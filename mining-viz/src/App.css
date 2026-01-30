@@ -226,30 +226,47 @@
 .section h3 {
   margin-top: 0;
   font-size: 0.9rem;
-  color: #64748b;
+  color: #334155;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 2px solid #e2e8f0;
   padding-bottom: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
 }
 
 .grid-2 label {
   display: block;
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: #475569;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.grid-2 div {
+  color: #0f172a;
+  font-weight: 500;
 }
 
 .checklist {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.checklist label {
+  color: #1e293b;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  cursor: pointer;
 }
 
 .stage-selector {
