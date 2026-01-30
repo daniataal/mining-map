@@ -64,7 +64,7 @@ const MapEffect = ({ selectedItem }) => {
     return null;
 };
 
-const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense }) => {
+const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes }) => {
     return (
         <div className="map-wrapper">
             <MapContainer center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
@@ -153,6 +153,8 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                         annotation={annotation}
                                         updateAnnotation={updateAnnotation}
                                         onDelete={() => deleteLicense(item.id)}
+                                        commodities={commodities}
+                                        licenseTypes={licenseTypes}
                                     />
                                 </Popup>
                             </Marker>
