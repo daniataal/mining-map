@@ -1,0 +1,128 @@
+import sqlite3
+import re
+
+# Dictionary of Region -> (Lat, Lng)
+# Keys match the "CLEANED" region name (up to province, if present in string)
+# The input text often contains "REGIONNAME          PROVINCE". 
+# We'll normalize by reducing multiple spaces to single space.
+
+coords = {
+    "BARKLY WEST NORTHERN CAPE": (-28.5354, 24.5215),
+    "SCHWEIZER - RENEKE NORTH-WEST": (-27.1895, 25.3283),
+    "WOLMARANSSTAD NORTH-WEST": (-27.1974, 25.9831),
+    "WITBANK MPUMALANGA": (-25.8713, 29.2276),
+    "NAMAKWALAND NORTHERN CAPE": (-29.8667, 17.8833),
+    "CHRISTIANA NORTH-WEST": (-27.9140, 25.1611),
+    "RUSTENBURG NORTH-WEST": (-25.6545, 27.2458),
+    "MIDDELBURG MP MPUMALANGA": (-25.7684, 29.4564),
+    "BRITS NORTH-WEST": (-25.6347, 27.7802),
+    "KURUMAN NORTHERN CAPE": (-27.46, 23.44),
+    "HAY NORTHERN CAPE": (-28.85, 22.95),
+    "LICHTENBURG NORTH-WEST": (-26.1508, 26.1596),
+    "PRETORIA GAUTENG": (-25.7479, 28.2293),
+    "MALMESBURY WESTERN CAPE": (-33.4554, 18.7275),
+    "KIMBERLEY NORTHERN CAPE": (-28.7323, 24.7623),
+    "LYDENBURG MPUMALANGA": (-25.0944, 30.4579),
+    "KLERKSDORP NORTH-WEST": (-26.8598, 26.6318),
+    "BRONKHORSTSPRUIT GAUTENG": (-25.8115, 28.7424),
+    "PIETERSBURG LIMPOPO": (-23.8962, 29.4486),
+    "UITENHAGE EASTERN CAPE": (-33.7667, 25.4),
+    "BETHAL MPUMALANGA": (-26.4583, 29.4626),
+    "VENTERSDORP NORTH-WEST": (-26.3167, 26.8167),
+    "POSTMASBURG NORTHERN CAPE": (-28.3333, 23.0667),
+    "PORT ELIZABETH EASTERN CAPE": (-33.9608, 25.6022),
+    "ERMELO MPUMALANGA": (-26.5414, 29.9825),
+    "THABAZIMBI LIMPOPO": (-24.5914, 27.4116),
+    "EAST LONDON EASTERN CAPE": (-32.9833, 27.8667),
+    "DELMAS MPUMALANGA": (-26.1437, 28.6840),
+    "PORT SHEPSTONE KWA-ZULU NATAL": (-30.7410, 30.4550),
+    "HERBERT NORTHERN CAPE": (-29.0667, 23.7667),
+    "POTGIETERSRUS LIMPOPO": (-24.1833, 29.0000),
+    "HUMANSDORP EASTERN CAPE": (-34.0333, 24.7667),
+    "HOPETOWN NORTHERN CAPE": (-29.6167, 24.0833),
+    "GORDONIA NORTHERN CAPE": (-28.4500, 21.2500), # Upington area
+    "VREDENDAL WESTERN CAPE": (-31.6667, 18.5000),
+    "BELFAST MPUMALANGA": (-25.6833, 30.0333),
+    "SEKHUKHUNELAND LIMPOPO": (-24.9667, 29.9833),
+    "LOWER UMFOLOZI KWA-ZULU NATAL": (-28.7500, 31.8833), # Empangeni
+    "HIGHVELD RIDGE MPUMALANGA": (-26.5167, 29.2000), # Secunda
+    "ALBANY EASTERN CAPE": (-33.3000, 26.5167), # Grahamstown
+    "WATERBERG LIMPOPO": (-24.3000, 28.3167),
+    "RIVERSDAL WESTERN CAPE": (-34.0931, 21.2575),
+    "KRUGERSDORP GAUTENG": (-26.1000, 27.7667),
+    "CULLINAN GAUTENG": (-25.6709, 28.5173),
+    "BABERTON MPUMALANGA": (-25.7963, 31.0436),
+    "VANRHYNSDORP WESTERN CAPE": (-31.6167, 18.7333),
+    "SPRINGS GAUTENG": (-26.2500, 28.4000),
+    "RANDFONTEIN GAUTENG": (-26.1833, 27.7000),
+    "PHALABORWA LIMPOPO": (-23.9431, 31.1411),
+    "LETABA LIMPOPO": (-23.8333, 30.1500),
+    "CAROLINA MPUMALANGA": (-26.0667, 30.1167),
+    "VEREENIGING GAUTENG": (-26.6736, 27.9319),
+    "KOMGA EASTERN CAPE": (-32.5769, 27.8925),
+    "CAPE WESTERN CAPE": (-33.9249, 18.4241),
+    "WESTONARIA GAUTENG": (-26.3167, 27.6500),
+    "VRYHEID KWA-ZULU NATAL": (-27.7694, 30.7914),
+    "VREDENBURG WESTERN CAPE": (-32.9064, 17.9903),
+    "PRIESKA NORTHERN CAPE": (-29.6644, 22.7472),
+    "OBERHOLZER GAUTENG": (-26.3167, 27.4000), # Carletonville
+    "MOSSEL BAY WESTERN CAPE": (-34.1833, 22.1333),
+    "MADIKWE NORTH-WEST": (-25.3333, 26.5500),
+    "LOWER TUGELA KWA-ZULU NATAL": (-29.2167, 31.2333), # Stanger
+    "DURBAN KWA-ZULU NATAL": (-29.8587, 31.0218),
+    "SOUTPANSBERG LIMPOPO": (-23.0000, 29.9667),
+    "PIETERMARITZBURG KWA-ZULU NATAL": (-29.6006, 30.3794),
+    "INANDA KWA-ZULU NATAL": (-29.7000, 30.9333),
+    "BENONI GAUTENG": (-26.1929, 28.3077),
+    "NEWCASTLE KWA-ZULU NATAL": (-27.7628, 29.9239),
+    "KNYSNA WESTERN CAPE": (-34.0356, 23.0471),
+    "KENHARDT NORTHERN CAPE": (-29.3500, 21.1500),
+    "BLOEMFONTEIN FREE STATE": (-29.0852, 26.1596),
+    "WYNBERG WESTERN CAPE": (-34.0083, 18.4667),
+    "WORCESTER WESTERN CAPE": (-33.6400, 19.4483),
+    "QUEENSTOWN EASTERN CAPE": (-31.9000, 26.8833),
+    "NIGEL GAUTENG": (-26.4333, 28.4833),
+    "MOUNT CURRIE KWA-ZULU NATAL": (-30.5500, 29.5000), # Kokstad
+    "KEMPTON PARK GAUTENG": (-26.1000, 28.2333),
+    "JOHANNESBURG GAUTENG": (-26.2041, 28.0473),
+    "GEORGE WESTERN CAPE": (-33.9630, 22.4617),
+    "CALVINIA NORTHERN CAPE": (-31.4722, 19.7764),
+    "CALEDON WESTERN CAPE": (-34.2306, 19.4267),
+    "BREDASDORP WESTERN CAPE": (-34.5322, 20.0403),
+    "VRYBURG NORTH-WEST": (-26.9566, 24.7281),
+    "VIRGINIA FREE STATE": (-28.1000, 26.8667),
+    "UMZINTO KWA-ZULU NATAL": (-30.3167, 30.6667),
+    "SASOLBURG FREE STATE": (-26.8167, 27.8333),
+    "NELSPRUIT MPUMALANGA": (-25.4753, 30.9694)
+}
+
+conn = sqlite3.connect('mining.db')
+cursor = conn.cursor()
+
+updated = 0
+not_found = set()
+
+# Iterate over all SA records missing coords
+cursor.execute("SELECT id, region FROM licenses WHERE country='South Africa' AND lat IS NULL")
+rows = cursor.fetchall()
+for row in rows:
+    lic_id, region_raw = row
+    if not region_raw:
+        continue
+        
+    cleaned = re.sub(r'\s+', ' ', region_raw).strip()
+    
+    if cleaned in coords:
+        lat, lng = coords[cleaned]
+        cursor.execute("UPDATE licenses SET lat=?, lng=? WHERE id=?", (lat, lng, lic_id))
+        updated += 1
+    else:
+        not_found.add(cleaned)
+        
+conn.commit()
+conn.close()
+
+print(f"Updated {updated} records.")
+print(f"Regions not found ({len(not_found)} unique):")
+for nf in list(not_found)[:20]:
+    print(nf)
