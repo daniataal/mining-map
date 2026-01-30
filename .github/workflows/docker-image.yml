@@ -13,30 +13,35 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Set up Docker Buildx
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
+    # Log in to Docker Hub
     - name: Log in to Docker Hub
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
+    # Get the current build version (counter)
     - name: Get the current build version (counter)
       id: version
       run: |
         BUILD_NUMBER=$(git rev-list --count HEAD)
         echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
 
+    # Build and Push Docker Image
     - name: Build and Push Docker Image
       run: |
         docker build . --file Dockerfile --tag dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
         docker push dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
 
-    - name: Set up SSH Agent
-      uses: webfactory/ssh-agent-action@v0.5.3
+    # Set up the SSH key using actions/setup-ssh (handles RSA private key)
+    - name: Set up SSH Key
+      uses: actions/setup-ssh@v2
       with:
-        ssh-private-key: ${{ secrets.REMOTE_SSH_KEY }}
+        ssh-private-key: ${{ secrets.REMOTE_SSH_KEY }}  # This is your RSA private key stored in GitHub Secrets
 
     # SSH into the remote server and deploy the container
     - name: Deploy to remote server
@@ -44,21 +49,15 @@ jobs:
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
-        port: 22  # Adjust if you're using a different port
+        port: 22  # Adjust if using a different port
         script: |
-          # Pull the latest Docker image (use the version number from the GitHub environment)
           sudo docker pull dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
-
-          # Remove the old container if it exists
           sudo docker rm -f mining-map-auto
-
-          # Run the new container with the necessary environment variables and mount points
           sudo docker run -d \
-            -e VITE_API_BASE=http://129.159.148.51:8000 \
+            -e VITE_API_BASE=http://***:8000 \
             -p 8000:8000 \
             -p 5173:5173 \
             -v /opt/mining-map:/data \
             -e MINING_DB_PATH=/data/mining.db \
             --name mining-map-auto \
             dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
-        debug: true
