@@ -146,7 +146,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
             {/* Commercials */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
                 <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.75em', color: '#64748b', fontWeight: '600' }}>QTY (KG/TONS)</label>
+                    <label style={{ fontSize: '0.75em', color: '#64748b', fontWeight: '600' }}>QTY (KG)</label>
                     <input
                         type="number"
                         placeholder="0"

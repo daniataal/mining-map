@@ -127,8 +127,8 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                         {activityLog.length === 0 && <div style={{ color: '#94a3b8', fontSize: '0.85em', fontStyle: 'italic' }}>No activity recorded yet.</div>}
                         {activityLog.map(note => (
                             <div key={note.id} style={{ borderLeft: '2px solid #cbd5e1', paddingLeft: '10px', marginBottom: '10px' }}>
-                                <div style={{ fontSize: '0.75em', color: '#64748b' }}>{new Date(note.date).toLocaleString()}</div>
-                                <div style={{ fontSize: '0.9em', color: '#334155' }}>{note.text}</div>
+                                <div style={{ fontSize: '0.75em', color: '#475569', fontWeight: '600' }}>{new Date(note.date).toLocaleString()}</div>
+                                <div style={{ fontSize: '0.9em', color: '#0f172a', lineHeight: '1.4' }}>{note.text}</div>
                             </div>
                         ))}
                     </div>
