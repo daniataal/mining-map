@@ -1,357 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, LayersControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
-import L from 'leaflet';
 
-// Fix for default marker icon in React Leaflet
-import icon from 'leaflet/dist/images/marker-icon.png';
-import iconShadow from 'leaflet/dist/images/marker-shadow.png';
-import MarkerClusterGroup from 'react-leaflet-cluster';
-
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41]
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
-
-// Custom Icons
-const createCustomIcon = (color, isHovered) => {
-  const size = isHovered ? 24 : 12;
-  const border = isHovered ? '3px solid white' : '2px solid white';
-  const boxShadow = isHovered ? '0 0 10px rgba(0,0,0,0.8)' : '0 0 4px rgba(0,0,0,0.5)';
-
-  return new L.DivIcon({
-    className: 'custom-marker',
-    html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.2s ease;"></div>`,
-    iconSize: isHovered ? [28, 28] : [16, 16],
-    iconAnchor: isHovered ? [14, 14] : [8, 8],
-    popupAnchor: [0, -8]
-  });
-};
-
-const getMarkerColor = (commodity, userStatus) => {
-  // User override
-  if (userStatus === 'good') return '#22c55e'; // Green-500
-  if (userStatus === 'bad') return '#ef4444'; // Red-500
-  if (userStatus === 'maybe') return '#f59e0b'; // Amber-500 (Orange)
-
-  if (!commodity) return '#94a3b8';
-  const c = commodity.toLowerCase();
-  if (c.includes('gold')) return '#fbbf24'; // Amber-400
-  if (c.includes('diamond')) return '#60a5fa'; // Blue-400
-  if (c.includes('bauxite')) return '#f87171'; // Red-400
-  if (c.includes('manganese')) return '#a78bfa'; // Purple-400
-  if (c.includes('lithium')) return '#34d399'; // Emerald-400
-  if (c.includes('iron')) return '#ef4444'; // Red-500
-  if (c.includes('salt')) return '#fcd34d'; // Amber-300
-  return '#94a3b8'; // Slate-400
-};
-
-// Component to handle map flyTo effects
-const MapEffect = ({ selectedItem }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (selectedItem && selectedItem.lat && selectedItem.lng) {
-      map.flyTo([selectedItem.lat, selectedItem.lng], 25, {
-        duration: 2.0
-      });
-    }
-  }, [selectedItem, map]);
-  return null;
-};
-
-// Sample data placeholder (will be replaced by real data)
-// Popup Form Component to handle local state and avoid re-renders on typing
-const PopupForm = ({ item, annotation, updateAnnotation, onDelete }) => {
-  const [comment, setComment] = useState(annotation.comment || '');
-  const [quantity, setQuantity] = useState(annotation.quantity || '');
-  const [price, setPrice] = useState(annotation.price || '');
-  const [licenseType, setLicenseType] = useState(annotation.licenseType || item.licenseType || '');
-  const [commodity, setCommodity] = useState(annotation.commodity || item.commodity || '');
-
-  // Update local state when prop changes (in case of external updates)
-  useEffect(() => {
-    setComment(annotation.comment || '');
-    setQuantity(annotation.quantity || '');
-    setPrice(annotation.price || '');
-    setLicenseType(annotation.licenseType || item.licenseType || '');
-    setCommodity(annotation.commodity || item.commodity || '');
-  }, [annotation.comment, annotation.quantity, annotation.price, annotation.licenseType, item.licenseType, annotation.commodity, item.commodity]);
-
-  const handleBlur = (field, value) => {
-    if (value !== annotation[field]) {
-      updateAnnotation(item.id, field, value);
-    }
-  };
-
-  return (
-    <div className="popup-content">
-      <strong style={{ fontSize: '1.2em', display: 'block', marginBottom: '8px', borderBottom: '1px solid #ccc', paddingBottom: '4px' }}>
-        {item.company}
-      </strong>
-
-      <div className="user-controls" style={{ marginBottom: '15px' }}>
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '8px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => updateAnnotation(item.id, 'status', 'good')}
-            style={{
-              background: annotation.status === 'good' ? '#22c55e' : '#f1f5f9',
-              color: annotation.status === 'good' ? 'white' : '#333',
-              border: '1px solid #cbd5e1', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', flex: 1, minWidth: '40px'
-            }}
-          >
-            Go
-          </button>
-          <button
-            onClick={() => updateAnnotation(item.id, 'status', 'maybe')}
-            style={{
-              background: annotation.status === 'maybe' ? '#f59e0b' : '#f1f5f9',
-              color: annotation.status === 'maybe' ? 'white' : '#333',
-              border: '1px solid #cbd5e1', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', flex: 1, minWidth: '40px'
-            }}
-          >
-            Maybe
-          </button>
-          <button
-            onClick={() => updateAnnotation(item.id, 'status', 'bad')}
-            style={{
-              background: annotation.status === 'bad' ? '#ef4444' : '#f1f5f9',
-              color: annotation.status === 'bad' ? 'white' : '#333',
-              border: '1px solid #cbd5e1', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', flex: 1, minWidth: '40px'
-            }}
-          >
-            No Go
-          </button>
-          <button
-            onClick={() => updateAnnotation(item.id, 'status', null)}
-            style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.8em', padding: '0 5px' }}
-          >
-            ❌
-          </button>
-        </div>
-
-        <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-          <button
-            onClick={onDelete}
-            style={{
-              background: 'transparent',
-              border: '1px solid #ef4444',
-              color: '#ef4444',
-              borderRadius: '4px',
-              padding: '4px 12px',
-              fontSize: '0.8em',
-              cursor: 'pointer'
-            }}
-          >
-            🗑️ DeleteLicense
-          </button>
-        </div>
-
-        <textarea
-          placeholder="Add your notes here..."
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          onBlur={(e) => handleBlur('comment', e.target.value)}
-          style={{ width: '100%', minHeight: '60px', padding: '6px', fontSize: '0.9em', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-        />
-
-        <div className="commercial-inputs" style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Quantity (kg/tons)</label>
-              <input
-                type="number"
-                placeholder="0"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                onBlur={(e) => handleBlur('quantity', e.target.value)}
-                style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '0.8rem', color: '#64748b' }}>Price ($)</label>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                onBlur={(e) => handleBlur('price', e.target.value)}
-                style={{ width: '100%', padding: '5px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-              />
-            </div>
-          </div>
-
-          {(quantity && price) && (
-            <div style={{ background: '#ecfdf5', padding: '8px', borderRadius: '4px', color: '#047857', textAlign: 'center', fontWeight: 'bold' }}>
-              Total Value: ${(parseFloat(quantity) * parseFloat(price)).toLocaleString()}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div style={{ fontSize: '0.9em', color: '#666', background: '#f8fafc', padding: '8px', borderRadius: '4px' }}>
-        <div style={{ marginBottom: '2px' }}>
-          <span style={{ fontWeight: '600' }}>Status:</span>
-          <span style={{ color: item.status.toLowerCase().includes('active') ? 'green' : '#666', marginLeft: '4px' }}>
-            {item.status}
-          </span>
-        </div>
-        <div style={{ marginBottom: '2px' }}>
-          <span style={{ fontWeight: '600' }}>Type:</span>
-          <input
-            type="text"
-            value={licenseType}
-            onChange={(e) => setLicenseType(e.target.value)}
-            onBlur={(e) => handleBlur('licenseType', e.target.value)}
-            style={{
-              border: 'none',
-              borderBottom: '1px dashed #999',
-              background: 'transparent',
-              marginLeft: '4px',
-              fontFamily: 'inherit',
-              fontSize: 'inherit',
-              width: '120px'
-            }}
-          />
-        </div>
-      </div>
-      <div style={{ marginBottom: '2px' }}>
-        <span style={{ fontWeight: '600' }}>Commodity:</span>
-        <input
-          type="text"
-          value={commodity}
-          onChange={(e) => setCommodity(e.target.value)}
-          onBlur={(e) => handleBlur('commodity', e.target.value)}
-          style={{
-            border: 'none',
-            borderBottom: '1px dashed #999',
-            background: 'transparent',
-            marginLeft: '4px',
-            fontFamily: 'inherit',
-            fontSize: 'inherit',
-            width: '120px'
-          }}
-        />
-      </div>
-      <div>
-        <span style={{ fontWeight: '600' }}>Region:</span> {item.region}
-      </div>
-      {item.date && <div>
-        <span style={{ fontWeight: '600' }}>Date:</span> {item.date}
-      </div>}
-      {item.contactPerson && <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #cbd5e1' }}>
-        <span style={{ fontWeight: '600', display: 'block', fontSize: '0.85em', color: '#475569' }}>Contact Person</span>
-        <span style={{ color: '#0f172a' }}>{item.contactPerson}</span>
-      </div>}
-      {item.phoneNumber && <div style={{ marginTop: '4px' }}>
-        <span style={{ fontWeight: '600', display: 'block', fontSize: '0.85em', color: '#475569' }}>Phone</span>
-        <a href={`tel:${item.phoneNumber}`} style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }}>{item.phoneNumber}</a>
-      </div>}
-    </div>
-  );
-};
-
-
-// Add License Modal Component
-const AddLicenseModal = ({ isOpen, onClose, onSubmit }) => {
-  const [formData, setFormData] = useState({
-    company: '',
-    country: 'Ghana',
-    region: '',
-    commodity: '',
-    licenseType: 'Large Scale',
-    status: 'Operating',
-    lat: '',
-    lng: '',
-    phoneNumber: '',
-    contactPerson: ''
-  });
-
-  if (!isOpen) return null;
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit({
-      ...formData,
-      lat: parseFloat(formData.lat),
-      lng: parseFloat(formData.lng)
-    });
-    onClose();
-  };
-
-  return (
-    <div className="modal-overlay" style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 9999,
-      display: 'flex', justifyContent: 'center', alignItems: 'center'
-    }}>
-      <div className="modal-content" style={{
-        backgroundColor: '#1e293b', padding: '20px', borderRadius: '8px',
-        width: '500px', maxWidth: '90%', maxHeight: '90vh', overflowY: 'auto',
-        color: '#f8fafc', border: '1px solid #334155'
-      }}>
-        <h2 style={{ marginTop: 0 }}>Add New License</h2>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-
-          <label>Company Name *</label>
-          <input required type="text" value={formData.company} onChange={e => setFormData({ ...formData, company: e.target.value })} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
-              <label>Latitude *</label>
-              <input required type="number" step="any" value={formData.lat} onChange={e => setFormData({ ...formData, lat: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label>Longitude *</label>
-              <input required type="number" step="any" value={formData.lng} onChange={e => setFormData({ ...formData, lng: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-            </div>
-          </div>
-
-          <label>Commodity</label>
-          <input type="text" value={formData.commodity} onChange={e => setFormData({ ...formData, commodity: e.target.value })} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
-              <label>Country</label>
-              <select value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
-                <option value="Ghana">Ghana</option>
-                <option value="South Africa">South Africa</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div style={{ flex: 1 }}>
-              <label>Region</label>
-              <input type="text" value={formData.region} onChange={e => setFormData({ ...formData, region: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-            </div>
-          </div>
-
-          <label>Status</label>
-          <select value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value })} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
-            <option value="Operating">Operating</option>
-            <option value="Closed">Closed</option>
-            <option value="Maintenance">Maintenance</option>
-          </select>
-
-          <label>Phone</label>
-          <input type="text" value={formData.phoneNumber} onChange={e => setFormData({ ...formData, phoneNumber: e.target.value })} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-
-          <label>Contact Person</label>
-          <input type="text" value={formData.contactPerson} onChange={e => setFormData({ ...formData, contactPerson: e.target.value })} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }} />
-
-          <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '10px', backgroundColor: '#64748b', border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer' }}>Cancel</button>
-            <button type="submit" style={{ flex: 1, padding: '10px', backgroundColor: '#22c55e', border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer', fontWeight: 'bold' }}>Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
+// Components
+import Sidebar from './components/Sidebar';
+import MapComponent from './components/MapComponent';
+import DossierView from './components/DossierView';
+import PopupForm from './components/PopupForm';
+import AddLicenseModal from './components/AddLicenseModal';
 
 function App() {
   const [rawData, setRawData] = useState([]);
@@ -366,6 +22,31 @@ function App() {
   // Interaction states
   const [selectedItem, setSelectedItem] = useState(null);
   const [hoveredItem, setHoveredItem] = useState(null);
+
+  // New: Dossier State
+  const [isDossierOpen, setIsDossierOpen] = useState(false);
+
+  // Open dossier when item selected from map or list? 
+  // Maybe just from list double click or separate button? 
+  // For now, let's say selecting an item opens it if not on map?
+  // Let's add an explicit "Open Dossier" button in the popup or list.
+  // Actually, let's make the list item click open the Dossier INSTEAD of just selecting on map?
+  // Or maybe clicking "Details" on popup opens Dossier.
+
+  // Let's have `selectedItem` drive the map flyTo.
+  // And `dossierItem` (which could be the same) drive the panel.
+  const [dossierItem, setDossierItem] = useState(null);
+
+  const handleOpenDossier = (item) => {
+    setDossierItem(item);
+    setIsDossierOpen(true);
+  };
+
+  const handleCloseDossier = () => {
+    setIsDossierOpen(false);
+    setDossierItem(null);
+  };
+
 
   // Load annotations from local storage
   const [userAnnotations, setUserAnnotations] = useState(() => {
@@ -607,270 +288,50 @@ function App() {
         onSubmit={handleCreateLicense}
       />
 
-      <div className="sidebar">
-        <div className="header">
-          <h1>Mining Licenses</h1>
-          <p>Active licenses viewer</p>
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            style={{
-              marginTop: '10px',
-              width: '100%',
-              padding: '8px',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            + Add New License
-          </button>
+      <DossierView
+        isOpen={isDossierOpen}
+        onClose={handleCloseDossier}
+        item={dossierItem}
+        annotation={dossierItem ? (userAnnotations[dossierItem.id] || {}) : {}}
+        updateAnnotation={updateAnnotation}
+      />
 
-          <div className="action-buttons" style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-            <label style={{ flex: 1, backgroundColor: '#475569', color: 'white', padding: '6px', borderRadius: '4px', textAlign: 'center', cursor: 'pointer', fontSize: '0.85em' }}>
-              📥 Import
-              <input type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
-            </label>
-            <button onClick={handleTemplate} style={{ flex: 1, backgroundColor: 'transparent', border: '1px solid #475569', color: '#475569', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85em' }}>
-              📄 Template
-            </button>
-            <button onClick={handleExport} style={{ flex: 1, backgroundColor: 'transparent', border: '1px solid #3b82f6', color: '#3b82f6', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85em' }}>
-              📤 Export
-            </button>
-          </div>
-        </div>
+      <Sidebar
+        processedData={processedData}
+        filter={filter} setFilter={setFilter}
+        sortBy={sortBy} setSortBy={setSortBy}
+        selectedCommodity={selectedCommodity} setSelectedCommodity={setSelectedCommodity}
+        selectedCountry={selectedCountry} setSelectedCountry={setSelectedCountry}
+        userStatusFilter={userStatusFilter} setUserStatusFilter={setUserStatusFilter}
+        selectedLicenseType={selectedLicenseType} setSelectedLicenseType={setSelectedLicenseType}
+        commodities={commodities} countries={countries} licenseTypes={licenseTypes}
+        isAddModalOpen={isAddModalOpen} setIsAddModalOpen={setIsAddModalOpen}
+        deleteFilteredList={deleteFilteredList} loading={loading}
+        handleImport={handleImport} handleTemplate={handleTemplate} handleExport={handleExport}
+        selectedItem={selectedItem} setSelectedItem={(item) => {
+          setSelectedItem(item);
+          // handleOpenDossier(item); 
+          // Optional: Open dossier on list click or just map flyto? 
+          // Let's decide: List click = Map FlyTo + Open Dossier
+          handleOpenDossier(item);
+        }}
+        hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
+        userAnnotations={userAnnotations} rawData={rawData} error={error}
+      />
 
-        <div className="controls">
-          <input
-            type="text"
-            placeholder="Search company or type..."
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            className="search-input"
-          />
-
-          <div className="control-group">
-            <label>Sort by:</label>
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              <option value="company">Company</option>
-              <option value="status">Status</option>
-              <option value="commodity">Commodity</option>
-              <option value="date">Date</option>
-            </select>
-          </div>
-
-          <div className="control-group">
-            <label>Commodity:</label>
-            <select className="commodity-select" value={selectedCommodity} onChange={e => setSelectedCommodity(e.target.value)}>
-              {commodities.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-
-          <div className="control-group">
-            <label>Country:</label>
-            <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)}>
-              {countries.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-
-          <div className="control-group">
-            <label>My Analysis:</label>
-            <select value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value)}>
-              <option value="All">All</option>
-              <option value="good">✅ Go</option>
-              <option value="maybe">🤔 Maybe</option>
-              <option value="bad">❌ No Go</option>
-              <option value="unmarked">Unmarked</option>
-            </select>
-          </div>
-
-          <div className="control-group">
-            <label>License Type:</label>
-            <select value={selectedLicenseType} onChange={e => setSelectedLicenseType(e.target.value)}>
-              {licenseTypes.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-
-          {(selectedCountry !== 'All' || selectedCommodity !== 'All' || filter || userStatusFilter !== 'All' || selectedLicenseType !== 'All') && (
-            <div style={{ marginTop: '15px', borderTop: '1px solid #334155', paddingTop: '10px' }}>
-              <div style={{ fontSize: '0.85em', marginBottom: '5px', color: '#94a3b8' }}>
-                Showing {processedData.length} licenses
-              </div>
-              <button
-                onClick={deleteFilteredList}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '0.9em',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                }}
-              >
-                🗑️ Delete ALL Visible ({processedData.length})
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="list-view">
-          {processedData.map((item, idx) => {
-            const annotation = userAnnotations[item.id] || {};
-            const statusColor = annotation.status === 'good' ? '#22c55e' :
-              annotation.status === 'bad' ? '#ef4444' :
-                annotation.status === 'maybe' ? '#f59e0b' : 'transparent';
-            const isHovered = hoveredItem === item.id;
-            const isSelected = selectedItem?.id === item.id;
-
-            return (
-              <div
-                key={idx}
-                className="list-item"
-                style={{
-                  borderLeft: `4px solid ${statusColor}`,
-                  backgroundColor: (isHovered || isSelected) ? '#1e293b' : 'transparent',
-                  transform: isHovered ? 'translateX(4px)' : 'none',
-                  transition: 'all 0.2s ease'
-                }}
-                onClick={() => setSelectedItem(item)}
-                onMouseEnter={() => setHoveredItem(item.id)}
-                onMouseLeave={() => setHoveredItem(null)}
-              >
-                <h3>{item.company}</h3>
-                <div className="badges">
-                  <span className="badge status">{item.status}</span>
-                  <span className="badge type">{item.commodity}</span>
-                </div>
-                <p className="details">{item.region} | {annotation.licenseType || item.licenseType}</p>
-                {item.phoneNumber && (
-                  <div style={{ fontSize: '0.85em', color: '#64748b', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>📞</span> <a href={`tel:${item.phoneNumber}`} onClick={(e) => e.stopPropagation()} style={{ color: '#2563eb', textDecoration: 'none' }}>{item.phoneNumber}</a>
-                    {item.contactPerson && <span style={{ color: '#94a3b8' }}>• {item.contactPerson}</span>}
-                  </div>
-                )}
-                {annotation.comment && <p className="user-comment">📝 {annotation.comment}</p>}
-
-                {annotation.status && <div className="user-tag" style={{ color: statusColor, fontWeight: 'bold', fontSize: '0.8em', marginTop: '4px' }}>
-                  {annotation.status === 'good' ? '✅ GO' :
-                    annotation.status === 'bad' ? '❌ NO GO' :
-                      annotation.status === 'maybe' ? '🤔 MAYBE' : ''}
-                </div>}
-
-                {(annotation.quantity || annotation.price) && (
-                  <div className="order-summary" style={{ marginTop: '5px', fontSize: '0.85em', color: '#cbd5e1', borderTop: '1px solid #334155', paddingTop: '4px' }}>
-                    {annotation.quantity && <div>Qty: <strong>{annotation.quantity}</strong></div>}
-                    {annotation.price && <div>Price: <strong>${annotation.price}</strong></div>}
-                    {(annotation.quantity && annotation.price) && (
-                      <div style={{ color: '#fbbf24', marginTop: '2px' }}>
-                        Total: <strong>${(parseFloat(annotation.quantity) * parseFloat(annotation.price)).toLocaleString()}</strong>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {loading && <div className="status-message">Loading data...</div>}
-          {error && <div className="error-message">{error}</div>}
-          {!loading && !error && processedData.length === 0 && <div className="empty-state">No results found (Raw: {rawData.length})</div>}
-        </div>
-      </div>
-
-      <div className="map-wrapper">
-        <MapContainer center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
-          <MapEffect selectedItem={selectedItem} />
-          <LayersControl position="topright">
-            <LayersControl.BaseLayer checked name="Dark Matter (Default)">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                maxNativeZoom={19}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-
-            <LayersControl.BaseLayer name="Light (Clean)">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                maxNativeZoom={19}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-
-            <LayersControl.BaseLayer name="Topographic (Terrain)">
-              <TileLayer
-                attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-                url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-                maxNativeZoom={17}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-
-            <LayersControl.BaseLayer name="NatGeo (Esri)">
-              <TileLayer
-                attribution='Tiles &copy; Esri &mdash; National Geographic, Esri, DeLorme, NAVTEQ, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA, iPC'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
-                maxNativeZoom={16}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-
-            <LayersControl.BaseLayer name="Satellite (Esri)">
-              <TileLayer
-                attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                maxNativeZoom={19}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-
-            <LayersControl.BaseLayer name="Street Map (Color)">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                maxNativeZoom={19}
-                maxZoom={25}
-              />
-            </LayersControl.BaseLayer>
-          </LayersControl>
-          <MarkerClusterGroup
-            chunkedLoading
-            spiderfyOnMaxZoom={true}
-            showCoverageOnHover={false}
-          >
-            {processedData.map((item, idx) => {
-              if (!item.lat || !item.lng) return null;
-              const annotation = userAnnotations[item.id] || {};
-              const isHovered = hoveredItem === item.id;
-
-              return (
-                <Marker
-                  key={idx}
-                  position={[item.lat, item.lng]}
-                  icon={createCustomIcon(getMarkerColor(item.commodity, annotation.status), isHovered)}
-                  zIndexOffset={isHovered ? 1000 : 0} // Bring to front on hover
-                >
-                  <Popup>
-                    <PopupForm
-                      item={item}
-                      annotation={annotation}
-                      updateAnnotation={updateAnnotation}
-                      onDelete={() => deleteLicense(item.id)}
-                    />
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MarkerClusterGroup>
-        </MapContainer>
-      </div>
+      <MapComponent
+        processedData={processedData}
+        userAnnotations={userAnnotations}
+        selectedItem={selectedItem}
+        setSelectedItem={(item) => {
+          setSelectedItem(item);
+          // handleOpenDossier(item); // Optional: Open dossier on map click?
+        }}
+        mapCenter={mapCenter}
+        PopupForm={PopupForm}
+        updateAnnotation={updateAnnotation}
+        deleteLicense={deleteLicense}
+      />
     </div>
   );
 }
