@@ -22,11 +22,10 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Get the current build version (counter)
+    - name: Set Build Version
       id: version
       run: |
-        BUILD_NUMBER=$(git rev-list --count HEAD)
-        echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+        echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
     - name: Build and Push Docker Image
       run: |
