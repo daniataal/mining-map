@@ -33,6 +33,11 @@ jobs:
         docker build . --file Dockerfile --tag dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
         docker push dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
 
+    - name: Set up SSH Agent
+      uses: webfactory/ssh-agent-action@v0.5.3
+      with:
+        ssh-private-key: ${{ secrets.REMOTE_SSH_KEY }}
+
     # SSH into the remote server and deploy the container
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v0.1.4
@@ -40,7 +45,6 @@ jobs:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22  # Adjust if you're using a different port
-        key: ${{ secrets.REMOTE_SSH_KEY }}  # Directly using SSH key here
         script: |
           # Pull the latest Docker image (use the version number from the GitHub environment)
           sudo docker pull dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
