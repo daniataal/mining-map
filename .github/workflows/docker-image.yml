@@ -1,4 +1,4 @@
-name: Docker Image CI
+name: Docker Image CI and Remote Deployment
 
 on:
   push:
@@ -7,31 +7,61 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
 
+    # Set up Docker Buildx (optional, but good for multi-platform builds)
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
+    # Log in to Docker Hub
     - name: Log in to Docker Hub
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
+    # Get the current build version (counter or tag)
     - name: Get the current build version (counter)
       id: version
       run: |
         BUILD_NUMBER=$(git rev-list --count HEAD)
         echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
 
+    # Build the Docker image
     - name: Build the Docker image
       run: |
-        docker build . --file Dockerfile --tag dannyatalla/mining-map:${{ env.BUILD_NUMBER }}
+        docker build . --file Dockerfile --tag dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
 
+    # Push the Docker image to Docker Hub
     - name: Push the Docker image
       run: |
-        docker push dannyatalla/mining-map:${{ env.BUILD_NUMBER }}
+        docker push dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
+
+    # SSH into the remote machine and deploy
+    - name: Deploy to remote server
+      uses: appleboy/ssh-action@v0.1.4
+      with:
+        host: ${{ secrets.REMOTE_HOST }}  # Remote server IP or hostname
+        username: ${{ secrets.REMOTE_USER }}  # SSH username (e.g., ubuntu, root)
+        key: ${{ secrets.REMOTE_SSH_KEY }}  # SSH private key for authentication
+        port: 22  # SSH port, default is 22
+        script: |
+          # Pull the latest Docker image (use the version number from the GitHub environment)
+          sudo docker pull dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
+          
+          # Remove the old container if it exists
+          sudo docker rm -f mining-map-auto
+
+          # Run the new container with the necessary environment variables and mount points
+          sudo docker run -d \
+            -e VITE_API_BASE=http://129.159.148.51:8000 \
+            -p 8000:8000 \
+            -p 5173:5173 \
+            -v /opt/mining-map:/data \
+            -e MINING_DB_PATH=/data/mining.db \
+            --name mining-map-auto \
+            dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}

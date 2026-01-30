@@ -8,6 +8,7 @@ import MapComponent from './components/MapComponent';
 import DossierView from './components/DossierView';
 import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
+import KanbanBoard from './components/KanbanBoard';
 
 function App() {
   const [rawData, setRawData] = useState([]);
@@ -18,6 +19,7 @@ function App() {
   const [selectedLicenseType, setSelectedLicenseType] = useState('All');
   const [userStatusFilter, setUserStatusFilter] = useState('All');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState('map'); // 'map' or 'pipeline'
 
   // Interaction states
   const [selectedItem, setSelectedItem] = useState(null);
@@ -25,16 +27,6 @@ function App() {
 
   // New: Dossier State
   const [isDossierOpen, setIsDossierOpen] = useState(false);
-
-  // Open dossier when item selected from map or list? 
-  // Maybe just from list double click or separate button? 
-  // For now, let's say selecting an item opens it if not on map?
-  // Let's add an explicit "Open Dossier" button in the popup or list.
-  // Actually, let's make the list item click open the Dossier INSTEAD of just selecting on map?
-  // Or maybe clicking "Details" on popup opens Dossier.
-
-  // Let's have `selectedItem` drive the map flyTo.
-  // And `dossierItem` (which could be the same) drive the panel.
   const [dossierItem, setDossierItem] = useState(null);
 
   const handleOpenDossier = (item) => {
@@ -46,7 +38,6 @@ function App() {
     setIsDossierOpen(false);
     setDossierItem(null);
   };
-
 
   // Load annotations from local storage
   const [userAnnotations, setUserAnnotations] = useState(() => {
@@ -97,14 +88,12 @@ function App() {
       })
       .then(data => {
         alert(`Successfully deleted ${data.deleted_count} licenses.`);
-        // Refresh data or remove from local state
         setRawData(prev => prev.filter(item => !idsToDelete.includes(item.id)));
         setSelectedItem(null);
       })
       .catch(err => alert("Error batch deleting: " + err.message))
       .finally(() => setLoading(false));
   };
-
 
   const handleCreateLicense = (newItem) => {
     fetch(`${API_BASE}/licenses`, {
@@ -310,28 +299,80 @@ function App() {
         handleImport={handleImport} handleTemplate={handleTemplate} handleExport={handleExport}
         selectedItem={selectedItem} setSelectedItem={(item) => {
           setSelectedItem(item);
-          // handleOpenDossier(item); 
-          // Optional: Open dossier on list click or just map flyto? 
-          // Let's decide: List click = Map FlyTo + Open Dossier
           handleOpenDossier(item);
         }}
         hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
         userAnnotations={userAnnotations} rawData={rawData} error={error}
       />
 
-      <MapComponent
-        processedData={processedData}
-        userAnnotations={userAnnotations}
-        selectedItem={selectedItem}
-        setSelectedItem={(item) => {
-          setSelectedItem(item);
-          // handleOpenDossier(item); // Optional: Open dossier on map click?
-        }}
-        mapCenter={mapCenter}
-        PopupForm={PopupForm}
-        updateAnnotation={updateAnnotation}
-        deleteLicense={deleteLicense}
-      />
+      <div className="main-content" style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        {/* View Switcher - Floating on top */}
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          backgroundColor: '#1e293b',
+          padding: '5px',
+          borderRadius: '8px',
+          display: 'flex',
+          gap: '5px',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+        }}>
+          <button
+            onClick={() => setViewMode('map')}
+            style={{
+              background: viewMode === 'map' ? '#3b82f6' : 'transparent',
+              color: viewMode === 'map' ? 'white' : '#94a3b8',
+              border: 'none',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            🗺️ Map
+          </button>
+          <button
+            onClick={() => setViewMode('pipeline')}
+            style={{
+              background: viewMode === 'pipeline' ? '#3b82f6' : 'transparent',
+              color: viewMode === 'pipeline' ? 'white' : '#94a3b8',
+              border: 'none',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            📊 Pipeline
+          </button>
+        </div>
+
+        {viewMode === 'map' ? (
+          <MapComponent
+            processedData={processedData}
+            userAnnotations={userAnnotations}
+            selectedItem={selectedItem}
+            setSelectedItem={(item) => {
+              setSelectedItem(item);
+            }}
+            mapCenter={mapCenter}
+            PopupForm={PopupForm}
+            updateAnnotation={updateAnnotation}
+            deleteLicense={deleteLicense}
+          />
+        ) : (
+          <KanbanBoard
+            processedData={processedData}
+            userAnnotations={userAnnotations}
+            updateAnnotation={updateAnnotation}
+            onCardClick={handleOpenDossier}
+            commodities={commodities}
+          />
+        )}
+      </div>
     </div>
   );
 }
