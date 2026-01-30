@@ -357,11 +357,14 @@ function App() {
             selectedItem={selectedItem}
             setSelectedItem={(item) => {
               setSelectedItem(item);
+              handleOpenDossier(item);
             }}
             mapCenter={mapCenter}
             PopupForm={PopupForm}
             updateAnnotation={updateAnnotation}
             deleteLicense={deleteLicense}
+            commodities={commodities}
+            licenseTypes={licenseTypes}
           />
         ) : (
           <KanbanBoard
