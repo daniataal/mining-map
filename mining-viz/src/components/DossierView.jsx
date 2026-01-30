@@ -105,6 +105,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                         <button className={annotation.stage === 'Contacted' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Contacted')}>Contacted</button>
                         <button className={annotation.stage === 'Diligence' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Diligence')}>Diligence</button>
                         <button className={annotation.stage === 'Verified' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Verified')}>Verified</button>
+                        <button className={annotation.stage === 'Closed' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Closed')} style={{ borderColor: '#64748b' }}>Closed</button>
                     </div>
                 </section>
 
