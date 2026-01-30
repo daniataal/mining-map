@@ -1,0 +1,37 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Get the current build version (counter)
+      id: version
+      run: |
+        BUILD_NUMBER=$(git rev-list --count HEAD)
+        echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+
+    - name: Build the Docker image
+      run: |
+        docker build . --file Dockerfile --tag dannyatalla/mining-map:${{ env.BUILD_NUMBER }}
+
+    - name: Push the Docker image
+      run: |
+        docker push dannyatalla/mining-map:${{ env.BUILD_NUMBER }}
