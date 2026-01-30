@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+*.db
+.env
+mining-viz/node_modules/
+mining-viz/dist/
+.DS_Store
+.idea/
+.vscode/
