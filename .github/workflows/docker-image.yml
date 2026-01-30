@@ -57,3 +57,4 @@ jobs:
             -e MINING_DB_PATH=/data/mining.db \
             --name mining-map-auto \
             dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
+        debug: true
