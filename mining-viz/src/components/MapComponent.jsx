@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { MapContainer, TileLayer, useMap, LayersControl } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Marker, Popup } from 'react-leaflet';
+import { Marker, Popup, GeoJSON } from 'react-leaflet';
 
 // Fix for default marker icon in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -33,6 +33,19 @@ const createCustomIcon = (color, isHovered) => {
     });
 };
 
+const createClusterCustomIcon = function (cluster) {
+    const count = cluster.getChildCount();
+    let size = 40;
+    if (count > 10) size = 50;
+    if (count > 100) size = 60;
+
+    return L.divIcon({
+        html: `<div class="custom-cluster-icon" style="width: ${size}px; height: ${size}px;">${count}</div>`,
+        className: 'cluster-marker-wrapper', // meaningful styles are in inner div
+        iconSize: L.point(size, size, true),
+    });
+};
+
 const getMarkerColor = (commodity, userStatus) => {
     // User override
     if (userStatus === 'good') return '#22c55e'; // Green-500
@@ -56,7 +69,7 @@ const MapEffect = ({ selectedItem }) => {
     const map = useMap();
     useEffect(() => {
         if (selectedItem && selectedItem.lat && selectedItem.lng) {
-            map.flyTo([selectedItem.lat, selectedItem.lng], 25, {
+            map.flyTo([selectedItem.lat, selectedItem.lng], 14, {
                 duration: 2.0
             });
         }
@@ -64,7 +77,35 @@ const MapEffect = ({ selectedItem }) => {
     return null;
 };
 
+
 const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes }) => {
+    const [geoJsonData, setGeoJsonData] = useState(null);
+
+    useEffect(() => {
+        // Fetch simplified world borders
+        fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
+            .then(res => res.json())
+            .then(data => setGeoJsonData(data))
+            .catch(err => console.error("Failed to load country borders", err));
+    }, []);
+
+    const activeCountries = useMemo(() => {
+        const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
+        return Array.from(countries);
+    }, [processedData]);
+
+    const filteredGeoJson = useMemo(() => {
+        if (!geoJsonData) return null;
+        return {
+            ...geoJsonData,
+            features: geoJsonData.features.filter(f => {
+                const name = f.properties.name.toLowerCase();
+                // Check exact match or if active country is part of the name (e.g. "Republic of Ghana" match "Ghana")
+                // Normalized check:
+                return activeCountries.some(ac => name.includes(ac) || ac === 'ghana' && name === 'ghana');
+            })
+        };
+    }, [geoJsonData, activeCountries]);
     return (
         <div className="map-wrapper">
             <MapContainer center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
@@ -106,6 +147,22 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                         />
                     </LayersControl.BaseLayer>
 
+                    {filteredGeoJson && (
+                        <LayersControl.Overlay checked name="Country Borders">
+                            <GeoJSON
+                                key={activeCountries.join(',')} // Force re-render when countries change
+                                data={filteredGeoJson}
+                                style={{
+                                    className: 'country-border-path',
+                                    fillColor: 'transparent',
+                                    weight: 2,
+                                    color: '#3b82f6',
+                                    fillOpacity: 0
+                                }}
+                            />
+                        </LayersControl.Overlay>
+                    )}
+
                     <LayersControl.BaseLayer name="Satellite (Esri)">
                         <TileLayer
                             attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
@@ -129,6 +186,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                     spiderfyOnMaxZoom={true}
                     showCoverageOnHover={false}
                     maxClusterRadius={40}
+                    iconCreateFunction={createClusterCustomIcon}
                 >
                     {processedData.map((item, idx) => {
                         if (!item.lat || !item.lng) return null;
