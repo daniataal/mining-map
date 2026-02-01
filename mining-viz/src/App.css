@@ -395,3 +395,22 @@
     filter: drop-shadow(0 0 8px rgba(59, 130, 246, 1));
   }
 }
+
+.upload-btn {
+  display: inline-block;
+  background: #3b82f6;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.upload-btn:hover {
+  background: #2563eb;
+}

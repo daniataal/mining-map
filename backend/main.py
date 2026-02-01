@@ -65,7 +65,16 @@ def init_db():
                 phone_number TEXT,
                 contact_person TEXT,
                 date_issued TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            );
+            
+            CREATE TABLE IF NOT EXISTS license_files (
+                id VARCHAR(255) PRIMARY KEY,
+                license_id VARCHAR(255) NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
+            );
         """)
         conn.commit()
         cur.close()
@@ -318,6 +327,111 @@ async def import_licenses(file: UploadFile = File(...)):
         
     conn.close()
     return {"status": "success", "imported_count": count}
+
+# --- File Management for Dossiers ---
+from fastapi.staticfiles import StaticFiles
+
+# Ensure upload directory exists
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/data/uploads")
+if not os.path.exists(UPLOAD_DIR):
+    try:
+        os.makedirs(UPLOAD_DIR)
+    except Exception as e:
+        print(f"Warning: Could not create upload dir {UPLOAD_DIR}: {e}")
+        # Fallback for local dev if /data doesn't exist
+        UPLOAD_DIR = "uploads"
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Mount it so we can serve files (add authentication in real prod if sensitive)
+app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
+
+@app.post("/licenses/{license_id}/files")
+async def upload_license_file(license_id: str, file: UploadFile = File(...)):
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # Verify license exists
+    c.execute("SELECT id FROM licenses WHERE id = %s", (license_id,))
+    if not c.fetchone():
+        conn.close()
+        return Response("License not found", status_code=404)
+
+    file_id = str(uuid.uuid4())
+    # Secure filename
+    safe_filename = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+    if not safe_filename:
+        safe_filename = "unnamed_file"
+        
+    final_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_filename}")
+    
+    try:
+        with open(final_path, "wb") as buffer:
+            import shutil
+            shutil.copyfileobj(file.file, buffer)
+            
+        c.execute("""
+            INSERT INTO license_files (id, license_id, filename, file_path)
+            VALUES (%s, %s, %s, %s)
+        """, (file_id, license_id, file.filename, f"/files/{file_id}_{safe_filename}"))
+        
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return {"error": str(e)}
+        
+    conn.close()
+    return {
+        "id": file_id,
+        "filename": file.filename,
+        "url": f"/files/{file_id}_{safe_filename}"
+    }
+
+@app.get("/licenses/{license_id}/files")
+def get_license_files(license_id: str):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM license_files WHERE license_id = %s ORDER BY upload_date DESC", (license_id,))
+        files = c.fetchall()
+        # Ensure we return valid URLs
+        result = []
+        for f in files:
+            result.append({
+                "id": f["id"],
+                "filename": f["filename"],
+                "url": f["file_path"], # In our case file_path stores the relative URL
+                "date": f["upload_date"]
+            })
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+@app.delete("/files/{file_id}")
+def delete_file(file_id: str):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        c.execute("SELECT file_path FROM license_files WHERE id = %s", (file_id,))
+        row = c.fetchone()
+        
+        if row:
+            # Try to delete from disk
+            # URL is like /files/GUID_name, we need partial relative path
+            relative_name = row['file_path'].replace("/files/", "")
+            full_path = os.path.join(UPLOAD_DIR, relative_name)
+            if os.path.exists(full_path):
+                os.remove(full_path)
+                
+        c.execute("DELETE FROM license_files WHERE id = %s", (file_id,))
+        conn.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
 if __name__ == "__main__":
     import uvicorn
     # Run slightly different port than typical default to avoid collisions if any

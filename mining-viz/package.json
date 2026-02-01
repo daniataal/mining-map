@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"cd .. && python backend/main.py\"",
+    "dev": "concurrently \"vite --host\" \"cd .. && python backend/main.py\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) => {
     const [newNote, setNewNote] = useState('');
@@ -7,6 +7,62 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
 
     const verification = annotation.verification || {};
     const activityLog = annotation.activityLog || [];
+    const [uploading, setUploading] = useState(false);
+    const [files, setFiles] = useState([]);
+
+    // Fetch files on mount/open
+    useEffect(() => {
+        if (isOpen && item) {
+            fetchFileList();
+        }
+    }, [isOpen, item]);
+
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
+    const fetchFileList = () => {
+        fetch(`${API_BASE}/licenses/${item.id}/files`)
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data)) setFiles(data);
+            })
+            .catch(err => console.error("Failed to load files", err));
+    };
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch(`${API_BASE}/licenses/${item.id}/files`, {
+            method: 'POST',
+            body: formData
+        })
+            .then(res => res.json())
+            .then(newFile => {
+                if (newFile.error) {
+                    alert(newFile.error);
+                } else {
+                    setFiles(prev => [newFile, ...prev]);
+                }
+            })
+            .catch(err => alert("Upload failed: " + err.message))
+            .finally(() => {
+                setUploading(false);
+                e.target.value = null;
+            });
+    };
+
+    const deleteFile = (fileId) => {
+        if (!confirm("Are you sure?")) return;
+        fetch(`${API_BASE}/files/${fileId}`, { method: 'DELETE' })
+            .then(() => {
+                setFiles(prev => prev.filter(f => f.id !== fileId));
+            })
+            .catch(err => alert("Delete failed: " + err.message));
+    };
 
     const toggleVerification = (key) => {
         const currentVal = verification[key] || false;
@@ -106,6 +162,49 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                         <button className={annotation.stage === 'Diligence' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Diligence')}>Diligence</button>
                         <button className={annotation.stage === 'Verified' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Verified')}>Verified</button>
                         <button className={annotation.stage === 'Closed' ? 'active' : ''} onClick={() => updateAnnotation(item.id, 'stage', 'Closed')} style={{ borderColor: '#64748b' }}>Closed</button>
+                    </div>
+                </section>
+
+                {/* File Management Section */}
+                <section className="section">
+                    <h3>📂 Documents & Contracts</h3>
+                    <div className="file-upload-area">
+                        <label className="upload-btn">
+                            {uploading ? 'Uploading...' : '⬆️ Upload SPA / NCNDA'}
+                            <input
+                                type="file"
+                                style={{ display: 'none' }}
+                                onChange={handleFileUpload}
+                                disabled={uploading}
+                            />
+                        </label>
+                    </div>
+
+                    <div className="file-list" style={{ marginTop: '15px' }}>
+                        {files.length === 0 && <div style={{ color: '#94a3b8', fontSize: '0.85em', fontStyle: 'italic' }}>No documents uploaded.</div>}
+                        {files.map(file => (
+                            <div key={file.id} style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: '#f1f5f9',
+                                padding: '8px',
+                                borderRadius: '4px',
+                                marginBottom: '5px',
+                                fontSize: '0.9em'
+                            }}>
+                                <a href={`${API_BASE}${file.url}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: '#334155', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    📄 {file.filename}
+                                </a>
+                                <button
+                                    onClick={() => deleteFile(file.id)}
+                                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '1.1em' }}
+                                    title="Delete File"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 </section>
 

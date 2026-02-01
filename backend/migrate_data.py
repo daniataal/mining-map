@@ -26,7 +26,7 @@ def get_pg_conn():
             password=PG_PASS
         )
     except Exception as e:
-        print(f"Failed to connect to Postgres: {e}")
+        print(f"Failed to connect to Postgres: {e}\nHost: {PG_HOST}, User: {PG_USER}")
         return None
 
 def migrate():
