@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const Sidebar = ({
     processedData,
@@ -16,6 +16,36 @@ const Sidebar = ({
     hoveredItem, setHoveredItem,
     userAnnotations, rawData, error
 }) => {
+
+    // Infinite scroll state
+    const [displayCount, setDisplayCount] = useState(20);
+    const observerTarget = useRef(null);
+
+    // Reset display count when filters verify
+    useEffect(() => {
+        setDisplayCount(20);
+    }, [processedData]);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting && displayCount < processedData.length) {
+                    setDisplayCount(prev => Math.min(prev + 20, processedData.length));
+                }
+            },
+            { threshold: 0.1 }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => {
+            if (observerTarget.current) {
+                observer.unobserve(observerTarget.current);
+            }
+        };
+    }, [displayCount, processedData.length]);
 
     return (
         <div className="sidebar">
@@ -131,7 +161,7 @@ const Sidebar = ({
             </div>
 
             <div className="list-view">
-                {processedData.map((item, idx) => {
+                {processedData.slice(0, displayCount).map((item, idx) => {
                     const annotation = userAnnotations[item.id] || {};
                     const statusColor = annotation.status === 'good' ? '#22c55e' :
                         annotation.status === 'bad' ? '#ef4444' :
@@ -187,6 +217,14 @@ const Sidebar = ({
                         </div>
                     );
                 })}
+
+                {displayCount < processedData.length && (
+                    <div ref={observerTarget} className="scroll-loader">
+                        <div className="loader-spinner"></div>
+                        <div>Loading more...</div>
+                    </div>
+                )}
+
                 {loading && <div className="status-message">Loading data...</div>}
                 {error && <div className="error-message">{error}</div>}
                 {!loading && !error && processedData.length === 0 && <div className="empty-state">No results found (Raw: {rawData.length})</div>}
