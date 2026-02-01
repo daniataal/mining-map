@@ -176,7 +176,6 @@ def create_license(item: LicenseCreate):
 @app.delete("/licenses/{license_id:path}")
 def delete_license(license_id: str):
     print(f"Deleting license with ID: '{license_id}'")
-    print(f"DB Path: {DB_PATH}")
     
     conn = get_db_connection()
     c = conn.cursor()
@@ -357,8 +356,9 @@ async def upload_license_file(license_id: str, file: UploadFile = File(...)):
         return Response("License not found", status_code=404)
 
     file_id = str(uuid.uuid4())
-    # Secure filename
-    safe_filename = "".join(x for x in file.filename if x.isalnum() or x in "._- ")
+    # Secure filename - replace spaces with underscores first
+    safe_filename = file.filename.replace(" ", "_")
+    safe_filename = "".join(x for x in safe_filename if x.isalnum() or x in "._-")
     if not safe_filename:
         safe_filename = "unnamed_file"
         

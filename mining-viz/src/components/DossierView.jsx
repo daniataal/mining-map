@@ -194,7 +194,12 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                                 marginBottom: '5px',
                                 fontSize: '0.9em'
                             }}>
-                                <a href={`${API_BASE}${file.url}`} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: '#334155', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <a
+                                    href={encodeURI(`${API_BASE}${file.url}`)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ textDecoration: 'none', color: '#334155', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                >
                                     📄 {file.filename}
                                 </a>
                                 <button
