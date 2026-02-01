@@ -69,7 +69,9 @@ const MapEffect = ({ selectedItem }) => {
     const map = useMap();
     useEffect(() => {
         if (selectedItem && selectedItem.lat && selectedItem.lng) {
-            map.flyTo([selectedItem.lat, selectedItem.lng], 14, {
+            const currentZoom = map.getZoom();
+            const targetZoom = Math.max(currentZoom, 14);
+            map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, {
                 duration: 2.0
             });
         }

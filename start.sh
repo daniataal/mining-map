@@ -10,4 +10,4 @@ echo "Starting Mining App (Postgres Backend)..."
 # The Dockerfile runs npm run build, but then runs start.sh.
 # Dev mode uses 'npx vite --host'.
 
-exec npx concurrently --kill-others "npm run dev -- --host" "python3 ../backend/main.py"
+exec npm run dev -- --host
