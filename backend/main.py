@@ -1,7 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import time
 import os
 import csv
 import io
@@ -20,49 +22,73 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database file is one level up
-# Database file is one level up
-if os.getenv("MINING_DB_PATH"):
-    DB_PATH = os.getenv("MINING_DB_PATH")
-else:
-    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mining.db")
+# Database connection parameters
+DB_HOST = os.getenv("DB_HOST", "db")
+DB_NAME = os.getenv("DB_NAME", "mining_db")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
 
 def get_db_connection():
-    print(f"Connecting to DB at: {DB_PATH}")
-    if os.path.exists(DB_PATH):
-        if os.path.isdir(DB_PATH):
-             print(f"CRITICAL ERROR: {DB_PATH} is a DIRECTORY, not a file.")
-        else:
-             print(f"File exists. Permissions: R={os.access(DB_PATH, os.R_OK)}, W={os.access(DB_PATH, os.W_OK)}")
-             # Try to touch the file
-             try:
-                 with open(DB_PATH, 'a'):
-                     os.utime(DB_PATH, None)
-                 print("Successfully touched DB file (Write check passed).")
-             except Exception as e:
-                 print(f"Failed to write/touch DB file: {e}")
-    else:
-        print(f"File does not exist at {DB_PATH}")
+    # Simple retry logic for container startup
+    retries = 5
+    while retries > 0:
+        try:
+            conn = psycopg2.connect(
+                host=DB_HOST,
+                database=DB_NAME,
+                user=DB_USER,
+                password=DB_PASSWORD
+            )
+            return conn
+        except psycopg2.OperationalError as e:
+            print(f"Waiting for DB... ({5-retries}/5)")
+            time.sleep(2)
+            retries -= 1
+            if retries == 0:
+                raise e
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row # This allows access by column name
-    return conn
+def init_db():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS licenses (
+                id VARCHAR(255) PRIMARY KEY,
+                company TEXT,
+                country TEXT,
+                region TEXT,
+                commodity TEXT,
+                license_type TEXT,
+                status TEXT,
+                lat FLOAT,
+                lng FLOAT,
+                phone_number TEXT,
+                contact_person TEXT,
+                date_issued TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"Failed to initialize database: {e}")
+
+# Initialize DB on startup
+init_db()
 
 @app.get("/licenses")
 def read_licenses():
-    if not os.path.exists(DB_PATH):
-        return {"error": "Database not found. Run push_to_sql.py first."}
-    
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=RealDictCursor)
     
     # Select all rows
     try:
         c.execute("SELECT * FROM licenses")
         rows = c.fetchall()
-    except sqlite3.OperationalError as e:
+    except Exception as e:
         conn.close()
-        return {"error": f"Database error (likely missing tables): {str(e)}. Please ensure mining.db is populated."}
+        return {"error": f"Database error: {str(e)}"}
     
     conn.close()
     
@@ -114,7 +140,7 @@ def create_license(item: LicenseCreate):
     c.execute('''
         INSERT INTO licenses 
         (id, company, country, region, commodity, license_type, status, lat, lng, phone_number, contact_person, date_issued)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ''', (
         new_id, item.company, item.country, item.region, item.commodity, 
         item.licenseType, item.status, item.lat, item.lng, 
@@ -147,13 +173,13 @@ def delete_license(license_id: str):
     c = conn.cursor()
     
     # Check if exists first for debugging
-    c.execute("SELECT * FROM licenses WHERE id = ?", (license_id,))
+    c.execute("SELECT * FROM licenses WHERE id = %s", (license_id,))
     found = c.fetchone()
     print(f"Record found before delete: {found is not None}")
     if found:
         print(f"Record: {tuple(found)}")
 
-    c.execute("DELETE FROM licenses WHERE id = ?", (license_id,))
+    c.execute("DELETE FROM licenses WHERE id = %s", (license_id,))
     conn.commit()
     deleted = c.rowcount
     print(f"Rows deleted: {deleted}")
@@ -161,7 +187,7 @@ def delete_license(license_id: str):
     
     if deleted == 0:
         from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail=f"License {license_id} not found in {DB_PATH}")
+        raise HTTPException(status_code=404, detail=f"License {license_id} not found")
         
     return {"status": "success", "deleted_id": license_id}
 
@@ -179,11 +205,11 @@ def batch_delete_licenses(request: BatchDeleteRequest):
     c = conn.cursor()
     
     # Create placeholders for IN clause
-    placeholders = ','.join('?' * len(request.ids))
+    placeholders = ','.join(['%s'] * len(request.ids))
     sql = f"DELETE FROM licenses WHERE id IN ({placeholders})"
     
     try:
-        c.execute(sql, request.ids)
+        c.execute(sql, tuple(request.ids))
         conn.commit()
         deleted_count = c.rowcount
         print(f"Total rows deleted: {deleted_count}")
@@ -200,7 +226,7 @@ def batch_delete_licenses(request: BatchDeleteRequest):
 @app.get("/licenses/export")
 def export_licenses():
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=RealDictCursor)
     c.execute("SELECT * FROM licenses")
     rows = c.fetchall()
     conn.close()
@@ -282,7 +308,7 @@ async def import_licenses(file: UploadFile = File(...)):
         c.executemany('''
             INSERT INTO licenses 
             (id, company, country, region, commodity, license_type, status, lat, lng, phone_number, contact_person, date_issued)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', rows_to_insert)
         conn.commit()
         count = c.rowcount

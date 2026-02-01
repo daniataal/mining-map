@@ -41,19 +41,54 @@ jobs:
         port: 22  # Adjust if you're using a different port
         key: ${{ secrets.REMOTE_SSH_KEY }}  # Directly using SSH key here
         script: |
-          # Pull the latest Docker image (use the version number from the GitHub environment)
-          sudo docker pull dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
+          APP_IMAGE="dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}"
+          
+          # Ensure directory exists
+          sudo mkdir -p /opt/mining-map
+          cd /opt/mining-map
 
-          # Remove the old container if it exists
-          sudo docker rm -f mining-map-auto
+          # Create/Overwrite docker-compose.yml
+          cat <<EOF | sudo tee docker-compose.yml
+          version: '3.8'
+          services:
+            app:
+              image: $APP_IMAGE
+              ports:
+                - "8000:8000"
+                - "5173:5173"
+              environment:
+                - VITE_API_BASE=http://129.159.148.51:8000
+                - DB_HOST=db
+                - DB_NAME=mining_db
+                - DB_USER=postgres
+                - DB_PASSWORD=password
+              depends_on:
+                - db
+              restart: always
 
-          # Run the new container with the necessary environment variables and mount points
-          sudo docker run -d \
-            -e VITE_API_BASE=http://129.159.148.51:8000 \
-            -p 8000:8000 \
-            -p 5173:5173 \
-            -v /opt/mining-map:/data \
-            -e MINING_DB_PATH=/data/mining.db \
-            --name mining-map-auto \
-            dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
-        debug: true
+            db:
+              image: postgres:15
+              environment:
+                POSTGRES_DB: mining_db
+                POSTGRES_USER: postgres
+                POSTGRES_PASSWORD: password
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              restart: always
+
+          volumes:
+            postgres_data:
+          EOF
+
+          # Pull latest image
+          sudo docker pull $APP_IMAGE
+
+          # Stop old containers if running via independent docker run (cleanup)
+          sudo docker rm -f mining-map-auto || true
+
+          # Start up with Compose
+          if sudo docker compose version >/dev/null 2>&1; then
+            sudo docker compose up -d --remove-orphans
+          else
+            sudo docker-compose up -d --remove-orphans
+          fi
