@@ -5,7 +5,9 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
     const [uploading, setUploading] = useState(false);
     const [files, setFiles] = useState([]);
 
-    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+    // Use window.location.hostname to ensure it works when accessing via IP (remote dev) 
+    // instead of hardcoded localhost
+    const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
 
     const fetchFileList = () => {
         if (!item?.id) return;
@@ -13,13 +15,18 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data)) setFiles(data);
+                else setFiles([]);
             })
-            .catch(err => console.error("Failed to load files", err));
+            .catch(err => {
+                console.error("Failed to load files", err);
+                setFiles([]);
+            });
     };
 
-    // Fetch files on mount/open
+    // Fetch files on mount/open - reset files first so we don't show prev item's files
     useEffect(() => {
         if (isOpen && item) {
+            setFiles([]); // Clear previous state immediately
             fetchFileList();
         }
     }, [isOpen, item]);
@@ -71,6 +78,15 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
             ...verification,
             [key]: !currentVal
         });
+    };
+
+    const getFileIcon = (filename) => {
+        const ext = filename.split('.').pop().toLowerCase();
+        if (['pdf'].includes(ext)) return '📕';
+        if (['doc', 'docx'].includes(ext)) return '📘';
+        if (['xls', 'xlsx', 'csv'].includes(ext)) return '📗';
+        if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return '🖼️';
+        return '📄';
     };
 
     const addNote = () => {
@@ -195,12 +211,12 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                                 fontSize: '0.9em'
                             }}>
                                 <a
-                                    href={encodeURI(`${API_BASE}${file.url}`)}
+                                    href={API_BASE.startsWith('http') ? encodeURI(`${API_BASE}${file.url}`) : encodeURI(`http://${API_BASE}${file.url}`)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     style={{ textDecoration: 'none', color: '#334155', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}
                                 >
-                                    📄 {file.filename}
+                                    {getFileIcon(file.filename)} {file.filename}
                                 </a>
                                 <button
                                     onClick={() => deleteFile(file.id)}
