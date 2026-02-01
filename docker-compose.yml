@@ -13,8 +13,7 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=password
     volumes:
-      - .:/app
-      - /app/mining.db 
+      - .:/app 
     depends_on:
       - db
     # Override command to ensure we can run migrations or specific setup if needed
