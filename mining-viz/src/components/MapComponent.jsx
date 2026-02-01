@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, useMap, LayersControl } from 'react-leaflet';
+import { useState, useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, CircleMarker } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Marker, Popup } from 'react-leaflet';
+import HeatmapLayer from './HeatmapLayer';
 
 // Fix for default marker icon in React Leaflet
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -19,10 +19,20 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 // Custom Icons
-const createCustomIcon = (color, isHovered) => {
+const createCustomIcon = (color, isHovered, riskStatus = null) => {
     const size = isHovered ? 24 : 12;
     const border = isHovered ? '3px solid white' : '2px solid white';
-    const boxShadow = isHovered ? '0 0 10px rgba(0,0,0,0.8)' : '0 0 4px rgba(0,0,0,0.5)';
+
+    let boxShadow = isHovered ? '0 0 10px rgba(0,0,0,0.8)' : '0 0 4px rgba(0,0,0,0.5)';
+
+    if (riskStatus) {
+        let haloColor = '#ef4444'; // Red (High Risk/Unverified)
+        if (riskStatus === 'fully_verified') haloColor = '#22c55e'; // Green
+        else if (riskStatus === 'partially_verified') haloColor = '#eab308'; // Yellow
+
+        // Heavy halo
+        boxShadow = `0 0 0 4px ${haloColor}, 0 0 15px ${haloColor}`;
+    }
 
     return new L.DivIcon({
         className: 'custom-marker',
@@ -34,21 +44,19 @@ const createCustomIcon = (color, isHovered) => {
 };
 
 const getMarkerColor = (commodity, userStatus) => {
-    // User override
-    if (userStatus === 'good') return '#22c55e'; // Green-500
-    if (userStatus === 'bad') return '#ef4444'; // Red-500
-    if (userStatus === 'maybe') return '#f59e0b'; // Amber-500 (Orange)
-
+    if (userStatus === 'good') return '#22c55e';
+    if (userStatus === 'bad') return '#ef4444';
+    if (userStatus === 'maybe') return '#f59e0b';
     if (!commodity) return '#94a3b8';
     const c = commodity.toLowerCase();
-    if (c.includes('gold')) return '#fbbf24'; // Amber-400
-    if (c.includes('diamond')) return '#60a5fa'; // Blue-400
-    if (c.includes('bauxite')) return '#f87171'; // Red-400
-    if (c.includes('manganese')) return '#a78bfa'; // Purple-400
-    if (c.includes('lithium')) return '#34d399'; // Emerald-400
-    if (c.includes('iron')) return '#ef4444'; // Red-500
-    if (c.includes('salt')) return '#fcd34d'; // Amber-300
-    return '#94a3b8'; // Slate-400
+    if (c.includes('gold')) return '#fbbf24';
+    if (c.includes('diamond')) return '#60a5fa';
+    if (c.includes('bauxite')) return '#f87171';
+    if (c.includes('manganese')) return '#a78bfa';
+    if (c.includes('lithium')) return '#34d399';
+    if (c.includes('iron')) return '#ef4444';
+    if (c.includes('salt')) return '#fcd34d';
+    return '#94a3b8';
 };
 
 // Component to handle map flyTo effects
@@ -56,7 +64,7 @@ const MapEffect = ({ selectedItem }) => {
     const map = useMap();
     useEffect(() => {
         if (selectedItem && selectedItem.lat && selectedItem.lng) {
-            map.flyTo([selectedItem.lat, selectedItem.lng], 25, {
+            map.flyTo([selectedItem.lat, selectedItem.lng], 12, {
                 duration: 2.0
             });
         }
@@ -64,106 +72,150 @@ const MapEffect = ({ selectedItem }) => {
     return null;
 };
 
-const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes }) => {
+// Component to track zoom level
+const ZoomHandler = ({ setZoom }) => {
+    const map = useMapEvents({
+        zoomend: () => {
+            setZoom(map.getZoom());
+        },
+    });
+    return null;
+};
+
+const MapComponent = ({
+    processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter,
+    PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes,
+    mapMode = 'operations'
+}) => {
+    const [zoom, setZoom] = useState(7);
+
+    // Helpers
+    const getRiskStatus = (annotation) => {
+        const v = annotation.verification || {};
+        if (v.siteVisit) return 'fully_verified';
+        if (v.govMatch || v.taxClearance) return 'partially_verified';
+        return 'unverified';
+    };
+
+    const getValue = (item, annotation) => {
+        const qty = parseFloat(annotation.quantity || 0);
+        const price = parseFloat(annotation.price || 0);
+        const val = qty * price;
+        return val > 0 ? val : 1000; // Default small value
+    };
+
+    // Render Logic per mode
+    const renderOperations = () => (
+        <MarkerClusterGroup chunkedLoading spiderfyOnMaxZoom={true} showCoverageOnHover={false} maxClusterRadius={40}>
+            {processedData.map((item, idx) => {
+                if (!item.lat || !item.lng) return null;
+                const annotation = userAnnotations[item.id] || {};
+                const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
+                const isSelected = selectedItem?.id === item.id;
+                return (
+                    <Marker
+                        key={item.id || idx}
+                        position={[item.lat, item.lng]}
+                        icon={createCustomIcon(color, isSelected)}
+                        eventHandlers={{ click: () => setSelectedItem(item) }}
+                    >
+                        <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
+                            <PopupForm item={item} annotation={annotation} updateAnnotation={updateAnnotation} onDelete={() => deleteLicense(item.id)} commodities={commodities} licenseTypes={licenseTypes} />
+                        </Popup>
+                    </Marker>
+                );
+            })}
+        </MarkerClusterGroup>
+    );
+
+    const renderIntelligence = () => {
+        if (zoom < 8) {
+            // Heatmap
+            const points = processedData.map(item => {
+                const annotation = userAnnotations[item.id] || {};
+                const val = getValue(item, annotation);
+                // Normalize intensity roughly. Log scale might be better.
+                const intensity = Math.min(val / 100000, 1.0);
+                return [item.lat, item.lng, intensity]; // Standard format for leaflet.heat
+            }).filter(p => p[0] && p[1]);
+
+            return <HeatmapLayer points={points} options={{ radius: 25, blur: 15, maxZoom: 10 }} />;
+        } else {
+            // Circles
+            return processedData.map((item, idx) => {
+                const annotation = userAnnotations[item.id] || {};
+                const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
+                const val = getValue(item, annotation);
+                // Radius based on value
+                const radius = Math.min(Math.max(Math.sqrt(val) / 10, 5), 50);
+
+                return (
+                    <CircleMarker
+                        key={item.id || idx}
+                        center={[item.lat, item.lng]}
+                        radius={radius}
+                        pathOptions={{ color: color, fillColor: color, fillOpacity: 0.6 }}
+                        eventHandlers={{ click: () => setSelectedItem(item) }}
+                    >
+                        <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
+                            <PopupForm item={item} annotation={annotation} updateAnnotation={updateAnnotation} onDelete={() => deleteLicense(item.id)} commodities={commodities} licenseTypes={licenseTypes} />
+                        </Popup>
+                    </CircleMarker>
+                )
+            });
+        }
+    };
+
+    const renderRisk = () => {
+        return processedData.map((item, idx) => {
+            if (!item.lat || !item.lng) return null;
+            const annotation = userAnnotations[item.id] || {};
+            const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
+            const isSelected = selectedItem?.id === item.id;
+            const riskStatus = getRiskStatus(annotation);
+
+            // Note: No clustering in Risk mode to clearly see individual risks
+            return (
+                <Marker
+                    key={item.id || idx}
+                    position={[item.lat, item.lng]}
+                    icon={createCustomIcon(color, isSelected, riskStatus)}
+                    eventHandlers={{ click: () => setSelectedItem(item) }}
+                    opacity={0.9} // Slight dim as requested
+                >
+                    <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
+                        <PopupForm item={item} annotation={annotation} updateAnnotation={updateAnnotation} onDelete={() => deleteLicense(item.id)} commodities={commodities} licenseTypes={licenseTypes} />
+                    </Popup>
+                </Marker>
+            );
+        });
+    };
+
     return (
         <div className="map-wrapper">
             <MapContainer center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
                 <MapEffect selectedItem={selectedItem} />
+                <ZoomHandler setZoom={setZoom} />
+
                 <LayersControl position="topright">
-                    <LayersControl.BaseLayer checked name="Dark Matter (Default)">
-                        <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                            maxNativeZoom={19}
-                            maxZoom={25}
-                        />
+                    <LayersControl.BaseLayer checked name="Dark Matter">
+                        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution="CARTO" />
                     </LayersControl.BaseLayer>
-
-                    <LayersControl.BaseLayer name="Light (Clean)">
-                        <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                            maxNativeZoom={19}
-                            maxZoom={25}
-                        />
+                    <LayersControl.BaseLayer name="Satellite">
+                        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" attribution="Esri" />
                     </LayersControl.BaseLayer>
-
-                    <LayersControl.BaseLayer name="Topographic (Terrain)">
-                        <TileLayer
-                            attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-                            url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
-                            maxNativeZoom={17}
-                            maxZoom={25}
-                        />
-                    </LayersControl.BaseLayer>
-
-                    <LayersControl.BaseLayer name="NatGeo (Esri)">
-                        <TileLayer
-                            attribution='Tiles &copy; Esri &mdash; National Geographic, Esri, DeLorme, NAVTEQ, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA, iPC'
-                            url="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
-                            maxNativeZoom={16}
-                            maxZoom={25}
-                        />
-                    </LayersControl.BaseLayer>
-
-                    <LayersControl.BaseLayer name="Satellite (Esri)">
-                        <TileLayer
-                            attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-                            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                            maxNativeZoom={19}
-                            maxZoom={25}
-                        />
-                    </LayersControl.BaseLayer>
-
-                    <LayersControl.BaseLayer name="Street Map (Color)">
-                        <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            maxNativeZoom={19}
-                            maxZoom={25}
-                        />
+                    <LayersControl.BaseLayer name="Clean Light">
+                        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution="CARTO" />
                     </LayersControl.BaseLayer>
                 </LayersControl>
-                <MarkerClusterGroup
-                    chunkedLoading
-                    spiderfyOnMaxZoom={true}
-                    showCoverageOnHover={false}
-                    maxClusterRadius={40}
-                >
-                    {processedData.map((item, idx) => {
-                        if (!item.lat || !item.lng) return null;
-                        const annotation = userAnnotations[item.id] || {};
-                        // If commodity is overridden, use it for color
-                        const commodity = annotation.commodity || item.commodity;
-                        const color = getMarkerColor(commodity, annotation.status);
-                        const isSelected = selectedItem?.id === item.id;
 
-                        return (
-                            <Marker
-                                key={item.id || idx}
-                                position={[item.lat, item.lng]}
-                                icon={createCustomIcon(color, isSelected)}
-                                eventHandlers={{
-                                    click: () => setSelectedItem(item),
-                                }}
-                            >
-                                <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
-                                    <PopupForm
-                                        item={item}
-                                        annotation={annotation}
-                                        updateAnnotation={updateAnnotation}
-                                        onDelete={() => deleteLicense(item.id)}
-                                        commodities={commodities}
-                                        licenseTypes={licenseTypes}
-                                    />
-                                </Popup>
-                            </Marker>
-                        );
-                    })}
-                </MarkerClusterGroup>
+                {mapMode === 'operations' && renderOperations()}
+                {mapMode === 'intelligence' && renderIntelligence()}
+                {mapMode === 'risk' && renderRisk()}
+
             </MapContainer>
         </div>
     );
-}
+};
 
 export default MapComponent;

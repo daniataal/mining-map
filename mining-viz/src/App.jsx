@@ -20,6 +20,7 @@ function App() {
   const [userStatusFilter, setUserStatusFilter] = useState('All');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'pipeline'
+  const [mapMode, setMapMode] = useState('operations'); // 'operations', 'intelligence', 'risk'
 
   // Interaction states
   const [selectedItem, setSelectedItem] = useState(null);
@@ -350,6 +351,71 @@ function App() {
           </button>
         </div>
 
+        {/* Map Mode Switcher (only when in Map View) */}
+        {viewMode === 'map' && (
+          <div style={{
+            position: 'absolute',
+            top: '65px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            backgroundColor: 'rgba(30, 41, 59, 0.95)',
+            padding: '4px',
+            borderRadius: '24px',
+            display: 'flex',
+            gap: '8px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(4px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <button
+              onClick={() => setMapMode('operations')}
+              style={{
+                background: mapMode === 'operations' ? '#3b82f6' : 'transparent',
+                color: mapMode === 'operations' ? 'white' : '#cbd5e1',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                fontSize: '0.8em',
+                fontWeight: '600'
+              }}
+            >
+              Operations
+            </button>
+            <button
+              onClick={() => setMapMode('intelligence')}
+              style={{
+                background: mapMode === 'intelligence' ? '#8b5cf6' : 'transparent',
+                color: mapMode === 'intelligence' ? 'white' : '#cbd5e1',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                fontSize: '0.8em',
+                fontWeight: '600'
+              }}
+            >
+              Intelligence
+            </button>
+            <button
+              onClick={() => setMapMode('risk')}
+              style={{
+                background: mapMode === 'risk' ? '#ef4444' : 'transparent',
+                color: mapMode === 'risk' ? 'white' : '#cbd5e1',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                fontSize: '0.8em',
+                fontWeight: '600'
+              }}
+            >
+              Risk
+            </button>
+          </div>
+        )}
+
         {viewMode === 'map' ? (
           <MapComponent
             processedData={processedData}
@@ -365,6 +431,7 @@ function App() {
             deleteLicense={deleteLicense}
             commodities={commodities}
             licenseTypes={licenseTypes}
+            mapMode={mapMode}
           />
         ) : (
           <KanbanBoard
