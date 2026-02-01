@@ -2,13 +2,20 @@ import { useState, useEffect } from 'react';
 
 const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) => {
     const [newNote, setNewNote] = useState('');
-
-    if (!isOpen || !item) return null;
-
-    const verification = annotation.verification || {};
-    const activityLog = annotation.activityLog || [];
     const [uploading, setUploading] = useState(false);
     const [files, setFiles] = useState([]);
+
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
+    const fetchFileList = () => {
+        if (!item?.id) return;
+        fetch(`${API_BASE}/licenses/${item.id}/files`)
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data)) setFiles(data);
+            })
+            .catch(err => console.error("Failed to load files", err));
+    };
 
     // Fetch files on mount/open
     useEffect(() => {
@@ -17,16 +24,10 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
         }
     }, [isOpen, item]);
 
-    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+    if (!isOpen || !item) return null;
 
-    const fetchFileList = () => {
-        fetch(`${API_BASE}/licenses/${item.id}/files`)
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data)) setFiles(data);
-            })
-            .catch(err => console.error("Failed to load files", err));
-    };
+    const verification = annotation?.verification || {};
+    const activityLog = annotation?.activityLog || [];
 
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
