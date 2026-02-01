@@ -81,6 +81,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
     };
 
     const getFileIcon = (filename) => {
+        if (!filename) return '📄';
         const ext = filename.split('.').pop().toLowerCase();
         if (['pdf'].includes(ext)) return '📕';
         if (['doc', 'docx'].includes(ext)) return '📘';

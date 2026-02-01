@@ -344,7 +344,7 @@ if not os.path.exists(UPLOAD_DIR):
 # Mount it so we can serve files (add authentication in real prod if sensitive)
 app.mount("/files", StaticFiles(directory=UPLOAD_DIR), name="files")
 
-@app.post("/licenses/{license_id}/files")
+@app.post("/licenses/{license_id:path}/files")
 async def upload_license_file(license_id: str, file: UploadFile = File(...)):
     conn = get_db_connection()
     c = conn.cursor()
@@ -386,7 +386,7 @@ async def upload_license_file(license_id: str, file: UploadFile = File(...)):
         "url": f"/files/{file_id}_{safe_filename}"
     }
 
-@app.get("/licenses/{license_id}/files")
+@app.get("/licenses/{license_id:path}/files")
 def get_license_files(license_id: str):
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
