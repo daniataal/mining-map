@@ -394,6 +394,7 @@ function App() {
             updateAnnotation={updateAnnotation}
             onCardClick={handleOpenDossier}
             commodities={commodities}
+            isMobile={isMobile}
           />
         )}
       </div>

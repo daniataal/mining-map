@@ -1,6 +1,8 @@
+import { useState } from 'react';
 
-const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodities, onCardClick }) => {
+const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodities, onCardClick, isMobile }) => {
     const stages = ['New', 'Contacted', 'Diligence', 'Verified', 'Closed'];
+    const [activeStage, setActiveStage] = useState('New');
 
     // Helper to get stage for an item
     const getStage = (id) => {
@@ -24,10 +26,66 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
         }
     };
 
+    const stagesToRender = isMobile ? [activeStage] : stages;
+
     return (
-        <div className="kanban-board" style={{ flex: 1, overflowX: 'auto', padding: '20px', backgroundColor: '#0f172a', display: 'flex', gap: '20px' }}>
-            {stages.map(stage => (
-                <div key={stage} style={{ minWidth: '280px', width: '280px', display: 'flex', flexDirection: 'column' }}>
+        <div className="kanban-board" style={{
+            flex: 1,
+            overflowX: isMobile ? 'hidden' : 'auto',
+            padding: '20px',
+            backgroundColor: '#0f172a',
+            display: 'flex',
+            flexDirection: isMobile ? 'column' : 'row',
+            gap: '20px',
+            paddingBottom: isMobile ? '80px' : '20px'
+        }}>
+
+            {/* Mobile Tab Selector */}
+            {isMobile && (
+                <div style={{
+                    display: 'flex',
+                    gap: '10px',
+                    overflowX: 'auto',
+                    paddingBottom: '5px',
+                    marginBottom: '5px',
+                    scrollbarWidth: 'none',
+                    msOverflowStyle: 'none'
+                }}>
+                    {stages.map(stage => {
+                        const isActive = activeStage === stage;
+                        const color = getStageColor(stage);
+                        return (
+                            <button
+                                key={stage}
+                                onClick={() => setActiveStage(stage)}
+                                style={{
+                                    padding: '8px 16px',
+                                    borderRadius: '20px',
+                                    border: `1px solid ${isActive ? color : '#334155'}`,
+                                    backgroundColor: isActive ? color : 'transparent',
+                                    color: isActive ? '#fff' : '#94a3b8',
+                                    fontWeight: isActive ? 'bold' : 'normal',
+                                    whiteSpace: 'nowrap',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    fontSize: '0.9rem'
+                                }}
+                            >
+                                {stage} ({columns[stage].length})
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
+            {stagesToRender.map(stage => (
+                <div key={stage} style={{
+                    minWidth: isMobile ? '100%' : '280px',
+                    width: isMobile ? '100%' : '280px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    animation: isMobile ? 'fadeIn 0.3s ease' : 'none'
+                }}>
                     {/* Column Header */}
                     <div style={{
                         padding: '10px 15px',
@@ -60,8 +118,8 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                                         boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
                                         transition: 'transform 0.1s'
                                     }}
-                                    onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                                    onMouseOut={(e) => e.currentTarget.style.transform = 'none'}
+                                    onMouseOver={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-2px)')}
+                                    onMouseOut={(e) => !isMobile && (e.currentTarget.style.transform = 'none')}
                                 >
                                     <div style={{ fontWeight: 'bold', color: 'white', marginBottom: '4px' }}>{item.company}</div>
                                     <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
@@ -74,9 +132,17 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                                 </div>
                             );
                         })}
+                        {columns[stage].length === 0 && <div style={{ color: '#64748b', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
                     </div>
                 </div>
             ))}
+
+            <style>{`
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(5px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `}</style>
         </div>
     );
 };
