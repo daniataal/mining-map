@@ -20,6 +20,14 @@ function App() {
   const [userStatusFilter, setUserStatusFilter] = useState('All');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'pipeline'
+  const [mobileTab, setMobileTab] = useState('map'); // 'map', 'list', 'pipeline'
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Interaction states
   const [selectedItem, setSelectedItem] = useState(null);
@@ -270,7 +278,7 @@ function App() {
   const mapCenter = [7.9465, -1.0232]; // Ghana center
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${isMobile ? 'mobile-mode' : ''}`}>
       <AddLicenseModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -285,70 +293,83 @@ function App() {
         updateAnnotation={updateAnnotation}
       />
 
-      <Sidebar
-        processedData={processedData}
-        filter={filter} setFilter={setFilter}
-        sortBy={sortBy} setSortBy={setSortBy}
-        selectedCommodity={selectedCommodity} setSelectedCommodity={setSelectedCommodity}
-        selectedCountry={selectedCountry} setSelectedCountry={setSelectedCountry}
-        userStatusFilter={userStatusFilter} setUserStatusFilter={setUserStatusFilter}
-        selectedLicenseType={selectedLicenseType} setSelectedLicenseType={setSelectedLicenseType}
-        commodities={commodities} countries={countries} licenseTypes={licenseTypes}
-        isAddModalOpen={isAddModalOpen} setIsAddModalOpen={setIsAddModalOpen}
-        deleteFilteredList={deleteFilteredList} loading={loading}
-        handleImport={handleImport} handleTemplate={handleTemplate} handleExport={handleExport}
-        selectedItem={selectedItem} setSelectedItem={(item) => {
-          setSelectedItem(item);
-          handleOpenDossier(item);
-        }}
-        hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
-        userAnnotations={userAnnotations} rawData={rawData} error={error}
-      />
+      {/* Sidebar Wrapper for Mobile Toggling */}
+      <div className="sidebar-wrapper" style={{
+        display: isMobile && mobileTab !== 'list' ? 'none' : 'block',
+        width: isMobile ? '100%' : 'auto'
+      }}>
+        <Sidebar
+          processedData={processedData}
+          filter={filter} setFilter={setFilter}
+          sortBy={sortBy} setSortBy={setSortBy}
+          selectedCommodity={selectedCommodity} setSelectedCommodity={setSelectedCommodity}
+          selectedCountry={selectedCountry} setSelectedCountry={setSelectedCountry}
+          userStatusFilter={userStatusFilter} setUserStatusFilter={setUserStatusFilter}
+          selectedLicenseType={selectedLicenseType} setSelectedLicenseType={setSelectedLicenseType}
+          commodities={commodities} countries={countries} licenseTypes={licenseTypes}
+          isAddModalOpen={isAddModalOpen} setIsAddModalOpen={setIsAddModalOpen}
+          deleteFilteredList={deleteFilteredList} loading={loading}
+          handleImport={handleImport} handleTemplate={handleTemplate} handleExport={handleExport}
+          selectedItem={selectedItem} setSelectedItem={(item) => {
+            setSelectedItem(item);
+            handleOpenDossier(item);
+          }}
+          hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
+          userAnnotations={userAnnotations} rawData={rawData} error={error}
+        />
+      </div>
 
-      <div className="main-content" style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        {/* View Switcher - Floating on top */}
-        <div style={{
-          position: 'absolute',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          backgroundColor: '#1e293b',
-          padding: '5px',
-          borderRadius: '8px',
-          display: 'flex',
-          gap: '5px',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-        }}>
-          <button
-            onClick={() => setViewMode('map')}
-            style={{
-              background: viewMode === 'map' ? '#3b82f6' : 'transparent',
-              color: viewMode === 'map' ? 'white' : '#94a3b8',
-              border: 'none',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            🗺️ Map
-          </button>
-          <button
-            onClick={() => setViewMode('pipeline')}
-            style={{
-              background: viewMode === 'pipeline' ? '#3b82f6' : 'transparent',
-              color: viewMode === 'pipeline' ? 'white' : '#94a3b8',
-              border: 'none',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            📊 Pipeline
-          </button>
-        </div>
+      <div className="main-content" style={{
+        flex: 1,
+        position: 'relative',
+        display: isMobile && (mobileTab === 'list') ? 'none' : 'flex',
+        flexDirection: 'column'
+      }}>
+        {/* View Switcher - Floating on top (Hidden on Mobile) */}
+        {!isMobile && (
+          <div style={{
+            position: 'absolute',
+            top: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            backgroundColor: '#1e293b',
+            padding: '5px',
+            borderRadius: '8px',
+            display: 'flex',
+            gap: '5px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+          }}>
+            <button
+              onClick={() => setViewMode('map')}
+              style={{
+                background: viewMode === 'map' ? '#3b82f6' : 'transparent',
+                color: viewMode === 'map' ? 'white' : '#94a3b8',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              🗺️ Map
+            </button>
+            <button
+              onClick={() => setViewMode('pipeline')}
+              style={{
+                background: viewMode === 'pipeline' ? '#3b82f6' : 'transparent',
+                color: viewMode === 'pipeline' ? 'white' : '#94a3b8',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              📊 Pipeline
+            </button>
+          </div>
+        )}
 
         {viewMode === 'map' ? (
           <MapComponent
@@ -376,6 +397,39 @@ function App() {
           />
         )}
       </div>
+
+      {/* Bottom Navigation for Mobile */}
+      {isMobile && (
+        <div className="bottom-nav">
+          <button
+            className={`nav-item ${mobileTab === 'list' ? 'active' : ''}`}
+            onClick={() => setMobileTab('list')}
+          >
+            <span className="nav-icon">📋</span>
+            <span>List</span>
+          </button>
+          <button
+            className={`nav-item ${mobileTab === 'map' ? 'active' : ''}`}
+            onClick={() => {
+              setMobileTab('map');
+              setViewMode('map');
+            }}
+          >
+            <span className="nav-icon">🗺️</span>
+            <span>Map</span>
+          </button>
+          <button
+            className={`nav-item ${mobileTab === 'pipeline' ? 'active' : ''}`}
+            onClick={() => {
+              setMobileTab('pipeline');
+              setViewMode('pipeline');
+            }}
+          >
+            <span className="nav-icon">📊</span>
+            <span>Pipeline</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
