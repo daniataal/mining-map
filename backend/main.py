@@ -53,7 +53,7 @@ import jwt
 from datetime import datetime, timedelta
 
 # Authentication Configuration
-SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-this")
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-this-to-something-longer-than-32-bytes")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
