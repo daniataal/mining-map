@@ -326,10 +326,6 @@ def get_logs(limit: int = 100):
         conn.close()
 
 
-if __name__ == "__main__":
-    import uvicorn
-    # Run slightly different port than typical default to avoid collisions if any
-    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 @app.get("/licenses")
 def read_licenses():
