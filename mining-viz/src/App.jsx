@@ -22,6 +22,7 @@ function App() {
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'pipeline'
   const [mobileTab, setMobileTab] = useState('map'); // 'map', 'list', 'pipeline'
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -295,7 +296,7 @@ function App() {
 
       {/* Sidebar Wrapper for Mobile Toggling */}
       <div className="sidebar-wrapper" style={{
-        display: isMobile && mobileTab !== 'list' ? 'none' : 'block',
+        display: (isMobile && mobileTab !== 'list') || (!isMobile && isSidebarCollapsed) ? 'none' : 'block',
         width: isMobile ? '100%' : 'auto'
       }}>
         <Sidebar
@@ -316,6 +317,7 @@ function App() {
           }}
           hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
           userAnnotations={userAnnotations} rawData={rawData} error={error}
+          onToggleCollapse={!isMobile ? () => setIsSidebarCollapsed(true) : undefined}
         />
       </div>
 
@@ -325,6 +327,30 @@ function App() {
         display: isMobile && (mobileTab === 'list') ? 'none' : 'flex',
         flexDirection: 'column'
       }}>
+        {/* Restore Sidebar Button (Desktop Only) */}
+        {!isMobile && isSidebarCollapsed && (
+          <button
+            onClick={() => setIsSidebarCollapsed(false)}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              left: '20px',
+              zIndex: 1000,
+              backgroundColor: '#1e293b',
+              color: '#94a3b8',
+              border: '1px solid #475569',
+              padding: '8px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+            }}
+            title="Show Sidebar"
+          >
+            »
+          </button>
+        )}
+
         {/* View Switcher - Floating on top (Hidden on Mobile) */}
         {!isMobile && (
           <div style={{
@@ -386,6 +412,7 @@ function App() {
             deleteLicense={deleteLicense}
             commodities={commodities}
             licenseTypes={licenseTypes}
+            isMobile={isMobile}
           />
         ) : (
           <KanbanBoard
