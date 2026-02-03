@@ -16,8 +16,8 @@ const AuthOverlay = ({ onLogin, error }) => {
             left: 0,
             width: '100vw',
             height: '100vh',
-            backgroundColor: 'rgba(15, 23, 42, 0.85)', // Dark, semi-transparent
-            backdropFilter: 'blur(8px)',
+            backgroundColor: 'rgba(15, 23, 42, 0.2)', // Very transparent
+            backdropFilter: 'blur(2px)',
             zIndex: 9999,
             display: 'flex',
             alignItems: 'center',

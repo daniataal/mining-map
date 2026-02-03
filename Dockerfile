@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python-is-python3 \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x
@@ -21,7 +22,7 @@ WORKDIR /app
 
 # Install Python dependencies globally (ok for container)
 # We assume requirements are minimal: fastapi, uvicorn
-RUN pip3 install fastapi uvicorn python-multipart psycopg2-binary passlib bcrypt pyjwt
+RUN pip3 install fastapi uvicorn python-multipart psycopg2-binary bcrypt pyjwt
 
 # Copy the entire project
 COPY . .
@@ -34,8 +35,8 @@ RUN npm install
 RUN mkdir -p /data
 
 # Copy and prepare startup script
-COPY start.sh /app/start.sh
-RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
+COPY start.sh /usr/local/bin/start.sh
+RUN dos2unix /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
 
 # Build frontend
 RUN npm run build
@@ -47,4 +48,4 @@ EXPOSE 8000
 EXPOSE 5173
 
 # Use the startup script
-CMD ["/app/start.sh"]
+CMD ["/usr/local/bin/start.sh"]

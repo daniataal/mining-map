@@ -15,7 +15,8 @@ const Sidebar = ({
     selectedItem, setSelectedItem,
     hoveredItem, setHoveredItem,
     userAnnotations, rawData, error,
-    onToggleCollapse // New prop
+    onToggleCollapse, // New prop
+    onLogout // New prop
 }) => {
 
     // Infinite scroll state
@@ -68,11 +69,38 @@ const Sidebar = ({
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '1.2rem'
+                            fontSize: '1.2rem',
+                            zIndex: 10
                         }}
                         title="Minimize Sidebar"
                     >
                         «
+                    </button>
+                )}
+                {onLogout && (
+                    <button
+                        onClick={onLogout}
+                        style={{
+                            position: 'absolute',
+                            top: '20px',
+                            right: onToggleCollapse ? '60px' : '20px',
+                            background: 'transparent',
+                            border: '1px solid #ef4444',
+                            color: '#ef4444',
+                            height: '30px',
+                            padding: '0 10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.9rem',
+                            fontWeight: 'bold',
+                            zIndex: 10
+                        }}
+                        title="Sign Out"
+                    >
+                        Sign Out
                     </button>
                 )}
                 <h1>Mining Licenses</h1>

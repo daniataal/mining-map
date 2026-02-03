@@ -13,11 +13,12 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=password
     volumes:
-      - .:/app 
+      - .:/app
+      - /app/mining-viz/node_modules
     depends_on:
       - db
     # Override command to ensure we can run migrations or specific setup if needed
-    command: /app/start.sh
+    command: /usr/local/bin/start.sh
 
   db:
     image: postgres:15

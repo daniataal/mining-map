@@ -146,6 +146,10 @@
   position: relative;
 }
 
+.leaflet-control-attribution {
+  display: none !important;
+}
+
 .popup-content {
   color: #333;
 }
@@ -451,6 +455,11 @@
   /* Map controls adjustment for bottom nav */
   .leaflet-bottom {
     bottom: 70px !important;
+  }
+
+  /* Hide leaflet attribution (User request) */
+  .leaflet-control-attribution {
+    display: none !important;
   }
 
   /* Dossier Panel Mobile */

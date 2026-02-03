@@ -57,6 +57,50 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
             .catch(err => setCreateMsg('Error: ' + err.message));
     };
 
+    const handleDeleteUser = (id, username) => {
+        if (!confirm(`Are you sure you want to delete user '${username}'?`)) return;
+
+        fetch(`${API_BASE}/auth/users/${id}`, { method: 'DELETE' })
+            .then(res => {
+                if (res.ok) {
+                    fetchUsers();
+                    setCreateMsg('User deleted.');
+                    setTimeout(() => setCreateMsg(''), 3000);
+                } else {
+                    res.text().then(t => alert('Failed to delete: ' + t));
+                }
+            })
+            .catch(err => alert('Error: ' + err.message));
+    };
+
+    const handleEditUser = (u) => {
+        const newPass = prompt(`Enter new password for ${u.username} (leave blank to keep current):`);
+        const newRole = prompt(`Enter new role for ${u.username} (user/admin):`, u.role);
+
+        if (newPass === null && newRole === null) return; // Cancelled
+
+        const updates = {};
+        if (newPass) updates.password = newPass;
+        if (newRole && newRole !== u.role) updates.role = newRole;
+
+        if (Object.keys(updates).length === 0) return;
+
+        fetch(`${API_BASE}/auth/users/${u.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        })
+            .then(res => {
+                if (res.ok) {
+                    alert('User updated successfully');
+                    fetchUsers();
+                } else {
+                    alert('Update failed');
+                }
+            })
+            .catch(e => alert(e.message));
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -171,6 +215,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                                 <th style={{ padding: '12px' }}>Username</th>
                                                 <th style={{ padding: '12px' }}>Role</th>
                                                 <th style={{ padding: '12px' }}>Created</th>
+                                                <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -179,6 +224,20 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                                     <td style={{ padding: '12px', color: 'white' }}>{u.username}</td>
                                                     <td style={{ padding: '12px' }}>{u.role}</td>
                                                     <td style={{ padding: '12px' }}>{new Date(u.created_at).toLocaleDateString()}</td>
+                                                    <td style={{ padding: '12px', textAlign: 'right', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                                                        <button
+                                                            onClick={() => handleEditUser(u)}
+                                                            style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}
+                                                        >
+                                                            ✏️ Edit
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteUser(u.id, u.username)}
+                                                            style={{ background: '#ef4444', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>

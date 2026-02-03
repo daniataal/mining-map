@@ -37,6 +37,16 @@ function App() {
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
+
+    // Restore session
+    const savedToken = localStorage.getItem('mining_token');
+    if (savedToken) {
+      setToken(savedToken);
+      setUserRole(localStorage.getItem('mining_role'));
+      setUsername(localStorage.getItem('mining_username'));
+      setUserId(localStorage.getItem('mining_userid'));
+    }
+
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -53,6 +63,19 @@ function App() {
 
   // --- Auth & Logging ---
 
+  const handleLogout = () => {
+    // Clear session
+    localStorage.removeItem('mining_token');
+    localStorage.removeItem('mining_role');
+    localStorage.removeItem('mining_username');
+    localStorage.removeItem('mining_userid');
+
+    setToken(null);
+    setUserRole(null);
+    setUsername(null);
+    setUserId(null);
+  };
+
   const handleLogin = (user, pass) => {
     fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
@@ -64,6 +87,12 @@ function App() {
         throw new Error('Invalid credentials');
       })
       .then(data => {
+        // Persist session
+        localStorage.setItem('mining_token', data.access_token);
+        localStorage.setItem('mining_role', data.role);
+        localStorage.setItem('mining_username', data.username);
+        localStorage.setItem('mining_userid', data.id);
+
         setToken(data.access_token);
         setUserRole(data.role);
         setUsername(data.username);
@@ -335,14 +364,13 @@ function App() {
 
   const mapCenter = [7.9465, -1.0232]; // Ghana center
 
-  if (!token) {
-    return (
-      <AuthOverlay onLogin={handleLogin} error={authError} />
-    );
-  }
-
   return (
     <div className={`app-container ${isMobile ? 'mobile-mode' : ''}`}>
+
+      {/* Auth Overlay - Shows if not logged in */}
+      {!token && (
+        <AuthOverlay onLogin={handleLogin} error={authError} />
+      )}
 
       {/* Admin Panel (Modal) */}
       <AdminPanel isOpen={isAdminPanelOpen} onClose={() => setIsAdminPanelOpen(false)} token={token} />
@@ -438,6 +466,7 @@ function App() {
           hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
           userAnnotations={userAnnotations} rawData={rawData} error={error}
           onToggleCollapse={!isMobile ? () => setIsSidebarCollapsed(true) : undefined}
+          onLogout={handleLogout}
         />
       </div>
 
