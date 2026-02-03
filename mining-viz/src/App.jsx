@@ -48,8 +48,8 @@ function App() {
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState(null);
 
-  // Get API base URL from env
-  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+  // Get API base URL from env or default to dynamic hostname
+  const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
 
   // --- Auth & Logging ---
 
