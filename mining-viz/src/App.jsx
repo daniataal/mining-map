@@ -333,9 +333,9 @@ function App() {
             onClick={() => setIsSidebarCollapsed(false)}
             style={{
               position: 'absolute',
-              top: '20px',
-              left: '20px',
-              zIndex: 1000,
+              top: '80px', // Moved down
+              left: '10px',
+              zIndex: 2000,
               backgroundColor: '#1e293b',
               color: '#94a3b8',
               border: '1px solid #475569',
@@ -404,8 +404,9 @@ function App() {
             selectedItem={selectedItem}
             setSelectedItem={(item) => {
               setSelectedItem(item);
-              handleOpenDossier(item);
+              if (!isMobile) handleOpenDossier(item);
             }}
+            handleOpenDossier={handleOpenDossier}
             mapCenter={mapCenter}
             PopupForm={PopupForm}
             updateAnnotation={updateAnnotation}
