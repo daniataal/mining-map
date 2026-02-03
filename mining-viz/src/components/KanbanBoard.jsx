@@ -31,11 +31,12 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
     return (
         <div className="kanban-board" style={{
             flex: 1,
-            overflowX: isMobile ? 'hidden' : 'auto',
+            height: '100%',
+            overflow: 'hidden', // Prevent outer scrolling
             padding: '20px',
             backgroundColor: '#0f172a',
             display: 'flex',
-            flexDirection: isMobile ? 'column' : 'row',
+            flexDirection: 'column', // Always column, we handle inner layout responsive
             gap: '20px',
             paddingBottom: isMobile ? '80px' : '20px'
         }}>
@@ -46,6 +47,7 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                     display: 'flex',
                     gap: '10px',
                     overflowX: 'auto',
+                    flexShrink: 0, // Don't shrink
                     paddingBottom: '5px',
                     marginBottom: '5px',
                     scrollbarWidth: 'none',
@@ -78,64 +80,84 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                 </div>
             )}
 
-            {stagesToRender.map(stage => (
-                <div key={stage} style={{
-                    minWidth: isMobile ? '100%' : '280px',
-                    width: isMobile ? '100%' : '280px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    animation: isMobile ? 'fadeIn 0.3s ease' : 'none'
-                }}>
-                    {/* Column Header */}
-                    <div style={{
-                        padding: '10px 15px',
-                        borderRadius: '6px',
-                        marginBottom: '15px',
-                        backgroundColor: 'rgba(255,255,255,0.05)',
-                        borderTop: `4px solid ${getStageColor(stage)}`,
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            {/* Content Container */}
+            <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                gap: '20px',
+                overflowX: isMobile ? 'hidden' : 'auto',
+                overflowY: isMobile ? 'hidden' : 'hidden' // Inner columns handle Y scroll
+            }}>
+                {stagesToRender.map(stage => (
+                    <div key={stage} style={{
+                        minWidth: isMobile ? '100%' : '280px',
+                        width: isMobile ? '100%' : '280px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        height: '100%', // Take full height of container
+                        animation: isMobile ? 'fadeIn 0.3s ease' : 'none'
                     }}>
-                        <h3 style={{ margin: 0, color: 'white', fontSize: '1rem' }}>{stage}</h3>
-                        <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '10px', color: '#cbd5e1' }}>
-                            {columns[stage].length}
-                        </span>
-                    </div>
+                        {/* Column Header */}
+                        <div style={{
+                            padding: '10px 15px',
+                            borderRadius: '6px',
+                            marginBottom: '15px',
+                            backgroundColor: 'rgba(255,255,255,0.05)',
+                            borderTop: `4px solid ${getStageColor(stage)}`,
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            flexShrink: 0
+                        }}>
+                            <h3 style={{ margin: 0, color: 'white', fontSize: '1rem' }}>{stage}</h3>
+                            <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '10px', color: '#cbd5e1' }}>
+                                {columns[stage].length}
+                            </span>
+                        </div>
 
-                    {/* Cards */}
-                    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {columns[stage].map(item => {
-                            const annotation = userAnnotations[item.id] || {};
-                            return (
-                                <div
-                                    key={item.id}
-                                    onClick={() => onCardClick(item)}
-                                    style={{
-                                        backgroundColor: '#1e293b',
-                                        padding: '12px',
-                                        borderRadius: '6px',
-                                        border: '1px solid #334155',
-                                        cursor: 'pointer',
-                                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                                        transition: 'transform 0.1s'
-                                    }}
-                                    onMouseOver={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-2px)')}
-                                    onMouseOut={(e) => !isMobile && (e.currentTarget.style.transform = 'none')}
-                                >
-                                    <div style={{ fontWeight: 'bold', color: 'white', marginBottom: '4px' }}>{item.company}</div>
-                                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
+                        {/* Cards - This is the scrollable part */}
+                        <div style={{
+                            flex: 1,
+                            overflowY: 'auto',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                            paddingRight: '5px' // Space for scrollbar
+                        }}>
+                            {columns[stage].map(item => {
+                                const annotation = userAnnotations[item.id] || {};
+                                return (
+                                    <div
+                                        key={item.id}
+                                        onClick={() => onCardClick(item)}
+                                        style={{
+                                            backgroundColor: '#1e293b',
+                                            padding: '12px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #334155',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                                            transition: 'transform 0.1s',
+                                            flexShrink: 0
+                                        }}
+                                        onMouseOver={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-2px)')}
+                                        onMouseOut={(e) => !isMobile && (e.currentTarget.style.transform = 'none')}
+                                    >
+                                        <div style={{ fontWeight: 'bold', color: 'white', marginBottom: '4px' }}>{item.company}</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
 
-                                    {/* Mini Tags */}
-                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                        {annotation.status === 'good' && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }}>GO</span>}
-                                        {annotation.verification?.siteVisit && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>Visited</span>}
+                                        {/* Mini Tags */}
+                                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                            {annotation.status === 'good' && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }}>GO</span>}
+                                            {annotation.verification?.siteVisit && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>Visited</span>}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
-                        {columns[stage].length === 0 && <div style={{ color: '#64748b', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
+                                );
+                            })}
+                            {columns[stage].length === 0 && <div style={{ color: '#64748b', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
+                        </div>
                     </div>
-                </div>
-            ))}
+                ))}
+            </div>
 
             <style>{`
                 @keyframes fadeIn {
