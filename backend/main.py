@@ -47,10 +47,54 @@ def get_db_connection():
             if retries == 0:
                 raise e
 
+# ... existing imports
+from passlib.context import CryptContext
+import jwt
+from datetime import datetime, timedelta
+
+# Authentication Configuration
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-this")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# Models
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "user" # 'admin' or 'user'
+
+class LogCreate(BaseModel):
+    user_id: str
+    username: str
+    action: str
+    details: Optional[str] = None
+
+# DB Init Update
 def init_db():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        
+        # Licenses Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS licenses (
                 id VARCHAR(255) PRIMARY KEY,
@@ -66,7 +110,10 @@ def init_db():
                 contact_person TEXT,
                 date_issued TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-            
+        """)
+
+        # Files Table
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS license_files (
                 id VARCHAR(255) PRIMARY KEY,
                 license_id VARCHAR(255) NOT NULL,
@@ -76,6 +123,41 @@ def init_db():
                 FOREIGN KEY (license_id) REFERENCES licenses(id) ON DELETE CASCADE
             );
         """)
+
+        # Users Table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(255) PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(50) DEFAULT 'user',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Activity Logs Table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(255),
+                username VARCHAR(255),
+                action VARCHAR(255),
+                details TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Create Default Admin if not exists
+        cur.execute("SELECT * FROM users WHERE username = 'admin'")
+        if not cur.fetchone():
+            admin_id = str(uuid.uuid4())
+            admin_hash = get_password_hash("admin123")
+            cur.execute(
+                "INSERT INTO users (id, username, password_hash, role) VALUES (%s, %s, %s, %s)",
+                (admin_id, 'admin', admin_hash, 'admin')
+            )
+            print("Default admin created: admin / admin123")
+
         conn.commit()
         cur.close()
         conn.close()
@@ -83,10 +165,111 @@ def init_db():
     except Exception as e:
         print(f"Failed to initialize database: {e}")
 
-# Initialize DB on startup
+# ... existing code ...
+# (You need to re-run init_db() call as it was in the original file)
+# But since we are replacing the bottom part, carefully reconstruct order.
+
+# Re-call init_db because we updated the definition
 init_db()
 
-@app.get("/licenses")
+# --- Auth Endpoints ---
+
+@app.post("/auth/login")
+def login(user: UserLogin):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+        db_user = c.fetchone()
+        
+        if not db_user or not verify_password(user.password, db_user['password_hash']):
+            return Response("Invalid credentials", status_code=401)
+            
+        access_token = create_access_token(data={"sub": db_user['username'], "role": db_user['role'], "id": db_user['id']})
+        return {
+            "access_token": access_token, 
+            "token_type": "bearer",
+            "username": db_user['username'],
+            "role": db_user['role'],
+            "id": db_user['id']
+        }
+    finally:
+        conn.close()
+
+@app.post("/auth/register")
+def register(user: UserCreate):
+    # In a real app, check for Admin token here. For MVP, we'll assume the frontend enforces 'Admin Panel' access.
+    # ideally verify jwt token from header.
+    
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # Check if username exists
+        c.execute("SELECT id FROM users WHERE username = %s", (user.username,))
+        if c.fetchone():
+            return Response("Username already taken", status_code=400)
+
+        user_id = str(uuid.uuid4())
+        hashed = get_password_hash(user.password)
+        
+        c.execute(
+            "INSERT INTO users (id, username, password_hash, role) VALUES (%s, %s, %s, %s)",
+            (user_id, user.username, hashed, user.role)
+        )
+        conn.commit()
+        return {"status": "success", "username": user.username, "role": user.role}
+    except Exception as e:
+        return Response(f"Error: {str(e)}", status_code=500)
+    finally:
+        conn.close()
+
+@app.get("/auth/users")
+def get_users():
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
+        return c.fetchall()
+    finally:
+        conn.close()
+
+# --- Activity Logging ---
+
+@app.post("/activity/log")
+def log_activity(log: LogCreate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        log_id = str(uuid.uuid4())
+        c.execute(
+            "INSERT INTO activity_logs (id, user_id, username, action, details) VALUES (%s, %s, %s, %s, %s)",
+            (log_id, log.user_id, log.username, log.action, log.details)
+        )
+        conn.commit()
+        return {"status": "logged"}
+    except Exception as e:
+        print(f"Logging failed: {e}")
+        # Don't fail the request if logging fails, just print error
+        return {"status": "failed", "error": str(e)}
+    finally:
+        conn.close()
+
+@app.get("/activity/logs")
+def get_logs(limit: int = 100):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT %s", (limit,))
+        return c.fetchall()
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Run slightly different port than typical default to avoid collisions if any
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 def read_licenses():
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)

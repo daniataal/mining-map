@@ -21,7 +21,7 @@ WORKDIR /app
 
 # Install Python dependencies globally (ok for container)
 # We assume requirements are minimal: fastapi, uvicorn
-RUN pip3 install fastapi uvicorn python-multipart psycopg2-binary
+RUN pip3 install fastapi uvicorn python-multipart psycopg2-binary passlib bcrypt pyjwt
 
 # Copy the entire project
 COPY . .

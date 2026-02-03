@@ -9,6 +9,8 @@ import DossierView from './components/DossierView';
 import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
 import KanbanBoard from './components/KanbanBoard';
+import AuthOverlay from './components/AuthOverlay';
+import AdminPanel from './components/AdminPanel';
 
 function App() {
   const [rawData, setRawData] = useState([]);
@@ -24,6 +26,14 @@ function App() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // Auth State
+  const [token, setToken] = useState(null);
+  const [userRole, setUserRole] = useState(null);
+  const [username, setUsername] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [authError, setAuthError] = useState(null);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
@@ -38,9 +48,50 @@ function App() {
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState(null);
 
+  // Get API base URL from env
+  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+
+  // --- Auth & Logging ---
+
+  const handleLogin = (user, pass) => {
+    fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass })
+    })
+      .then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Invalid credentials');
+      })
+      .then(data => {
+        setToken(data.access_token);
+        setUserRole(data.role);
+        setUsername(data.username);
+        setUserId(data.id);
+        setAuthError(null);
+        logActivity(data.id, data.username, 'LOGIN', 'User logged in');
+      })
+      .catch(err => setAuthError(err.message));
+  };
+
+  const logActivity = (uid, uName, action, details) => {
+    if (!uid) return;
+    fetch(`${API_BASE}/activity/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: uid,
+        username: uName,
+        action: action,
+        details: details
+      })
+    }).catch(err => console.warn("Log failed", err));
+  };
+
   const handleOpenDossier = (item) => {
     setDossierItem(item);
     setIsDossierOpen(true);
+    logActivity(userId, username, 'VIEW_DOSSIER', `Viewed ${item.company} (${item.id})`);
   };
 
   const handleCloseDossier = () => {
@@ -62,9 +113,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Get API base URL from env
-  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-
   const deleteLicense = (id) => {
     if (!confirm("Are you sure you want to delete this license?")) return;
 
@@ -73,6 +121,7 @@ function App() {
         if (!res.ok) throw new Error("Failed to delete");
         setRawData(prev => prev.filter(item => item.id !== id));
         setSelectedItem(null);
+        logActivity(userId, username, 'DELETE_LICENSE', `Deleted license ${id}`);
       })
       .catch(err => alert("Error deleting license: " + err.message));
   };
@@ -99,6 +148,7 @@ function App() {
         alert(`Successfully deleted ${data.deleted_count} licenses.`);
         setRawData(prev => prev.filter(item => !idsToDelete.includes(item.id)));
         setSelectedItem(null);
+        logActivity(userId, username, 'BATCH_DELETE', `Deleted ${data.deleted_count} licenses`);
       })
       .catch(err => alert("Error batch deleting: " + err.message))
       .finally(() => setLoading(false));
@@ -118,12 +168,14 @@ function App() {
         setRawData(prev => [...prev, data]);
         setSelectedItem(data); // Auto select the new item
         alert("License created successfully!");
+        logActivity(userId, username, 'CREATE_LICENSE', `Created ${data.company}`);
       })
       .catch(err => alert("Error creating license: " + err.message));
   };
 
   const handleExport = () => {
     window.location.href = `${API_BASE}/licenses/export`;
+    logActivity(userId, username, 'EXPORT', 'Exported CSV');
   };
 
   const handleTemplate = () => {
@@ -146,6 +198,7 @@ function App() {
       .then(data => {
         if (data.status === 'success') {
           alert(`Successfully imported ${data.imported_count} licenses.`);
+          logActivity(userId, username, 'IMPORT', `Imported ${data.imported_count} items`);
           window.location.reload(); // Simple reload to fetch new data
         } else {
           alert("Import failed: " + data.message);
@@ -197,6 +250,10 @@ function App() {
       localStorage.setItem('mining_user_data', JSON.stringify(next));
       return next;
     });
+    // Log meaningful updates (status changes)
+    if (field === 'status') {
+      logActivity(userId, username, 'UPDATE_STATUS', `Set ${id} to ${value}`);
+    }
   };
 
   // Extract unique countries
@@ -278,8 +335,70 @@ function App() {
 
   const mapCenter = [7.9465, -1.0232]; // Ghana center
 
+  if (!token) {
+    return (
+      <AuthOverlay onLogin={handleLogin} error={authError} />
+    );
+  }
+
   return (
     <div className={`app-container ${isMobile ? 'mobile-mode' : ''}`}>
+
+      {/* Admin Panel (Modal) */}
+      <AdminPanel isOpen={isAdminPanelOpen} onClose={() => setIsAdminPanelOpen(false)} token={token} />
+
+      {/* Admin Toggle Button (Floating) */}
+      {userRole === 'admin' && !isMobile && (
+        <button
+          onClick={() => setIsAdminPanelOpen(true)}
+          style={{
+            position: 'fixed',
+            bottom: '90px',
+            right: '20px',
+            zIndex: 9999,
+            background: '#dc2626',
+            color: 'white',
+            border: 'none',
+            borderRadius: '50%',
+            width: '50px',
+            height: '50px',
+            fontSize: '1.5rem',
+            cursor: 'pointer',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+          title="Admin Panel"
+        >
+          ⚙️
+        </button>
+      )}
+
+      {/* Mobile Admin Toggle (Bottom Nav Area? Or Top Right) */}
+      {userRole === 'admin' && isMobile && (
+        <button
+          onClick={() => setIsAdminPanelOpen(true)}
+          style={{
+            position: 'fixed',
+            top: '10px',
+            right: '10px',
+            zIndex: 9999,
+            background: '#dc2626',
+            color: 'white',
+            border: 'none',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            fontSize: '1.2rem',
+            cursor: 'pointer',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+          title="Admin Panel"
+        >
+          ⚙️
+        </button>
+      )}
+
       <AddLicenseModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -314,6 +433,7 @@ function App() {
           selectedItem={selectedItem} setSelectedItem={(item) => {
             setSelectedItem(item);
             handleOpenDossier(item);
+            logActivity(userId, username, 'SELECT_ITEM', `Selected ${item.company}`);
           }}
           hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
           userAnnotations={userAnnotations} rawData={rawData} error={error}
@@ -405,6 +525,7 @@ function App() {
             setSelectedItem={(item) => {
               setSelectedItem(item);
               if (!isMobile) handleOpenDossier(item);
+              logActivity(userId, username, 'SELECT_MAP_PIN', `Selected ${item.company}`);
             }}
             handleOpenDossier={handleOpenDossier}
             mapCenter={mapCenter}
