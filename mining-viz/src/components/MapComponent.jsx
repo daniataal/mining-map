@@ -143,7 +143,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                 <LayersControl position="topright">
                     <LayersControl.BaseLayer checked name="Dark Matter (Default)">
                         <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            attribution=""
                             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                             maxNativeZoom={19}
                             maxZoom={25}
@@ -152,7 +152,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
                     <LayersControl.BaseLayer name="Light (Clean)">
                         <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            attribution=""
                             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                             maxNativeZoom={19}
                             maxZoom={25}
@@ -161,7 +161,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
                     <LayersControl.BaseLayer name="Topographic (Terrain)">
                         <TileLayer
-                            attribution='Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
+                            attribution=""
                             url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
                             maxNativeZoom={17}
                             maxZoom={25}
@@ -170,7 +170,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
                     <LayersControl.BaseLayer name="NatGeo (Esri)">
                         <TileLayer
-                            attribution='Tiles &copy; Esri &mdash; National Geographic, Esri, DeLorme, NAVTEQ, UNEP-WCMC, USGS, NASA, ESA, METI, NRCAN, GEBCO, NOAA, iPC'
+                            attribution=""
                             url="https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}"
                             maxNativeZoom={16}
                             maxZoom={25}
@@ -195,7 +195,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
                     <LayersControl.BaseLayer name="Satellite (Esri)">
                         <TileLayer
-                            attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+                            attribution=""
                             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                             maxNativeZoom={19}
                             maxZoom={25}
@@ -204,7 +204,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
                     <LayersControl.BaseLayer name="Street Map (Color)">
                         <TileLayer
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            attribution=""
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             maxNativeZoom={19}
                             maxZoom={25}

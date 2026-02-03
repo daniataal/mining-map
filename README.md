@@ -2,6 +2,18 @@
 
 A full-stack application for visualizing mining licenses on an interactive map.
 
+## ✨ New Features
+*   **Secure Authentication**: Map interactions are locked until login.
+*   **Admin Panel**: Create new users and monitor system activity.
+*   **Activity Logs**: Tracks every user click and action (viewing licenses, updating status, etc.).
+*   **Mobile Optimized**: Responsive design with specialized mobile navigation and layouts.
+
+## 🔐 Default Credentials
+*   **Username**: `admin`
+*   **Password**: `admin123`
+
+> **Note**: You should change these credentials or create a new admin user immediately after deployment.
+
 ## 🚀 Quick Start (Docker)
 
 The easiest way to run the application is using Docker.
@@ -39,7 +51,7 @@ If you see **"Database error"** or permissions issues:
 cd backend
 python -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install fastapi uvicorn
+pip install fastapi uvicorn python-multipart psycopg2-binary passlib bcrypt pyjwt
 python main.py
 ```
 
@@ -51,7 +63,7 @@ npm run dev
 ```
 
 ## 📂 Project Structure
-*   `/backend` - FastAPI server and SQLite database logic.
-*   `/mining-viz` - React frontend with Leaflet maps.
+*   `/backend` - FastAPI server, Postgres/SQLite logic, and Auth handling.
+*   `/mining-viz` - React frontend with Leaflet maps and Admin Panel.
 *   `Dockerfile` - Container definition.
 *   `start.sh` - Startup script that handles DB persistence and permissions.
