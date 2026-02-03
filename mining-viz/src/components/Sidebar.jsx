@@ -14,7 +14,8 @@ const Sidebar = ({
     handleImport, handleTemplate, handleExport,
     selectedItem, setSelectedItem,
     hoveredItem, setHoveredItem,
-    userAnnotations, rawData, error
+    userAnnotations, rawData, error,
+    onToggleCollapse // New prop
 }) => {
 
     // Infinite scroll state
@@ -49,7 +50,31 @@ const Sidebar = ({
 
     return (
         <div className="sidebar">
-            <div className="header">
+            <div className="header" style={{ position: 'relative' }}>
+                {onToggleCollapse && (
+                    <button
+                        onClick={onToggleCollapse}
+                        style={{
+                            position: 'absolute',
+                            top: '20px',
+                            right: '20px',
+                            background: 'transparent',
+                            border: '1px solid #475569',
+                            color: '#94a3b8',
+                            width: '30px',
+                            height: '30px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '1.2rem'
+                        }}
+                        title="Minimize Sidebar"
+                    >
+                        «
+                    </button>
+                )}
                 <h1>Mining Licenses</h1>
                 <p>Active licenses viewer</p>
                 <button
