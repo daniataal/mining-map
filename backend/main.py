@@ -270,6 +270,7 @@ if __name__ == "__main__":
     # Run slightly different port than typical default to avoid collisions if any
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+@app.get("/licenses")
 def read_licenses():
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
