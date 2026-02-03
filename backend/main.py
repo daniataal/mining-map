@@ -48,7 +48,7 @@ def get_db_connection():
                 raise e
 
 # ... existing imports
-from passlib.context import CryptContext
+import bcrypt
 import jwt
 from datetime import datetime, timedelta
 
@@ -57,13 +57,17 @@ SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-change-this")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    if isinstance(plain_password, str):
+        plain_password = plain_password.encode('utf-8')
+    if isinstance(hashed_password, str):
+        hashed_password = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(plain_password, hashed_password)
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    if isinstance(password, str):
+        password = password.encode('utf-8')
+    return bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -230,6 +234,63 @@ def get_users():
     try:
         c.execute("SELECT id, username, role, created_at FROM users ORDER BY created_at DESC")
         return c.fetchall()
+    finally:
+        conn.close()
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+
+@app.delete("/auth/users/{user_id}")
+def delete_user(user_id: str):
+    # Prevent deleting the last admin or specific generic admin if needed
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        # Optional: check if user exists first
+        c.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        if c.rowcount == 0:
+             return Response("User not found", status_code=404)
+        conn.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.put("/auth/users/{user_id}")
+def update_user(user_id: str, user: UserUpdate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        updates = []
+        values = []
+        
+        if user.username:
+            updates.append("username = %s")
+            values.append(user.username)
+        
+        if user.password:
+            hashed = get_password_hash(user.password)
+            updates.append("password_hash = %s")
+            values.append(hashed)
+            
+        if user.role:
+            updates.append("role = %s")
+            values.append(user.role)
+            
+        if not updates:
+            return {"status": "no changes"}
+            
+        values.append(user_id)
+        sql = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
+        
+        c.execute(sql, tuple(values))
+        conn.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        return Response(str(e), status_code=500)
     finally:
         conn.close()
 
