@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, useMap, LayersControl } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -83,6 +83,34 @@ const MapEffect = ({ selectedItem }) => {
 const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile, handleOpenDossier }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
 
+    // Effect to handle map resize
+    const mapRef = useRef(null);
+    useEffect(() => {
+        const handleResize = () => {
+            if (mapRef.current) {
+                mapRef.current.invalidateSize();
+            }
+        };
+
+        // ResizeObserver for more robust detection of container changes
+        const resizeObserver = new ResizeObserver(() => {
+            if (mapRef.current) {
+                mapRef.current.invalidateSize();
+            }
+        });
+
+        const mapContainer = document.querySelector('.map-wrapper');
+        if (mapContainer) {
+            resizeObserver.observe(mapContainer);
+        }
+
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
+        };
+    }, []);
+
     useEffect(() => {
         // Fetch simplified world borders
         fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
@@ -110,7 +138,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
     }, [geoJsonData, activeCountries]);
     return (
         <div className="map-wrapper">
-            <MapContainer center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
+            <MapContainer ref={mapRef} center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
                 <MapEffect selectedItem={selectedItem} />
                 <LayersControl position="topright">
                     <LayersControl.BaseLayer checked name="Dark Matter (Default)">
