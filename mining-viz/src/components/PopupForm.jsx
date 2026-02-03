@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes }) => {
+const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes, isMobile, onOpenDossier }) => {
     const [comment, setComment] = useState(annotation.comment || '');
     const [quantity, setQuantity] = useState(annotation.quantity || '');
     const [price, setPrice] = useState(annotation.price || '');
@@ -130,6 +130,32 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                     </datalist>
                 </div>
             </div>
+
+            {/* Mobile Actions */}
+            {isMobile && onOpenDossier && (
+                <div style={{ marginBottom: '15px' }}>
+                    <button
+                        onClick={onOpenDossier}
+                        style={{
+                            width: '100%',
+                            background: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '10px',
+                            fontWeight: 'bold',
+                            fontSize: '1em',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px'
+                        }}
+                    >
+                        📄 Open Full Dossier
+                    </button>
+                </div>
+            )}
 
             {/* Notes Section */}
             <div style={{ marginBottom: '15px' }}>

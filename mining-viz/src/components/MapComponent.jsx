@@ -80,7 +80,7 @@ const MapEffect = ({ selectedItem }) => {
 };
 
 
-const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile }) => {
+const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile, handleOpenDossier }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
 
     useEffect(() => {
@@ -207,18 +207,18 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                     click: () => setSelectedItem(item),
                                 }}
                             >
-                                {!isMobile && (
-                                    <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
-                                        <PopupForm
-                                            item={item}
-                                            annotation={annotation}
-                                            updateAnnotation={updateAnnotation}
-                                            onDelete={() => deleteLicense(item.id)}
-                                            commodities={commodities}
-                                            licenseTypes={licenseTypes}
-                                        />
-                                    </Popup>
-                                )}
+                                <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
+                                    <PopupForm
+                                        item={item}
+                                        annotation={annotation}
+                                        updateAnnotation={updateAnnotation}
+                                        onDelete={() => deleteLicense(item.id)}
+                                        commodities={commodities}
+                                        licenseTypes={licenseTypes}
+                                        isMobile={isMobile}
+                                        onOpenDossier={() => handleOpenDossier(item)}
+                                    />
+                                </Popup>
                             </Marker>
                         );
                     })}
