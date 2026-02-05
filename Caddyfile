@@ -1,0 +1,14 @@
+{
+    auto_https disable_redirects
+}
+
+:443 {
+    tls internal
+
+    @backend {
+        path /auth/* /licenses* /activity/* /files/* /docs /openapi.json
+    }
+    reverse_proxy @backend app:8000
+
+    reverse_proxy * app:5173
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { countriesList } from '../data/countries';
 
 const AddLicenseModal = ({ isOpen, onClose, onSubmit }) => {
     const [formData, setFormData] = useState({
@@ -59,11 +60,15 @@ const AddLicenseModal = ({ isOpen, onClose, onSubmit }) => {
 
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <div style={{ flex: 1 }}>
-                            <label>Country</label>
-                            <select value={formData.country} onChange={e => setFormData({ ...formData, country: e.target.value })} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}>
-                                <option value="Ghana">Ghana</option>
-                                <option value="South Africa">South Africa</option>
-                                <option value="Other">Other</option>
+                            <label>Country *</label>
+                            <select
+                                value={formData.country}
+                                onChange={e => setFormData({ ...formData, country: e.target.value })}
+                                style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #475569', background: '#0f172a', color: 'white' }}
+                            >
+                                {countriesList.map(c => (
+                                    <option key={c} value={c}>{c}</option>
+                                ))}
                             </select>
                         </div>
                         <div style={{ flex: 1 }}>

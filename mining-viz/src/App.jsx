@@ -59,7 +59,9 @@ function App() {
   const [dossierItem, setDossierItem] = useState(null);
 
   // Get API base URL from env or default to dynamic hostname
-  const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
+  // If we are on HTTPS, assume we are behind a proxy that handles /api routing or similar
+  const API_BASE = import.meta.env.VITE_API_BASE ||
+    (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
 
   // --- Auth & Logging ---
 
