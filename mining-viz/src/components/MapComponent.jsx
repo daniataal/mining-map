@@ -137,7 +137,27 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
         };
     }, [geoJsonData, activeCountries]);
     return (
-        <div className="map-wrapper">
+        <div className="map-wrapper" style={{ position: 'relative' }}>
+            {processedData.length === 0 && (
+                <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 1000,
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    padding: '20px 40px',
+                    borderRadius: '12px',
+                    color: '#94a3b8',
+                    textAlign: 'center',
+                    border: '1px solid #334155',
+                    pointerEvents: 'none' // allow clicking through if needed, though usually empty state means reset filters
+                }}>
+                    <div style={{ fontSize: '3rem', marginBottom: '10px' }}>🔍</div>
+                    <h3 style={{ margin: 0, color: '#f8fafc' }}>No Licenses Found</h3>
+                    <p style={{ margin: '5px 0 0 0' }}>Try adjusting your filters</p>
+                </div>
+            )}
             <MapContainer ref={mapRef} center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
                 <MapEffect selectedItem={selectedItem} />
                 <LayersControl position="topright">
