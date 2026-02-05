@@ -31,5 +31,20 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  caddy:
+    image: caddy:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
