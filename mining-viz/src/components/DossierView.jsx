@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useToast } from './Toast';
 
 const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) => {
+    const { addToast } = useToast();
     const [newNote, setNewNote] = useState('');
     const [uploading, setUploading] = useState(false);
     const [files, setFiles] = useState([]);
@@ -51,12 +53,13 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
             .then(res => res.json())
             .then(newFile => {
                 if (newFile.error) {
-                    alert(newFile.error);
+                    addToast(newFile.error, "error");
                 } else {
                     setFiles(prev => [newFile, ...prev]);
+                    addToast("File uploaded successfully", "success");
                 }
             })
-            .catch(err => alert("Upload failed: " + err.message))
+            .catch(err => addToast("Upload failed: " + err.message, "error"))
             .finally(() => {
                 setUploading(false);
                 e.target.value = null;
@@ -68,8 +71,9 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
         fetch(`${API_BASE}/files/${fileId}`, { method: 'DELETE' })
             .then(() => {
                 setFiles(prev => prev.filter(f => f.id !== fileId));
+                addToast("File deleted", "info");
             })
-            .catch(err => alert("Delete failed: " + err.message));
+            .catch(err => addToast("Delete failed: " + err.message, "error"));
     };
 
     const toggleVerification = (key) => {

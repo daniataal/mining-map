@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+import { useToast } from './components/Toast';
 
 // Components
 import Sidebar from './components/Sidebar';
@@ -13,6 +14,7 @@ import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 
 function App() {
+  const { addToast } = useToast();
   const [rawData, setRawData] = useState([]);
   const [filter, setFilter] = useState('');
   const [sortBy, setSortBy] = useState('company');
@@ -153,8 +155,9 @@ function App() {
         setRawData(prev => prev.filter(item => item.id !== id));
         setSelectedItem(null);
         logActivity(userId, username, 'DELETE_LICENSE', `Deleted license ${id}`);
+        addToast("License deleted", "info");
       })
-      .catch(err => alert("Error deleting license: " + err.message));
+      .catch(err => addToast("Error deleting license: " + err.message, "error"));
   };
 
   const deleteFilteredList = () => {
@@ -176,12 +179,12 @@ function App() {
         return res.json();
       })
       .then(data => {
-        alert(`Successfully deleted ${data.deleted_count} licenses.`);
+        addToast(`Successfully deleted ${data.deleted_count} licenses.`, "success");
         setRawData(prev => prev.filter(item => !idsToDelete.includes(item.id)));
         setSelectedItem(null);
         logActivity(userId, username, 'BATCH_DELETE', `Deleted ${data.deleted_count} licenses`);
       })
-      .catch(err => alert("Error batch deleting: " + err.message))
+      .catch(err => addToast("Error batch deleting: " + err.message, "error"))
       .finally(() => setLoading(false));
   };
 
@@ -198,10 +201,10 @@ function App() {
       .then(data => {
         setRawData(prev => [...prev, data]);
         setSelectedItem(data); // Auto select the new item
-        alert("License created successfully!");
+        addToast("License created successfully!", "success");
         logActivity(userId, username, 'CREATE_LICENSE', `Created ${data.company}`);
       })
-      .catch(err => alert("Error creating license: " + err.message));
+      .catch(err => addToast("Error creating license: " + err.message, "error"));
   };
 
   const handleExport = () => {
@@ -228,14 +231,14 @@ function App() {
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          alert(`Successfully imported ${data.imported_count} licenses.`);
+          addToast(`Successfully imported ${data.imported_count} licenses.`, "success");
           logActivity(userId, username, 'IMPORT', `Imported ${data.imported_count} items`);
           window.location.reload(); // Simple reload to fetch new data
         } else {
-          alert("Import failed: " + data.message);
+          addToast("Import failed: " + data.message, "error");
         }
       })
-      .catch(err => alert("Error importing: " + err.message))
+      .catch(err => addToast("Error importing: " + err.message, "error"))
       .finally(() => {
         setLoading(false);
         event.target.value = null; // Reset input

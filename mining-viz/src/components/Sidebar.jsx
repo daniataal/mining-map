@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import SkeletonLoader from './SkeletonLoader';
 
 const Sidebar = ({
     processedData,
@@ -278,7 +279,7 @@ const Sidebar = ({
                     </div>
                 )}
 
-                {loading && <div className="status-message">Loading data...</div>}
+                {loading && <SkeletonLoader count={6} />}
                 {error && <div className="error-message">{error}</div>}
                 {!loading && !error && processedData.length === 0 && <div className="empty-state">No results found (Raw: {rawData.length})</div>}
             </div>
