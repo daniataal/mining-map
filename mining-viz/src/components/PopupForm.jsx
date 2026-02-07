@@ -64,9 +64,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
     return (
         <div className="popup-content" style={{ minWidth: '320px', maxHeight: '500px', overflowY: 'auto', backgroundColor: '#0d1117' }}>
             {/* Header / Title */}
+            {/* Header / Title */}
             <div style={{
                 background: '#161b22',
-                margin: '-20px -24px 15px -24px', // Counteract Leaflet popup padding
+                // No negative margins needed as we fixed the CSS wrapper padding
                 padding: '15px 20px',
                 borderBottom: '1px solid #30363d',
                 borderTopLeftRadius: '12px',
@@ -79,7 +80,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 top: 0,
                 zIndex: 10
             }}>
-                <div style={{ flex: 1, paddingRight: '10px' }}>
+                <div style={{ flex: 1, paddingRight: '20px' }}> {/* More padding for close button space */}
                     <strong style={{ fontSize: '1.1em', display: 'block' }}>{item.company}</strong>
                     <span style={{ fontSize: '0.8em', color: '#8b949e' }}>{item.region}, {item.country}</span>
                 </div>
@@ -87,7 +88,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 {/* Edit Toggle */}
                 {!isEditing ? (
                     <button
-                        onClick={() => setIsEditing(true)}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setIsEditing(true);
+                        }}
                         style={{
                             background: '#fbbf24', color: '#0d1117', border: 'none', borderRadius: '6px',
                             padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
@@ -98,7 +102,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 ) : (
                     <div style={{ display: 'flex', gap: '5px' }}>
                         <button
-                            onClick={handleSave}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleSave();
+                            }}
                             style={{
                                 background: '#238636', color: 'white', border: 'none', borderRadius: '6px',
                                 padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
@@ -107,7 +114,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                             Apply
                         </button>
                         <button
-                            onClick={handleCancel}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleCancel();
+                            }}
                             style={{
                                 background: '#30363d', color: '#e6edf3', border: 'none', borderRadius: '6px',
                                 padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
