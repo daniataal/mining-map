@@ -20,6 +20,8 @@ const Sidebar = ({
     onLogout // New prop
 }) => {
 
+    // --- Sidebar Logic ---
+
     // Infinite scroll state
     const [displayCount, setDisplayCount] = useState(20);
     const observerTarget = useRef(null);
@@ -226,48 +228,59 @@ const Sidebar = ({
                     return (
                         <div
                             key={idx}
-                            className="list-item"
-                            style={{
-                                borderLeft: `4px solid ${statusColor}`,
-                                backgroundColor: (isHovered || isSelected) ? '#1e293b' : 'transparent',
-                                transform: isHovered ? 'translateX(4px)' : 'none',
-                                transition: 'all 0.2s ease'
-                            }}
+                            className={`mining-card ${selectedItem?.id === item.id ? 'active-card' : ''} ${annotation.commodity?.toLowerCase().includes('gold') || item.commodity?.toLowerCase().includes('gold') ? 'hologram' : ''}`}
                             onClick={() => setSelectedItem(item)}
                             onMouseEnter={() => setHoveredItem(item.id)}
                             onMouseLeave={() => setHoveredItem(null)}
                         >
-                            <h3>{item.company}</h3>
-                            <div className="badges">
-                                <span className="badge status">{item.status}</span>
-                                <span className="badge type">{item.commodity}</span>
+                            <div className="card-header">
+                                <h3 className="company-name">{item.company}</h3>
+                                <div className="diamond-icon">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M6 3h12l4 6-10 13L2 9z" />
+                                    </svg>
+                                </div>
                             </div>
-                            <p className="details">{item.region} | {annotation.licenseType || item.licenseType}</p>
+
+                            <div className="card-badges">
+                                <span className="status-capsule status-active">
+                                    {item.status || 'Active'}
+                                </span>
+                                <span className={`commodity-capsule ${annotation.commodity?.toLowerCase().includes('gold') || item.commodity?.toLowerCase().includes('gold') ? 'commodity-gold' : ''}`}>
+                                    {annotation.commodity || item.commodity || 'Unknown'}
+                                </span>
+                            </div>
+
+                            <div className="card-location">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                    <circle cx="12" cy="10" r="3" />
+                                </svg>
+                                {item.region} | {annotation.licenseType || item.licenseType}
+                            </div>
+
                             {item.phoneNumber && (
-                                <div style={{ fontSize: '0.85em', color: '#64748b', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                     <span>📞</span> <a href={`tel:${item.phoneNumber}`} onClick={(e) => e.stopPropagation()} style={{ color: '#2563eb', textDecoration: 'none' }}>{item.phoneNumber}</a>
-                                    {item.contactPerson && <span style={{ color: '#94a3b8' }}>• {item.contactPerson}</span>}
                                 </div>
                             )}
-                            {annotation.comment && <p className="user-comment">📝 {annotation.comment}</p>}
 
-                            {annotation.status && <div className="user-tag" style={{ color: statusColor, fontWeight: 'bold', fontSize: '0.8em', marginTop: '4px' }}>
+                            {annotation.status && <div style={{
+                                marginTop: '10px',
+                                borderTop: '1px solid rgba(255,255,255,0.1)',
+                                paddingTop: '8px',
+                                color: statusColor,
+                                fontWeight: 'bold',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                            }}>
                                 {annotation.status === 'good' ? '✅ GO' :
                                     annotation.status === 'bad' ? '❌ NO GO' :
                                         annotation.status === 'maybe' ? '🤔 MAYBE' : ''}
+                                {annotation.comment && <span style={{ color: '#94a3b8', fontWeight: 'normal' }}>- {annotation.comment}</span>}
                             </div>}
-
-                            {(annotation.quantity || annotation.price) && (
-                                <div className="order-summary" style={{ marginTop: '5px', fontSize: '0.85em', color: '#cbd5e1', borderTop: '1px solid #334155', paddingTop: '4px' }}>
-                                    {annotation.quantity && <div>Qty: <strong>{annotation.quantity}</strong></div>}
-                                    {annotation.price && <div>Price: <strong>${annotation.price}</strong></div>}
-                                    {(annotation.quantity && annotation.price) && (
-                                        <div style={{ color: '#fbbf24', marginTop: '2px' }}>
-                                            Total: <strong>${(parseFloat(annotation.quantity) * parseFloat(annotation.price)).toLocaleString()}</strong>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </div>
                     );
                 })}

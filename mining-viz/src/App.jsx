@@ -569,18 +569,19 @@ function App() {
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 1000,
-            backgroundColor: '#1e293b',
+            backgroundColor: 'var(--card-bg)',
             padding: '5px',
             borderRadius: '8px',
             display: 'flex',
             gap: '5px',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+            border: '1px solid var(--border-color)'
           }}>
             <button
               onClick={() => setViewMode('map')}
               style={{
-                background: viewMode === 'map' ? '#3b82f6' : 'transparent',
-                color: viewMode === 'map' ? 'white' : '#94a3b8',
+                background: viewMode === 'map' ? 'var(--primary-color)' : 'transparent',
+                color: viewMode === 'map' ? '#0d1117' : 'var(--text-muted)',
                 border: 'none',
                 padding: '6px 12px',
                 borderRadius: '6px',
@@ -593,8 +594,8 @@ function App() {
             <button
               onClick={() => setViewMode('pipeline')}
               style={{
-                background: viewMode === 'pipeline' ? '#3b82f6' : 'transparent',
-                color: viewMode === 'pipeline' ? 'white' : '#94a3b8',
+                background: viewMode === 'pipeline' ? 'var(--primary-color)' : 'transparent',
+                color: viewMode === 'pipeline' ? '#0d1117' : 'var(--text-muted)',
                 border: 'none',
                 padding: '6px 12px',
                 borderRadius: '6px',
@@ -644,6 +645,7 @@ function App() {
           <button
             className={`nav-item ${mobileTab === 'list' ? 'active' : ''}`}
             onClick={() => setMobileTab('list')}
+            style={{ color: mobileTab === 'list' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">📋</span>
             <span>List</span>
@@ -654,6 +656,7 @@ function App() {
               setMobileTab('map');
               setViewMode('map');
             }}
+            style={{ color: mobileTab === 'map' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">🗺️</span>
             <span>Map</span>
@@ -664,6 +667,7 @@ function App() {
               setMobileTab('pipeline');
               setViewMode('pipeline');
             }}
+            style={{ color: mobileTab === 'pipeline' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">📊</span>
             <span>Pipeline</span>
