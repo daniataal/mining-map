@@ -617,8 +617,12 @@ function App() {
             selectedItem={selectedItem}
             setSelectedItem={(item) => {
               setSelectedItem(item);
-              if (!isMobile) handleOpenDossier(item);
-              logActivity(userId, username, 'SELECT_MAP_PIN', `Selected ${item.company}`);
+              if (item) {
+                if (!isMobile) handleOpenDossier(item);
+                logActivity(userId, username, 'SELECT_MAP_PIN', `Selected ${item.company}`);
+              } else {
+                if (viewMode === 'map') handleCloseDossier(); // Optional: close dossier if deselected
+              }
             }}
             handleOpenDossier={handleOpenDossier}
             mapCenter={mapCenter}
