@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 
-const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes, isMobile, onOpenDossier }) => {
+const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes, isMobile, onOpenDossier, isOpen }) => {
     const [isEditing, setIsEditing] = useState(false);
+
+    // Reset editing state when popup closes
+    useEffect(() => {
+        if (!isOpen) {
+            setIsEditing(false);
+        }
+    }, [isOpen]);
 
     // Local state for form fields - initialized from props
     const [formData, setFormData] = useState({

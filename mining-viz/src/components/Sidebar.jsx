@@ -54,87 +54,55 @@ const Sidebar = ({
 
     return (
         <div className="sidebar">
-            <div className="header" style={{ position: 'relative' }}>
-                {onToggleCollapse && (
-                    <button
-                        onClick={onToggleCollapse}
-                        style={{
-                            position: 'absolute',
-                            top: '20px',
-                            right: '20px',
-                            background: 'transparent',
-                            border: '1px solid #475569',
-                            color: '#94a3b8',
-                            width: '30px',
-                            height: '30px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '1.2rem',
-                            zIndex: 10
-                        }}
-                        title="Minimize Sidebar"
-                    >
-                        «
-                    </button>
-                )}
-                {onLogout && (
-                    <button
-                        onClick={onLogout}
-                        style={{
-                            position: 'absolute',
-                            top: '20px',
-                            right: onToggleCollapse ? '60px' : '20px',
-                            background: 'transparent',
-                            border: '1px solid #ef4444',
-                            color: '#ef4444',
-                            height: '30px',
-                            padding: '0 10px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '0.9rem',
-                            fontWeight: 'bold',
-                            zIndex: 10
-                        }}
-                        title="Sign Out"
-                    >
-                        Sign Out
-                    </button>
-                )}
-                <h1>Mining Licenses</h1>
-                <p>Active licenses viewer</p>
+            <div className="header">
+                <div className="sidebar-header-top">
+                    <div>
+                        <h1 className="sidebar-title">Mining Licenses</h1>
+                        <p className="sidebar-subtitle">Active licenses viewer</p>
+                    </div>
+                    <div className="header-actions">
+                        {onLogout && (
+                            <button
+                                onClick={onLogout}
+                                className="icon-btn danger"
+                                title="Sign Out"
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                    <polyline points="16 17 21 12 16 7"></polyline>
+                                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                                </svg>
+                            </button>
+                        )}
+                        {onToggleCollapse && (
+                            <button
+                                onClick={onToggleCollapse}
+                                className="icon-btn"
+                                title="Minimize Sidebar"
+                            >
+                                «
+                            </button>
+                        )}
+                    </div>
+                </div>
+
                 <button
                     onClick={() => setIsAddModalOpen(true)}
-                    style={{
-                        marginTop: '10px',
-                        width: '100%',
-                        padding: '8px',
-                        backgroundColor: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold'
-                    }}
+                    className="primary-btn-full"
                 >
                     + Add New License
                 </button>
 
-                <div className="action-buttons" style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-                    <label style={{ flex: 1, backgroundColor: '#475569', color: 'white', padding: '6px', borderRadius: '4px', textAlign: 'center', cursor: 'pointer', fontSize: '0.85em' }}>
-                        📥 Import
+                <div className="action-row">
+                    <label className="secondary-btn file-input-label">
                         <input type="file" accept=".csv" onChange={handleImport} style={{ display: 'none' }} />
+                        <span>📥 Import</span>
                     </label>
-                    <button onClick={handleTemplate} style={{ flex: 1, backgroundColor: 'transparent', border: '1px solid #475569', color: '#475569', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85em' }}>
-                        📄 Template
+                    <button onClick={handleTemplate} className="secondary-btn">
+                        <span>📄 Template</span>
                     </button>
-                    <button onClick={handleExport} style={{ flex: 1, backgroundColor: 'transparent', border: '1px solid #3b82f6', color: '#3b82f6', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85em' }}>
-                        📤 Export
+                    <button onClick={handleExport} className="secondary-btn">
+                        <span>📤 Export</span>
                     </button>
                 </div>
             </div>
@@ -148,69 +116,71 @@ const Sidebar = ({
                     className="search-input"
                 />
 
-                <div className="control-group">
-                    <label>Sort by:</label>
-                    <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
-                        <option value="company">Company</option>
-                        <option value="status">Status</option>
-                        <option value="commodity">Commodity</option>
-                        <option value="date">Date</option>
-                    </select>
-                </div>
+                <div className="filters-grid">
+                    <div className="control-group">
+                        <label>Sort by</label>
+                        <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                            <option value="company">Company</option>
+                            <option value="status">Status</option>
+                            <option value="commodity">Commodity</option>
+                            <option value="date">Date</option>
+                        </select>
+                    </div>
 
-                <div className="control-group">
-                    <label>Commodity:</label>
-                    <select className="commodity-select" value={selectedCommodity} onChange={e => setSelectedCommodity(e.target.value)}>
-                        {commodities.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                </div>
+                    <div className="control-group">
+                        <label>Commodity</label>
+                        <select className="commodity-select" value={selectedCommodity} onChange={e => setSelectedCommodity(e.target.value)}>
+                            {commodities.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
 
-                <div className="control-group">
-                    <label>Country:</label>
-                    <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)}>
-                        {countries.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                </div>
+                    <div className="control-group">
+                        <label>Country</label>
+                        <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)}>
+                            {countries.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
 
-                <div className="control-group">
-                    <label>My Analysis:</label>
-                    <select value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value)}>
-                        <option value="All">All</option>
-                        <option value="good">✅ Go</option>
-                        <option value="maybe">🤔 Maybe</option>
-                        <option value="bad">❌ No Go</option>
-                        <option value="unmarked">Unmarked</option>
-                    </select>
-                </div>
+                    <div className="control-group">
+                        <label>My Analysis</label>
+                        <select value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value)}>
+                            <option value="All">All</option>
+                            <option value="good">✅ Go</option>
+                            <option value="maybe">🤔 Maybe</option>
+                            <option value="bad">❌ No Go</option>
+                            <option value="unmarked">Unmarked</option>
+                        </select>
+                    </div>
 
-                <div className="control-group">
-                    <label>License Type:</label>
-                    <select value={selectedLicenseType} onChange={e => setSelectedLicenseType(e.target.value)}>
-                        {licenseTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <div className="control-group">
+                        <label>License Type</label>
+                        <select value={selectedLicenseType} onChange={e => setSelectedLicenseType(e.target.value)}>
+                            {licenseTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
                 </div>
 
                 {(selectedCountry !== 'All' || selectedCommodity !== 'All' || filter || userStatusFilter !== 'All' || selectedLicenseType !== 'All') && (
                     <div style={{ marginTop: '15px', borderTop: '1px solid #334155', paddingTop: '10px' }}>
-                        <div style={{ fontSize: '0.85em', marginBottom: '5px', color: '#94a3b8' }}>
-                            Showing {processedData.length} licenses
+                        <div style={{ fontSize: '0.85em', marginBottom: '8px', color: '#94a3b8', textAlign: 'center' }}>
+                            Found {processedData.length} matches
                         </div>
                         <button
                             onClick={deleteFilteredList}
                             style={{
                                 width: '100%',
                                 padding: '8px',
-                                backgroundColor: '#ef4444',
-                                color: 'white',
-                                border: 'none',
+                                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                color: '#f85149',
+                                border: '1px solid rgba(239, 68, 68, 0.3)',
                                 borderRadius: '6px',
                                 cursor: 'pointer',
                                 fontWeight: 'bold',
-                                fontSize: '0.9em',
+                                fontSize: '0.85rem',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
                             }}
                         >
-                            🗑️ Delete ALL Visible ({processedData.length})
+                            🗑️ Delete Visible ({processedData.length})
                         </button>
                     </div>
                 )}

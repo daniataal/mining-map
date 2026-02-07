@@ -87,9 +87,9 @@ const MapEffect = ({ selectedItem }) => {
     useEffect(() => {
         if (selectedItem && selectedItem.lat && selectedItem.lng) {
             const currentZoom = map.getZoom();
-            const targetZoom = Math.max(currentZoom, 14);
+            const targetZoom = Math.max(currentZoom, 16);
             map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, {
-                duration: 2.0
+                duration: 1.5
             });
         }
     }, [selectedItem, map]);
@@ -135,6 +135,21 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
             .then(data => setGeoJsonData(data))
             .catch(err => console.error("Failed to load country borders", err));
     }, []);
+
+    const markerRefs = useRef({});
+
+    useEffect(() => {
+        if (selectedItem) {
+            // Small delay to allow flyTo and unclustering to happen
+            const timer = setTimeout(() => {
+                const marker = markerRefs.current[selectedItem.id];
+                if (marker) {
+                    marker.openPopup();
+                }
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [selectedItem]);
 
     const activeCountries = useMemo(() => {
         const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
@@ -268,11 +283,19 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                 key={item.id || idx}
                                 position={[item.lat, item.lng]}
                                 icon={createCustomIcon(color, isSelected)}
+                                ref={(el) => (markerRefs.current[item.id] = el)}
                                 eventHandlers={{
                                     click: () => setSelectedItem(item),
                                 }}
                             >
-                                <Popup offset={[0, -20]} maxWidth={300} minWidth={250}>
+                                <Popup
+                                    offset={[0, -20]}
+                                    maxWidth={300}
+                                    minWidth={250}
+                                    eventHandlers={{
+                                        remove: () => setSelectedItem(null)
+                                    }}
+                                >
                                     <PopupForm
                                         item={item}
                                         annotation={annotation}
@@ -282,6 +305,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                         licenseTypes={licenseTypes}
                                         isMobile={isMobile}
                                         onOpenDossier={() => handleOpenDossier(item)}
+                                        isOpen={selectedItem?.id === item.id}
                                     />
                                 </Popup>
                             </Marker>
