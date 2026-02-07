@@ -102,6 +102,12 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
     // Effect to handle map resize
     const mapRef = useRef(null);
+    const selectedItemRef = useRef(selectedItem);
+
+    useEffect(() => {
+        selectedItemRef.current = selectedItem;
+    }, [selectedItem]);
+
     useEffect(() => {
         const handleResize = () => {
             if (mapRef.current) {
@@ -293,7 +299,11 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                     maxWidth={300}
                                     minWidth={250}
                                     eventHandlers={{
-                                        remove: () => setSelectedItem(null)
+                                        remove: () => {
+                                            if (selectedItemRef.current?.id === item.id) {
+                                                setSelectedItem(null);
+                                            }
+                                        }
                                     }}
                                 >
                                     <PopupForm
