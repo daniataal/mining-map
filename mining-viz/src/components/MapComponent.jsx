@@ -20,16 +20,28 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 // Custom Icons
 const createCustomIcon = (color, isHovered) => {
-    const size = isHovered ? 24 : 12;
-    const border = isHovered ? '3px solid white' : '2px solid white';
-    const boxShadow = isHovered ? '0 0 10px rgba(0,0,0,0.8)' : '0 0 4px rgba(0,0,0,0.5)';
+    const isGold = color === '#FFD700';
+    const size = isHovered ? 24 : (isGold ? 14 : 10);
+    const border = isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)');
+
+    // Gold gets a special "Pulse" or stronger glow
+    let boxShadow;
+    if (isGold) {
+        boxShadow = isHovered
+            ? '0 0 20px rgba(255, 215, 0, 0.8), 0 0 10px rgba(255, 215, 0, 0.6)'
+            : '0 0 12px rgba(255, 215, 0, 0.6), 0 0 6px rgba(255, 215, 0, 0.4)';
+    } else {
+        boxShadow = isHovered
+            ? `0 0 15px ${color}`
+            : `0 0 8px ${color}`;
+    }
 
     return new L.DivIcon({
         className: 'custom-marker',
-        html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.2s ease;"></div>`,
-        iconSize: isHovered ? [28, 28] : [16, 16],
-        iconAnchor: isHovered ? [14, 14] : [8, 8],
-        popupAnchor: [0, -8]
+        html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.3s ease;"></div>`,
+        iconSize: isHovered ? [24, 24] : [size, size],
+        iconAnchor: isHovered ? [12, 12] : [size / 2, size / 2],
+        popupAnchor: [0, -10]
     });
 };
 
@@ -52,16 +64,21 @@ const getMarkerColor = (commodity, userStatus) => {
     if (userStatus === 'bad') return '#ef4444'; // Red-500
     if (userStatus === 'maybe') return '#f59e0b'; // Amber-500 (Orange)
 
-    if (!commodity) return '#94a3b8';
+    if (!commodity) return '#64748b'; // Slate-500
     const c = commodity.toLowerCase();
-    if (c.includes('gold')) return '#fbbf24'; // Amber-400
-    if (c.includes('diamond')) return '#60a5fa'; // Blue-400
-    if (c.includes('bauxite')) return '#f87171'; // Red-400
-    if (c.includes('manganese')) return '#a78bfa'; // Purple-400
-    if (c.includes('lithium')) return '#34d399'; // Emerald-400
-    if (c.includes('iron')) return '#ef4444'; // Red-500
-    if (c.includes('salt')) return '#fcd34d'; // Amber-300
-    return '#94a3b8'; // Slate-400
+
+    // GOLD - Premium Glow
+    if (c.includes('gold')) return '#FFD700'; // Gold (Real Gold color)
+
+    // Others - Aligned styles (slightly muted to let Gold pop)
+    if (c.includes('diamond')) return '#60a5fa'; // Blue
+    if (c.includes('bauxite')) return '#f87171'; // Red
+    if (c.includes('manganese')) return '#a78bfa'; // Purple
+    if (c.includes('lithium')) return '#34d399'; // Emerald
+    if (c.includes('iron')) return '#f87171'; // Red
+    if (c.includes('salt')) return '#fbbf24'; // Amber
+
+    return '#64748b'; // Slate-500
 };
 
 // Component to handle map flyTo effects

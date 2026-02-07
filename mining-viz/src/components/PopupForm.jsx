@@ -62,26 +62,26 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
     };
 
     return (
-        <div className="popup-content" style={{ minWidth: '320px', maxHeight: '500px', overflowY: 'auto' }}>
+        <div className="popup-content" style={{ minWidth: '320px', maxHeight: '500px', overflowY: 'auto', backgroundColor: '#0d1117' }}>
             {/* Header / Title */}
             <div style={{
-                background: '#1e293b',
+                background: '#161b22',
                 margin: '-20px -24px 15px -24px', // Counteract Leaflet popup padding
                 padding: '15px 20px',
-                borderBottom: '1px solid #334155',
+                borderBottom: '1px solid #30363d',
                 borderTopLeftRadius: '12px',
                 borderTopRightRadius: '12px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                color: 'white',
+                color: '#e6edf3',
                 position: 'sticky',
                 top: 0,
                 zIndex: 10
             }}>
                 <div style={{ flex: 1, paddingRight: '10px' }}>
                     <strong style={{ fontSize: '1.1em', display: 'block' }}>{item.company}</strong>
-                    <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{item.region}, {item.country}</span>
+                    <span style={{ fontSize: '0.8em', color: '#8b949e' }}>{item.region}, {item.country}</span>
                 </div>
 
                 {/* Edit Toggle */}
@@ -89,7 +89,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                     <button
                         onClick={() => setIsEditing(true)}
                         style={{
-                            background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px',
+                            background: '#fbbf24', color: '#0d1117', border: 'none', borderRadius: '6px',
                             padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
                         }}
                     >
@@ -100,7 +100,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                         <button
                             onClick={handleSave}
                             style={{
-                                background: '#22c55e', color: 'white', border: 'none', borderRadius: '6px',
+                                background: '#238636', color: 'white', border: 'none', borderRadius: '6px',
                                 padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
                             }}
                         >
@@ -109,7 +109,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                         <button
                             onClick={handleCancel}
                             style={{
-                                background: '#64748b', color: 'white', border: 'none', borderRadius: '6px',
+                                background: '#30363d', color: '#e6edf3', border: 'none', borderRadius: '6px',
                                 padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
                             }}
                         >
@@ -119,15 +119,16 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 )}
             </div>
 
-            {/* Quick Actions (Always Visible or maybe disabled when editing? Lets keep them accessible) */}
+            {/* Quick Actions */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px', marginBottom: '15px' }}>
                 <button
                     onClick={() => updateAnnotation(item.id, 'status', 'good')}
                     title="Mark as Good"
                     style={{
-                        background: annotation.status === 'good' ? '#22c55e' : '#f1f5f9',
-                        color: annotation.status === 'good' ? 'white' : '#64748b',
-                        border: '1px solid #cbd5e1', borderRadius: '6px', padding: '6px', cursor: 'pointer',
+                        background: annotation.status === 'good' ? 'rgba(46, 160, 67, 0.2)' : '#21262d',
+                        color: annotation.status === 'good' ? '#3fb950' : '#8b949e',
+                        border: annotation.status === 'good' ? '1px solid #3fb950' : '1px solid #30363d',
+                        borderRadius: '6px', padding: '6px', cursor: 'pointer',
                         fontWeight: '600', fontSize: '0.9em'
                     }}
                 >
@@ -137,9 +138,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                     onClick={() => updateAnnotation(item.id, 'status', 'maybe')}
                     title="Mark as Maybe"
                     style={{
-                        background: annotation.status === 'maybe' ? '#f59e0b' : '#f1f5f9',
-                        color: annotation.status === 'maybe' ? 'white' : '#64748b',
-                        border: '1px solid #cbd5e1', borderRadius: '6px', padding: '6px', cursor: 'pointer',
+                        background: annotation.status === 'maybe' ? 'rgba(210, 153, 34, 0.2)' : '#21262d',
+                        color: annotation.status === 'maybe' ? '#d29922' : '#8b949e',
+                        border: annotation.status === 'maybe' ? '1px solid #d29922' : '1px solid #30363d',
+                        borderRadius: '6px', padding: '6px', cursor: 'pointer',
                         fontWeight: '600', fontSize: '0.9em'
                     }}
                 >
@@ -149,9 +151,10 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                     onClick={() => updateAnnotation(item.id, 'status', 'bad')}
                     title="Mark as No Go"
                     style={{
-                        background: annotation.status === 'bad' ? '#ef4444' : '#f1f5f9',
-                        color: annotation.status === 'bad' ? 'white' : '#64748b',
-                        border: '1px solid #cbd5e1', borderRadius: '6px', padding: '6px', cursor: 'pointer',
+                        background: annotation.status === 'bad' ? 'rgba(248, 81, 73, 0.2)' : '#21262d',
+                        color: annotation.status === 'bad' ? '#f85149' : '#8b949e',
+                        border: annotation.status === 'bad' ? '1px solid #f85149' : '1px solid #30363d',
+                        borderRadius: '6px', padding: '6px', cursor: 'pointer',
                         fontWeight: '600', fontSize: '0.9em'
                     }}
                 >
@@ -160,79 +163,76 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 <button
                     onClick={() => updateAnnotation(item.id, 'status', null)}
                     title="Clear Status"
-                    style={{ background: 'transparent', border: '1px solid #e2e8f0', borderRadius: '6px', color: '#94a3b8', cursor: 'pointer', width: '32px' }}
+                    style={{ background: 'transparent', border: '1px solid #30363d', borderRadius: '6px', color: '#8b949e', cursor: 'pointer', width: '32px' }}
                 >
                     🔄
                 </button>
             </div>
 
             {/* Editable Fields Container */}
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px', position: 'relative' }}>
-                {/* Overlay to darken when not editing (optional, but requested "put it behind a protecting mechanism") */}
+            <div style={{ background: '#161b22', padding: '12px', borderRadius: '8px', border: '1px solid #30363d', marginBottom: '15px', position: 'relative' }}>
                 {!isEditing && (
                     <div style={{
                         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: 'rgba(255,255,255,0)', // Transparent but blocks clicks? No, just render text.
-                        // Actually, rendering text vs input is better. 
                         zIndex: 0
                     }} />
                 )}
 
                 {/* License Type */}
                 <div style={{ marginBottom: '10px' }}>
-                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>LICENSE TYPE</label>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>LICENSE TYPE</label>
                     {isEditing ? (
                         <input
                             list="license-types"
                             value={formData.licenseType}
                             onChange={(e) => setFormData({ ...formData, licenseType: e.target.value })}
-                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                         />
                     ) : (
-                        <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.licenseType || 'Unknown'}</div>
+                        <div style={{ fontSize: '0.95em', color: '#e6edf3', fontWeight: '500' }}>{formData.licenseType || 'Unknown'}</div>
                     )}
                 </div>
 
                 {/* Commodity */}
                 <div style={{ marginBottom: '10px' }}>
-                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>COMMODITY</label>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>COMMODITY</label>
                     {isEditing ? (
                         <input
                             list="commodities-list"
                             value={formData.commodity}
                             onChange={(e) => setFormData({ ...formData, commodity: e.target.value })}
-                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                         />
                     ) : (
-                        <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.commodity || 'Unknown'}</div>
+                        <div style={{ fontSize: '0.95em', color: '#e6edf3', fontWeight: '500' }}>{formData.commodity || 'Unknown'}</div>
                     )}
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>QTY (KG)</label>
+                        <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>QTY (KG)</label>
                         {isEditing ? (
                             <input
                                 type="number"
                                 value={formData.quantity}
                                 onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                             />
                         ) : (
-                            <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.quantity || '-'}</div>
+                            <div style={{ fontSize: '0.95em', color: '#e6edf3', fontWeight: '500' }}>{formData.quantity || '-'}</div>
                         )}
                     </div>
                     <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>PRICE ($)</label>
+                        <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>PRICE ($)</label>
                         {isEditing ? (
                             <input
                                 type="number"
                                 value={formData.price}
                                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                             />
                         ) : (
-                            <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.price || '-'}</div>
+                            <div style={{ fontSize: '0.95em', color: '#e6edf3', fontWeight: '500' }}>{formData.price || '-'}</div>
                         )}
                     </div>
                 </div>
@@ -247,45 +247,45 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
             </div>
 
             {/* Contact Info Section */}
-            <div style={{ background: '#f0f9ff', padding: '12px', borderRadius: '8px', border: '1px solid #bae6fd', marginBottom: '15px' }}>
+            <div style={{ background: '#1e232d', padding: '12px', borderRadius: '8px', border: '1px solid #30363d', marginBottom: '15px' }}>
                 <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <span style={{ fontSize: '1em' }}>📞</span>
-                    <label style={{ fontSize: '0.75em', color: '#0369a1', fontWeight: 'bold' }}>CONTACT DETAILS</label>
+                    <label style={{ fontSize: '0.75em', color: '#58a6ff', fontWeight: 'bold' }}>CONTACT DETAILS</label>
                 </div>
 
                 <div style={{ marginBottom: '8px' }}>
-                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', marginBottom: '2px' }}>Name / Position</label>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', marginBottom: '2px' }}>Name / Position</label>
                     {isEditing ? (
                         <input
                             type="text"
                             placeholder="Contact Person..."
                             value={formData.contactPerson}
                             onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                         />
                     ) : (
-                        <div style={{ fontWeight: '500', color: '#334155' }}>{formData.contactPerson || 'No contact info'}</div>
+                        <div style={{ fontWeight: '500', color: '#e6edf3' }}>{formData.contactPerson || 'No contact info'}</div>
                     )}
                 </div>
 
                 <div>
-                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', marginBottom: '2px' }}>Phone Number</label>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', marginBottom: '2px' }}>Phone Number</label>
                     {isEditing ? (
                         <input
                             type="tel"
                             placeholder="+233..."
                             value={formData.phoneNumber}
                             onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                         />
                     ) : (
-                        <div style={{ fontWeight: '500', color: '#334155' }}>
+                        <div style={{ fontWeight: '500', color: '#e6edf3' }}>
                             {formData.phoneNumber ? (
-                                <a href={`tel:${formData.phoneNumber}`} style={{ color: '#0284c7', textDecoration: 'none' }}>
+                                <a href={`tel:${formData.phoneNumber}`} style={{ color: '#58a6ff', textDecoration: 'none' }}>
                                     {formData.phoneNumber}
                                 </a>
                             ) : (
-                                <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No phone number</span>
+                                <span style={{ color: '#8b949e', fontStyle: 'italic' }}>No phone number</span>
                             )}
                         </div>
                     )}
@@ -294,17 +294,17 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
 
             {/* Notes Section */}
             <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontSize: '0.75em', color: '#64748b', marginBottom: '4px', fontWeight: '600' }}>NOTES</label>
+                <label style={{ display: 'block', fontSize: '0.75em', color: '#8b949e', marginBottom: '4px', fontWeight: '600' }}>NOTES</label>
                 {isEditing ? (
                     <textarea
                         placeholder="Add private notes..."
                         value={formData.comment}
                         onChange={(e) => setFormData({ ...formData, comment: e.target.value })}
-                        style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '0.9em', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
+                        style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '0.9em', borderRadius: '6px', border: '1px solid #30363d', resize: 'vertical', background: '#0d1117', color: '#e6edf3' }}
                     />
                 ) : (
                     <div style={{
-                        background: '#f1f5f9', padding: '10px', borderRadius: '6px', minHeight: '40px', fontSize: '0.9em', color: formData.comment ? '#334155' : '#94a3b8', fontStyle: formData.comment ? 'normal' : 'italic'
+                        background: '#161b22', padding: '10px', borderRadius: '6px', minHeight: '40px', fontSize: '0.9em', color: formData.comment ? '#e6edf3' : '#8b949e', fontStyle: formData.comment ? 'normal' : 'italic'
                     }}>
                         {formData.comment || 'No notes added.'}
                     </div>
@@ -318,8 +318,8 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                         onClick={onDelete}
                         style={{
                             background: 'transparent',
-                            border: '1px solid #fca5a5',
-                            color: '#ef4444',
+                            border: '1px solid #f85149',
+                            color: '#f85149',
                             fontSize: '0.8em',
                             cursor: 'pointer',
                             padding: '6px 12px',

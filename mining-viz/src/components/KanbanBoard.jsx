@@ -34,7 +34,7 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
             height: '100%',
             overflow: 'hidden', // Prevent outer scrolling
             padding: '20px',
-            backgroundColor: '#0f172a',
+            backgroundColor: 'var(--bg-color)',
             display: 'flex',
             flexDirection: 'column', // Always column, we handle inner layout responsive
             gap: '20px',
@@ -63,9 +63,9 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                                 style={{
                                     padding: '8px 16px',
                                     borderRadius: '20px',
-                                    border: `1px solid ${isActive ? color : '#334155'}`,
-                                    backgroundColor: isActive ? color : 'transparent',
-                                    color: isActive ? '#fff' : '#94a3b8',
+                                    border: `1px solid ${isActive ? color : 'var(--border-color)'}`,
+                                    backgroundColor: isActive ? `${color}20` : 'transparent',
+                                    color: isActive ? color : 'var(--text-muted)',
                                     fontWeight: isActive ? 'bold' : 'normal',
                                     whiteSpace: 'nowrap',
                                     cursor: 'pointer',
@@ -103,13 +103,14 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                             padding: '10px 15px',
                             borderRadius: '6px',
                             marginBottom: '15px',
-                            backgroundColor: 'rgba(255,255,255,0.05)',
+                            backgroundColor: 'var(--card-bg)',
+                            border: '1px solid var(--border-color)',
                             borderTop: `4px solid ${getStageColor(stage)}`,
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             flexShrink: 0
                         }}>
-                            <h3 style={{ margin: 0, color: 'white', fontSize: '1rem' }}>{stage}</h3>
-                            <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '10px', color: '#cbd5e1' }}>
+                            <h3 style={{ margin: 0, color: '#e6edf3', fontSize: '1rem', fontFamily: 'serif' }}>{stage}</h3>
+                            <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '10px', color: '#8b949e' }}>
                                 {columns[stage].length}
                             </span>
                         </div>
@@ -120,7 +121,7 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                             overflowY: 'auto',
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: '10px',
+                            gap: '12px',
                             paddingRight: '5px' // Space for scrollbar
                         }}>
                             {columns[stage].map(item => {
@@ -129,31 +130,31 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                                     <div
                                         key={item.id}
                                         onClick={() => onCardClick(item)}
+                                        className="mining-card"
                                         style={{
-                                            backgroundColor: '#1e293b',
                                             padding: '12px',
-                                            borderRadius: '6px',
-                                            border: '1px solid #334155',
                                             cursor: 'pointer',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                                            transition: 'transform 0.1s',
-                                            flexShrink: 0
+                                            flexShrink: 0,
+                                            margin: 0 // Reset override
                                         }}
                                         onMouseOver={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-2px)')}
                                         onMouseOut={(e) => !isMobile && (e.currentTarget.style.transform = 'none')}
                                     >
-                                        <div style={{ fontWeight: 'bold', color: 'white', marginBottom: '4px' }}>{item.company}</div>
-                                        <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
+                                        <div style={{ fontWeight: 'bold', color: '#e6edf3', marginBottom: '4px', fontFamily: 'serif' }}>{item.company}</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#8b949e', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
+
+                                        {/* Simple separator */}
+                                        <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }}></div>
 
                                         {/* Mini Tags */}
                                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                            {annotation.status === 'good' && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }}>GO</span>}
-                                            {annotation.verification?.siteVisit && <span style={{ fontSize: '0.7rem', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8' }}>Visited</span>}
+                                            {annotation.status === 'good' && <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }}>GO</span>}
+                                            {annotation.verification?.siteVisit && <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>Visited</span>}
                                         </div>
                                     </div>
                                 );
                             })}
-                            {columns[stage].length === 0 && <div style={{ color: '#64748b', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
+                            {columns[stage].length === 0 && <div style={{ color: '#8b949e', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
                         </div>
                     </div>
                 ))}
