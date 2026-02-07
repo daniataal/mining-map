@@ -1,29 +1,68 @@
 import { useState, useEffect } from 'react';
 
 const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes, isMobile, onOpenDossier }) => {
-    const [comment, setComment] = useState(annotation.comment || '');
-    const [quantity, setQuantity] = useState(annotation.quantity || '');
-    const [price, setPrice] = useState(annotation.price || '');
-    const [licenseType, setLicenseType] = useState(annotation.licenseType || item.licenseType || '');
-    const [commodity, setCommodity] = useState(annotation.commodity || item.commodity || '');
+    const [isEditing, setIsEditing] = useState(false);
 
-    // Update local state when prop changes (in case of external updates)
+    // Local state for form fields - initialized from props
+    const [formData, setFormData] = useState({
+        comment: '',
+        quantity: '',
+        price: '',
+        licenseType: '',
+        commodity: '',
+        phoneNumber: '',
+        contactPerson: ''
+    });
+
+    // Sync state with props when not editing (or on open)
     useEffect(() => {
-        setComment(annotation.comment || '');
-        setQuantity(annotation.quantity || '');
-        setPrice(annotation.price || '');
-        setLicenseType(annotation.licenseType || item.licenseType || '');
-        setCommodity(annotation.commodity || item.commodity || '');
-    }, [annotation.comment, annotation.quantity, annotation.price, annotation.licenseType, item.licenseType, annotation.commodity, item.commodity]);
-
-    const handleBlur = (field, value) => {
-        if (value !== annotation[field]) {
-            updateAnnotation(item.id, field, value);
+        if (!isEditing) {
+            setFormData({
+                comment: annotation.comment || '',
+                quantity: annotation.quantity || '',
+                price: annotation.price || '',
+                licenseType: annotation.licenseType || item.licenseType || '',
+                commodity: annotation.commodity || item.commodity || '',
+                phoneNumber: annotation.phoneNumber || item.phoneNumber || '',
+                contactPerson: annotation.contactPerson || item.contactPerson || ''
+            });
         }
+    }, [isEditing, annotation, item]);
+
+    const handleSave = () => {
+        // Prepare updates
+        const updates = {};
+
+        // Helper to check if changed
+        const hasChanged = (field, originalValue) => {
+            const val = formData[field];
+            // Simple strict equality might be enough if types match
+            return val != (originalValue || ''); // loosen comparison slightly for null/undefined vs empty string
+        };
+
+        updates.comment = formData.comment;
+        updates.quantity = formData.quantity;
+        updates.price = formData.price;
+        updates.licenseType = formData.licenseType;
+        updates.commodity = formData.commodity;
+        updates.phoneNumber = formData.phoneNumber;
+        updates.contactPerson = formData.contactPerson;
+
+        // We could optimize by only sending changed fields, 
+        // but App.jsx updateAnnotation handles merging, so sending all form data is safer to ensure sync.
+        // Actually, passing everything overrides everything. 
+
+        updateAnnotation(item.id, updates);
+        setIsEditing(false);
+    };
+
+    const handleCancel = () => {
+        setIsEditing(false);
+        // Effect will reset data
     };
 
     return (
-        <div className="popup-content" style={{ minWidth: '300px' }}>
+        <div className="popup-content" style={{ minWidth: '320px', maxHeight: '500px', overflowY: 'auto' }}>
             {/* Header / Title */}
             <div style={{
                 background: '#1e293b',
@@ -35,24 +74,52 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                color: 'white'
+                color: 'white',
+                position: 'sticky',
+                top: 0,
+                zIndex: 10
             }}>
-                <div>
+                <div style={{ flex: 1, paddingRight: '10px' }}>
                     <strong style={{ fontSize: '1.1em', display: 'block' }}>{item.company}</strong>
                     <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{item.region}, {item.country}</span>
                 </div>
-                <div style={{
-                    fontSize: '0.75em',
-                    padding: '2px 8px',
-                    borderRadius: '12px',
-                    background: item.status.toLowerCase().includes('active') ? 'rgba(34, 197, 94, 0.2)' : 'rgba(148, 163, 184, 0.2)',
-                    color: item.status.toLowerCase().includes('active') ? '#4ade80' : '#94a3b8'
-                }}>
-                    {item.status}
-                </div>
+
+                {/* Edit Toggle */}
+                {!isEditing ? (
+                    <button
+                        onClick={() => setIsEditing(true)}
+                        style={{
+                            background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px',
+                            padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
+                        }}
+                    >
+                        ✏️ Edit
+                    </button>
+                ) : (
+                    <div style={{ display: 'flex', gap: '5px' }}>
+                        <button
+                            onClick={handleSave}
+                            style={{
+                                background: '#22c55e', color: 'white', border: 'none', borderRadius: '6px',
+                                padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
+                            }}
+                        >
+                            Apply
+                        </button>
+                        <button
+                            onClick={handleCancel}
+                            style={{
+                                background: '#64748b', color: 'white', border: 'none', borderRadius: '6px',
+                                padding: '6px 12px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8em'
+                            }}
+                        >
+                            ✕
+                        </button>
+                    </div>
+                )}
             </div>
 
-            {/* Quick Actions */}
+            {/* Quick Actions (Always Visible or maybe disabled when editing? Lets keep them accessible) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px', marginBottom: '15px' }}>
                 <button
                     onClick={() => updateAnnotation(item.id, 'status', 'good')}
@@ -99,138 +166,170 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 </button>
             </div>
 
-            {/* Editable Fields */}
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px' }}>
-                <div style={{ marginBottom: '8px' }}>
-                    <label style={{ display: 'block', fontSize: '0.75em', color: '#64748b', marginBottom: '2px', fontWeight: '600' }}>LICENSE TYPE (EDITABLE)</label>
-                    <input
-                        list="license-types"
-                        value={licenseType}
-                        onChange={(e) => setLicenseType(e.target.value)}
-                        onBlur={(e) => handleBlur('licenseType', e.target.value)}
-                        placeholder="Select or Type..."
-                        style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
-                    />
-                    <datalist id="license-types">
-                        {licenseTypes && licenseTypes.filter(t => t !== 'All').map(t => <option key={t} value={t} />)}
-                    </datalist>
+            {/* Editable Fields Container */}
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '15px', position: 'relative' }}>
+                {/* Overlay to darken when not editing (optional, but requested "put it behind a protecting mechanism") */}
+                {!isEditing && (
+                    <div style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: 'rgba(255,255,255,0)', // Transparent but blocks clicks? No, just render text.
+                        // Actually, rendering text vs input is better. 
+                        zIndex: 0
+                    }} />
+                )}
+
+                {/* License Type */}
+                <div style={{ marginBottom: '10px' }}>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>LICENSE TYPE</label>
+                    {isEditing ? (
+                        <input
+                            list="license-types"
+                            value={formData.licenseType}
+                            onChange={(e) => setFormData({ ...formData, licenseType: e.target.value })}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    ) : (
+                        <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.licenseType || 'Unknown'}</div>
+                    )}
                 </div>
-                <div>
-                    <label style={{ display: 'block', fontSize: '0.75em', color: '#64748b', marginBottom: '2px', fontWeight: '600' }}>COMMODITY (EDITABLE)</label>
-                    <input
-                        list="commodities-list"
-                        value={commodity}
-                        onChange={(e) => setCommodity(e.target.value)}
-                        onBlur={(e) => handleBlur('commodity', e.target.value)}
-                        placeholder="Select or Type..."
-                        style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
-                    />
-                    <datalist id="commodities-list">
-                        {commodities && commodities.filter(t => t !== 'All').map(c => <option key={c} value={c} />)}
-                    </datalist>
+
+                {/* Commodity */}
+                <div style={{ marginBottom: '10px' }}>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>COMMODITY</label>
+                    {isEditing ? (
+                        <input
+                            list="commodities-list"
+                            value={formData.commodity}
+                            onChange={(e) => setFormData({ ...formData, commodity: e.target.value })}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    ) : (
+                        <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.commodity || 'Unknown'}</div>
+                    )}
                 </div>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>QTY (KG)</label>
+                        {isEditing ? (
+                            <input
+                                type="number"
+                                value={formData.quantity}
+                                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            />
+                        ) : (
+                            <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.quantity || '-'}</div>
+                        )}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', fontWeight: 'bold' }}>PRICE ($)</label>
+                        {isEditing ? (
+                            <input
+                                type="number"
+                                value={formData.price}
+                                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            />
+                        ) : (
+                            <div style={{ fontSize: '0.95em', color: '#334155', fontWeight: '500' }}>{formData.price || '-'}</div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Datalists */}
+                <datalist id="license-types">
+                    {licenseTypes && licenseTypes.filter(t => t !== 'All').map(t => <option key={t} value={t} />)}
+                </datalist>
+                <datalist id="commodities-list">
+                    {commodities && commodities.filter(t => t !== 'All').map(c => <option key={c} value={c} />)}
+                </datalist>
             </div>
 
-            {/* Mobile Actions */}
-            {isMobile && onOpenDossier && (
-                <div style={{ marginBottom: '15px' }}>
-                    <button
-                        onClick={onOpenDossier}
-                        style={{
-                            width: '100%',
-                            background: '#3b82f6',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            padding: '10px',
-                            fontWeight: 'bold',
-                            fontSize: '1em',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px'
-                        }}
-                    >
-                        📄 Open Full Dossier
-                    </button>
+            {/* Contact Info Section */}
+            <div style={{ background: '#f0f9ff', padding: '12px', borderRadius: '8px', border: '1px solid #bae6fd', marginBottom: '15px' }}>
+                <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ fontSize: '1em' }}>📞</span>
+                    <label style={{ fontSize: '0.75em', color: '#0369a1', fontWeight: 'bold' }}>CONTACT DETAILS</label>
                 </div>
-            )}
+
+                <div style={{ marginBottom: '8px' }}>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', marginBottom: '2px' }}>Name / Position</label>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            placeholder="Contact Person..."
+                            value={formData.contactPerson}
+                            onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
+                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    ) : (
+                        <div style={{ fontWeight: '500', color: '#334155' }}>{formData.contactPerson || 'No contact info'}</div>
+                    )}
+                </div>
+
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.7em', color: '#64748b', marginBottom: '2px' }}>Phone Number</label>
+                    {isEditing ? (
+                        <input
+                            type="tel"
+                            placeholder="+233..."
+                            value={formData.phoneNumber}
+                            onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                            style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                        />
+                    ) : (
+                        <div style={{ fontWeight: '500', color: '#334155' }}>
+                            {formData.phoneNumber ? (
+                                <a href={`tel:${formData.phoneNumber}`} style={{ color: '#0284c7', textDecoration: 'none' }}>
+                                    {formData.phoneNumber}
+                                </a>
+                            ) : (
+                                <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No phone number</span>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* Notes Section */}
             <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', fontSize: '0.75em', color: '#64748b', marginBottom: '4px', fontWeight: '600' }}>NOTES</label>
-                <textarea
-                    placeholder="Add private notes..."
-                    value={comment}
-                    onChange={(e) => setComment(e.target.value)}
-                    onBlur={(e) => handleBlur('comment', e.target.value)}
-                    style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '0.9em', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
-                />
-            </div>
-
-            {/* Commercials */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '15px' }}>
-                <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.75em', color: '#64748b', fontWeight: '600' }}>QTY (KG)</label>
-                    <input
-                        type="number"
-                        placeholder="0"
-                        value={quantity}
-                        onChange={(e) => setQuantity(e.target.value)}
-                        onBlur={(e) => handleBlur('quantity', e.target.value)}
-                        style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                {isEditing ? (
+                    <textarea
+                        placeholder="Add private notes..."
+                        value={formData.comment}
+                        onChange={(e) => setFormData({ ...formData, comment: e.target.value })}
+                        style={{ width: '100%', minHeight: '60px', padding: '8px', fontSize: '0.9em', borderRadius: '6px', border: '1px solid #cbd5e1', resize: 'vertical' }}
                     />
-                </div>
-                <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.75em', color: '#64748b', fontWeight: '600' }}>PRICE ($)</label>
-                    <input
-                        type="number"
-                        placeholder="0.00"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        onBlur={(e) => handleBlur('price', e.target.value)}
-                        style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
-                    />
-                </div>
+                ) : (
+                    <div style={{
+                        background: '#f1f5f9', padding: '10px', borderRadius: '6px', minHeight: '40px', fontSize: '0.9em', color: formData.comment ? '#334155' : '#94a3b8', fontStyle: formData.comment ? 'normal' : 'italic'
+                    }}>
+                        {formData.comment || 'No notes added.'}
+                    </div>
+                )}
             </div>
-
-            {(quantity && price) && (
-                <div style={{ background: '#ecfdf5', padding: '10px', borderRadius: '6px', color: '#047857', textAlign: 'center', fontWeight: 'bold', border: '1px solid #a7f3d0' }}>
-                    Est. Value: ${(parseFloat(quantity) * parseFloat(price)).toLocaleString()}
-                </div>
-            )}
-
-            {/* Contact Info */}
-            {(item.contactPerson || item.phoneNumber) && (
-                <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px dashed #e2e8f0', fontSize: '0.85em' }}>
-                    {item.contactPerson && <div style={{ color: '#334155', fontWeight: '600' }}>👤 {item.contactPerson}</div>}
-                    {item.phoneNumber && (
-                        <div style={{ marginTop: '4px' }}>
-                            <a href={`tel:${item.phoneNumber}`} style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                📞 {item.phoneNumber}
-                            </a>
-                        </div>
-                    )}
-                </div>
-            )}
 
             {/* Delete Button */}
-            <div style={{ textAlign: 'center', marginTop: '15px' }}>
-                <button
-                    onClick={onDelete}
-                    style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#ef4444',
-                        fontSize: '0.8em',
-                        cursor: 'pointer',
-                        textDecoration: 'underline'
-                    }}
-                >
-                    Delete License Permanently
-                </button>
-            </div>
+            {isEditing && (
+                <div style={{ textAlign: 'center', marginTop: '15px' }}>
+                    <button
+                        onClick={onDelete}
+                        style={{
+                            background: 'transparent',
+                            border: '1px solid #fca5a5',
+                            color: '#ef4444',
+                            fontSize: '0.8em',
+                            cursor: 'pointer',
+                            padding: '6px 12px',
+                            borderRadius: '4px'
+                        }}
+                    >
+                        🗑️ Delete License
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

@@ -272,21 +272,77 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  const updateAnnotation = (id, field, value) => {
+  const updateAnnotation = (id, fieldOrUpdate, value) => {
+    // Normalize arguments: support (id, field, value) OR (id, { field: value, ... })
+    let updates = {};
+    if (typeof fieldOrUpdate === 'string') {
+      updates[fieldOrUpdate] = value;
+    } else if (typeof fieldOrUpdate === 'object' && fieldOrUpdate !== null) {
+      updates = fieldOrUpdate;
+    }
+
+    // 1. Update Local State (Immediate UI Feedback)
     setUserAnnotations(prev => {
+      const prevItem = prev[id] || {};
+      const nextItem = { ...prevItem, ...updates };
+
       const next = {
         ...prev,
-        [id]: {
-          ...prev[id],
-          [field]: value
-        }
+        [id]: nextItem
       };
       localStorage.setItem('mining_user_data', JSON.stringify(next));
       return next;
     });
-    // Log meaningful updates (status changes)
-    if (field === 'status') {
-      logActivity(userId, username, 'UPDATE_STATUS', `Set ${id} to ${value}`);
+
+    // 2. Map Frontend Fields to Backend Model
+    let backendPayload = {};
+
+    // Iterate over all updates to build payload
+    Object.entries(updates).forEach(([field, val]) => {
+      if (field === 'price') {
+        backendPayload.pricePerKg = parseFloat(val) || 0;
+      } else if (field === 'quantity') {
+        backendPayload.capacity = parseFloat(val) || 0;
+      } else if (field === 'status') {
+        // Map frontend status 'good'/'verified' to backend 'APPROVED' if needed, 
+        // OR mostly just pass it through if the user selects "APPROVED" (which they might need a way to do).
+        // The prompt implies "miner.status == APPROVED". 
+        // The Popup has buttons for "Go" (good), "Maybe", "No" (bad).
+        // We might need to interpret "good" as "APPROVED" or allow direct status setting.
+        // For now, let's pass the value. Use uppercase for backend consistency if it matches standard statuses.
+        backendPayload.status = val === 'good' ? 'APPROVED' : val;
+        // Note: The UI separates "Go" (good) from the actual "status" badge. 
+        // But let's assume "Go" == APPROVED for the export trigger.
+      } else if (field === 'licenseType') {
+        backendPayload.licenseType = val;
+      } else if (field === 'commodity') {
+        backendPayload.commodity = val;
+      } else if (field === 'phoneNumber') {
+        backendPayload.phoneNumber = val;
+      } else if (field === 'contactPerson') {
+        backendPayload.contactPerson = val;
+      }
+    });
+
+    // 3. Send to Backend
+    if (Object.keys(backendPayload).length > 0) {
+      fetch(`${API_BASE}/licenses/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backendPayload)
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.exported) {
+            addToast("Miner exported to Marketplace!", "success");
+            logActivity(userId, username, 'EXPORT_TRIGGER', `License ${id} exported`);
+          }
+          if (updates.status) {
+            const val = updates.status;
+            logActivity(userId, username, 'UPDATE_STATUS', `Set ${id} to ${val}`);
+          }
+        })
+        .catch(err => console.error("Failed to sync annotation to backend:", err));
     }
   };
 

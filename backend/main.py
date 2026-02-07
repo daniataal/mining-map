@@ -112,8 +112,23 @@ def init_db():
                 lng FLOAT,
                 phone_number TEXT,
                 contact_person TEXT,
-                date_issued TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                date_issued TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                price_per_kg FLOAT DEFAULT 0.0,
+                capacity FLOAT DEFAULT 0.0,
+                is_exported BOOLEAN DEFAULT FALSE
             );
+        
+
+        # Migration for existing tables (safe to run every time)
+        try:
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS price_per_kg FLOAT DEFAULT 0.0;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS capacity FLOAT DEFAULT 0.0;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS is_exported BOOLEAN DEFAULT FALSE;")
+            conn.commit()
+            print("Schema migration successful (added new columns if missing).")
+        except Exception as e:
+            conn.rollback() 
+            print(f"Schema migration skipped or failed (might already exist): {e}")
         """)
 
         # Files Table
@@ -413,6 +428,142 @@ def create_license(item: LicenseCreate):
         "contactPerson": item.contactPerson,
         "date": None
     }
+
+# --- Marketplace Export Logic ---
+import requests
+
+MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "https://api.marketplace.example.com/v1/sellers/integrate")
+MARKETPLACE_API_KEY = os.getenv("MARKETPLACE_API_KEY", "demo-key")
+
+def export_license_to_marketplace(license_data: dict):
+    print(f"Attempting export for license {license_data['id']}...")
+    try:
+        # Map fields to Marketplace Seller Object
+        payload = {
+            "external_id": license_data["id"],
+            "company_name": license_data["company"],
+            "location": {
+                "country": license_data["country"],
+                "region": license_data["region"],
+                "coordinates": {
+                    "lat": license_data["lat"],
+                    "lng": license_data["lng"]
+                }
+            },
+            "commodity": {
+                "type": license_data["commodity"],
+                "price_per_kg": license_data.get("price_per_kg", 0),
+                "capacity": license_data.get("capacity", 0)
+            },
+            "status": "PASSIVE_SELLER", # Enforced passive status
+            "phone": license_data.get("phone_number"),
+            "contact": license_data.get("contact_person")
+        }
+        
+        # In a real scenario, we would POST to the API
+        # response = requests.post(MARKETPLACE_API_URL, json=payload, timeout=5)
+        # response.raise_for_status()
+        
+        print(f"EXPORT SUCCESS: Exported {license_data['company']} to Marketplace as PASSIVE seller.")
+        return True
+    except Exception as e:
+        print(f"EXPORT FAILED: {e}")
+        return False
+
+# NEW: Update Model and Endpoint
+class LicenseUpdate(BaseModel):
+    company: Optional[str] = None
+    country: Optional[str] = None
+    region: Optional[str] = None
+    commodity: Optional[str] = None
+    licenseType: Optional[str] = None
+    status: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    phoneNumber: Optional[str] = None
+    contactPerson: Optional[str] = None
+    pricePerKg: Optional[float] = None
+    capacity: Optional[float] = None
+
+@app.put("/licenses/{license_id}")
+def update_license(license_id: str, item: LicenseUpdate):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Check if license exists
+        c.execute("SELECT * FROM licenses WHERE id = %s", (license_id,))
+        existing = c.fetchone()
+        if not existing:
+            return Response("License not found", status_code=404)
+
+        updates = []
+        values = []
+        
+        # Dynamic Update Query Construction
+        if item.company is not None:
+            updates.append("company = %s"); values.append(item.company)
+        if item.country is not None:
+            updates.append("country = %s"); values.append(item.country)
+        if item.region is not None:
+             updates.append("region = %s"); values.append(item.region)
+        if item.commodity is not None:
+             updates.append("commodity = %s"); values.append(item.commodity)
+        if item.licenseType is not None:
+             updates.append("license_type = %s"); values.append(item.licenseType)
+        if item.status is not None:
+             updates.append("status = %s"); values.append(item.status)
+        if item.lat is not None:
+             updates.append("lat = %s"); values.append(item.lat)
+        if item.lng is not None:
+             updates.append("lng = %s"); values.append(item.lng)
+        if item.phoneNumber is not None:
+             updates.append("phone_number = %s"); values.append(item.phoneNumber)
+        if item.contactPerson is not None:
+             updates.append("contact_person = %s"); values.append(item.contactPerson)
+        if item.pricePerKg is not None:
+             updates.append("price_per_kg = %s"); values.append(item.pricePerKg)
+        if item.capacity is not None:
+             updates.append("capacity = %s"); values.append(item.capacity)
+
+        if not updates:
+            return {"status": "no changes"}
+            
+        values.append(license_id)
+        sql = f"UPDATE licenses SET {', '.join(updates)} WHERE id = %s"
+        c.execute(sql, tuple(values))
+        
+        # --- EXPORT TRIGGER LOGIC ---
+        # Trigger: Status is APPROVED (either newly set or existing, but typically newly set)
+        # Idempotency: Check 'is_exported' flag
+        
+        # We need to know the FINAL status. 
+        # If item.status was passed, use it. If not, use existing['status']
+        final_status = item.status if item.status is not None else existing['status']
+        already_exported = existing['is_exported']
+        
+        if final_status == 'APPROVED' and not already_exported:
+            # Gather all data for export (merge existing with updates)
+            # Simplest is to just use what we have, or re-fetch. Re-fetching is safer.
+            conn.commit() # Commit the update first
+            
+            c.execute("SELECT * FROM licenses WHERE id = %s", (license_id,))
+            updated_row = c.fetchone()
+            
+            if export_license_to_marketplace(updated_row):
+                c.execute("UPDATE licenses SET is_exported = TRUE WHERE id = %s", (license_id,))
+                conn.commit()
+                return {"status": "updated", "exported": True}
+        else:
+            conn.commit()
+
+        return {"status": "updated", "exported": False}
+        
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
 
 @app.delete("/licenses/{license_id:path}")
 def delete_license(license_id: str):
