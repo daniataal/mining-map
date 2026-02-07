@@ -321,6 +321,8 @@ function App() {
         backendPayload.phoneNumber = val;
       } else if (field === 'contactPerson') {
         backendPayload.contactPerson = val;
+      } else if (field === 'export_trigger') {
+        backendPayload.export_trigger = true;
       }
     });
 
@@ -468,18 +470,18 @@ function App() {
           onClick={() => setIsAdminPanelOpen(true)}
           style={{
             position: 'fixed',
-            top: '10px',
-            right: '10px',
+            bottom: '70px', // Adjusted to be above bottom nav (60px)
+            right: '20px',
             zIndex: 9999,
             background: '#dc2626',
             color: 'white',
             border: 'none',
             borderRadius: '50%',
-            width: '40px',
-            height: '40px',
+            width: '45px',
+            height: '45px',
             fontSize: '1.2rem',
             cursor: 'pointer',
-            boxShadow: '0 2px 5px rgba(0,0,0,0.5)',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}
           title="Admin Panel"
@@ -632,7 +634,10 @@ function App() {
             processedData={processedData}
             userAnnotations={userAnnotations}
             updateAnnotation={updateAnnotation}
-            onCardClick={handleOpenDossier}
+            onCardClick={(item) => {
+              setSelectedItem(item);
+              if (!isMobile) handleOpenDossier(item);
+            }}
             commodities={commodities}
             isMobile={isMobile}
           />

@@ -187,6 +187,36 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                     </div>
                 </section>
 
+                {/* Marketplace Actions */}
+                <section className="section" style={{ border: '1px solid #d97706', background: 'rgba(251, 191, 36, 0.05)' }}>
+                    <h3 style={{ color: '#d97706', borderBottomColor: '#d97706' }}>🚀 Marketplace Listing</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <p style={{ fontSize: '0.85em', color: '#94a3b8', margin: 0 }}>
+                            Publish this license to the public marketplace for investors to see.
+                        </p>
+                        <button
+                            onClick={() => updateAnnotation(item.id, 'export_trigger', true)}
+                            style={{
+                                width: '100%',
+                                padding: '10px',
+                                background: 'linear-gradient(90deg, #d97706, #fbbf24)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '8px',
+                                boxShadow: '0 4px 6px rgba(217, 119, 6, 0.2)'
+                            }}
+                        >
+                            🌍 Export to Marketplace
+                        </button>
+                    </div>
+                </section>
+
                 {/* File Management Section */}
                 <section className="section">
                     <h3>📂 Documents & Contracts</h3>
