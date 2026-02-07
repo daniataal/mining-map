@@ -221,6 +221,48 @@
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+/* Leaflet Popup Overrides for Premium Dark Theme */
+.leaflet-popup-content-wrapper {
+  background: #161b22;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 0;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.leaflet-popup-tip {
+  background: #161b22;
+  border: 1px solid #30363d;
+  /* Sometimes better to set transparent if it looks glitches */
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  width: auto !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  color: #8b949e;
+  top: 12px;
+  right: 12px;
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s;
+  z-index: 20;
+  /* Ensure it's above the sticky header if needed */
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
 /* Dossier Panel Styles */
 .dossier-panel {
   position: fixed;
