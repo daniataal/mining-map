@@ -89,7 +89,7 @@ const MapEffect = ({ selectedItem }) => {
             const currentZoom = map.getZoom();
             const targetZoom = Math.max(currentZoom, 16);
             map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, {
-                duration: 1.5
+                duration: 1.0
             });
         }
     }, [selectedItem, map]);
@@ -140,13 +140,13 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
     useEffect(() => {
         if (selectedItem) {
-            // Small delay to allow flyTo and unclustering to happen
+            // Wait for flyTo (1.0s) to finish + buffer to allow marker to mount/uncluster
             const timer = setTimeout(() => {
                 const marker = markerRefs.current[selectedItem.id];
                 if (marker) {
                     marker.openPopup();
                 }
-            }, 500);
+            }, 1200);
             return () => clearTimeout(timer);
         }
     }, [selectedItem]);
