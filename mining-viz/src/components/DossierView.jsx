@@ -30,12 +30,37 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
             });
     };
 
+    // Generic Due Diligence
     const fetchAiReport = () => {
         setLoadingAi(true);
         setAiReport(null);
 
-        const query = `Provide a due diligence summary for the mining company "${item.company}" located in ${item.region}, ${item.country}. They deal in "${item.commodity}". Check for any news, reputation, or license info.`;
+        // Enhanced prompt based on User Feedback that Popup agent is better
+        // We include specifically the license type and ask to verify it, which guides the AI better than a generic "check for info"
+        const lType = annotation?.licenseType || item.licenseType || 'Unknown';
+        const query = `Analyze the mining company "${item.company}" located in ${item.region}, ${item.country}. They are listed for commodity "${item.commodity}" with license type "${lType}". 
+        Provide a due diligence snapshot.
+        1. License Validity: Verify if a "${lType}" is appropriate for their operations and if they appear in valid registries.
+        2. Ownership & Corporate Structure: Look for shareholders and directors.
+        3. Reputation: Check for news, awards, or controversies.
+        4. Environmental Compliance: Check for EPA filings or issues.
+        
+        giving me a "Key Takeaway" at the end.`;
 
+        runAiQuery(query);
+    };
+
+    // Specific Contact Search
+    const fetchContactInfo = () => {
+        setLoadingAi(true);
+        setAiReport(null);
+
+        const query = `Find the official phone number, email, and owner contact details for the mining company "${item.company}" located in ${item.region}, ${item.country}. Prioritize finding direct contact numbers for the owner or administration.`;
+
+        runAiQuery(query);
+    };
+
+    const runAiQuery = (query) => {
         fetch(`${API_BASE}/api/ai/analyze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -137,6 +162,17 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
         setNewNote('');
     };
 
+    const saveReportToLogs = () => {
+        if (!aiReport) return;
+        const note = {
+            id: Date.now(),
+            text: `🤖 AI REPORT SUMMARY:\n${aiReport}`,
+            date: new Date().toISOString()
+        };
+        updateAnnotation(item.id, 'activityLog', [note, ...activityLog]);
+        addToast("Report saved to Activity Log", "success");
+    };
+
     return (
         <div className={`dossier-panel ${isOpen ? 'open' : ''}`}>
             <div className="dossier-header">
@@ -180,29 +216,53 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                             <p style={{ fontSize: '0.9em', color: '#586069', marginBottom: '12px' }}>
                                 Generate a real-time due diligence report on this entity using our AI engine.
                             </p>
-                            <button
-                                onClick={fetchAiReport}
-                                disabled={loadingAi}
-                                style={{
-                                    width: '100%',
-                                    padding: '12px',
-                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    fontWeight: '600',
-                                    fontSize: '0.95em',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '8px',
-                                    boxShadow: '0 4px 6px rgba(99, 102, 241, 0.3)',
-                                    transition: 'all 0.2s'
-                                }}
-                            >
-                                ✨ Generate Comprehensive Report
-                            </button>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button
+                                    onClick={fetchAiReport}
+                                    disabled={loadingAi}
+                                    style={{
+                                        flex: 1,
+                                        padding: '12px',
+                                        background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontWeight: '600',
+                                        fontSize: '0.95em',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        boxShadow: '0 4px 6px rgba(99, 102, 241, 0.3)',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    ✨ Full Report
+                                </button>
+                                <button
+                                    onClick={fetchContactInfo}
+                                    disabled={loadingAi}
+                                    style={{
+                                        flex: 1,
+                                        padding: '12px',
+                                        background: 'white',
+                                        color: '#6366f1',
+                                        border: '1px solid #6366f1',
+                                        borderRadius: '8px',
+                                        fontWeight: '600',
+                                        fontSize: '0.95em',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'all 0.2s'
+                                    }}
+                                >
+                                    📞 Find Contact
+                                </button>
+                            </div>
                         </>
                     )}
 
@@ -234,7 +294,10 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                         }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', borderBottom: '1px solid #f1f5f9', paddingBottom: '5px' }}>
                                 <strong style={{ color: '#6366f1' }}>GENERATED ANALYSIS</strong>
-                                <button onClick={() => setAiReport(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8em' }}>Clear</button>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <button onClick={saveReportToLogs} style={{ background: 'none', border: 'none', color: '#10b981', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}>💾 Save to Logs</button>
+                                    <button onClick={() => setAiReport(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.8em' }}>Clear</button>
+                                </div>
                             </div>
                             {aiReport}
                         </div>
