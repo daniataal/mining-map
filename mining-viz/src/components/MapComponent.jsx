@@ -146,14 +146,33 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
     useEffect(() => {
         if (selectedItem) {
-            // Wait for flyTo (1.0s) to finish + buffer to allow marker to mount/uncluster
-            const timer = setTimeout(() => {
+            let attempts = 0;
+            const maxAttempts = 15; // Try for ~4.5 seconds to be safe
+
+            const attemptOpen = () => {
+                attempts++;
                 const marker = markerRefs.current[selectedItem.id];
+                // Check if marker exists and is attached to a map (partially safeguards against unmounted refs)
                 if (marker) {
                     marker.openPopup();
+                    // We found it, but let's do one more open in case the map was still animating
+                    // actually, openPopup is usually idempotent-ish.
+                    return true;
                 }
-            }, 1200);
-            return () => clearTimeout(timer);
+                return false;
+            };
+
+            // Immediate attempt (if already unclustered)
+            if (attemptOpen()) return;
+
+            // Poll for the marker to become available (e.g. after declustering)
+            const interval = setInterval(() => {
+                if (attemptOpen() || attempts >= maxAttempts) {
+                    clearInterval(interval);
+                }
+            }, 300);
+
+            return () => clearInterval(interval);
         }
     }, [selectedItem]);
 
