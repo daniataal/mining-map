@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useToast } from './Toast';
 
-const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) => {
+const DossierView = ({ item, annotation, updateAnnotation, onClose, onOpenPopup, isOpen }) => {
     const { addToast } = useToast();
     const [newNote, setNewNote] = useState('');
     const [uploading, setUploading] = useState(false);
@@ -177,7 +177,26 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
         <div className={`dossier-panel ${isOpen ? 'open' : ''}`}>
             <div className="dossier-header">
                 <h2>{item.company}</h2>
-                <button className="close-btn" onClick={onClose}>×</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                        onClick={() => onOpenPopup && onOpenPopup(item)}
+                        style={{
+                            background: 'transparent',
+                            color: '#58a6ff',
+                            border: '1px solid #30363d',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '0.9em',
+                            fontWeight: '600',
+                            display: 'flex', alignItems: 'center', gap: '5px'
+                        }}
+                        title="Locate on Map & Open Popup"
+                    >
+                        📍 Locate
+                    </button>
+                    <button className="close-btn" onClick={onClose}>×</button>
+                </div>
             </div>
 
             <div className="dossier-content">
