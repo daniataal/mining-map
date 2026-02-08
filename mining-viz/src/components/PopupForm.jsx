@@ -186,6 +186,37 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                 </button>
             </div>
 
+            {/* AI Research Button */}
+            <div style={{ marginBottom: '15px' }}>
+                <button
+                    onClick={() => {
+                        // Construct a detailed search query for Gemini/Google
+                        const query = `Analyze the mining company "${item.company}" located in ${item.region}, ${item.country}. They are listed for commodity "${item.commodity}" with license type "${item.licenseType || 'Unknown'}". Provide details on their ${formData.licenseType || 'license'} verification, recent news, operational status, and any compliance issues.`;
+                        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                        window.open(url, '_blank');
+                    }}
+                    style={{
+                        width: '100%',
+                        background: 'linear-gradient(135deg, #4285F4, #9B72CB, #D96570)', // Gemini/Google AI colors
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '10px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        fontWeight: 'bold',
+                        fontSize: '0.95em',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                    }}
+                >
+                    <span>✨</span>
+                    <span>Ignite Gemini Intelligence</span>
+                </button>
+            </div>
+
             {/* Editable Fields Container */}
             <div style={{ background: '#161b22', padding: '12px', borderRadius: '8px', border: '1px solid #30363d', marginBottom: '15px', position: 'relative' }}>
                 {!isEditing && (

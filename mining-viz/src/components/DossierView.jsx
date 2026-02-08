@@ -136,6 +136,50 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                     </div>
                 </section>
 
+                {/* AI Intelligence Section */}
+                <section className="section" style={{ background: 'linear-gradient(to right, rgba(66, 133, 244, 0.1), rgba(219, 68, 55, 0.1))', border: '1px solid #e1e4e8' }}>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>✨</span> AI Intelligence & Research
+                    </h3>
+                    <p style={{ fontSize: '0.9em', color: '#586069', marginBottom: '12px' }}>
+                        Use AI to verify this entity, check for adverse media, and validate license claims.
+                    </p>
+                    <button
+                        onClick={() => {
+                            const query = `Conduct a due diligence report on "${item.company}" in ${item.region}, ${item.country}. Focus on: 1. Mining license validity for ${item.commodity}. 2. Ownership structure. 3. Environmental compliance history. 4. Recent news and reputation.`;
+                            const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                            window.open(url, '_blank');
+                        }}
+                        style={{
+                            width: '100%',
+                            padding: '12px',
+                            background: 'white',
+                            color: '#1a73e8',
+                            border: '1px solid #dadce0',
+                            borderRadius: '24px',
+                            fontWeight: '600',
+                            fontSize: '0.95em',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 1px 3px rgba(60,64,67,0.3)',
+                            transition: 'all 0.2s'
+                        }}
+                        onMouseOver={(e) => {
+                            e.currentTarget.style.boxShadow = '0 4px 8px rgba(60,64,67,0.3)';
+                            e.currentTarget.style.background = '#f8f9fa';
+                        }}
+                        onMouseOut={(e) => {
+                            e.currentTarget.style.boxShadow = '0 1px 3px rgba(60,64,67,0.3)';
+                            e.currentTarget.style.background = 'white';
+                        }}
+                    >
+                        <span style={{ fontSize: '1.2em' }}>🧠</span> Generate AI Report
+                    </button>
+                </section>
+
                 {/* Verification Checklist (The "Trust Score") */}
                 <section className="section">
                     <h3>🛡️ Verification Checklist</h3>
