@@ -222,7 +222,11 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
             <div style={{ marginBottom: '15px' }}>
                 {!aiAnalysis && !loadingAi && (
                     <button
-                        onClick={igniteGemini}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            igniteGemini();
+                        }}
                         style={{
                             width: '100%',
                             background: 'linear-gradient(135deg, #4285F4, #9B72CB, #D96570)',
