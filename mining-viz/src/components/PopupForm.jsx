@@ -5,6 +5,28 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
     const [aiAnalysis, setAiAnalysis] = useState(null);
     const [loadingAi, setLoadingAi] = useState(false);
 
+    // State for Gold Price
+    const [lbmaPricePerKg, setLbmaPricePerKg] = useState(null);
+
+    // Fetch Gold Price
+    useEffect(() => {
+        // Only fetch if commodity is gold-related
+        if (formData.commodity?.toLowerCase().includes('gold') || item.commodity?.toLowerCase().includes('gold')) {
+            fetch('https://data-asg.goldprice.org/dbXRates/USD')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.items && data.items.length > 0) {
+                        const pricePerOz = data.items[0].xauPrice;
+                        // 1 Troy Ounce = 0.0311035 Kg
+                        // So 1 Kg = 32.1507 Troy Ounces
+                        const pricePerKg = pricePerOz * 32.1507;
+                        setLbmaPricePerKg(pricePerKg);
+                    }
+                })
+                .catch(err => console.error("Failed to fetch gold price", err));
+        }
+    }, [formData.commodity, item.commodity]);
+
     // Use window.location.hostname to ensure it works when accessing via IP (remote dev) 
     // instead of hardcoded localhost
     const API_BASE = import.meta.env.VITE_API_BASE ||
@@ -320,6 +342,7 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                     )}
                 </div>
 
+
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <div style={{ flex: 1 }}>
                         <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>QTY (KG)</label>
@@ -335,7 +358,14 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                         )}
                     </div>
                     <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>PRICE ($)</label>
+                        <label style={{ display: 'block', fontSize: '0.7em', color: '#8b949e', fontWeight: 'bold' }}>
+                            PRICE ($)
+                            {formData.commodity?.toLowerCase().includes('gold') && formData.price && lbmaPricePerKg && (
+                                <span style={{ color: ((lbmaPricePerKg - formData.price) / lbmaPricePerKg) > 0 ? '#3fb950' : '#f85149', marginLeft: '5px' }}>
+                                    ({((lbmaPricePerKg - formData.price) / lbmaPricePerKg * 100).toFixed(1)}% Disc.)
+                                </span>
+                            )}
+                        </label>
                         {isEditing ? (
                             <input
                                 type="number"
@@ -345,6 +375,9 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
                             />
                         ) : (
                             <div style={{ fontSize: '0.95em', color: '#e6edf3', fontWeight: '500' }}>{formData.price || '-'}</div>
+                        )}
+                        {isEditing && formData.commodity?.toLowerCase().includes('gold') && lbmaPricePerKg && (
+                            <div style={{ fontSize: '0.7em', color: '#8b949e', marginTop: '2px' }}>Ref LBMA: ${Math.round(lbmaPricePerKg / 1000)}k/kg (Live)</div>
                         )}
                     </div>
                 </div>
