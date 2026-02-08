@@ -64,40 +64,58 @@ const createClusterCustomIcon = function (cluster) {
     const hasGold = goldCount > 0;
 
     // Calculate gold intensity (0-1) based on percentage
-    const goldIntensity = Math.min(goldPercentage * 1.5, 1); // Boost visibility
+    const goldIntensity = Math.min(goldPercentage * 1.2, 1);
 
-    // Create gradient that pulses between blue and gold
-    const baseColor = '#3b82f6'; // Blue
-    const goldColor = '#FFD700'; // Gold
+    // Base colors - keep background subtle like regular clusters
+    const baseColor = 'rgba(59, 130, 246, 0.2)'; // Blue background (same as regular)
+    const baseBorder = 'rgba(59, 130, 246, 0.6)';
 
-    // Use CSS animation for pulsing effect
-    const animationStyle = hasGold
-        ? `animation: goldPulse-${Math.round(goldIntensity * 100)} 2s ease-in-out infinite;`
-        : '';
+    // Gold accent for clusters with gold
+    const goldBorder = `rgba(255, 215, 0, ${0.4 + goldIntensity * 0.4})`;
+    const mixedBackground = hasGold
+        ? `rgba(${59 + goldIntensity * 196}, ${130 + goldIntensity * 85}, ${246 - goldIntensity * 246}, ${0.2 + goldIntensity * 0.1})`
+        : baseColor;
 
-    // Inject keyframes for this specific intensity
+    // Use CSS animation for subtle pulsing glow effect (like regular clusters)
+    const animationClass = hasGold ? `gold-pulse-${Math.round(goldIntensity * 100)}` : '';
+
+    // Inject keyframes for this specific intensity - only animate the glow, not the background
     if (hasGold && !document.getElementById(`goldPulse-style-${Math.round(goldIntensity * 100)}`)) {
         const style = document.createElement('style');
         style.id = `goldPulse-style-${Math.round(goldIntensity * 100)}`;
-        const intensity = Math.round(goldIntensity * 100);
+        const intensity = goldIntensity;
+
+        // Match the regular cluster animation style - only pulse the shadow
         style.innerHTML = `
-            @keyframes goldPulse-${intensity} {
-                0%, 100% { 
-                    background: ${baseColor};
-                    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+            @keyframes gold-pulse-${Math.round(intensity * 100)} {
+                0% {
+                    box-shadow: 0 0 10px rgba(255, 215, 0, ${0.3 * intensity}), 
+                                inset 0 0 5px rgba(255, 215, 0, ${0.15 * intensity}),
+                                0 0 10px rgba(59, 130, 246, ${0.4 * (1 - intensity * 0.5)}),
+                                inset 0 0 5px rgba(59, 130, 246, ${0.2 * (1 - intensity * 0.5)});
                 }
-                50% { 
-                    background: ${goldColor};
-                    box-shadow: 0 0 ${10 + goldIntensity * 20}px rgba(255, 215, 0, ${0.3 + goldIntensity * 0.5}),
-                                0 0 ${20 + goldIntensity * 30}px rgba(255, 215, 0, ${0.2 + goldIntensity * 0.3});
+                50% {
+                    box-shadow: 0 0 20px rgba(255, 215, 0, ${0.5 * intensity}), 
+                                inset 0 0 10px rgba(255, 215, 0, ${0.25 * intensity}),
+                                0 0 15px rgba(59, 130, 246, ${0.5 * (1 - intensity * 0.5)}),
+                                inset 0 0 8px rgba(59, 130, 246, ${0.3 * (1 - intensity * 0.5)});
+                }
+                100% {
+                    box-shadow: 0 0 10px rgba(255, 215, 0, ${0.3 * intensity}), 
+                                inset 0 0 5px rgba(255, 215, 0, ${0.15 * intensity}),
+                                0 0 10px rgba(59, 130, 246, ${0.4 * (1 - intensity * 0.5)}),
+                                inset 0 0 5px rgba(59, 130, 246, ${0.2 * (1 - intensity * 0.5)});
                 }
             }
         `;
         document.head.appendChild(style);
     }
 
+    const border = hasGold ? goldBorder : baseBorder;
+    const animationStyle = animationClass ? `animation: ${animationClass} 2s ease-in-out infinite;` : '';
+
     return L.divIcon({
-        html: `<div class="custom-cluster-icon" style="width: ${size}px; height: ${size}px; ${animationStyle}">${count}</div>`,
+        html: `<div class="custom-cluster-icon" style="width: ${size}px; height: ${size}px; background: ${mixedBackground}; border: 1px solid ${border}; ${animationStyle}">${count}</div>`,
         className: 'cluster-marker-wrapper', // meaningful styles are in inner div
         iconSize: L.point(size, size, true),
     });

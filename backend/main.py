@@ -340,6 +340,20 @@ def get_logs(limit: int = 100):
     finally:
         conn.close()
 
+@app.get("/activity/logs/user/{user_id}")
+def get_user_logs(user_id: int, limit: int = 100):
+    """Get activity logs for a specific user"""
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute(
+            "SELECT * FROM activity_logs WHERE user_id = %s ORDER BY timestamp DESC LIMIT %s",
+            (user_id, limit)
+        )
+        return c.fetchall()
+    finally:
+        conn.close()
+
 
 
 @app.get("/licenses")
