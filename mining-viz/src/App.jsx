@@ -18,10 +18,10 @@ function App() {
   const [rawData, setRawData] = useState([]);
   const [filter, setFilter] = useState('');
   const [sortBy, setSortBy] = useState('company');
-  const [selectedCountry, setSelectedCountry] = useState('All');
-  const [selectedCommodity, setSelectedCommodity] = useState('All');
-  const [selectedLicenseType, setSelectedLicenseType] = useState('All');
-  const [userStatusFilter, setUserStatusFilter] = useState('All');
+  const [selectedCountry, setSelectedCountry] = useState([]);
+  const [selectedCommodity, setSelectedCommodity] = useState([]);
+  const [selectedLicenseType, setSelectedLicenseType] = useState([]);
+  const [userStatusFilter, setUserStatusFilter] = useState([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'pipeline'
   const [mobileTab, setMobileTab] = useState('map'); // 'map', 'list', 'pipeline'
@@ -361,7 +361,7 @@ function App() {
   // Extract unique countries
   const countries = useMemo(() => {
     const c = new Set(rawData.map(item => item.country || 'Ghana')); // Default to Ghana if missing
-    return ['All', ...Array.from(c)];
+    return Array.from(c).sort();
   }, [rawData]);
 
   // Extract unique commodities
@@ -370,7 +370,7 @@ function App() {
       const annotation = userAnnotations[item.id] || {};
       return annotation.commodity || item.commodity || 'Unknown';
     }));
-    return ['All', ...Array.from(c).sort()];
+    return Array.from(c).sort();
   }, [rawData, userAnnotations]);
 
   // Extract unique license types
@@ -379,30 +379,30 @@ function App() {
       const annotation = userAnnotations[item.id] || {};
       return annotation.licenseType || item.licenseType || 'Unknown';
     }));
-    return ['All', ...Array.from(t).sort()];
+    return Array.from(t).sort();
   }, [rawData, userAnnotations]);
 
   // Filter and Sort
   const processedData = useMemo(() => {
     let data = rawData;
 
-    if (selectedCountry !== 'All') {
-      data = data.filter(item => (item.country || 'Ghana') === selectedCountry);
+    if (selectedCountry.length > 0) {
+      data = data.filter(item => selectedCountry.includes(item.country || 'Ghana'));
     }
 
-    if (selectedCommodity !== 'All') {
+    if (selectedCommodity.length > 0) {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
         const val = annotation.commodity || item.commodity || 'Unknown';
-        return val === selectedCommodity;
+        return selectedCommodity.includes(val);
       });
     }
 
-    if (selectedLicenseType !== 'All') {
+    if (selectedLicenseType.length > 0) {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
         const val = annotation.licenseType || item.licenseType || 'Unknown';
-        return val === selectedLicenseType;
+        return selectedLicenseType.includes(val);
       });
     }
 
@@ -411,20 +411,22 @@ function App() {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
         const comment = annotation.comment || '';
+        const commodity = annotation.commodity || item.commodity || '';
 
         return (
           (item.company && item.company.toLowerCase().includes(lower)) ||
           (item.licenseType && item.licenseType.toLowerCase().includes(lower)) ||
+          (commodity.toLowerCase().includes(lower)) ||
           (comment.toLowerCase().includes(lower)) // Search within comments too
         );
       });
     }
 
-    if (userStatusFilter !== 'All') {
+    if (userStatusFilter.length > 0) {
       data = data.filter(item => {
         const status = userAnnotations[item.id]?.status;
-        if (userStatusFilter === 'unmarked') return !status;
-        return status === userStatusFilter;
+        if (userStatusFilter.includes('unmarked') && !status) return true;
+        return userStatusFilter.includes(status);
       });
     }
 

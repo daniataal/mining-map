@@ -5,27 +5,8 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
     const [aiAnalysis, setAiAnalysis] = useState(null);
     const [loadingAi, setLoadingAi] = useState(false);
 
-    // State for Gold Price
+    // State for Gold Price (moved after formData declaration)
     const [lbmaPricePerKg, setLbmaPricePerKg] = useState(null);
-
-    // Fetch Gold Price
-    useEffect(() => {
-        // Only fetch if commodity is gold-related
-        if (formData.commodity?.toLowerCase().includes('gold') || item.commodity?.toLowerCase().includes('gold')) {
-            fetch('https://data-asg.goldprice.org/dbXRates/USD')
-                .then(res => res.json())
-                .then(data => {
-                    if (data.items && data.items.length > 0) {
-                        const pricePerOz = data.items[0].xauPrice;
-                        // 1 Troy Ounce = 0.0311035 Kg
-                        // So 1 Kg = 32.1507 Troy Ounces
-                        const pricePerKg = pricePerOz * 32.1507;
-                        setLbmaPricePerKg(pricePerKg);
-                    }
-                })
-                .catch(err => console.error("Failed to fetch gold price", err));
-        }
-    }, [formData.commodity, item.commodity]);
 
     // Use window.location.hostname to ensure it works when accessing via IP (remote dev) 
     // instead of hardcoded localhost
@@ -64,6 +45,26 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
             });
         }
     }, [isEditing, annotation, item]);
+
+    // Fetch Gold Price (after formData is initialized)
+    useEffect(() => {
+        // Only fetch if commodity is gold-related
+        const commodity = formData.commodity || item.commodity || '';
+        if (commodity.toLowerCase().includes('gold')) {
+            fetch('https://data-asg.goldprice.org/dbXRates/USD')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.items && data.items.length > 0) {
+                        const pricePerOz = data.items[0].xauPrice;
+                        // 1 Troy Ounce = 0.0311035 Kg
+                        // So 1 Kg = 32.1507 Troy Ounces
+                        const pricePerKg = pricePerOz * 32.1507;
+                        setLbmaPricePerKg(pricePerKg);
+                    }
+                })
+                .catch(err => console.error("Failed to fetch gold price", err));
+        }
+    }, [formData.commodity, item.commodity]);
 
     const handleSave = () => {
         // Prepare updates

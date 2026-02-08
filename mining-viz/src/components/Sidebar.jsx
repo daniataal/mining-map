@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import SkeletonLoader from './SkeletonLoader';
+import MultiSelect from './MultiSelect';
 
 const Sidebar = ({
     processedData,
@@ -102,39 +103,51 @@ const Sidebar = ({
 
                         <div className="control-group">
                             <label>Commodity</label>
-                            <select className="commodity-select" value={selectedCommodity} onChange={e => setSelectedCommodity(e.target.value)}>
-                                {commodities.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                            <MultiSelect
+                                options={commodities}
+                                selected={selectedCommodity}
+                                onChange={setSelectedCommodity}
+                                placeholder="Commodities"
+                                searchable={true}
+                            />
                         </div>
 
                         <div className="control-group">
                             <label>Country</label>
-                            <select value={selectedCountry} onChange={e => setSelectedCountry(e.target.value)}>
-                                {countries.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                            <MultiSelect
+                                options={countries}
+                                selected={selectedCountry}
+                                onChange={setSelectedCountry}
+                                placeholder="Countries"
+                                searchable={true}
+                            />
                         </div>
 
                         <div className="control-group">
                             <label>My Analysis</label>
-                            <select value={userStatusFilter} onChange={e => setUserStatusFilter(e.target.value)}>
-                                <option value="All">All</option>
-                                <option value="good">✅ Go</option>
-                                <option value="maybe">🤔 Maybe</option>
-                                <option value="bad">❌ No Go</option>
-                                <option value="unmarked">Unmarked</option>
-                            </select>
+                            <MultiSelect
+                                options={['good', 'maybe', 'bad', 'unmarked']}
+                                selected={userStatusFilter}
+                                onChange={setUserStatusFilter}
+                                placeholder="Status"
+                                searchable={false}
+                            />
                         </div>
 
                         <div className="control-group">
                             <label>License Type</label>
-                            <select value={selectedLicenseType} onChange={e => setSelectedLicenseType(e.target.value)}>
-                                {licenseTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                            <MultiSelect
+                                options={licenseTypes}
+                                selected={selectedLicenseType}
+                                onChange={setSelectedLicenseType}
+                                placeholder="License Types"
+                                searchable={true}
+                            />
                         </div>
                     </div>
                 )}
 
-                {showFilters && (selectedCountry !== 'All' || selectedCommodity !== 'All' || filter || userStatusFilter !== 'All' || selectedLicenseType !== 'All') && (
+                {showFilters && (selectedCountry.length > 0 || selectedCommodity.length > 0 || filter || userStatusFilter.length > 0 || selectedLicenseType.length > 0) && (
                     <div style={{ marginTop: '15px', borderTop: '1px solid #334155', paddingTop: '10px' }}>
                         <div style={{ fontSize: '0.85em', marginBottom: '8px', color: '#94a3b8', textAlign: 'center' }}>
                             Found {processedData.length} matches
