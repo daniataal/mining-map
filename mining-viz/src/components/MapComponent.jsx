@@ -82,22 +82,22 @@ const getMarkerColor = (commodity, userStatus) => {
 };
 
 // Component to handle map flyTo effects
-const MapEffect = ({ selectedItem }) => {
+const MapEffect = ({ selectedItem, mapFlyTrigger }) => {
     const map = useMap();
     useEffect(() => {
-        if (selectedItem && selectedItem.lat && selectedItem.lng) {
+        if (selectedItem && selectedItem.lat && selectedItem.lng && mapFlyTrigger > 0) {
             const currentZoom = map.getZoom();
             const targetZoom = Math.max(currentZoom, 16);
             map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, {
                 duration: 1.0
             });
         }
-    }, [selectedItem, map]);
+    }, [mapFlyTrigger, map]); // Only fly when trigger changes
     return null;
 };
 
 
-const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile, handleOpenDossier }) => {
+const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile, handleOpenDossier, mapFlyTrigger }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
 
     // Effect to handle map resize
@@ -216,7 +216,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                 </div>
             )}
             <MapContainer ref={mapRef} center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
-                <MapEffect selectedItem={selectedItem} />
+                <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
                 <LayersControl position="topright">
                     <LayersControl.BaseLayer checked name="Dark Matter (Default)">
                         <TileLayer

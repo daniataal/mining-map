@@ -59,6 +59,7 @@ function App() {
   // New: Dossier State
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState(null);
+  const [mapFlyTrigger, setMapFlyTrigger] = useState(0); // Trigger map animations only when desired
 
   // Get API base URL from env or default to dynamic hostname
   // If we are on HTTPS, assume we are behind a proxy that handles /api routing or similar
@@ -504,7 +505,6 @@ function App() {
         updateAnnotation={updateAnnotation}
       />
 
-      {/* Sidebar Wrapper for Mobile Toggling */}
       <div className="sidebar-wrapper" style={{
         display: (isMobile && mobileTab !== 'list') || (!isMobile && isSidebarCollapsed) ? 'none' : 'block',
         width: isMobile ? '100%' : 'auto'
@@ -524,6 +524,7 @@ function App() {
           selectedItem={selectedItem} setSelectedItem={(item) => {
             setSelectedItem(item);
             handleOpenDossier(item);
+            setMapFlyTrigger(prev => prev + 1); // Trigger map fly only from Sidebar
             logActivity(userId, username, 'SELECT_ITEM', `Selected ${item.company}`);
           }}
           hoveredItem={hoveredItem} setHoveredItem={setHoveredItem}
@@ -615,6 +616,7 @@ function App() {
             processedData={processedData}
             userAnnotations={userAnnotations}
             selectedItem={selectedItem}
+            mapFlyTrigger={mapFlyTrigger} // Pass the trigger
             setSelectedItem={(item) => {
               setSelectedItem(item);
               if (item) {
