@@ -341,7 +341,7 @@ def get_logs(limit: int = 100):
         conn.close()
 
 @app.get("/activity/logs/user/{user_id}")
-def get_user_logs(user_id: int, limit: int = 100):
+def get_user_logs(user_id: str, limit: int = 100):
     """Get activity logs for a specific user"""
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
