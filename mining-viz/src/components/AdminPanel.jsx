@@ -112,14 +112,22 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
         setUserLogs([]);
 
         fetch(`${API_BASE}/activity/logs/user/${user.id}?limit=200`)
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+            })
             .then(data => {
-                setUserLogs(data);
+                // Ensure data is an array
+                setUserLogs(Array.isArray(data) ? data : []);
                 setLoadingUserLogs(false);
             })
             .catch(err => {
                 console.error("Failed to fetch user logs", err);
+                setUserLogs([]); // Ensure it's an empty array on error
                 setLoadingUserLogs(false);
+                alert(`Failed to load activity logs: ${err.message}`);
             });
     };
 
