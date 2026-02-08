@@ -407,7 +407,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                background: '#f1f5f9',
+                                background: '#161b22',
                                 padding: '8px',
                                 borderRadius: '4px',
                                 marginBottom: '5px',
@@ -417,7 +417,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                                     href={API_BASE.startsWith('http') ? encodeURI(`${API_BASE}${file.url}`) : encodeURI(`http://${API_BASE}${file.url}`)}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    style={{ textDecoration: 'none', color: '#334155', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}
+                                    style={{ textDecoration: 'none', color: '#58a6ff', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '5px' }}
                                 >
                                     {getFileIcon(file.filename)} {file.filename}
                                 </a>
@@ -442,7 +442,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                             rows={3}
                             value={newNote}
                             onChange={(e) => setNewNote(e.target.value)}
-                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3' }}
                         ></textarea>
                         <button className="log-btn" onClick={addNote}>Add Note</button>
                     </div>
@@ -450,9 +450,9 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, isOpen }) =>
                     <div className="log-history" style={{ marginTop: '15px' }}>
                         {activityLog.length === 0 && <div style={{ color: '#94a3b8', fontSize: '0.85em', fontStyle: 'italic' }}>No activity recorded yet.</div>}
                         {activityLog.map(note => (
-                            <div key={note.id} style={{ borderLeft: '2px solid #cbd5e1', paddingLeft: '10px', marginBottom: '10px' }}>
-                                <div style={{ fontSize: '0.75em', color: '#475569', fontWeight: '600' }}>{new Date(note.date).toLocaleString()}</div>
-                                <div style={{ fontSize: '0.9em', color: '#0f172a', lineHeight: '1.4' }}>{note.text}</div>
+                            <div key={note.id} style={{ borderLeft: '2px solid #30363d', paddingLeft: '10px', marginBottom: '10px' }}>
+                                <div style={{ fontSize: '0.75em', color: '#8b949e', fontWeight: '600' }}>{new Date(note.date).toLocaleString()}</div>
+                                <div style={{ fontSize: '0.9em', color: '#e6edf3', lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>{note.text}</div>
                             </div>
                         ))}
                     </div>
