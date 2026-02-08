@@ -145,7 +145,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                         onClick={() => setActiveTab('users')}
                         style={{
                             flex: 1, padding: '15px', background: activeTab === 'users' ? '#1e293b' : 'transparent',
-                            color: activeTab === 'users' ? '#3b82f6' : '#94a3b8', border: 'none', cursor: 'pointer', fontWeight: 'bold'
+                            color: activeTab === 'users' ? '#fbbf24' : '#94a3b8', border: 'none', cursor: 'pointer', fontWeight: 'bold'
                         }}
                     >
                         👥 User Management
@@ -154,7 +154,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                         onClick={() => setActiveTab('logs')}
                         style={{
                             flex: 1, padding: '15px', background: activeTab === 'logs' ? '#1e293b' : 'transparent',
-                            color: activeTab === 'logs' ? '#3b82f6' : '#94a3b8', border: 'none', cursor: 'pointer', fontWeight: 'bold'
+                            color: activeTab === 'logs' ? '#fbbf24' : '#94a3b8', border: 'none', cursor: 'pointer', fontWeight: 'bold'
                         }}
                     >
                         📜 Activity Logs
@@ -197,7 +197,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                     </div>
                                     <button
                                         type="submit"
-                                        style={{ padding: '8px 20px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                                        style={{ padding: '8px 20px', background: '#fbbf24', color: '#000', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                                     >
                                         Create
                                     </button>
@@ -227,7 +227,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                                     <td style={{ padding: '12px', textAlign: 'right', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                                                         <button
                                                             onClick={() => handleEditUser(u)}
-                                                            style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer' }}
+                                                            style={{ background: '#fbbf24', color: '#000', border: 'none', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                                                         >
                                                             ✏️ Edit
                                                         </button>
@@ -266,7 +266,7 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                             <tr key={log.id} style={{ borderTop: '1px solid #334155' }}>
                                                 <td style={{ padding: '10px' }}>{new Date(log.timestamp).toLocaleString()}</td>
                                                 <td style={{ padding: '10px', color: '#fff' }}>{log.username}</td>
-                                                <td style={{ padding: '10px', color: '#3b82f6' }}>{log.action}</td>
+                                                <td style={{ padding: '10px', color: '#fbbf24' }}>{log.action}</td>
                                                 <td style={{ padding: '10px' }}>{log.details || '-'}</td>
                                             </tr>
                                         ))}
