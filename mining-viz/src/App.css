@@ -833,3 +833,34 @@
   font-size: 1.5rem;
   margin-bottom: 4px;
 }
+
+/* Admin Panel Mobile Responsive */
+@media (max-width: 768px) {
+  .admin-modal {
+    max-width: 100% !important;
+    max-height: 95vh !important;
+    margin: 10px !important;
+    border-radius: 8px !important;
+  }
+
+  .admin-modal table {
+    font-size: 0.8rem !important;
+  }
+
+  .admin-modal th,
+  .admin-modal td {
+    padding: 8px !important;
+  }
+
+  .admin-modal h3 {
+    font-size: 1rem !important;
+  }
+
+  .admin-modal form {
+    flex-direction: column !important;
+  }
+
+  .admin-modal form>div {
+    width: 100% !important;
+  }
+}
