@@ -242,31 +242,34 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
             </div>
 
             {/* View Dossier Button */}
-            <div style={{ marginBottom: '15px' }}>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenDossier && onOpenDossier();
-                    }}
-                    style={{
-                        width: '100%',
-                        padding: '10px',
-                        background: '#1f6feb',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontWeight: 'bold',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        fontSize: '0.9em'
-                    }}
-                >
-                    📄 View Full Dossier
-                </button>
-            </div>
+            {/* View Full Dossier - Mobile Only */}
+            {isMobile && (
+                <div style={{ marginBottom: '15px' }}>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenDossier && onOpenDossier();
+                        }}
+                        style={{
+                            width: '100%',
+                            padding: '10px',
+                            background: '#1f6feb',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            fontWeight: 'bold',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            fontSize: '0.9em'
+                        }}
+                    >
+                        📄 View Full Dossier
+                    </button>
+                </div>
+            )}
 
             {/* AI Research Button */}
             <div style={{ marginBottom: '15px' }}>

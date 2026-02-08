@@ -383,9 +383,13 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                     minWidth={250}
                                     eventHandlers={{
                                         remove: () => {
-                                            if (selectedItemRef.current?.id === item.id) {
-                                                setSelectedItem(null);
-                                            }
+                                            // Use a small timeout to allow marker clicks to update selectedItem first
+                                            // This prevents the popup from being cleared when switching between markers
+                                            setTimeout(() => {
+                                                if (selectedItemRef.current?.id === item.id) {
+                                                    setSelectedItem(null);
+                                                }
+                                            }, 50);
                                         }
                                     }}
                                 >
