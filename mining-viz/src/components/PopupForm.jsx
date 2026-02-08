@@ -2,6 +2,13 @@ import { useState, useEffect } from 'react';
 
 const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, licenseTypes, isMobile, onOpenDossier, isOpen }) => {
     const [isEditing, setIsEditing] = useState(false);
+    const [aiAnalysis, setAiAnalysis] = useState(null);
+    const [loadingAi, setLoadingAi] = useState(false);
+
+    // Use window.location.hostname to ensure it works when accessing via IP (remote dev) 
+    // instead of hardcoded localhost
+    const API_BASE = import.meta.env.VITE_API_BASE ||
+        (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
 
     // Reset editing state when popup closes
     useEffect(() => {
@@ -68,9 +75,34 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
         // Effect will reset data
     };
 
+    const igniteGemini = () => {
+        setLoadingAi(true);
+        setAiAnalysis(null);
+
+        const query = `Analyze the mining company "${item.company}" located in ${item.region}, ${item.country}. They are listed for commodity "${item.commodity}" with license type "${item.licenseType || 'Unknown'}". Verify their license status.`;
+
+        fetch(`${API_BASE}/api/ai/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: query })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    setAiAnalysis(data.analysis);
+                } else {
+                    setAiAnalysis("Could not generate report. " + (data.message || ""));
+                }
+            })
+            .catch(err => {
+                setAiAnalysis("Error connecting to AI service.");
+                console.error(err);
+            })
+            .finally(() => setLoadingAi(false));
+    };
+
     return (
         <div className="popup-content" style={{ minWidth: '320px', maxHeight: '500px', overflowY: 'auto', backgroundColor: '#0d1117' }}>
-            {/* Header / Title */}
             {/* Header / Title */}
             <div style={{
                 background: '#161b22',
@@ -188,33 +220,61 @@ const PopupForm = ({ item, annotation, updateAnnotation, onDelete, commodities, 
 
             {/* AI Research Button */}
             <div style={{ marginBottom: '15px' }}>
-                <button
-                    onClick={() => {
-                        // Construct a detailed search query for Gemini/Google
-                        const query = `Analyze the mining company "${item.company}" located in ${item.region}, ${item.country}. They are listed for commodity "${item.commodity}" with license type "${item.licenseType || 'Unknown'}". Provide details on their ${formData.licenseType || 'license'} verification, recent news, operational status, and any compliance issues.`;
-                        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-                        window.open(url, '_blank');
-                    }}
-                    style={{
-                        width: '100%',
-                        background: 'linear-gradient(135deg, #4285F4, #9B72CB, #D96570)', // Gemini/Google AI colors
-                        color: 'white',
-                        border: 'none',
+                {!aiAnalysis && !loadingAi && (
+                    <button
+                        onClick={igniteGemini}
+                        style={{
+                            width: '100%',
+                            background: 'linear-gradient(135deg, #4285F4, #9B72CB, #D96570)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '10px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            fontWeight: 'bold',
+                            fontSize: '0.95em',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }}
+                    >
+                        <span>✨</span>
+                        <span>Ignite Gemini Intelligence</span>
+                    </button>
+                )}
+
+                {loadingAi && (
+                    <div style={{ padding: '10px', textAlign: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px' }}>
+                        <div className="spinner" style={{
+                            width: '20px', height: '20px', border: '2px solid rgba(66, 133, 244, 0.3)',
+                            borderTop: '2px solid #4285F4', borderRadius: '50%', margin: '0 auto 5px auto',
+                            animation: 'spin 1s linear infinite'
+                        }}></div>
+                        <span style={{ fontSize: '0.8em', color: '#8b949e' }}>Generating Intelligence...</span>
+                        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                    </div>
+                )}
+
+                {aiAnalysis && (
+                    <div style={{
+                        background: '#0d1117',
+                        border: '1px solid #30363d',
                         borderRadius: '6px',
                         padding: '10px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        fontWeight: 'bold',
-                        fontSize: '0.95em',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                    }}
-                >
-                    <span>✨</span>
-                    <span>Ignite Gemini Intelligence</span>
-                </button>
+                        maxHeight: '200px',
+                        overflowY: 'auto'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', borderBottom: '1px solid #21262d', paddingBottom: '5px' }}>
+                            <strong style={{ color: '#D96570', fontSize: '0.8em' }}>AI ANALYSIS</strong>
+                            <button onClick={() => setAiAnalysis(null)} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '0.8em' }}>Close</button>
+                        </div>
+                        <div style={{ fontSize: '0.85em', color: '#c9d1d9', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
+                            {aiAnalysis}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Editable Fields Container */}

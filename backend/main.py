@@ -821,9 +821,51 @@ def delete_file(file_id: str):
         conn.commit()
         return {"status": "deleted"}
     except Exception as e:
-        return {"error": str(e)}
+        return Response(str(e), status_code=500)
     finally:
         conn.close()
+
+# --- AI Analysis Endpoint (Free via Pollinations.ai) ---
+
+class AIRequest(BaseModel):
+    query: str
+
+@app.post("/api/ai/analyze")
+def analyze_with_ai(request: AIRequest):
+    """
+    Proxies a request to a free AI provider (Pollinations.ai) to get a text response.
+    This avoids CORS issues and hides the provider details.
+    Pollinations.ai provides free access to models like OpenAI/Claude.
+    """
+    try:
+        # Construct a system-like prompt wrapper for better results
+        full_prompt = (
+            "You are an expert mining intelligence analyst. "
+            "Analyze the following mining entity request and provide a professional, concise due diligence report. "
+            "Focus on: License Validity, Ownership, Reputation, and Environmental Compliance. "
+            "Use bullet points for clarity. If info is unknown, state 'Data unavailable in public records'.\n\n"
+            f"Query: {request.query}"
+        )
+        
+        # Pollinations.ai text API
+        # URL pattern: https://text.pollinations.ai/{prompt}
+        # It handles URL encoding, but requests handles it better.
+        
+        url = f"https://text.pollinations.ai/{requests.utils.quote(full_prompt)}"
+        
+        # Determine model? Pollinations defaults to a good one (usually GPT-4o-mini or similar)
+        # We can try to specify model if supported, but default is smartest.
+        
+        response = requests.get(url, timeout=30)
+        
+        if response.status_code == 200:
+            return {"status": "success", "analysis": response.text}
+        else:
+            return {"status": "error", "message": f"AI Provider returned {response.status_code}"}
+            
+    except Exception as e:
+        print(f"AI Request Failed: {e}")
+        return {"status": "error", "message": "Failed to connect to AI service."}
 if __name__ == "__main__":
     import uvicorn
     # Run slightly different port than typical default to avoid collisions if any
