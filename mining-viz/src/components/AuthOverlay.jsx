@@ -85,16 +85,17 @@ const AuthOverlay = ({ onLogin, error }) => {
                     <button
                         type="submit"
                         style={{
+                            width: '100%',
                             padding: '12px',
-                            background: '#3b82f6',
-                            color: 'white',
+                            background: '#fbbf24', // Gold
+                            color: '#000',
                             border: 'none',
                             borderRadius: '8px',
                             fontSize: '1rem',
                             fontWeight: 'bold',
                             cursor: 'pointer',
                             marginTop: '10px',
-                            transition: 'background 0.2s'
+                            transition: 'opacity 0.2s'
                         }}
                     >
                         Sign In

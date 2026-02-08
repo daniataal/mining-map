@@ -514,21 +514,27 @@
 }
 
 .stage-selector button.active {
-  background: #3b82f6;
-  color: white;
-  border-color: #3b82f6;
+  background: var(--primary-color);
+  color: #000;
+  border-color: var(--primary-color);
+  font-weight: bold;
 }
 
 .log-btn {
   width: 100%;
   padding: 8px;
-  background: #3b82f6;
-  color: white;
+  background: var(--primary-color);
+  color: #000;
   border: none;
   border-radius: 4px;
   margin-top: 8px;
   cursor: pointer;
   font-weight: bold;
+  transition: background 0.2s;
+}
+
+.log-btn:hover {
+  background: #f59e0b;
 }
 
 @keyframes spin {
@@ -626,12 +632,12 @@
 
 .upload-btn {
   display: inline-block;
-  background: #3b82f6;
-  color: white;
-  padding: 8px 12px;
+  background: var(--primary-color);
+  color: #000;
+  padding: 10px 12px;
   border-radius: 6px;
   font-size: 0.9em;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: background 0.2s;
   width: 100%;
@@ -640,7 +646,7 @@
 }
 
 .upload-btn:hover {
-  background: #2563eb;
+  background: #f59e0b;
 }
 
 /* Mobile App Styles */
@@ -746,7 +752,7 @@
 }
 
 .toast-error {
-  border-left: 4px solid #ef4444;
+  border-left: 44px solid #ef4444;
 }
 
 .toast-info {
@@ -807,8 +813,20 @@
 }
 
 .nav-item.active {
-  color: #3b82f6;
-  background-color: rgba(59, 130, 246, 0.1);
+  color: var(--primary-color);
+  background-color: rgba(251, 191, 36, 0.1);
+}
+
+.mining-card.active-card {
+  border-color: var(--primary-color);
+  background: rgba(251, 191, 36, 0.05);
+  /* Gold tint */
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.diamond-icon {
+  color: var(--primary-color);
+  opacity: 1;
 }
 
 .nav-icon {
