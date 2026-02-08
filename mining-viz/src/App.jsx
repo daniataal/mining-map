@@ -133,6 +133,15 @@ function App() {
     setDossierItem(null);
   };
 
+  const handleOpenPopup = (item) => {
+    // pinpoint on map
+    if (!item) return;
+    setSelectedItem(item);
+    setIsDossierOpen(false);
+    setMapFlyTrigger(prev => prev + 1);
+    logActivity(userId, username, 'LOCATE_ON_MAP', `Located ${item.company}`);
+  };
+
   // Load annotations from local storage
   const [userAnnotations, setUserAnnotations] = useState(() => {
     try {
@@ -500,6 +509,7 @@ function App() {
       <DossierView
         isOpen={isDossierOpen}
         onClose={handleCloseDossier}
+        onOpenPopup={handleOpenPopup}
         item={dossierItem}
         annotation={dossierItem ? (userAnnotations[dossierItem.id] || {}) : {}}
         updateAnnotation={updateAnnotation}
