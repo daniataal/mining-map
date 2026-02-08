@@ -51,8 +51,53 @@ const createClusterCustomIcon = function (cluster) {
     if (count > 10) size = 50;
     if (count > 100) size = 60;
 
+    // Count gold licenses in cluster
+    const markers = cluster.getAllChildMarkers();
+    const goldCount = markers.filter(marker => {
+        const item = marker.options.item; // We'll need to pass this
+        if (!item) return false;
+        const commodity = item.commodity || '';
+        return commodity.toLowerCase().includes('gold');
+    }).length;
+
+    const goldPercentage = goldCount / count;
+    const hasGold = goldCount > 0;
+
+    // Calculate gold intensity (0-1) based on percentage
+    const goldIntensity = Math.min(goldPercentage * 1.5, 1); // Boost visibility
+
+    // Create gradient that pulses between blue and gold
+    const baseColor = '#3b82f6'; // Blue
+    const goldColor = '#FFD700'; // Gold
+
+    // Use CSS animation for pulsing effect
+    const animationStyle = hasGold
+        ? `animation: goldPulse-${Math.round(goldIntensity * 100)} 2s ease-in-out infinite;`
+        : '';
+
+    // Inject keyframes for this specific intensity
+    if (hasGold && !document.getElementById(`goldPulse-style-${Math.round(goldIntensity * 100)}`)) {
+        const style = document.createElement('style');
+        style.id = `goldPulse-style-${Math.round(goldIntensity * 100)}`;
+        const intensity = Math.round(goldIntensity * 100);
+        style.innerHTML = `
+            @keyframes goldPulse-${intensity} {
+                0%, 100% { 
+                    background: ${baseColor};
+                    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+                }
+                50% { 
+                    background: ${goldColor};
+                    box-shadow: 0 0 ${10 + goldIntensity * 20}px rgba(255, 215, 0, ${0.3 + goldIntensity * 0.5}),
+                                0 0 ${20 + goldIntensity * 30}px rgba(255, 215, 0, ${0.2 + goldIntensity * 0.3});
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     return L.divIcon({
-        html: `<div class="custom-cluster-icon" style="width: ${size}px; height: ${size}px;">${count}</div>`,
+        html: `<div class="custom-cluster-icon" style="width: ${size}px; height: ${size}px; ${animationStyle}">${count}</div>`,
         className: 'cluster-marker-wrapper', // meaningful styles are in inner div
         iconSize: L.point(size, size, true),
     });
@@ -309,6 +354,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                 position={[item.lat, item.lng]}
                                 icon={createCustomIcon(color, isSelected)}
                                 ref={(el) => (markerRefs.current[item.id] = el)}
+                                item={item}
                                 eventHandlers={{
                                     click: () => setSelectedItem(item),
                                 }}
