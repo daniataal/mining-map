@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, useMap, LayersControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -159,6 +159,15 @@ const MapEffect = ({ selectedItem, mapFlyTrigger }) => {
     return null;
 };
 
+const MapClickHandler = ({ onMapClick }) => {
+    useMapEvents({
+        click: () => {
+            onMapClick();
+        },
+    });
+    return null;
+};
+
 
 const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelectedItem, mapCenter, PopupForm, updateAnnotation, deleteLicense, commodities, licenseTypes, isMobile, handleOpenDossier, mapFlyTrigger }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
@@ -285,6 +294,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                 </div>
             )}
             <MapContainer ref={mapRef} center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
+                <MapClickHandler onMapClick={() => setSelectedItem(null)} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
                 <LayersControl position="topright">
                     <LayersControl.BaseLayer checked name="Dark Matter (Default)">
@@ -380,24 +390,17 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                                 ref={(el) => (markerRefs.current[item.id] = el)}
                                 item={item}
                                 eventHandlers={{
-                                    click: () => setSelectedItem(item),
+                                    click: (e) => {
+                                        setSelectedItem(item);
+                                        // Ensure popup opens even if item was already selected (which prevents useEffect from firing)
+                                        e.target.openPopup();
+                                    },
                                 }}
                             >
                                 <Popup
                                     offset={[0, -20]}
                                     maxWidth={300}
                                     minWidth={250}
-                                    eventHandlers={{
-                                        remove: () => {
-                                            // Use a small timeout to allow marker clicks to update selectedItem first
-                                            // This prevents the popup from being cleared when switching between markers
-                                            setTimeout(() => {
-                                                if (selectedItemRef.current?.id === item.id) {
-                                                    setSelectedItem(null);
-                                                }
-                                            }, 50);
-                                        }
-                                    }}
                                 >
                                     <PopupForm
                                         item={item}
