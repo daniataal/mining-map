@@ -273,6 +273,66 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
             })
         };
     }, [geoJsonData, activeCountries]);
+    const onSelectRef = useRef(setSelectedItem);
+    const onOpenDossierRef = useRef(handleOpenDossier);
+    const updateAnnotationRef = useRef(updateAnnotation);
+    const deleteLicenseRef = useRef(deleteLicense);
+
+    // Keep refs updated with latest props
+    useEffect(() => {
+        onSelectRef.current = setSelectedItem;
+        onOpenDossierRef.current = handleOpenDossier;
+        updateAnnotationRef.current = updateAnnotation;
+        deleteLicenseRef.current = deleteLicense;
+    });
+
+    const markers = useMemo(() => {
+        return processedData.map((item, idx) => {
+            if (item.lat === undefined || item.lat === null || item.lng === undefined || item.lng === null) return null;
+            const annotation = userAnnotations[item.id] || {};
+            const commodity = annotation.commodity || item.commodity;
+            const color = getMarkerColor(commodity, annotation.status);
+
+            return (
+                <Marker
+                    key={item.id || idx}
+                    position={[item.lat, item.lng]}
+                    // STATIC ICON: Only depends on data, not selection state
+                    icon={createCustomIcon(color, false)}
+                    ref={(el) => {
+                        if (el) markerRefs.current[item.id] = el;
+                    }}
+                    item={item}
+                    eventHandlers={{
+                        click: (e) => {
+                            // Use ref to call latest handler without breaking memoization
+                            onSelectRef.current && onSelectRef.current(item);
+                            e.target.openPopup();
+                        },
+                    }}
+                >
+                    <Popup
+                        offset={[0, -20]}
+                        maxWidth={300}
+                        minWidth={250}
+                    >
+                        <PopupForm
+                            item={item}
+                            annotation={annotation}
+                            updateAnnotation={(id, field, val) => updateAnnotationRef.current(id, field, val)}
+                            onDelete={() => deleteLicenseRef.current(item.id)}
+                            commodities={commodities}
+                            licenseTypes={licenseTypes}
+                            isMobile={isMobile}
+                            onOpenDossier={() => onOpenDossierRef.current && onOpenDossierRef.current(item)}
+                            isOpen={false} // logic handled by imperative open, keeping this static avoids re-renders
+                        />
+                    </Popup>
+                </Marker>
+            );
+        });
+    }, [processedData, userAnnotations, commodities, licenseTypes, isMobile]);
+
     return (
         <div className="map-wrapper" style={{ position: 'relative' }}>
             {processedData.length === 0 && (
@@ -288,7 +348,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                     color: '#94a3b8',
                     textAlign: 'center',
                     border: '1px solid #334155',
-                    pointerEvents: 'none' // allow clicking through if needed, though usually empty state means reset filters
+                    pointerEvents: 'none'
                 }}>
                     <div style={{ fontSize: '3rem', marginBottom: '10px' }}>🔍</div>
                     <h3 style={{ margin: 0, color: '#f8fafc' }}>No Licenses Found</h3>
@@ -296,7 +356,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                 </div>
             )}
             <MapContainer ref={mapRef} center={mapCenter} zoom={7} style={{ height: '100%', width: '100%' }}>
-                <MapClickHandler onMapClick={() => setSelectedItem(null)} />
+                <MapClickHandler onMapClick={() => onSelectRef.current(null)} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
                 <LayersControl position="topright">
                     <LayersControl.BaseLayer checked name="Dark Matter (Default)">
@@ -376,50 +436,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                     maxClusterRadius={40}
                     iconCreateFunction={createClusterCustomIcon}
                 >
-                    {processedData.map((item, idx) => {
-                        if (item.lat === undefined || item.lat === null || item.lng === undefined || item.lng === null) return null;
-                        const annotation = userAnnotations[item.id] || {};
-                        // If commodity is overridden, use it for color
-                        const commodity = annotation.commodity || item.commodity;
-                        const color = getMarkerColor(commodity, annotation.status);
-                        const isSelected = selectedItem?.id === item.id;
-
-                        return (
-                            <Marker
-                                key={item.id || idx}
-                                position={[item.lat, item.lng]}
-                                // STATIC ICON: Only depends on data, not selection state
-                                icon={createCustomIcon(color, false)}
-                                ref={(el) => (markerRefs.current[item.id] = el)}
-                                item={item}
-                                eventHandlers={{
-                                    click: (e) => {
-                                        setSelectedItem(item);
-                                        // Ensure popup opens even if item was already selected (which prevents useEffect from firing)
-                                        e.target.openPopup();
-                                    },
-                                }}
-                            >
-                                <Popup
-                                    offset={[0, -20]}
-                                    maxWidth={300}
-                                    minWidth={250}
-                                >
-                                    <PopupForm
-                                        item={item}
-                                        annotation={annotation}
-                                        updateAnnotation={updateAnnotation}
-                                        onDelete={() => deleteLicense(item.id)}
-                                        commodities={commodities}
-                                        licenseTypes={licenseTypes}
-                                        isMobile={isMobile}
-                                        onOpenDossier={() => handleOpenDossier(item)}
-                                        isOpen={selectedItem?.id === item.id}
-                                    />
-                                </Popup>
-                            </Marker>
-                        );
-                    })}
+                    {markers}
                 </MarkerClusterGroup>
             </MapContainer>
         </div>
