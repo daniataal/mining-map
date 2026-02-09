@@ -148,7 +148,7 @@ const getMarkerColor = (commodity, userStatus) => {
 const MapEffect = ({ selectedItem, mapFlyTrigger }) => {
     const map = useMap();
     useEffect(() => {
-        if (selectedItem && selectedItem.lat && selectedItem.lng && mapFlyTrigger > 0) {
+        if (selectedItem && selectedItem.lat != null && selectedItem.lng != null && mapFlyTrigger > 0) {
             const currentZoom = map.getZoom();
             const targetZoom = Math.max(currentZoom, 16);
             map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, {
@@ -211,6 +211,8 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
         if (selectedItem) {
             let attempts = 0;
             const maxAttempts = 15; // Try for ~4.5 seconds to be safe
+            let interval = null;
+            let timer = null;
 
             const attemptOpen = () => {
                 attempts++;
@@ -218,24 +220,28 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                 // Check if marker exists and is attached to a map (partially safeguards against unmounted refs)
                 if (marker) {
                     marker.openPopup();
-                    // We found it, but let's do one more open in case the map was still animating
-                    // actually, openPopup is usually idempotent-ish.
                     return true;
                 }
                 return false;
             };
 
-            // Immediate attempt (if already unclustered)
-            if (attemptOpen()) return;
+            // Small initial delay to allow React render cycle & Leaflet icon update to settle
+            timer = setTimeout(() => {
+                // Immediate attempt (if already unclustered)
+                if (attemptOpen()) return;
 
-            // Poll for the marker to become available (e.g. after declustering)
-            const interval = setInterval(() => {
-                if (attemptOpen() || attempts >= maxAttempts) {
-                    clearInterval(interval);
-                }
-            }, 300);
+                // Poll for the marker to become available (e.g. after declustering)
+                interval = setInterval(() => {
+                    if (attemptOpen() || attempts >= maxAttempts) {
+                        clearInterval(interval);
+                    }
+                }, 300);
+            }, 100);
 
-            return () => clearInterval(interval);
+            return () => {
+                if (timer) clearTimeout(timer);
+                if (interval) clearInterval(interval);
+            };
         }
     }, [selectedItem]);
 
@@ -359,7 +365,7 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                     iconCreateFunction={createClusterCustomIcon}
                 >
                     {processedData.map((item, idx) => {
-                        if (!item.lat || !item.lng) return null;
+                        if (item.lat === undefined || item.lat === null || item.lng === undefined || item.lng === null) return null;
                         const annotation = userAnnotations[item.id] || {};
                         // If commodity is overridden, use it for color
                         const commodity = annotation.commodity || item.commodity;
