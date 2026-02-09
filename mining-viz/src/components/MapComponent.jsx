@@ -216,43 +216,45 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
 
     const markerRefs = useRef({});
 
+    const prevSelectedIdRef = useRef(null);
+
     useEffect(() => {
-        if (selectedItem) {
-            let attempts = 0;
-            const maxAttempts = 15; // Try for ~4.5 seconds to be safe
-            let interval = null;
-            let timer = null;
-
-            const attemptOpen = () => {
-                attempts++;
-                const marker = markerRefs.current[selectedItem.id];
-                // Check if marker exists and is attached to a map (partially safeguards against unmounted refs)
-                if (marker) {
-                    marker.openPopup();
-                    return true;
+        // 1. Reset Previous Layout
+        if (prevSelectedIdRef.current && prevSelectedIdRef.current !== selectedItem?.id) {
+            const prevId = prevSelectedIdRef.current;
+            const marker = markerRefs.current[prevId];
+            if (marker) {
+                // Find item data to restore correct color
+                const prevItem = processedData.find(d => d.id === prevId);
+                if (prevItem) {
+                    const annotation = userAnnotations[prevId] || {};
+                    const commodity = annotation.commodity || prevItem.commodity;
+                    const color = getMarkerColor(commodity, annotation.status);
+                    marker.setIcon(createCustomIcon(color, false));
                 }
-                return false;
-            };
-
-            // Small initial delay to allow React render cycle & Leaflet icon update to settle
-            timer = setTimeout(() => {
-                // Immediate attempt (if already unclustered)
-                if (attemptOpen()) return;
-
-                // Poll for the marker to become available (e.g. after declustering)
-                interval = setInterval(() => {
-                    if (attemptOpen() || attempts >= maxAttempts) {
-                        clearInterval(interval);
-                    }
-                }, 300);
-            }, 100);
-
-            return () => {
-                if (timer) clearTimeout(timer);
-                if (interval) clearInterval(interval);
-            };
+            }
         }
-    }, [selectedItem]);
+
+        // 2. Set New Layout & Open Popup
+        if (selectedItem) {
+            const marker = markerRefs.current[selectedItem.id];
+            if (marker) {
+                const annotation = userAnnotations[selectedItem.id] || {};
+                const commodity = annotation.commodity || selectedItem.commodity;
+                const color = getMarkerColor(commodity, annotation.status);
+
+                // Imperatively set selected icon
+                marker.setIcon(createCustomIcon(color, true));
+
+                // Open Popup (with small delay if needed for animation, but usually direct is fine here)
+                // We restart interval if needed, but the imperative update avoids the React-remount race condition
+                setTimeout(() => marker.openPopup(), 50);
+            }
+            prevSelectedIdRef.current = selectedItem.id;
+        } else {
+            prevSelectedIdRef.current = null;
+        }
+    }, [selectedItem, processedData, userAnnotations]);
 
     const activeCountries = useMemo(() => {
         const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
@@ -386,7 +388,8 @@ const MapComponent = ({ processedData, userAnnotations, selectedItem, setSelecte
                             <Marker
                                 key={item.id || idx}
                                 position={[item.lat, item.lng]}
-                                icon={createCustomIcon(color, isSelected)}
+                                // STATIC ICON: Only depends on data, not selection state
+                                icon={createCustomIcon(color, false)}
                                 ref={(el) => (markerRefs.current[item.id] = el)}
                                 item={item}
                                 eventHandlers={{
