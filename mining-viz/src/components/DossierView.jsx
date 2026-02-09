@@ -55,7 +55,7 @@ const DossierView = ({ item, annotation, updateAnnotation, onClose, onOpenPopup,
         setLoadingAi(true);
         setAiReport(null);
 
-        const query = `Find the official phone number, email, and owner contact details for the mining company "${item.company}" located in ${item.region}, ${item.country}. Prioritize finding direct contact numbers for the owner or administration.`;
+        const query = `Find the publicly available business contact information for "${item.company}" in ${item.country}. Identify key personnel (Directors, Managers) or associated parent companies listed in official registries. Look for official global business records.`;
 
         runAiQuery(query);
     };
