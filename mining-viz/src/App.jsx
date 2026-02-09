@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 import { useToast } from './components/Toast';
@@ -122,16 +122,16 @@ function App() {
     }).catch(err => console.warn("Log failed", err));
   };
 
-  const handleOpenDossier = (item) => {
+  const handleOpenDossier = useCallback((item) => {
     setDossierItem(item);
     setIsDossierOpen(true);
     logActivity(userId, username, 'VIEW_DOSSIER', `Viewed ${item.company} (${item.id})`);
-  };
+  }, [userId, username]);
 
-  const handleCloseDossier = () => {
+  const handleCloseDossier = useCallback(() => {
     setIsDossierOpen(false);
     setDossierItem(null);
-  };
+  }, []);
 
   const handleOpenPopup = (item) => {
     // pinpoint on map
@@ -156,7 +156,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const deleteLicense = (id) => {
+  const deleteLicense = useCallback((id) => {
     if (!confirm("Are you sure you want to delete this license?")) return;
 
     fetch(`${API_BASE}/licenses/${id}`, { method: 'DELETE' })
@@ -168,7 +168,7 @@ function App() {
         addToast("License deleted", "info");
       })
       .catch(err => addToast("Error deleting license: " + err.message, "error"));
-  };
+  }, [API_BASE, userId, username, addToast]);
 
   const deleteFilteredList = () => {
     const idsToDelete = processedData.map(item => item.id);
@@ -282,7 +282,7 @@ function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  const updateAnnotation = (id, fieldOrUpdate, value) => {
+  const updateAnnotation = useCallback((id, fieldOrUpdate, value) => {
     // Normalize arguments: support (id, field, value) OR (id, { field: value, ... })
     let updates = {};
     if (typeof fieldOrUpdate === 'string') {
@@ -314,15 +314,7 @@ function App() {
       } else if (field === 'quantity') {
         backendPayload.capacity = parseFloat(val) || 0;
       } else if (field === 'status') {
-        // Map frontend status 'good'/'verified' to backend 'APPROVED' if needed, 
-        // OR mostly just pass it through if the user selects "APPROVED" (which they might need a way to do).
-        // The prompt implies "miner.status == APPROVED". 
-        // The Popup has buttons for "Go" (good), "Maybe", "No" (bad).
-        // We might need to interpret "good" as "APPROVED" or allow direct status setting.
-        // For now, let's pass the value. Use uppercase for backend consistency if it matches standard statuses.
         backendPayload.status = val === 'good' ? 'APPROVED' : val;
-        // Note: The UI separates "Go" (good) from the actual "status" badge. 
-        // But let's assume "Go" == APPROVED for the export trigger.
       } else if (field === 'licenseType') {
         backendPayload.licenseType = val;
       } else if (field === 'commodity') {
@@ -356,7 +348,7 @@ function App() {
         })
         .catch(err => console.error("Failed to sync annotation to backend:", err));
     }
-  };
+  }, [userId, username, addToast, API_BASE]);
 
   // Extract unique countries
   const countries = useMemo(() => {
