@@ -446,7 +446,7 @@ def create_license(item: LicenseCreate):
 # --- Marketplace Export Logic ---
 import requests
 
-MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "https://api.marketplace.example.com/v1/sellers/integrate")
+MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "http://localhost:3001/api/v1/ingest")
 MARKETPLACE_API_KEY = os.getenv("MARKETPLACE_API_KEY", "demo-key")
 
 def export_license_to_marketplace(license_data: dict):
@@ -454,24 +454,13 @@ def export_license_to_marketplace(license_data: dict):
     try:
         # Map fields to Marketplace Seller Object
         payload = {
-            "external_id": license_data["id"],
-            "company_name": license_data["company"],
-            "location": {
-                "country": license_data["country"],
-                "region": license_data["region"],
-                "coordinates": {
-                    "lat": license_data["lat"],
-                    "lng": license_data["lng"]
-                }
-            },
-            "commodity": {
-                "type": license_data["commodity"],
-                "price_per_kg": license_data.get("price_per_kg", 0),
-                "capacity": license_data.get("capacity", 0)
-            },
-            "status": "PASSIVE_SELLER", # Enforced passive status
-            "phone": license_data.get("phone_number"),
-            "contact": license_data.get("contact_person")
+            "externalId": license_data["id"],
+            "company": license_data["company"],
+            "commodity": license_data["commodity"],
+            "quantity": license_data.get("capacity", 0),  # Mapping capacity to quantity for now
+            "pricePerKg": license_data.get("price_per_kg", 0),
+            "discount": 5.0, # Hardcoded discount for demo, or add to DB
+            "status": "OPEN"
         }
         
         # In a real scenario, we would POST to the API
