@@ -446,7 +446,7 @@ def create_license(item: LicenseCreate):
 # --- Marketplace Export Logic ---
 import requests
 
-MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "http://localhost:3001/api/v1/ingest")
+MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "http://host.docker.internal:3001/api/v1/ingest")
 MARKETPLACE_API_KEY = os.getenv("MARKETPLACE_API_KEY", "demo-key")
 
 def export_license_to_marketplace(license_data: dict):
@@ -464,8 +464,8 @@ def export_license_to_marketplace(license_data: dict):
         }
         
         # In a real scenario, we would POST to the API
-        # response = requests.post(MARKETPLACE_API_URL, json=payload, timeout=5)
-        # response.raise_for_status()
+        response = requests.post(MARKETPLACE_API_URL, json=payload, timeout=5)
+        response.raise_for_status()
         
         print(f"EXPORT SUCCESS: Exported {license_data['company']} to Marketplace as PASSIVE seller.")
         return True
