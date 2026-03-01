@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react';
 
 const AdminPanel = ({ isOpen, onClose, token }) => {
-    const [activeTab, setActiveTab] = useState('users'); // 'users' or 'logs'
+    const [activeTab, setActiveTab] = useState('users'); // 'users', 'logs', 'meeting-points', 'miner-listings'
     const [users, setUsers] = useState([]);
     const [logs, setLogs] = useState([]);
+    const [meetingPoints, setMeetingPoints] = useState([]);
+    const [minerListings, setMinerListings] = useState([]);
+
+    const [newMpName, setNewMpName] = useState('');
+    const [newMpLat, setNewMpLat] = useState('');
+    const [newMpLng, setNewMpLng] = useState('');
+    const [newMpAddress, setNewMpAddress] = useState('');
+    const [mpMsg, setMpMsg] = useState('');
+    const [mlMsg, setMlMsg] = useState('');
 
     // Per-user activity log state
     const [selectedUserForLogs, setSelectedUserForLogs] = useState(null);
@@ -22,6 +31,8 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
         if (isOpen && token) {
             fetchUsers();
             fetchLogs();
+            fetchMeetingPoints();
+            fetchMinerListings();
         }
     }, [isOpen, token]);
 
@@ -38,6 +49,65 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
             .then(res => res.json())
             .then(data => setLogs(data))
             .catch(err => console.error("Failed to fetch logs", err));
+    };
+
+    const fetchMeetingPoints = () => {
+        fetch(`${API_BASE}/meeting-points`)
+            .then(res => res.json())
+            .then(data => setMeetingPoints(data))
+            .catch(err => console.error("Failed to fetch meeting points", err));
+    };
+
+    const fetchMinerListings = () => {
+        fetch(`${API_BASE}/miner-listings`)
+            .then(res => res.json())
+            .then(data => setMinerListings(data))
+            .catch(err => console.error("Failed to fetch miner listings", err));
+    };
+
+    const handleCreateMeetingPoint = (e) => {
+        e.preventDefault();
+        fetch(`${API_BASE}/meeting-points`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: newMpName,
+                lat: parseFloat(newMpLat),
+                lng: parseFloat(newMpLng),
+                address: newMpAddress,
+                status: 'ACTIVE'
+            })
+        })
+            .then(async res => {
+                if (res.ok) {
+                    setMpMsg('Meeting Point created!');
+                    setNewMpName(''); setNewMpLat(''); setNewMpLng(''); setNewMpAddress('');
+                    fetchMeetingPoints();
+                    setTimeout(() => setMpMsg(''), 3000);
+                } else {
+                    const text = await res.text();
+                    setMpMsg('Error: ' + text);
+                }
+            })
+            .catch(err => setMpMsg('Error: ' + err.message));
+    };
+
+    const handleVerifyListing = (listingId, status) => {
+        fetch(`${API_BASE}/miner-listings/${listingId}/verify`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        })
+            .then(async res => {
+                if (res.ok) {
+                    setMlMsg(`Listing marked as ${status}!`);
+                    fetchMinerListings();
+                    setTimeout(() => setMlMsg(''), 3000);
+                } else {
+                    setMlMsg('Error updating listing');
+                }
+            })
+            .catch(err => setMlMsg('Error: ' + err.message));
     };
 
     const handleCreateUser = (e) => {
@@ -241,7 +311,40 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                     >
                         📜 Activity Logs
                     </button>
+                    <button
+                        onClick={() => setActiveTab('meeting-points')}
+                        style={{
+                            flex: 1,
+                            padding: '15px',
+                            background: activeTab === 'meeting-points' ? 'var(--surface-color)' : 'transparent',
+                            color: activeTab === 'meeting-points' ? 'var(--primary-color)' : 'var(--text-muted)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            borderBottom: activeTab === 'meeting-points' ? '2px solid var(--primary-color)' : '2px solid transparent',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        📍 Meeting Points
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('miner-listings')}
+                        style={{
+                            flex: 1,
+                            padding: '15px',
+                            background: activeTab === 'miner-listings' ? 'var(--surface-color)' : 'transparent',
+                            color: activeTab === 'miner-listings' ? 'var(--primary-color)' : 'var(--text-muted)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            borderBottom: activeTab === 'miner-listings' ? '2px solid var(--primary-color)' : '2px solid transparent',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        ⛏️ Miner Listings
+                    </button>
                 </div>
+
 
                 {/* Content */}
                 <div style={{ flex: 1, overflowY: 'auto', padding: '20px', background: 'var(--bg-color)' }}>
@@ -363,7 +466,150 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                             </div>
                         </div>
                     )}
+
+                    {/* Meeting Points Tab */}
+                    {activeTab === 'meeting-points' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                            <div style={{ background: 'var(--surface-color)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                                <h3 style={{ marginTop: 0, color: 'var(--text-color)' }}>Create Meeting Point</h3>
+                                <form onSubmit={handleCreateMeetingPoint} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '5px' }}>Name (e.g., Store A)</label>
+                                        <input
+                                            value={newMpName} onChange={e => setNewMpName(e.target.value)} required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-color)', color: 'var(--text-color)' }}
+                                        />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '5px' }}>Latitude</label>
+                                        <input type="number" step="0.000001"
+                                            value={newMpLat} onChange={e => setNewMpLat(e.target.value)} required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-color)', color: 'var(--text-color)' }}
+                                        />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '5px' }}>Longitude</label>
+                                        <input type="number" step="0.000001"
+                                            value={newMpLng} onChange={e => setNewMpLng(e.target.value)} required
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-color)', color: 'var(--text-color)' }}
+                                        />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <label style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '5px' }}>Address</label>
+                                        <input
+                                            value={newMpAddress} onChange={e => setNewMpAddress(e.target.value)}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-color)', color: 'var(--text-color)' }}
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        style={{ padding: '8px 20px', background: 'var(--primary-color)', color: '#000', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+                                    >
+                                        Create
+                                    </button>
+                                </form>
+                                {mpMsg && <p style={{ color: mpMsg.includes('Error') ? '#ef4444' : '#22c55e', marginTop: '10px' }}>{mpMsg}</p>}
+                            </div>
+
+                            <div>
+                                <h3 style={{ color: 'var(--text-color)' }}>Existing Meeting Points</h3>
+                                <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', color: 'var(--text-muted)' }}>
+                                        <thead style={{ background: 'var(--surface-color)', textAlign: 'left' }}>
+                                            <tr>
+                                                <th style={{ padding: '12px' }}>Name</th>
+                                                <th style={{ padding: '12px' }}>Location</th>
+                                                <th style={{ padding: '12px' }}>Address</th>
+                                                <th style={{ padding: '12px' }}>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {meetingPoints.map(mp => (
+                                                <tr key={mp.id} style={{ borderTop: '1px solid var(--border-color)' }}>
+                                                    <td style={{ padding: '12px', color: 'var(--text-color)' }}>{mp.name}</td>
+                                                    <td style={{ padding: '12px' }}>{mp.lat}, {mp.lng}</td>
+                                                    <td style={{ padding: '12px' }}>{mp.address || '-'}</td>
+                                                    <td style={{ padding: '12px' }}>{mp.status}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Miner Listings Tab */}
+                    {activeTab === 'miner-listings' && (
+                        <div>
+                            <h3 style={{ color: 'var(--text-color)', marginTop: 0 }}>Community Miner Listings</h3>
+                            {mlMsg && <p style={{ color: mlMsg.includes('Error') ? '#ef4444' : '#22c55e', marginBottom: '10px' }}>{mlMsg}</p>}
+                            <div style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                    <thead style={{ background: 'var(--surface-color)', textAlign: 'left' }}>
+                                        <tr>
+                                            <th style={{ padding: '12px' }}>Miner ID</th>
+                                            <th style={{ padding: '12px' }}>Product</th>
+                                            <th style={{ padding: '12px' }}>Details</th>
+                                            <th style={{ padding: '12px' }}>Pricing</th>
+                                            <th style={{ padding: '12px' }}>Status</th>
+                                            <th style={{ padding: '12px' }}>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {minerListings.map(listing => (
+                                            <tr key={listing.id} style={{ borderTop: '1px solid var(--border-color)' }}>
+                                                <td style={{ padding: '10px', color: 'var(--text-color)' }}>{listing.miner_id.substring(0, 8)}...</td>
+                                                <td style={{ padding: '10px' }}>
+                                                    <div style={{ color: 'var(--text-color)', fontWeight: 'bold' }}>{listing.product}</div>
+                                                    <div style={{ fontSize: '0.85em' }}>Shape: {listing.shape}</div>
+                                                    {listing.photo_url && (
+                                                        <a href={`${API_BASE}${listing.photo_url}`} target="_blank" rel="noreferrer" style={{ color: 'var(--primary-color)' }}>View Photo</a>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '10px' }}>
+                                                    <div>Loc: {listing.lat.toFixed(4)}, {listing.lng.toFixed(4)}</div>
+                                                    <div style={{ fontSize: '0.85em' }}>Meeting Pt: {listing.meeting_point_id}</div>
+                                                </td>
+                                                <td style={{ padding: '10px' }}>
+                                                    <div>{listing.quantity} kg</div>
+                                                    <div>${listing.price_per_kg}/kg</div>
+                                                </td>
+                                                <td style={{ padding: '10px' }}>
+                                                    <span style={{
+                                                        color: listing.status === 'VERIFIED' ? '#22c55e' : (listing.status === 'REJECTED' ? '#ef4444' : '#fbbf24'),
+                                                        fontWeight: 'bold'
+                                                    }}>
+                                                        {listing.status}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '10px', display: 'flex', gap: '5px' }}>
+                                                    {listing.status === 'PENDING' && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleVerifyListing(listing.id, 'VERIFIED')}
+                                                                style={{ background: '#22c55e', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                                                            >
+                                                                Verify
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleVerifyListing(listing.id, 'REJECTED')}
+                                                                style={{ background: '#ef4444', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                                                            >
+                                                                Reject
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
                 </div>
+
             </div>
 
             {/* Per-User Activity Log Modal */}
