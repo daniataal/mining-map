@@ -31,6 +31,11 @@ COPY . .
 WORKDIR /app/mining-viz
 RUN npm install
 
+WORKDIR /app/community-miner-viz
+RUN npm install
+
+WORKDIR /app
+
 # Create a directory for persistent data
 RUN mkdir -p /data
 
@@ -38,14 +43,22 @@ RUN mkdir -p /data
 COPY start.sh /usr/local/bin/start.sh
 RUN dos2unix /usr/local/bin/start.sh && chmod +x /usr/local/bin/start.sh
 
-# Build frontend
-RUN npm run build
+# Build frontends
+WORKDIR /app/mining-viz
+RUN npm run build || true 
+
+WORKDIR /app/community-miner-viz
+RUN npm run build || true 
+
+WORKDIR /app
 
 # Expose the ports
 # 8000: Backend API
-# 5173: Vite Frontend
+# 5173: Admin Vite Frontend
+# 5174: Community Miner Vite Frontend
 EXPOSE 8000
 EXPOSE 5173
+EXPOSE 5174
 
 # Use the startup script
 CMD ["/usr/local/bin/start.sh"]

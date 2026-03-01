@@ -139,6 +139,7 @@ def init_db():
                 capacity FLOAT DEFAULT 0.0,
                 is_exported BOOLEAN DEFAULT FALSE
             );
+        """)
         
 
         # Migration for existing tables (safe to run every time)
@@ -151,7 +152,6 @@ def init_db():
         except Exception as e:
             conn.rollback() 
             print(f"Schema migration skipped or failed (might already exist): {e}")
-        """)
 
         # Files Table
         cur.execute("""
