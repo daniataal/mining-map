@@ -92,6 +92,28 @@ class LogCreate(BaseModel):
     action: str
     details: Optional[str] = None
 
+class MeetingPointCreate(BaseModel):
+    name: str
+    lat: float
+    lng: float
+    address: Optional[str] = None
+    status: str = 'ACTIVE'
+
+class MinerListingCreate(BaseModel):
+    miner_id: str
+    lat: float
+    lng: float
+    price_per_kg: float
+    quantity: float
+    shape: str
+    product: str
+    meeting_point_id: str
+
+class MinerListingVerify(BaseModel):
+    status: str
+    meeting_outcome: Optional[str] = None
+    communication_log: Optional[str] = None
+
 # DB Init Update
 def init_db():
     try:
@@ -117,6 +139,7 @@ def init_db():
                 capacity FLOAT DEFAULT 0.0,
                 is_exported BOOLEAN DEFAULT FALSE
             );
+        """)
         
 
         # Migration for existing tables (safe to run every time)
@@ -129,7 +152,6 @@ def init_db():
         except Exception as e:
             conn.rollback() 
             print(f"Schema migration skipped or failed (might already exist): {e}")
-        """)
 
         # Files Table
         cur.execute("""
@@ -163,6 +185,41 @@ def init_db():
                 action VARCHAR(255),
                 details TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Meeting Points Table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS meeting_points (
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                lat FLOAT NOT NULL,
+                lng FLOAT NOT NULL,
+                address TEXT,
+                status VARCHAR(50) DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Miner Listings Table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS miner_listings (
+                id VARCHAR(255) PRIMARY KEY,
+                miner_id VARCHAR(255),
+                lat FLOAT NOT NULL,
+                lng FLOAT NOT NULL,
+                photo_url TEXT,
+                price_per_kg FLOAT,
+                quantity FLOAT,
+                shape VARCHAR(100),
+                product VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'PENDING',
+                meeting_point_id VARCHAR(255),
+                meeting_outcome VARCHAR(50),
+                communication_log TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (meeting_point_id) REFERENCES meeting_points(id) ON DELETE SET NULL,
+                FOREIGN KEY (miner_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
 
@@ -869,6 +926,117 @@ def analyze_with_ai(request: AIRequest):
     except Exception as e:
         print(f"AI Request Failed: {e}")
         return {"status": "error", "message": "Failed to connect to AI service."}
+
+# --- Community Miner Endpoints ---
+
+@app.get("/meeting-points")
+def get_meeting_points():
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM meeting_points ORDER BY created_at DESC")
+        return c.fetchall()
+    finally:
+        conn.close()
+
+@app.post("/meeting-points")
+def create_meeting_point(item: MeetingPointCreate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    new_id = str(uuid.uuid4())
+    try:
+        c.execute('''
+            INSERT INTO meeting_points (id, name, lat, lng, address, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (new_id, item.name, item.lat, item.lng, item.address, item.status))
+        conn.commit()
+        return {**item.dict(), "id": new_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.get("/miner-listings")
+def get_miner_listings(miner_id: Optional[str] = None):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if miner_id:
+            c.execute("SELECT * FROM miner_listings WHERE miner_id = %s ORDER BY created_at DESC", (miner_id,))
+        else:
+            c.execute("SELECT * FROM miner_listings ORDER BY created_at DESC")
+        return c.fetchall()
+    finally:
+        conn.close()
+
+@app.post("/miner-listings")
+def create_miner_listing(item: MinerListingCreate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    new_id = str(uuid.uuid4())
+    try:
+        c.execute('''
+            INSERT INTO miner_listings (id, miner_id, lat, lng, price_per_kg, quantity, shape, product, meeting_point_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (new_id, item.miner_id, item.lat, item.lng, item.price_per_kg, item.quantity, item.shape, item.product, item.meeting_point_id))
+        conn.commit()
+        return {**item.dict(), "id": new_id, "status": "PENDING"}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.put("/miner-listings/{listing_id}/verify")
+def verify_miner_listing(listing_id: str, item: MinerListingVerify):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute('''
+            UPDATE miner_listings 
+            SET status = %s, meeting_outcome = %s, communication_log = %s
+            WHERE id = %s
+        ''', (item.status, item.meeting_outcome, item.communication_log, listing_id))
+        conn.commit()
+        return {"status": "success", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.post("/miner-listings/{listing_id}/photo")
+async def upload_listing_photo(listing_id: str, file: UploadFile = File(...)):
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    try:
+        c.execute("SELECT id FROM miner_listings WHERE id = %s", (listing_id,))
+        if not c.fetchone():
+            return Response("Listing not found", status_code=404)
+
+        file_id = str(uuid.uuid4())
+        safe_filename = file.filename.replace(" ", "_")
+        safe_filename = "".join(x for x in safe_filename if x.isalnum() or x in "._-")
+        if not safe_filename: safe_filename = "unnamed_file"
+        
+        final_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_filename}")
+        file_url = f"/files/{file_id}_{safe_filename}"
+        
+        with open(final_path, "wb") as buffer:
+            import shutil
+            shutil.copyfileobj(file.file, buffer)
+                
+        c.execute("UPDATE miner_listings SET photo_url = %s WHERE id = %s", (file_url, listing_id))
+        conn.commit()
+        return {"id": file_id, "url": file_url}
+    except Exception as e:
+        conn.rollback()
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     import uvicorn
     # Run slightly different port than typical default to avoid collisions if any
