@@ -115,6 +115,21 @@ class MinerListingVerify(BaseModel):
     meeting_outcome: Optional[str] = None
     communication_log: Optional[str] = None
 
+class MinerListingAssay(BaseModel):
+    tested_weight: float
+    tested_purity: float
+    final_offer: float
+
+class MinerListingUpdate(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    price_per_kg: Optional[float] = None
+    quantity: Optional[float] = None
+    shape: Optional[str] = None
+    product: Optional[str] = None
+    meeting_point_id: Optional[str] = None
+    meeting_date: Optional[str] = None
+
 # DB Init Update
 def init_db():
     try:
@@ -173,6 +188,7 @@ def init_db():
                 username VARCHAR(255) UNIQUE NOT NULL,
                 password_hash VARCHAR(255) NOT NULL,
                 role VARCHAR(50) DEFAULT 'user',
+                phone_number VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -219,15 +235,22 @@ def init_db():
                 meeting_date VARCHAR(255),
                 meeting_outcome VARCHAR(50),
                 communication_log TEXT,
+                tested_weight FLOAT,
+                tested_purity FLOAT,
+                final_offer FLOAT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (meeting_point_id) REFERENCES meeting_points(id) ON DELETE SET NULL,
                 FOREIGN KEY (miner_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
         
-        # Add meeting_date if it does not exist
+        # Add new columns to existing tables
         try:
             cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS meeting_date VARCHAR(255);")
+            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS tested_weight FLOAT;")
+            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS tested_purity FLOAT;")
+            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS final_offer FLOAT;")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(100);")
             conn.commit()
         except:
             conn.rollback()
@@ -1007,8 +1030,71 @@ def verify_miner_listing(listing_id: str, item: MinerListingVerify):
             SET status = %s, meeting_outcome = %s, communication_log = %s
             WHERE id = %s
         ''', (item.status, item.meeting_outcome, item.communication_log, listing_id))
+        
+        # If the status is being updated to PURCHASED, let's auto-transfer it to DoreMarket
+        if item.status == "PURCHASED":
+            c.execute("SELECT * FROM miner_listings WHERE id = %s", (listing_id,))
+            listing = c.fetchone()
+            if listing:
+                try:
+                    payload = {
+                        "listing_id": listing[0],
+                        "miner_id": listing[1],
+                        "lat": listing[2],
+                        "lng": listing[3],
+                        "price_per_kg": listing[5],
+                        "quantity": listing[6],
+                        "shape": listing[7],
+                        "product": listing[8],
+                        "tested_weight": listing[14],
+                        "tested_purity": listing[15],
+                        "final_offer": listing[16],
+                    }
+                    import requests
+                    requests.post("http://localhost:3000/api/webhooks/mining-map", json=payload, timeout=5)
+                except Exception as ex:
+                    print(f"Failed to post to DoreMarket Webhook: {ex}")
+                
         conn.commit()
         return {"status": "success", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.post("/miner-listings/{listing_id}/assay")
+def assay_miner_listing(listing_id: str, item: MinerListingAssay):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            UPDATE miner_listings 
+            SET tested_weight = %s, tested_purity = %s, final_offer = %s, status = 'OFFER' 
+            WHERE id = %s
+        """, (item.tested_weight, item.tested_purity, item.final_offer, listing_id))
+        conn.commit()
+
+        if c.rowcount == 0:
+            return Response("Listing not found", status_code=404)
+
+        return {"status": "Assayed and Offer Made", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.post("/miner-listings/{listing_id}/accept-offer")
+def accept_miner_offer(listing_id: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE miner_listings SET status = 'ACCEPTED' WHERE id = %s AND status = 'OFFER'", (listing_id,))
+        if c.rowcount == 0:
+             return Response("Listing not found or not in OFFER state", status_code=400)
+        conn.commit()
+        return {"status": "Offer Accepted", "id": listing_id}
     except Exception as e:
         conn.rollback()
         return Response(str(e), status_code=500)
@@ -1043,6 +1129,66 @@ async def upload_listing_photo(listing_id: str, file: UploadFile = File(...)):
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
+    finally:
+        conn.close()
+
+@app.put("/miner-listings/{listing_id}")
+def update_miner_listing(listing_id: str, item: MinerListingUpdate):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM miner_listings WHERE id = %s", (listing_id,))
+        existing = c.fetchone()
+        if not existing:
+            return Response("Listing not found", status_code=404)
+
+        updates = []
+        values = []
+        
+        if item.lat is not None:
+            updates.append("lat = %s"); values.append(item.lat)
+        if item.lng is not None:
+             updates.append("lng = %s"); values.append(item.lng)
+        if item.price_per_kg is not None:
+             updates.append("price_per_kg = %s"); values.append(item.price_per_kg)
+        if item.quantity is not None:
+             updates.append("quantity = %s"); values.append(item.quantity)
+        if item.shape is not None:
+             updates.append("shape = %s"); values.append(item.shape)
+        if item.product is not None:
+             updates.append("product = %s"); values.append(item.product)
+        if item.meeting_point_id is not None:
+             updates.append("meeting_point_id = %s"); values.append(item.meeting_point_id)
+        if item.meeting_date is not None:
+             updates.append("meeting_date = %s"); values.append(item.meeting_date)
+
+        if not updates:
+            return {"status": "no changes"}
+            
+        values.append(listing_id)
+        sql = f"UPDATE miner_listings SET {', '.join(updates)} WHERE id = %s"
+        c.execute(sql, tuple(values))
+        conn.commit()
+        return {"status": "updated", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.delete("/miner-listings/{listing_id}")
+def delete_miner_listing(listing_id: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM miner_listings WHERE id = %s", (listing_id,))
+        if c.rowcount == 0:
+             return Response("Listing not found", status_code=404)
+        conn.commit()
+        return {"status": "deleted", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
     finally:
         conn.close()
 
