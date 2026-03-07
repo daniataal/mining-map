@@ -108,6 +108,7 @@ class MinerListingCreate(BaseModel):
     shape: str
     product: str
     meeting_point_id: str
+    meeting_date: Optional[str] = None
 
 class MinerListingVerify(BaseModel):
     status: str
@@ -215,6 +216,7 @@ def init_db():
                 product VARCHAR(100),
                 status VARCHAR(50) DEFAULT 'PENDING',
                 meeting_point_id VARCHAR(255),
+                meeting_date VARCHAR(255),
                 meeting_outcome VARCHAR(50),
                 communication_log TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -222,6 +224,13 @@ def init_db():
                 FOREIGN KEY (miner_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
+        
+        # Add meeting_date if it does not exist
+        try:
+            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS meeting_date VARCHAR(255);")
+            conn.commit()
+        except:
+            conn.rollback()
 
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -977,9 +986,9 @@ def create_miner_listing(item: MinerListingCreate):
     new_id = str(uuid.uuid4())
     try:
         c.execute('''
-            INSERT INTO miner_listings (id, miner_id, lat, lng, price_per_kg, quantity, shape, product, meeting_point_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (new_id, item.miner_id, item.lat, item.lng, item.price_per_kg, item.quantity, item.shape, item.product, item.meeting_point_id))
+            INSERT INTO miner_listings (id, miner_id, lat, lng, price_per_kg, quantity, shape, product, meeting_point_id, meeting_date)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (new_id, item.miner_id, item.lat, item.lng, item.price_per_kg, item.quantity, item.shape, item.product, item.meeting_point_id, item.meeting_date))
         conn.commit()
         return {**item.dict(), "id": new_id, "status": "PENDING"}
     except Exception as e:
