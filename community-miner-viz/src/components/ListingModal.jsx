@@ -7,6 +7,7 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
     const [quantity, setQuantity] = useState('');
     const [price, setPrice] = useState('');
     const [meetingPointId, setMeetingPointId] = useState('');
+    const [meetingDate, setMeetingDate] = useState('');
     const [photo, setPhoto] = useState(null);
     const [uploading, setUploading] = useState(false);
 
@@ -21,6 +22,7 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
             quantity: parseFloat(quantity),
             price_per_kg: parseFloat(price),
             meeting_point_id: meetingPointId,
+            meeting_date: meetingDate,
             lat: initialLocation.lat,
             lng: initialLocation.lng,
             photoFile: photo
@@ -75,14 +77,21 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Meeting Destination</label>
-                        <select value={meetingPointId} onChange={e => setMeetingPointId(e.target.value)} required className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500">
-                            <option value="" disabled>Select a location...</option>
-                            {meetingPoints.map(mp => (
-                                <option key={mp.id} value={mp.id}>{mp.name} {mp.address ? `(${mp.address})` : ''}</option>
-                            ))}
-                        </select>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Meeting Destination</label>
+                            <select value={meetingPointId} onChange={e => setMeetingPointId(e.target.value)} required className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500">
+                                <option value="" disabled>Select a location...</option>
+                                {meetingPoints.map(mp => (
+                                    <option key={mp.id} value={mp.id}>{mp.name} {mp.address ? `(${mp.address})` : ''}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Meeting Date Mode</label>
+                            <input type="datetime-local" value={meetingDate} onChange={e => setMeetingDate(e.target.value)} required
+                                className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500" />
+                        </div>
                     </div>
 
                     <div>

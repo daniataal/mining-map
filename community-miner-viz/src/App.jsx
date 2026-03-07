@@ -127,7 +127,8 @@ export default function App() {
         quantity: formData.quantity,
         shape: formData.shape,
         product: formData.product,
-        meeting_point_id: formData.meeting_point_id
+        meeting_point_id: formData.meeting_point_id,
+        meeting_date: formData.meeting_date
       };
       const res = await fetch(`${API_BASE}/miner-listings`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -240,7 +241,10 @@ export default function App() {
         )}
 
         <MapContainer center={[7.9465, -1.0232]} zoom={6} scrollWheelZoom={true} className="h-full w-full z-0">
-          <TileLayer attribution='&copy; OSM' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          />
 
           <MapEvents onMapClick={(latlng) => {
             if (addingMode && !isModalOpen) {
@@ -270,6 +274,7 @@ export default function App() {
                   <div className="text-sm space-y-1">
                     <p><span className="text-slate-500">Qty:</span> {l.quantity} kg</p>
                     <p><span className="text-slate-500">Price:</span> ${l.price_per_kg}/kg</p>
+                    {l.meeting_date && <p><span className="text-slate-500">Date:</span> {new Date(l.meeting_date).toLocaleString()}</p>}
                     <p>
                       <span className="text-slate-500">Status: </span>
                       <span className={l.status === 'VERIFIED' ? 'text-green-600 font-bold' : (l.status === 'REJECTED' ? 'text-red-600 font-bold' : 'text-amber-600 font-bold')}>{l.status}</span>
