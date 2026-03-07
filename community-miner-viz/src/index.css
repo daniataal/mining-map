@@ -10,3 +10,58 @@ body,
   background-color: #f8fafc;
   color: #0f172a;
 }
+
+/* Custom Leaflet Routing Machine Styles */
+.leaflet-routing-container {
+  background-color: #0f172a !important;
+  /* slate-900 */
+  color: #f8fafc !important;
+  /* slate-50 */
+  border-radius: 1rem !important;
+  border: 1px solid #334155 !important;
+  /* slate-700 */
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+  padding: 10px !important;
+  margin-right: 20px !important;
+  margin-top: 20px !important;
+  max-height: 50vh !important;
+  overflow-y: auto !important;
+}
+
+.leaflet-routing-container h2 {
+  color: #f59e0b !important;
+  /* amber-500 */
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+  margin-bottom: 10px !important;
+}
+
+.leaflet-routing-alt {
+  max-height: none !important;
+}
+
+.leaflet-routing-alt table {
+  color: #cbd5e1 !important;
+  /* slate-300 */
+}
+
+.leaflet-routing-alt tr:hover {
+  background-color: #1e293b !important;
+  /* slate-800 */
+  cursor: pointer;
+}
+
+.leaflet-routing-alt td {
+  padding: 8px !important;
+  border-bottom: 1px solid #334155 !important;
+}
+
+.leaflet-routing-icon {
+  filter: brightness(0) invert(1) sepia(100%) saturate(500%) hue-rotate(350deg) !important;
+  /* Make icons somewhat amber/white */
+}
+
+/* Hide the geocoders/inputs if they appear, we just want the itinerary */
+.leaflet-routing-geocoders {
+  display: none !important;
+}

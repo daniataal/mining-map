@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Navigation, Camera, LogOut, Check, X } from 'lucide-react';
+import { MapPin, Navigation, Camera, LogOut, Check, X, Search, Crosshair } from 'lucide-react';
 import L from 'leaflet';
 
 import ListingModal from './components/ListingModal';
@@ -27,11 +27,20 @@ const DraftIcon = new L.Icon({
 });
 
 
-// Helper component for map clicks
 function MapEvents({ onMapClick }) {
   useMapEvents({
     click(e) { onMapClick(e.latlng); }
   });
+  return null;
+}
+
+function MapUpdater({ center }) {
+  const map = useMapEvents({});
+  useEffect(() => {
+    if (center) {
+      map.flyTo(center, Math.max(map.getZoom(), 12));
+    }
+  }, [center, map]);
   return null;
 }
 
@@ -54,6 +63,11 @@ export default function App() {
   const [addingMode, setAddingMode] = useState(false);
   const [draftLocation, setDraftLocation] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingListing, setEditingListing] = useState(null);
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mapCenter, setMapCenter] = useState([7.9465, -1.0232]);
 
   const [activeRoute, setActiveRoute] = useState(null); // { start: {lat, lng}, end: {lat, lng} }
 
@@ -162,10 +176,93 @@ export default function App() {
     }
   };
 
+  const handleEditListing = async (formData) => {
+    try {
+      const { id, photoFile, ...updateBody } = formData;
+      const res = await fetch(`${API_BASE}/miner-listings/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateBody)
+      });
+      if (!res.ok) throw new Error('Failed to update listing');
+
+      if (photoFile) {
+        const fileData = new FormData();
+        fileData.append('file', photoFile);
+        const photoRes = await fetch(`${API_BASE}/miner-listings/${id}/photo`, {
+          method: 'POST', body: fileData
+        });
+        if (!photoRes.ok) throw new Error('Failed to update photo');
+      }
+
+      await fetchData();
+      setEditingListing(null);
+
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleDeleteListing = async (id) => {
+    if (!confirm('Are you sure you want to delete this listing?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/miner-listings/${id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Failed to delete listing');
+
+      // If the deleted listing is currently the active route, clear it
+      if (activeRoute && listings.find(l => l.id === id)) {
+        setActiveRoute(null);
+      }
+
+      await fetchData();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const startRoute = (listing) => {
     const mp = meetingPoints.find(m => m.id === listing.meeting_point_id);
     if (!mp) return alert('Meeting point not found');
     setActiveRoute({ start: { lat: listing.lat, lng: listing.lng }, end: { lat: mp.lat, lng: mp.lng } });
+  };
+
+  const handleGeolocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setMapCenter([latitude, longitude]);
+        setDraftLocation({ lat: latitude, lng: longitude });
+        setAddingMode(true);
+      },
+      (error) => {
+        alert("Unable to retrieve your location: " + error.message);
+      }
+    );
+  };
+
+  const handleAddressSearch = async () => {
+    if (!searchQuery.trim()) return;
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        setMapCenter([lat, lon]);
+        setDraftLocation({ lat, lng: lon });
+        setAddingMode(true);
+      } else {
+        alert("Address not found.");
+      }
+    } catch (err) {
+      alert("Error searching address: " + err.message);
+    }
   };
 
   if (!token) {
@@ -222,14 +319,35 @@ export default function App() {
       </header>
 
       <main className="flex-1 relative">
+        {/* Location Search Bar */}
+        <div className="absolute top-4 w-[90%] max-w-md left-1/2 transform -translate-x-1/2 z-[1000]">
+          <div className="bg-slate-900 rounded-full shadow-2xl border border-slate-700 p-2 flex items-center gap-2">
+            <button onClick={handleGeolocation} className="p-2 text-amber-500 hover:bg-slate-800 rounded-full transition" title="Use My Location">
+              <Crosshair size={20} />
+            </button>
+            <div className="h-6 w-px bg-slate-700"></div>
+            <input
+              type="text"
+              placeholder="Search street, city, etc..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddressSearch()}
+              className="flex-1 bg-transparent text-white placeholder-slate-400 focus:outline-none px-2 text-sm"
+            />
+            <button onClick={handleAddressSearch} className="p-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-full transition" title="Search">
+              <Search size={16} />
+            </button>
+          </div>
+        </div>
+
         {addingMode && (
-          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[1000] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl border border-slate-700 flex items-center gap-2 animate-bounce">
+          <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-[1000] bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl border border-slate-700 flex items-center gap-2 animate-bounce">
             <MapPin size={18} className="text-amber-500" />
             <span className="font-medium text-sm">Tap on the map to place your listing</span>
           </div>
         )}
 
-        {draftLocation && (
+        {draftLocation && !editingListing && (
           <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-[1000] bg-slate-800 p-4 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-4 w-[90%] max-w-sm">
             <button onClick={() => { setDraftLocation(null); setAddingMode(false); }} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg text-sm font-medium flex justify-center items-center gap-2 transition">
               <X size={16} /> Cancel
@@ -240,7 +358,8 @@ export default function App() {
           </div>
         )}
 
-        <MapContainer center={[7.9465, -1.0232]} zoom={6} scrollWheelZoom={true} className="h-full w-full z-0">
+        <MapContainer center={mapCenter} zoom={6} scrollWheelZoom={true} className="h-full w-full z-0">
+          <MapUpdater center={mapCenter} />
           <TileLayer
             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
@@ -283,6 +402,16 @@ export default function App() {
                   <button onClick={() => startRoute(l)} className="mt-3 w-full bg-slate-900 text-white text-xs font-semibold py-2 rounded-md hover:bg-slate-800 transition flex justify-center items-center gap-1">
                     <Navigation size={12} /> View Route
                   </button>
+                  {l.miner_id === userId && (
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => { setEditingListing(l); setIsModalOpen(true); }} className="flex-1 bg-slate-200 text-slate-800 text-xs font-semibold py-1.5 rounded-md hover:bg-slate-300 transition">
+                        Edit
+                      </button>
+                      <button onClick={() => handleDeleteListing(l.id)} className="flex-1 bg-red-100 text-red-600 text-xs font-semibold py-1.5 rounded-md hover:bg-red-200 transition">
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               </Popup>
             </Marker>
@@ -319,10 +448,11 @@ export default function App() {
       {/* Listing Modal */}
       <ListingModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSubmit={handleCreateListing}
+        onClose={() => { setIsModalOpen(false); setEditingListing(null); }}
+        onSubmit={editingListing ? handleEditListing : handleCreateListing}
         meetingPoints={meetingPoints}
         initialLocation={draftLocation}
+        initialListing={editingListing}
       />
     </div>
   );
