@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react';
 
 const AdminPanel = ({ isOpen, onClose, token }) => {
     const [activeTab, setActiveTab] = useState('users'); // 'users', 'logs', 'meeting-points', 'miner-listings'
+    const [assayListing, setAssayListing] = useState(null);
+    const [testedWeight, setTestedWeight] = useState('');
+    const [testedPurity, setTestedPurity] = useState('');
+    const [finalOffer, setFinalOffer] = useState('');
     const [users, setUsers] = useState([]);
     const [logs, setLogs] = useState([]);
     const [meetingPoints, setMeetingPoints] = useState([]);
@@ -105,6 +109,30 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                     setTimeout(() => setMlMsg(''), 3000);
                 } else {
                     setMlMsg('Error updating listing');
+                }
+            })
+            .catch(err => setMlMsg('Error: ' + err.message));
+    };
+
+    const handleAssaySubmit = (e) => {
+        e.preventDefault();
+        fetch(`${API_BASE}/miner-listings/${assayListing.id}/assay`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tested_weight: parseFloat(testedWeight),
+                tested_purity: parseFloat(testedPurity),
+                final_offer: parseFloat(finalOffer)
+            })
+        })
+            .then(async res => {
+                if (res.ok) {
+                    setMlMsg('Assay complete and Offer sent!');
+                    setAssayListing(null);
+                    setTestedWeight(''); setTestedPurity(''); setFinalOffer('');
+                    fetchMinerListings();
+                } else {
+                    setMlMsg('Error: ' + await res.text());
                 }
             })
             .catch(err => setMlMsg('Error: ' + err.message));
@@ -581,29 +609,30 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                                     <div>${listing.price_per_kg}/kg</div>
                                                 </td>
                                                 <td style={{ padding: '10px' }}>
-                                                    <span style={{
-                                                        color: listing.status === 'VERIFIED' ? '#22c55e' : (listing.status === 'REJECTED' ? '#ef4444' : '#fbbf24'),
-                                                        fontWeight: 'bold'
-                                                    }}>
-                                                        {listing.status}
-                                                    </span>
+                                                    <select
+                                                        value={listing.status}
+                                                        onChange={(e) => handleVerifyListing(listing.id, e.target.value)}
+                                                        style={{ padding: '5px', borderRadius: '4px', background: 'var(--surface-color)', color: 'var(--text-color)', border: '1px solid var(--border-color)', fontWeight: 'bold', width: '100%' }}
+                                                    >
+                                                        <option value="PENDING">PENDING</option>
+                                                        <option value="CONTACTED">CONTACTED</option>
+                                                        <option value="MEETING">MEETING</option>
+                                                        <option value="ASSAY">ASSAY</option>
+                                                        <option value="OFFER">OFFER</option>
+                                                        <option value="ACCEPTED">ACCEPTED</option>
+                                                        <option value="REJECTED">REJECTED</option>
+                                                        <option value="PURCHASED">PURCHASED</option>
+                                                        <option value="TRANSFERRED">TRANSFERRED</option>
+                                                    </select>
                                                 </td>
                                                 <td style={{ padding: '10px', display: 'flex', gap: '5px' }}>
-                                                    {listing.status === 'PENDING' && (
-                                                        <>
-                                                            <button
-                                                                onClick={() => handleVerifyListing(listing.id, 'VERIFIED')}
-                                                                style={{ background: '#22c55e', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                                                            >
-                                                                Verify
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleVerifyListing(listing.id, 'REJECTED')}
-                                                                style={{ background: '#ef4444', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                                                            >
-                                                                Reject
-                                                            </button>
-                                                        </>
+                                                    {listing.status === 'ASSAY' && (
+                                                        <button
+                                                            onClick={() => setAssayListing(listing)}
+                                                            style={{ background: '#f59e0b', color: '#000', border: 'none', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                                                        >
+                                                            ⚖️ Assay & Offer
+                                                        </button>
                                                     )}
                                                 </td>
                                             </tr>
@@ -611,6 +640,37 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                     </tbody>
                                 </table>
                             </div>
+
+                            {/* Assay Modal */}
+                            {assayListing && (
+                                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                                    <div style={{ background: 'var(--bg-color)', padding: '30px', width: '400px', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                        <h2 style={{ marginTop: 0, color: 'var(--text-color)' }}>Assay & Valuation</h2>
+                                        <p style={{ color: 'var(--text-muted)', marginBottom: '20px', fontSize: '0.9rem' }}>
+                                            Listing: {assayListing.product} ({assayListing.shape})<br />
+                                            Claimed: {assayListing.quantity} kg @ ${assayListing.price_per_kg}/kg
+                                        </p>
+                                        <form onSubmit={handleAssaySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                            <div>
+                                                <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '5px' }}>Tested Weight (kg)</label>
+                                                <input type="number" step="0.001" required value={testedWeight} onChange={e => setTestedWeight(e.target.value)} style={{ width: '100%', padding: '8px', background: 'var(--surface-color)', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '5px' }}>Tested Purity (e.g 0.85)</label>
+                                                <input type="number" step="0.001" max="1" min="0" required value={testedPurity} onChange={e => setTestedPurity(e.target.value)} style={{ width: '100%', padding: '8px', background: 'var(--surface-color)', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px' }} />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '5px' }}>Final Offer (USD)</label>
+                                                <input type="number" step="0.01" required value={finalOffer} onChange={e => setFinalOffer(e.target.value)} style={{ width: '100%', padding: '8px', background: 'var(--surface-color)', border: '1px solid var(--border-color)', color: 'white', borderRadius: '4px' }} />
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                                                <button type="button" onClick={() => setAssayListing(null)} style={{ flex: 1, padding: '10px', background: 'var(--surface-color)', color: 'white', border: '1px solid var(--border-color)', borderRadius: '4px', cursor: 'pointer' }}>Cancel</button>
+                                                <button type="submit" style={{ flex: 1, padding: '10px', background: '#f59e0b', color: 'black', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Send Offer</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
