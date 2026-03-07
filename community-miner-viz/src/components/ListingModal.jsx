@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 
-export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints, initialLocation }) {
-    const [product, setProduct] = useState('Gold');
-    const [shape, setShape] = useState('Dore Bar');
-    const [quantity, setQuantity] = useState('');
-    const [price, setPrice] = useState('');
-    const [meetingPointId, setMeetingPointId] = useState('');
-    const [meetingDate, setMeetingDate] = useState('');
+export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints, initialLocation, initialListing }) {
+    const [product, setProduct] = useState(initialListing ? initialListing.product : 'Gold');
+    const [shape, setShape] = useState(initialListing ? initialListing.shape : 'Dore Bar');
+    const [quantity, setQuantity] = useState(initialListing ? initialListing.quantity : '');
+    const [price, setPrice] = useState(initialListing ? initialListing.price_per_kg : '');
+    const [meetingPointId, setMeetingPointId] = useState(initialListing ? initialListing.meeting_point_id : '');
+    const [meetingDate, setMeetingDate] = useState(initialListing && initialListing.meeting_date ? new Date(initialListing.meeting_date).toISOString().slice(0, 16) : '');
     const [photo, setPhoto] = useState(null);
     const [uploading, setUploading] = useState(false);
 
@@ -16,17 +16,24 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
     const handleSubmit = (e) => {
         e.preventDefault();
         setUploading(true);
-        onSubmit({
+        const payload = {
             product,
             shape,
             quantity: parseFloat(quantity),
             price_per_kg: parseFloat(price),
             meeting_point_id: meetingPointId,
             meeting_date: meetingDate,
-            lat: initialLocation.lat,
-            lng: initialLocation.lng,
             photoFile: photo
-        }).finally(() => {
+        };
+
+        if (initialListing) {
+            payload.id = initialListing.id;
+        } else {
+            payload.lat = initialLocation.lat;
+            payload.lng = initialLocation.lng;
+        }
+
+        onSubmit(payload).finally(() => {
             setUploading(false);
             onClose();
         });
@@ -36,7 +43,7 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
         <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div className="bg-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-slate-700">
                 <div className="px-6 py-4 flex justify-between items-center bg-slate-900 border-b border-slate-700">
-                    <h2 className="text-xl font-bold text-white">Create Listing</h2>
+                    <h2 className="text-xl font-bold text-white">{initialListing ? 'Edit Listing' : 'Create Listing'}</h2>
                     <button onClick={onClose} className="text-slate-400 hover:text-white transition">
                         <X size={24} />
                     </button>
@@ -95,14 +102,14 @@ export default function ListingModal({ isOpen, onClose, onSubmit, meetingPoints,
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Upload Photo</label>
-                        <input type="file" accept="image/*" onChange={e => setPhoto(e.target.files[0])} required
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Upload Photo {initialListing && '(Leave empty to keep existing)'}</label>
+                        <input type="file" accept="image/*" onChange={e => setPhoto(e.target.files[0])} required={!initialListing}
                             className="w-full p-2 text-sm text-slate-300 file:mr-4 file:py-2 flex file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-500 file:text-slate-900 hover:file:bg-amber-600 cursor-pointer border border-slate-700 rounded-lg bg-slate-900" />
                     </div>
 
                     <div className="mt-8 pt-4 border-t border-slate-700 flex justify-end">
                         <button type="submit" disabled={uploading} className="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-2.5 px-6 rounded-lg transition disabled:opacity-50 flex items-center gap-2">
-                            {uploading ? 'Processing...' : 'Submit Listing & Get Route'}
+                            {uploading ? 'Processing...' : (initialListing ? 'Update Listing' : 'Submit Listing & Get Route')}
                         </button>
                     </div>
                 </form>

@@ -18,6 +18,8 @@ export default function RoutingControl({ startNode, endNode }) {
             addWaypoints: false,
             fitSelectedRoutes: true,
             showAlternatives: false,
+            show: true, // Show the itinerary panel
+            collapsible: true, // Allow collapsing the itinerary
             lineOptions: {
                 styles: [
                     { color: '#ffffff', opacity: 0.9, weight: 8 },  // white casing

@@ -115,6 +115,16 @@ class MinerListingVerify(BaseModel):
     meeting_outcome: Optional[str] = None
     communication_log: Optional[str] = None
 
+class MinerListingUpdate(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    price_per_kg: Optional[float] = None
+    quantity: Optional[float] = None
+    shape: Optional[str] = None
+    product: Optional[str] = None
+    meeting_point_id: Optional[str] = None
+    meeting_date: Optional[str] = None
+
 # DB Init Update
 def init_db():
     try:
@@ -1043,6 +1053,66 @@ async def upload_listing_photo(listing_id: str, file: UploadFile = File(...)):
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
+    finally:
+        conn.close()
+
+@app.put("/miner-listings/{listing_id}")
+def update_miner_listing(listing_id: str, item: MinerListingUpdate):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute("SELECT * FROM miner_listings WHERE id = %s", (listing_id,))
+        existing = c.fetchone()
+        if not existing:
+            return Response("Listing not found", status_code=404)
+
+        updates = []
+        values = []
+        
+        if item.lat is not None:
+            updates.append("lat = %s"); values.append(item.lat)
+        if item.lng is not None:
+             updates.append("lng = %s"); values.append(item.lng)
+        if item.price_per_kg is not None:
+             updates.append("price_per_kg = %s"); values.append(item.price_per_kg)
+        if item.quantity is not None:
+             updates.append("quantity = %s"); values.append(item.quantity)
+        if item.shape is not None:
+             updates.append("shape = %s"); values.append(item.shape)
+        if item.product is not None:
+             updates.append("product = %s"); values.append(item.product)
+        if item.meeting_point_id is not None:
+             updates.append("meeting_point_id = %s"); values.append(item.meeting_point_id)
+        if item.meeting_date is not None:
+             updates.append("meeting_date = %s"); values.append(item.meeting_date)
+
+        if not updates:
+            return {"status": "no changes"}
+            
+        values.append(listing_id)
+        sql = f"UPDATE miner_listings SET {', '.join(updates)} WHERE id = %s"
+        c.execute(sql, tuple(values))
+        conn.commit()
+        return {"status": "updated", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+@app.delete("/miner-listings/{listing_id}")
+def delete_miner_listing(listing_id: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM miner_listings WHERE id = %s", (listing_id,))
+        if c.rowcount == 0:
+             return Response("Listing not found", status_code=404)
+        conn.commit()
+        return {"status": "deleted", "id": listing_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
     finally:
         conn.close()
 
