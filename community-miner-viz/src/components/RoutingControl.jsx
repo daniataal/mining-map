@@ -19,7 +19,10 @@ export default function RoutingControl({ startNode, endNode }) {
             fitSelectedRoutes: true,
             showAlternatives: false,
             lineOptions: {
-                styles: [{ color: '#f59e0b', opacity: 0.8, weight: 6 }]
+                styles: [
+                    { color: '#ffffff', opacity: 0.9, weight: 8 },  // white casing
+                    { color: '#8b5cf6', opacity: 1, weight: 5 } // vibrant purple inner line
+                ]
             },
             createMarker: () => null // Hide default routing markers, we have our own
         }).addTo(map);

@@ -570,6 +570,11 @@ const AdminPanel = ({ isOpen, onClose, token }) => {
                                                 <td style={{ padding: '10px' }}>
                                                     <div>Loc: {listing.lat.toFixed(4)}, {listing.lng.toFixed(4)}</div>
                                                     <div style={{ fontSize: '0.85em' }}>Meeting Pt: {listing.meeting_point_id}</div>
+                                                    {listing.meeting_date && (
+                                                        <div style={{ color: 'var(--primary-color)', fontSize: '0.85em', fontWeight: 'bold' }}>
+                                                            Date: {new Date(listing.meeting_date).toLocaleString()}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td style={{ padding: '10px' }}>
                                                     <div>{listing.quantity} kg</div>
