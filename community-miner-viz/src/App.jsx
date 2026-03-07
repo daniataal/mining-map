@@ -53,6 +53,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState('login');
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
+  const [loginPhone, setLoginPhone] = useState('');
   const [authError, setAuthError] = useState('');
 
   // Data State
@@ -64,6 +65,7 @@ export default function App() {
   const [draftLocation, setDraftLocation] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingListing, setEditingListing] = useState(null);
+  const [offerListing, setOfferListing] = useState(null);
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,7 +119,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUser, password: loginPass, role: 'miner' })
+        body: JSON.stringify({ username: loginUser, password: loginPass, phone_number: loginPhone, role: 'miner' })
       });
       if (!res.ok) {
         const txt = await res.text(); throw new Error(txt || 'Failed to register');
@@ -222,6 +224,20 @@ export default function App() {
     }
   };
 
+  const handleAcceptOffer = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/miner-listings/${id}/accept-offer`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Failed to accept offer');
+      await fetchData();
+      setOfferListing(null);
+      alert('Offer accepted successfully!');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const startRoute = (listing) => {
     const mp = meetingPoints.find(m => m.id === listing.meeting_point_id);
     if (!mp) return alert('Meeting point not found');
@@ -292,6 +308,16 @@ export default function App() {
                 className="w-full mt-1 p-3 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500"
               />
             </div>
+            {authMode === 'register' && (
+              <div>
+                <label className="text-sm font-medium text-slate-300">Phone Number</label>
+                <input
+                  type="tel" value={loginPhone} onChange={e => setLoginPhone(e.target.value)} required
+                  placeholder="+1..."
+                  className="w-full mt-1 p-3 rounded-lg bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
             {authError && <p className="text-red-400 text-sm font-medium">{authError}</p>}
             <button className="w-full mt-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3.5 px-4 rounded-xl transition text-lg tracking-wide uppercase">
               {authMode === 'login' ? 'Sign In' : 'Create Account'}
@@ -402,6 +428,11 @@ export default function App() {
                   <button onClick={() => startRoute(l)} className="mt-3 w-full bg-slate-900 text-white text-xs font-semibold py-2 rounded-md hover:bg-slate-800 transition flex justify-center items-center gap-1">
                     <Navigation size={12} /> View Route
                   </button>
+                  {l.status === 'OFFER' && l.miner_id === userId && (
+                    <button onClick={() => setOfferListing(l)} className="mt-2 w-full bg-amber-500 text-slate-900 text-xs font-bold py-2 rounded-md hover:bg-amber-600 transition flex justify-center items-center shadow-md">
+                      ⚖️ Review Offer
+                    </button>
+                  )}
                   {l.miner_id === userId && (
                     <div className="flex gap-2 mt-2">
                       <button onClick={() => { setEditingListing(l); setIsModalOpen(true); }} className="flex-1 bg-slate-200 text-slate-800 text-xs font-semibold py-1.5 rounded-md hover:bg-slate-300 transition">
@@ -444,6 +475,44 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Offer Review Modal */}
+      {offerListing && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[2000] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in-up">
+            <div className="bg-amber-500 p-4 text-center">
+              <h2 className="text-xl font-bold text-slate-900">Official Offer</h2>
+              <p className="text-amber-900 text-sm font-medium">From DoreMarket Trading Auth</p>
+            </div>
+            <div className="p-6">
+              <div className="space-y-4 mb-6">
+                <div className="flex justify-between items-center border-b pb-2">
+                  <span className="text-slate-500 font-medium">Tested Weight</span>
+                  <span className="text-slate-900 font-bold">{offerListing.tested_weight} kg</span>
+                </div>
+                <div className="flex justify-between items-center border-b pb-2">
+                  <span className="text-slate-500 font-medium">Tested Purity</span>
+                  <span className="text-slate-900 font-bold">{(offerListing.tested_purity * 100).toFixed(2)}%</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <span className="text-slate-600 font-bold text-lg">Final Offer</span>
+                  <span className="text-green-600 font-black text-2xl">${offerListing.final_offer.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => setOfferListing(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">
+                  Close
+                </button>
+                <button onClick={() => handleAcceptOffer(offerListing.id)} className="flex-[2] py-3 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-500/30 transition flex justify-center items-center gap-2">
+                  <Check size={18} /> Accept Offer
+                </button>
+              </div>
+              <p className="text-center text-xs text-slate-400 mt-4 px-4">By accepting this offer, an overarching agreement and inventory transfer will be initiated automatically.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Listing Modal */}
       <ListingModal
