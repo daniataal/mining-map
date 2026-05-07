@@ -71,19 +71,17 @@ const Sidebar = ({
             </div>
 
             <div className="controls">
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <div className="search-row">
                     <input
                         type="text"
                         placeholder="Search..."
                         value={filter}
                         onChange={e => setFilter(e.target.value)}
                         className="search-input"
-                        style={{ margin: 0, flex: 1 }}
                     />
                     <button
                         onClick={() => setShowFilters(!showFilters)}
-                        className="secondary-btn"
-                        style={{ padding: '0 12px' }}
+                        className="secondary-btn filter-toggle-btn"
                     >
                         {showFilters ? 'Hide' : 'Filters'}
                     </button>
@@ -148,24 +146,13 @@ const Sidebar = ({
                 )}
 
                 {showFilters && (selectedCountry.length > 0 || selectedCommodity.length > 0 || filter || userStatusFilter.length > 0 || selectedLicenseType.length > 0) && (
-                    <div style={{ marginTop: '15px', borderTop: '1px solid #334155', paddingTop: '10px' }}>
-                        <div style={{ fontSize: '0.85em', marginBottom: '8px', color: '#94a3b8', textAlign: 'center' }}>
+                    <div className="filter-results-panel">
+                        <div className="filter-results-count">
                             Found {processedData.length} matches
                         </div>
                         <button
                             onClick={deleteFilteredList}
-                            style={{
-                                width: '100%',
-                                padding: '8px',
-                                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                                color: '#f85149',
-                                border: '1px solid rgba(239, 68, 68, 0.3)',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontWeight: 'bold',
-                                fontSize: '0.85rem',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
-                            }}
+                            className="danger-btn"
                         >
                             🗑️ Delete Visible ({processedData.length})
                         </button>
@@ -217,26 +204,16 @@ const Sidebar = ({
                             </div>
 
                             {item.phoneNumber && (
-                                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <div className="card-phone">
                                     <span>📞</span> <a href={`tel:${item.phoneNumber}`} onClick={(e) => e.stopPropagation()} style={{ color: '#2563eb', textDecoration: 'none' }}>{item.phoneNumber}</a>
                                 </div>
                             )}
 
-                            {annotation.status && <div style={{
-                                marginTop: '10px',
-                                borderTop: '1px solid rgba(255,255,255,0.1)',
-                                paddingTop: '8px',
-                                color: statusColor,
-                                fontWeight: 'bold',
-                                fontSize: '0.8rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px'
-                            }}>
+                            {annotation.status && <div className="annotation-status-row" style={{ color: statusColor }}>
                                 {annotation.status === 'good' ? '✅ GO' :
                                     annotation.status === 'bad' ? '❌ NO GO' :
                                         annotation.status === 'maybe' ? '🤔 MAYBE' : ''}
-                                {annotation.comment && <span style={{ color: '#94a3b8', fontWeight: 'normal' }}>- {annotation.comment}</span>}
+                                {annotation.comment && <span className="annotation-comment">- {annotation.comment}</span>}
                             </div>}
                         </div>
                     );
