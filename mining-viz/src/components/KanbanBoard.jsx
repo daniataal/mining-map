@@ -29,30 +29,11 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
     const stagesToRender = isMobile ? [activeStage] : stages;
 
     return (
-        <div className="kanban-board" style={{
-            flex: 1,
-            height: '100%',
-            overflow: 'hidden', // Prevent outer scrolling
-            padding: '20px',
-            backgroundColor: 'var(--bg-color)',
-            display: 'flex',
-            flexDirection: 'column', // Always column, we handle inner layout responsive
-            gap: '20px',
-            paddingBottom: isMobile ? '80px' : '20px'
-        }}>
+        <div className={`kanban-board ${isMobile ? 'mobile' : ''}`}>
 
             {/* Mobile Tab Selector */}
             {isMobile && (
-                <div style={{
-                    display: 'flex',
-                    gap: '10px',
-                    overflowX: 'auto',
-                    flexShrink: 0, // Don't shrink
-                    paddingBottom: '5px',
-                    marginBottom: '5px',
-                    scrollbarWidth: 'none',
-                    msOverflowStyle: 'none'
-                }}>
+                <div className="kanban-stage-tabs">
                     {stages.map(stage => {
                         const isActive = activeStage === stage;
                         const color = getStageColor(stage);
@@ -60,18 +41,8 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                             <button
                                 key={stage}
                                 onClick={() => setActiveStage(stage)}
-                                style={{
-                                    padding: '8px 16px',
-                                    borderRadius: '20px',
-                                    border: `1px solid ${isActive ? color : 'var(--border-color)'}`,
-                                    backgroundColor: isActive ? `${color}20` : 'transparent',
-                                    color: isActive ? color : 'var(--text-muted)',
-                                    fontWeight: isActive ? 'bold' : 'normal',
-                                    whiteSpace: 'nowrap',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s',
-                                    fontSize: '0.9rem'
-                                }}
+                                className={`kanban-stage-tab ${isActive ? 'active' : ''}`}
+                                style={{ '--stage-color': color }}
                             >
                                 {stage} ({columns[stage].length})
                             </button>
@@ -81,49 +52,19 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
             )}
 
             {/* Content Container */}
-            <div style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: isMobile ? 'column' : 'row',
-                gap: '20px',
-                overflowX: isMobile ? 'hidden' : 'auto',
-                overflowY: isMobile ? 'hidden' : 'hidden' // Inner columns handle Y scroll
-            }}>
+            <div className={`kanban-columns ${isMobile ? 'mobile' : ''}`}>
                 {stagesToRender.map(stage => (
-                    <div key={stage} style={{
-                        minWidth: isMobile ? '100%' : '280px',
-                        width: isMobile ? '100%' : '280px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        height: '100%', // Take full height of container
-                        animation: isMobile ? 'fadeIn 0.3s ease' : 'none'
-                    }}>
+                    <div key={stage} className={`kanban-column ${isMobile ? 'mobile' : ''}`}>
                         {/* Column Header */}
-                        <div style={{
-                            padding: '10px 15px',
-                            borderRadius: '6px',
-                            marginBottom: '15px',
-                            backgroundColor: 'var(--card-bg)',
-                            border: '1px solid var(--border-color)',
-                            borderTop: `4px solid ${getStageColor(stage)}`,
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            flexShrink: 0
-                        }}>
-                            <h3 style={{ margin: 0, color: '#e6edf3', fontSize: '1rem', fontFamily: 'serif' }}>{stage}</h3>
-                            <span style={{ fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '10px', color: '#8b949e' }}>
+                        <div className="kanban-column-header" style={{ '--stage-color': getStageColor(stage) }}>
+                            <h3>{stage}</h3>
+                            <span className="kanban-count-pill">
                                 {columns[stage].length}
                             </span>
                         </div>
 
                         {/* Cards - This is the scrollable part */}
-                        <div style={{
-                            flex: 1,
-                            overflowY: 'auto',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '12px',
-                            paddingRight: '5px' // Space for scrollbar
-                        }}>
+                        <div className="kanban-card-list">
                             {columns[stage].map(item => {
                                 const annotation = userAnnotations[item.id] || {};
                                 return (
@@ -131,41 +72,29 @@ const KanbanBoard = ({ processedData, userAnnotations, updateAnnotation, commodi
                                         key={item.id}
                                         onClick={() => onCardClick(item)}
                                         className="mining-card"
-                                        style={{
-                                            padding: '12px',
-                                            cursor: 'pointer',
-                                            flexShrink: 0,
-                                            margin: 0 // Reset override
-                                        }}
+                                        style={{ margin: 0 }}
                                         onMouseOver={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-2px)')}
                                         onMouseOut={(e) => !isMobile && (e.currentTarget.style.transform = 'none')}
                                     >
-                                        <div style={{ fontWeight: 'bold', color: '#e6edf3', marginBottom: '4px', fontFamily: 'serif' }}>{item.company}</div>
-                                        <div style={{ fontSize: '0.8rem', color: '#8b949e', marginBottom: '8px' }}>{annotation.commodity || item.commodity}</div>
+                                        <div className="kanban-card-title">{item.company}</div>
+                                        <div className="kanban-card-subtitle">{annotation.commodity || item.commodity}</div>
 
                                         {/* Simple separator */}
-                                        <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }}></div>
+                                        <div className="kanban-separator"></div>
 
                                         {/* Mini Tags */}
-                                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                            {annotation.status === 'good' && <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)' }}>GO</span>}
-                                            {annotation.verification?.siteVisit && <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', backgroundColor: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>Visited</span>}
+                                        <div className="kanban-tags">
+                                            {annotation.status === 'good' && <span className="kanban-tag go">GO</span>}
+                                            {annotation.verification?.siteVisit && <span className="kanban-tag visited">Visited</span>}
                                         </div>
                                     </div>
                                 );
                             })}
-                            {columns[stage].length === 0 && <div style={{ color: '#8b949e', fontSize: '0.9rem', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>No items in this stage</div>}
+                            {columns[stage].length === 0 && <div className="kanban-empty">No items in this stage</div>}
                         </div>
                     </div>
                 ))}
             </div>
-
-            <style>{`
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(5px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-            `}</style>
         </div>
     );
 };

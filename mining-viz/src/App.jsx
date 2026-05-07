@@ -446,22 +446,7 @@ function App() {
       {userRole === 'admin' && !isMobile && (
         <button
           onClick={() => setIsAdminPanelOpen(true)}
-          style={{
-            position: 'fixed',
-            bottom: '90px',
-            right: '20px',
-            zIndex: 9999,
-            background: '#dc2626',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50%',
-            width: '50px',
-            height: '50px',
-            fontSize: '1.5rem',
-            cursor: 'pointer',
-            boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}
+          className="admin-fab desktop"
           title="Admin Panel"
         >
           ⚙️
@@ -472,22 +457,7 @@ function App() {
       {userRole === 'admin' && isMobile && (
         <button
           onClick={() => setIsAdminPanelOpen(true)}
-          style={{
-            position: 'fixed',
-            bottom: '70px', // Adjusted to be above bottom nav (60px)
-            right: '20px',
-            zIndex: 9999,
-            background: '#dc2626',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50%',
-            width: '45px',
-            height: '45px',
-            fontSize: '1.2rem',
-            cursor: 'pointer',
-            boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}
+          className="admin-fab mobile"
           title="Admin Panel"
         >
           ⚙️
@@ -509,10 +479,9 @@ function App() {
         updateAnnotation={updateAnnotation}
       />
 
-      <div className="sidebar-wrapper" style={{
-        display: (isMobile && mobileTab !== 'list') || (!isMobile && isSidebarCollapsed) ? 'none' : 'block',
-        width: isMobile ? '100%' : 'auto'
-      }}>
+      <div
+        className={`sidebar-wrapper ${(isMobile && mobileTab !== 'list') || (!isMobile && isSidebarCollapsed) ? 'is-hidden' : ''}`}
+      >
         <Sidebar
           processedData={processedData}
           filter={filter} setFilter={setFilter}
@@ -538,30 +507,12 @@ function App() {
         />
       </div>
 
-      <div className="main-content" style={{
-        flex: 1,
-        position: 'relative',
-        display: isMobile && (mobileTab === 'list') ? 'none' : 'flex',
-        flexDirection: 'column'
-      }}>
+      <div className={`main-content ${isMobile && mobileTab === 'list' ? 'is-hidden' : ''}`}>
         {/* Restore Sidebar Button (Desktop Only) */}
         {!isMobile && isSidebarCollapsed && (
           <button
             onClick={() => setIsSidebarCollapsed(false)}
-            style={{
-              position: 'absolute',
-              top: '80px', // Moved down
-              left: '10px',
-              zIndex: 2000,
-              backgroundColor: '#1e293b',
-              color: '#94a3b8',
-              border: '1px solid #475569',
-              padding: '8px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
-            }}
+            className="sidebar-restore-btn"
             title="Show Sidebar"
           >
             »
@@ -570,45 +521,16 @@ function App() {
 
         {/* View Switcher - Floating on top (Hidden on Mobile) */}
         {!isMobile && (
-          <div style={{
-            position: 'absolute',
-            top: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 1000,
-            backgroundColor: 'var(--card-bg)',
-            padding: '5px',
-            borderRadius: '8px',
-            display: 'flex',
-            gap: '5px',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-            border: '1px solid var(--border-color)'
-          }}>
+          <div className="view-switcher">
             <button
               onClick={() => setViewMode('map')}
-              style={{
-                background: viewMode === 'map' ? 'var(--primary-color)' : 'transparent',
-                color: viewMode === 'map' ? '#0d1117' : 'var(--text-muted)',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
+              className={`view-switch-btn ${viewMode === 'map' ? 'active' : ''}`}
             >
               🗺️ Map
             </button>
             <button
               onClick={() => setViewMode('pipeline')}
-              style={{
-                background: viewMode === 'pipeline' ? 'var(--primary-color)' : 'transparent',
-                color: viewMode === 'pipeline' ? '#0d1117' : 'var(--text-muted)',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
+              className={`view-switch-btn ${viewMode === 'pipeline' ? 'active' : ''}`}
             >
               📊 Pipeline
             </button>
@@ -660,7 +582,6 @@ function App() {
           <button
             className={`nav-item ${mobileTab === 'list' ? 'active' : ''}`}
             onClick={() => setMobileTab('list')}
-            style={{ color: mobileTab === 'list' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">📋</span>
             <span>List</span>
@@ -671,7 +592,6 @@ function App() {
               setMobileTab('map');
               setViewMode('map');
             }}
-            style={{ color: mobileTab === 'map' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">🗺️</span>
             <span>Map</span>
@@ -682,7 +602,6 @@ function App() {
               setMobileTab('pipeline');
               setViewMode('pipeline');
             }}
-            style={{ color: mobileTab === 'pipeline' ? 'var(--primary-color)' : 'var(--text-muted)' }}
           >
             <span className="nav-icon">📊</span>
             <span>Pipeline</span>
