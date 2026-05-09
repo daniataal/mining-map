@@ -68,3 +68,93 @@ npm run dev
 *   `/meridian-android` - **Meridian Trade OS** — native Kotlin/Compose Android app ([README](meridian-android/README.md)).
 *   `Dockerfile` - Container definition.
 *   `start.sh` - Startup script that handles DB persistence and permissions.
+
+## 🗺️ License Geocoding Backfill
+
+About **3000 of ~4000** licenses ship without precise coordinates and the rest
+often share a regional centroid (the CSV importer used a static lookup table
+in `convert_data.py`). The backend exposes an **additive, reversible**
+backfill that approximates coordinates from each row's `region` + `country`
+text via Nominatim (free) or Mapbox (optional, faster).
+
+### How to run safely
+
+Always **dry-run first** (default) and inspect the sample before committing:
+
+```bash
+# Preview 100 candidates, no writes:
+curl -X POST http://localhost:8000/api/admin/geocode-licenses \
+  -H 'Content-Type: application/json' \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"dry_run": true, "limit": 100}'
+
+# Looks good? Commit a small batch (writes lat/lng, snapshots originals):
+curl -X POST http://localhost:8000/api/admin/geocode-licenses \
+  -H 'Content-Type: application/json' \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"dry_run": false, "limit": 100}'
+
+# Restrict to one country:
+curl -X POST http://localhost:8000/api/admin/geocode-licenses \
+  -H 'Content-Type: application/json' \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"dry_run": false, "limit": 500, "country": "Ghana"}'
+
+# Undo every backfilled row (keeps user-verified rows untouched):
+curl -X POST http://localhost:8000/api/admin/geocode-licenses/revert \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
+There is an equivalent CLI:
+
+```bash
+docker compose exec backend python /app/geocode_licenses.py --dry-run --limit 100
+docker compose exec backend python /app/geocode_licenses.py --limit 500 --country Ghana
+docker compose exec backend python /app/geocode_licenses.py --revert --limit 10000
+```
+
+### Safety properties
+
+*   **Reversible.** Every write snapshots the prior `lat` / `lng` into
+    `original_lat` / `original_lng` (only the *first* time, so re-runs don't
+    lose the canonical pre-backfill value). `/revert` restores them.
+*   **Never overwrites user-verified rows.** Rows with `geo_source = 'user'`
+    are skipped unless the request explicitly passes
+    `allow_overwrite_user: true`.
+*   **Idempotent.** A persistent `geo_cache` table memoises every
+    `(region, country)` lookup (positive *and* negative results), so a
+    repeated run on the same set is a no-op.
+*   **Polite to Nominatim.** Hard ≥1.1 s delay between requests, custom
+    `User-Agent` required by their usage policy.
+*   **Approximate flag surfaces in the UI.** The frontend reads
+    `geoApproximated` from `GET /licenses` and renders an `≈ APPROX
+    LOCATION` badge on the marker popup so analysts immediately see which
+    rows are surveyed and which are district-centroid backfills.
+
+### Env vars
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `ADMIN_TOKEN` | *(unset → endpoint logs warning, allows access)* | Required value for the `X-Admin-Token` header in production. |
+| `GEOCODER_USER_AGENT` | `mining-map-backfill/1.0 (contact admin)` | Per Nominatim policy. Replace with a real contact email in prod. |
+| `NOMINATIM_BASE_URL` | `https://nominatim.openstreetmap.org` | Point at a self-hosted Nominatim for higher throughput. |
+| `NOMINATIM_RPS_DELAY` | `1.1` | Seconds between Nominatim requests. |
+| `MAPBOX_GEOCODING_TOKEN` | *(unset)* | Optional. When set, Mapbox is preferred over Nominatim. |
+
+### Manual test plan
+
+1. Start the stack: `docker compose up -d`. The migration adds the
+   `geo_source`, `geo_approximated`, `original_lat`, `original_lng`,
+   `geo_confidence`, `geocoded_at` columns to `licenses` (idempotent).
+2. Open the map at `http://localhost:5173` and zoom into a known cluster
+   that previously refused to open popups (e.g. an Accra-centroid stack).
+   Click the cluster → spiderfy → click any leg. The popup must open
+   anchored on the spider leg.
+3. Hover the spider legs — collocated rows show an inline `≈ approx (N)`
+   tag in the tooltip indicating how many rows shared coordinates.
+4. Run the backfill in dry-run mode (above). Inspect the `sample` array.
+5. Run with `dry_run=false`. Reload the map: rows that were nudged
+   into a real location now show the `≈ APPROX LOCATION` badge in the
+   popup.
+6. Run `/revert`. The `≈` badges disappear and rows return to their
+   original lat/lng (user-verified rows are unaffected).

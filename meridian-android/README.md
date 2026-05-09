@@ -10,7 +10,7 @@ The **primary experience is native UI** (Compose) that calls the **same FastAPI 
 - **Open in Android Studio:** File → Open → select `meridian-android/`; Studio auto-generates the Gradle wrapper jar on sync.
 - **Run on device / emulator:** press ▶ Run in Android Studio (requires API 26+ AVD or physical device).
 - **Build debug APK locally:** `cd meridian-android && gradle wrapper --gradle-version=8.7 && ./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
-- **CI — download APK from GitHub Actions:** push to `meridian-android/**` or trigger workflow `Meridian Android — Build Debug APK` manually → Actions tab → select run → **Artifacts** section → download `meridian-debug-apk`.
+- **CI — download APK from GitHub Actions:** pushes and PRs to `main` that touch `meridian-android/**` or `.github/workflows/meridian-android-apk.yml` (or manual **workflow_dispatch**) → Actions → **Meridian Android — Build Debug APK** → **Artifacts** → `meridian-debug-apk`. Fork PRs do not receive `MERIDIAN_WEB_HOST` / `MERIDIAN_API_HOST` secrets; the debug build still uses Gradle defaults (see API/web host sections below).
 - **Release signing:** add `signingConfigs { release { ... } }` in `app/build.gradle.kts` with GitHub secrets `KEYSTORE_FILE`, `KEY_ALIAS`, `KEY_PASSWORD`; switch CI step to `assembleRelease`.
 
 ## Backend API base URL (`BuildConfig.MERIDIAN_API_BASE_URL`)

@@ -6,6 +6,12 @@ name: "Meridian Android — Build Debug APK"
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+    paths:
+      - "meridian-android/**"
+      - ".github/workflows/meridian-android-apk.yml"
+  pull_request:
+    branches: [main]
     paths:
       - "meridian-android/**"
       - ".github/workflows/meridian-android-apk.yml"
@@ -40,6 +46,7 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x meridian-android/gradlew
 
+      # Fork PRs: repo secrets are not exposed to workflows from forks; hosts stay unset and Gradle fallbacks apply.
       - name: Build Debug APK
         working-directory: meridian-android
         env:

@@ -473,6 +473,7 @@ export default function App() {
                   onClose={() => setViewMode('map')} 
                   token={token || undefined} 
                   isFullPage={true}
+                  currentUserId={userId}
                 />
               </div>
             )}
@@ -492,6 +493,7 @@ export default function App() {
           isOpen={isAdminPanelOpen} 
           onClose={() => setIsAdminPanelOpen(false)} 
           token={token || undefined} 
+          currentUserId={userId}
         />
         <FilterPanel 
           isOpen={isFilterOpen}
