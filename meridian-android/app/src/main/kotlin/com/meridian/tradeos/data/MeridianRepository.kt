@@ -40,7 +40,7 @@ class MeridianRepository(private val context: Context) {
     private suspend inline fun <reified T> get(
         path: String,
         token: String? = null,
-        decoder: (String) -> T,
+        crossinline decoder: (String) -> T,
     ): Result<T> = withContext(Dispatchers.IO) {
         val url = "${apiBase().trimEnd('/')}$path"
         try {
@@ -86,26 +86,24 @@ class MeridianRepository(private val context: Context) {
     }
 
     suspend fun login(username: String, password: String): Result<LoginResponse> {
-        val payload = json.encodeToString(
-            buildJsonObject {
-                put("username", username)
-                put("password", password)
-            },
-        )
-        return postJson("/auth/login", payload).map { body ->
+        val payload = buildJsonObject {
+            put("username", username)
+            put("password", password)
+        }
+        val payloadStr = json.encodeToString(JsonObject.serializer(), payload)
+        return postJson("/auth/login", payloadStr).map { body ->
             json.decodeFromString(LoginResponse.serializer(), body)
         }
     }
 
     suspend fun register(username: String, password: String, role: String = "user"): Result<Unit> {
-        val payload = json.encodeToString(
-            buildJsonObject {
-                put("username", username)
-                put("password", password)
-                put("role", role)
-            },
-        )
-        return postJson("/auth/register", payload).map { }
+        val payload = buildJsonObject {
+            put("username", username)
+            put("password", password)
+            put("role", role)
+        }
+        val payloadStr = json.encodeToString(JsonObject.serializer(), payload)
+        return postJson("/auth/register", payloadStr).map { }
     }
 
     suspend fun fetchLicenses(token: String?): Result<List<MiningLicenseDto>> =

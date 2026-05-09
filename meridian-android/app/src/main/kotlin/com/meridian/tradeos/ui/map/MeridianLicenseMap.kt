@@ -1,5 +1,6 @@
 package com.meridian.tradeos.ui.map
 
+import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -13,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.meridian.tradeos.data.MiningLicenseDto
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -37,7 +37,7 @@ fun MeridianLicenseMap(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = context as ComponentActivity
 
     val mapView = remember {
         MapView(context).also { it.onCreate(null) }
@@ -48,7 +48,7 @@ fun MeridianLicenseMap(
     val latestLicenses by rememberUpdatedState(licenses)
     val onLicenseTap by rememberUpdatedState(onLicenseClick)
 
-    DisposableEffect(lifecycleOwner, mapView) {
+    DisposableEffect(activity, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> mapView.onStart()
@@ -58,7 +58,7 @@ fun MeridianLicenseMap(
                 else -> {}
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        activity.lifecycle.addObserver(observer)
         mapView.getMapAsync { map ->
             map.uiSettings.isAttributionEnabled = true
             val center = LatLng(7.9465, -1.0232)
@@ -89,7 +89,7 @@ fun MeridianLicenseMap(
             }
         }
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+            activity.lifecycle.removeObserver(observer)
             mapView.onDestroy()
         }
     }
