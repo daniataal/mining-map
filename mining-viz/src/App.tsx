@@ -178,8 +178,10 @@ export default function App() {
         
         {/* PANEL 1: Left Navigation & Results List */}
         <aside 
-          className={`transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-white/5 bg-slate-950/40 backdrop-blur-3xl shadow-2xl
-          ${isSidebarCollapsed ? 'w-16' : 'w-96'}`}
+          className={`transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-white/5 bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
+          onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
+          onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
         >
           <Sidebar
             processedData={miningData.processedData}
@@ -197,6 +199,9 @@ export default function App() {
             onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
             onToggleAdmin={() => setViewMode('admin')}
             isFilterOpen={isFilterOpen}
+            isPinned={isSidebarPinned}
+            setIsPinned={setIsSidebarPinned}
+            isCollapsed={isSidebarCollapsed && !isSidebarPinned}
           />
         </aside>
 
