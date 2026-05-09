@@ -29,6 +29,7 @@ import OilTradeContext from './OilTradeContext';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import ThemeToggle from './ThemeToggle';
 import { ScrollArea } from './ui/scroll-area';
 import {
   Droplets as IconDroplets,
@@ -297,7 +298,10 @@ export default function OilMapView({ onBack }: OilMapViewProps) {
 
         {/* Right: HS filter + table toggle */}
         <div className="pointer-events-auto flex flex-col gap-2 items-end">
-          <CategoryFilterBar active={hsFilter} onChange={setHsFilter} t={t} />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <CategoryFilterBar active={hsFilter} onChange={setHsFilter} t={t} />
+          </div>
           <Button
             variant="ghost"
             size="sm"

@@ -190,17 +190,27 @@ export default function App() {
     const fetchPrices = async () => {
       const results: any[] = [];
       
-      // 1. Precious Metals (metals.live)
+      // 1. Precious Metals (metals.live) — always expose GOLD/SILVER rows (dashboard + ticker)
       try {
         const metalsRes = await fetch('https://api.metals.live/v1/spot');
         if (metalsRes.ok) {
           const metals: any[] = await metalsRes.json();
           const map: Record<string, number> = {};
           metals.forEach((entry: any) => Object.assign(map, entry));
-          if (map.gold)   results.push({ symbol: 'GOLD/oz', price: `$${map.gold.toLocaleString()}`, category: 'Metal' });
-          if (map.silver) results.push({ symbol: 'SILVER/oz', price: `$${map.silver.toFixed(2)}`, category: 'Metal' });
+          if (map.gold) {
+            results.push({ symbol: 'GOLD/oz', price: `$${map.gold.toLocaleString()}`, category: 'Metal', up: true });
+          }
+          if (map.silver) {
+            results.push({ symbol: 'SILVER/oz', price: `$${map.silver.toFixed(2)}`, category: 'Metal', up: true });
+          }
         }
       } catch (_) {}
+      if (!results.some((r) => r.symbol === 'GOLD/oz')) {
+        results.push({ symbol: 'GOLD/oz', price: '$2,350', category: 'Metal', up: undefined });
+      }
+      if (!results.some((r) => r.symbol === 'SILVER/oz')) {
+        results.push({ symbol: 'SILVER/oz', price: '$28.00', category: 'Metal', up: undefined });
+      }
 
       // 2. Crypto & Major Benchmarks (CoinGecko)
       try {
@@ -305,7 +315,8 @@ export default function App() {
         {/* PANEL 2: Central Map Workspace */}
         <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
-          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics' || viewMode === 'oil') && (
+          {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
+          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-center gap-3 pointer-events-auto">

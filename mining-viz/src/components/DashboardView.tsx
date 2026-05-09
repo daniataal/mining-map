@@ -40,9 +40,21 @@ export default function DashboardView({
     return acc;
   }, {});
 
-  // 2. Financial Overview
-  const activeGoldPrice = parseFloat(marketPrices.find(p => p.symbol.includes('GOLD'))?.price.replace(/[$,]/g, '') || '2350');
-  
+  // 2. Precious metals — always surface on dashboard even if /spot failed (ticker omits them)
+  const goldEntry = marketPrices.find((p) => /GOLD/i.test(p.symbol));
+  const silverEntry = marketPrices.find((p) => /SILVER/i.test(p.symbol));
+  const parsePx = (s?: string) => parseFloat((s || '').replace(/[$,]/g, '')) || 0;
+  const activeGoldPrice = parsePx(goldEntry?.price) || 2350;
+  const activeSilverPrice = parsePx(silverEntry?.price) || 28;
+  const metalsForTicker = [
+    goldEntry ?? { symbol: 'GOLD/oz', price: '$—', category: 'Metal' },
+    silverEntry ?? { symbol: 'SILVER/oz', price: '$—', category: 'Metal' },
+  ];
+  const tickerWithoutDupMetals = marketPrices.filter(
+    (p) => !/GOLD/i.test(p.symbol) && !/SILVER/i.test(p.symbol)
+  );
+  const displayPrices = [...metalsForTicker, ...tickerWithoutDupMetals];
+
   return (
     <div className="flex-1 overflow-y-auto bg-slate-950 p-8 space-y-8 no-scrollbar">
       {/* Header Intelligence */}
@@ -66,7 +78,7 @@ export default function DashboardView({
       </div>
 
       {/* KPI Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         <KPICard 
           icon={<Layers className="w-5 h-5 text-blue-500" />}
           label={t("סה\"כ רשיונות", "Total Licenses")}
@@ -86,11 +98,18 @@ export default function DashboardView({
           subValue={t("פריסה טקטית", "Tactical Spread")}
         />
         <KPICard 
-          icon={<TrendingUp className="w-5 h-5 text-emerald-500" />}
+          icon={<TrendingUp className="w-5 h-5 text-amber-400" />}
           label={t("מחיר זהב", "Gold Spot")}
-          value={`$${activeGoldPrice.toLocaleString()}`}
+          value={goldEntry?.price?.trim() ? goldEntry.price : `$${activeGoldPrice.toLocaleString()}`}
           subValue={t("מחיר אונקיה", "Per Troy Oz")}
-          trend="+0.45%"
+          trend={goldEntry ? '+0.45%' : undefined}
+        />
+        <KPICard 
+          icon={<TrendingUp className="w-5 h-5 text-slate-300" />}
+          label={t("מחיר כסף", "Silver Spot")}
+          value={silverEntry?.price?.trim() ? silverEntry.price : `$${activeSilverPrice.toFixed(2)}`}
+          subValue={t("מחיר אונקיה", "Per Troy Oz")}
+          trend={silverEntry ? '+0.45%' : undefined}
         />
       </div>
 
@@ -134,16 +153,16 @@ export default function DashboardView({
              <Zap className="w-4 h-4 text-emerald-500" /> {t("מרכז סחורות גלובלי", "Global Macro Ticker")}
           </h3>
           <div className="grid grid-cols-1 gap-4">
-             {marketPrices.map((price, i) => (
-               <div key={i} className="flex items-center justify-between p-4 bg-slate-950/50 rounded-2xl border border-white/5 hover:border-white/20 transition-all group">
+             {displayPrices.map((price, i) => (
+               <div key={`${price.symbol}-${i}`} className="flex items-center justify-between p-4 bg-slate-950/50 rounded-2xl border border-white/5 hover:border-white/20 transition-all group">
                   <div className="flex flex-col">
                     <span className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">{price.category || 'Commodity'}</span>
                     <span className="text-xs font-black text-white group-hover:text-amber-500 transition-colors uppercase italic">{price.symbol}</span>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-black text-white">{price.price}</div>
-                    <div className={`text-[8px] font-bold ${price.up !== false ? 'text-emerald-500' : 'text-red-500'}`}>
-                      {price.up !== false ? '▲ LIVE' : '▼ TREND'}
+                    <div className={`text-[8px] font-bold ${price.price === '$—' ? 'text-slate-500' : price.up === false ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {price.price === '$—' ? t('אין זרם', 'No feed') : price.up === false ? '▼ TREND' : '▲ LIVE'}
                     </div>
                   </div>
                </div>
