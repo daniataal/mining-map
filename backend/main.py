@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Response
+from fastapi import FastAPI, UploadFile, File, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import psycopg2
@@ -75,6 +75,20 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def _admin_payload_from_authorization(authorization: Optional[str]):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None, Response("Unauthorized", status_code=401)
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        return None, Response("Unauthorized", status_code=401)
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        return None, Response("Invalid or expired token", status_code=401)
+    if payload.get("role") != "admin":
+        return None, Response("Forbidden", status_code=403)
+    return payload, None
 
 # Models
 class UserLogin(BaseModel):
@@ -163,6 +177,23 @@ def init_db():
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS price_per_kg FLOAT DEFAULT 0.0;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS capacity FLOAT DEFAULT 0.0;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS is_exported BOOLEAN DEFAULT FALSE;")
+            # Geocoding provenance — additive, fully reversible. The geocode
+            # backfill workflow writes here; never overwrites lat/lng without
+            # also stashing the prior value in original_lat/original_lng so a
+            # later /api/admin/geocode-licenses/revert can roll it back.
+            #   geo_source        : 'user' | 'csv-import' | 'gazetteer' | 'nominatim' | 'mapbox' | 'manual-fix'
+            #   geo_approximated  : TRUE when coords come from text geocoding
+            #                       (district/region centroid, not a surveyed
+            #                       point) — drives the ≈ badge in the UI.
+            #   geo_confidence    : geocoder confidence (0..1) when reported
+            #   original_lat/lng  : pre-backfill snapshot for safe revert
+            #   geocoded_at       : when the backfill last touched this row
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS geo_source VARCHAR(50);")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS geo_approximated BOOLEAN DEFAULT FALSE;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS geo_confidence FLOAT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS original_lat FLOAT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS original_lng FLOAT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS geocoded_at TIMESTAMP;")
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -376,18 +407,30 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
 
 @app.delete("/auth/users/{user_id}")
-def delete_user(user_id: str):
-    # Prevent deleting the last admin or specific generic admin if needed
+def delete_user(user_id: str, authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err:
+        return err
+    actor_id = payload.get("id")
+    if actor_id is not None and str(actor_id) == str(user_id):
+        return Response("Cannot delete your own account", status_code=400)
+
     conn = get_db_connection()
     c = conn.cursor()
     try:
-        # Optional: check if user exists first
+        c.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+        row = c.fetchone()
+        if not row:
+            return Response("User not found", status_code=404)
+        if row[0] == "admin":
+            c.execute("SELECT COUNT(*) FROM users WHERE role = %s", ("admin",))
+            if c.fetchone()[0] <= 1:
+                return Response("Cannot delete the last admin user", status_code=400)
         c.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        if c.rowcount == 0:
-             return Response("User not found", status_code=404)
         conn.commit()
         return {"status": "deleted"}
     except Exception as e:
+        conn.rollback()
         return Response(str(e), status_code=500)
     finally:
         conn.close()
@@ -492,6 +535,7 @@ def read_licenses():
     # Transform to list of dicts with keys matching what the Reac app expects
     results = []
     for row in rows:
+        keys = row.keys()
         results.append({
             "id": row["id"],
             "company": row["company"],
@@ -503,8 +547,16 @@ def read_licenses():
             "region": row["region"],
             "lat": row["lat"],
             "lng": row["lng"],
-            "phoneNumber": row["phone_number"] if "phone_number" in row.keys() else None,
-            "contactPerson": row["contact_person"] if "contact_person" in row.keys() else None
+            "phoneNumber": row["phone_number"] if "phone_number" in keys else None,
+            "contactPerson": row["contact_person"] if "contact_person" in keys else None,
+            # Geocoding provenance — read-only on the frontend; drives the
+            # "≈ approx location" badge and lets users distinguish surveyed
+            # points from district-centroid backfills.
+            "geoSource": row["geo_source"] if "geo_source" in keys else None,
+            "geoApproximated": row["geo_approximated"] if "geo_approximated" in keys else None,
+            "geoConfidence": row["geo_confidence"] if "geo_confidence" in keys else None,
+            "originalLat": row["original_lat"] if "original_lat" in keys else None,
+            "originalLng": row["original_lng"] if "original_lng" in keys else None,
         })
     
     return results
@@ -1973,6 +2025,148 @@ def admin_oil_ingest(request: OilIngestRequest):
             return {"status": "success", **result}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+# ======================================================================
+# License Geocoding Backfill  /api/admin/geocode-licenses
+# ======================================================================
+#
+# Many license rows came in without coordinates (~3000 of ~4000) or share a
+# regional centroid because the CSV importer used a static lookup table. This
+# endpoint backfills missing/low-quality coords from the existing free-form
+# ``region`` + ``country`` text fields using a polite Nominatim query path
+# (or Mapbox if MAPBOX_GEOCODING_TOKEN is set).
+#
+# Safety properties
+# -----------------
+#   * **Reversible.** Every overwrite snapshots the prior lat/lng into
+#     ``original_lat`` / ``original_lng`` (only if they're not already set, so
+#     re-runs don't lose the *first* known good value). The companion
+#     ``/revert`` route restores them.
+#   * **Never overwrites surveyed coords.** Rows tagged ``geo_source='user'``
+#     are skipped unless the caller explicitly passes
+#     ``allow_overwrite_user=True``.
+#   * **Dry-run by default.** Returns a sample of the first 10 changes so an
+#     operator can sanity-check before running with ``dry_run=False``.
+#   * **Polite to Nominatim.** Hard rate-limit (1.1 s between hits by
+#     default), persistent cache table ``geo_cache`` so re-runs don't re-hit.
+#
+# Auth model
+# ----------
+# Matches the existing project pattern: optional ``X-Admin-Token`` header is
+# checked against ``ADMIN_TOKEN`` env var when set; in dev (env unset) the
+# endpoint logs a warning and lets the call through. Wire a real auth check
+# (e.g. require_admin_jwt) before exposing this route to the public internet.
+
+class GeocodeBackfillRequest(BaseModel):
+    dry_run: bool = True
+    limit: int = 200
+    force: bool = False
+    allow_overwrite_user: bool = False
+    country: Optional[str] = None
+
+
+class GeocodeRevertRequest(BaseModel):
+    limit: int = 10000
+    country: Optional[str] = None
+
+
+def _check_admin_token(x_admin_token: Optional[str]) -> Optional[Response]:
+    expected = os.getenv("ADMIN_TOKEN")
+    if not expected:
+        # Match the rest of the codebase: log but allow in local dev. The
+        # frontend Admin Panel is gated client-side; this endpoint should
+        # additionally be reverse-proxy gated in prod.
+        print("[admin] WARNING: ADMIN_TOKEN env not set — admin endpoint is unauthenticated.")
+        return None
+    if x_admin_token != expected:
+        return Response("Forbidden", status_code=403)
+    return None
+
+
+from fastapi import Header
+
+
+@app.post("/api/admin/geocode-licenses")
+def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optional[str] = Header(None)):
+    """Run a backfill batch.
+
+    Example
+    -------
+    Preview first 100 missing-coord licenses (no DB writes)::
+
+        curl -X POST http://localhost:8000/api/admin/geocode-licenses \\
+             -H 'Content-Type: application/json' \\
+             -H "X-Admin-Token: $ADMIN_TOKEN" \\
+             -d '{"dry_run": true, "limit": 100}'
+
+    When happy, re-run with ``"dry_run": false`` and a larger limit. Repeated
+    calls are idempotent thanks to the ``geo_cache`` table and the
+    ``geo_source`` filter.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    try:
+        from geocode_licenses import backfill
+    except ImportError:
+        # Fall back to in-tree relative import when running with a different
+        # PYTHONPATH (e.g. uvicorn with reload from project root).
+        import sys, os as _os
+        sys.path.insert(0, _os.path.dirname(__file__))
+        from geocode_licenses import backfill  # type: ignore
+    try:
+        stats = backfill(
+            dry_run=request.dry_run,
+            limit=request.limit,
+            force=request.force,
+            allow_overwrite_user=request.allow_overwrite_user,
+            country_filter=request.country,
+        )
+        return {
+            "status": "success",
+            "dry_run": request.dry_run,
+            "candidates": stats.candidates,
+            "would_update": stats.would_update,
+            "updated": stats.updated,
+            "not_found": stats.not_found,
+            "skipped_user_verified": stats.skipped_user_verified,
+            "skipped_no_text": stats.skipped_no_text,
+            "cache_hits": stats.cache_hits,
+            "network_hits": stats.network_hits,
+            "started_at": stats.started_at,
+            "finished_at": stats.finished_at,
+            "sample": stats.sample,
+            "notes": [
+                "Set MAPBOX_GEOCODING_TOKEN for higher throughput; otherwise Nominatim is rate-limited to ~1 rps.",
+                "Re-run after dry_run=true with dry_run=false to commit changes.",
+                "Use POST /api/admin/geocode-licenses/revert to undo any non-user-verified row.",
+            ],
+        }
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/geocode-licenses/revert")
+def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[str] = Header(None)):
+    """Restore ``original_lat`` / ``original_lng`` for any row touched by a
+    backfill run. ``geo_source='user'`` rows are never reverted because they
+    have no recorded prior value to restore.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    try:
+        from geocode_licenses import revert_geocoded
+    except ImportError:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.dirname(__file__))
+        from geocode_licenses import revert_geocoded  # type: ignore
+    try:
+        result = revert_geocoded(limit=request.limit, country_filter=request.country)
+        return {"status": "success", **result}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

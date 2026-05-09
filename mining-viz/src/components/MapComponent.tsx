@@ -7,6 +7,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MiningLicense, UserAnnotation } from '../types';
 import { useI18n } from '../lib/i18n';
+import { applyCollocationJitter } from '../lib/geo';
 import PopupForm from './PopupForm';
 
 // Fix for default marker icon in React Leaflet
@@ -49,6 +50,14 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
     });
 };
 
+// Applied to the marker root (.leaflet-marker-icon) when an item is the
+// active selection. We toggle a class instead of calling setIcon() because
+// setIcon replaces the marker's _icon DOM node — and replacing that node
+// while a cluster is in spiderfy mode resets every leg back to the centroid,
+// which is exactly the bug that made popups fail to open over collocated
+// points.
+const SELECTED_CLASS = 'is-selected';
+
 const getMarkerColor = (commodity?: string, userStatus?: string) => {
     if (userStatus === 'good') return '#22c55e';
     if (userStatus === 'bad') return '#ef4444';
@@ -76,15 +85,28 @@ interface MapComponentProps {
   mapFlyTrigger: number;
 }
 
-const MapEffect = ({ selectedItem, mapFlyTrigger }: { selectedItem: MiningLicense | null, mapFlyTrigger: number }) => {
+const MapEffect = ({
+    selectedItem,
+    mapFlyTrigger,
+    flyTarget,
+}: {
+    selectedItem: MiningLicense | null;
+    mapFlyTrigger: number;
+    // Optional jittered display coords so the camera lands on the marker we
+    // actually rendered (matters when the row was nudged due to collocation).
+    flyTarget: { lat: number; lng: number } | null;
+}) => {
     const map = useMap();
     useEffect(() => {
-        if (selectedItem && selectedItem.lat != null && selectedItem.lng != null && mapFlyTrigger > 0) {
-            const currentZoom = map.getZoom();
-            const targetZoom = Math.max(currentZoom, 16);
-            map.flyTo([selectedItem.lat, selectedItem.lng], targetZoom, { duration: 1.0 });
-        }
-    }, [mapFlyTrigger, map, selectedItem]);
+        if (!selectedItem || mapFlyTrigger <= 0) return;
+        const tgt = flyTarget ?? (selectedItem.lat != null && selectedItem.lng != null
+            ? { lat: selectedItem.lat, lng: selectedItem.lng }
+            : null);
+        if (!tgt) return;
+        const currentZoom = map.getZoom();
+        const targetZoom = Math.max(currentZoom, 16);
+        map.flyTo([tgt.lat, tgt.lng], targetZoom, { duration: 1.0 });
+    }, [mapFlyTrigger, map, selectedItem, flyTarget]);
     return null;
 };
 
@@ -122,36 +144,53 @@ export default function MapComponent({
             .catch(err => console.error("Failed to load country borders", err));
     }, []);
 
+    // Jitter rows that share exact coordinates so each marker has a unique
+    // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
+    const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+
+    const flyTarget = useMemo(() => {
+        if (!selectedItem) return null;
+        const j = displayData.find(d => d.id === selectedItem.id);
+        if (!j || j._displayLat == null || j._displayLng == null) return null;
+        return { lat: j._displayLat, lng: j._displayLng };
+    }, [selectedItem, displayData]);
+
+    // Selection-driven side effects:
+    //   - toggle a CSS class on the previous & next markers (no setIcon swap
+    //     because that would replace the marker DOM node and collapse any
+    //     active spiderfy);
+    //   - open the popup. For sidebar-driven selection we wait one tick so
+    //     the camera flyTo can start; for marker clicks the popup is already
+    //     opened synchronously inside the click handler below, so the
+    //     openPopup call here is a harmless no-op.
     useEffect(() => {
-        if (prevSelectedIdRef.current && prevSelectedIdRef.current !== selectedItem?.id) {
-            const prevId = prevSelectedIdRef.current;
-            const marker = markerRefs.current[prevId];
-            if (marker) {
-                const prevItem = processedData.find(d => d.id === prevId);
-                if (prevItem) {
-                    const annotation = userAnnotations[prevId] || {};
-                    const color = getMarkerColor(annotation.commodity || prevItem.commodity, annotation.status);
-                    marker.setIcon(createCustomIcon(color, false));
-                }
-            }
+        const prevId = prevSelectedIdRef.current;
+        if (prevId && prevId !== selectedItem?.id) {
+            const prevMarker = markerRefs.current[prevId];
+            const el = prevMarker?.getElement();
+            if (el) el.classList.remove(SELECTED_CLASS);
         }
 
-        if (selectedItem) {
-            const marker = markerRefs.current[selectedItem.id];
-            if (marker) {
-                const annotation = userAnnotations[selectedItem.id] || {};
-                const color = getMarkerColor(annotation.commodity || selectedItem.commodity, annotation.status);
-                marker.setIcon(createCustomIcon(color, true));
-                // Small delay lets React finish the icon swap (setIcon) before
-                // Leaflet positions the popup anchor, avoiding a mis-anchored popup
-                // on first open in spiderfy mode.
-                setTimeout(() => marker.openPopup(), 80);
-            }
-            prevSelectedIdRef.current = selectedItem.id;
-        } else {
+        if (!selectedItem) {
             prevSelectedIdRef.current = null;
+            return;
         }
-    }, [selectedItem, processedData, userAnnotations]);
+
+        const marker = markerRefs.current[selectedItem.id];
+        const el = marker?.getElement();
+        if (el) el.classList.add(SELECTED_CLASS);
+        if (marker && !marker.isPopupOpen?.()) {
+            // Defer openPopup so flyTo (from the sidebar path) and any
+            // pending cluster animation can settle. If the popup is already
+            // open from a synchronous marker-click handler this is a no-op.
+            const handle = setTimeout(() => {
+                if (markerRefs.current[selectedItem.id] === marker) marker.openPopup();
+            }, 60);
+            prevSelectedIdRef.current = selectedItem.id;
+            return () => clearTimeout(handle);
+        }
+        prevSelectedIdRef.current = selectedItem.id;
+    }, [selectedItem?.id]);
 
     const activeCountries = useMemo(() => {
         const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
@@ -190,7 +229,7 @@ export default function MapComponent({
             >
                 <ZoomControl position="bottomleft" />
                 <MapClickHandler onMapClick={() => setSelectedItem(null)} />
-                <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
+                <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 
                 {/* key forces remount when theme changes so `checked` re-applies */}
                 <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
@@ -233,24 +272,42 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
-                    {processedData.map((item) => {
-                        if (item.lat == null || item.lng == null) return null;
+                    {displayData.map((item) => {
+                        if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
                         const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
 
                         return (
                             <Marker
                                 key={item.id}
-                                position={[item.lat, item.lng]}
+                                position={[item._displayLat, item._displayLng]}
                                 icon={createCustomIcon(color, false)}
-                                ref={(el) => { if (el) markerRefs.current[item.id] = el; }}
+                                ref={(el) => {
+                                    if (!el) return;
+                                    markerRefs.current[item.id] = el;
+                                    // Re-apply the selected class after a re-mount (the
+                                    // ref callback fires every time the marker DOM is
+                                    // rebuilt, e.g. after spiderfy/unspiderfy).
+                                    if (selectedItem?.id === item.id) {
+                                        const root = el.getElement();
+                                        if (root) root.classList.add(SELECTED_CLASS);
+                                    }
+                                }}
                                 eventHandlers={{
                                     click: (e) => {
                                         // Stop propagation so the map-level click handler
                                         // (MapClickHandler → setSelectedItem(null)) does not
                                         // fire in the same event cycle and cancel the selection
-                                        // that we are about to set (React 18 batches both).
+                                        // that we are about to set.
                                         L.DomEvent.stopPropagation(e);
+                                        // Open the popup *synchronously* while the marker
+                                        // is still in its spiderfied position. Waiting for
+                                        // a state-driven setTimeout (the previous
+                                        // implementation) let leaflet.markercluster
+                                        // un-spiderfy the stack first, which is why
+                                        // collocated/duplicate-coord points appeared to
+                                        // ignore clicks.
+                                        e.target.openPopup();
                                         setSelectedItem(item);
                                     },
                                 }}
@@ -258,6 +315,9 @@ export default function MapComponent({
                                 <Tooltip direction="top" offset={[0, -20]} opacity={1}>
                                     <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
                                         <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
+                                        {item._wasJittered && (
+                                          <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
+                                        )}
                                     </div>
                                 </Tooltip>
                                 <Popup className="custom-popup" minWidth={300}>

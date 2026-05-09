@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Api
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
@@ -46,6 +48,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meridian.tradeos.BuildConfig
+import com.meridian.tradeos.KEY_API_BASE_URL_OVERRIDE
+import com.meridian.tradeos.KEY_WEB_BASE_URL_OVERRIDE
+import com.meridian.tradeos.LEGACY_WEB_BASE_URL
+import com.meridian.tradeos.MERIDIAN_PREFS
 import com.meridian.tradeos.ui.components.GlassCard
 import com.meridian.tradeos.ui.theme.AccentAmberDim
 import com.meridian.tradeos.ui.theme.BackgroundDeep
@@ -57,12 +63,14 @@ import com.meridian.tradeos.ui.theme.TextSecondary
 @Composable
 fun SettingsScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
+    var apiUrl by remember { mutableStateOf("") }
     var webUrl by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val sp = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE)
-        webUrl = sp.getString(KEY_WEB_BASE_URL, null)?.trim()
-            ?: BuildConfig.MERIDIAN_WEB_URL.trim()
+        apiUrl = sp.getString(KEY_API_BASE_URL_OVERRIDE, null)?.trim().orEmpty()
+        webUrl = sp.getString(KEY_WEB_BASE_URL_OVERRIDE, null)?.trim().orEmpty()
+            .ifEmpty { sp.getString(LEGACY_WEB_BASE_URL, null)?.trim().orEmpty() }
     }
 
     Column(
@@ -72,7 +80,6 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
             .padding(top = 48.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // ── Top bar ────────────────────────────────────────────────────────
         Row(
             modifier          = Modifier
                 .fillMaxWidth()
@@ -106,17 +113,18 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                 SettingsRow(icon = Icons.Filled.Security, label = "Security", value = "2FA enabled")
             }
 
-            SettingsSection(title = "WEB DESK (MAP & DATA)") {
+            SettingsSection(title = "BACKEND API (NATIVE)") {
                 Text(
-                    text          = "URL of your mining-map web app (Vite dev or deployed HTTPS). Emulator default: http://10.0.2.2:5173 — physical phone: http://YOUR_PC_IP:5173",
+                    text          = "Native mode talks to the FastAPI server directly (same routes as mining-viz: VITE_API_BASE / axios baseURL). It is usually NOT the Vite dev URL (:5173). Default emulator: ${BuildConfig.MERIDIAN_API_BASE_URL}",
                     fontSize      = 11.sp,
                     color         = TextMuted,
                     modifier      = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 OutlinedTextField(
-                    value                   = webUrl,
-                    onValueChange           = { webUrl = it },
-                    label                   = { Text("Base URL", color = TextMuted) },
+                    value                   = apiUrl,
+                    onValueChange           = { apiUrl = it },
+                    label                   = { Text("Override API base URL (optional)", color = TextMuted) },
+                    placeholder             = { Text("Leave empty for build default", color = TextMuted) },
                     singleLine              = true,
                     modifier                = Modifier
                         .fillMaxWidth()
@@ -130,10 +138,10 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                 )
                 Button(
                     onClick  = {
-                        context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE)
-                            .edit()
-                            .putString(KEY_WEB_BASE_URL, webUrl.trim().trimEnd('/'))
-                            .apply()
+                        val ed = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE).edit()
+                        val v = apiUrl.trim().trimEnd('/')
+                        if (v.isEmpty()) ed.remove(KEY_API_BASE_URL_OVERRIDE) else ed.putString(KEY_API_BASE_URL_OVERRIDE, v)
+                        ed.apply()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -143,10 +151,56 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                         contentColor   = TextPrimary,
                     ),
                 ) {
-                    Text("Save URL", fontWeight = FontWeight.SemiBold)
+                    Text("Save API override", fontWeight = FontWeight.SemiBold)
                 }
                 SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Sync, label = "Tip", value = "Run API on :8000 & web on :5173")
+                SettingsRow(icon = Icons.Filled.Api, label = "Build default", value = BuildConfig.MERIDIAN_API_BASE_URL)
+                SettingsDivider()
+                SettingsRow(icon = Icons.Filled.Sync, label = "Tip", value = "Backend :8000 · Vite :5173 (web only)")
+            }
+
+            SettingsSection(title = "LEGACY WEB DESK (WEBVIEW)") {
+                Text(
+                    text          = "Optional: host for the React mining-viz app inside a WebView. Not required for native-first usage. Build default: ${BuildConfig.MERIDIAN_WEB_URL}",
+                    fontSize      = 11.sp,
+                    color         = TextMuted,
+                    modifier      = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                OutlinedTextField(
+                    value                   = webUrl,
+                    onValueChange           = { webUrl = it },
+                    label                   = { Text("Override Vite / web base URL (optional)", color = TextMuted) },
+                    placeholder             = { Text("Leave empty for build default", color = TextMuted) },
+                    singleLine              = true,
+                    modifier                = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors                  = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor   = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentAmberDim,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                    ),
+                )
+                Button(
+                    onClick  = {
+                        val ed = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE).edit()
+                        val v = webUrl.trim().trimEnd('/')
+                        if (v.isEmpty()) ed.remove(KEY_WEB_BASE_URL_OVERRIDE) else ed.putString(KEY_WEB_BASE_URL_OVERRIDE, v)
+                        ed.apply()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = AccentAmberDim,
+                        contentColor   = TextPrimary,
+                    ),
+                ) {
+                    Text("Save web override", fontWeight = FontWeight.SemiBold)
+                }
+                SettingsDivider()
+                SettingsRow(icon = Icons.Filled.Web, label = "Debug", value = "Legacy WebView from command center")
             }
 
             SettingsSection(title = "APPEARANCE") {

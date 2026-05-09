@@ -40,10 +40,18 @@ export default function PopupForm({
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 dark:from-slate-950 via-transparent to-transparent opacity-80" />
-                <div className="absolute top-3 left-3 flex gap-2">
+                <div className="absolute top-3 left-3 flex gap-2 flex-wrap max-w-[260px]">
                    <Badge className="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-black/10 dark:border-white/10 text-[9px] font-black uppercase px-2 h-5 text-slate-900 dark:text-white">
                      {item.lat?.toFixed(4)}, {item.lng?.toFixed(4)}
                    </Badge>
+                   {item.geoApproximated && (
+                     <Badge
+                       title={item.geoSource ? `Coords approximated via ${item.geoSource}` : 'Coords are an approximation, not the surveyed point'}
+                       className="bg-amber-500/90 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5"
+                     >
+                       {t("מיקום משוער", "≈ APPROX LOCATION")}
+                     </Badge>
+                   )}
                    {(item.phoneNumber || annotation.phoneNumber) && (
                      <Badge className="bg-emerald-500 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5">
                        {t("קו פעיל", "ACTIVE LINE")}
