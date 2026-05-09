@@ -216,24 +216,9 @@ export default function MapComponent({
                                 eventHandlers={{
                                     click: (e) => {
                                         setSelectedItem(item);
-                                        e.target.openPopup();
                                     },
                                 }}
-                            >
-                                <Popup className="custom-popup">
-                                    <PopupForm 
-                                      item={item}
-                                      annotation={annotation}
-                                      updateAnnotation={updateAnnotation}
-                                      onDelete={() => deleteLicense(item.id)}
-                                      commodities={[]} // These could be passed from props if needed
-                                      licenseTypes={[]} 
-                                      isMobile={false}
-                                      onOpenDossier={() => handleOpenDossier(item)}
-                                      isOpen={selectedItem?.id === item.id}
-                                    />
-                                </Popup>
-                            </Marker>
+                            />
                         );
                     })}
                 </MarkerClusterGroup>
