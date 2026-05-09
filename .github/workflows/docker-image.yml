@@ -27,69 +27,98 @@ jobs:
       run: |
         echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
-    - name: Build and Push Docker Image
+    - name: Build and Push Backend
       run: |
-        docker build . --file Dockerfile --tag dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
-        docker push dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}
+        docker build -t dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }} ./backend
+        docker push dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }}
 
-    # SSH into the remote server and deploy the container
+    - name: Build and Push Admin Frontend
+      run: |
+        docker build -t dannyatalla/mining-frontend-admin:v${{ env.BUILD_NUMBER }} ./mining-viz
+        docker push dannyatalla/mining-frontend-admin:v${{ env.BUILD_NUMBER }}
+
+    - name: Build and Push Community Frontend
+      run: |
+        docker build -t dannyatalla/mining-frontend-community:v${{ env.BUILD_NUMBER }} ./community-miner-viz
+        docker push dannyatalla/mining-frontend-community:v${{ env.BUILD_NUMBER }}
+
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
-        port: 22  # Adjust if you're using a different port
-        key: ${{ secrets.REMOTE_SSH_KEY }}  # Directly using SSH key here
+        port: 22
+        key: ${{ secrets.REMOTE_SSH_KEY }}
         script: |
-          APP_IMAGE="dannyatalla/mining-map:v${{ env.BUILD_NUMBER }}"
+          VERSION="v${{ env.BUILD_NUMBER }}"
           
-          # Ensure directory exists
           sudo mkdir -p /opt/mining-map
           cd /opt/mining-map
 
-          # Create/Overwrite docker-compose.yml
+          # Create the modern split-service docker-compose.yml
           cat <<EOF | sudo tee docker-compose.yml
-          version: '3.8'
           services:
-            app:
-              image: $APP_IMAGE
+            backend:
+              image: dannyatalla/mining-backend:\$VERSION
+              container_name: mining-backend
+              restart: always
               ports:
                 - "8000:8000"
-                - "5173:5173"
-                - "5174:5174"
               environment:
-                - VITE_API_BASE=http://129.159.148.51:8000
                 - DB_HOST=db
+                - DB_PORT=5432
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
               depends_on:
-                - db
+                db:
+                  condition: service_healthy
+
+            frontend-admin:
+              image: dannyatalla/mining-frontend-admin:\$VERSION
+              container_name: mining-frontend-admin
               restart: always
+              ports:
+                - "5173:5173"
+              environment:
+                - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
+              depends_on:
+                - backend
+
+            frontend-community:
+              image: dannyatalla/mining-frontend-community:\$VERSION
+              container_name: mining-frontend-community
+              restart: always
+              ports:
+                - "5174:5174"
+              environment:
+                - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
+              depends_on:
+                - backend
 
             db:
-              image: postgres:15
+              image: postgres:15-alpine
+              container_name: mining-db
+              restart: always
               environment:
                 POSTGRES_DB: mining_db
                 POSTGRES_USER: postgres
                 POSTGRES_PASSWORD: password
+              ports:
+                - "5432:5432"
               volumes:
                 - postgres_data:/var/lib/postgresql/data
-              restart: always
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U postgres -d mining_db"]
+                interval: 5s
+                timeout: 5s
+                retries: 5
 
           volumes:
             postgres_data:
           EOF
 
-          # Pull latest image
-          sudo docker pull $APP_IMAGE
-
-          # Stop old containers if running via independent docker run (cleanup)
-          sudo docker rm -f mining-map-auto || true
-
-          # Start up with Compose
-          if sudo docker compose version >/dev/null 2>&1; then
-            sudo docker compose up -d --remove-orphans
-          else
-            sudo docker-compose up -d --remove-orphans
-          fi
+          # Pull and Restart
+          sudo docker compose pull
+          sudo docker compose up -d --remove-orphans
+          sudo docker image prune -f
