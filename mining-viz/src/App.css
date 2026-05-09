@@ -1217,3 +1217,29 @@
     width: 100% !important;
   }
 }
+
+/* ── Mobile responsive additions ── */
+
+/* Lift Leaflet map controls above the 64px bottom nav bar on mobile */
+@media (max-width: 767px) {
+  .leaflet-bottom {
+    bottom: 68px;
+  }
+  /* Prevent map popups from being clipped at the bottom */
+  .leaflet-popup {
+    margin-bottom: 72px;
+  }
+}
+
+/* No-scrollbar utility (used in dossier tabs, kanban, etc.) */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Touch-friendly leaflet controls */
+@media (max-width: 767px) {
+  .leaflet-bar a {
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+  }
+}

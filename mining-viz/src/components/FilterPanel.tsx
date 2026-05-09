@@ -49,12 +49,12 @@ export default function FilterPanel({
       initial={{ x: 400, opacity: 0 }}
       animate={{ x: isOpen ? 0 : 400, opacity: isOpen ? 1 : 0 }}
       transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-      className={`fixed top-4 bottom-4 right-4 w-80 bg-slate-950/80 backdrop-blur-3xl border border-white/10 rounded-3xl shadow-2xl z-40 flex flex-col overflow-hidden ${!isOpen && 'pointer-events-none'}`}
+      className={`fixed inset-0 sm:inset-auto sm:top-4 sm:bottom-4 sm:right-4 sm:w-80 bg-white/95 sm:bg-white/80 dark:bg-slate-950/95 dark:sm:bg-slate-950/80 backdrop-blur-3xl border-0 sm:border border-black/10 dark:border-white/10 sm:rounded-3xl shadow-2xl z-50 flex flex-col overflow-hidden ${!isOpen && 'pointer-events-none'}`}
     >
-      <header className="p-5 border-b border-white/5 flex items-center justify-between bg-white/5">
+      <header className="p-5 border-b border-black/5 dark:border-white/5 flex items-center justify-between bg-black/5 dark:bg-white/5">
         <div className="flex items-center gap-2">
           <LucideFilter className="w-4 h-4 text-amber-500" />
-          <h3 className="text-xs font-black uppercase tracking-widest text-slate-200">{t("מסנני רישיון", "License Filters")}</h3>
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">{t("מסנני רישיון", "License Filters")}</h3>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-slate-500 hover:text-white">
           <LucideX className="w-4 h-4" />
@@ -108,10 +108,10 @@ export default function FilterPanel({
         </div>
       </ScrollArea>
 
-      <footer className="p-5 border-t border-white/5 bg-white/5 flex gap-3">
+      <footer className="p-5 border-t border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 flex gap-3">
         <Button 
           variant="outline" 
-          className="flex-1 h-10 border-white/10 bg-transparent text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 hover:text-white transition-colors"
+          className="flex-1 h-10 border-black/10 dark:border-white/10 bg-transparent text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white transition-colors"
           onClick={resetFilters}
         >
           <LucideRotateCcw className="w-3 h-3 mr-2" />

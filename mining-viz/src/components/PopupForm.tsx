@@ -31,7 +31,7 @@ export default function PopupForm({
       : "/assets/commodities/satellite.png";
 
     return (
-        <div className="flex flex-col w-[320px] bg-slate-950 border border-white/10 overflow-hidden text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
+        <div className="flex flex-col w-[320px] bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
             {/* 1. Visual Commodity Identification */}
             <div className="relative h-44 w-full overflow-hidden group">
                 <img 
@@ -39,9 +39,9 @@ export default function PopupForm({
                   alt="Commodity Visual"
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-80" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 dark:from-slate-950 via-transparent to-transparent opacity-80" />
                 <div className="absolute top-3 left-3 flex gap-2">
-                   <Badge className="bg-slate-950/80 backdrop-blur-md border-white/10 text-[9px] font-black uppercase px-2 h-5 text-white">
+                   <Badge className="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-black/10 dark:border-white/10 text-[9px] font-black uppercase px-2 h-5 text-slate-900 dark:text-white">
                      {item.lat?.toFixed(4)}, {item.lng?.toFixed(4)}
                    </Badge>
                    {(item.phoneNumber || annotation.phoneNumber) && (
@@ -56,7 +56,7 @@ export default function PopupForm({
             <div className="p-4 pt-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
-                    <h3 className="font-black text-sm tracking-tight leading-tight text-white uppercase italic truncate">
+                    <h3 className="font-black text-sm tracking-tight leading-tight text-slate-900 dark:text-white uppercase italic truncate">
                       {item.company}
                     </h3>
                     <div className="flex items-center mt-1">
@@ -90,24 +90,24 @@ export default function PopupForm({
                 </div>
 
                 {/* 4. Technical Specs (Flexible) */}
-                <div className="grid grid-cols-2 gap-px bg-white/5 border border-white/5 rounded-lg mt-5 overflow-hidden">
+                <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
                     <div className="p-3 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס", "Status")}</span>
-                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight leading-tight">{item.status || 'Active'}</span>
+                       <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-tight leading-tight">{item.status || 'Active'}</span>
                     </div>
-                    <div className="p-3 border-l border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
+                    <div className="p-3 border-l border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("טלפון", "Phone")}</span>
                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tight leading-tight">{item.phoneNumber || annotation.phoneNumber || '---'}</span>
                     </div>
-                    <div className="p-3 border-t border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                    <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סחורה וסוג", "Commodity & Type")}</span>
-                       <span className="text-[10px] font-bold text-white uppercase tracking-tight leading-tight break-words">
+                       <span className="text-[10px] font-bold text-slate-900 dark:text-white uppercase tracking-tight leading-tight break-words">
                          <span className="text-amber-500">{item.commodity}</span> • {item.licenseType || 'ML'}
                        </span>
                     </div>
                 </div>
 
-                <p className="mt-4 text-[9px] text-slate-600 font-bold text-center uppercase tracking-tighter">
+                <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
                   ID: #{item.id.slice(0, 8)} • {t("עודכן לאחרונה: לפני שעה", "Last updated: 1h ago")}
                 </p>
             </div>

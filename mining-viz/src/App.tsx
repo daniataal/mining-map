@@ -15,7 +15,8 @@ import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
-import { Search as LucideSearch, Filter as LucideFilter } from 'lucide-react';
+import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut } from 'lucide-react';
+import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -23,8 +24,8 @@ import './App.css';
 function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change: string, up?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[9px] font-black text-slate-400">{symbol}</span>
-      <span className="text-[10px] font-bold text-white">{price}</span>
+      <span className="text-[9px] font-black text-slate-500 dark:text-slate-400">{symbol}</span>
+      <span className="text-[10px] font-bold text-slate-900 dark:text-white">{price}</span>
       <span className={`text-[9px] font-black ${up ? 'text-emerald-500' : 'text-red-500'}`}>{change}</span>
     </div>
   );
@@ -70,8 +71,28 @@ export default function App() {
     }
   });
 
+  // Locally-added licenses (persisted to localStorage)
+  const [localLicenses, setLocalLicenses] = useState<MiningLicense[]>(() => {
+    try {
+      const saved = localStorage.getItem('mining_local_licenses');
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // Persist local licenses to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('mining_local_licenses', JSON.stringify(localLicenses));
+  }, [localLicenses]);
+
+  const allLicenses = useMemo(
+    () => [...rawData, ...localLicenses],
+    [rawData, localLicenses]
+  );
+
   // Filtering Hook
-  const miningData = useMiningData(rawData, userAnnotations);
+  const miningData = useMiningData(allLicenses, userAnnotations);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -215,10 +236,10 @@ export default function App() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   return (
-    <div className={`h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
+    <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* 1. Global Market Ticker (Entrepreneur Desk) */}
-      <div className="h-8 w-full bg-slate-950 border-b border-white/5 flex items-center overflow-hidden">
-         <div className="flex items-center gap-2 px-4 border-r border-white/5 bg-amber-500/10 h-full shrink-0">
+      <div className="h-8 w-full bg-slate-50 dark:bg-slate-950 border-b border-black/5 dark:border-white/5 flex items-center overflow-hidden">
+         <div className="flex items-center gap-2 px-4 border-r border-black/5 dark:border-white/5 bg-amber-500/10 h-full shrink-0">
             <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
             <span className="text-[9px] font-black uppercase text-amber-500 tracking-widest">{t("שווקים חיים", "LIVE MARKETS")}</span>
          </div>
@@ -247,12 +268,12 @@ export default function App() {
       </div>
 
       {/* 2. Main Discovery Layout */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
         
-        {/* PANEL 1: Left Navigation & Results List */}
+        {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
-          className={`transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-white/5 bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          className={`hidden md:block transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
           ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
           onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
           onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
@@ -283,45 +304,49 @@ export default function App() {
         <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar - Only show on Map and Pipeline */}
           {(viewMode === 'map' || viewMode === 'pipeline') && (
-            <div className="absolute top-4 left-6 right-6 z-[1000] flex justify-between items-center pointer-events-none">
-              <div className="flex items-center gap-3 pointer-events-auto">
-                  <div className="flex items-center bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
-                    <LucideSearch className="w-5 h-5 text-slate-500 mr-3" />
+            <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
+              {/* Search bar — hidden on mobile, shown on sm+ */}
+              <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
+                  <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
+                    <LucideSearch className="w-5 h-5 text-slate-400 dark:text-slate-500 mr-3" />
                     <input 
                       type="text"
                       placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
-                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-200 w-full placeholder:text-slate-600 tracking-tight"
+                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
                       value={miningData.filter}
                       onChange={(e) => miningData.setFilter(e.target.value)}
                     />
                   </div>
               </div>
 
-              <div className="flex items-center gap-3 pointer-events-auto">
-                  <div className="flex gap-1.5 bg-slate-950/40 backdrop-blur-2xl p-1.5 rounded-2xl border border-white/5 shadow-2xl">
+              <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+                  <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
                       onClick={() => setViewMode('map')}
-                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("מפה", "Map")}
                     </button>
                     <button
                       onClick={() => setViewMode('dashboard')}
-                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'dashboard' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'dashboard' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      {t("לוח בקרה", "Dashboard")}
+                      <span className="hidden xs:inline">{t("לוח בקרה", "Dashboard")}</span>
+                      <span className="xs:hidden">{t("לוח", "Dash")}</span>
                     </button>
                     <button
                       onClick={() => setViewMode('pipeline')}
-                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("צנרת", "Pipeline")}
                     </button>
                   </div>
 
+                  {/* Filter button — hidden on mobile (available in bottom nav) */}
+                  <ThemeToggle className="hidden sm:flex" />
                   <button
                     onClick={() => setIsFilterOpen(!isFilterOpen)}
-                    className={`p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-white'}`}
+                    className={`hidden sm:flex p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-white/60 dark:bg-slate-950/60 border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
                   >
                     <LucideFilter className="w-5 h-5" />
                   </button>
@@ -351,17 +376,18 @@ export default function App() {
               />
             )}
             {viewMode === 'pipeline' && (
-              <div className="pt-24 px-6 h-full bg-slate-950">
+              <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">
                 <KanbanBoard
                   processedData={miningData.processedData}
                   userAnnotations={userAnnotations}
                   updateAnnotation={updateAnnotation}
                   onCardClick={handleOpenDossier}
+                  isMobile={isMobile}
                 />
               </div>
             )}
             {viewMode === 'admin' && (
-              <div className="h-full bg-slate-950">
+              <div className="h-full bg-white dark:bg-slate-950">
                 <AdminPanel 
                   isOpen={true} 
                   onClose={() => setViewMode('map')} 
@@ -404,14 +430,62 @@ export default function App() {
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
           updateAnnotation={updateAnnotation}
         />
+
+        {/* Add License Modal */}
+        <AddLicenseModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onSubmit={(formData) => {
+            const newLicense = {
+              ...formData,
+              id: `local-${Date.now()}`,
+              date: new Date().toISOString().split('T')[0],
+              status: formData.status || 'Operating',
+            };
+            setLocalLicenses(prev => [...prev, newLicense]);
+            setIsAddModalOpen(false);
+          }}
+        />
       </div>
 
-      {/* Mobile Nav */}
-      {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-around z-40">
-           {/* Mobile nav items... */}
-        </nav>
-      )}
+      {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
+      <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
+        <button
+          onClick={() => setViewMode('map')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'map' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideMapPin className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("מפה", "Map")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('pipeline')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'pipeline' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideLayoutGrid className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("צנרת", "Pipeline")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('dashboard')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'dashboard' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("דאשבורד", "Dash")}</span>
+        </button>
+        <button
+          onClick={() => setIsFilterOpen(!isFilterOpen)}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${isFilterOpen ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideFilter className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("סינון", "Filter")}</span>
+        </button>
+        <button
+          onClick={handleLogout}
+          className="flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 text-slate-400 dark:text-slate-500 hover:text-red-400 transition-colors"
+        >
+          <LucideLogOut className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("יציאה", "Logout")}</span>
+        </button>
+      </nav>
     </div>
   );
 }
