@@ -150,6 +150,18 @@ export default function App() {
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<any[]>([]);
 
+  const [filteredGeoJson, setFilteredGeoJson] = useState<any>(null);
+
+  useEffect(() => {
+    // Loading Global Tactical Boundaries for the entire world
+    fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
+      .then(res => res.json())
+      .then(data => {
+        setFilteredGeoJson(data);
+      })
+      .catch(err => console.error("Global GeoJSON load failed", err));
+  }, []);
+
   useEffect(() => {
     const fetchPrices = async () => {
       try {
