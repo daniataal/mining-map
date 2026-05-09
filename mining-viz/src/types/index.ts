@@ -16,6 +16,13 @@ export interface MiningLicense {
   pricePerKg?: number;
   capacity?: number;
   isExported?: boolean;
+  // Geocoding provenance. Populated by the backend after a backfill run.
+  // Frontend only reads these — never write them back from the map UI.
+  geoSource?: 'user' | 'csv-import' | 'gazetteer' | 'nominatim' | 'mapbox' | 'manual-fix' | string | null;
+  geoApproximated?: boolean | null;
+  geoConfidence?: number | null;
+  originalLat?: number | null;
+  originalLng?: number | null;
 }
 
 export interface User {
