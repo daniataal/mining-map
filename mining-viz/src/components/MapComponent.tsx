@@ -218,7 +218,18 @@ export default function MapComponent({
                                         setSelectedItem(item);
                                     },
                                 }}
-                            />
+                            >
+                                <Popup className="custom-popup" minWidth={300}>
+                                    <PopupForm 
+                                      item={item}
+                                      annotation={annotation}
+                                      updateAnnotation={updateAnnotation}
+                                      onDelete={() => deleteLicense(item.id)}
+                                      onOpenDossier={() => handleOpenDossier(item)}
+                                      isOpen={selectedItem?.id === item.id}
+                                    />
+                                </Popup>
+                            </Marker>
                         );
                     })}
                 </MarkerClusterGroup>
