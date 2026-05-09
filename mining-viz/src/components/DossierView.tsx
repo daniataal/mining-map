@@ -78,22 +78,23 @@ export default function DossierView({
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<UserAnnotation>>({});
 
-  // Live Gold price (troy oz → kg)
+  // Gold/silver from ticker: COMEX-style USD/troy oz (same as GC=F / SI=F feed)
   const goldPriceObj = marketPrices.find(p => p.symbol === 'GOLD/oz');
   const goldPricePerOz = goldPriceObj
-    ? parseFloat(goldPriceObj.price.replace(/[$,]/g, ''))
-    : 3326;
-  const rawGoldPricePerKg = goldPricePerOz * 32.1507;
+    ? parseFloat(goldPriceObj.price.replace(/[$,]/g, '').replace(/—/g, ''))
+    : NaN;
+  const goldSpotOk = Number.isFinite(goldPricePerOz) && goldPricePerOz > 100;
+  const rawGoldPricePerKg = goldSpotOk ? goldPricePerOz * 32.1507 : NaN;
   const discount = 0.12;
   const logistics = 2400;
-  const netGoldProfit = rawGoldPricePerKg * (1 - discount) - logistics;
+  const netGoldProfit = goldSpotOk ? rawGoldPricePerKg * (1 - discount) - logistics : NaN;
 
-  // Silver price for reference (troy oz → kg)
   const silverPriceObj = marketPrices.find(p => p.symbol === 'SILVER/oz');
   const silverPricePerOz = silverPriceObj
-    ? parseFloat(silverPriceObj.price.replace(/[$,]/g, ''))
-    : 32.5;
-  const silverPricePerKg = silverPricePerOz * 32.1507;
+    ? parseFloat(silverPriceObj.price.replace(/[$,]/g, '').replace(/—/g, ''))
+    : NaN;
+  const silverSpotOk = Number.isFinite(silverPricePerOz) && silverPricePerOz > 1;
+  const silverPricePerKg = silverSpotOk ? silverPricePerOz * 32.1507 : NaN;
 
   // Current pipeline stage
   const currentStage = annotation.stage || 'New';
@@ -690,7 +691,9 @@ Output requirements:
                           {t('מחיר זהב (LIVE)', 'Gold Market (LIVE)')}
                         </span>
                         <span className="text-xs font-black text-amber-500 dark:text-amber-400">
-                          ${rawGoldPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG
+                          {goldSpotOk
+                            ? `$${rawGoldPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
+                            : '—'}
                         </span>
                       </div>
                       <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
@@ -698,7 +701,9 @@ Output requirements:
                           {t('מחיר כסף (REF)', 'Silver Ref (LIVE)')}
                         </span>
                         <span className="text-xs font-black text-slate-500 dark:text-slate-400">
-                          ${silverPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG
+                          {silverSpotOk
+                            ? `$${silverPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
+                            : '—'}
                         </span>
                       </div>
                       <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
@@ -722,15 +727,21 @@ Output requirements:
                               {t('רווח נקי - זהב', 'Est. Net Profit (Gold)')}
                             </span>
                             <span className="text-2xl font-black text-emerald-500">
-                              $
-                              {netGoldProfit.toLocaleString(undefined, {
-                                maximumFractionDigits: 0,
-                              })}{' '}
-                              / KG
+                              {goldSpotOk ? (
+                                <>
+                                  $
+                                  {netGoldProfit.toLocaleString(undefined, {
+                                    maximumFractionDigits: 0,
+                                  })}{' '}
+                                  / KG
+                                </>
+                              ) : (
+                                '—'
+                              )}
                             </span>
                           </div>
                           <Badge className="bg-emerald-500 text-slate-950 font-black text-[10px] mb-1">
-                            HIGH MARGIN
+                            {goldSpotOk ? 'HIGH MARGIN' : 'NO FEED'}
                           </Badge>
                         </div>
                       </div>
@@ -738,7 +749,10 @@ Output requirements:
                         onClick={() => {
                           setIsGeneratingLOI(true);
                           setTimeout(() => {
-                            const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${item.commodity}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\nEst. Net Profit (Gold): $${netGoldProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
+                            const profitLine = goldSpotOk
+                              ? `Est. Net Profit (Gold): $${netGoldProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
+                              : 'Est. Net Profit (Gold): N/A (spot feed unavailable)';
+                            const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${item.commodity}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\n${profitLine}\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
                             const blob = new Blob([loi], { type: 'text/plain' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');

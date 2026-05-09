@@ -1336,10 +1336,10 @@ def delete_miner_listing(listing_id: str):
 import requests as _requests
 
 FALLBACK_PRICES = [
-    {"symbol": "XAU/USD", "price": "3,327.45", "change": "+0.45%", "up": True},
-    {"symbol": "XAG/USD", "price": "32.80",    "change": "-0.12%", "up": False},
-    {"symbol": "BTC/USD", "price": "103,200.00","change": "+1.85%", "up": True},
-    {"symbol": "BRENT",   "price": "64.20",    "change": "+0.72%", "up": True},
+    {"symbol": "XAU/USD", "price": "—", "change": "—", "up": None},
+    {"symbol": "XAG/USD", "price": "—", "change": "—", "up": None},
+    {"symbol": "BTC/USD", "price": "103,200.00", "change": "+1.85%", "up": True},
+    {"symbol": "BRENT", "price": "64.20", "change": "+0.72%", "up": True},
 ]
 
 _YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -1378,6 +1378,36 @@ def _yahoo_futures_spot(yahoo_symbol: str):
         return None
 
 
+def _normalize_comex_usd_per_troy_oz(price: float, *, metal: str) -> float:
+    """
+    Yahoo GC=F / SI=F are COMEX continuous futures quoted in USD per troy ounce.
+    If an upstream ever returns cents-per-oz scale, pull it back to dollars.
+    """
+    p = float(price)
+    if metal == "gold" and p > 50_000:
+        p = p / 100.0
+    if metal == "silver" and p > 500:
+        p = p / 100.0
+    return p
+
+
+def _ticker_metal_row(label: str, category: str, yahoo_sym: str, metal: str, price_fmt):
+    """Ticker row for COMEX gold/silver futures (USD/troy oz), indicative / may be delayed."""
+    q = _yahoo_futures_spot(yahoo_sym)
+    if not q:
+        return None
+    adj = _normalize_comex_usd_per_troy_oz(q["price"], metal=metal)
+    up = True if q["chg_pct"] is None else q["chg_pct"] >= 0
+    chg = "LIVE" if q["chg_pct"] is None else f"{q['chg_pct']:+.2f}%"
+    return {
+        "symbol": label,
+        "price": price_fmt(adj),
+        "category": category,
+        "up": up,
+        "change": chg,
+    }
+
+
 def _ticker_energy_row(label: str, category: str, yahoo_sym: str, price_fmt):
     """price_fmt: callable(float) -> str for display."""
     q = _yahoo_futures_spot(yahoo_sym)
@@ -1397,32 +1427,25 @@ def _ticker_energy_row(label: str, category: str, yahoo_sym: str, price_fmt):
 @app.get("/api/market-ticker")
 def get_market_ticker():
     """
-    Rows for the web app ticker + dashboard: metals, crypto, and **live** CME/NYMEX-style
-    benchmarks via Yahoo (WTI CL=F, Brent BZ=F, etc.). No API key.
+    Rows for the web app ticker + dashboard: metals, crypto, and CME/NYMEX-style
+    benchmarks via Yahoo. No API key.
 
-    If Yahoo blocks a symbol, that row is omitted (frontend has its own fallbacks).
+    Gold/silver: COMEX continuous futures GC=F / SI=F in USD per troy ounce (standard
+    spot-style screen convention). Indicative only; Yahoo can be exchange-delayed vs
+    physical spot. If Yahoo blocks a symbol, the row shows an em dash (no demo numbers).
     """
     rows: list = []
 
-    metals_map: dict = {}
-    try:
-        metals_res = _requests.get("https://api.metals.live/v1/spot", timeout=6)
-        if metals_res.status_code == 200:
-            for entry in metals_res.json():
-                metals_map.update(entry)
-    except Exception:
-        pass
-
-    g = metals_map.get("gold")
-    s = metals_map.get("silver")
-    if g:
-        rows.append({"symbol": "GOLD/oz", "price": f"${float(g):,.2f}", "category": "Metal", "up": True, "change": "LIVE"})
+    gold_row = _ticker_metal_row("GOLD/oz", "Metal", "GC=F", "gold", lambda p: f"${p:,.2f}")
+    if gold_row:
+        rows.append(gold_row)
     else:
-        rows.append({"symbol": "GOLD/oz", "price": "$2,350.00", "category": "Metal", "up": None, "change": "—"})
-    if s:
-        rows.append({"symbol": "SILVER/oz", "price": f"${float(s):.2f}", "category": "Metal", "up": True, "change": "LIVE"})
+        rows.append({"symbol": "GOLD/oz", "price": "$—", "category": "Metal", "up": None, "change": "—"})
+    silver_row = _ticker_metal_row("SILVER/oz", "Metal", "SI=F", "silver", lambda p: f"${p:,.2f}")
+    if silver_row:
+        rows.append(silver_row)
     else:
-        rows.append({"symbol": "SILVER/oz", "price": "$28.00", "category": "Metal", "up": None, "change": "—"})
+        rows.append({"symbol": "SILVER/oz", "price": "$—", "category": "Metal", "up": None, "change": "—"})
 
     try:
         btc_res = _requests.get(
@@ -1463,29 +1486,29 @@ def get_market_ticker():
 @app.get("/market-prices")
 def get_market_prices():
     """
-    Fetches live commodity benchmarks via free public APIs.
-    Falls back gracefully — never returns a 500.
+    Commodity benchmarks: gold/silver as COMEX GC=F / SI=F (USD/troy oz, indicative / may be delayed),
+    BTC via CoinGecko, oil via Yahoo. Never returns 500.
     """
     try:
         results = []
 
-        metals_map = {}
-        metals_res = _requests.get(
-            "https://api.metals.live/v1/spot",
-            timeout=5
-        )
-        if metals_res.status_code == 200:
-            metals = metals_res.json()
-            for entry in metals:
-                metals_map.update(entry)
-
-            gold_price = metals_map.get("gold", 3327.45)
-            silver_price = metals_map.get("silver", 32.80)
-
-            results.append({"symbol": "XAU/USD", "price": f"{gold_price:,.2f}", "change": "LIVE", "up": True})
-            results.append({"symbol": "XAG/USD", "price": f"{silver_price:,.2f}", "change": "LIVE", "up": True})
+        gq = _yahoo_futures_spot("GC=F")
+        if gq:
+            gp = _normalize_comex_usd_per_troy_oz(gq["price"], metal="gold")
+            up = True if gq["chg_pct"] is None else gq["chg_pct"] >= 0
+            chg = "LIVE" if gq["chg_pct"] is None else f"{'+' if gq['chg_pct'] >= 0 else ''}{gq['chg_pct']:.2f}%"
+            results.append({"symbol": "XAU/USD", "price": f"{gp:,.2f}", "change": chg, "up": up})
         else:
-            results += FALLBACK_PRICES[:2]
+            results.append({"symbol": "XAU/USD", "price": "—", "change": "—", "up": None})
+
+        sq = _yahoo_futures_spot("SI=F")
+        if sq:
+            sp = _normalize_comex_usd_per_troy_oz(sq["price"], metal="silver")
+            up = True if sq["chg_pct"] is None else sq["chg_pct"] >= 0
+            chg = "LIVE" if sq["chg_pct"] is None else f"{'+' if sq['chg_pct'] >= 0 else ''}{sq['chg_pct']:.2f}%"
+            results.append({"symbol": "XAG/USD", "price": f"{sp:,.2f}", "change": chg, "up": up})
+        else:
+            results.append({"symbol": "XAG/USD", "price": "—", "change": "—", "up": None})
 
         # BTC via CoinGecko (free, no auth)
         btc_res = _requests.get(
@@ -1505,7 +1528,7 @@ def get_market_prices():
         else:
             results.append(FALLBACK_PRICES[2])
 
-        # Brent & WTI — Yahoo (more reliable than stale metals.live “brent” field)
+        # Brent & WTI — Yahoo
         bz = _yahoo_futures_spot("BZ=F")
         cl = _yahoo_futures_spot("CL=F")
         if bz:
@@ -1513,11 +1536,7 @@ def get_market_prices():
             chg = "LIVE" if bz["chg_pct"] is None else f"{'+' if bz['chg_pct'] >= 0 else ''}{bz['chg_pct']:.2f}%"
             results.append({"symbol": "BRENT", "price": f"{bz['price']:.2f}", "change": chg, "up": up})
         else:
-            br_m = metals_map.get("brent crude") or metals_map.get("brent")
-            if br_m:
-                results.append({"symbol": "BRENT", "price": f"{float(br_m):,.2f}", "change": "LIVE", "up": True})
-            else:
-                results.append(FALLBACK_PRICES[3])
+            results.append(FALLBACK_PRICES[3])
         if cl:
             up = True if cl["chg_pct"] is None else cl["chg_pct"] >= 0
             chg = "LIVE" if cl["chg_pct"] is None else f"{'+' if cl['chg_pct'] >= 0 else ''}{cl['chg_pct']:.2f}%"

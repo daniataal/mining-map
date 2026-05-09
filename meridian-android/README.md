@@ -1,43 +1,58 @@
 # Meridian Trade OS — Android
 
-Native Kotlin + Jetpack Compose app. Package: `com.meridian.tradeos`. minSdk 26, targetSdk 34.
+Native **Kotlin + Jetpack Compose** app (`com.meridian.tradeos`, minSdk 26, targetSdk 34). The UI is **Compose-first** and talks to the **same FastAPI** as `mining-viz` (see `mining-viz/src/lib/api.ts`): JWT auth, `GET /licenses`, `GET /api/market-ticker`, `GET /api/logistics/shipments`, `GET /api/oil/summary`, etc. Visual language is a **dark nautical / chart-room** palette (slate blues, cyan accents, amber highlights) inspired by professional vessel-tracking apps — without using any third-party trademarks in the product name.
 
-The **primary experience is native UI** (Compose) that calls the **same FastAPI backend** as `mining-viz` (e.g. `/licenses`, `/api/market-ticker`, `/api/oil/summary`). A **WebView is not** the main surface: an optional **legacy web desk** (embedded mining-viz) is available **only in debug** builds from the command center.
+## What is fully native vs. not
 
-- **WebView** = an embedded browser (`WebView`) loading a URL.
-- **Native app** = Compose screens + HTTP client (`OkHttp`) + JSON (`kotlinx.serialization`) against the **REST API base URL**, matching how the web app uses `VITE_API_BASE` / axios `baseURL` in `mining-viz/src/lib/api.ts`.
+| Area | Status |
+|------|--------|
+| Auth (login / register) + encrypted token storage | **Native** — `AuthStorage` (EncryptedSharedPreferences), `/auth/login`, `/auth/register` |
+| Map (license markers from API lat/lng) | **Native** — MapLibre, public demo style URL (no API keys) |
+| Bottom navigation (Map, Dash, Pipeline, Logistics, Oil) | **Native** |
+| Dashboard (ticker + license count) | **Native** — `/api/market-ticker`, `/licenses` |
+| Pipeline (list by status, detail sheet) | **Native** |
+| Logistics (shipment list) | **Native** — `/api/logistics/shipments` |
+| Oil (normalized summary + ranked flows) | **Native** — `/api/oil/summary` (same normalization idea as web) |
+| Settings (API base override only in normal builds) | **Native** |
+| Legacy full mining-viz in WebView | **Debug-only** — top bar “Web desk” and optional Settings section; not linked in release |
 
-- **Open in Android Studio:** File → Open → select `meridian-android/`; Studio auto-generates the Gradle wrapper jar on sync.
-- **Run on device / emulator:** press ▶ Run in Android Studio (requires API 26+ AVD or physical device).
-- **Build debug APK locally:** `cd meridian-android && gradle wrapper --gradle-version=8.7 && ./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
-- **CI — download APK from GitHub Actions:** pushes and PRs to `main` that touch `meridian-android/**` or `.github/workflows/meridian-android-apk.yml` (or manual **workflow_dispatch**) → Actions → **Meridian Android — Build Debug APK** → **Artifacts** → `meridian-debug-apk`. Fork PRs do not receive `MERIDIAN_WEB_HOST` / `MERIDIAN_API_HOST` secrets; the debug build still uses Gradle defaults (see API/web host sections below).
-- **Release signing:** add `signingConfigs { release { ... } }` in `app/build.gradle.kts` with GitHub secrets `KEYSTORE_FILE`, `KEY_ALIAS`, `KEY_PASSWORD`; switch CI step to `assembleRelease`.
+**Not in this pass (web parity gaps):** Kanban drag-and-drop, dossier / admin panel, activity log UI, meeting points, miner listings, local-only license merge, filters, i18n, AI/LOI tools — those remain on the web or for later native work.
 
-## Backend API base URL (`BuildConfig.MERIDIAN_API_BASE_URL`)
+## Build & run
 
-Used for native REST calls. Resolved at build time from the first non-empty source:
+- **Android Studio:** File → Open → `meridian-android/`
+- **Debug APK:** `cd meridian-android && ./gradlew assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`
+- **CI:** `.github/workflows/meridian-android-apk.yml` runs `assembleDebug` (no Google Maps secrets; MapLibre + demo tiles only).
 
-1. Environment variable `MERIDIAN_API_HOST`
-2. Gradle property `MERIDIAN_API_HOST` (e.g. `-PMERIDIAN_API_HOST=...` or `ORG_GRADLE_PROJECT_MERIDIAN_API_HOST` in CI — the workflow can map repo secret **`MERIDIAN_API_HOST`**)
-3. `meridian-android/secrets.properties` — copy `secrets.properties.example` to `secrets.properties` (gitignored)
-4. `local.properties` → `MERIDIAN_API_HOST=...`
-5. Fallback: `http://10.0.2.2:8000` (emulator → host machine FastAPI)
+## API base URL (`BuildConfig.MERIDIAN_API_BASE_URL`)
 
-**Optional in-app override:** Settings → **Override API base URL** (cleared when empty + **Save API override**).
+Resolved at build time (first non-empty): `MERIDIAN_API_HOST` env → Gradle property → `secrets.properties` → `local.properties` → `http://10.0.2.2:8000` for the emulator.
+
+**In-app:** Settings → optional **API base** override (no “test connection” / probe UI).
 
 ## Legacy web host (`BuildConfig.MERIDIAN_WEB_URL`)
 
-Only for the optional **legacy WebView** (debug). Same resolution pattern with `MERIDIAN_WEB_HOST`, fallback `http://10.0.2.2:5173`. **Not required** for native-first usage.
-
-## mining-viz vs backend (reference)
-
-- **mining-viz** (Vite) often runs on **:5173**; it talks to FastAPI on **:8000** unless `VITE_API_BASE` is set (`mining-viz/src/lib/api.ts`).
-- The Android app’s **API** field must point at the **backend** (e.g. `http://10.0.2.2:8000`), not the Vite dev server, unless you intentionally put a reverse proxy in front of both.
+Used **only** for the optional debug WebView. Same resolution pattern with `MERIDIAN_WEB_HOST`. Release builds do not surface this in Settings.
 
 ## Local dev
 
-1. Backend on **8000**, Vite on **5173** (for web only).
-2. **Emulator:** default API URL reaches your machine at `10.0.2.2:8000`.
-3. **Physical device:** set LAN URL in `secrets.properties` / Settings override, or rebuild with `MERIDIAN_API_HOST=http://192.168.x.x:8000`.
+1. Run FastAPI on **:8000** (see repo `backend/`).
+2. Emulator: default API URL uses `10.0.2.2:8000`.
+3. Physical device: set LAN URL via override or `MERIDIAN_API_HOST` when building.
 
-> Production: prefer **HTTPS**; you can turn off `usesCleartextTraffic` for release builds if everything is TLS.
+> Prefer HTTPS in production; adjust `usesCleartextTraffic` when everything is TLS-terminated.
+
+## Package layout (main sources)
+
+```
+com.meridian.tradeos/
+  MainActivity.kt, MeridianApp.kt, MeridianConfig.kt
+  data/           — ApiDtos, AuthStorage, MeridianRepository, OilSummaryParser
+  navigation/     — NavGraph (splash → auth/main, settings, debug web)
+  ui/
+    MeridianViewModel.kt
+    components/   — GlassCard, LicenseDetailSheet
+    map/          — MeridianLicenseMap (MapLibre)
+    screens/      — Auth, Splash, MainShell, Dashboard, Pipeline, Logistics, Oil, Settings, LegacyWebDesk
+    theme/        — Color, Theme, Type
+```

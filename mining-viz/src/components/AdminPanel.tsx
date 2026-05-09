@@ -11,6 +11,7 @@ import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { deleteAuthUser } from '../lib/api';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -80,22 +81,23 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
     };
 
     const confirmDeleteUser = async () => {
-        if (!userPendingDelete || !token) return;
+        if (!userPendingDelete) return;
         setDeleteSubmitting(true);
         try {
-            const res = await fetch(`${API_BASE}/auth/users/${userPendingDelete.id}`, {
-                method: 'DELETE',
-                headers: authHeaders(),
-            });
-            if (!res.ok) {
-                const text = await res.text();
-                throw new Error(text || res.statusText);
-            }
+            await deleteAuthUser(userPendingDelete.id);
             toast.success(t('המשתמש נמחק', 'User deleted'));
             setUserPendingDelete(null);
             await fetchData('/auth/users', setUsers);
-        } catch (err) {
-            toast.error(err instanceof Error ? err.message : String(err));
+        } catch (err: unknown) {
+            const ax = err as { response?: { data?: unknown }; message?: string };
+            const data = ax.response?.data;
+            const msg =
+                typeof data === 'string'
+                    ? data
+                    : data != null
+                      ? JSON.stringify(data)
+                      : ax.message;
+            toast.error(msg || (err instanceof Error ? err.message : String(err)));
         } finally {
             setDeleteSubmitting(false);
         }

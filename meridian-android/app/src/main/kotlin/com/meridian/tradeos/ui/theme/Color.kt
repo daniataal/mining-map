@@ -14,7 +14,9 @@ val GlassBorder       = Color(0x26FFFFFF)   // ~15 % white
 val GlassBorderSubtle = Color(0x0DFFFFFF)   // ~5 % white
 val GlassHighlight    = Color(0x1AFFFFFF)   // ~10 % white — top-edge sheen
 
-// ── Accent — amber / gold (aligns with mining-viz brand) ──────────────────
+// ── Accent — cyan (nautical / chart) + amber (commodities) ────────────────
+val AccentCyan     = Color(0xFF00E5FF)
+val AccentCyanDim  = Color(0x9900E5FF)
 val AccentAmber    = Color(0xFFF5A623)
 val AccentGold     = Color(0xFFFFD166)
 val AccentAmberDim = Color(0x99F5A623)      // 60 % amber

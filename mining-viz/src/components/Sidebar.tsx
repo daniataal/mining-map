@@ -74,7 +74,7 @@ export default function Sidebar({
   }, [displayCount, processedData.length]);
 
   return (
-    <div className="flex h-full bg-transparent text-slate-800 dark:text-slate-100 select-none">
+    <div className="flex h-full min-h-0 flex-1 bg-transparent text-slate-800 dark:text-slate-100 select-none">
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
         <button 
@@ -130,7 +130,7 @@ export default function Sidebar({
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
-          className="flex-1 flex flex-col min-w-0"
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
         >
           <header className="p-5 border-b border-black/5 dark:border-white/5">
             <div className="flex items-center justify-between">
@@ -160,7 +160,7 @@ export default function Sidebar({
             </div>
           </header>
 
-          <ScrollArea className="flex-1">
+          <ScrollArea className="min-h-0 flex-1 overflow-hidden">
             <div className="p-3 space-y-2">
             <AnimatePresence mode="popLayout">
               {processedData.slice(0, displayCount).map((item) => {
