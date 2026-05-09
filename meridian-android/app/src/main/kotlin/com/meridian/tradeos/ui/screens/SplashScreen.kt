@@ -29,7 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
+import com.meridian.tradeos.data.AuthStorage
 import com.meridian.tradeos.ui.theme.AccentAmber
 import com.meridian.tradeos.ui.theme.AccentAmberDim
 import com.meridian.tradeos.ui.theme.AccentGlow
@@ -43,7 +45,12 @@ import com.meridian.tradeos.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
 
 @Composable
-fun SplashScreen(onNavigateToMap: () -> Unit) {
+fun SplashScreen(
+    onContinueSignedIn: () -> Unit,
+    onContinueSignedOut: () -> Unit,
+) {
+    val context = LocalContext.current
+    val auth = remember(context) { AuthStorage(context.applicationContext) }
     var triggered by remember { mutableStateOf(false) }
 
     val alpha by animateFloatAsState(
@@ -64,8 +71,8 @@ fun SplashScreen(onNavigateToMap: () -> Unit) {
 
     LaunchedEffect(Unit) {
         triggered = true
-        delay(2400)
-        onNavigateToMap()
+        delay(1400)
+        if (auth.isLoggedIn()) onContinueSignedIn() else onContinueSignedOut()
     }
 
     Box(

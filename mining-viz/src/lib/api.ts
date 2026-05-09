@@ -84,6 +84,10 @@ export const login = async (username: string, password: string) => {
   return data;
 };
 
+export async function deleteAuthUser(userId: string): Promise<void> {
+  await apiClient.delete(`/auth/users/${userId}`);
+}
+
 // ─── Oil / Petroleum ──────────────────────────────────────────────────────────
 // TODO: Agent A — implement GET /api/oil/summary returning OilSummaryResponse.
 // Expected shape: { flows: OilTradeFlow[], source: string, data_as_of: string, limitations: string[] }

@@ -12,17 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Api
-import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Button
@@ -52,17 +51,23 @@ import com.meridian.tradeos.KEY_API_BASE_URL_OVERRIDE
 import com.meridian.tradeos.KEY_WEB_BASE_URL_OVERRIDE
 import com.meridian.tradeos.LEGACY_WEB_BASE_URL
 import com.meridian.tradeos.MERIDIAN_PREFS
+import com.meridian.tradeos.data.AuthStorage
 import com.meridian.tradeos.ui.components.GlassCard
-import com.meridian.tradeos.ui.theme.AccentAmberDim
+import com.meridian.tradeos.ui.theme.AccentCyanDim
 import com.meridian.tradeos.ui.theme.BackgroundDeep
 import com.meridian.tradeos.ui.theme.GlassBorderSubtle
+import com.meridian.tradeos.ui.theme.StatusError
 import com.meridian.tradeos.ui.theme.TextMuted
 import com.meridian.tradeos.ui.theme.TextPrimary
 import com.meridian.tradeos.ui.theme.TextSecondary
 
 @Composable
-fun SettingsScreen(onNavigateBack: () -> Unit) {
+fun SettingsScreen(
+    onNavigateBack: () -> Unit,
+    onLoggedOut: () -> Unit,
+) {
     val context = LocalContext.current
+    val auth = remember(context) { AuthStorage(context.applicationContext) }
     var apiUrl by remember { mutableStateOf("") }
     var webUrl by remember { mutableStateOf("") }
 
@@ -78,66 +83,97 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
             .fillMaxSize()
             .background(BackgroundDeep)
             .padding(top = 48.dp)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()),
     ) {
         Row(
-            modifier          = Modifier
+            modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onNavigateBack) {
                 Icon(
-                    imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint               = TextSecondary,
+                    tint = TextSecondary,
                 )
             }
             Text(
-                text       = "Settings",
-                style      = MaterialTheme.typography.titleLarge,
+                text = "Settings",
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
-                color      = TextPrimary,
+                color = TextPrimary,
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Column(
-            modifier            = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             SettingsSection(title = "ACCOUNT") {
-                SettingsRow(icon = Icons.Filled.Person,   label = "Profile",  value = "Meridian User")
+                SettingsRow(
+                    icon = Icons.Filled.Person,
+                    label = "Signed in as",
+                    value = auth.username().orEmpty().ifEmpty { "—" },
+                )
                 SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Security, label = "Security", value = "2FA enabled")
+                SettingsRow(
+                    icon = Icons.Filled.Info,
+                    label = "Role",
+                    value = auth.role().orEmpty().ifEmpty { "—" },
+                )
+                SettingsDivider()
+                Button(
+                    onClick = {
+                        auth.clear()
+                        onLoggedOut()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = StatusError.copy(alpha = 0.85f),
+                        contentColor = TextPrimary,
+                    ),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(Icons.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sign out", fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
 
-            SettingsSection(title = "BACKEND API (NATIVE)") {
+            SettingsSection(title = "API") {
                 Text(
-                    text          = "Native mode talks to the FastAPI server directly (same routes as mining-viz: VITE_API_BASE / axios baseURL). It is usually NOT the Vite dev URL (:5173). Default emulator: ${BuildConfig.MERIDIAN_API_BASE_URL}",
-                    fontSize      = 11.sp,
-                    color         = TextMuted,
-                    modifier      = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    text = "REST base URL (FastAPI — same routes as mining-viz). Build default: ${BuildConfig.MERIDIAN_API_BASE_URL}",
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 OutlinedTextField(
-                    value                   = apiUrl,
-                    onValueChange           = { apiUrl = it },
-                    label                   = { Text("Override API base URL (optional)", color = TextMuted) },
-                    placeholder             = { Text("Leave empty for build default", color = TextMuted) },
-                    singleLine              = true,
-                    modifier                = Modifier
+                    value = apiUrl,
+                    onValueChange = { apiUrl = it },
+                    label = { Text("Override API base (optional)", color = TextMuted) },
+                    placeholder = { Text("Empty = build default", color = TextMuted) },
+                    singleLine = true,
+                    modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors                  = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor   = TextPrimary,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = AccentAmberDim,
+                        focusedBorderColor = AccentCyanDim,
                         unfocusedBorderColor = GlassBorderSubtle,
                     ),
                 )
                 Button(
-                    onClick  = {
+                    onClick = {
                         val ed = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE).edit()
                         val v = apiUrl.trim().trimEnd('/')
                         if (v.isEmpty()) ed.remove(KEY_API_BASE_URL_OVERRIDE) else ed.putString(KEY_API_BASE_URL_OVERRIDE, v)
@@ -146,81 +182,77 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors   = ButtonDefaults.buttonColors(
-                        containerColor = AccentAmberDim,
-                        contentColor   = TextPrimary,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentCyanDim,
+                        contentColor = TextPrimary,
                     ),
                 ) {
-                    Text("Save API override", fontWeight = FontWeight.SemiBold)
+                    Text("Save API base", fontWeight = FontWeight.SemiBold)
                 }
                 SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Api, label = "Build default", value = BuildConfig.MERIDIAN_API_BASE_URL)
+                SettingsRow(icon = Icons.Filled.Api, label = "Resolved from", value = "BuildConfig or override above")
                 SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Sync, label = "Tip", value = "Backend :8000 · Vite :5173 (web only)")
+                SettingsRow(icon = Icons.Filled.Sync, label = "Tip", value = "Emulator → host: http://10.0.2.2:8000")
             }
 
-            SettingsSection(title = "LEGACY WEB DESK (WEBVIEW)") {
-                Text(
-                    text          = "Optional: host for the React mining-viz app inside a WebView. Not required for native-first usage. Build default: ${BuildConfig.MERIDIAN_WEB_URL}",
-                    fontSize      = 11.sp,
-                    color         = TextMuted,
-                    modifier      = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                OutlinedTextField(
-                    value                   = webUrl,
-                    onValueChange           = { webUrl = it },
-                    label                   = { Text("Override Vite / web base URL (optional)", color = TextMuted) },
-                    placeholder             = { Text("Leave empty for build default", color = TextMuted) },
-                    singleLine              = true,
-                    modifier                = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors                  = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor   = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = AccentAmberDim,
-                        unfocusedBorderColor = GlassBorderSubtle,
-                    ),
-                )
-                Button(
-                    onClick  = {
-                        val ed = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE).edit()
-                        val v = webUrl.trim().trimEnd('/')
-                        if (v.isEmpty()) ed.remove(KEY_WEB_BASE_URL_OVERRIDE) else ed.putString(KEY_WEB_BASE_URL_OVERRIDE, v)
-                        ed.apply()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors   = ButtonDefaults.buttonColors(
-                        containerColor = AccentAmberDim,
-                        contentColor   = TextPrimary,
-                    ),
-                ) {
-                    Text("Save web override", fontWeight = FontWeight.SemiBold)
+            if (BuildConfig.DEBUG) {
+                SettingsSection(title = "DEBUG — LEGACY WEBVIEW") {
+                    Text(
+                        text = "Optional embedded mining-viz URL. Not used in release; not part of normal product UX.",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                    OutlinedTextField(
+                        value = webUrl,
+                        onValueChange = { webUrl = it },
+                        label = { Text("Web / Vite base (optional)", color = TextMuted) },
+                        placeholder = { Text("Empty = ${BuildConfig.MERIDIAN_WEB_URL}", color = TextMuted) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = AccentCyanDim,
+                            unfocusedBorderColor = GlassBorderSubtle,
+                        ),
+                    )
+                    Button(
+                        onClick = {
+                            val ed = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE).edit()
+                            val v = webUrl.trim().trimEnd('/')
+                            if (v.isEmpty()) ed.remove(KEY_WEB_BASE_URL_OVERRIDE) else ed.putString(KEY_WEB_BASE_URL_OVERRIDE, v)
+                            ed.apply()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentCyanDim,
+                            contentColor = TextPrimary,
+                        ),
+                    ) {
+                        Text("Save web base", fontWeight = FontWeight.SemiBold)
+                    }
+                    SettingsDivider()
+                    SettingsRow(icon = Icons.Filled.Web, label = "Build default", value = BuildConfig.MERIDIAN_WEB_URL)
                 }
-                SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Web, label = "Debug", value = "Legacy WebView from command center")
             }
 
             SettingsSection(title = "APPEARANCE") {
-                SettingsRow(icon = Icons.Filled.DarkMode, label = "Theme",  value = "Dark")
-                SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Language, label = "Region", value = "Global")
+                SettingsRow(icon = Icons.Filled.DarkMode, label = "Theme", value = "Dark (nautical)")
             }
 
             SettingsSection(title = "ABOUT") {
-                SettingsRow(icon = Icons.Filled.Info, label = "Version", value = "1.0.0-dev")
-                SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Code, label = "Build",   value = "meridian-android")
+                SettingsRow(icon = Icons.Filled.Info, label = "Version", value = BuildConfig.VERSION_NAME)
             }
         }
 
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
-
-// ── Private sub-composables ───────────────────────────────────────────────
 
 @Composable
 private fun SettingsSection(
@@ -229,20 +261,20 @@ private fun SettingsSection(
 ) {
     Column {
         Text(
-            text          = title,
-            fontSize      = 10.sp,
-            fontWeight    = FontWeight.SemiBold,
+            text = title,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
             letterSpacing = 1.5.sp,
-            color         = TextMuted,
-            modifier      = Modifier.padding(bottom = 8.dp),
+            color = TextMuted,
+            modifier = Modifier.padding(bottom = 8.dp),
         )
         GlassCard(
-            modifier     = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             cornerRadius = 16.dp,
         ) {
             Column(
                 modifier = Modifier.padding(vertical = 4.dp),
-                content  = content,
+                content = content,
             )
         }
     }
@@ -251,9 +283,9 @@ private fun SettingsSection(
 @Composable
 private fun SettingsDivider() {
     Divider(
-        modifier  = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.padding(horizontal = 16.dp),
         thickness = 0.5.dp,
-        color     = GlassBorderSubtle,
+        color = GlassBorderSubtle,
     )
 }
 
@@ -264,30 +296,30 @@ private fun SettingsRow(
     value: String,
 ) {
     Row(
-        modifier              = Modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            verticalAlignment     = Alignment.CenterVertically,
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Icon(
-                imageVector        = icon,
+                imageVector = icon,
                 contentDescription = null,
-                tint               = AccentAmberDim,
-                modifier           = Modifier.size(18.dp),
+                tint = AccentCyanDim,
+                modifier = Modifier.size(18.dp),
             )
             Text(
-                text  = label,
+                text = label,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextPrimary,
             )
         }
         Text(
-            text  = value,
+            text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = TextMuted,
         )

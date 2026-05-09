@@ -194,7 +194,7 @@ export default function App() {
       (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
 
     const fetchPrices = async () => {
-      // Prefer backend: live WTI/Brent/etc. via Yahoo (server-side), metals.live, CoinGecko
+      // Backend: gold/silver as COMEX GC=F / SI=F (USD/troy oz) + energy/crypto via Yahoo/CoinGecko
       try {
         const tickerRes = await fetch(`${apiBase}/api/market-ticker`);
         if (tickerRes.ok) {
@@ -205,41 +205,15 @@ export default function App() {
           }
         }
       } catch (_) {
-        /* offline or CORS — use client fallbacks */
+        /* offline or CORS — minimal client fallbacks (no demo spot numbers) */
       }
 
       const results: any[] = [];
 
-      try {
-        const metalsRes = await fetch('https://api.metals.live/v1/spot');
-        if (metalsRes.ok) {
-          const metals: any[] = await metalsRes.json();
-          const map: Record<string, number> = {};
-          metals.forEach((entry: any) => Object.assign(map, entry));
-          if (map.gold) {
-            results.push({
-              symbol: 'GOLD/oz',
-              price: `$${map.gold.toLocaleString()}`,
-              category: 'Metal',
-              up: true,
-              change: 'LIVE',
-            });
-          }
-          if (map.silver) {
-            results.push({
-              symbol: 'SILVER/oz',
-              price: `$${map.silver.toFixed(2)}`,
-              category: 'Metal',
-              up: true,
-              change: 'LIVE',
-            });
-          }
-        }
-      } catch (_) {}
       if (!results.some((r) => r.symbol === 'GOLD/oz')) {
         results.push({
           symbol: 'GOLD/oz',
-          price: '$2,350',
+          price: '$—',
           category: 'Metal',
           change: '—',
           up: null,
@@ -248,7 +222,7 @@ export default function App() {
       if (!results.some((r) => r.symbol === 'SILVER/oz')) {
         results.push({
           symbol: 'SILVER/oz',
-          price: '$28.00',
+          price: '$—',
           category: 'Metal',
           change: '—',
           up: null,
@@ -339,7 +313,7 @@ export default function App() {
         
         {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
-          className={`hidden md:block transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          className={`hidden min-h-0 md:flex md:flex-col md:h-full transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
           ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
           onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
           onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
