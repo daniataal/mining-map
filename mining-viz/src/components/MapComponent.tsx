@@ -197,7 +197,14 @@ export default function MapComponent({
                             <GeoJSON 
                                 key={activeCountries.join(',')}
                                 data={filteredGeoJson} 
-                                style={{ fillColor: 'transparent', weight: 2, color: '#3b82f6', fillOpacity: 0 }} 
+                                style={{ 
+                                  fillColor: '#3b82f6', 
+                                  weight: 1.5, 
+                                  color: '#3b82f6', 
+                                  fillOpacity: 0.05,
+                                  dashArray: '5, 5',
+                                  lineCap: 'round'
+                                }} 
                             />
                         </LayersControl.Overlay>
                     )}
