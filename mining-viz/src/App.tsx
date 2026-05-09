@@ -169,8 +169,8 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         {/* Sidebar */}
         <aside 
-          className={`transition-all duration-300 border-r border-slate-800 bg-slate-900/50 backdrop-blur-xl z-20 
-          ${isSidebarCollapsed ? 'w-0 overflow-hidden opacity-0' : 'w-80'} 
+          className={`transition-all duration-500 ease-in-out border-r border-slate-800 bg-slate-950/40 backdrop-blur-3xl z-20 shadow-2xl
+          ${isSidebarCollapsed ? 'w-0 overflow-hidden opacity-0 -translate-x-full' : 'w-80 translate-x-0'} 
           ${isMobile && mobileTab !== 'list' ? 'hidden' : ''}`}
         >
           <Sidebar
