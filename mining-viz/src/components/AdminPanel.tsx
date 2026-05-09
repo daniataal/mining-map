@@ -9,16 +9,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar } from 'lucide-react';
+import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface AdminPanelProps {
   isOpen: boolean;
   onClose: () => void;
   token?: string;
   isFullPage?: boolean;
+  currentUserId?: string | null;
 }
 
-export default function AdminPanel({ isOpen, onClose, token, isFullPage }: AdminPanelProps) {
+export default function AdminPanel({ isOpen, onClose, token, isFullPage, currentUserId }: AdminPanelProps) {
     const { t } = useI18n();
     const [activeTab, setActiveTab] = useState('users');
     const [users, setUsers] = useState<User[]>([]);
@@ -38,6 +40,8 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
     const [formRole, setFormRole] = useState<'admin' | 'user'>('user');
     const [userFormError, setUserFormError] = useState<string | null>(null);
     const [userFormSubmitting, setUserFormSubmitting] = useState(false);
+    const [userPendingDelete, setUserPendingDelete] = useState<User | null>(null);
+    const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
     const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
@@ -73,6 +77,28 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
         setFormRole(u.role);
         setUserFormError(null);
         setUserEditorOpen(true);
+    };
+
+    const confirmDeleteUser = async () => {
+        if (!userPendingDelete || !token) return;
+        setDeleteSubmitting(true);
+        try {
+            const res = await fetch(`${API_BASE}/auth/users/${userPendingDelete.id}`, {
+                method: 'DELETE',
+                headers: authHeaders(),
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || res.statusText);
+            }
+            toast.success(t('המשתמש נמחק', 'User deleted'));
+            setUserPendingDelete(null);
+            await fetchData('/auth/users', setUsers);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err));
+        } finally {
+            setDeleteSubmitting(false);
+        }
     };
 
     const handleUserFormSubmit = async (e: React.FormEvent) => {
@@ -222,6 +248,21 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
                                                     <Button type="button" variant="outline" size="sm" onClick={() => fetchUserLogs(u)} className="h-9 min-w-[44px] border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-slate-700 dark:text-white text-[9px] font-black uppercase tracking-widest">
                                                         <LucideChartBar className="w-3 h-3 mr-1 text-amber-500" /> {t("פעילות", "Activity")}
                                                     </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="destructive"
+                                                        size="sm"
+                                                        onClick={() => setUserPendingDelete(u)}
+                                                        disabled={currentUserId != null && String(currentUserId) === String(u.id)}
+                                                        title={
+                                                            currentUserId != null && String(currentUserId) === String(u.id)
+                                                                ? t('לא ניתן למחוק את המשתמש המחובר', 'Cannot delete the signed-in account')
+                                                                : undefined
+                                                        }
+                                                        className="h-9 min-w-[44px] text-[9px] font-black uppercase tracking-widest"
+                                                    >
+                                                        <LucideTrash2 className="w-3 h-3 mr-1" /> {t('מחיקה', 'Delete')}
+                                                    </Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -307,6 +348,48 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
         </Dialog>
     );
 
+    const DeleteUserDialog = (
+        <Dialog
+            open={!!userPendingDelete}
+            onOpenChange={(open) => {
+                if (!open) setUserPendingDelete(null);
+            }}
+        >
+            <DialogContent className="max-w-md bg-slate-900 border-white/10 text-slate-100 shadow-2xl">
+                <DialogHeader className="border-b border-white/5 pb-4">
+                    <DialogTitle className="text-sm font-black uppercase tracking-widest text-amber-500">
+                        {t('מחיקת משתמש', 'Delete user')}
+                    </DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-slate-300 pt-2">
+                    {t('למחוק לצמיתות את', 'Permanently delete')}{' '}
+                    <span className="font-bold text-white">{userPendingDelete?.username}</span>?{' '}
+                    {t('פעולה זו אינה הפיכה.', 'This cannot be undone.')}
+                </p>
+                <DialogFooter className="gap-2 sm:gap-0 pt-4">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="border-white/10"
+                        onClick={() => setUserPendingDelete(null)}
+                        disabled={deleteSubmitting}
+                    >
+                        {t('ביטול', 'Cancel')}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="destructive"
+                        className="font-black uppercase text-[10px]"
+                        onClick={confirmDeleteUser}
+                        disabled={deleteSubmitting || !token}
+                    >
+                        {deleteSubmitting ? t('מוחק...', 'Deleting...') : t('מחק', 'Delete')}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+
     const UserEditorDialog = (
         <Dialog
             open={userEditorOpen}
@@ -381,6 +464,7 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
         <>
             {AdminContent}
             {SecondaryDialogs}
+            {DeleteUserDialog}
             {UserEditorDialog}
         </>
     );
@@ -391,6 +475,7 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage }: Admin
                 {AdminContent}
             </DialogContent>
             {SecondaryDialogs}
+            {DeleteUserDialog}
             {UserEditorDialog}
         </Dialog>
     );

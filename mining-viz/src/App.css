@@ -1243,3 +1243,19 @@
     line-height: 36px !important;
   }
 }
+
+/* ── Selected map marker highlight ────────────────────────────────────────────
+ * We highlight a selected license by toggling `.is-selected` on the leaflet
+ * marker root rather than calling `marker.setIcon()` from React. Replacing the
+ * marker DOM mid-spiderfy resets the cluster animation and was the underlying
+ * cause of "popup never opens after clicking a spider leg". Pure CSS keeps the
+ * spider intact. */
+.custom-marker.is-selected {
+  z-index: 1100 !important;
+}
+.custom-marker.is-selected > div {
+  transform: scale(1.6);
+  transform-origin: center;
+  border-color: #fff !important;
+  box-shadow: 0 0 18px rgba(255, 215, 0, 0.85), 0 0 8px rgba(255, 255, 255, 0.5) !important;
+}

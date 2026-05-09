@@ -43,7 +43,7 @@ import com.meridian.tradeos.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
 
 @Composable
-fun SplashScreen(onNavigateToHome: () -> Unit) {
+fun SplashScreen(onNavigateToMap: () -> Unit) {
     var triggered by remember { mutableStateOf(false) }
 
     val alpha by animateFloatAsState(
@@ -65,7 +65,7 @@ fun SplashScreen(onNavigateToHome: () -> Unit) {
     LaunchedEffect(Unit) {
         triggered = true
         delay(2400)
-        onNavigateToHome()
+        onNavigateToMap()
     }
 
     Box(
