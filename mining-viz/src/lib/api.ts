@@ -135,16 +135,109 @@ const OIL_STUB_DATA: OilSummaryResponse = {
   ],
 };
 
+/** Lat/lng for map markers — built from stub; extend as new exporters appear in DB. */
+const ISO2_TO_COORD: Record<string, { lat: number; lng: number }> = Object.fromEntries(
+  OIL_STUB_FLOWS.map((f) => [f.iso2.toUpperCase(), { lat: f.lat, lng: f.lng }])
+);
+
+const HS_TO_CATEGORY: Record<string, OilTradeFlow['category']> = {
+  '2709': 'crude',
+  '2710': 'refined',
+  '2711': 'gas',
+};
+
+function dominantHsForCountry(
+  iso2: string,
+  breakdown: Record<string, { exporters?: { reporter_iso2?: string; trade_value_usd?: number }[] }>
+): { category: OilTradeFlow['category']; code: string; desc: string } {
+  const u = iso2.toUpperCase();
+  let best: { hs: string; val: number } | null = null;
+  for (const hs of ['2709', '2710', '2711']) {
+    const rows = breakdown[hs]?.exporters ?? [];
+    const row = rows.find((r) => (r.reporter_iso2 || '').toUpperCase() === u);
+    const val = Number(row?.trade_value_usd) || 0;
+    if (val > (best?.val ?? 0)) best = { hs, val };
+  }
+  if (best) {
+    const cat = HS_TO_CATEGORY[best.hs] ?? 'other';
+    const desc =
+      best.hs === '2709'
+        ? 'Petroleum oils, crude'
+        : best.hs === '2710'
+          ? 'Petroleum oils, not crude'
+          : 'Petroleum gases';
+    return { category: cat, code: best.hs, desc };
+  }
+  return { category: 'other', code: '2709', desc: 'Petroleum (aggregated)' };
+}
+
+/**
+ * Backend `/api/oil/summary` returns `top_exporters_by_value` + `breakdown_by_hs`.
+ * Older code expected `flows` — normalize so the map always receives markers.
+ */
+function normalizeOilSummaryResponse(raw: Record<string, unknown>): OilSummaryResponse {
+  const lim = raw.limitations;
+  const limitations = Array.isArray(lim) ? (lim as string[]) : [];
+
+  if (Array.isArray(raw.flows) && raw.flows.length > 0) {
+    return {
+      flows: raw.flows as OilTradeFlow[],
+      source: (raw.source as string) || (raw.provenance as string) || 'API',
+      data_as_of: (raw.data_as_of as string) || String(raw.year ?? ''),
+      limitations,
+    };
+  }
+
+  const tops = raw.top_exporters_by_value;
+  if (!Array.isArray(tops) || tops.length === 0) {
+    return { flows: [], source: '', data_as_of: '', limitations };
+  }
+
+  const breakdown = (raw.breakdown_by_hs || {}) as Record<
+    string,
+    { exporters?: { reporter_iso2?: string; trade_value_usd?: number }[] }
+  >;
+  const year = Number(raw.year) || 2022;
+  const flows: OilTradeFlow[] = tops.map((row: Record<string, unknown>, i: number) => {
+    const iso2 = String(row.reporter_iso2 || '').toUpperCase() || 'XX';
+    const coord = ISO2_TO_COORD[iso2] ?? { lat: 20, lng: 10 };
+    const { category, code, desc } = dominantHsForCountry(iso2, breakdown);
+    return {
+      country: String(row.reporter ?? ''),
+      iso2,
+      lat: coord.lat,
+      lng: coord.lng,
+      export_value_usd: row.total_value_usd != null ? Number(row.total_value_usd) : null,
+      import_value_usd: null,
+      top_hs_code: code,
+      top_hs_description: desc,
+      category,
+      year,
+      rank: i + 1,
+    };
+  });
+
+  return {
+    flows,
+    source: (raw.provenance as string) || 'UN Comtrade (aggregated via backend)',
+    data_as_of: String(year),
+    limitations: limitations.length
+      ? limitations
+      : ['Country-level exports only. Run `python backend/ingest_oil_trades.py` if the map is empty.'],
+  };
+}
+
 export const useOilSummary = (enabled = true) => {
   return useQuery<OilSummaryResponse>({
     queryKey: ['oil-summary'],
     queryFn: async () => {
       try {
-        const { data } = await apiClient.get<OilSummaryResponse>('/api/oil/summary');
-        return data;
+        const { data } = await apiClient.get<Record<string, unknown>>('/api/oil/summary');
+        if (data?.error) return OIL_STUB_DATA;
+        const normalized = normalizeOilSummaryResponse(data);
+        if (!normalized.flows.length) return OIL_STUB_DATA;
+        return normalized;
       } catch {
-        // Backend endpoint not yet implemented — return stub data.
-        // TODO: remove once /api/oil/summary is live.
         return OIL_STUB_DATA;
       }
     },
