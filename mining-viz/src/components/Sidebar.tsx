@@ -7,7 +7,21 @@ import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from './ui/accordion';
-import { LucideSearch, LucideFilter, LucidePlus, LucideFileText, LucideDownload, LucideUpload, LucideLogOut, LucideChevronLeft, LucideMapPin } from 'lucide-react';
+import { 
+  Search as LucideSearch, 
+  Filter as LucideFilter, 
+  Plus as LucidePlus, 
+  FileText as LucideFileText, 
+  Download as LucideDownload, 
+  Upload as LucideUpload, 
+  LogOut as LucideLogOut, 
+  ChevronLeft as LucideChevronLeft, 
+  MapPin as LucideMapPin,
+  LayoutGrid as LucideLayoutGrid,
+  Layers as LucideLayers,
+  Settings as LucideSettings,
+  ShieldCheck as LucideShieldCheck
+} from 'lucide-react';
 import MultiSelect from './MultiSelect';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -78,7 +92,13 @@ export default function Sidebar({
           <LucideMapPin className="w-5 h-5" />
         </div>
         <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
-          <LucideFileText className="w-5 h-5" />
+          <LucideLayoutGrid className="w-5 h-5" />
+        </div>
+        <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
+          <LucideLayers className="w-5 h-5" />
+        </div>
+        <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
+          <LucideSettings className="w-5 h-5" />
         </div>
         <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
           <LucideLogOut className="w-5 h-5" />

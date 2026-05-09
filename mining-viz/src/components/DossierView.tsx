@@ -5,15 +5,15 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
 import { 
-  LucideX, 
-  LucideBrain, 
-  LucideMapPin, 
-  LucideShieldCheck, 
-  LucideZap, 
-  LucideUser, 
-  LucidePhone, 
-  LucideCamera, 
-  LucideShare2 
+  X as LucideX, 
+  Brain as LucideBrain, 
+  MapPin as LucideMapPin, 
+  ShieldCheck as LucideShieldCheck, 
+  Zap as LucideZap, 
+  User as LucideUser, 
+  Phone as LucidePhone, 
+  Camera as LucideCamera, 
+  Share2 as LucideShare2 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 

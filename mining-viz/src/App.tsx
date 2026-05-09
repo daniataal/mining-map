@@ -13,6 +13,7 @@ import AddLicenseModal from './components/AddLicenseModal';
 import KanbanBoard from './components/KanbanBoard';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
+import { Search as LucideSearch, Filter as LucideFilter } from 'lucide-react';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';

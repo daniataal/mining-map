@@ -2,7 +2,7 @@ import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { LucideMapPin, LucidePlus } from 'lucide-react';
+import { MapPin as LucideMapPin, Plus as LucidePlus } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;

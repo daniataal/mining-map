@@ -2,7 +2,11 @@ import { useI18n } from '../lib/i18n';
 import MultiSelect from './MultiSelect';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import { LucideFilter, LucideRotateCcw, LucideX } from 'lucide-react';
+import { 
+  Filter as LucideFilter, 
+  RotateCcw as LucideRotateCcw, 
+  X as LucideX 
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface FilterPanelProps {
