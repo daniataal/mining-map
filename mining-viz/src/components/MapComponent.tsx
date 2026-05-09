@@ -98,6 +98,8 @@ export default function MapComponent({
   selectedItem,
   setSelectedItem,
   mapCenter,
+  updateAnnotation,
+  deleteLicense,
   handleOpenDossier,
   mapFlyTrigger
 }: MapComponentProps) {
