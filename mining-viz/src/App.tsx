@@ -153,7 +153,7 @@ export default function App() {
   useEffect(() => {
     const fetchPrices = async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/market-prices`);
+        const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/market-prices`);
         const data = await res.json();
         setMarketPrices(data);
       } catch (err) {
@@ -161,7 +161,7 @@ export default function App() {
       }
     };
     fetchPrices();
-    const interval = setInterval(fetchPrices, 1000 * 60 * 5); // every 5 mins
+    const interval = setInterval(fetchPrices, 1000 * 60 * 1); // every 1 min
     return () => clearInterval(interval);
   }, []);
 
