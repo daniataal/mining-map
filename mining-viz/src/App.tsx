@@ -353,6 +353,7 @@ export default function App() {
           isOpen={isDossierOpen} 
           onClose={() => setIsDossierOpen(false)} 
           item={dossierItem} 
+          marketPrices={marketPrices}
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
           updateAnnotation={(id, updates) => setUserAnnotations(prev => ({
             ...prev,
