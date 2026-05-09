@@ -191,13 +191,15 @@ export default function App() {
               setSelectedItem(item);
               setMapFlyTrigger(prev => prev + 1);
             }}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
           />
         </aside>
 
         {/* PANEL 2: Central Map Workspace */}
-        <main className="flex-1 relative">
+        <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar */}
-          <div className="absolute top-4 left-6 right-6 z-30 flex justify-between items-center pointer-events-none">
+          <div className="absolute top-4 left-6 right-6 z-[1000] flex justify-between items-center pointer-events-none">
             <div className="flex items-center gap-3 pointer-events-auto">
                 <div className="flex items-center bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
                   <LucideSearch className="w-5 h-5 text-slate-500 mr-3" />
@@ -236,28 +238,30 @@ export default function App() {
             </div>
           </div>
 
-          {viewMode === 'map' ? (
-            <MapComponent
-              processedData={miningData.processedData}
-              userAnnotations={userAnnotations}
-              selectedItem={selectedItem}
-              mapFlyTrigger={mapFlyTrigger}
-              setSelectedItem={setSelectedItem}
-              handleOpenDossier={handleOpenDossier}
-              mapCenter={mapCenter}
-              updateAnnotation={updateAnnotation}
-              deleteLicense={deleteLicense}
-            />
-          ) : (
-            <div className="pt-24 px-6 h-full bg-slate-950">
-              <KanbanBoard
+          <div className="w-full h-full z-0">
+            {viewMode === 'map' ? (
+              <MapComponent
                 processedData={miningData.processedData}
                 userAnnotations={userAnnotations}
+                selectedItem={selectedItem}
+                mapFlyTrigger={mapFlyTrigger}
+                setSelectedItem={setSelectedItem}
+                handleOpenDossier={handleOpenDossier}
+                mapCenter={mapCenter}
                 updateAnnotation={updateAnnotation}
-                onCardClick={handleOpenDossier}
+                deleteLicense={deleteLicense}
               />
-            </div>
-          )}
+            ) : (
+              <div className="pt-24 px-6 h-full bg-slate-950">
+                <KanbanBoard
+                  processedData={miningData.processedData}
+                  userAnnotations={userAnnotations}
+                  updateAnnotation={updateAnnotation}
+                  onCardClick={handleOpenDossier}
+                />
+              </div>
+            )}
+          </div>
         </main>
 
         {/* PANEL 3: Right Tactical Filter Hub */}
