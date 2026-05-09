@@ -74,15 +74,15 @@ export default function Sidebar({
   }, [displayCount, processedData.length]);
 
   return (
-    <div className="flex h-full bg-transparent text-slate-100 select-none">
+    <div className="flex h-full bg-transparent text-slate-800 dark:text-slate-100 select-none">
       {/* Icon Rail (MarineTraffic style) */}
-      <div className="w-16 flex-shrink-0 border-r border-white/5 flex flex-col items-center py-6 gap-6 bg-slate-950">
+      <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
         <button 
           onClick={() => setViewMode('map')}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${viewMode === 'map' 
             ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
-            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
           <LucideMapPin className="w-5 h-5" />
         </button>
@@ -91,7 +91,7 @@ export default function Sidebar({
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${viewMode === 'dashboard' 
             ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
-            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
           <LucidePieChart className="w-5 h-5" />
         </button>
@@ -100,7 +100,7 @@ export default function Sidebar({
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${viewMode === 'pipeline' 
             ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
-            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
         </button>
@@ -109,17 +109,17 @@ export default function Sidebar({
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${isFilterOpen 
             ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
-            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
           <LucideLayers className="w-5 h-5" />
         </button>
         <button 
           onClick={onToggleAdmin}
-          className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 hover:text-slate-200 border border-transparent transition-all cursor-pointer"
+          className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 border border-transparent transition-all cursor-pointer"
         >
           <LucideSettings className="w-5 h-5" />
         </button>
-        <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
+        <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
           <LucideLogOut className="w-5 h-5" />
         </div>
       </div>
@@ -132,9 +132,9 @@ export default function Sidebar({
           exit={{ opacity: 0, x: -20 }}
           className="flex-1 flex flex-col min-w-0"
         >
-          <header className="p-5 border-b border-white/5">
+          <header className="p-5 border-b border-black/5 dark:border-white/5">
             <div className="flex items-center justify-between">
-              <h1 className="text-sm font-black tracking-[0.2em] text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
+              <h1 className="text-sm font-black tracking-[0.2em] text-slate-400 dark:text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
               <button 
                 onClick={(e) => {
                   e.stopPropagation();
@@ -146,7 +146,7 @@ export default function Sidebar({
               </button>
             </div>
             <div className="flex items-center justify-between mt-4">
-               <Badge variant="outline" className="text-[10px] border-white/10 text-slate-400 bg-white/5 px-2 h-5 font-black uppercase">
+               <Badge variant="outline" className="text-[10px] border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 bg-black/5 dark:bg-white/5 px-2 h-5 font-black uppercase">
                   {processedData.length} {t("נמצאו", "Total Found")}
                </Badge>
                <Button 
@@ -177,11 +177,11 @@ export default function Sidebar({
                     className={`group p-4 rounded-xl cursor-pointer transition-all duration-300 border
                       ${isSelected 
                         ? 'bg-amber-500/10 border-amber-500/30 shadow-[inset_0_0_20px_rgba(245,158,11,0.05)]' 
-                        : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10'}`}
+                        : 'bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/[0.05] hover:border-black/10 dark:hover:border-white/10'}`}
                     onClick={() => setSelectedItem(item)}
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <h3 className={`text-xs font-black uppercase tracking-tight truncate pr-4 transition-colors ${isSelected ? 'text-amber-500' : 'text-slate-200'}`}>
+                      <h3 className={`text-xs font-black uppercase tracking-tight truncate pr-4 transition-colors ${isSelected ? 'text-amber-500' : 'text-slate-700 dark:text-slate-200'}`}>
                         {item.company}
                       </h3>
                       <div className="flex gap-1 shrink-0">
@@ -190,7 +190,7 @@ export default function Sidebar({
                          {annotation.status === 'bad' && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
                       </div>
                     </div>
-                    <div className="flex items-center text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
                        <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
                        <span className="truncate">{item.region}</span>
                     </div>

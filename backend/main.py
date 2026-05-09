@@ -937,11 +937,13 @@ def analyze_with_ai(request: AIRequest):
     ]
 
     system_prompt = (
-        "You are an ENTREPRENEUR in West African commodity trading. "
-        "Your goal is to evaluate if a mining license is a 'GO' or 'NO GO' for a purchase. "
-        "Provide a risk rating (1-10) and a tactical recommendation for closing the deal. "
-        "Focus on: Local Discount potential, Logistics difficulty, and License validity. "
-        "Be blunt and professional."
+        "You are an advisor on West African mining licenses for experienced buyers. "
+        "Decide GO / NO GO with evidence, not hype. Give a risk score 1–10 (10 = do not proceed). "
+        "Cover: local discount potential, logistics, license validity/compliance. "
+        "Reply in Markdown only. Use ## for main sections. Keep paragraphs short (2–4 sentences). "
+        "Put basic facts in bullets, not huge tables. Use one compact table only for risk breakdown "
+        "(Category | Score | One-line rationale). Number tactical steps. "
+        "Call out what must be verified with regulators. Tone: direct, scannable, plain language."
     )
 
     # Attempt Cascade
@@ -1318,6 +1320,281 @@ def get_market_prices():
     except Exception as e:
         print(f"[market-prices] fetch error: {e}")
         return FALLBACK_PRICES
+
+
+# ======================================================================
+# Trade & Company Intelligence Endpoint
+# ======================================================================
+#
+# Data sources:
+#   1. UN Comtrade (free tier, 500 req/day) — country-level commodity
+#      trade flows (exports/imports, USD value, weight) by HS code.
+#      Requires env var: COMTRADE_API_KEY (register at comtradeapi.un.org)
+#
+#   2. World Bank Open Data (free, no key) — GDP, FDI inflows,
+#      GDP per capita, mining share of GDP.
+#
+#   3. Pre-built deep links — OpenCorporates, EITI, Comtrade+, Google
+#      for manual human-in-the-loop verification.
+#
+# Known limitations (returned in response):
+#   - Trade data is COUNTRY-level; company-level customs data is NOT free.
+#   - Comtrade lags 12-24 months; World Bank lags ~12 months.
+#   - Coverage depends on member state reporting cadence.
+#
+# Env vars required/optional:
+#   COMTRADE_API_KEY  — UN Comtrade subscription key (optional; endpoint
+#                       degrades gracefully to deep-links only if absent)
+
+_COMMODITY_HS: dict[str, str] = {
+    "gold": "7108", "silver": "7106",
+    "diamond": "7102", "diamonds": "7102",
+    "platinum": "7110", "palladium": "7110",
+    "copper": "7403",
+    "iron ore": "2601", "iron": "2601",
+    "coal": "2701",
+    "bauxite": "2606",
+    "aluminium": "7601", "aluminum": "7601",
+    "manganese": "2602",
+    "chromite": "2610", "chrome": "2610",
+    "cobalt": "2605",
+    "lithium": "2825",
+    "nickel": "7502",
+    "zinc": "7901",
+    "lead": "7801",
+    "tin": "8001",
+    "tungsten": "2611",
+    "titanium": "2614",
+    "tantalum": "2615",
+    "coltan": "2615",
+    "uranium": "2612",
+}
+
+# Country display name (lower) → {iso2, m49}
+# m49 = UN Comtrade reporter code; iso2 = World Bank country code
+_COUNTRY_CODES: dict[str, dict] = {
+    "ghana":                        {"iso2": "GH", "m49": "288"},
+    "south africa":                 {"iso2": "ZA", "m49": "710"},
+    "nigeria":                      {"iso2": "NG", "m49": "566"},
+    "kenya":                        {"iso2": "KE", "m49": "404"},
+    "tanzania":                     {"iso2": "TZ", "m49": "834"},
+    "ethiopia":                     {"iso2": "ET", "m49": "231"},
+    "mozambique":                   {"iso2": "MZ", "m49": "508"},
+    "zambia":                       {"iso2": "ZM", "m49": "894"},
+    "zimbabwe":                     {"iso2": "ZW", "m49": "716"},
+    "botswana":                     {"iso2": "BW", "m49": "072"},
+    "namibia":                      {"iso2": "NA", "m49": "516"},
+    "dr congo":                     {"iso2": "CD", "m49": "180"},
+    "democratic republic of the congo": {"iso2": "CD", "m49": "180"},
+    "congo":                        {"iso2": "CG", "m49": "178"},
+    "mali":                         {"iso2": "ML", "m49": "466"},
+    "burkina faso":                 {"iso2": "BF", "m49": "854"},
+    "senegal":                      {"iso2": "SN", "m49": "686"},
+    "guinea":                       {"iso2": "GN", "m49": "324"},
+    "sierra leone":                 {"iso2": "SL", "m49": "694"},
+    "liberia":                      {"iso2": "LR", "m49": "430"},
+    "ivory coast":                  {"iso2": "CI", "m49": "384"},
+    "côte d'ivoire":                {"iso2": "CI", "m49": "384"},
+    "cameroon":                     {"iso2": "CM", "m49": "120"},
+    "angola":                       {"iso2": "AO", "m49": "024"},
+    "sudan":                        {"iso2": "SD", "m49": "729"},
+    "egypt":                        {"iso2": "EG", "m49": "818"},
+    "morocco":                      {"iso2": "MA", "m49": "504"},
+    "mauritania":                   {"iso2": "MR", "m49": "478"},
+    "niger":                        {"iso2": "NE", "m49": "562"},
+    "chad":                         {"iso2": "TD", "m49": "148"},
+    "central african republic":     {"iso2": "CF", "m49": "140"},
+    "gabon":                        {"iso2": "GA", "m49": "266"},
+    "rwanda":                       {"iso2": "RW", "m49": "646"},
+    "uganda":                       {"iso2": "UG", "m49": "800"},
+    "madagascar":                   {"iso2": "MG", "m49": "450"},
+    "malawi":                       {"iso2": "MW", "m49": "454"},
+    "eritrea":                      {"iso2": "ER", "m49": "232"},
+    "somalia":                      {"iso2": "SO", "m49": "706"},
+    "djibouti":                     {"iso2": "DJ", "m49": "262"},
+    "togo":                         {"iso2": "TG", "m49": "768"},
+    "benin":                        {"iso2": "BJ", "m49": "204"},
+    "guinea-bissau":                {"iso2": "GW", "m49": "624"},
+    "gambia":                       {"iso2": "GM", "m49": "270"},
+    "equatorial guinea":            {"iso2": "GQ", "m49": "226"},
+    "comoros":                      {"iso2": "KM", "m49": "174"},
+    "burundi":                      {"iso2": "BI", "m49": "108"},
+    "lesotho":                      {"iso2": "LS", "m49": "426"},
+    "eswatini":                     {"iso2": "SZ", "m49": "748"},
+    "swaziland":                    {"iso2": "SZ", "m49": "748"},
+}
+
+
+def _resolve_codes(country: str) -> dict:
+    """Partial-match country name to ISO codes."""
+    key = country.lower().strip()
+    if key in _COUNTRY_CODES:
+        return _COUNTRY_CODES[key]
+    for k, v in _COUNTRY_CODES.items():
+        if k in key or key in k:
+            return v
+    return {}
+
+
+def _resolve_hs(commodity: str) -> Optional[str]:
+    """Map commodity string to HS-4 code."""
+    key = commodity.lower().strip()
+    if key in _COMMODITY_HS:
+        return _COMMODITY_HS[key]
+    for k, v in _COMMODITY_HS.items():
+        if k in key or key in k:
+            return v
+    return None
+
+
+def _fetch_comtrade(m49: str, hs_code: str, year: int = 2023) -> dict:
+    """Fetch Comtrade trade flows. Returns {} if key absent or error."""
+    api_key = os.getenv("COMTRADE_API_KEY", "")
+    if not api_key:
+        return {}
+    try:
+        url = (
+            "https://comtradeapi.un.org/data/v1/get/C/A/HS"
+            f"?reporterCode={m49}&cmdCode={hs_code}"
+            f"&period={year}&flowCode=X,M"
+            f"&subscription-key={api_key}&limit=10"
+        )
+        r = _requests.get(url, timeout=8)
+        if r.status_code == 200:
+            rows = r.json().get("data", [])
+            flows = []
+            for row in rows:
+                flows.append({
+                    "flow": "Export" if row.get("flowCode") == "X" else "Import",
+                    "trade_value_usd": row.get("primaryValue"),
+                    "net_weight_kg": row.get("netWgt"),
+                    "qty": row.get("qty"),
+                    "qty_unit": row.get("qtyUnitAbbr"),
+                    "partner": row.get("partnerDesc"),
+                    "year": row.get("period"),
+                })
+            return {"source": "UN Comtrade", "year": year, "hs_code": hs_code, "flows": flows}
+        # Try one year back on 404/empty
+        if r.status_code in (404, 200) and year > 2020:
+            return _fetch_comtrade(m49, hs_code, year - 1)
+        return {}
+    except Exception as e:
+        print(f"[comtrade] error: {e}")
+        return {}
+
+
+def _fetch_world_bank(iso2: str) -> dict:
+    """Fetch World Bank macro indicators. Free, no key."""
+    result: dict = {"source": "World Bank Open Data", "indicators": {}}
+    indicators = {
+        "NY.GDP.MKTP.CD":       "gdp_usd",
+        "NY.GDP.PCAP.CD":       "gdp_per_capita_usd",
+        "BX.KLT.DINV.CD.WD":   "fdi_inflows_usd",
+        "NY.GDP.MINR.ZS":       "mining_share_of_gdp_pct",
+    }
+    for wb_code, label in indicators.items():
+        try:
+            url = (
+                f"https://api.worldbank.org/v2/country/{iso2}"
+                f"/indicator/{wb_code}?format=json&mrv=3"
+            )
+            r = _requests.get(url, timeout=6)
+            if r.status_code == 200:
+                body = r.json()
+                if len(body) > 1 and body[1]:
+                    for entry in body[1]:
+                        if entry.get("value") is not None:
+                            result["indicators"][label] = {
+                                "value": entry["value"],
+                                "year": entry["date"],
+                            }
+                            break
+        except Exception as e:
+            print(f"[worldbank] {wb_code}: {e}")
+    return result
+
+
+@app.get("/api/company-intel")
+def get_company_intel(company: str = "", country: str = "", commodity: str = ""):
+    """
+    Aggregate open-data trade & economic context for a mining license dossier.
+    Returns UN Comtrade country-level trade flows, World Bank macro data,
+    and deep links for manual company verification.
+    Data provenance and known limitations are documented in the response.
+    """
+    hs_code = _resolve_hs(commodity)
+    codes = _resolve_codes(country)
+
+    trade_data: dict = {}
+    if hs_code and codes.get("m49"):
+        trade_data = _fetch_comtrade(codes["m49"], hs_code)
+
+    econ_data: dict = {}
+    if codes.get("iso2"):
+        econ_data = _fetch_world_bank(codes["iso2"])
+
+    # Pre-built deep links — no API calls, always available
+    company_q = _requests.utils.quote(company)
+    commodity_q = _requests.utils.quote(commodity)
+    country_q = _requests.utils.quote(country)
+    deep_links = [
+        {
+            "label": "OpenCorporates Search",
+            "url": f"https://opencorporates.com/companies?q={company_q}",
+            "description": f"Search for '{company}' across 200+ registries",
+            "icon": "building",
+        },
+        {
+            "label": "EITI Extractive Data",
+            "url": "https://eiti.org/countries",
+            "description": f"{country} extractive sector transparency data",
+            "icon": "shield",
+        },
+        {
+            "label": f"Comtrade+ Interactive ({commodity})",
+            "url": (
+                f"https://comtradeplus.un.org/TradeFlow"
+                f"?Frequency=A&Flows=X%2CM"
+                f"&CommodityCodes={hs_code or ''}"
+                f"&Partners=0&Reporters=0&period=2023"
+                f"&AggregateBy=none&BreakdownMode=plus"
+            ),
+            "description": f"Explore HS {hs_code or 'N/A'} ({commodity}) trade flows",
+            "icon": "chart",
+        },
+        {
+            "label": "Company Export History (Web)",
+            "url": f"https://www.google.com/search?q={company_q}+{commodity_q}+export+customs",
+            "description": "Verify company trade activity via open web sources",
+            "icon": "search",
+        },
+        {
+            "label": "African Mining Registry Links",
+            "url": f"https://www.google.com/search?q={country_q}+mining+license+registry+{commodity_q}",
+            "description": f"Search {country} mining authority records",
+            "icon": "map",
+        },
+    ]
+
+    has_comtrade_key = bool(os.getenv("COMTRADE_API_KEY", ""))
+    return {
+        "company": company,
+        "country": country,
+        "commodity": commodity,
+        "hs_code": hs_code,
+        "country_codes": codes,
+        "trade_flows": trade_data,
+        "economy": econ_data,
+        "deep_links": deep_links,
+        "comtrade_available": has_comtrade_key,
+        "data_as_of": "2023 (most recent Comtrade/World Bank release)",
+        "limitations": [
+            "Trade data is country-level, not company-specific — company-level customs data requires paid government sources.",
+            "UN Comtrade data typically lags 12–24 months from the current date.",
+            "World Bank indicators lag approximately 12 months.",
+            "Verify all figures with the local customs authority and mining registry before deal execution.",
+        ],
+    }
 
 
 if __name__ == "__main__":

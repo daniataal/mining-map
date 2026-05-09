@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
+import { useTheme } from 'next-themes';
 import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
@@ -41,7 +42,7 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
 
     return new L.DivIcon({
         className: 'custom-marker',
-        html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.3s ease;"></div>`,
+        html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.3s ease; pointer-events: auto; cursor: pointer;"></div>`,
         iconSize: isHovered ? [24, 24] : [size, size],
         iconAnchor: isHovered ? [12, 12] : [size / 2, size / 2],
         popupAnchor: [0, -10]
@@ -104,13 +105,18 @@ export default function MapComponent({
   mapFlyTrigger
 }: MapComponentProps) {
     const { t } = useI18n();
+    const { resolvedTheme } = useTheme();
+    const isDark = resolvedTheme !== 'light';
     const [geoJsonData, setGeoJsonData] = useState<any>(null);
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
 
     useEffect(() => {
-        fetch('https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json')
+        // Natural Earth 1:10m via datasets/geo-countries — accurate enough to show
+        // narrow features like Namibia's Caprivi/Zambezi Strip without corner-cutting.
+        // (johan/world.geo.json was 1:110m and visibly misaligned against tile basemaps.)
+        fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
             .then(res => res.json())
             .then(data => setGeoJsonData(data))
             .catch(err => console.error("Failed to load country borders", err));
@@ -136,7 +142,10 @@ export default function MapComponent({
                 const annotation = userAnnotations[selectedItem.id] || {};
                 const color = getMarkerColor(annotation.commodity || selectedItem.commodity, annotation.status);
                 marker.setIcon(createCustomIcon(color, true));
-                setTimeout(() => marker.openPopup(), 50);
+                // Small delay lets React finish the icon swap (setIcon) before
+                // Leaflet positions the popup anchor, avoiding a mis-anchored popup
+                // on first open in spiderfy mode.
+                setTimeout(() => marker.openPopup(), 80);
             }
             prevSelectedIdRef.current = selectedItem.id;
         } else {
@@ -154,16 +163,18 @@ export default function MapComponent({
         return {
             ...geoJsonData,
             features: geoJsonData.features.filter((f: any) => {
-                const name = f.properties.name.toLowerCase();
+                // datasets/geo-countries (Natural Earth 1:10m) uses "ADMIN"; older
+                // johan dataset used "name" — support both so a source swap doesn't break filtering.
+                const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
                 return activeCountries.some(ac => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
             })
         };
     }, [geoJsonData, activeCountries]);
 
     return (
-        <div className="w-full h-full relative bg-slate-900">
+        <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
             {processedData.length === 0 && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-900/60 backdrop-blur-sm">
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו רישיונות", "No Licenses Found")}</h3>
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים", "Try adjusting your filters")}</p>
@@ -181,9 +192,13 @@ export default function MapComponent({
                 <MapClickHandler onMapClick={() => setSelectedItem(null)} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
                 
-                <LayersControl position="bottomright">
-                    <LayersControl.BaseLayer checked name={t("מצב כהה", "Dark Mode")}>
+                {/* key forces remount when theme changes so `checked` re-applies */}
+                <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
+                    <LayersControl.BaseLayer checked={isDark} name={t("כהה", "Dark")}>
                         <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+                    </LayersControl.BaseLayer>
+                    <LayersControl.BaseLayer checked={!isDark} name={t("בהיר", "Light")}>
+                        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
                     </LayersControl.BaseLayer>
                     <LayersControl.BaseLayer name={t("לוויין", "Satellite")}>
                         <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
@@ -210,7 +225,14 @@ export default function MapComponent({
                     )}
                 </LayersControl>
 
-                <MarkerClusterGroup>
+                {/* spiderLegPolylineOptions interactive:false prevents spider-leg polylines from
+                    eating clicks meant for the spiderfied markers beneath them.
+                    showCoverageOnHover:false removes the coverage polygon overlay that can
+                    also intercept pointer events in dense areas. */}
+                <MarkerClusterGroup
+                    showCoverageOnHover={false}
+                    spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
+                >
                     {processedData.map((item) => {
                         if (item.lat == null || item.lng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
@@ -224,6 +246,11 @@ export default function MapComponent({
                                 ref={(el) => { if (el) markerRefs.current[item.id] = el; }}
                                 eventHandlers={{
                                     click: (e) => {
+                                        // Stop propagation so the map-level click handler
+                                        // (MapClickHandler → setSelectedItem(null)) does not
+                                        // fire in the same event cycle and cancel the selection
+                                        // that we are about to set (React 18 batches both).
+                                        L.DomEvent.stopPropagation(e);
                                         setSelectedItem(item);
                                     },
                                 }}

@@ -37,11 +37,15 @@ export interface ActivityLog {
 
 export interface UserAnnotation {
   status?: LicenseStatus;
+  stage?: string;
   comment?: string;
+  notes?: string;
   commodity?: string;
   licenseType?: string;
   price?: number;
   quantity?: number;
+  contactPerson?: string;
+  phoneNumber?: string;
   [key: string]: any;
 }
 
