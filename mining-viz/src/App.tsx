@@ -23,12 +23,14 @@ import ThemeToggle from './components/ThemeToggle';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 
-function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change: string, up?: boolean }) {
+function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change?: string, up?: boolean | null }) {
+  const ch = change ?? '—';
+  const tone = up === true ? 'text-emerald-500' : up === false ? 'text-red-500' : 'text-slate-500 dark:text-slate-500';
   return (
     <div className="flex items-center gap-2">
       <span className="text-[9px] font-black text-slate-500 dark:text-slate-400">{symbol}</span>
       <span className="text-[10px] font-bold text-slate-900 dark:text-white">{price}</span>
-      <span className={`text-[9px] font-black ${up ? 'text-emerald-500' : 'text-red-500'}`}>{change}</span>
+      <span className={`text-[9px] font-black ${tone}`}>{ch}</span>
     </div>
   );
 }
@@ -187,10 +189,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const apiBase =
+      import.meta.env.VITE_API_BASE ||
+      (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+
     const fetchPrices = async () => {
+      // Prefer backend: live WTI/Brent/etc. via Yahoo (server-side), metals.live, CoinGecko
+      try {
+        const tickerRes = await fetch(`${apiBase}/api/market-ticker`);
+        if (tickerRes.ok) {
+          const rows = await tickerRes.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            setMarketPrices(rows);
+            return;
+          }
+        }
+      } catch (_) {
+        /* offline or CORS — use client fallbacks */
+      }
+
       const results: any[] = [];
-      
-      // 1. Precious Metals (metals.live) — always expose GOLD/SILVER rows (dashboard + ticker)
+
       try {
         const metalsRes = await fetch('https://api.metals.live/v1/spot');
         if (metalsRes.ok) {
@@ -198,45 +217,80 @@ export default function App() {
           const map: Record<string, number> = {};
           metals.forEach((entry: any) => Object.assign(map, entry));
           if (map.gold) {
-            results.push({ symbol: 'GOLD/oz', price: `$${map.gold.toLocaleString()}`, category: 'Metal', up: true });
+            results.push({
+              symbol: 'GOLD/oz',
+              price: `$${map.gold.toLocaleString()}`,
+              category: 'Metal',
+              up: true,
+              change: 'LIVE',
+            });
           }
           if (map.silver) {
-            results.push({ symbol: 'SILVER/oz', price: `$${map.silver.toFixed(2)}`, category: 'Metal', up: true });
+            results.push({
+              symbol: 'SILVER/oz',
+              price: `$${map.silver.toFixed(2)}`,
+              category: 'Metal',
+              up: true,
+              change: 'LIVE',
+            });
           }
         }
       } catch (_) {}
       if (!results.some((r) => r.symbol === 'GOLD/oz')) {
-        results.push({ symbol: 'GOLD/oz', price: '$2,350', category: 'Metal', up: undefined });
+        results.push({
+          symbol: 'GOLD/oz',
+          price: '$2,350',
+          category: 'Metal',
+          change: '—',
+          up: null,
+        });
       }
       if (!results.some((r) => r.symbol === 'SILVER/oz')) {
-        results.push({ symbol: 'SILVER/oz', price: '$28.00', category: 'Metal', up: undefined });
+        results.push({
+          symbol: 'SILVER/oz',
+          price: '$28.00',
+          category: 'Metal',
+          change: '—',
+          up: null,
+        });
       }
 
-      // 2. Crypto & Major Benchmarks (CoinGecko)
       try {
-        const btcRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd');
+        const btcRes = await fetch(
+          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true'
+        );
         if (btcRes.ok) {
           const data = await btcRes.json();
-          results.push({ symbol: 'BTC/USD', price: `$${data.bitcoin.usd.toLocaleString()}`, category: 'Crypto' });
+          const ch = data.bitcoin?.usd_24h_change ?? 0;
+          results.push({
+            symbol: 'BTC/USD',
+            price: `$${data.bitcoin.usd.toLocaleString()}`,
+            category: 'Crypto',
+            up: ch >= 0,
+            change: `${ch >= 0 ? '+' : ''}${Number(ch).toFixed(2)}%`,
+          });
         }
       } catch (_) {}
 
-      // 3. Energy & Softs (Simulated/Fallback for VM safety - can be swapped for specific APIs)
-      // Note: Sulphur and Diesel (Heating Oil) usually require auth-based commodity APIs.
-      // Providing live-updated benchmarks based on standard market volatility.
-      const baseEnergy = [
-        { symbol: 'BRENT', price: '$82.45', category: 'Energy', up: true },
-        { symbol: 'WTI CRUDE', price: '$78.12', category: 'Energy', up: false },
-        { symbol: 'DIESEL', price: '$3.12/g', category: 'Energy', up: true },
-        { symbol: 'SUGAR', price: '$22.40', category: 'Softs', up: true },
-        { symbol: 'COFFEE', price: '$185.30', category: 'Softs', up: false },
-        { symbol: 'SULPHUR', price: '$142.00', category: 'Mineral', up: true },
-        { symbol: 'COPPER', price: '$9,240', category: 'Industrial', up: true },
-        { symbol: 'IRON ORE', price: '$118.50', category: 'Industrial', up: false },
-        { symbol: 'LITHIUM', price: '$13,400', category: 'Battery', up: true }
-      ];
-      
-      setMarketPrices([...results, ...baseEnergy]);
+      // Last resort when backend unreachable — no fake “live” oil numbers
+      results.push(
+        {
+          symbol: 'BRENT',
+          price: '—',
+          category: 'Energy',
+          change: 'API',
+          up: null,
+        },
+        {
+          symbol: 'WTI CRUDE',
+          price: '—',
+          category: 'Energy',
+          change: 'API',
+          up: null,
+        }
+      );
+
+      setMarketPrices(results);
     };
 
     fetchPrices();
