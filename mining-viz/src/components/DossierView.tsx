@@ -22,6 +22,7 @@ interface DossierViewProps {
   onClose: () => void;
   item: MiningLicense | null;
   annotation: UserAnnotation;
+  marketPrices: any[];
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
 }
 
@@ -30,10 +31,45 @@ export default function DossierView({
   onClose,
   item,
   annotation,
+  marketPrices,
   updateAnnotation
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
+  const [aiAnalysis, setAiAnalysis] = useState<string>("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Live Price Calculation
+  const goldPriceObj = marketPrices.find(p => p.symbol === 'XAU/USD');
+  const rawGoldPrice = goldPriceObj ? parseFloat(goldPriceObj.price.replace(/,/g, '')) : 68450;
+  const discount = 0.12; // 12%
+  const logistics = 2400;
+  const netProfit = (rawGoldPrice * (1 - discount)) - logistics;
+
+  useEffect(() => {
+    if (isOpen && item && !aiAnalysis) {
+      const fetchAnalysis = async () => {
+        setIsAnalyzing(true);
+        try {
+          const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/ai/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              context: `Analyze mining potential for ${item.company} in ${item.region}, ${item.country}. Commodity: ${item.commodity}. License Type: ${item.licenseType}.`,
+              type: 'DOSSIER'
+            })
+          });
+          const data = await res.json();
+          setAiAnalysis(data.analysis || data.response || "No tactical data available for this site.");
+        } catch (err) {
+          setAiAnalysis("Intelligence link failed. Manual verification recommended.");
+        } finally {
+          setIsAnalyzing(false);
+        }
+      };
+      fetchAnalysis();
+    }
+  }, [isOpen, item, aiAnalysis]);
 
   if (!item) return null;
 
@@ -173,12 +209,18 @@ export default function DossierView({
                      <h4 className="text-[12px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                         <LucideBrain className="w-4 h-4" /> {t("מודיעין Gemini", "Gemini Intelligence OS")}
                      </h4>
-                     <div className="space-y-6">
-                        <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-5 border border-indigo-500/20">
-                           <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                             Analysis indicates a high probability of artisanal expansion in the {item.region} sector. 
-                             Structural anomalies in the pits suggest deep-vein potential. Verification recommended.
-                           </p>
+                      <div className="space-y-6">
+                        <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-5 border border-indigo-500/20 min-h-[120px] flex items-center justify-center">
+                           {isAnalyzing ? (
+                             <div className="flex flex-col items-center gap-3">
+                               <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                               <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">{t("מנתח...", "Analyzing Intelligence...")}</span>
+                             </div>
+                           ) : (
+                             <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                               {aiAnalysis}
+                             </p>
+                           )}
                         </div>
                         <Button className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px] shadow-2xl">
                            {t("הפק דוח מודיעין מלא", "Execute Full Intelligence Dossier")}
@@ -196,8 +238,8 @@ export default function DossierView({
                      </h4>
                      <div className="space-y-4">
                         <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
-                           <span className="text-[9px] font-black text-slate-500 uppercase">{t("מחיר שוק (LBMA)", "Market Price (LBMA)")}</span>
-                           <span className="text-xs font-black text-white">$68,450 / KG</span>
+                           <span className="text-[9px] font-black text-slate-500 uppercase">{t("מחיר שוק (LIVE)", "Market Price (LIVE)")}</span>
+                           <span className="text-xs font-black text-white">${rawGoldPrice.toLocaleString()} / KG</span>
                         </div>
                         <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
                            <span className="text-[9px] font-black text-slate-500 uppercase">{t("דיסקאונט מקומי", "Local Discount")}</span>
@@ -205,14 +247,14 @@ export default function DossierView({
                         </div>
                         <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
                            <span className="text-[9px] font-black text-slate-500 uppercase">{t("לוגיסטיקה ומיסים", "Logistics & Taxes")}</span>
-                           <span className="text-xs font-black text-red-400">$2,400 / KG</span>
+                           <span className="text-xs font-black text-red-400">${logistics.toLocaleString()} / KG</span>
                         </div>
                         
                         <div className="pt-4 border-t border-white/5 mt-2">
                            <div className="flex justify-between items-end">
                               <div className="flex flex-col">
                                  <span className="text-[10px] font-black text-slate-400 uppercase">{t("רווח פוטנציאלי", "Est. Net Profit")}</span>
-                                 <span className="text-2xl font-black text-emerald-500">$57,836 / KG</span>
+                                 <span className="text-2xl font-black text-emerald-500">${netProfit.toLocaleString(undefined, {maximumFractionDigits: 0})} / KG</span>
                               </div>
                               <Badge className="bg-emerald-500 text-slate-950 font-black text-[10px] mb-1">HIGH MARGIN</Badge>
                            </div>
@@ -236,15 +278,21 @@ export default function DossierView({
                               <span className="text-sm font-black text-white">{annotation.contactPerson || t("לא ידוע", "Not Identified")}</span>
                            </div>
                            <Button size="icon" variant="ghost" className="h-10 w-10 text-slate-400 hover:text-white">
-                              <LucidePhone className="w-4 h-4" />
+                              <LucideUser className="w-4 h-4" />
                            </Button>
                         </div>
-                        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                        <a 
+                          href={annotation.phoneNumber ? `tel:${annotation.phoneNumber}` : '#'}
+                          className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors"
+                        >
                            <div className="flex flex-col">
                               <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{t("טלפון", "Phone Line")}</span>
                               <span className="text-sm font-black text-white">{annotation.phoneNumber || '--- --- ---'}</span>
                            </div>
-                        </div>
+                           <div className="h-10 w-10 flex items-center justify-center text-emerald-500">
+                              <LucidePhone className="w-4 h-4" />
+                           </div>
+                        </a>
                      </div>
                   </Card>
                </div>
