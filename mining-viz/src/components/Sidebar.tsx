@@ -185,7 +185,7 @@ export default function Sidebar({
       <ScrollArea className="flex-1 px-4">
         <div className="space-y-3 pb-4">
           {processedData.slice(0, displayCount).map((item) => {
-            const annotation = userAnnotations[item.id] || {};
+            const annotation = (userAnnotations && userAnnotations[item.id]) || {};
             const isSelected = selectedItem?.id === item.id;
             const isGold = item.commodity?.toLowerCase().includes('gold') || annotation.commodity?.toLowerCase().includes('gold');
 
