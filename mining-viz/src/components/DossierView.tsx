@@ -43,7 +43,7 @@ export default function DossierView({
   const [news, setNews] = useState<any[]>([]);
 
   // Live Price Calculation (gold price per troy oz × 32.1507 = per kg)
-  const goldPriceObj = marketPrices.find(p => p.symbol === 'XAU/oz');
+  const goldPriceObj = marketPrices.find(p => p.symbol === 'GOLD/oz');
   const pricePerOz = goldPriceObj ? parseFloat(goldPriceObj.price.replace(/[$,]/g, '')) : 3326;
   const rawGoldPrice = pricePerOz * 32.1507; // convert to per KG
   const discount = 0.12; // 12% local discount
@@ -54,10 +54,15 @@ export default function DossierView({
     if (!item) return;
     setAiAnalysis("");
     setIsAnalyzing(true);
+    const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/ai/analyze`, {
+      const token = localStorage.getItem('mining_token');
+      const res = await fetch(`${API_BASE}/api/ai/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           query: `Analyze the mining potential, risks, and opportunities for ${item.company} located in ${item.region}, ${item.country}. Primary commodity: ${item.commodity}. License type: ${item.licenseType}. License ID: ${item.id}. Provide a detailed tactical assessment.`,
           context: { type: 'DOSSIER', item_id: item.id }
@@ -76,7 +81,8 @@ export default function DossierView({
     if (isOpen && item) {
       if (!aiAnalysis) runAiAnalysis();
       // Fetch activity logs for this license
-      fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/activity/logs?limit=50`)
+      const API_BASE = import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
+      fetch(`${API_BASE}/activity/logs?limit=50`)
         .then(r => r.json())
         .then(logs => setActivityLogs(logs.filter((l: any) => l.details?.includes(item.id) || l.details?.includes(item.company))))
         .catch(() => {});
@@ -148,12 +154,12 @@ export default function DossierView({
             </div>
 
             {/* Main Tabs (MarineTraffic Style) */}
-            <nav className="flex gap-1 border-b border-white/5 mb-10 overflow-x-auto no-scrollbar">
+            <nav className="flex gap-1 border-b border-white/5 mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
                {['overview', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map((tab) => (
                  <button
                    key={tab}
                    onClick={() => setActiveTab(tab)}
-                   className={`px-6 py-4 text-[10px] font-black uppercase tracking-widest transition-all relative
+                   className={`px-6 py-4 text-[10px] font-black uppercase tracking-widest transition-all relative z-10
                    ${activeTab === tab ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
                  >
                    {tab.replace('-', ' ')}
@@ -423,6 +429,40 @@ export default function DossierView({
                               <LucidePhone className="w-4 h-4" />
                            </div>
                         </a>
+                     </div>
+                  </Card>
+
+                  {/* Tactical Pipeline Status Selector */}
+                  <Card className="bg-white/5 border border-white/10 rounded-3xl p-8">
+                     <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                        <LucideZap className="w-4 h-4 text-emerald-500" /> {t("מצב צנרת", "Pipeline State")}
+                     </h4>
+                     <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { id: 'good', label: t("עסקה", "Deal"), color: 'bg-emerald-500' },
+                          { id: 'maybe', label: t("בדיקה", "Assay"), color: 'bg-amber-500' },
+                          { id: 'bad', label: t("ליד", "Lead"), color: 'bg-red-500' }
+                        ].map((s) => {
+                          const isActive = annotation.status === s.id;
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateAnnotation(item.id, { status: s.id as any });
+                              }}
+                              className={`flex flex-col items-center gap-3 p-4 rounded-2xl border transition-all active:scale-95 cursor-pointer relative z-50
+                                ${isActive 
+                                  ? `${s.color}/20 border-white/30 shadow-[0_0_15px_rgba(0,0,0,0.3)]` 
+                                  : 'bg-white/5 border-transparent hover:bg-white/10'}`}
+                            >
+                              <div className={`w-2.5 h-2.5 rounded-full ${s.color} ${isActive ? 'animate-pulse' : 'opacity-40'}`} />
+                              <span className={`text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-white' : 'text-slate-500'}`}>
+                                {s.label}
+                              </span>
+                            </button>
+                          );
+                        })}
                      </div>
                   </Card>
                </div>
