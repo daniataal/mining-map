@@ -2,8 +2,11 @@ import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MiningLicense, User, ActivityLog, OilSummaryResponse, OilTradeFlow } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 
-  (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+/** Same base URL for fetch() and axios — import this in AdminPanel to avoid localhost vs prod drift. */
+export const API_BASE = import.meta.env.VITE_API_BASE ||
+  (typeof window !== 'undefined' && window.location.protocol === 'https:'
+    ? ''
+    : `http://${window.location.hostname}:8000`);
 
 const apiClient = axios.create({
   baseURL: API_BASE,
@@ -84,8 +87,18 @@ export const login = async (username: string, password: string) => {
   return data;
 };
 
-export async function deleteAuthUser(userId: string): Promise<void> {
-  await apiClient.delete(`/auth/users/${userId}`);
+/**
+ * Requires an admin JWT. Pass `bearerToken` from app state when available so the header
+ * matches the logged-in session even if localStorage is out of sync.
+ */
+export async function deleteAuthUser(userId: string, bearerToken?: string | null): Promise<void> {
+  const t = (bearerToken?.trim() || localStorage.getItem('mining_token') || '').trim();
+  if (!t) {
+    throw new Error('Not authenticated — log in again, then retry delete.');
+  }
+  await apiClient.delete(`/auth/users/${userId}`, {
+    headers: { Authorization: `Bearer ${t}` },
+  });
 }
 
 // ─── Oil / Petroleum ──────────────────────────────────────────────────────────

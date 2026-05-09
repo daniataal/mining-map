@@ -11,7 +11,7 @@ import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { deleteAuthUser } from '../lib/api';
+import { API_BASE, deleteAuthUser } from '../lib/api';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -43,8 +43,6 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
     const [userFormSubmitting, setUserFormSubmitting] = useState(false);
     const [userPendingDelete, setUserPendingDelete] = useState<User | null>(null);
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-
-    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
     const authHeaders = (): HeadersInit => {
         const h: Record<string, string> = {};
@@ -82,9 +80,13 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
 
     const confirmDeleteUser = async () => {
         if (!userPendingDelete) return;
+        if (!token?.trim()) {
+            toast.error(t('נדרשת התחברות', 'You must be logged in to delete users.'));
+            return;
+        }
         setDeleteSubmitting(true);
         try {
-            await deleteAuthUser(userPendingDelete.id);
+            await deleteAuthUser(userPendingDelete.id, token);
             toast.success(t('המשתמש נמחק', 'User deleted'));
             setUserPendingDelete(null);
             await fetchData('/auth/users', setUsers);
