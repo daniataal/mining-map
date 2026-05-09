@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -173,13 +173,15 @@ export default function MapComponent({
               center={mapCenter} 
               zoom={7} 
               className="w-full h-full"
+              zoomControl={false}
               // @ts-ignore
               ref={mapRef}
             >
+                <ZoomControl position="bottomleft" />
                 <MapClickHandler onMapClick={() => setSelectedItem(null)} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} />
                 
-                <LayersControl position="topright">
+                <LayersControl position="bottomright">
                     <LayersControl.BaseLayer checked name={t("מצב כהה", "Dark Mode")}>
                         <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
                     </LayersControl.BaseLayer>

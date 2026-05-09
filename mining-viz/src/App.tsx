@@ -47,7 +47,7 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'map' | 'pipeline'>('map');
+  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin'>('map');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -193,53 +193,58 @@ export default function App() {
             }}
             viewMode={viewMode}
             setViewMode={setViewMode}
+            onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
+            onToggleAdmin={() => setViewMode('admin')}
+            isFilterOpen={isFilterOpen}
           />
         </aside>
 
         {/* PANEL 2: Central Map Workspace */}
         <main className="flex-1 relative z-0 h-full overflow-hidden">
-          {/* Top Command Toolbar */}
-          <div className="absolute top-4 left-6 right-6 z-[1000] flex justify-between items-center pointer-events-none">
-            <div className="flex items-center gap-3 pointer-events-auto">
-                <div className="flex items-center bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
-                  <LucideSearch className="w-5 h-5 text-slate-500 mr-3" />
-                  <input 
-                    type="text"
-                    placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
-                    className="bg-transparent border-none outline-none text-sm font-bold text-slate-200 w-full placeholder:text-slate-600 tracking-tight"
-                    value={miningData.filter}
-                    onChange={(e) => miningData.setFilter(e.target.value)}
-                  />
-                </div>
-            </div>
+          {/* Top Command Toolbar - Only show on Map and Pipeline */}
+          {(viewMode === 'map' || viewMode === 'pipeline') && (
+            <div className="absolute top-4 left-6 right-6 z-[1000] flex justify-between items-center pointer-events-none">
+              <div className="flex items-center gap-3 pointer-events-auto">
+                  <div className="flex items-center bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
+                    <LucideSearch className="w-5 h-5 text-slate-500 mr-3" />
+                    <input 
+                      type="text"
+                      placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
+                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-200 w-full placeholder:text-slate-600 tracking-tight"
+                      value={miningData.filter}
+                      onChange={(e) => miningData.setFilter(e.target.value)}
+                    />
+                  </div>
+              </div>
 
-            <div className="flex items-center gap-3 pointer-events-auto">
-                <div className="flex gap-1.5 bg-slate-950/40 backdrop-blur-2xl p-1.5 rounded-2xl border border-white/5 shadow-2xl">
-                  <button
-                    onClick={() => setViewMode('map')}
-                    className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
-                  >
-                    {t("מפה", "Map")}
-                  </button>
-                  <button
-                    onClick={() => setViewMode('pipeline')}
-                    className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
-                  >
-                    {t("צנרת", "Pipeline")}
-                  </button>
-                </div>
+              <div className="flex items-center gap-3 pointer-events-auto">
+                  <div className="flex gap-1.5 bg-slate-950/40 backdrop-blur-2xl p-1.5 rounded-2xl border border-white/5 shadow-2xl">
+                    <button
+                      onClick={() => setViewMode('map')}
+                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                    >
+                      {t("מפה", "Map")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('pipeline')}
+                      className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+                    >
+                      {t("צנרת", "Pipeline")}
+                    </button>
+                  </div>
 
-                <button
-                  onClick={() => setIsFilterOpen(!isFilterOpen)}
-                  className={`p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-white'}`}
-                >
-                  <LucideFilter className="w-5 h-5" />
-                </button>
+                  <button
+                    onClick={() => setIsFilterOpen(!isFilterOpen)}
+                    className={`p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-white'}`}
+                  >
+                    <LucideFilter className="w-5 h-5" />
+                  </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="w-full h-full z-0">
-            {viewMode === 'map' ? (
+            {viewMode === 'map' && (
               <MapComponent
                 processedData={miningData.processedData}
                 userAnnotations={userAnnotations}
@@ -251,7 +256,8 @@ export default function App() {
                 updateAnnotation={updateAnnotation}
                 deleteLicense={deleteLicense}
               />
-            ) : (
+            )}
+            {viewMode === 'pipeline' && (
               <div className="pt-24 px-6 h-full bg-slate-950">
                 <KanbanBoard
                   processedData={miningData.processedData}
@@ -261,10 +267,25 @@ export default function App() {
                 />
               </div>
             )}
+            {viewMode === 'admin' && (
+              <div className="h-full bg-slate-950">
+                <AdminPanel 
+                  isOpen={true} 
+                  onClose={() => setViewMode('map')} 
+                  token={token || undefined} 
+                  isFullPage={true}
+                />
+              </div>
+            )}
           </div>
         </main>
 
         {/* PANEL 3: Right Tactical Filter Hub */}
+        <AdminPanel 
+          isOpen={isAdminPanelOpen} 
+          onClose={() => setIsAdminPanelOpen(false)} 
+          token={token || undefined} 
+        />
         <FilterPanel 
           isOpen={isFilterOpen}
           onClose={() => setIsFilterOpen(false)}
