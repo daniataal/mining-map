@@ -146,6 +146,24 @@ export default function App() {
   }, [t, deleteLicenseMutation]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
+  
+  // Market Prices State
+  const [marketPrices, setMarketPrices] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/market-prices`);
+        const data = await res.json();
+        setMarketPrices(data);
+      } catch (err) {
+        console.error("Failed to fetch market prices", err);
+      }
+    };
+    fetchPrices();
+    const interval = setInterval(fetchPrices, 1000 * 60 * 5); // every 5 mins
+    return () => clearInterval(interval);
+  }, []);
 
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -160,14 +178,24 @@ export default function App() {
          </div>
          <div className="flex-1 overflow-hidden relative">
             <div className="flex items-center gap-12 whitespace-nowrap animate-marquee py-1">
-               <TickerItem symbol="XAU/USD" price="2,341.20" change="+1.2%" up />
-               <TickerItem symbol="XAG/USD" price="28.45" change="-0.4%" />
-               <TickerItem symbol="XPT/USD" price="982.10" change="+0.8%" up />
-               <TickerItem symbol="BRENT" price="83.42" change="+2.1%" up />
-               <TickerItem symbol="COPPER" price="4.52" change="-0.2%" />
-               <TickerItem symbol="XAU/USD" price="2,341.20" change="+1.2%" up />
-               <TickerItem symbol="XAG/USD" price="28.45" change="-0.4%" />
-               <TickerItem symbol="XPT/USD" price="982.10" change="+0.8%" up />
+               {marketPrices.length > 0 ? (
+                 <>
+                   {marketPrices.map((item, idx) => (
+                     <TickerItem key={`${item.symbol}-${idx}`} symbol={item.symbol} price={item.price} change={item.change} up={item.up} />
+                   ))}
+                   {/* Repeat for seamless marquee */}
+                   {marketPrices.map((item, idx) => (
+                     <TickerItem key={`${item.symbol}-repeat-${idx}`} symbol={item.symbol} price={item.price} change={item.change} up={item.up} />
+                   ))}
+                 </>
+               ) : (
+                 <>
+                   <TickerItem symbol="XAU/USD" price="---" change="0.00%" up />
+                   <TickerItem symbol="XAG/USD" price="---" change="0.00%" />
+                   <TickerItem symbol="XPT/USD" price="---" change="0.00%" up />
+                   <TickerItem symbol="BRENT" price="---" change="0.00%" up />
+                 </>
+               )}
             </div>
          </div>
       </div>
