@@ -1,0 +1,74 @@
+name: "Meridian Android — Build Debug APK"
+
+# ── Triggers ─────────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:          # manual run from the Actions tab
+  push:
+    paths:
+      - "meridian-android/**"
+
+# ── Build job ─────────────────────────────────────────────────────────────────
+jobs:
+  build-debug-apk:
+    name: Assemble Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. JDK 17 ───────────────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      # ── 3. Gradle (also handles caching ~/.gradle) ───────────────────────────
+      #    gradle-version: '8.7' makes the `gradle` binary available on PATH,
+      #    which lets us bootstrap the wrapper jar in step 4.
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.7"
+
+      # ── 4. Accept Android SDK licenses ──────────────────────────────────────
+      - name: Accept Android SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # ── 5. Ensure SDK platform 34 + build-tools 34.0.0 are present ──────────
+      - name: Install Android SDK Platform 34
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      # ── 6. Generate Gradle wrapper jar ──────────────────────────────────────
+      #    The jar is .gitignore'd; CI regenerates it from the properties file.
+      - name: Generate Gradle wrapper
+        working-directory: meridian-android
+        run: gradle wrapper --gradle-version=8.7 --distribution-type=bin
+
+      - name: Make gradlew executable
+        run: chmod +x meridian-android/gradlew
+
+      # ── 7. Build ─────────────────────────────────────────────────────────────
+      #    assembleDebug signs with the auto-generated debug keystore — produces
+      #    an installable APK with no user-supplied secrets required.
+      #
+      #    For a signed release build add:
+      #      signingConfigs { release { ... } } in app/build.gradle.kts
+      #    and store KEYSTORE_FILE, KEY_ALIAS, KEY_PASSWORD as GitHub secrets.
+      - name: Build Debug APK
+        working-directory: meridian-android
+        run: ./gradlew assembleDebug --stacktrace
+
+      # ── 8. Upload artifact ───────────────────────────────────────────────────
+      - name: Upload meridian-debug-apk
+        uses: actions/upload-artifact@v4
+        with:
+          name:               meridian-debug-apk
+          path:               meridian-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found:  error
+          retention-days:     30
