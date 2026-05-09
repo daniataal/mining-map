@@ -38,13 +38,15 @@ export default function DossierView({
   const [activeTab, setActiveTab] = useState('overview');
   const [aiAnalysis, setAiAnalysis] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGeneratingLOI, setIsGeneratingLOI] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [news, setNews] = useState<any[]>([]);
 
-  // Live Price Calculation
-  const goldPriceObj = marketPrices.find(p => p.symbol === 'XAU/USD');
-  const rawGoldPrice = goldPriceObj ? parseFloat(goldPriceObj.price.replace(/,/g, '')) : 68450;
-  const discount = 0.12; // 12%
+  // Live Price Calculation (gold price per troy oz × 32.1507 = per kg)
+  const goldPriceObj = marketPrices.find(p => p.symbol === 'XAU/oz');
+  const pricePerOz = goldPriceObj ? parseFloat(goldPriceObj.price.replace(/[$,]/g, '')) : 3326;
+  const rawGoldPrice = pricePerOz * 32.1507; // convert to per KG
+  const discount = 0.12; // 12% local discount
   const logistics = 2400;
   const netProfit = (rawGoldPrice * (1 - discount)) - logistics;
 
@@ -53,12 +55,12 @@ export default function DossierView({
     setAiAnalysis("");
     setIsAnalyzing(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/ai/analyze`, {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/ai/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          context: `Analyze the mining potential, risks, and opportunities for ${item.company} located in ${item.region}, ${item.country}. Primary commodity: ${item.commodity}. License type: ${item.licenseType}. License ID: ${item.id}. Provide a detailed tactical assessment.`,
-          type: 'DOSSIER'
+          query: `Analyze the mining potential, risks, and opportunities for ${item.company} located in ${item.region}, ${item.country}. Primary commodity: ${item.commodity}. License type: ${item.licenseType}. License ID: ${item.id}. Provide a detailed tactical assessment.`,
+          context: { type: 'DOSSIER', item_id: item.id }
         })
       });
       const data = await res.json();
@@ -259,17 +261,20 @@ export default function DossierView({
 
             {/* ── OVERVIEW TAB (existing grid) ── */}
             {activeTab === 'overview' && (
-               
+               <div className="grid grid-cols-12 gap-8">
                {/* Left Column: Media & Primary Info */}
                <div className="col-span-12 lg:col-span-8 space-y-8">
                   {/* Hero Visual Card */}
-                  <Card className="bg-white/5 border-white/5 overflow-hidden rounded-3xl">
+                  <Card className="bg-white/5 border-white/5 overflow-hidden rounded-3xl relative">
+                     {/* Drone Scan Overlay */}
+                     <div className="absolute inset-0 z-10 pointer-events-none opacity-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
                      <div className="h-[400px] w-full relative">
                         <img 
                           src={item.commodity?.toLowerCase().includes('gold') ? '/assets/commodities/gold.png' : item.commodity?.toLowerCase().includes('diamond') ? '/assets/commodities/diamond.png' : '/assets/commodities/satellite.png'}
                           className="w-full h-full object-cover grayscale-[20%] hover:grayscale-0 transition-all duration-1000"
                           alt="Commodity Visual"
                         />
+                        <div className="absolute top-0 left-0 w-full h-px bg-cyan-500/50 animate-[scan_3s_ease-in-out_infinite]" />
                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
                         <div className="absolute bottom-8 left-8 right-8 flex justify-between items-end">
                            <div className="space-y-2">
@@ -367,13 +372,26 @@ export default function DossierView({
                            </div>
                         </div>
                         
-                        <Button onClick={() => {
-                           const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${item.commodity}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\nEstimated Net Profit: $${netProfit.toLocaleString(undefined, {maximumFractionDigits: 0})} / KG\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
-                           const blob = new Blob([loi], { type: 'text/plain' });
-                           const url = URL.createObjectURL(blob);
-                           const a = document.createElement('a'); a.href = url; a.download = `LOI_${item.company.replace(/\s+/g, '_')}.txt`; a.click();
-                        }} className="w-full h-12 bg-white text-slate-950 hover:bg-slate-200 font-black uppercase tracking-widest text-[10px] mt-4 shadow-2xl">
-                           {t("צור מכתב כוונות (LOI)", "Generate LOI Contract")}
+                        <Button 
+                          onClick={() => {
+                            setIsGeneratingLOI(true);
+                            setTimeout(() => {
+                              const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${item.commodity}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\nEstimated Net Profit: $${netProfit.toLocaleString(undefined, {maximumFractionDigits: 0})} / KG\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
+                              const blob = new Blob([loi], { type: 'text/plain' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a'); a.href = url; a.download = `LOI_${item.company.replace(/\s+/g, '_')}.txt`; a.click();
+                              setIsGeneratingLOI(false);
+                            }, 1500);
+                          }} 
+                          disabled={isGeneratingLOI}
+                          className="w-full h-12 bg-white text-slate-950 hover:bg-slate-200 font-black uppercase tracking-widest text-[10px] mt-4 shadow-2xl relative overflow-hidden"
+                        >
+                           {isGeneratingLOI ? (
+                             <>
+                               <div className="absolute bottom-0 left-0 h-1 bg-emerald-500 animate-[progress_1.5s_linear_infinite]" style={{ width: '100%' }} />
+                               {t("מייצר מסמך...", "Producing Document...")}
+                             </>
+                           ) : t("צור מכתב כוונות (LOI)", "Generate LOI Contract")}
                         </Button>
                      </div>
                   </Card>

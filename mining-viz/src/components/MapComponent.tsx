@@ -198,11 +198,11 @@ export default function MapComponent({
                                 key={activeCountries.join(',')}
                                 data={filteredGeoJson} 
                                 style={{ 
-                                  fillColor: '#3b82f6', 
-                                  weight: 1.5, 
-                                  color: '#3b82f6', 
-                                  fillOpacity: 0.05,
-                                  dashArray: '5, 5',
+                                  fillColor: '#06b6d4', 
+                                  weight: 1, 
+                                  color: '#06b6d4', 
+                                  fillOpacity: 0.02,
+                                  opacity: 0.5,
                                   lineCap: 'round'
                                 }} 
                             />

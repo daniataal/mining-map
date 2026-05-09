@@ -11,7 +11,8 @@ import {
   LayoutGrid as LucideLayoutGrid,
   Layers as LucideLayers,
   Settings as LucideSettings,
-  Pin as LucidePin
+  Pin as LucidePin,
+  PieChart as LucidePieChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -23,8 +24,8 @@ interface SidebarProps {
   userAnnotations: Record<string, UserAnnotation>;
   selectedItem: MiningLicense | null;
   setSelectedItem: (item: MiningLicense) => void;
-  viewMode: 'map' | 'pipeline' | 'admin';
-  setViewMode: (mode: 'map' | 'pipeline' | 'admin') => void;
+  viewMode: 'map' | 'pipeline' | 'admin' | 'dashboard';
+  setViewMode: (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
   isFilterOpen: boolean;
@@ -84,6 +85,15 @@ export default function Sidebar({
             : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
         >
           <LucideMapPin className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => setViewMode('dashboard')}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${viewMode === 'dashboard' 
+            ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
+            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
         </button>
         <button 
           onClick={() => setViewMode('pipeline')}
