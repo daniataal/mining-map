@@ -19,7 +19,6 @@ import './App.css';
 
 export default function App() {
   const { t, isRtl } = useI18n();
-  // const { addToast } = useToast();
   
   // Data Fetching
   const { data: rawData = [], isLoading, error: fetchError } = useLicenses();
@@ -131,7 +130,7 @@ export default function App() {
         toast.info(t("הרישיון נמחק", "License deleted"));
       }
     });
-  }, [t, deleteLicenseMutation, addToast]);
+  }, [t, deleteLicenseMutation]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
 
