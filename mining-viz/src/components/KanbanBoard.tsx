@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, LeadValue } from '../types';
 import { Badge } from './ui/badge';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
@@ -116,6 +116,17 @@ export default function KanbanBoard({
                     )}
                     {annotation.verification?.siteVisit && (
                       <Badge className="text-[9px] bg-blue-500/20 text-blue-400 border-none">Visited</Badge>
+                    )}
+                    {annotation.leadValue && (
+                      <Badge className={`text-[9px] border-none font-black ${
+                        annotation.leadValue === 'high'
+                          ? 'bg-emerald-500/20 text-emerald-500'
+                          : annotation.leadValue === 'medium'
+                          ? 'bg-amber-500/20 text-amber-400'
+                          : 'bg-slate-500/20 text-slate-400'
+                      }`}>
+                        {(annotation.leadValue as LeadValue).toUpperCase()}
+                      </Badge>
                     )}
                   </div>
                   {/* Stage control row */}

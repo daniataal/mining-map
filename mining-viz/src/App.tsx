@@ -15,7 +15,9 @@ import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
-import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut } from 'lucide-react';
+import LogisticsDesk from './components/LogisticsDesk';
+import OilMapView from './components/OilMapView';
+import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
@@ -49,7 +51,7 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin' | 'dashboard'>('map');
+  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin' | 'dashboard' | 'logistics' | 'oil'>('map');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
@@ -302,8 +304,8 @@ export default function App() {
 
         {/* PANEL 2: Central Map Workspace */}
         <main className="flex-1 relative z-0 h-full overflow-hidden">
-          {/* Top Command Toolbar - Only show on Map and Pipeline */}
-          {(viewMode === 'map' || viewMode === 'pipeline') && (
+          {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
+          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics' || viewMode === 'oil') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
@@ -339,6 +341,19 @@ export default function App() {
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("צנרת", "Pipeline")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('logistics')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'logistics' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("לוגיסטיקה", "Logistics")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('oil')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <LucideDroplets className="w-3.5 h-3.5" />
+                      {t("נפט", "Oil")}
                     </button>
                   </div>
 
@@ -395,6 +410,14 @@ export default function App() {
                   isFullPage={true}
                 />
               </div>
+            )}
+            {viewMode === 'logistics' && (
+              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
+                <LogisticsDesk licenses={allLicenses} />
+              </div>
+            )}
+            {viewMode === 'oil' && (
+              <OilMapView onBack={() => setViewMode('map')} />
             )}
           </div>
         </main>
@@ -470,6 +493,20 @@ export default function App() {
         >
           <LucidePieChart className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("דאשבורד", "Dash")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('logistics')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'logistics' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideAnchor className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("לוגיסטיקה", "Logistics")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('oil')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideDroplets className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט", "Oil")}</span>
         </button>
         <button
           onClick={() => setIsFilterOpen(!isFilterOpen)}

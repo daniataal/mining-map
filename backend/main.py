@@ -255,6 +255,35 @@ def init_db():
         except:
             conn.rollback()
 
+        # Oil Trade Flows Table (petroleum / energy context)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS oil_trade_flows (
+                id              SERIAL PRIMARY KEY,
+                reporter        VARCHAR(255)  NOT NULL,
+                reporter_m49    VARCHAR(10),
+                reporter_iso2   VARCHAR(5),
+                partner         VARCHAR(255)  NOT NULL DEFAULT 'World',
+                partner_m49     VARCHAR(10)   DEFAULT '0',
+                hs_code         VARCHAR(10)   NOT NULL,
+                hs_description  TEXT,
+                flow_type       CHAR(1)       NOT NULL,
+                year            SMALLINT      NOT NULL,
+                trade_value_usd BIGINT,
+                net_weight_kg   BIGINT,
+                data_source     VARCHAR(80)   NOT NULL DEFAULT 'seed/static',
+                ingested_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oil_hs_year
+                ON oil_trade_flows (hs_code, year);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_oil_reporter
+                ON oil_trade_flows (reporter, year);
+        """)
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -1595,6 +1624,392 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
             "Verify all figures with the local customs authority and mining registry before deal execution.",
         ],
     }
+
+
+# ======================================================================
+# Oil & Petroleum Trade Flows
+# ======================================================================
+#
+# Data provenance
+# ---------------
+#   Primary live source : UN Comtrade API v1 (https://comtradeapi.un.org)
+#       Requires env var  COMTRADE_API_KEY (free registration at
+#       https://comtradeplus.un.org/ — 500 req/day on free tier).
+#   Static seed fallback: Curated 2022 export figures (HS 2709/2710/2711)
+#       derived from UN Comtrade aggregate tables (2024-Q4) and
+#       BP Statistical Review of World Energy 2023.
+#
+# HS codes covered
+# ----------------
+#   2709  Petroleum oils, crude
+#   2710  Petroleum oils, not crude (gasoline, diesel, fuel oil, lubricants)
+#   2711  Petroleum gases (LNG, LPG, natural gas, propane, butane)
+#
+#   NOTE: HS 2517 ("Pebbles, gravel, broken or crushed stone") is NOT a
+#   petroleum code. The correct petroleum HS chapter is 27 (2709–2711).
+#
+# Known limitations
+# -----------------
+#   - All data is country-level, not company-specific.
+#   - Comtrade data typically lags 12–24 months.
+#   - Russia 2022 figures may be under-reported due to sanctions data gaps.
+
+_OIL_HS_META: dict[str, str] = {
+    "2709": "Petroleum oils, crude",
+    "2710": "Petroleum oils, not crude (refined products incl. gasoline, diesel, fuel oil)",
+    "2711": "Petroleum gases (LNG, LPG, natural gas, propane, butane)",
+}
+
+_OIL_LIMITATIONS: list[str] = [
+    "All data is country-level; company-level customs records are not available via free APIs.",
+    "UN Comtrade data typically lags 12–24 months from the current date.",
+    "Static seed covers 2022 only; use POST /api/admin/oil/ingest to fetch other years.",
+    "Russia 2022 figures may be under-reported due to sanctions-related data gaps.",
+    "HS 2517 (pebbles/gravel) is NOT a petroleum code — ignored per Comtrade verification.",
+]
+
+
+@app.get("/api/oil/flows")
+def get_oil_flows(
+    reporter: Optional[str] = None,
+    hs: Optional[str] = None,
+    year: Optional[int] = None,
+    flow: Optional[str] = None,
+    limit: int = 200,
+):
+    """
+    Query petroleum trade flows stored in oil_trade_flows.
+
+    Parameters
+    ----------
+    reporter : country name substring (case-insensitive), e.g. "saudi"
+    hs       : HS code, e.g. "2709" | "2710" | "2711"
+    year     : e.g. 2022
+    flow     : "X" (exports) | "M" (imports)
+    limit    : max rows returned (default 200)
+
+    Returns
+    -------
+    JSON with `data` array + provenance metadata.
+    """
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        filters = []
+        params: list = []
+
+        if reporter:
+            filters.append("LOWER(reporter) LIKE %s")
+            params.append(f"%{reporter.lower()}%")
+        if hs:
+            filters.append("hs_code = %s")
+            params.append(hs)
+        if year:
+            filters.append("year = %s")
+            params.append(year)
+        if flow:
+            filters.append("flow_type = %s")
+            params.append(flow.upper())
+
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(limit)
+
+        c.execute(
+            f"""SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
+                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at
+                FROM oil_trade_flows
+                {where}
+                ORDER BY year DESC, trade_value_usd DESC NULLS LAST
+                LIMIT %s""",
+            params,
+        )
+        rows = c.fetchall()
+
+        return {
+            "data": rows,
+            "count": len(rows),
+            "hs_codes_covered": _OIL_HS_META,
+            "provenance": (
+                "Seed: UN Comtrade aggregate tables (comtradeplus.un.org, 2024-Q4), "
+                "cross-checked with BP Statistical Review 2023. "
+                "Live rows sourced via UN Comtrade API v1."
+            ),
+            "limitations": _OIL_LIMITATIONS,
+        }
+    except Exception as exc:
+        return {"error": str(exc), "data": []}
+    finally:
+        conn.close()
+
+
+@app.get("/api/oil/summary")
+def get_oil_summary(year: int = 2022):
+    """
+    Ranked exporters + commodity breakdown for a given year.
+
+    Returns
+    -------
+    {
+      "year": 2022,
+      "top_exporters_by_value": [...],     # top 15 across all HS codes
+      "breakdown_by_hs": {
+        "2709": [...],                     # top exporters per HS code
+        "2710": [...],
+        "2711": [...],
+      },
+      "provenance": ...,
+      "limitations": [...]
+    }
+    """
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute(
+            """SELECT reporter, reporter_iso2,
+                      SUM(trade_value_usd)  AS total_value_usd,
+                      SUM(net_weight_kg)    AS total_weight_kg,
+                      COUNT(DISTINCT hs_code) AS hs_codes_reported
+               FROM oil_trade_flows
+               WHERE flow_type = 'X' AND year = %s
+               GROUP BY reporter, reporter_iso2
+               ORDER BY total_value_usd DESC NULLS LAST
+               LIMIT 20""",
+            (year,),
+        )
+        top_exporters = c.fetchall()
+
+        breakdown: dict = {}
+        for hs_code, hs_desc in _OIL_HS_META.items():
+            c.execute(
+                """SELECT reporter, reporter_iso2,
+                          trade_value_usd, net_weight_kg, data_source
+                   FROM oil_trade_flows
+                   WHERE flow_type = 'X' AND year = %s AND hs_code = %s
+                   ORDER BY trade_value_usd DESC NULLS LAST
+                   LIMIT 15""",
+                (year, hs_code),
+            )
+            breakdown[hs_code] = {
+                "description": hs_desc,
+                "exporters": c.fetchall(),
+            }
+
+        return {
+            "year": year,
+            "top_exporters_by_value": top_exporters,
+            "breakdown_by_hs": breakdown,
+            "provenance": (
+                "Seed: UN Comtrade aggregate tables (comtradeplus.un.org, 2024-Q4), "
+                "cross-checked with BP Statistical Review 2023. "
+                "Live rows sourced via UN Comtrade API v1."
+            ),
+            "hs_scope": _OIL_HS_META,
+            "limitations": _OIL_LIMITATIONS,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+    finally:
+        conn.close()
+
+
+class OilIngestRequest(BaseModel):
+    year: int = 2022
+    seed_only: bool = False
+
+
+@app.post("/api/admin/oil/ingest")
+def admin_oil_ingest(request: OilIngestRequest):
+    """
+    Admin-triggered route to populate oil_trade_flows.
+
+    Behaviour
+    ---------
+    1. Always writes/refreshes the static seed rows (2022, HS 2709/2710/2711,
+       top exporters — no API key required).
+    2. If COMTRADE_API_KEY is set and seed_only=False, also fetches live
+       annual data from UN Comtrade for the requested year.
+
+    The upsert is idempotent — safe to call multiple times.
+    """
+    try:
+        # Import here to avoid circular import issues if run standalone
+        from ingest_oil_trades import ingest
+        result = ingest(year=request.year, seed_only=request.seed_only)
+        return {"status": "success", **result}
+    except ImportError:
+        # Fallback: run ingestion inline using the seed data embedded here
+        import sys, os
+        sys.path.insert(0, os.path.dirname(__file__))
+        try:
+            from ingest_oil_trades import ingest
+            result = ingest(year=request.year, seed_only=request.seed_only)
+            return {"status": "success", **result}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+# ======================================================================
+# Logistics Routes  /api/logistics/*
+# ======================================================================
+# deal_shipments table: one row per shipment leg.
+# Mirrors the ShipmentLeg TypeScript type in the frontend.
+
+def _ensure_logistics_table():
+    """Create the deal_shipments table if it doesn't already exist."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS deal_shipments (
+                id VARCHAR(255) PRIMARY KEY,
+                deal_id VARCHAR(255),
+                deal_label TEXT,
+                origin TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                incoterm VARCHAR(10) DEFAULT 'FOB',
+                status VARCHAR(50) DEFAULT 'planned',
+                eta VARCHAR(50),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[logistics] table init failed: {e}")
+
+_ensure_logistics_table()
+
+
+class ShipmentCreate(BaseModel):
+    deal_id: Optional[str] = None
+    deal_label: Optional[str] = None
+    origin: str
+    destination: str
+    incoterm: Optional[str] = "FOB"
+    status: Optional[str] = "planned"
+    eta: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ShipmentUpdate(BaseModel):
+    deal_id: Optional[str] = None
+    deal_label: Optional[str] = None
+    origin: Optional[str] = None
+    destination: Optional[str] = None
+    incoterm: Optional[str] = None
+    status: Optional[str] = None
+    eta: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.get("/api/logistics/shipments")
+def list_shipments(deal_id: Optional[str] = None):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if deal_id:
+            c.execute(
+                "SELECT * FROM deal_shipments WHERE deal_id = %s ORDER BY created_at DESC",
+                (deal_id,)
+            )
+        else:
+            c.execute("SELECT * FROM deal_shipments ORDER BY created_at DESC")
+        rows = c.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "dealId": r["deal_id"],
+                "dealLabel": r["deal_label"],
+                "origin": r["origin"],
+                "destination": r["destination"],
+                "incoterm": r["incoterm"],
+                "status": r["status"],
+                "eta": r["eta"],
+                "notes": r["notes"],
+                "createdAt": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+@app.post("/api/logistics/shipments")
+def create_shipment(item: ShipmentCreate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    new_id = str(uuid.uuid4())
+    try:
+        c.execute("""
+            INSERT INTO deal_shipments
+              (id, deal_id, deal_label, origin, destination, incoterm, status, eta, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            new_id, item.deal_id, item.deal_label,
+            item.origin, item.destination, item.incoterm,
+            item.status, item.eta, item.notes,
+        ))
+        conn.commit()
+        return {"id": new_id, "status": "created"}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.put("/api/logistics/shipments/{shipment_id}")
+def update_shipment(shipment_id: str, item: ShipmentUpdate):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        updates, values = [], []
+        fields = {
+            "deal_id": item.deal_id, "deal_label": item.deal_label,
+            "origin": item.origin, "destination": item.destination,
+            "incoterm": item.incoterm, "status": item.status,
+            "eta": item.eta, "notes": item.notes,
+        }
+        for col, val in fields.items():
+            if val is not None:
+                updates.append(f"{col} = %s")
+                values.append(val)
+        if not updates:
+            return {"status": "no changes"}
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(shipment_id)
+        c.execute(f"UPDATE deal_shipments SET {', '.join(updates)} WHERE id = %s", tuple(values))
+        if c.rowcount == 0:
+            return Response("Shipment not found", status_code=404)
+        conn.commit()
+        return {"status": "updated", "id": shipment_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/logistics/shipments/{shipment_id}")
+def delete_shipment(shipment_id: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM deal_shipments WHERE id = %s", (shipment_id,))
+        if c.rowcount == 0:
+            return Response("Shipment not found", status_code=404)
+        conn.commit()
+        return {"status": "deleted", "id": shipment_id}
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
