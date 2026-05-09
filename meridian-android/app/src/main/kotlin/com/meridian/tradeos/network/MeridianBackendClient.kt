@@ -3,6 +3,7 @@ package com.meridian.tradeos.network
 import com.meridian.tradeos.data.MarketTickerRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,7 +34,10 @@ suspend fun fetchMarketTicker(baseUrl: String): Result<List<MarketTickerRow>> = 
                     IllegalStateException("HTTP ${response.code}: ${body.take(200)}"),
                 )
             }
-            val rows = json.decodeFromString<List<MarketTickerRow>>(body)
+            val rows = json.decodeFromString(
+                ListSerializer(MarketTickerRow.serializer()),
+                body,
+            )
             Result.success(rows)
         }
     } catch (e: Exception) {
