@@ -40,22 +40,14 @@ interface SidebarProps {
 
 export default function Sidebar({
   processedData,
-  filter, setFilter,
-  selectedCommodity, setSelectedCommodity,
-  selectedCountry, setSelectedCountry,
-  userStatusFilter, setUserStatusFilter,
-  selectedLicenseType, setSelectedLicenseType,
-  commodities, countries, licenseTypes,
-  setIsAddModalOpen,
   loading,
   onLogout,
   setSelectedItem,
   selectedItem,
   userAnnotations,
-  error,
-  onToggleCollapse
-}: SidebarProps) {
-  const { t, isRtl } = useI18n();
+  setIsAddModalOpen
+}: Omit<SidebarProps, 'filter' | 'setFilter' | 'sortBy' | 'setSortBy' | 'selectedCommodity' | 'setSelectedCommodity' | 'selectedCountry' | 'setSelectedCountry' | 'userStatusFilter' | 'setUserStatusFilter' | 'selectedLicenseType' | 'setSelectedLicenseType' | 'commodities' | 'countries' | 'licenseTypes' | 'error' | 'onToggleCollapse'>) {
+  const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -74,184 +66,101 @@ export default function Sidebar({
       { threshold: 1.0 }
     );
 
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current);
-    }
-
+    if (observerTarget.current) observer.observe(observerTarget.current);
     return () => observer.disconnect();
   }, [displayCount, processedData.length]);
 
   return (
-    <div className="flex flex-col h-full bg-transparent text-slate-100 select-none">
-      {/* Header */}
-      <header className="p-5 border-b border-white/5 space-y-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-amber-400 to-amber-600 bg-clip-text text-transparent uppercase italic">
-              {t("מודיעין כריה", "Mining Intelligence")}
-            </h1>
-            <p className="text-[10px] text-slate-500 font-bold tracking-[0.1em] uppercase mt-0.5">
-              {t("מערכת ניהול רישיונות", "Precision Mapping OS")}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="icon" onClick={onLogout} className="h-8 w-8 hover:bg-red-500/10 hover:text-red-400 text-slate-500 transition-colors">
-              <LucideLogOut className="w-4 h-4" />
-            </Button>
-            {onToggleCollapse && (
-              <Button variant="ghost" size="icon" onClick={onToggleCollapse} className="h-8 w-8 hover:bg-white/5 text-slate-500">
-                <LucideChevronLeft className={`w-4 h-4 transition-transform duration-500 ${isRtl ? 'rotate-180' : ''}`} />
-              </Button>
-            )}
-          </div>
+    <div className="flex h-full bg-transparent text-slate-100 select-none">
+      {/* Icon Rail (MarineTraffic style) */}
+      <div className="w-16 flex-shrink-0 border-r border-white/5 flex flex-col items-center py-6 gap-6 bg-slate-950">
+        <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500 border border-amber-500/20">
+          <LucideMapPin className="w-5 h-5" />
         </div>
-
-        <Button 
-          className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black tracking-wide shadow-[0_0_20px_rgba(245,158,11,0.2)] transition-all active:scale-95"
-          onClick={() => setIsAddModalOpen(true)}
-        >
-          <LucidePlus className="w-4 h-4 mr-2 stroke-[3]" />
-          {t("הוסף רישיון חדש", "Add New License")}
-        </Button>
-
-        <div className="grid grid-cols-3 gap-2">
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideUpload className="w-3 h-3 mr-1" /> {t("יבוא", "Import")}
-           </Button>
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideFileText className="w-3 h-3 mr-1" /> {t("תבנית", "Template")}
-           </Button>
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideDownload className="w-3 h-3 mr-1" /> {t("יצוא", "Export")}
-           </Button>
+        <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
+          <LucideFileText className="w-5 h-5" />
         </div>
-      </header>
-
-      {/* Controls */}
-      <div className="p-4 space-y-4">
-        <div className="relative">
-          <LucideSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <Input 
-            placeholder={t("חיפוש...", "Search...")} 
-            className="pl-9 bg-slate-950 border-slate-800 focus:ring-amber-500"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-          />
+        <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
+          <LucideLogOut className="w-5 h-5" />
         </div>
-
-        <Accordion type="single" collapsible className="w-full">
-          <AccordionItem value="filters" className="border-slate-800">
-            <AccordionTrigger className="py-2 text-sm text-slate-400 hover:text-slate-200">
-              <div className="flex items-center">
-                <LucideFilter className="w-4 h-4 mr-2" />
-                {t("מסננים מתקדמים", "Advanced Filters")}
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("מדינה", "Country")}</label>
-                <MultiSelect 
-                  options={countries} 
-                  selected={selectedCountry} 
-                  onChange={setSelectedCountry} 
-                  placeholder={t("כל המדינות", "All Countries")} 
-                  searchable 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("סחורה", "Commodity")}</label>
-                <MultiSelect 
-                  options={commodities} 
-                  selected={selectedCommodity} 
-                  onChange={setSelectedCommodity} 
-                  placeholder={t("כל הסחורות", "All Commodities")} 
-                  searchable 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("סוג רישיון", "License Type")}</label>
-                <MultiSelect 
-                  options={licenseTypes} 
-                  selected={selectedLicenseType} 
-                  onChange={setSelectedLicenseType} 
-                  placeholder={t("כל הסוגים", "All Types")} 
-                />
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
       </div>
 
-      {/* List */}
-      <ScrollArea className="flex-1 px-4">
-        <div className="space-y-4 pb-10 pt-4">
-          <AnimatePresence mode="popLayout">
-            {processedData.slice(0, displayCount).map((item, index) => {
-              const annotation = (userAnnotations && userAnnotations[item.id]) || {};
-              const isSelected = selectedItem?.id === item.id;
-              const isGold = item.commodity?.toLowerCase().includes('gold') || annotation.commodity?.toLowerCase().includes('gold');
+      {/* Results List */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="p-5 border-b border-white/5">
+          <h1 className="text-sm font-black tracking-[0.2em] text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
+          <div className="flex items-center justify-between mt-4">
+             <Badge variant="outline" className="text-[10px] border-white/10 text-slate-400 bg-white/5 px-2 h-5 font-black uppercase">
+                {processedData.length} {t("נמצאו", "Total Found")}
+             </Badge>
+             <Button 
+               size="icon" 
+               variant="ghost" 
+               onClick={() => setIsAddModalOpen(true)}
+               className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg"
+             >
+               <LucidePlus className="w-4 h-4 stroke-[3]" />
+             </Button>
+          </div>
+        </header>
 
-              return (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.03, duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-                >
-                  <Card 
-                    className={`group cursor-pointer transition-all duration-300 border-white/5 bg-white/5 hover:bg-white/10 relative overflow-hidden
-                    ${isSelected ? 'ring-1 ring-amber-500/50 border-amber-500/50 bg-amber-500/5' : ''}
-                    ${isGold ? 'border-amber-500/20' : ''}`}
-                    onClick={() => setSelectedItem(item)}
+        <ScrollArea className="flex-1 px-4">
+          <div className="space-y-4 pb-10 pt-4">
+            <AnimatePresence mode="popLayout">
+              {processedData.slice(0, displayCount).map((item, index) => {
+                const annotation = (userAnnotations && userAnnotations[item.id]) || {};
+                const isSelected = selectedItem?.id === item.id;
+                const isGold = item.commodity?.toLowerCase().includes('gold') || annotation.commodity?.toLowerCase().includes('gold');
+
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.01, duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
                   >
-                    {/* Selected Indicator */}
-                    {isSelected && (
-                      <motion.div 
-                        layoutId="active-indicator"
-                        className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" 
-                      />
-                    )}
+                    <Card 
+                      className={`group cursor-pointer transition-all duration-300 border-white/5 bg-white/5 hover:bg-white/10 relative overflow-hidden
+                      ${isSelected ? 'ring-1 ring-amber-500/50 border-amber-500/50 bg-amber-500/5 shadow-[0_0_20px_rgba(245,158,11,0.05)]' : ''}
+                      ${isGold ? 'border-amber-500/20' : ''}`}
+                      onClick={() => setSelectedItem(item)}
+                    >
+                      {/* Selected Indicator */}
+                      {isSelected && (
+                        <motion.div 
+                          layoutId="active-indicator"
+                          className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]" 
+                        />
+                      )}
 
-                    <CardHeader className="p-4 pb-1">
-                      <div className="flex justify-between items-start gap-2">
-                        <CardTitle className={`text-sm font-bold tracking-tight leading-tight ${isGold ? 'text-amber-400' : 'text-slate-200'}`}>
-                          {item.company}
-                        </CardTitle>
-                        {isGold && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] shrink-0" />}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-2 space-y-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        <Badge variant="secondary" className="text-[10px] bg-slate-800/80 hover:bg-slate-700/80 text-slate-400 border-none px-1.5 h-4 font-bold uppercase tracking-wider">
-                          {item.status || 'Active'}
-                        </Badge>
-                        <Badge className={`text-[10px] border-none px-1.5 h-4 font-bold uppercase tracking-wider ${isGold ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}>
-                          {annotation.commodity || item.commodity || 'Unknown'}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center text-[10px] text-slate-500 font-bold uppercase tracking-wide">
-                        <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
-                        {item.region} | {item.country}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-          
-          <div ref={observerTarget} className="h-4" />
-          
-          {loading && <div className="text-center py-4 text-slate-500 text-xs">{t("טוען...", "Loading...")}</div>}
-          {error && <div className="text-center py-4 text-red-500 text-xs">{error}</div>}
-          {!loading && !error && processedData.length === 0 && (
-            <div className="text-center py-12">
-              <div className="text-slate-600 text-4xl mb-2 text-center flex justify-center">🔍</div>
-              <p className="text-slate-500 text-xs">{t("לא נמצאו תוצאות", "No results found")}</p>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+                      <CardHeader className="p-4 pb-1">
+                        <div className="flex justify-between items-start gap-2">
+                          <CardTitle className={`text-[13px] font-black tracking-tight leading-tight uppercase italic ${isGold ? 'text-amber-400' : 'text-slate-200'}`}>
+                            {item.company}
+                          </CardTitle>
+                          {isGold && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] shrink-0" />}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4 pt-2 space-y-3">
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge className={`text-[9px] border-none px-1.5 h-4 font-black uppercase tracking-widest ${isGold ? 'bg-amber-500/10 text-amber-500' : 'bg-blue-500/10 text-blue-400'}`}>
+                            {annotation.commodity || item.commodity || 'Unknown'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center text-[10px] text-slate-500 font-bold uppercase tracking-wide truncate">
+                          <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
+                          {item.region}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            <div ref={observerTarget} className="h-4" />
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   );
 }

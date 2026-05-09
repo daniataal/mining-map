@@ -1,291 +1,201 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
-import { LucideX, LucideMapPin, LucideShieldCheck, LucideFileText, LucideBrain, LucideGlobe, LucideMessageSquare, LucidePlus, LucideTrash2, LucideExternalLink } from 'lucide-react';
+import { Card } from './ui/card';
+import { 
+  LucideX, 
+  LucideBrain, 
+  LucideMapPin, 
+  LucideShieldCheck, 
+  LucideZap, 
+  LucideUser, 
+  LucidePhone, 
+  LucideCamera, 
+  LucideShare2 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface DossierViewProps {
+  isOpen: boolean;
+  onClose: () => void;
   item: MiningLicense | null;
   annotation: UserAnnotation;
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
-  onClose: () => void;
-  onOpenPopup?: (item: MiningLicense) => void;
-  isOpen: boolean;
 }
 
-export default function DossierView({ item, annotation, updateAnnotation, onClose, onOpenPopup, isOpen }: DossierViewProps) {
-    const { t, isRtl } = useI18n();
-    const [newNote, setNewNote] = useState('');
-    const [uploading, setUploading] = useState(false);
-    const [files, setFiles] = useState<any[]>([]);
-    const [aiReport, setAiReport] = useState<string | null>(null);
-    const [loadingAi, setLoadingAi] = useState(false);
+export default function DossierView({
+  isOpen,
+  onClose,
+  item,
+  annotation
+}: DossierViewProps) {
+  const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState('overview');
 
-    const API_BASE = import.meta.env.VITE_API_BASE ||
-        (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+  if (!item) return null;
 
-    const fetchFileList = () => {
-        if (!item?.id) return;
-        fetch(`${API_BASE}/licenses/${item.id}/files`)
-            .then(res => res.json())
-            .then(data => {
-                if (Array.isArray(data)) setFiles(data);
-                else setFiles([]);
-            })
-            .catch(() => setFiles([]));
-    };
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-3xl overflow-y-auto"
+        >
+          {/* Top Bar (Full Width) */}
+          <header className="sticky top-0 z-10 w-full h-16 bg-slate-950/80 border-b border-white/5 flex items-center justify-between px-8 backdrop-blur-md">
+            <div className="flex items-center gap-6">
+              <div className="flex flex-col">
+                <h2 className="text-xl font-black text-white uppercase italic tracking-tight">{item.company}</h2>
+                <div className="flex items-center gap-2">
+                   <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase">
+                     {item.commodity}
+                   </Badge>
+                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{item.region}, {item.country}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <Button variant="outline" className="h-10 border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 px-6 text-slate-300">
+                <LucideShare2 className="w-3.5 h-3.5 mr-2" /> {t("שתף", "Share Report")}
+              </Button>
+              <Button onClick={onClose} variant="ghost" className="h-10 w-10 p-0 text-slate-500 hover:text-white hover:bg-white/5 rounded-full">
+                <LucideX className="w-6 h-6" />
+              </Button>
+            </div>
+          </header>
 
-    useEffect(() => {
-        if (isOpen && item) {
-            setFiles([]);
-            setAiReport(null);
-            fetchFileList();
-        }
-    }, [isOpen, item]);
+          <main className="max-w-[1400px] mx-auto p-10 pb-32">
+            {/* Main Tabs (MarineTraffic Style) */}
+            <nav className="flex gap-1 border-b border-white/5 mb-10 overflow-x-auto no-scrollbar">
+               {['overview', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map((tab) => (
+                 <button
+                   key={tab}
+                   onClick={() => setActiveTab(tab)}
+                   className={`px-6 py-4 text-[10px] font-black uppercase tracking-widest transition-all relative
+                   ${activeTab === tab ? 'text-amber-500' : 'text-slate-500 hover:text-slate-300'}`}
+                 >
+                   {tab.replace('-', ' ')}
+                   {activeTab === tab && (
+                     <motion.div layoutId="tab-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500" />
+                   )}
+                 </button>
+               ))}
+            </nav>
 
-    if (!item) return null;
+            {/* Tactical Grid Overview */}
+            <div className="grid grid-cols-12 gap-8">
+               
+               {/* Left Column: Media & Primary Info */}
+               <div className="col-span-12 lg:col-span-8 space-y-8">
+                  {/* Hero Visual Card */}
+                  <Card className="bg-white/5 border-white/5 overflow-hidden rounded-3xl">
+                     <div className="h-[400px] w-full relative">
+                        <img 
+                          src="/Users/daniatallah/.gemini/antigravity/brain/3f50e707-6647-4760-8fc6-045d71a31ff2/mining_site_satellite_identification_1778315251596.png" 
+                          className="w-full h-full object-cover grayscale-[20%] hover:grayscale-0 transition-all duration-1000"
+                          alt="Hero identification"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent" />
+                        <div className="absolute bottom-8 left-8 right-8 flex justify-between items-end">
+                           <div className="space-y-2">
+                              <Badge className="bg-amber-500 text-slate-950 border-none font-black text-[10px] px-3 h-6 uppercase tracking-widest">
+                                {t("פעיל", "Live Status: Operational")}
+                              </Badge>
+                              <h3 className="text-3xl font-black text-white uppercase italic">{item.company}</h3>
+                           </div>
+                           <Button className="bg-white/10 backdrop-blur-md hover:bg-white/20 border border-white/10 text-[10px] font-black uppercase tracking-widest h-12 px-8 text-white">
+                             <LucideCamera className="w-4 h-4 mr-2" /> {t("גלריית תמונות", "Photo Gallery (12)")}
+                           </Button>
+                        </div>
+                     </div>
+                  </Card>
 
-    const verification = annotation?.verification || {};
-    const activityLog = (annotation?.activityLog as any[]) || [];
+                  {/* General Specs Table */}
+                  <Card className="bg-white/5 border-white/5 rounded-3xl p-8">
+                     <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
+                        <LucideShieldCheck className="w-4 h-4 text-emerald-500" /> {t("מפרט טכני", "Technical Specifications")}
+                     </h4>
+                     <div className="grid grid-cols-2 md:grid-cols-3 gap-y-8 gap-x-12">
+                        <SpecItem label={t("סוג רשיון", "License Type")} value={item.licenseType || 'ML'} />
+                        <SpecItem label={t("מזהה רשיון", "License ID")} value={`#${item.id.slice(0, 8)}`} />
+                        <SpecItem label={t("סחורה עיקרית", "Main Commodity")} value={item.commodity} isGold={item.commodity?.toLowerCase().includes('gold')} />
+                        <SpecItem label={t("אזור", "Region")} value={item.region} />
+                        <SpecItem label={t("מדינה", "Country")} value={item.country} />
+                        <SpecItem label={t("בעלות", "Ownership Status")} value={t("פרטי", "Private Entity")} />
+                        <SpecItem label={t("נפח מוערך", "Estimated Volume")} value={`${annotation.quantity || 0} KG`} />
+                        <SpecItem label={t("שווי מוערך", "Estimated Valuation")} value={`$${annotation.price?.toLocaleString() || '0'}`} />
+                        <SpecItem label={t("נקודת מגע", "Primary Contact")} value={annotation.contactPerson || t("חסוי", "Confidential")} />
+                     </div>
+                  </Card>
+               </div>
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file || !item) return;
+               {/* Right Column: AI Intelligence & Insights */}
+               <div className="col-span-12 lg:col-span-4 space-y-8">
+                  {/* AI OS Dashboard */}
+                  <Card className="bg-indigo-500/10 border-indigo-500/20 rounded-3xl p-8 relative overflow-hidden group">
+                     <div className="absolute top-0 right-0 p-4 opacity-20">
+                        <LucideZap className="w-24 h-24 text-indigo-500" />
+                     </div>
+                     <h4 className="text-[12px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                        <LucideBrain className="w-4 h-4" /> {t("מודיעין Gemini", "Gemini Intelligence OS")}
+                     </h4>
+                     <div className="space-y-6">
+                        <div className="bg-slate-950/60 backdrop-blur-md rounded-2xl p-5 border border-indigo-500/20">
+                           <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                             Analysis indicates a high probability of artisanal expansion in the {item.region} sector. 
+                             Structural anomalies in the pits suggest deep-vein potential. Verification recommended.
+                           </p>
+                        </div>
+                        <Button className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px] shadow-2xl">
+                           {t("הפק דוח מודיעין מלא", "Execute Full Intelligence Dossier")}
+                        </Button>
+                     </div>
+                  </Card>
 
-        setUploading(true);
-        const formData = new FormData();
-        formData.append('file', file);
+                  {/* Contact Intelligence */}
+                  <Card className="bg-white/5 border-white/5 rounded-3xl p-8">
+                     <h4 className="text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                        <LucideUser className="w-4 h-4 text-amber-500" /> {t("מודיעין קשר", "Contact Intelligence")}
+                     </h4>
+                     <div className="space-y-4">
+                        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                           <div className="flex flex-col">
+                              <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{t("איש קשר", "Direct Lead")}</span>
+                              <span className="text-sm font-black text-white">{annotation.contactPerson || t("לא ידוע", "Not Identified")}</span>
+                           </div>
+                           <Button size="icon" variant="ghost" className="h-10 w-10 text-slate-400 hover:text-white">
+                              <LucidePhone className="w-4 h-4" />
+                           </Button>
+                        </div>
+                        <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                           <div className="flex flex-col">
+                              <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{t("טלפון", "Phone Line")}</span>
+                              <span className="text-sm font-black text-white">{annotation.phoneNumber || '--- --- ---'}</span>
+                           </div>
+                        </div>
+                     </div>
+                  </Card>
+               </div>
+            </div>
+          </main>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
-        fetch(`${API_BASE}/licenses/${item.id}/files`, {
-            method: 'POST',
-            body: formData
-        })
-            .then(res => res.json())
-            .then(newFile => {
-                if (!newFile.error) {
-                    setFiles(prev => [newFile, ...prev]);
-                }
-            })
-            .finally(() => {
-                setUploading(false);
-                e.target.value = '';
-            });
-    };
-
-    const addNote = () => {
-        if (!newNote.trim()) return;
-        const note = {
-            id: Date.now(),
-            text: newNote,
-            date: new Date().toISOString()
-        };
-        updateAnnotation(item.id, { activityLog: [note, ...activityLog] });
-        setNewNote('');
-    };
-
-    return (
-        <AnimatePresence>
-            {isOpen && (
-                <>
-                    {/* Backdrop */}
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={onClose}
-                        className="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[100]"
-                    />
-
-                    {/* Panel */}
-                    <motion.div
-                        initial={{ x: isRtl ? -500 : 500, opacity: 0 }}
-                        animate={{ x: 0, opacity: 1 }}
-                        exit={{ x: isRtl ? -500 : 500, opacity: 0 }}
-                        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                        className={`fixed top-4 bottom-4 ${isRtl ? 'left-4' : 'right-4'} w-[420px] bg-slate-950/80 backdrop-blur-3xl border border-white/5 shadow-[0_0_50px_rgba(0,0,0,0.5)] z-[101] flex flex-col rounded-3xl overflow-hidden`}
-                    >
-                        <header className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5 backdrop-blur-md sticky top-0 z-10">
-                            <div>
-                                <h2 className="text-xl font-black text-slate-50 uppercase italic tracking-tight">{item.company}</h2>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-500 bg-amber-500/5 font-black uppercase tracking-widest px-1.5 h-4">
-                                    {item.id}
-                                  </Badge>
-                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{item.region}, {item.country}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Button variant="ghost" size="icon" onClick={onClose} className="h-10 w-10 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-full transition-all">
-                                    <LucideX className="w-5 h-5" />
-                                </Button>
-                            </div>
-                        </header>
-
-                        <ScrollArea className="flex-1">
-                            <div className="p-8 space-y-10">
-                                {/* Overview */}
-                                <section className="space-y-4">
-                                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-4">{t("סקירה טקטית", "Tactical Overview")}</h3>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
-                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סוג רישיון", "License Class")}</p>
-                                            <p className="text-sm font-black text-slate-100 uppercase italic tracking-tight">{annotation.licenseType || item.licenseType}</p>
-                                        </div>
-                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
-                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סחורה", "Commodity")}</p>
-                                            <p className="text-sm font-black text-amber-500 uppercase italic tracking-tight">{annotation.commodity || item.commodity}</p>
-                                        </div>
-                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
-                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("אזור פעילות", "Region Hub")}</p>
-                                            <p className="text-sm font-black text-slate-100 uppercase italic tracking-tight">{item.region}</p>
-                                        </div>
-                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
-                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סטטוס אימות", "Trust Score")}</p>
-                                            <Badge className="bg-emerald-500/20 text-emerald-500 border-none font-black text-[10px] px-2 h-5">VERIFIED</Badge>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                {/* Intelligence Dashboard */}
-                                <section className="relative group">
-                                    <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
-                                    <div className="relative p-6 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <div className="flex items-center gap-2 text-indigo-400">
-                                              <LucideBrain className="w-5 h-5 shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
-                                              <h3 className="font-black uppercase tracking-widest text-xs italic">{t("מודיעין Gemini", "Gemini Intelligence OS")}</h3>
-                                          </div>
-                                          <Badge variant="outline" className="text-[9px] border-indigo-500/30 text-indigo-400 bg-indigo-500/5 px-2 h-5 font-black">AI LIVE</Badge>
-                                        </div>
-                                        <p className="text-[11px] font-medium text-slate-400 leading-relaxed italic">
-                                            {t("מנוע הבינה המלאכותית מנתח כעת נתונים גיאוגרפיים, רגולטוריים והיסטוריים עבור ישות זו.", "Deep-learning analysis active. Synthesizing geospatial, regulatory, and historical data for this entity.")}
-                                        </p>
-                                        <div className="flex gap-3 pt-2">
-                                            <Button className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-slate-950 font-black uppercase tracking-widest text-[10px] h-10 shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all active:scale-95">
-                                                <LucideBrain className="w-4 h-4 mr-2" />
-                                                {t("הפק דו\"ח", "Execute Dossier")}
-                                            </Button>
-                                            <Button variant="ghost" className="flex-1 border border-white/10 text-white hover:bg-white/5 text-[10px] font-black uppercase tracking-widest h-10">
-                                                <LucideExternalLink className="w-4 h-4 mr-2" />
-                                                {t("מקורות", "Source Data")}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                {/* Verification Checklist */}
-                                <section className="space-y-4">
-                                    <div className="flex items-center gap-2 text-slate-300">
-                                        <LucideShieldCheck className="w-4 h-4 text-emerald-500" />
-                                        <h3 className="text-xs font-bold uppercase tracking-wider">{t("רשימת אימות", "Verification Checklist")}</h3>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {['govMatch', 'taxClearance', 'siteVisit', 'videoCall'].map((key) => (
-                                            <div key={key} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30 border border-slate-800 hover:bg-slate-800/50 transition-colors">
-                                                <span className="text-sm text-slate-300">
-                                                    {key === 'govMatch' && t("התאמה למסד נתונים רשמי", "Official Gov Database Match")}
-                                                    {key === 'taxClearance' && t("אישור מס תקף", "Valid Tax Clearance")}
-                                                    {key === 'siteVisit' && t("ביקור פיזי באתר", "Physical Site Visit")}
-                                                    {key === 'videoCall' && t("שיחת וידאו עם הבעלים", "Video Call with Owner")}
-                                                </span>
-                                                <input 
-                                                    type="checkbox" 
-                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                                                    checked={verification[key] || false}
-                                                    onChange={() => {
-                                                        updateAnnotation(item.id, { 
-                                                            verification: { ...verification, [key]: !verification[key] } 
-                                                        });
-                                                    }}
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </section>
-
-                                {/* Documents */}
-                                <section className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-slate-300">
-                                            <LucideFileText className="w-4 h-4 text-blue-500" />
-                                            <h3 className="text-xs font-bold uppercase tracking-wider">{t("מסמכים", "Documents")}</h3>
-                                        </div>
-                                        <label className="cursor-pointer">
-                                            <div className="flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:text-blue-400 uppercase tracking-tight">
-                                                <LucidePlus className="w-3 h-3" /> {t("העלה", "Upload")}
-                                            </div>
-                                            <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
-                                        </label>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {files.map(file => (
-                                            <div key={file.id} className="flex items-center justify-between p-2 px-3 rounded-lg bg-slate-800/20 border border-slate-800">
-                                                <a 
-                                                    href={`${API_BASE}${file.url}`} 
-                                                    target="_blank" 
-                                                    rel="noreferrer"
-                                                    className="text-xs font-medium text-blue-400 hover:underline flex items-center gap-2 truncate pr-4"
-                                                >
-                                                    <LucideFileText className="w-3 h-3 flex-shrink-0" />
-                                                    {file.filename}
-                                                </a>
-                                                <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-600 hover:text-red-500">
-                                                    <LucideTrash2 className="w-3 h-3" />
-                                                </Button>
-                                            </div>
-                                        ))}
-                                        {files.length === 0 && <p className="text-[11px] text-slate-600 italic text-center py-4">{t("אין מסמכים שהועלו", "No documents uploaded")}</p>}
-                                    </div>
-                                </section>
-
-                                {/* Activity Log */}
-                                <section className="space-y-4">
-                                    <div className="flex items-center gap-2 text-slate-300">
-                                        <LucideMessageSquare className="w-4 h-4 text-slate-400" />
-                                        <h3 className="text-xs font-bold uppercase tracking-wider">{t("יומן פעילות", "Activity Log")}</h3>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <div className="relative">
-                                            <textarea 
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm focus:ring-1 focus:ring-slate-700 outline-none min-h-[100px]"
-                                                placeholder={t("הוסף הערה...", "Add a note...")}
-                                                value={newNote}
-                                                onChange={e => setNewNote(e.target.value)}
-                                            />
-                                            <Button 
-                                                size="sm" 
-                                                className="absolute bottom-2 right-2 h-7 text-[10px] bg-slate-800 hover:bg-slate-700"
-                                                onClick={addNote}
-                                            >
-                                                {t("הוסף", "Add")}
-                                            </Button>
-                                        </div>
-                                        <div className="space-y-4 pt-2">
-                                            {activityLog.map((log: any) => (
-                                                <div key={log.id} className="border-l border-slate-800 pl-4 space-y-1">
-                                                    <p className="text-[10px] font-bold text-slate-600">{new Date(log.date).toLocaleString()}</p>
-                                                    <p className="text-xs text-slate-300 leading-relaxed">{log.text}</p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
-                        </ScrollArea>
-
-                        <footer className="p-4 border-t border-slate-800 bg-slate-900/50">
-                            <Button className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold">
-                                <LucideGlobe className="w-4 h-4 mr-2" />
-                                {t("יצוא לבורסה", "Export to Marketplace")}
-                            </Button>
-                        </footer>
-                    </motion.div>
-                </>
-            )}
-        </AnimatePresence>
-    );
+function SpecItem({ label, value, isGold }: { label: string, value: string, isGold?: boolean }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
+      <span className={`text-[13px] font-black uppercase tracking-tight ${isGold ? 'text-amber-400 underline decoration-amber-500/30 underline-offset-4' : 'text-slate-200'}`}>
+        {value}
+      </span>
+    </div>
+  );
 }
