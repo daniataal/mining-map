@@ -70,6 +70,34 @@ export default function DossierView({
           </header>
 
           <main className="max-w-[1400px] mx-auto p-10 pb-32">
+            {/* Deal Execution Workflow Tracker */}
+            <div className="mb-10 bg-white/5 border border-white/10 rounded-2xl p-6 flex items-center justify-between">
+               <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס עסקה", "Deal Lifecycle")}</span>
+                  <div className="flex items-center gap-2">
+                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                     <span className="text-xs font-bold text-white uppercase">{t("מכין הצעה", "Drafting Proposal (LOI)")}</span>
+                  </div>
+               </div>
+               
+               <div className="flex gap-4">
+                  {[
+                    { id: 'lead', label: 'Lead' },
+                    { id: 'loi', label: 'LOI Sent' },
+                    { id: 'dd', label: 'Due Diligence' },
+                    { id: 'closed', label: 'Closed Deal' }
+                  ].map((step, i) => (
+                    <div key={step.id} className="flex items-center gap-3">
+                       <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all
+                         ${i === 1 ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg shadow-amber-500/20' : 'bg-white/5 text-slate-500 border-white/5'}`}>
+                          <span className="opacity-50">{i + 1}.</span> {step.label}
+                       </div>
+                       {i < 3 && <div className="w-4 h-px bg-white/10" />}
+                    </div>
+                  ))}
+               </div>
+            </div>
+
             {/* Main Tabs (MarineTraffic Style) */}
             <nav className="flex gap-1 border-b border-white/5 mb-10 overflow-x-auto no-scrollbar">
                {['overview', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map((tab) => (
@@ -153,6 +181,44 @@ export default function DossierView({
                         </div>
                         <Button className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px] shadow-2xl">
                            {t("הפק דוח מודיעין מלא", "Execute Full Intelligence Dossier")}
+                        </Button>
+                     </div>
+                  </Card>
+
+                  {/* Entrepreneur Profit Calculator */}
+                  <Card className="bg-emerald-500/10 border-emerald-500/20 rounded-3xl p-8 relative overflow-hidden group">
+                     <div className="absolute top-0 right-0 p-4 opacity-10">
+                        <LucideZap className="w-20 h-20 text-emerald-500" />
+                     </div>
+                     <h4 className="text-[12px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                        <LucideBrain className="w-4 h-4" /> {t("מחשבון רווח יזמי", "Entrepreneur ROI Engine")}
+                     </h4>
+                     <div className="space-y-4">
+                        <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
+                           <span className="text-[9px] font-black text-slate-500 uppercase">{t("מחיר שוק (LBMA)", "Market Price (LBMA)")}</span>
+                           <span className="text-xs font-black text-white">$68,450 / KG</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
+                           <span className="text-[9px] font-black text-slate-500 uppercase">{t("דיסקאונט מקומי", "Local Discount")}</span>
+                           <span className="text-xs font-black text-emerald-400">- 12%</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-950/60 p-3 rounded-xl border border-white/5">
+                           <span className="text-[9px] font-black text-slate-500 uppercase">{t("לוגיסטיקה ומיסים", "Logistics & Taxes")}</span>
+                           <span className="text-xs font-black text-red-400">$2,400 / KG</span>
+                        </div>
+                        
+                        <div className="pt-4 border-t border-white/5 mt-2">
+                           <div className="flex justify-between items-end">
+                              <div className="flex flex-col">
+                                 <span className="text-[10px] font-black text-slate-400 uppercase">{t("רווח פוטנציאלי", "Est. Net Profit")}</span>
+                                 <span className="text-2xl font-black text-emerald-500">$57,836 / KG</span>
+                              </div>
+                              <Badge className="bg-emerald-500 text-slate-950 font-black text-[10px] mb-1">HIGH MARGIN</Badge>
+                           </div>
+                        </div>
+                        
+                        <Button className="w-full h-12 bg-white text-slate-950 hover:bg-slate-200 font-black uppercase tracking-widest text-[10px] mt-4 shadow-2xl">
+                           {t("צור מכתב כוונות (LOI)", "Generate LOI Contract")}
                         </Button>
                      </div>
                   </Card>

@@ -919,45 +919,102 @@ def delete_file(file_id: str):
 
 # --- AI Analysis Endpoint (Free via Pollinations.ai) ---
 
+# --- AI Intelligence Waterfall (Groq, OpenRouter, AwanLLM) ---
+
 class AIRequest(BaseModel):
     query: str
+    context: Optional[dict] = None
 
 @app.post("/api/ai/analyze")
 def analyze_with_ai(request: AIRequest):
     """
-    Proxies a request to a free AI provider (Pollinations.ai) to get a text response.
-    This avoids CORS issues and hides the provider details.
-    Pollinations.ai provides free access to models like OpenAI/Claude.
+    Executes the AI Waterfall. 
+    Cascade: Groq -> OpenRouter -> AwanLLM -> Pollinations (Free Proxy)
     """
+    providers = [
+        {"name": "Groq", "url": "https://api.groq.com/openai/v1/chat/completions", "key": os.getenv("GROQ_API_KEY")},
+        {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1/chat/completions", "key": os.getenv("OPENROUTER_API_KEY")},
+        {"name": "AwanLLM", "url": "https://www.awanllm.com/api/v1/chat/completions", "key": os.getenv("AWAN_API_KEY")}
+    ]
+
+    system_prompt = (
+        "You are an ENTREPRENEUR in West African commodity trading. "
+        "Your goal is to evaluate if a mining license is a 'GO' or 'NO GO' for a purchase. "
+        "Provide a risk rating (1-10) and a tactical recommendation for closing the deal. "
+        "Focus on: Local Discount potential, Logistics difficulty, and License validity. "
+        "Be blunt and professional."
+    )
+
+    # Attempt Cascade
+    import requests
+    for provider in providers:
+        if provider["key"]:
+            try:
+                headers = {"Authorization": f"Bearer {provider['key']}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "llama3-70b-8192" if provider["name"] == "Groq" else "meta-llama/llama-3-8b-instruct:free",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": request.query}
+                    ]
+                }
+                response = requests.post(provider["url"], headers=headers, json=payload, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data['choices'][0]['message']['content']
+                    return {"status": "success", "provider": provider["name"], "analysis": content}
+            except Exception as e:
+                print(f"Provider {provider['name']} failed: {e}")
+
+    # Ultimate Fallback (Free Proxy)
     try:
-        # Construct a system-like prompt wrapper for better results
-        full_prompt = (
-            "You are an expert mining intelligence analyst. "
-            "Analyze the following mining entity request and provide a professional, concise due diligence report. "
-            "Focus on: License Validity, Ownership, Reputation, and Environmental Compliance. "
-            "Use bullet points for clarity. If info is unknown, state 'Data unavailable in public records'.\n\n"
-            f"Query: {request.query}"
-        )
-        
-        # Pollinations.ai text API
-        # URL pattern: https://text.pollinations.ai/{prompt}
-        # It handles URL encoding, but requests handles it better.
-        
-        url = f"https://text.pollinations.ai/{requests.utils.quote(full_prompt)}"
-        
-        # Determine model? Pollinations defaults to a good one (usually GPT-4o-mini or similar)
-        # We can try to specify model if supported, but default is smartest.
-        
-        response = requests.get(url, timeout=30)
-        
-        if response.status_code == 200:
-            return {"status": "success", "analysis": response.text}
-        else:
-            return {"status": "error", "message": f"AI Provider returned {response.status_code}"}
-            
-    except Exception as e:
-        print(f"AI Request Failed: {e}")
-        return {"status": "error", "message": "Failed to connect to AI service."}
+        url = f"https://text.pollinations.ai/{requests.utils.quote(system_prompt + ' ' + request.query)}"
+        response = requests.get(url, timeout=20)
+        return {"status": "success", "provider": "Pollinations (Fallback)", "analysis": response.text}
+    except:
+        return {"status": "error", "message": "All intelligence providers are offline."}
+
+# --- Deal Execution: LOI Generator ---
+
+class LOIRequest(BaseModel):
+    company_name: str
+    commodity: str
+    target_price: float
+    quantity: str
+    validity_days: int = 7
+
+@app.post("/api/deals/generate-loi")
+def generate_loi(request: LOIRequest):
+    """
+    Generates a professional Letter of Intent (LOI) for commodity purchase.
+    """
+    loi_text = f"""
+LETTER OF INTENT (LOI) - COMMODITY PURCHASE
+-------------------------------------------
+REF ID: DEAL-{uuid.uuid4().hex[:8].upper()}
+DATE: {datetime.now().strftime('%Y-%m-%d')}
+
+TO: {request.company_name}
+RE: SOFT CORPORATE OFFER FOR {request.commodity.upper()}
+
+We, the undersigned, hereby confirm our interest and capability to purchase:
+COMMODITY: {request.commodity}
+QUANTITY: {request.quantity}
+TARGET PRICE: ${request.target_price} USD per KG/Unit
+INCOTERMS: FOB / CIF (Subject to Negotiation)
+
+PROCEDURE:
+1. Seller issues FCO (Full Corporate Offer).
+2. Buyer issues ICPO with full banking coordinates.
+3. SPA execution and logistics coordination.
+
+This LOI is valid for {request.validity_days} days.
+
+SIGNATURE:
+[Digital Signature Placeholder]
+Execution Engine v1.0
+"""
+    return {"status": "success", "loi": loi_text}
 
 # --- Community Miner Endpoints ---
 

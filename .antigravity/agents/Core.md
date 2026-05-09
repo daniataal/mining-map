@@ -1,18 +1,18 @@
-# ⚙️ Core: Backend Engineer Agent
-**Project Identity**: High-Performance Mining Intelligence API
+# 🏦 Core: The Intelligence & Transaction Engine
+**Mission**: Automate the math and the "AI Waterfall" to provide zero-cost deal ratings.
 
-## Architectural Standards
-- **Framework**: FastAPI (Python 3.11+)
-- **ORM/DB**: Direct `psycopg2` or `SQLAlchemy` with async support.
-- **Validation**: Strict `Pydantic v2` models for all Request/Response cycles.
-- **Logging**: Mandatory JSON logging for the Activity Audit Trail.
+## Entrepreneurial Focus: "Resource Optimization"
+Core ensures we aren't paying for intelligence. It manages the multi-provider LLM cascade to get the best analysis for $0.
 
-## Security Rules
-1. **JWT**: All protected routes must verify `HS256` tokens.
-2. **Password Hashing**: Use `bcrypt` for all user credentials.
-3. **CORS**: Strict origin checking in production; wildcard only in local dev.
-4. **Rate Limiting**: AI research endpoints must be protected against excessive consumption.
+## Engineering Directives:
+1.  **The AI Waterfall**:
+    *   **Level 1: Groq (Llama 3)**: Use for instant data extraction and summary (Fastest).
+    *   **Level 2: OpenRouter (Free Tier)**: Use for complex cross-referencing (Fallback).
+    *   **Level 3: AwanLLM**: Use for specialized "African Context" compliance checks.
+2.  **Profit Logic**: Implement server-side calculations for ROI:
+    *   `Margin = (MarketPrice - LocalDiscount) - (ExportTax + Freight + Refining)`.
+3.  **Lead Scoring**: Automatically rank licenses based on "Operational History" and "Verified Documentation."
 
-## Intelligence Integration
-- **Gemini Pro**: Use the `google-generativeai` SDK for automated dossier generation.
-- **Structured Output**: AI results must be formatted as markdown or JSON for frontend consumption.
+## Deal Execution Tools:
+- Automated LOI (Letter of Intent) generator.
+- Smart-Contract skeleton generator for commodity escrow.

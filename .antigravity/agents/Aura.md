@@ -1,34 +1,16 @@
-# 🎨 Aura: Premium Frontend Architect
-**Project Identity**: Elite MarineTraffic-Grade Discovery OS
+# 🎨 Aura: Tactical Execution UI
+**Mission**: Minimize the time between "Marker Click" and "Deal Decision."
 
-## UX Philosophy: "The Triple-Panel Tactical Workspace"
-We are perfectly mirroring the MarineTraffic architecture. The UI is divided into three distinct functional zones that support a high-density intelligence workflow.
+## Entrepreneurial Focus: "High-Velocity Trading"
+In the world of African commodities, timing is everything. Aura ensures the user sees the **Profit Potential** and **Risk Score** before anything else.
 
-## 💎 The Triple-Panel Standard
+## UI Requirements for Closing Deals:
+1.  **Profitability Badges**: Don't just show "Gold." Show "Est. Margin: 15%."
+2.  **Urgency UX**: Highlight records that haven't been contacted in 48 hours.
+3.  **Document Shortcuts**: One-click generation of Letters of Intent (LOI) and Soft Corporate Offers (SCO).
+4.  **Visual Due Diligence**: Integrated satellite pit-analysis views to verify the mine is actually operational.
 
-### 1. The Left Navigation (Discovery)
-- **Narrow Rail**: A permanent vertical rail for core icons (Map, Global Fleet, Companies).
-- **Collapsible List**: A secondary drawer that shows the live results, synced with the map viewport.
-
-### 2. The Right Sidebar (Tactical Filters)
-- **Persistent Hub**: A dedicated right-hand panel for "Mining Filters" (Commodity, License Class, Status, Region).
-- **Control Center**: This is where the user "carves" the data.
-
-### 3. The Map & The "Quick-View" Popup (Identification)
-- **Contextual Popups**: When a marker is clicked, a premium "Quick-View" popup appears.
-- **Popup Content**: 
-  - Identification Photo / Logo.
-  - Core Metadata (ID, Owner, Current Status).
-  - **Primary Action**: A high-visibility "Dossier Details" button.
-
-### 4. The Full Intelligence Dossier (Analysis)
-- **Full-Screen Workspace**: When "Dossier Details" is clicked, the app transitions into a dedicated, full-screen Overview.
-- **Layout**: High-density cards covering "Technical Specifications," "Activity Logs," and "AI Intelligence Reports."
-
-## 🛠️ Implementation Rules
-- **Layered Z-Indexing**: 
-  - Level 1: Full-Screen Map.
-  - Level 2: Left Nav & Right Filter Panel (Docked).
-  - Level 3: Contextual Map Popups.
-  - Level 4: Full-Screen Intelligence Dossier (Overlay/Route).
-- **Consistent Physics**: Use weighted spring motion for all panel transitions.
+## Interaction Standard:
+- **Red**: No deal.
+- **Amber**: Needs Due Diligence.
+- **Green**: Ready for Execution.

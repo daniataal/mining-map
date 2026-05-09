@@ -17,6 +17,16 @@ import AdminPanel from './components/AdminPanel';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 
+function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change: string, up?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] font-black text-slate-400">{symbol}</span>
+      <span className="text-[10px] font-bold text-white">{price}</span>
+      <span className={`text-[9px] font-black ${up ? 'text-emerald-500' : 'text-red-500'}`}>{change}</span>
+    </div>
+  );
+}
+
 export default function App() {
   const { t, isRtl } = useI18n();
   
@@ -138,13 +148,30 @@ export default function App() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   return (
-    <div className={`flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden ${isRtl ? 'rtl' : 'ltr'}`}>
-      {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
-      
-      <AdminPanel isOpen={isAdminPanelOpen} onClose={() => setIsAdminPanelOpen(false)} token={token} />
+    <div className={`h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
+      {/* 1. Global Market Ticker (Entrepreneur Desk) */}
+      <div className="h-8 w-full bg-slate-950 border-b border-white/5 flex items-center overflow-hidden">
+         <div className="flex items-center gap-2 px-4 border-r border-white/5 bg-amber-500/10 h-full shrink-0">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-[9px] font-black uppercase text-amber-500 tracking-widest">{t("שווקים חיים", "LIVE MARKETS")}</span>
+         </div>
+         <div className="flex-1 overflow-hidden relative">
+            <div className="flex items-center gap-12 whitespace-nowrap animate-marquee py-1">
+               <TickerItem symbol="XAU/USD" price="2,341.20" change="+1.2%" up />
+               <TickerItem symbol="XAG/USD" price="28.45" change="-0.4%" />
+               <TickerItem symbol="XPT/USD" price="982.10" change="+0.8%" up />
+               <TickerItem symbol="BRENT" price="83.42" change="+2.1%" up />
+               <TickerItem symbol="COPPER" price="4.52" change="-0.2%" />
+               <TickerItem symbol="XAU/USD" price="2,341.20" change="+1.2%" up />
+               <TickerItem symbol="XAG/USD" price="28.45" change="-0.4%" />
+               <TickerItem symbol="XPT/USD" price="982.10" change="+0.8%" up />
+            </div>
+         </div>
+      </div>
 
-      {/* Main Experience: Triple-Panel Discovery OS */}
-      <div className="flex flex-1 overflow-hidden relative bg-slate-950">
+      {/* 2. Main Discovery Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
         
         {/* PANEL 1: Left Navigation & Results List */}
         <aside 
