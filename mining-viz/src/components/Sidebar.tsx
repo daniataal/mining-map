@@ -1,60 +1,57 @@
 import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
-import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
-import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from './ui/accordion';
-import { LucideSearch, LucideFilter, LucidePlus, LucideFileText, LucideDownload, LucideUpload, LucideLogOut, LucideChevronLeft, LucideMapPin } from 'lucide-react';
-import MultiSelect from './MultiSelect';
+import { 
+  Plus as LucidePlus, 
+  LogOut as LucideLogOut, 
+  MapPin as LucideMapPin,
+  LayoutGrid as LucideLayoutGrid,
+  Layers as LucideLayers,
+  Settings as LucideSettings,
+  Pin as LucidePin,
+  PieChart as LucidePieChart
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface SidebarProps {
   processedData: MiningLicense[];
-  filter: string;
-  setFilter: (val: string) => void;
-  sortBy: string;
-  setSortBy: (val: any) => void;
-  selectedCommodity: string[];
-  setSelectedCommodity: (val: string[]) => void;
-  selectedCountry: string[];
-  setSelectedCountry: (val: string[]) => void;
-  userStatusFilter: string[];
-  setUserStatusFilter: (val: string[]) => void;
-  selectedLicenseType: string[];
-  setSelectedLicenseType: (val: string[]) => void;
-  commodities: string[];
-  countries: string[];
-  licenseTypes: string[];
   setIsAddModalOpen: (val: boolean) => void;
   loading: boolean;
   onLogout: () => void;
-  setSelectedItem: (item: MiningLicense) => void;
-  selectedItem?: MiningLicense | null;
   userAnnotations: Record<string, UserAnnotation>;
-  error?: string | null;
-  onToggleCollapse?: () => void;
+  selectedItem: MiningLicense | null;
+  setSelectedItem: (item: MiningLicense) => void;
+  viewMode: 'map' | 'pipeline' | 'admin' | 'dashboard';
+  setViewMode: (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => void;
+  onToggleFilter: () => void;
+  onToggleAdmin: () => void;
+  isFilterOpen: boolean;
+  isPinned: boolean;
+  setIsPinned: (val: boolean) => void;
+  isCollapsed: boolean;
 }
 
 export default function Sidebar({
   processedData,
-  filter, setFilter,
-  selectedCommodity, setSelectedCommodity,
-  selectedCountry, setSelectedCountry,
-  userStatusFilter, setUserStatusFilter,
-  selectedLicenseType, setSelectedLicenseType,
-  commodities, countries, licenseTypes,
-  setIsAddModalOpen,
   loading,
   onLogout,
   setSelectedItem,
   selectedItem,
   userAnnotations,
-  error,
-  onToggleCollapse
+  setIsAddModalOpen,
+  viewMode,
+  setViewMode,
+  onToggleFilter,
+  onToggleAdmin,
+  isFilterOpen,
+  isPinned,
+  setIsPinned,
+  isCollapsed
 }: SidebarProps) {
-  const { t, isRtl } = useI18n();
+  const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -62,7 +59,6 @@ export default function Sidebar({
     setDisplayCount(20);
   }, [processedData]);
 
-  // Infinite scroll logic
   useEffect(() => {
     const observer = new IntersectionObserver(
       entries => {
@@ -73,168 +69,140 @@ export default function Sidebar({
       { threshold: 1.0 }
     );
 
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current);
-    }
-
+    if (observerTarget.current) observer.observe(observerTarget.current);
     return () => observer.disconnect();
   }, [displayCount, processedData.length]);
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-slate-100 select-none">
-      {/* Header */}
-      <header className="p-4 border-b border-slate-800 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-amber-500">
-              {t("מודיעין כריה", "Mining Intelligence")}
-            </h1>
-            <p className="text-xs text-slate-400 font-medium">
-              {t("מערכת ניהול רישיונות", "License Management System")}
-            </p>
-          </div>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="icon" onClick={onLogout} title={t("התנתק", "Logout")}>
-              <LucideLogOut className="w-4 h-4 text-slate-400 hover:text-red-400" />
-            </Button>
-            {onToggleCollapse && (
-              <Button variant="ghost" size="icon" onClick={onToggleCollapse}>
-                <LucideChevronLeft className={`w-4 h-4 transition-transform ${isRtl ? 'rotate-180' : ''}`} />
-              </Button>
-            )}
-          </div>
-        </div>
-
-        <Button 
-          className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold"
-          onClick={() => setIsAddModalOpen(true)}
+    <div className="flex h-full bg-transparent text-slate-800 dark:text-slate-100 select-none">
+      {/* Icon Rail (MarineTraffic style) */}
+      <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
+        <button 
+          onClick={() => setViewMode('map')}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${viewMode === 'map' 
+            ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
-          <LucidePlus className="w-4 h-4 mr-2" />
-          {t("הוסף רישיון חדש", "Add New License")}
-        </Button>
-
-        <div className="grid grid-cols-3 gap-2">
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideUpload className="w-3 h-3 mr-1" /> {t("יבוא", "Import")}
-           </Button>
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideFileText className="w-3 h-3 mr-1" /> {t("תבנית", "Template")}
-           </Button>
-           <Button variant="outline" size="sm" className="text-[10px] px-1 border-slate-700 hover:bg-slate-800">
-             <LucideDownload className="w-3 h-3 mr-1" /> {t("יצוא", "Export")}
-           </Button>
+          <LucideMapPin className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => setViewMode('dashboard')}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${viewMode === 'dashboard' 
+            ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={() => setViewMode('pipeline')}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${viewMode === 'pipeline' 
+            ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
+        >
+          <LucideLayoutGrid className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={onToggleFilter}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${isFilterOpen 
+            ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
+            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
+        >
+          <LucideLayers className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={onToggleAdmin}
+          className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 border border-transparent transition-all cursor-pointer"
+        >
+          <LucideSettings className="w-5 h-5" />
+        </button>
+        <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
+          <LucideLogOut className="w-5 h-5" />
         </div>
-      </header>
-
-      {/* Controls */}
-      <div className="p-4 space-y-4">
-        <div className="relative">
-          <LucideSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <Input 
-            placeholder={t("חיפוש...", "Search...")} 
-            className="pl-9 bg-slate-950 border-slate-800 focus:ring-amber-500"
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-          />
-        </div>
-
-        <Accordion type="single" collapsible className="w-full">
-          <AccordionItem value="filters" className="border-slate-800">
-            <AccordionTrigger className="py-2 text-sm text-slate-400 hover:text-slate-200">
-              <div className="flex items-center">
-                <LucideFilter className="w-4 h-4 mr-2" />
-                {t("מסננים מתקדמים", "Advanced Filters")}
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("מדינה", "Country")}</label>
-                <MultiSelect 
-                  options={countries} 
-                  selected={selectedCountry} 
-                  onChange={setSelectedCountry} 
-                  placeholder={t("כל המדינות", "All Countries")} 
-                  searchable 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("סחורה", "Commodity")}</label>
-                <MultiSelect 
-                  options={commodities} 
-                  selected={selectedCommodity} 
-                  onChange={setSelectedCommodity} 
-                  placeholder={t("כל הסחורות", "All Commodities")} 
-                  searchable 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-slate-500">{t("סוג רישיון", "License Type")}</label>
-                <MultiSelect 
-                  options={licenseTypes} 
-                  selected={selectedLicenseType} 
-                  onChange={setSelectedLicenseType} 
-                  placeholder={t("כל הסוגים", "All Types")} 
-                />
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
       </div>
 
-      {/* List */}
-      <ScrollArea className="flex-1 px-4">
-        <div className="space-y-3 pb-4">
-          {processedData.slice(0, displayCount).map((item) => {
-            const annotation = userAnnotations[item.id] || {};
-            const isSelected = selectedItem?.id === item.id;
-            const isGold = item.commodity?.toLowerCase().includes('gold') || annotation.commodity?.toLowerCase().includes('gold');
-
-            return (
-              <Card 
-                key={item.id}
-                className={`cursor-pointer transition-all border-slate-800 bg-slate-900/50 hover:bg-slate-800 
-                ${isSelected ? 'ring-2 ring-amber-500 border-transparent bg-slate-800' : ''}
-                ${isGold ? 'border-amber-900/50' : ''}`}
-                onClick={() => setSelectedItem(item)}
+      {/* Results List */}
+      {!isCollapsed && (
+        <motion.div 
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -20 }}
+          className="flex-1 flex flex-col min-w-0"
+        >
+          <header className="p-5 border-b border-black/5 dark:border-white/5">
+            <div className="flex items-center justify-between">
+              <h1 className="text-sm font-black tracking-[0.2em] text-slate-400 dark:text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPinned(!isPinned);
+                }}
+                className={`p-1.5 rounded-lg transition-all ${isPinned ? 'text-amber-500 bg-amber-500/10' : 'text-slate-600 hover:text-slate-400'}`}
               >
-                <CardHeader className="p-3 pb-0">
-                  <div className="flex justify-between items-start">
-                    <CardTitle className={`text-sm font-bold ${isGold ? 'text-amber-400' : 'text-slate-200'}`}>
-                      {item.company}
-                    </CardTitle>
-                    {isGold && <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />}
-                  </div>
-                </CardHeader>
-                <CardContent className="p-3 pt-2 space-y-2">
-                  <div className="flex flex-wrap gap-1">
-                    <Badge variant="secondary" className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border-none">
-                      {item.status || 'Active'}
-                    </Badge>
-                    <Badge className={`text-[10px] border-none ${isGold ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}>
-                      {annotation.commodity || item.commodity || 'Unknown'}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center text-[11px] text-slate-500 font-medium">
-                    <LucideMapPin className="w-3 h-3 mr-1" />
-                    {item.region} | {item.country}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-          
-          <div ref={observerTarget} className="h-4" />
-          
-          {loading && <div className="text-center py-4 text-slate-500 text-xs">{t("טוען...", "Loading...")}</div>}
-          {error && <div className="text-center py-4 text-red-500 text-xs">{error}</div>}
-          {!loading && !error && processedData.length === 0 && (
-            <div className="text-center py-12">
-              <div className="text-slate-600 text-4xl mb-2 text-center flex justify-center">🔍</div>
-              <p className="text-slate-500 text-xs">{t("לא נמצאו תוצאות", "No results found")}</p>
+                <LucidePin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-500 rotate-45' : ''} transition-transform`} />
+              </button>
             </div>
-          )}
-        </div>
-      </ScrollArea>
+            <div className="flex items-center justify-between mt-4">
+               <Badge variant="outline" className="text-[10px] border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 bg-black/5 dark:bg-white/5 px-2 h-5 font-black uppercase">
+                  {processedData.length} {t("נמצאו", "Total Found")}
+               </Badge>
+               <Button 
+                 size="icon" 
+                 variant="ghost" 
+                 className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition-all active:scale-95"
+                 onClick={() => setIsAddModalOpen(true)}
+               >
+                 <LucidePlus className="w-4 h-4 stroke-[3]" />
+               </Button>
+            </div>
+          </header>
+
+          <ScrollArea className="flex-1">
+            <div className="p-3 space-y-2">
+            <AnimatePresence mode="popLayout">
+              {processedData.slice(0, displayCount).map((item) => {
+                const annotation = userAnnotations[item.id] || {};
+                const isSelected = selectedItem?.id === item.id;
+
+                return (
+                  <motion.div
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className={`group p-4 rounded-xl cursor-pointer transition-all duration-300 border
+                      ${isSelected 
+                        ? 'bg-amber-500/10 border-amber-500/30 shadow-[inset_0_0_20px_rgba(245,158,11,0.05)]' 
+                        : 'bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/[0.05] hover:border-black/10 dark:hover:border-white/10'}`}
+                    onClick={() => setSelectedItem(item)}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className={`text-xs font-black uppercase tracking-tight truncate pr-4 transition-colors ${isSelected ? 'text-amber-500' : 'text-slate-700 dark:text-slate-200'}`}>
+                        {item.company}
+                      </h3>
+                      <div className="flex gap-1 shrink-0">
+                         {annotation.status === 'good' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+                         {annotation.status === 'maybe' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />}
+                         {annotation.status === 'bad' && <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
+                      </div>
+                    </div>
+                    <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                       <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
+                       <span className="truncate">{item.region}</span>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+            <div ref={observerTarget} className="h-4" />
+          </div>
+        </ScrollArea>
+      </motion.div>
+      )}
     </div>
   );
 }
