@@ -22,22 +22,22 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
     };
 
     return (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-200/80 dark:bg-slate-950/80 backdrop-blur-md z-[9999] flex flex-col items-center justify-center p-4">
             <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.4, ease: "easeOut" }}
                 className="w-full max-w-md"
             >
-                <Card className="bg-slate-900 border-slate-800 shadow-2xl ring-1 ring-slate-800">
+                <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800">
                     <CardHeader className="space-y-2 text-center pb-8">
                         <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
                             <LucideLock className="w-6 h-6 text-amber-500" />
                         </div>
-                        <CardTitle className="text-2xl font-bold tracking-tight text-white">
+                        <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                             {t("גישה למערכת", "Mining Map Access")}
                         </CardTitle>
-                        <p className="text-sm text-slate-400">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
                             {t("אנא התחבר כדי לצפות ולנהל נתוני רישיונות", "Please sign in to view and manage license data.")}
                         </p>
                     </CardHeader>
@@ -49,7 +49,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                                     <Input 
                                         type="text" 
                                         placeholder={t("שם משתמש", "Username")}
-                                        className="pl-10 bg-slate-950 border-slate-800 focus:ring-amber-500 text-white"
+                                        className="pl-10 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-amber-500 text-slate-900 dark:text-white"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
                                         required
@@ -62,7 +62,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                                     <Input 
                                         type="password" 
                                         placeholder={t("סיסמה", "Password")}
-                                        className="pl-10 bg-slate-950 border-slate-800 focus:ring-amber-500 text-white"
+                                        className="pl-10 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-amber-500 text-slate-900 dark:text-white"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         required
@@ -91,9 +91,9 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                     </CardContent>
                     <CardFooter className="flex flex-col gap-4 text-center pb-8">
                         <div className="flex items-center gap-2 w-full">
-                            <div className="h-px bg-slate-800 flex-1" />
-                            <span className="text-[10px] uppercase font-bold text-slate-600 tracking-widest">{t("מערכת מאובטחת", "Secure System")}</span>
-                            <div className="h-px bg-slate-800 flex-1" />
+                            <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                            <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-600 tracking-widest">{t("מערכת מאובטחת", "Secure System")}</span>
+                            <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
                         </div>
                         <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
                             {t("צוות מורשה בלבד • 2026 מודיעין כריה", "Authorized Personnel Only • 2026 Mining Intelligence")}

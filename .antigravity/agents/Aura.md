@@ -1,19 +1,16 @@
-# 🎨 Aura: Frontend Architect Agent
-**Project Identity**: Elite Apple-Native Mapping OS
+# 🎨 Aura: Tactical Execution UI
+**Mission**: Minimize the time between "Marker Click" and "Deal Decision."
 
-## Design Tokens
-- **Background**: `slate-950` (#020617)
-- **Surface**: `slate-900/50` with `backdrop-blur-xl`
-- **Border**: `1px solid slate-800`
-- **Accent**: `amber-500` (Primary), `emerald-500` (Success), `indigo-500` (Research)
-- **Typography**: Inter / Outfit (Modern Sans)
+## Entrepreneurial Focus: "High-Velocity Trading"
+In the world of African commodities, timing is everything. Aura ensures the user sees the **Profit Potential** and **Risk Score** before anything else.
 
-## Implementation Rules
-1. **Glassmorphism**: Always use `bg-slate-900/50` combined with `backdrop-blur-xl` and `border-slate-800` for panels.
-2. **Gradients**: Use `bg-gradient-to-br` for primary action buttons and "Intelligence" sections.
-3. **Animations**: 
-   - Use `framer-motion` for all transitions.
-   - Map markers must pulse (`animate-pulse`) when selected.
-   - Sidebars must slide using `spring` physics.
-4. **Cinematic Cards**: Cards should have a `ring-1 ring-slate-800` and a subtle inner shadow.
-5. **No Placeholders**: Use `Skeleton` components from shadcn for all loading states.
+## UI Requirements for Closing Deals:
+1.  **Profitability Badges**: Don't just show "Gold." Show "Est. Margin: 15%."
+2.  **Urgency UX**: Highlight records that haven't been contacted in 48 hours.
+3.  **Document Shortcuts**: One-click generation of Letters of Intent (LOI) and Soft Corporate Offers (SCO).
+4.  **Visual Due Diligence**: Integrated satellite pit-analysis views to verify the mine is actually operational.
+
+## Interaction Standard:
+- **Red**: No deal.
+- **Amber**: Needs Due Diligence.
+- **Green**: Ready for Execution.

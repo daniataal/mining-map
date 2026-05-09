@@ -1,20 +1,14 @@
-import { useState, useEffect } from 'react';
 import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { Badge } from './ui/badge';
-import { LucideEdit, LucideCheck, LucideX, LucideBrain, LucideTrash2, LucideFileText, LucidePhone, LucideUser } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { MapPin as LucideMapPin, Phone as LucidePhone } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;
   annotation: UserAnnotation;
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDelete: () => void;
-  commodities: string[];
-  licenseTypes: string[];
-  isMobile: boolean;
   onOpenDossier?: () => void;
   isOpen: boolean;
 }
@@ -22,248 +16,100 @@ interface PopupFormProps {
 export default function PopupForm({ 
   item, 
   annotation, 
-  updateAnnotation, 
-  onDelete, 
-  commodities, 
-  licenseTypes, 
-  isMobile, 
-  onOpenDossier, 
-  isOpen 
+  onOpenDossier
 }: PopupFormProps) {
     const { t } = useI18n();
-    const [isEditing, setIsEditing] = useState(false);
-    const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-    const [loadingAi, setLoadingAi] = useState(false);
-    const [lbmaPricePerKg, setLbmaPricePerKg] = useState<number | null>(null);
-
-    const API_BASE = import.meta.env.VITE_API_BASE ||
-        (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
-
-    const [formData, setFormData] = useState({
-        comment: '',
-        quantity: '',
-        price: '',
-        licenseType: '',
-        commodity: '',
-        phoneNumber: '',
-        contactPerson: ''
-    });
-
-    useEffect(() => {
-        if (!isOpen) setIsEditing(false);
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (!isEditing) {
-            setFormData({
-                comment: annotation.comment || '',
-                quantity: annotation.quantity?.toString() || '',
-                price: annotation.price?.toString() || '',
-                licenseType: annotation.licenseType || item.licenseType || '',
-                commodity: annotation.commodity || item.commodity || '',
-                phoneNumber: annotation.phoneNumber || item.phoneNumber || '',
-                contactPerson: annotation.contactPerson || item.contactPerson || ''
-            });
-        }
-    }, [isEditing, annotation, item]);
-
-    useEffect(() => {
-        const commodity = formData.commodity || item.commodity || '';
-        if (commodity.toLowerCase().includes('gold')) {
-            fetch('https://data-asg.goldprice.org/dbXRates/USD')
-                .then(res => res.json())
-                .then(data => {
-                    if (data.items && data.items.length > 0) {
-                        const pricePerOz = data.items[0].xauPrice;
-                        const pricePerKg = pricePerOz * 32.1507;
-                        setLbmaPricePerKg(pricePerKg);
-                    }
-                })
-                .catch(err => console.error("Failed to fetch gold price", err));
-        }
-    }, [formData.commodity, item.commodity]);
-
-    const handleSave = () => {
-        updateAnnotation(item.id, {
-            comment: formData.comment,
-            quantity: parseFloat(formData.quantity) || 0,
-            price: parseFloat(formData.price) || 0,
-            licenseType: formData.licenseType,
-            commodity: formData.commodity,
-            phoneNumber: formData.phoneNumber,
-            contactPerson: formData.contactPerson
-        });
-        setIsEditing(false);
-    };
-
-    const igniteGemini = () => {
-        setLoadingAi(true);
-        const query = `Analyze the mining company "${item.company}" located in ${item.region}, ${item.country}. They are listed for commodity "${item.commodity}" with license type "${item.licenseType || 'Unknown'}". Verify their license status.`;
-
-        fetch(`${API_BASE}/api/ai/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query })
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') setAiAnalysis(data.analysis);
-                else setAiAnalysis("Could not generate report.");
-            })
-            .finally(() => setLoadingAi(false));
-    };
+    const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
+    const isGold = commodity.includes('gold');
+    const isDiamond = commodity.includes('diamond');
+    
+    // Tactical Asset Selection (Portable)
+    const heroImage = isGold 
+      ? "/assets/commodities/gold.png"
+      : isDiamond 
+      ? "/assets/commodities/diamond.png"
+      : "/assets/commodities/satellite.png";
 
     return (
-        <div className="flex flex-col w-[320px] bg-slate-900 overflow-hidden text-slate-100 p-0 rounded-lg">
-            <header className="p-4 bg-slate-800/50 border-b border-slate-700 flex items-center justify-between">
-                <div className="flex-1 pr-4">
-                    <h3 className="font-bold text-sm truncate">{item.company}</h3>
-                    <p className="text-[10px] text-slate-400">{item.region}, {item.country}</p>
+        <div className="flex flex-col w-[320px] bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
+            {/* 1. Visual Commodity Identification */}
+            <div className="relative h-44 w-full overflow-hidden group">
+                <img 
+                  src={heroImage} 
+                  alt="Commodity Visual"
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 dark:from-slate-950 via-transparent to-transparent opacity-80" />
+                <div className="absolute top-3 left-3 flex gap-2">
+                   <Badge className="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-black/10 dark:border-white/10 text-[9px] font-black uppercase px-2 h-5 text-slate-900 dark:text-white">
+                     {item.lat?.toFixed(4)}, {item.lng?.toFixed(4)}
+                   </Badge>
+                   {(item.phoneNumber || annotation.phoneNumber) && (
+                     <Badge className="bg-emerald-500 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5">
+                       {t("קו פעיל", "ACTIVE LINE")}
+                     </Badge>
+                   )}
                 </div>
-                {isEditing ? (
-                    <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-emerald-500" onClick={handleSave}>
-                            <LucideCheck className="w-4 h-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400" onClick={() => setIsEditing(false)}>
-                            <LucideX className="w-4 h-4" />
-                        </Button>
-                    </div>
-                ) : (
-                    <Button size="sm" variant="outline" className="h-7 text-[10px] border-slate-700 bg-slate-800" onClick={() => setIsEditing(true)}>
-                        <LucideEdit className="w-3 h-3 mr-1" /> {t("ערוך", "Edit")}
-                    </Button>
-                )}
-            </header>
+            </div>
 
-            <div className="p-4 space-y-4">
-                {/* Status Quick Actions */}
-                <div className="grid grid-cols-3 gap-1">
-                    {['good', 'maybe', 'bad'].map((status) => (
-                        <Button 
-                            key={status}
-                            variant="outline" 
-                            size="sm"
-                            className={`h-8 text-[10px] font-bold border-slate-800 transition-all ${
-                                annotation.status === status 
-                                ? (status === 'good' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/50' : 
-                                   status === 'maybe' ? 'bg-amber-500/10 text-amber-500 border-amber-500/50' : 
-                                   'bg-red-500/10 text-red-500 border-red-500/50')
-                                : 'bg-slate-950 text-slate-500 hover:text-slate-300'
-                            }`}
-                            onClick={() => updateAnnotation(item.id, { status: annotation.status === status ? undefined : status as any })}
-                        >
-                            {status === 'good' ? 'GO' : status === 'maybe' ? 'MAYBE' : 'NO'}
-                        </Button>
-                    ))}
+            {/* 2. Identification Details */}
+            <div className="p-4 pt-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <h3 className="font-black text-sm tracking-tight leading-tight text-slate-900 dark:text-white uppercase italic truncate">
+                      {item.company}
+                    </h3>
+                    <div className="flex items-center mt-1">
+                      <LucideMapPin className="w-2.5 h-2.5 mr-1 text-slate-500" />
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">{item.region}</p>
+                    </div>
+                  </div>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${isGold ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
+                    <LucideMapPin className="w-4 h-4" />
+                  </div>
                 </div>
 
-                {isMobile && onOpenDossier && (
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-xs font-bold h-9" onClick={onOpenDossier}>
-                        <LucideFileText className="w-3 h-3 mr-2" />
-                        {t("צפה בתיק המלא", "View Full Dossier")}
-                    </Button>
-                )}
+                {/* 3. Direct Action Protocol */}
+                <div className="grid grid-cols-2 gap-2 mt-5">
+                   <Button 
+                     size="sm" 
+                     className={`h-9 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all
+                       ${(item.phoneNumber || annotation.phoneNumber) ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                     onClick={() => { const ph = item.phoneNumber || annotation.phoneNumber; if (ph) window.location.href = `tel:${ph}`; }}
+                   >
+                     <LucidePhone className="w-3.5 h-3.5" />
+                     {t("התקשר לליד", "Call Lead")}
+                   </Button>
+                   <Button 
+                     size="sm" 
+                     className="h-9 text-[9px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center gap-2"
+                     onClick={onOpenDossier}
+                   >
+                     {t("פרטי רשיון", "License Details")}
+                   </Button>
+                </div>
 
-                {/* AI Research */}
-                {!aiAnalysis && !loadingAi && (
-                    <Button 
-                        className="w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white font-bold text-[10px] h-9 shadow-lg shadow-indigo-500/20"
-                        onClick={igniteGemini}
-                    >
-                        <LucideBrain className="w-3 h-3 mr-2" />
-                        {t("הפעל בינה מלאכותית", "Ignite Gemini Intelligence")}
-                    </Button>
-                )}
-
-                {loadingAi && (
-                    <div className="flex items-center justify-center p-2 bg-slate-950 rounded-lg border border-slate-800 animate-pulse">
-                        <span className="text-[10px] text-indigo-400 font-bold">{t("מנתח נתונים...", "Analyzing Intelligence...")}</span>
+                {/* 4. Technical Specs (Flexible) */}
+                <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
+                    <div className="p-3 flex flex-col items-center justify-center min-h-[50px] text-center">
+                       <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס", "Status")}</span>
+                       <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-tight leading-tight">{item.status || 'Active'}</span>
                     </div>
-                )}
-
-                <AnimatePresence>
-                    {aiAnalysis && (
-                        <motion.div 
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            className="bg-slate-950 border border-slate-800 rounded-lg p-3 relative"
-                        >
-                            <button className="absolute top-2 right-2 text-slate-500 hover:text-slate-300" onClick={() => setAiAnalysis(null)}>
-                                <LucideX className="w-3 h-3" />
-                            </button>
-                            <p className="text-[9px] font-bold text-indigo-400 uppercase mb-2">{t("ניתוח AI", "AI Analysis")}</p>
-                            <div className="text-[10px] text-slate-300 leading-relaxed max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
-                                {aiAnalysis}
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Fields */}
-                <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
-                    <div>
-                        <label className="text-[9px] font-bold text-slate-500 uppercase">{t("סוג רישיון", "License Type")}</label>
-                        {isEditing ? (
-                            <Input className="h-7 text-xs bg-slate-900 border-slate-700" value={formData.licenseType} onChange={e => setFormData({...formData, licenseType: e.target.value})} />
-                        ) : (
-                            <p className="text-xs font-medium text-slate-200">{formData.licenseType || 'Unknown'}</p>
-                        )}
+                    <div className="p-3 border-l border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
+                       <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("טלפון", "Phone")}</span>
+                       <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tight leading-tight">{item.phoneNumber || annotation.phoneNumber || '---'}</span>
                     </div>
-                    <div>
-                        <label className="text-[9px] font-bold text-slate-500 uppercase">{t("סחורה", "Commodity")}</label>
-                        {isEditing ? (
-                            <Input className="h-7 text-xs bg-slate-900 border-slate-700" value={formData.commodity} onChange={e => setFormData({...formData, commodity: e.target.value})} />
-                        ) : (
-                            <p className="text-xs font-medium text-amber-500">{formData.commodity || 'Unknown'}</p>
-                        )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-[9px] font-bold text-slate-500 uppercase">{t("כמות (ק\"ג)", "Qty (kg)")}</label>
-                            {isEditing ? (
-                                <Input type="number" className="h-7 text-xs bg-slate-900 border-slate-700" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} />
-                            ) : (
-                                <p className="text-xs font-medium text-slate-200">{formData.quantity || '-'}</p>
-                            )}
-                        </div>
-                        <div>
-                            <label className="text-[9px] font-bold text-slate-500 uppercase">{t("מחיר ($)", "Price ($)")}</label>
-                            {isEditing ? (
-                                <Input type="number" className="h-7 text-xs bg-slate-900 border-slate-700" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} />
-                            ) : (
-                                <p className="text-xs font-medium text-slate-200">{formData.price || '-'}</p>
-                            )}
-                        </div>
+                    <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                       <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סחורה וסוג", "Commodity & Type")}</span>
+                       <span className="text-[10px] font-bold text-slate-900 dark:text-white uppercase tracking-tight leading-tight break-words">
+                         <span className="text-amber-500">{item.commodity}</span> • {item.licenseType || 'ML'}
+                       </span>
                     </div>
                 </div>
 
-                <div className="bg-slate-800/30 border border-slate-800 rounded-lg p-3 space-y-2">
-                    <div className="flex items-center gap-2 text-slate-400">
-                        <LucideUser className="w-3 h-3" />
-                        <span className="text-[10px] font-bold uppercase">{t("פרטי התקשרות", "Contact Details")}</span>
-                    </div>
-                    {isEditing ? (
-                        <div className="space-y-2">
-                            <Input className="h-7 text-xs bg-slate-950 border-slate-700" placeholder={t("שם", "Name")} value={formData.contactPerson} onChange={e => setFormData({...formData, contactPerson: e.target.value})} />
-                            <Input className="h-7 text-xs bg-slate-950 border-slate-700" placeholder={t("טלפון", "Phone")} value={formData.phoneNumber} onChange={e => setFormData({...formData, phoneNumber: e.target.value})} />
-                        </div>
-                    ) : (
-                        <div className="text-xs space-y-1">
-                            <p className="text-slate-200 font-medium">{formData.contactPerson || t("אין איש קשר", "No contact info")}</p>
-                            {formData.phoneNumber && <a href={`tel:${formData.phoneNumber}`} className="text-blue-400 hover:underline flex items-center gap-1">
-                                <LucidePhone className="w-2 h-2" /> {formData.phoneNumber}
-                            </a>}
-                        </div>
-                    )}
-                </div>
-
-                {isEditing && (
-                    <Button variant="ghost" className="w-full text-red-500 hover:text-red-400 hover:bg-red-500/10 text-[10px] h-8" onClick={onDelete}>
-                        <LucideTrash2 className="w-3 h-3 mr-1" />
-                        {t("מחק רישיון", "Delete License")}
-                    </Button>
-                )}
+                <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
+                  ID: #{item.id.slice(0, 8)} • {t("עודכן לאחרונה: לפני שעה", "Last updated: 1h ago")}
+                </p>
             </div>
         </div>
     );

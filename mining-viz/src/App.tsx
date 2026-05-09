@@ -11,11 +11,29 @@ import DossierView from './components/DossierView';
 import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
 import KanbanBoard from './components/KanbanBoard';
+import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
+import FilterPanel from './components/FilterPanel';
+import LogisticsDesk from './components/LogisticsDesk';
+import OilMapView from './components/OilMapView';
+import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
+import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change?: string, up?: boolean | null }) {
+  const ch = change ?? '—';
+  const tone = up === true ? 'text-emerald-500' : up === false ? 'text-red-500' : 'text-slate-500 dark:text-slate-500';
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] font-black text-slate-500 dark:text-slate-400">{symbol}</span>
+      <span className="text-[10px] font-bold text-slate-900 dark:text-white">{price}</span>
+      <span className={`text-[9px] font-black ${tone}`}>{ch}</span>
+    </div>
+  );
+}
 
 export default function App() {
   const { t, isRtl } = useI18n();
@@ -35,10 +53,11 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'map' | 'pipeline'>('map');
+  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin' | 'dashboard' | 'logistics' | 'oil'>('map');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [hoveredItem, setHoveredItem] = useState<MiningLicense | null>(null);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
@@ -56,8 +75,28 @@ export default function App() {
     }
   });
 
+  // Locally-added licenses (persisted to localStorage)
+  const [localLicenses, setLocalLicenses] = useState<MiningLicense[]>(() => {
+    try {
+      const saved = localStorage.getItem('mining_local_licenses');
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // Persist local licenses to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('mining_local_licenses', JSON.stringify(localLicenses));
+  }, [localLicenses]);
+
+  const allLicenses = useMemo(
+    () => [...rawData, ...localLicenses],
+    [rawData, localLicenses]
+  );
+
   // Filtering Hook
-  const miningData = useMiningData(rawData, userAnnotations);
+  const miningData = useMiningData(allLicenses, userAnnotations);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -112,8 +151,8 @@ export default function App() {
 
     // Map to backend fields
     const backendPayload: any = {};
-    if (updates.price !== undefined) backendPayload.pricePerKg = updates.price;
-    if (updates.quantity !== undefined) backendPayload.capacity = updates.quantity;
+    if (updates.price !== undefined) backendPayload.pricePerKg = parseFloat(updates.price.toString());
+    if (updates.quantity !== undefined) backendPayload.capacity = parseFloat(updates.quantity.toString());
     if (updates.status !== undefined) backendPayload.status = updates.status === 'good' ? 'APPROVED' : updates.status;
     if (updates.commodity !== undefined) backendPayload.commodity = updates.commodity;
 
@@ -133,121 +172,422 @@ export default function App() {
   }, [t, deleteLicenseMutation]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
+  
+  // Market Prices State
+  const [marketPrices, setMarketPrices] = useState<any[]>([]);
+
+  const [filteredGeoJson, setFilteredGeoJson] = useState<any>(null);
+
+  useEffect(() => {
+    // Loading Global Tactical Boundaries for the entire world
+    fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
+      .then(res => res.json())
+      .then(data => {
+        setFilteredGeoJson(data);
+      })
+      .catch(err => console.error("Global GeoJSON load failed", err));
+  }, []);
+
+  useEffect(() => {
+    const apiBase =
+      import.meta.env.VITE_API_BASE ||
+      (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+
+    const fetchPrices = async () => {
+      // Prefer backend: live WTI/Brent/etc. via Yahoo (server-side), metals.live, CoinGecko
+      try {
+        const tickerRes = await fetch(`${apiBase}/api/market-ticker`);
+        if (tickerRes.ok) {
+          const rows = await tickerRes.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            setMarketPrices(rows);
+            return;
+          }
+        }
+      } catch (_) {
+        /* offline or CORS — use client fallbacks */
+      }
+
+      const results: any[] = [];
+
+      try {
+        const metalsRes = await fetch('https://api.metals.live/v1/spot');
+        if (metalsRes.ok) {
+          const metals: any[] = await metalsRes.json();
+          const map: Record<string, number> = {};
+          metals.forEach((entry: any) => Object.assign(map, entry));
+          if (map.gold) {
+            results.push({
+              symbol: 'GOLD/oz',
+              price: `$${map.gold.toLocaleString()}`,
+              category: 'Metal',
+              up: true,
+              change: 'LIVE',
+            });
+          }
+          if (map.silver) {
+            results.push({
+              symbol: 'SILVER/oz',
+              price: `$${map.silver.toFixed(2)}`,
+              category: 'Metal',
+              up: true,
+              change: 'LIVE',
+            });
+          }
+        }
+      } catch (_) {}
+      if (!results.some((r) => r.symbol === 'GOLD/oz')) {
+        results.push({
+          symbol: 'GOLD/oz',
+          price: '$2,350',
+          category: 'Metal',
+          change: '—',
+          up: null,
+        });
+      }
+      if (!results.some((r) => r.symbol === 'SILVER/oz')) {
+        results.push({
+          symbol: 'SILVER/oz',
+          price: '$28.00',
+          category: 'Metal',
+          change: '—',
+          up: null,
+        });
+      }
+
+      try {
+        const btcRes = await fetch(
+          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true'
+        );
+        if (btcRes.ok) {
+          const data = await btcRes.json();
+          const ch = data.bitcoin?.usd_24h_change ?? 0;
+          results.push({
+            symbol: 'BTC/USD',
+            price: `$${data.bitcoin.usd.toLocaleString()}`,
+            category: 'Crypto',
+            up: ch >= 0,
+            change: `${ch >= 0 ? '+' : ''}${Number(ch).toFixed(2)}%`,
+          });
+        }
+      } catch (_) {}
+
+      // Last resort when backend unreachable — no fake “live” oil numbers
+      results.push(
+        {
+          symbol: 'BRENT',
+          price: '—',
+          category: 'Energy',
+          change: 'API',
+          up: null,
+        },
+        {
+          symbol: 'WTI CRUDE',
+          price: '—',
+          category: 'Energy',
+          change: 'API',
+          up: null,
+        }
+      );
+
+      setMarketPrices(results);
+    };
+
+    fetchPrices();
+    const interval = setInterval(fetchPrices, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Triple-Panel States
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   return (
-    <div className={`flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden ${isRtl ? 'rtl' : 'ltr'}`}>
-      {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
-      
-      <AdminPanel isOpen={isAdminPanelOpen} onClose={() => setIsAdminPanelOpen(false)} token={token} />
+    <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
+      {/* 1. Global Market Ticker (Entrepreneur Desk) */}
+      <div className="h-8 w-full bg-slate-50 dark:bg-slate-950 border-b border-black/5 dark:border-white/5 flex items-center overflow-hidden">
+         <div className="flex items-center gap-2 px-4 border-r border-black/5 dark:border-white/5 bg-amber-500/10 h-full shrink-0">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-[9px] font-black uppercase text-amber-500 tracking-widest">{t("שווקים חיים", "LIVE MARKETS")}</span>
+         </div>
+         <div className="flex-1 overflow-hidden relative">
+            <div className="flex items-center gap-12 whitespace-nowrap animate-marquee py-1">
+               {marketPrices.length > 0 ? (
+                 <>
+                   {marketPrices.map((item, idx) => (
+                     <TickerItem key={`${item.symbol}-${idx}`} symbol={item.symbol} price={item.price} change={item.change} up={item.up} />
+                   ))}
+                   {/* Repeat for seamless marquee */}
+                   {marketPrices.map((item, idx) => (
+                     <TickerItem key={`${item.symbol}-repeat-${idx}`} symbol={item.symbol} price={item.price} change={item.change} up={item.up} />
+                   ))}
+                 </>
+               ) : (
+                 <>
+                   <TickerItem symbol="XAU/USD" price="---" change="0.00%" up />
+                   <TickerItem symbol="XAG/USD" price="---" change="0.00%" />
+                   <TickerItem symbol="XPT/USD" price="---" change="0.00%" up />
+                   <TickerItem symbol="BRENT" price="---" change="0.00%" up />
+                 </>
+               )}
+            </div>
+         </div>
+      </div>
 
-      {/* Admin Button */}
-      {userRole === 'admin' && (
-        <button
-          onClick={() => setIsAdminPanelOpen(true)}
-          className="fixed bottom-6 right-6 z-50 p-3 bg-amber-500 hover:bg-amber-600 rounded-full shadow-lg transition-all"
-          title={t("לוח בקרה", "Admin Panel")}
-        >
-          ⚙️
-        </button>
-      )}
-
-      <AddLicenseModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSubmit={(item: any) => {/* mutation here */}}
-      />
-
-      <DossierView
-        isOpen={isDossierOpen}
-        onClose={() => setIsDossierOpen(false)}
-        item={dossierItem}
-        annotation={dossierItem ? (userAnnotations[dossierItem.id] || {}) : {}}
-        updateAnnotation={updateAnnotation}
-      />
-
-      {/* Main Layout */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar */}
+      {/* 2. Main Discovery Layout */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
+        
+        {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
-          className={`transition-all duration-300 border-r border-slate-800 bg-slate-900/50 backdrop-blur-xl z-20 
-          ${isSidebarCollapsed ? 'w-0 overflow-hidden opacity-0' : 'w-80'} 
-          ${isMobile && mobileTab !== 'list' ? 'hidden' : ''}`}
+          className={`hidden md:block transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
+          onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
+          onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
         >
           <Sidebar
             processedData={miningData.processedData}
-            filter={miningData.filter} setFilter={miningData.setFilter}
-            sortBy={miningData.sortBy} setSortBy={miningData.setSortBy}
-            selectedCommodity={miningData.selectedCommodity} setSelectedCommodity={miningData.setSelectedCommodity}
-            selectedCountry={miningData.selectedCountry} setSelectedCountry={miningData.setSelectedCountry}
-            userStatusFilter={miningData.userStatusFilter} setUserStatusFilter={miningData.setUserStatusFilter}
-            selectedLicenseType={miningData.selectedLicenseType} setSelectedLicenseType={miningData.setSelectedLicenseType}
-            commodities={miningData.commodities} countries={miningData.countries} licenseTypes={miningData.licenseTypes}
             setIsAddModalOpen={setIsAddModalOpen}
             loading={isLoading}
             onLogout={handleLogout}
+            userAnnotations={userAnnotations}
+            selectedItem={selectedItem}
             setSelectedItem={(item: MiningLicense) => {
               setSelectedItem(item);
-              handleOpenDossier(item);
               setMapFlyTrigger(prev => prev + 1);
             }}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
+            onToggleAdmin={() => setViewMode('admin')}
+            isFilterOpen={isFilterOpen}
+            isPinned={isSidebarPinned}
+            setIsPinned={setIsSidebarPinned}
+            isCollapsed={isSidebarCollapsed && !isSidebarPinned}
           />
         </aside>
 
-        {/* Content Area */}
-        <main className="flex-1 relative">
-          {/* Sidebar Toggle */}
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="absolute top-4 left-4 z-30 p-2 bg-slate-800 hover:bg-slate-700 rounded-md shadow-md"
-          >
-            {isSidebarCollapsed ? '»' : '«'}
-          </button>
+        {/* PANEL 2: Central Map Workspace */}
+        <main className="flex-1 relative z-0 h-full overflow-hidden">
+          {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
+          {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
+          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics') && (
+            <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
+              {/* Search bar — hidden on mobile, shown on sm+ */}
+              <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
+                  <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
+                    <LucideSearch className="w-5 h-5 text-slate-400 dark:text-slate-500 mr-3" />
+                    <input 
+                      type="text"
+                      placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
+                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
+                      value={miningData.filter}
+                      onChange={(e) => miningData.setFilter(e.target.value)}
+                    />
+                  </div>
+              </div>
 
-          {/* View Mode Switcher */}
-          <div className="absolute top-4 right-4 z-30 flex gap-2 bg-slate-800/80 backdrop-blur p-1 rounded-lg border border-slate-700">
-            <button
-              onClick={() => setViewMode('map')}
-              className={`px-3 py-1 rounded-md transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950' : 'hover:bg-slate-700'}`}
-            >
-              🗺️ {t("מפה", "Map")}
-            </button>
-            <button
-              onClick={() => setViewMode('pipeline')}
-              className={`px-3 py-1 rounded-md transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950' : 'hover:bg-slate-700'}`}
-            >
-              📊 {t("צנרת", "Pipeline")}
-            </button>
-          </div>
+              <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+                  <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
+                    <button
+                      onClick={() => setViewMode('map')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("מפה", "Map")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('dashboard')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'dashboard' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <span className="hidden xs:inline">{t("לוח בקרה", "Dashboard")}</span>
+                      <span className="xs:hidden">{t("לוח", "Dash")}</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('pipeline')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("צנרת", "Pipeline")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('logistics')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'logistics' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("לוגיסטיקה", "Logistics")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('oil')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <LucideDroplets className="w-3.5 h-3.5" />
+                      {t("נפט", "Oil")}
+                    </button>
+                  </div>
 
-          {viewMode === 'map' ? (
-            <MapComponent
-              processedData={miningData.processedData}
-              userAnnotations={userAnnotations}
-              selectedItem={selectedItem}
-              mapFlyTrigger={mapFlyTrigger}
-              setSelectedItem={setSelectedItem}
-              handleOpenDossier={handleOpenDossier}
-              mapCenter={mapCenter}
-              updateAnnotation={updateAnnotation}
-              deleteLicense={deleteLicense}
-            />
-          ) : (
-            <KanbanBoard
-              processedData={miningData.processedData}
-              userAnnotations={userAnnotations}
-              updateAnnotation={updateAnnotation}
-              onCardClick={handleOpenDossier}
-            />
+                  {/* Filter button — hidden on mobile (available in bottom nav) */}
+                  <ThemeToggle className="hidden sm:flex" />
+                  <button
+                    onClick={() => setIsFilterOpen(!isFilterOpen)}
+                    className={`hidden sm:flex p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-white/60 dark:bg-slate-950/60 border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  >
+                    <LucideFilter className="w-5 h-5" />
+                  </button>
+              </div>
+            </div>
           )}
+
+          <div className="w-full h-full z-0">
+            {viewMode === 'map' && (
+              <MapComponent
+                processedData={miningData.processedData}
+                userAnnotations={userAnnotations}
+                selectedItem={selectedItem}
+                mapFlyTrigger={mapFlyTrigger}
+                setSelectedItem={setSelectedItem}
+                handleOpenDossier={handleOpenDossier}
+                mapCenter={mapCenter}
+                updateAnnotation={updateAnnotation}
+                deleteLicense={deleteLicense}
+              />
+            )}
+            {viewMode === 'dashboard' && (
+              <DashboardView 
+                licenses={miningData.processedData}
+                marketPrices={marketPrices}
+                annotations={userAnnotations}
+              />
+            )}
+            {viewMode === 'pipeline' && (
+              <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">
+                <KanbanBoard
+                  processedData={miningData.processedData}
+                  userAnnotations={userAnnotations}
+                  updateAnnotation={updateAnnotation}
+                  onCardClick={handleOpenDossier}
+                  isMobile={isMobile}
+                />
+              </div>
+            )}
+            {viewMode === 'admin' && (
+              <div className="h-full bg-white dark:bg-slate-950">
+                <AdminPanel 
+                  isOpen={true} 
+                  onClose={() => setViewMode('map')} 
+                  token={token || undefined} 
+                  isFullPage={true}
+                />
+              </div>
+            )}
+            {viewMode === 'logistics' && (
+              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
+                <LogisticsDesk licenses={allLicenses} />
+              </div>
+            )}
+            {viewMode === 'oil' && (
+              <OilMapView onBack={() => setViewMode('map')} />
+            )}
+          </div>
         </main>
+
+        {/* PANEL 3: Right Tactical Filter Hub */}
+        <AdminPanel 
+          isOpen={isAdminPanelOpen} 
+          onClose={() => setIsAdminPanelOpen(false)} 
+          token={token || undefined} 
+        />
+        <FilterPanel 
+          isOpen={isFilterOpen}
+          onClose={() => setIsFilterOpen(false)}
+          selectedCommodity={miningData.selectedCommodity}
+          setSelectedCommodity={miningData.setSelectedCommodity}
+          selectedCountry={miningData.selectedCountry}
+          setSelectedCountry={miningData.setSelectedCountry}
+          userStatusFilter={miningData.userStatusFilter}
+          setUserStatusFilter={miningData.setUserStatusFilter}
+          selectedLicenseType={miningData.selectedLicenseType}
+          setSelectedLicenseType={miningData.setSelectedLicenseType}
+          commodities={miningData.commodities}
+          countries={miningData.countries}
+          licenseTypes={miningData.licenseTypes}
+        />
+
+        {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
+        <DossierView 
+          isOpen={isDossierOpen} 
+          onClose={() => setIsDossierOpen(false)} 
+          item={dossierItem} 
+          marketPrices={marketPrices}
+          annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
+          updateAnnotation={updateAnnotation}
+        />
+
+        {/* Add License Modal */}
+        <AddLicenseModal
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          onSubmit={(formData) => {
+            const newLicense = {
+              ...formData,
+              id: `local-${Date.now()}`,
+              date: new Date().toISOString().split('T')[0],
+              status: formData.status || 'Operating',
+            };
+            setLocalLicenses(prev => [...prev, newLicense]);
+            setIsAddModalOpen(false);
+          }}
+        />
       </div>
 
-      {/* Mobile Nav */}
-      {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-around z-40">
-           {/* Mobile nav items... */}
-        </nav>
-      )}
+      {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
+      <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
+        <button
+          onClick={() => setViewMode('map')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'map' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideMapPin className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("מפה", "Map")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('pipeline')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'pipeline' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideLayoutGrid className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("צנרת", "Pipeline")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('dashboard')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'dashboard' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("דאשבורד", "Dash")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('logistics')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'logistics' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideAnchor className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("לוגיסטיקה", "Logistics")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('oil')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideDroplets className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט", "Oil")}</span>
+        </button>
+        <button
+          onClick={() => setIsFilterOpen(!isFilterOpen)}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${isFilterOpen ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideFilter className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("סינון", "Filter")}</span>
+        </button>
+        <button
+          onClick={handleLogout}
+          className="flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 text-slate-400 dark:text-slate-500 hover:text-red-400 transition-colors"
+        >
+          <LucideLogOut className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("יציאה", "Logout")}</span>
+        </button>
+      </nav>
     </div>
   );
 }

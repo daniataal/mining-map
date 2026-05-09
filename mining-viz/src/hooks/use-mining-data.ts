@@ -19,16 +19,18 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     if (selectedCommodity.length > 0) {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
-        const val = annotation.commodity || item.commodity || 'Unknown';
-        return selectedCommodity.includes(val);
+        const val = (annotation.commodity || item.commodity || 'Unknown').trim();
+        const normalized = val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        return selectedCommodity.includes(normalized);
       });
     }
 
     if (selectedLicenseType.length > 0) {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
-        const val = annotation.licenseType || item.licenseType || 'Unknown';
-        return selectedLicenseType.includes(val);
+        const val = (annotation.licenseType || item.licenseType || 'Unknown').trim();
+        const normalized = val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        return selectedLicenseType.includes(normalized);
       });
     }
 
@@ -71,7 +73,9 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const commodities = useMemo(() => {
     const c = new Set(rawData.map(item => {
       const annotation = userAnnotations[item.id] || {};
-      return annotation.commodity || item.commodity || 'Unknown';
+      const val = (annotation.commodity || item.commodity || 'Unknown').trim();
+      // Capitalize first letter of each word for professional consistency
+      return val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
     }));
     return Array.from(c).sort();
   }, [rawData, userAnnotations]);
@@ -79,7 +83,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const licenseTypes = useMemo(() => {
     const t = new Set(rawData.map(item => {
       const annotation = userAnnotations[item.id] || {};
-      return annotation.licenseType || item.licenseType || 'Unknown';
+      const val = (annotation.licenseType || item.licenseType || 'Unknown').trim();
+      return val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
     }));
     return Array.from(t).sort();
   }, [rawData, userAnnotations]);
