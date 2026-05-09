@@ -50,7 +50,8 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin'>('map');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [hoveredItem, setHoveredItem] = useState<MiningLicense | null>(null);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
