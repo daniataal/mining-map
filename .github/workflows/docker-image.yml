@@ -127,5 +127,5 @@ jobs:
           sudo docker compose pull
           sudo docker compose up -d --remove-orphans
           
-          # Clean up old dangling images to save space
-          sudo docker image prune -f
+          # Deep Clean: Remove ALL unused images to reclaim maximum disk space
+          sudo docker image prune -af

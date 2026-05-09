@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
