@@ -35,6 +35,9 @@ export interface ActivityLog {
   timestamp: string;
 }
 
+export type LeadValue = 'high' | 'medium' | 'low';
+export type ShipmentStatus = 'planned' | 'in-transit' | 'delivered' | 'cancelled';
+
 export interface UserAnnotation {
   status?: LicenseStatus;
   stage?: string;
@@ -46,7 +49,35 @@ export interface UserAnnotation {
   quantity?: number;
   contactPerson?: string;
   phoneNumber?: string;
+  leadValue?: LeadValue;
+  feeNote?: string;
   [key: string]: any;
+}
+
+export interface ShipmentLeg {
+  id: string;
+  dealId: string;
+  dealLabel?: string;
+  origin: string;
+  destination: string;
+  incoterm: string;
+  status: ShipmentStatus;
+  eta?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  label: string;
+  checked: boolean;
+  notes?: string;
+}
+
+export interface DealChecklist {
+  dealId: string;
+  items: ChecklistItem[];
+  updatedAt: string;
 }
 
 export interface MeetingPoint {
@@ -71,5 +102,37 @@ export interface MinerListing {
   meeting_point_id?: string;
   meeting_date?: string;
   status: 'PENDING' | 'CONTACTED' | 'MEETING' | 'ASSAY' | 'OFFER' | 'ACCEPTED' | 'REJECTED' | 'PURCHASED' | 'TRANSFERRED';
+}
+
+// ─── Oil / Petroleum Types ────────────────────────────────────────────────────
+
+export type OilHsCategory = 'crude' | 'refined' | 'gas' | 'other';
+
+export interface OilHsCode {
+  code: string;
+  description: string;
+  category: OilHsCategory;
+}
+
+/** Per-country petroleum trade summary returned by /api/oil/summary */
+export interface OilTradeFlow {
+  country: string;
+  iso2: string;
+  lat: number;
+  lng: number;
+  export_value_usd: number | null;
+  import_value_usd: number | null;
+  top_hs_code: string;
+  top_hs_description: string;
+  category: OilHsCategory;
+  year: number;
+  rank?: number;
+}
+
+export interface OilSummaryResponse {
+  flows: OilTradeFlow[];
+  source: string;
+  data_as_of: string;
+  limitations: string[];
 }
 

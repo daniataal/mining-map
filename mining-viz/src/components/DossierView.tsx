@@ -21,6 +21,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
 import TradeContext from './TradeContext';
+import ExecutionChecklist from './ExecutionChecklist';
+import { LeadValue } from '../types';
 
 interface DossierViewProps {
   isOpen: boolean;
@@ -269,7 +271,7 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'trade', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map(tab => (
+              {['overview', 'execution', 'trade', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -278,6 +280,8 @@ Output requirements:
                 >
                   {tab === 'trade'
                     ? t('מסחר וכלכלה', 'Trade Context')
+                    : tab === 'execution'
+                    ? '⚡ Execution'
                     : tab.replace('-', ' ')}
                   {activeTab === tab && (
                     <motion.div
@@ -288,6 +292,75 @@ Output requirements:
                 </button>
               ))}
             </nav>
+
+            {/* EXECUTION TAB */}
+            {activeTab === 'execution' && (
+              <div className="grid grid-cols-12 gap-6 md:gap-10">
+                {/* Left: Checklist */}
+                <div className="col-span-12 lg:col-span-7 space-y-6">
+                  <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 md:p-8">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                      <LucideShieldCheck className="w-4 h-4 text-emerald-500" /> Execution Checklist
+                    </h4>
+                    <ExecutionChecklist dealId={item.id} dealLabel={item.company} />
+                  </div>
+                </div>
+
+                {/* Right: Lead Value + Fee Note */}
+                <div className="col-span-12 lg:col-span-5 space-y-6">
+                  {/* Lead Value Score */}
+                  <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 md:p-8">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-5 flex items-center gap-3">
+                      <LucideZap className="w-4 h-4 text-amber-500" /> Lead Value
+                    </h4>
+                    <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
+                      Internal priority tag for pipeline ranking. Not shared externally.
+                    </p>
+                    <div className="grid grid-cols-3 gap-2 mb-4">
+                      {(['high', 'medium', 'low'] as LeadValue[]).map(v => {
+                        const cfg = {
+                          high:   { label: 'High',   color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', active: 'bg-emerald-500 text-white border-emerald-500' },
+                          medium: { label: 'Medium', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30',     active: 'bg-amber-500 text-slate-950 border-amber-500' },
+                          low:    { label: 'Low',    color: 'bg-slate-500/20 text-slate-400 border-slate-500/30',     active: 'bg-slate-500 text-white border-slate-500' },
+                        }[v];
+                        const isActive = (annotation.leadValue || 'medium') === v;
+                        return (
+                          <button
+                            key={v}
+                            onClick={() => updateAnnotation(item.id, { leadValue: v })}
+                            className={`py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${isActive ? cfg.active : cfg.color + ' hover:opacity-80'}`}
+                          >
+                            {cfg.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-relaxed">
+                      ⚠ Lead scores are internal workflow aids only — not investment ratings. No financial advice implied.
+                    </p>
+                  </div>
+
+                  {/* Broker Fee Note */}
+                  <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 md:p-8">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-3 flex items-center gap-3">
+                      <LucidePencil className="w-4 h-4 text-amber-500" /> Fee / Margin Note
+                    </h4>
+                    <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
+                      Private note for broker margin, commission structure, or deal economics. Stored locally only.
+                    </p>
+                    <textarea
+                      className="w-full text-xs bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 outline-none focus:border-amber-400 transition-colors resize-none h-28"
+                      placeholder="e.g. 3% broker margin on CIF value, split 50/50 with partner..."
+                      value={annotation.feeNote || ''}
+                      onChange={e => updateAnnotation(item.id, { feeNote: e.target.value })}
+                    />
+                    <p className="text-[9px] text-amber-500/80 mt-2 leading-relaxed">
+                      ⚠ This field is a private workflow note only — not legal, tax, or financial advice. Consult licensed professionals before structuring any fee arrangement.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* TRADE TAB */}
             {activeTab === 'trade' && (
