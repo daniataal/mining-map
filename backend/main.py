@@ -1290,6 +1290,124 @@ FALLBACK_PRICES = [
     {"symbol": "BRENT",   "price": "64.20",    "change": "+0.72%", "up": True},
 ]
 
+_YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+
+def _yahoo_futures_spot(yahoo_symbol: str):
+    """Last price + prior close for a Yahoo Finance symbol (e.g. CL=F, BZ=F)."""
+    try:
+        r = _requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
+            params={"interval": "1d", "range": "2d"},
+            headers={"User-Agent": _YAHOO_UA, "Accept": "application/json"},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return None
+        chart = r.json().get("chart", {})
+        res = chart.get("result") or []
+        if not res:
+            return None
+        meta = res[0].get("meta") or {}
+        price = meta.get("regularMarketPrice")
+        if price is None:
+            price = meta.get("previousClose")
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+        if price is None:
+            return None
+        price = float(price)
+        prev_f = float(prev) if prev is not None else None
+        chg_pct = None
+        if prev_f and prev_f > 0:
+            chg_pct = (price - prev_f) / prev_f * 100.0
+        return {"price": price, "chg_pct": chg_pct}
+    except Exception as ex:
+        print(f"[yahoo] {yahoo_symbol}: {ex}")
+        return None
+
+
+def _ticker_energy_row(label: str, category: str, yahoo_sym: str, price_fmt):
+    """price_fmt: callable(float) -> str for display."""
+    q = _yahoo_futures_spot(yahoo_sym)
+    if not q:
+        return None
+    up = True if q["chg_pct"] is None else q["chg_pct"] >= 0
+    chg = "LIVE" if q["chg_pct"] is None else f"{q['chg_pct']:+.2f}%"
+    return {
+        "symbol": label,
+        "price": price_fmt(q["price"]),
+        "category": category,
+        "up": up,
+        "change": chg,
+    }
+
+
+@app.get("/api/market-ticker")
+def get_market_ticker():
+    """
+    Rows for the web app ticker + dashboard: metals, crypto, and **live** CME/NYMEX-style
+    benchmarks via Yahoo (WTI CL=F, Brent BZ=F, etc.). No API key.
+
+    If Yahoo blocks a symbol, that row is omitted (frontend has its own fallbacks).
+    """
+    rows: list = []
+
+    metals_map: dict = {}
+    try:
+        metals_res = _requests.get("https://api.metals.live/v1/spot", timeout=6)
+        if metals_res.status_code == 200:
+            for entry in metals_res.json():
+                metals_map.update(entry)
+    except Exception:
+        pass
+
+    g = metals_map.get("gold")
+    s = metals_map.get("silver")
+    if g:
+        rows.append({"symbol": "GOLD/oz", "price": f"${float(g):,.2f}", "category": "Metal", "up": True, "change": "LIVE"})
+    else:
+        rows.append({"symbol": "GOLD/oz", "price": "$2,350.00", "category": "Metal", "up": None, "change": "—"})
+    if s:
+        rows.append({"symbol": "SILVER/oz", "price": f"${float(s):.2f}", "category": "Metal", "up": True, "change": "LIVE"})
+    else:
+        rows.append({"symbol": "SILVER/oz", "price": "$28.00", "category": "Metal", "up": None, "change": "—"})
+
+    try:
+        btc_res = _requests.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
+            timeout=6,
+        )
+        if btc_res.status_code == 200:
+            btc_data = btc_res.json().get("bitcoin", {})
+            btc_price = btc_data.get("usd", 0)
+            btc_change = btc_data.get("usd_24h_change", 0) or 0
+            rows.append({
+                "symbol": "BTC/USD",
+                "price": f"${float(btc_price):,.2f}",
+                "category": "Crypto",
+                "up": btc_change >= 0,
+                "change": f"{'+' if btc_change >= 0 else ''}{btc_change:.2f}%",
+            })
+    except Exception:
+        pass
+
+    # ICE / NYMEX continuous futures on Yahoo
+    for spec in (
+        ("BRENT", "Energy", "BZ=F", lambda p: f"${p:.2f}/bbl"),
+        ("WTI CRUDE", "Energy", "CL=F", lambda p: f"${p:.2f}/bbl"),
+        ("HEATING OIL", "Energy", "HO=F", lambda p: f"${p:.3f}/gal"),
+        ("COPPER", "Industrial", "HG=F", lambda p: f"${p:.3f}/lb"),
+        ("SUGAR #11", "Softs", "SB=F", lambda p: f"{p * 100:.2f}¢/lb"),
+        ("COFFEE", "Softs", "KC=F", lambda p: f"{p * 100:.2f}¢/lb"),
+    ):
+        label, cat, sym, fmt = spec
+        rrow = _ticker_energy_row(label, cat, sym, fmt)
+        if rrow:
+            rows.append(rrow)
+
+    return rows
+
+
 @app.get("/market-prices")
 def get_market_prices():
     """
@@ -1299,15 +1417,13 @@ def get_market_prices():
     try:
         results = []
 
-        # Gold & Silver via open.er-api (metals endpoint — free, no auth)
+        metals_map = {}
         metals_res = _requests.get(
             "https://api.metals.live/v1/spot",
             timeout=5
         )
         if metals_res.status_code == 200:
             metals = metals_res.json()
-            # metals.live returns a list of dicts: [{"gold": 3327.4}, {"silver": 32.8}, ...]
-            metals_map = {}
             for entry in metals:
                 metals_map.update(entry)
 
@@ -1337,12 +1453,23 @@ def get_market_prices():
         else:
             results.append(FALLBACK_PRICES[2])
 
-        # Brent Crude — use metals.live if available, else fallback
-        brent_price = metals_map.get("brent crude", None) if 'metals_map' in dir() else None
-        if brent_price:
-            results.append({"symbol": "BRENT", "price": f"{brent_price:,.2f}", "change": "LIVE", "up": True})
+        # Brent & WTI — Yahoo (more reliable than stale metals.live “brent” field)
+        bz = _yahoo_futures_spot("BZ=F")
+        cl = _yahoo_futures_spot("CL=F")
+        if bz:
+            up = True if bz["chg_pct"] is None else bz["chg_pct"] >= 0
+            chg = "LIVE" if bz["chg_pct"] is None else f"{'+' if bz['chg_pct'] >= 0 else ''}{bz['chg_pct']:.2f}%"
+            results.append({"symbol": "BRENT", "price": f"{bz['price']:.2f}", "change": chg, "up": up})
         else:
-            results.append(FALLBACK_PRICES[3])
+            br_m = metals_map.get("brent crude") or metals_map.get("brent")
+            if br_m:
+                results.append({"symbol": "BRENT", "price": f"{float(br_m):,.2f}", "change": "LIVE", "up": True})
+            else:
+                results.append(FALLBACK_PRICES[3])
+        if cl:
+            up = True if cl["chg_pct"] is None else cl["chg_pct"] >= 0
+            chg = "LIVE" if cl["chg_pct"] is None else f"{'+' if cl['chg_pct'] >= 0 else ''}{cl['chg_pct']:.2f}%"
+            results.append({"symbol": "WTI", "price": f"{cl['price']:.2f}", "change": chg, "up": up})
 
         return results if results else FALLBACK_PRICES
 
