@@ -7,11 +7,13 @@ import androidx.navigation.compose.composable
 import com.meridian.tradeos.ui.screens.HomeScreen
 import com.meridian.tradeos.ui.screens.SettingsScreen
 import com.meridian.tradeos.ui.screens.SplashScreen
+import com.meridian.tradeos.ui.screens.WebDeskScreen
 
 sealed class Screen(val route: String) {
-    object Splash   : Screen("splash")
-    object Home     : Screen("home")
-    object Settings : Screen("settings")
+    object Splash         : Screen("splash")
+    object Home           : Screen("home")
+    object Settings       : Screen("settings")
+    object CommandCenter  : Screen("command_center")
 }
 
 @Composable
@@ -32,13 +34,20 @@ fun MeridianNavGraph(navController: NavHostController) {
 
         composable(Screen.Home.route) {
             HomeScreen(
-                onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                onOpenCommandCenter = { navController.navigate(Screen.CommandCenter.route) },
+            )
+        }
+
+        composable(Screen.CommandCenter.route) {
+            WebDeskScreen(
+                onNavigateBack = { navController.popBackStack() },
             )
         }
 
         composable(Screen.Settings.route) {
             SettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
             )
         }
     }

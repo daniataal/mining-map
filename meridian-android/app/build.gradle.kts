@@ -15,6 +15,8 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
+        // Dev: Android emulator → host machine Vite. Physical device: use your PC LAN IP, e.g. http://192.168.1.5:5173/
+        buildConfigField("String", "MERIDIAN_WEB_URL", "\"http://10.0.2.2:5173/\"")
     }
 
     buildTypes {
@@ -36,7 +38,10 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     composeOptions {
         // Compose Compiler 1.5.13 is compatible with Kotlin 1.9.23 + BOM 2024.05.00
