@@ -338,11 +338,14 @@ export default function App() {
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
         <DossierView 
-          isOpen={isDossierOpen}
-          item={dossierItem}
-          annotation={dossierItem ? userAnnotations[dossierItem.id] : {} as any}
-          updateAnnotation={updateAnnotation}
-          onClose={() => setIsDossierOpen(false)}
+          isOpen={isDossierOpen} 
+          onClose={() => setIsDossierOpen(false)} 
+          item={dossierItem} 
+          annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
+          updateAnnotation={(id, updates) => setUserAnnotations(prev => ({
+            ...prev,
+            [id]: { ...prev[id], ...updates }
+          }))}
         />
       </div>
 
