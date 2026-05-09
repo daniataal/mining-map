@@ -172,9 +172,10 @@ fun CommandCenterScreen(
                     text = connectionLine(probeState, probeDetail),
                     fontSize = 13.sp,
                     color = when (probeState) {
+                        BackendProbeState.Idle -> TextMuted
+                        BackendProbeState.Loading -> TextMuted
                         BackendProbeState.Ok -> AccentAmberDim
                         BackendProbeState.Error -> Color(0xFFFF6B6B)
-                        else -> TextMuted,
                     },
                 )
                 Spacer(modifier = Modifier.height(16.dp))
