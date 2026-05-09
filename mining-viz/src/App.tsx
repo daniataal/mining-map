@@ -185,6 +185,8 @@ export default function App() {
             setIsAddModalOpen={setIsAddModalOpen}
             loading={isLoading}
             onLogout={handleLogout}
+            userAnnotations={userAnnotations}
+            selectedItem={selectedItem}
             setSelectedItem={(item: MiningLicense) => {
               setSelectedItem(item);
               handleOpenDossier(item);
