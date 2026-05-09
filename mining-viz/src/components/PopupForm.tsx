@@ -44,7 +44,7 @@ export default function PopupForm({
                    <Badge className="bg-slate-950/80 backdrop-blur-md border-white/10 text-[9px] font-black uppercase px-2 h-5 text-white">
                      {item.lat?.toFixed(4)}, {item.lng?.toFixed(4)}
                    </Badge>
-                   {annotation.phoneNumber && (
+                   {(item.phoneNumber || annotation.phoneNumber) && (
                      <Badge className="bg-emerald-500 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5">
                        {t("קו פעיל", "ACTIVE LINE")}
                      </Badge>
@@ -74,8 +74,8 @@ export default function PopupForm({
                    <Button 
                      size="sm" 
                      className={`h-9 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all
-                       ${annotation.phoneNumber ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
-                     onClick={() => annotation.phoneNumber && (window.location.href = `tel:${annotation.phoneNumber}`)}
+                       ${(item.phoneNumber || annotation.phoneNumber) ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                     onClick={() => { const ph = item.phoneNumber || annotation.phoneNumber; if (ph) window.location.href = `tel:${ph}`; }}
                    >
                      <LucidePhone className="w-3.5 h-3.5" />
                      {t("התקשר לליד", "Call Lead")}
@@ -97,7 +97,7 @@ export default function PopupForm({
                     </div>
                     <div className="p-3 border-l border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("טלפון", "Phone")}</span>
-                       <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tight leading-tight">{annotation.phoneNumber || '---'}</span>
+                       <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tight leading-tight">{item.phoneNumber || annotation.phoneNumber || '---'}</span>
                     </div>
                     <div className="p-3 border-t border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סחורה וסוג", "Commodity & Type")}</span>

@@ -282,12 +282,12 @@ export default function DossierView({
                            </Button>
                         </div>
                         <a 
-                          href={annotation.phoneNumber ? `tel:${annotation.phoneNumber}` : '#'}
+                          href={(item.phoneNumber || annotation.phoneNumber) ? `tel:${item.phoneNumber || annotation.phoneNumber}` : '#'}
                           className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors"
                         >
                            <div className="flex flex-col">
                               <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{t("טלפון", "Phone Line")}</span>
-                              <span className="text-sm font-black text-white">{annotation.phoneNumber || '--- --- ---'}</span>
+                              <span className="text-sm font-black text-white">{item.phoneNumber || annotation.phoneNumber || '--- --- ---'}</span>
                            </div>
                            <div className="h-10 w-10 flex items-center justify-center text-emerald-500">
                               <LucidePhone className="w-4 h-4" />
