@@ -52,14 +52,16 @@ jobs:
         script: |
           VERSION="v${{ env.BUILD_NUMBER }}"
           
+          # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
           cd /opt/mining-map
 
           # Create the modern split-service docker-compose.yml
+          # We don't escape the $VERSION here so the actual value is written to the file
           cat <<EOF | sudo tee docker-compose.yml
           services:
             backend:
-              image: dannyatalla/mining-backend:\$VERSION
+              image: dannyatalla/mining-backend:$VERSION
               container_name: mining-backend
               restart: always
               ports:
@@ -75,7 +77,7 @@ jobs:
                   condition: service_healthy
 
             frontend-admin:
-              image: dannyatalla/mining-frontend-admin:\$VERSION
+              image: dannyatalla/mining-frontend-admin:$VERSION
               container_name: mining-frontend-admin
               restart: always
               ports:
@@ -86,7 +88,7 @@ jobs:
                 - backend
 
             frontend-community:
-              image: dannyatalla/mining-frontend-community:\$VERSION
+              image: dannyatalla/mining-frontend-community:$VERSION
               container_name: mining-frontend-community
               restart: always
               ports:
@@ -118,7 +120,12 @@ jobs:
             postgres_data:
           EOF
 
-          # Pull and Restart
+          # Stop and remove the OLD monolithic container if it exists
+          sudo docker rm -f mining-map-app-1 mining-map-auto || true
+
+          # Pull and Restart using the new split architecture
           sudo docker compose pull
           sudo docker compose up -d --remove-orphans
+          
+          # Clean up old dangling images to save space
           sudo docker image prune -f
