@@ -24,6 +24,9 @@ interface SidebarProps {
   setSelectedItem: (item: MiningLicense) => void;
   viewMode: 'map' | 'pipeline';
   setViewMode: (mode: 'map' | 'pipeline') => void;
+  onToggleFilter: () => void;
+  onToggleAdmin: () => void;
+  isFilterOpen: boolean;
 }
 
 export default function Sidebar({
@@ -35,7 +38,10 @@ export default function Sidebar({
   userAnnotations,
   setIsAddModalOpen,
   viewMode,
-  setViewMode
+  setViewMode,
+  onToggleFilter,
+  onToggleAdmin,
+  isFilterOpen
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -81,12 +87,21 @@ export default function Sidebar({
         >
           <LucideLayoutGrid className="w-5 h-5" />
         </button>
-        <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
+        <button 
+          onClick={onToggleFilter}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
+          ${isFilterOpen 
+            ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
+            : 'text-slate-500 border-transparent hover:bg-white/5 hover:text-slate-300'}`}
+        >
           <LucideLayers className="w-5 h-5" />
-        </div>
-        <div className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 transition-colors cursor-pointer">
+        </button>
+        <button 
+          onClick={onToggleAdmin}
+          className="w-10 h-10 rounded-xl hover:bg-white/5 flex items-center justify-center text-slate-500 hover:text-slate-200 border border-transparent transition-all cursor-pointer"
+        >
           <LucideSettings className="w-5 h-5" />
-        </div>
+        </button>
         <div className="mt-auto w-10 h-10 rounded-xl hover:bg-red-500/10 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors cursor-pointer" onClick={onLogout}>
           <LucideLogOut className="w-5 h-5" />
         </div>

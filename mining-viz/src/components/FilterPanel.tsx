@@ -111,7 +111,7 @@ export default function FilterPanel({
       <footer className="p-5 border-t border-white/5 bg-white/5 flex gap-3">
         <Button 
           variant="outline" 
-          className="flex-1 h-10 border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-white/5"
+          className="flex-1 h-10 border-white/10 bg-transparent text-slate-400 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 hover:text-white transition-colors"
           onClick={resetFilters}
         >
           <LucideRotateCcw className="w-3 h-3 mr-2" />
