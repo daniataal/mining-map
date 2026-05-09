@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,7 +64,10 @@ import com.meridian.tradeos.ui.theme.TileOilEnd
 import com.meridian.tradeos.ui.theme.TileOilStart
 
 @Composable
-fun HomeScreen(onNavigateToSettings: () -> Unit) {
+fun HomeScreen(
+    onNavigateToSettings: () -> Unit,
+    onOpenCommandCenter: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -92,6 +97,33 @@ fun HomeScreen(onNavigateToSettings: () -> Unit) {
                     style      = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color      = TextPrimary,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text  = "Map, licenses, oil & tickers run in the web desk (Vite + API).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick     = onOpenCommandCenter,
+                modifier    = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                shape       = RoundedCornerShape(16.dp),
+                colors      = ButtonDefaults.buttonColors(
+                    containerColor = AccentAmber,
+                    contentColor   = Color.Black,
+                ),
+            ) {
+                Text(
+                    text       = "OPEN MAP & DATA",
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.2.sp,
                 )
             }
 
@@ -162,6 +194,7 @@ fun HomeScreen(onNavigateToSettings: () -> Unit) {
                         gradientStart  = TileMiningStart,
                         gradientEnd    = TileMiningEnd,
                         badge          = "LIVE",
+                        onClick        = onOpenCommandCenter,
                         modifier       = Modifier.weight(1f),
                     )
                     CommodityTile(
@@ -171,6 +204,7 @@ fun HomeScreen(onNavigateToSettings: () -> Unit) {
                         gradientStart  = TileOilStart,
                         gradientEnd    = TileOilEnd,
                         badge          = "LIVE",
+                        onClick        = onOpenCommandCenter,
                         modifier       = Modifier.weight(1f),
                     )
                 }
@@ -181,6 +215,7 @@ fun HomeScreen(onNavigateToSettings: () -> Unit) {
                         icon           = Icons.Filled.LocalShipping,
                         gradientStart  = TileLogisticsStart,
                         gradientEnd    = TileLogisticsEnd,
+                        onClick        = onOpenCommandCenter,
                         modifier       = Modifier.weight(1f),
                     )
                     CommodityTile(
@@ -190,6 +225,7 @@ fun HomeScreen(onNavigateToSettings: () -> Unit) {
                         gradientStart  = TileMarketsStart,
                         gradientEnd    = TileMarketsEnd,
                         badge          = "SOON",
+                        onClick        = onOpenCommandCenter,
                         modifier       = Modifier.weight(1f),
                     )
                 }

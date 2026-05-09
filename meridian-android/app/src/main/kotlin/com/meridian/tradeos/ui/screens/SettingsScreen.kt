@@ -1,5 +1,6 @@
 package com.meridian.tradeos.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,7 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
@@ -23,18 +23,29 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.meridian.tradeos.BuildConfig
 import com.meridian.tradeos.ui.components.GlassCard
 import com.meridian.tradeos.ui.theme.AccentAmberDim
 import com.meridian.tradeos.ui.theme.BackgroundDeep
@@ -45,6 +56,15 @@ import com.meridian.tradeos.ui.theme.TextSecondary
 
 @Composable
 fun SettingsScreen(onNavigateBack: () -> Unit) {
+    val context = LocalContext.current
+    var webUrl by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        val sp = context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE)
+        webUrl = sp.getString(KEY_WEB_BASE_URL, null)?.trim()
+            ?: BuildConfig.MERIDIAN_WEB_URL.trim()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -86,15 +106,47 @@ fun SettingsScreen(onNavigateBack: () -> Unit) {
                 SettingsRow(icon = Icons.Filled.Security, label = "Security", value = "2FA enabled")
             }
 
-            SettingsSection(title = "CONNECTIVITY") {
-                SettingsRow(
-                    icon  = Icons.Filled.Cloud,
-                    label = "API Endpoint",
-                    // Future: https://api.meridian.trade/v1
-                    value = "Not configured",
+            SettingsSection(title = "WEB DESK (MAP & DATA)") {
+                Text(
+                    text          = "URL of your mining-map web app (Vite dev or deployed HTTPS). Emulator default: http://10.0.2.2:5173 — physical phone: http://YOUR_PC_IP:5173",
+                    fontSize      = 11.sp,
+                    color         = TextMuted,
+                    modifier      = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+                OutlinedTextField(
+                    value                   = webUrl,
+                    onValueChange           = { webUrl = it },
+                    label                   = { Text("Base URL", color = TextMuted) },
+                    singleLine              = true,
+                    modifier                = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors                  = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor   = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentAmberDim,
+                        unfocusedBorderColor = GlassBorderSubtle,
+                    ),
+                )
+                Button(
+                    onClick  = {
+                        context.getSharedPreferences(MERIDIAN_PREFS, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString(KEY_WEB_BASE_URL, webUrl.trim().trimEnd('/'))
+                            .apply()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = AccentAmberDim,
+                        contentColor   = TextPrimary,
+                    ),
+                ) {
+                    Text("Save URL", fontWeight = FontWeight.SemiBold)
+                }
                 SettingsDivider()
-                SettingsRow(icon = Icons.Filled.Sync, label = "Sync interval", value = "5 minutes")
+                SettingsRow(icon = Icons.Filled.Sync, label = "Tip", value = "Run API on :8000 & web on :5173")
             }
 
             SettingsSection(title = "APPEARANCE") {
