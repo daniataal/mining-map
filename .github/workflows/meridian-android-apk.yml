@@ -42,6 +42,9 @@ jobs:
 
       - name: Build Debug APK
         working-directory: meridian-android
+        env:
+          ORG_GRADLE_PROJECT_MERIDIAN_WEB_HOST: ${{ secrets.MERIDIAN_WEB_HOST }}
+          ORG_GRADLE_PROJECT_MERIDIAN_API_HOST: ${{ secrets.MERIDIAN_API_HOST }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload meridian-debug-apk
