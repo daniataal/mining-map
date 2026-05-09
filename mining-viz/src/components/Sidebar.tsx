@@ -10,7 +10,8 @@ import {
   MapPin as LucideMapPin,
   LayoutGrid as LucideLayoutGrid,
   Layers as LucideLayers,
-  Settings as LucideSettings
+  Settings as LucideSettings,
+  Pin as LucidePin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -22,11 +23,14 @@ interface SidebarProps {
   userAnnotations: Record<string, UserAnnotation>;
   selectedItem: MiningLicense | null;
   setSelectedItem: (item: MiningLicense) => void;
-  viewMode: 'map' | 'pipeline';
-  setViewMode: (mode: 'map' | 'pipeline') => void;
+  viewMode: 'map' | 'pipeline' | 'admin';
+  setViewMode: (mode: 'map' | 'pipeline' | 'admin') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
   isFilterOpen: boolean;
+  isPinned: boolean;
+  setIsPinned: (val: boolean) => void;
+  isCollapsed: boolean;
 }
 
 export default function Sidebar({
@@ -41,7 +45,10 @@ export default function Sidebar({
   setViewMode,
   onToggleFilter,
   onToggleAdmin,
-  isFilterOpen
+  isFilterOpen,
+  isPinned,
+  setIsPinned,
+  isCollapsed
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -108,26 +115,43 @@ export default function Sidebar({
       </div>
 
       {/* Results List */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="p-5 border-b border-white/5">
-          <h1 className="text-sm font-black tracking-[0.2em] text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
-          <div className="flex items-center justify-between mt-4">
-             <Badge variant="outline" className="text-[10px] border-white/10 text-slate-400 bg-white/5 px-2 h-5 font-black uppercase">
-                {processedData.length} {t("נמצאו", "Total Found")}
-             </Badge>
-             <Button 
-               size="icon" 
-               variant="ghost" 
-               className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition-all active:scale-95"
-               onClick={() => setIsAddModalOpen(true)}
-             >
-               <LucidePlus className="w-4 h-4 stroke-[3]" />
-             </Button>
-          </div>
-        </header>
+      {!isCollapsed && (
+        <motion.div 
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -20 }}
+          className="flex-1 flex flex-col min-w-0"
+        >
+          <header className="p-5 border-b border-white/5">
+            <div className="flex items-center justify-between">
+              <h1 className="text-sm font-black tracking-[0.2em] text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPinned(!isPinned);
+                }}
+                className={`p-1.5 rounded-lg transition-all ${isPinned ? 'text-amber-500 bg-amber-500/10' : 'text-slate-600 hover:text-slate-400'}`}
+              >
+                <LucidePin className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-500 rotate-45' : ''} transition-transform`} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+               <Badge variant="outline" className="text-[10px] border-white/10 text-slate-400 bg-white/5 px-2 h-5 font-black uppercase">
+                  {processedData.length} {t("נמצאו", "Total Found")}
+               </Badge>
+               <Button 
+                 size="icon" 
+                 variant="ghost" 
+                 className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition-all active:scale-95"
+                 onClick={() => setIsAddModalOpen(true)}
+               >
+                 <LucidePlus className="w-4 h-4 stroke-[3]" />
+               </Button>
+            </div>
+          </header>
 
-        <ScrollArea className="flex-1">
-          <div className="p-3 space-y-2">
+          <ScrollArea className="flex-1">
+            <div className="p-3 space-y-2">
             <AnimatePresence mode="popLayout">
               {processedData.slice(0, displayCount).map((item) => {
                 const annotation = userAnnotations[item.id] || {};
@@ -167,7 +191,8 @@ export default function Sidebar({
             <div ref={observerTarget} className="h-4" />
           </div>
         </ScrollArea>
-      </div>
+      </motion.div>
+      )}
     </div>
   );
 }
