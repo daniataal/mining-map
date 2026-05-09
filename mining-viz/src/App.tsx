@@ -165,13 +165,58 @@ export default function App() {
         updateAnnotation={updateAnnotation}
       />
 
-      {/* Main Layout */}
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar */}
-        <aside 
-          className={`transition-all duration-500 ease-in-out border-r border-slate-800 bg-slate-950/40 backdrop-blur-3xl z-20 shadow-2xl
-          ${isSidebarCollapsed ? 'w-0 overflow-hidden opacity-0 -translate-x-full' : 'w-80 translate-x-0'} 
-          ${isMobile && mobileTab !== 'list' ? 'hidden' : ''}`}
+      {/* Main Experience: The Map is the OS */}
+      <div className="flex flex-1 overflow-hidden relative bg-slate-950">
+        {/* Floating Filter Hub Toggle */}
+        <button
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          className="absolute top-4 left-4 z-40 p-3 bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl hover:bg-slate-900 transition-all active:scale-95 group"
+        >
+          <LucideFilter className={`w-5 h-5 ${isSidebarCollapsed ? 'text-slate-400' : 'text-amber-500'}`} />
+        </button>
+
+        {/* Global Command Search (MarineTraffic Style) */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-full max-w-lg px-4">
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-amber-500/20 to-amber-600/20 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
+            <div className="relative flex items-center bg-slate-950/60 backdrop-blur-2xl border border-white/10 rounded-2xl px-4 h-12 shadow-2xl">
+              <LucideSearch className="w-5 h-5 text-slate-500 mr-3" />
+              <input 
+                type="text"
+                placeholder={t("חפש רישיונות, חברות או אזורים...", "Search intelligence hub...")}
+                className="bg-transparent border-none outline-none text-sm font-bold text-slate-200 w-full placeholder:text-slate-600 tracking-tight"
+                value={miningData.filter}
+                onChange={(e) => miningData.setFilter(e.target.value)}
+              />
+              <div className="flex items-center gap-2 ml-2">
+                <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border border-white/10 bg-white/5 px-1.5 font-mono text-[10px] font-black text-slate-500 opacity-100 uppercase">
+                  CMD K
+                </kbd>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* View Mode Switcher */}
+        <div className="absolute top-4 right-4 z-30 flex gap-1.5 bg-slate-950/40 backdrop-blur-2xl p-1 rounded-xl border border-white/5 shadow-2xl">
+          <button
+            onClick={() => setViewMode('map')}
+            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+          >
+            {t("מפה", "Map")}
+          </button>
+          <button
+            onClick={() => setViewMode('pipeline')}
+            className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}
+          >
+            {t("צנרת", "Pipeline")}
+          </button>
+        </div>
+
+        {/* Floating Sidebar (Filter Hub) - Collapsible Drawer */}
+        <div 
+          className={`absolute top-0 bottom-0 left-0 transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-white/5 bg-slate-950/40 backdrop-blur-3xl shadow-2xl
+          ${isSidebarCollapsed ? '-translate-x-full opacity-0' : 'translate-x-0 opacity-100'} w-80`}
         >
           <Sidebar
             processedData={miningData.processedData}
@@ -193,55 +238,45 @@ export default function App() {
               setMapFlyTrigger(prev => prev + 1);
             }}
           />
-        </aside>
+        </div>
 
-        {/* Content Area */}
+        {/* Full-Screen Workspace */}
         <main className="flex-1 relative">
-          {/* Sidebar Toggle */}
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="absolute top-4 left-4 z-30 p-2 bg-slate-800 hover:bg-slate-700 rounded-md shadow-md"
-          >
-            {isSidebarCollapsed ? '»' : '«'}
-          </button>
-
-          {/* View Mode Switcher */}
-          <div className="absolute top-4 right-4 z-30 flex gap-2 bg-slate-800/80 backdrop-blur p-1 rounded-lg border border-slate-700">
-            <button
-              onClick={() => setViewMode('map')}
-              className={`px-3 py-1 rounded-md transition-all ${viewMode === 'map' ? 'bg-amber-500 text-slate-950' : 'hover:bg-slate-700'}`}
-            >
-              🗺️ {t("מפה", "Map")}
-            </button>
-            <button
-              onClick={() => setViewMode('pipeline')}
-              className={`px-3 py-1 rounded-md transition-all ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950' : 'hover:bg-slate-700'}`}
-            >
-              📊 {t("צנרת", "Pipeline")}
-            </button>
-          </div>
-
           {viewMode === 'map' ? (
             <MapComponent
               processedData={miningData.processedData}
               userAnnotations={userAnnotations}
               selectedItem={selectedItem}
               mapFlyTrigger={mapFlyTrigger}
-              setSelectedItem={setSelectedItem}
+              setSelectedItem={(item) => {
+                setSelectedItem(item);
+                if (item) handleOpenDossier(item);
+              }}
               handleOpenDossier={handleOpenDossier}
               mapCenter={mapCenter}
               updateAnnotation={updateAnnotation}
               deleteLicense={deleteLicense}
             />
           ) : (
-            <KanbanBoard
-              processedData={miningData.processedData}
-              userAnnotations={userAnnotations}
-              updateAnnotation={updateAnnotation}
-              onCardClick={handleOpenDossier}
-            />
+            <div className="pt-20 px-4 h-full bg-slate-950">
+              <KanbanBoard
+                processedData={miningData.processedData}
+                userAnnotations={userAnnotations}
+                updateAnnotation={updateAnnotation}
+                onCardClick={handleOpenDossier}
+              />
+            </div>
           )}
         </main>
+
+        {/* Right-Docked Analysis Console (MarineTraffic style) */}
+        <DossierView 
+          isOpen={isDossierOpen}
+          item={selectedItem}
+          annotation={selectedItem ? userAnnotations[selectedItem.id] : {} as any}
+          updateAnnotation={updateAnnotation}
+          onClose={() => setIsDossierOpen(false)}
+        />
       </div>
 
       {/* Mobile Nav */}

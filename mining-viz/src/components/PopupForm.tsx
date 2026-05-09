@@ -280,7 +280,5 @@ export default function PopupForm({
                 )}
             </div>
         </div>
-            </div>
-        </div>
     );
 }

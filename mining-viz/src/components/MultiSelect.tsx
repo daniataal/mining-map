@@ -84,7 +84,7 @@ export default function MultiSelect({ options, selected, onChange, placeholder, 
                         )}
 
                         <div className="p-1 border-b border-slate-800 flex gap-1">
-                            <Button variant="ghost" className="flex-1 h-7 text-[10px] font-bold text-slate-400" onClick={() => onChange(options)}>Select All</Button>
+                            <Button variant="ghost" className="flex-1 h-7 text-[10px] font-bold text-slate-400" onClick={() => onChange([...new Set([...selected, ...filteredOptions])])}>Select All</Button>
                             <Button variant="ghost" className="flex-1 h-7 text-[10px] font-bold text-slate-400" onClick={() => onChange([])}>Clear</Button>
                         </div>
 

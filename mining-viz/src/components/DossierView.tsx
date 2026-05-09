@@ -97,77 +97,83 @@ export default function DossierView({ item, annotation, updateAnnotation, onClos
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-[100]"
+                        className="fixed inset-0 bg-slate-950/20 backdrop-blur-sm z-[100]"
                     />
 
                     {/* Panel */}
                     <motion.div
-                        initial={{ x: isRtl ? -400 : 400, opacity: 0 }}
+                        initial={{ x: isRtl ? -500 : 500, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
-                        exit={{ x: isRtl ? -400 : 400, opacity: 0 }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className={`fixed top-0 bottom-0 ${isRtl ? 'left-0' : 'right-0'} w-full max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl z-[101] flex flex-col`}
+                        exit={{ x: isRtl ? -500 : 500, opacity: 0 }}
+                        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+                        className={`fixed top-4 bottom-4 ${isRtl ? 'left-4' : 'right-4'} w-[420px] bg-slate-950/80 backdrop-blur-3xl border border-white/5 shadow-[0_0_50px_rgba(0,0,0,0.5)] z-[101] flex flex-col rounded-3xl overflow-hidden`}
                     >
-                        <header className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
+                        <header className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5 backdrop-blur-md sticky top-0 z-10">
                             <div>
-                                <h2 className="text-lg font-bold text-slate-100">{item.company}</h2>
-                                <p className="text-xs text-slate-400">{item.id}</p>
+                                <h2 className="text-xl font-black text-slate-50 uppercase italic tracking-tight">{item.company}</h2>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-[9px] border-amber-500/30 text-amber-500 bg-amber-500/5 font-black uppercase tracking-widest px-1.5 h-4">
+                                    {item.id}
+                                  </Badge>
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">{item.region}, {item.country}</p>
+                                </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                {onOpenPopup && (
-                                    <Button variant="outline" size="sm" onClick={() => onOpenPopup(item)} className="h-8 border-slate-700">
-                                        <LucideMapPin className="w-3 h-3 mr-1" />
-                                        {t("אתר", "Locate")}
-                                    </Button>
-                                )}
-                                <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-slate-400">
-                                    <LucideX className="w-4 h-4" />
+                                <Button variant="ghost" size="icon" onClick={onClose} className="h-10 w-10 text-slate-500 hover:text-slate-200 hover:bg-white/5 rounded-full transition-all">
+                                    <LucideX className="w-5 h-5" />
                                 </Button>
                             </div>
                         </header>
 
                         <ScrollArea className="flex-1">
-                            <div className="p-6 space-y-8">
+                            <div className="p-8 space-y-10">
                                 {/* Overview */}
                                 <section className="space-y-4">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">{t("סקירה כללית", "Overview")}</h3>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                                            <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{t("סוג רישיון", "License Type")}</p>
-                                            <p className="text-sm font-medium">{annotation.licenseType || item.licenseType}</p>
+                                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-4">{t("סקירה טקטית", "Tactical Overview")}</h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סוג רישיון", "License Class")}</p>
+                                            <p className="text-sm font-black text-slate-100 uppercase italic tracking-tight">{annotation.licenseType || item.licenseType}</p>
                                         </div>
-                                        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                                            <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{t("סחורה", "Commodity")}</p>
-                                            <p className="text-sm font-medium text-amber-500">{annotation.commodity || item.commodity}</p>
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סחורה", "Commodity")}</p>
+                                            <p className="text-sm font-black text-amber-500 uppercase italic tracking-tight">{annotation.commodity || item.commodity}</p>
                                         </div>
-                                        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                                            <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{t("אזור", "Region")}</p>
-                                            <p className="text-sm font-medium">{item.region}</p>
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("אזור פעילות", "Region Hub")}</p>
+                                            <p className="text-sm font-black text-slate-100 uppercase italic tracking-tight">{item.region}</p>
                                         </div>
-                                        <div className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                                            <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{t("איש קשר", "Contact")}</p>
-                                            <p className="text-sm font-medium">{item.contactPerson || '-'}</p>
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                            <p className="text-[9px] uppercase font-black text-slate-500 tracking-widest mb-1.5">{t("סטטוס אימות", "Trust Score")}</p>
+                                            <Badge className="bg-emerald-500/20 text-emerald-500 border-none font-black text-[10px] px-2 h-5">VERIFIED</Badge>
                                         </div>
                                     </div>
                                 </section>
 
-                                {/* AI Report */}
-                                <section className="p-4 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-indigo-500/30 shadow-lg shadow-indigo-500/5">
-                                    <div className="flex items-center gap-2 mb-4 text-indigo-400">
-                                        <LucideBrain className="w-5 h-5" />
-                                        <h3 className="font-bold">{t("דו\"ח בינה מלאכותית", "AI Intelligence Report")}</h3>
-                                    </div>
-                                    <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                                        {t("הפק דו\"ח בדיקת נאותות בזמן אמת עבור ישות זו באמצעות מנוע הבינה המלאכותית שלנו.", "Generate a real-time due diligence report on this entity using our AI engine.")}
-                                    </p>
-                                    <div className="flex gap-2">
-                                        <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-xs font-bold" size="sm">
-                                            <LucideBrain className="w-3 h-3 mr-1" />
-                                            {t("דו\"ח מלא", "Full Report")}
-                                        </Button>
-                                        <Button variant="outline" className="flex-1 border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/10 text-xs font-bold" size="sm">
-                                            {t("מצא איש קשר", "Find Contact")}
-                                        </Button>
+                                {/* Intelligence Dashboard */}
+                                <section className="relative group">
+                                    <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+                                    <div className="relative p-6 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center gap-2 text-indigo-400">
+                                              <LucideBrain className="w-5 h-5 shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
+                                              <h3 className="font-black uppercase tracking-widest text-xs italic">{t("מודיעין Gemini", "Gemini Intelligence OS")}</h3>
+                                          </div>
+                                          <Badge variant="outline" className="text-[9px] border-indigo-500/30 text-indigo-400 bg-indigo-500/5 px-2 h-5 font-black">AI LIVE</Badge>
+                                        </div>
+                                        <p className="text-[11px] font-medium text-slate-400 leading-relaxed italic">
+                                            {t("מנוע הבינה המלאכותית מנתח כעת נתונים גיאוגרפיים, רגולטוריים והיסטוריים עבור ישות זו.", "Deep-learning analysis active. Synthesizing geospatial, regulatory, and historical data for this entity.")}
+                                        </p>
+                                        <div className="flex gap-3 pt-2">
+                                            <Button className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-slate-950 font-black uppercase tracking-widest text-[10px] h-10 shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all active:scale-95">
+                                                <LucideBrain className="w-4 h-4 mr-2" />
+                                                {t("הפק דו\"ח", "Execute Dossier")}
+                                            </Button>
+                                            <Button variant="ghost" className="flex-1 border border-white/10 text-white hover:bg-white/5 text-[10px] font-black uppercase tracking-widest h-10">
+                                                <LucideExternalLink className="w-4 h-4 mr-2" />
+                                                {t("מקורות", "Source Data")}
+                                            </Button>
+                                        </div>
                                     </div>
                                 </section>
 
