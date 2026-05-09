@@ -6,4 +6,3 @@ bcrypt
 pyjwt
 requests
 passlib
-yfinance

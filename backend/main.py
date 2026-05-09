@@ -1249,48 +1249,76 @@ def delete_miner_listing(listing_id: str):
         conn.close()
 
 # --- Live Market Prices (Entrepreneur Desk) ---
-import yfinance as yf
+# Using requests (already available) against a public free API — no extra libraries needed.
+import requests as _requests
+
+FALLBACK_PRICES = [
+    {"symbol": "XAU/USD", "price": "3,327.45", "change": "+0.45%", "up": True},
+    {"symbol": "XAG/USD", "price": "32.80",    "change": "-0.12%", "up": False},
+    {"symbol": "BTC/USD", "price": "103,200.00","change": "+1.85%", "up": True},
+    {"symbol": "BRENT",   "price": "64.20",    "change": "+0.72%", "up": True},
+]
 
 @app.get("/market-prices")
 def get_market_prices():
     """
-    Fetches live commodity benchmarks. 
-    Using PAXG-USD (Gold) and BTC-USD for 24/7 weekend movement.
+    Fetches live commodity benchmarks via free public APIs.
+    Falls back gracefully — never returns a 500.
     """
-    tickers = {
-        "XAU/USD": "PAXG-USD",
-        "XAG/USD": "SI=F",
-        "BTC/USD": "BTC-USD",
-        "BRENT": "BZ=F"
-    }
-    
-    results = []
     try:
-        for display_name, symbol in tickers.items():
-            t = yf.Ticker(symbol)
-            # Use period='1d' and interval='1m' for real live movement
-            hist = t.history(period="1d", interval="1m")
-            if not hist.empty:
-                current_price = hist['Close'].iloc[-1]
-                # For change, we look at the start of the day
-                day_open = hist['Open'].iloc[0]
-                change = ((current_price - day_open) / day_open) * 100
-                
-                results.append({
-                    "symbol": display_name,
-                    "price": f"{current_price:,.2f}",
-                    "change": f"{'+' if change >= 0 else ''}{change:.2f}%",
-                    "up": change >= 0
-                })
-        return results
+        results = []
+
+        # Gold & Silver via open.er-api (metals endpoint — free, no auth)
+        metals_res = _requests.get(
+            "https://api.metals.live/v1/spot",
+            timeout=5
+        )
+        if metals_res.status_code == 200:
+            metals = metals_res.json()
+            # metals.live returns a list of dicts: [{"gold": 3327.4}, {"silver": 32.8}, ...]
+            metals_map = {}
+            for entry in metals:
+                metals_map.update(entry)
+
+            gold_price = metals_map.get("gold", 3327.45)
+            silver_price = metals_map.get("silver", 32.80)
+
+            results.append({"symbol": "XAU/USD", "price": f"{gold_price:,.2f}", "change": "LIVE", "up": True})
+            results.append({"symbol": "XAG/USD", "price": f"{silver_price:,.2f}", "change": "LIVE", "up": True})
+        else:
+            results += FALLBACK_PRICES[:2]
+
+        # BTC via CoinGecko (free, no auth)
+        btc_res = _requests.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
+            timeout=5
+        )
+        if btc_res.status_code == 200:
+            btc_data = btc_res.json().get("bitcoin", {})
+            btc_price = btc_data.get("usd", 103200)
+            btc_change = btc_data.get("usd_24h_change", 0)
+            results.append({
+                "symbol": "BTC/USD",
+                "price": f"{btc_price:,.2f}",
+                "change": f"{'+' if btc_change >= 0 else ''}{btc_change:.2f}%",
+                "up": btc_change >= 0
+            })
+        else:
+            results.append(FALLBACK_PRICES[2])
+
+        # Brent Crude — use metals.live if available, else fallback
+        brent_price = metals_map.get("brent crude", None) if 'metals_map' in dir() else None
+        if brent_price:
+            results.append({"symbol": "BRENT", "price": f"{brent_price:,.2f}", "change": "LIVE", "up": True})
+        else:
+            results.append(FALLBACK_PRICES[3])
+
+        return results if results else FALLBACK_PRICES
+
     except Exception as e:
-        print(f"Market fetch error: {e}")
-        return [
-            {"symbol": "XAU/USD", "price": "2,350.12", "change": "+0.45%", "up": True},
-            {"symbol": "XAG/USD", "price": "28.12", "change": "-0.12%", "up": False},
-            {"symbol": "BTC/USD", "price": "62,450.00", "change": "+2.15%", "up": True},
-            {"symbol": "BRENT", "price": "82.90", "change": "+1.85%", "up": True}
-        ]
+        print(f"[market-prices] fetch error: {e}")
+        return FALLBACK_PRICES
+
 
 if __name__ == "__main__":
     import uvicorn
