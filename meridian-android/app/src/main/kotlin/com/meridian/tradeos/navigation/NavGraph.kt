@@ -4,16 +4,17 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.meridian.tradeos.ui.screens.HomeScreen
+import com.meridian.tradeos.BuildConfig
+import com.meridian.tradeos.ui.screens.CommandCenterScreen
+import com.meridian.tradeos.ui.screens.LegacyWebDeskScreen
 import com.meridian.tradeos.ui.screens.SettingsScreen
 import com.meridian.tradeos.ui.screens.SplashScreen
-import com.meridian.tradeos.ui.screens.WebDeskScreen
 
 sealed class Screen(val route: String) {
     object Splash         : Screen("splash")
-    object Home           : Screen("home")
+    object MapDesk        : Screen("map_desk")
+    object LegacyWebDesk  : Screen("legacy_web_desk")
     object Settings       : Screen("settings")
-    object CommandCenter  : Screen("command_center")
 }
 
 @Composable
@@ -24,24 +25,29 @@ fun MeridianNavGraph(navController: NavHostController) {
     ) {
         composable(Screen.Splash.route) {
             SplashScreen(
-                onNavigateToHome = {
-                    navController.navigate(Screen.Home.route) {
+                onNavigateToMap = {
+                    navController.navigate(Screen.MapDesk.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
-                }
+                },
             )
         }
 
-        composable(Screen.Home.route) {
-            HomeScreen(
+        composable(Screen.MapDesk.route) {
+            CommandCenterScreen(
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                onOpenCommandCenter = { navController.navigate(Screen.CommandCenter.route) },
+                onOpenLegacyWebDesk = if (BuildConfig.DEBUG) {
+                    { navController.navigate(Screen.LegacyWebDesk.route) }
+                } else {
+                    null
+                },
             )
         }
 
-        composable(Screen.CommandCenter.route) {
-            WebDeskScreen(
+        composable(Screen.LegacyWebDesk.route) {
+            LegacyWebDeskScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
             )
         }
 

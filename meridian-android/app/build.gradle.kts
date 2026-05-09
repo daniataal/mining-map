@@ -1,6 +1,72 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+/**
+ * FastAPI backend base URL (axios / VITE_API_BASE in mining-viz). Resolved in order:
+ * 1. Environment variable MERIDIAN_API_HOST
+ * 2. Gradle property MERIDIAN_API_HOST (e.g. ORG_GRADLE_PROJECT_MERIDIAN_API_HOST in CI)
+ * 3. secrets.properties MERIDIAN_API_HOST
+ * 4. local.properties MERIDIAN_API_HOST
+ * 5. Emulator default http://10.0.2.2:8000
+ */
+fun meridianApiHost(project: org.gradle.api.Project): String {
+    System.getenv("MERIDIAN_API_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { return it.trimEnd('/') }
+    (project.findProperty("MERIDIAN_API_HOST") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { return it.trimEnd('/') }
+    val root = project.rootProject.projectDir
+    val secrets = File(root, "secrets.properties")
+    if (secrets.exists()) {
+        val p = Properties()
+        secrets.inputStream().use { p.load(it) }
+        p.getProperty("MERIDIAN_API_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { return it.trimEnd('/') }
+    }
+    val local = File(root, "local.properties")
+    if (local.exists()) {
+        val p = Properties()
+        local.inputStream().use { p.load(it) }
+        p.getProperty("MERIDIAN_API_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { return it.trimEnd('/') }
+    }
+    return "http://10.0.2.2:8000"
+}
+
+/**
+ * Host for the mining-viz web app (Vite / static deploy). Resolved in order:
+ * 1. Environment variable MERIDIAN_WEB_HOST
+ * 2. Gradle property MERIDIAN_WEB_HOST (e.g. -PMERIDIAN_WEB_HOST=... or ORG_GRADLE_PROJECT_MERIDIAN_WEB_HOST in CI)
+ * 3. secrets.properties in project root (MERIDIAN_WEB_HOST=...) — gitignored, use for local prod URL
+ * 4. local.properties MERIDIAN_WEB_HOST (Android Studio)
+ * 5. Emulator default http://10.0.2.2:5173
+ */
+fun meridianWebHost(project: org.gradle.api.Project): String {
+    System.getenv("MERIDIAN_WEB_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { return it.trimEnd('/') }
+    (project.findProperty("MERIDIAN_WEB_HOST") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { return it.trimEnd('/') }
+    val root = project.rootProject.projectDir
+    val secrets = File(root, "secrets.properties")
+    if (secrets.exists()) {
+        val p = Properties()
+        secrets.inputStream().use { p.load(it) }
+        p.getProperty("MERIDIAN_WEB_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { return it.trimEnd('/') }
+    }
+    val local = File(root, "local.properties")
+    if (local.exists()) {
+        val p = Properties()
+        local.inputStream().use { p.load(it) }
+        p.getProperty("MERIDIAN_WEB_HOST")?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { return it.trimEnd('/') }
+    }
+    return "http://10.0.2.2:5173"
 }
 
 android {
@@ -15,8 +81,14 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        // Dev: Android emulator → host machine Vite. Physical device: use your PC LAN IP, e.g. http://192.168.1.5:5173/
-        buildConfigField("String", "MERIDIAN_WEB_URL", "\"http://10.0.2.2:5173/\"")
+
+        val webHost = meridianWebHost(project)
+        val webEscaped = webHost.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "MERIDIAN_WEB_URL", "\"$webEscaped\"")
+
+        val apiHost = meridianApiHost(project)
+        val apiEscaped = apiHost.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "MERIDIAN_API_BASE_URL", "\"$apiEscaped\"")
     }
 
     buildTypes {
@@ -26,8 +98,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Release signing: add KEYSTORE_FILE, KEY_ALIAS, KEY_PASSWORD GitHub secrets
-            // and a signingConfigs block to produce a signed release APK.
         }
     }
 
@@ -44,7 +114,6 @@ android {
     }
 
     composeOptions {
-        // Compose Compiler 1.5.13 is compatible with Kotlin 1.9.23 + BOM 2024.05.00
         kotlinCompilerExtensionVersion = "1.5.13"
     }
 
@@ -74,4 +143,9 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 }
