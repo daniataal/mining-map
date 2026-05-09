@@ -29,7 +29,8 @@ export default function DossierView({
   isOpen,
   onClose,
   item,
-  annotation
+  annotation,
+  updateAnnotation
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');

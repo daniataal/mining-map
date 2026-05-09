@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -221,6 +221,11 @@ export default function MapComponent({
                                     },
                                 }}
                             >
+                                <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                                    <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                        <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
+                                    </div>
+                                </Tooltip>
                                 <Popup className="custom-popup" minWidth={300}>
                                     <PopupForm 
                                       item={item}
