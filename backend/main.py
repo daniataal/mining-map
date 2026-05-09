@@ -929,12 +929,11 @@ class AIRequest(BaseModel):
 def analyze_with_ai(request: AIRequest):
     """
     Executes the AI Waterfall. 
-    Cascade: Groq -> OpenRouter -> AwanLLM -> Pollinations (Free Proxy)
+    Cascade: Groq -> OpenRouter -> Pollinations (Free Proxy)
     """
     providers = [
         {"name": "Groq", "url": "https://api.groq.com/openai/v1/chat/completions", "key": os.getenv("GROQ_API_KEY")},
-        {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1/chat/completions", "key": os.getenv("OPENROUTER_API_KEY")},
-        {"name": "AwanLLM", "url": "https://www.awanllm.com/api/v1/chat/completions", "key": os.getenv("AWAN_API_KEY")}
+        {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1/chat/completions", "key": os.getenv("OPENROUTER_API_KEY")}
     ]
 
     system_prompt = (

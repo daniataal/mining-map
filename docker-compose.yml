@@ -15,7 +15,6 @@ services:
       - DB_PASSWORD=password
       - GROQ_API_KEY=${GROQ_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - AWANLLM_API_KEY=${AWANLLM_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
     depends_on:
       db:
