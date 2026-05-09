@@ -75,22 +75,22 @@ export default function PopupForm({
                 </div>
 
                 {/* 4. Technical Specs (Grid) */}
-                <div className="grid grid-cols-2 gap-px bg-white/5 border border-white/5 rounded-lg mt-5 overflow-hidden text-center">
-                    <div className="p-2.5 flex flex-col items-center">
+                <div className="grid grid-cols-2 gap-px bg-white/5 border border-white/5 rounded-lg mt-5 overflow-hidden">
+                    <div className="p-3 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס", "Status")}</span>
-                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight">{item.status || 'Active'}</span>
+                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight leading-tight">{item.status || 'Active'}</span>
                     </div>
-                    <div className="p-2.5 border-l border-white/5 flex flex-col items-center">
+                    <div className="p-3 border-l border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סחורה", "Commodity")}</span>
-                       <span className="text-[10px] font-bold text-amber-500 uppercase tracking-tight">{item.commodity}</span>
+                       <span className="text-[10px] font-bold text-amber-500 uppercase tracking-tight leading-tight break-words w-full">{item.commodity}</span>
                     </div>
-                    <div className="p-2.5 border-t border-white/5 flex flex-col items-center">
+                    <div className="p-3 border-t border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סוג", "Type")}</span>
-                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight truncate w-full px-1">{item.licenseType || 'ML'}</span>
+                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight leading-tight break-words w-full">{item.licenseType || 'ML'}</span>
                     </div>
-                    <div className="p-2.5 border-t border-l border-white/5 flex flex-col items-center">
+                    <div className="p-3 border-t border-l border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("מזהה", "ID")}</span>
-                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight">#{item.id.slice(0, 4)}</span>
+                       <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight">#{item.id.slice(0, 8)}</span>
                     </div>
                 </div>
 

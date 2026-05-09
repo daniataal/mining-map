@@ -1251,16 +1251,16 @@ def delete_miner_listing(listing_id: str):
 # --- Live Market Prices (Entrepreneur Desk) ---
 import yfinance as yf
 
-@app.get("/api/market-prices")
+@app.get("/market-prices")
 def get_market_prices():
     """
-    Fetches live commodity benchmarks for the tactical dashboard ticker.
-    Symbols: GC=F (Gold), SI=F (Silver), PL=F (Platinum), BZ=F (Brent Crude)
+    Fetches live commodity benchmarks. 
+    Using PAXG-USD (Gold) and BTC-USD for 24/7 weekend movement.
     """
     tickers = {
-        "XAU/USD": "GC=F",
+        "XAU/USD": "PAXG-USD",
         "XAG/USD": "SI=F",
-        "XPT/USD": "PL=F",
+        "BTC/USD": "BTC-USD",
         "BRENT": "BZ=F"
     }
     
@@ -1268,11 +1268,13 @@ def get_market_prices():
     try:
         for display_name, symbol in tickers.items():
             t = yf.Ticker(symbol)
-            hist = t.history(period="2d")
+            # Use period='1d' and interval='1m' for real live movement
+            hist = t.history(period="1d", interval="1m")
             if not hist.empty:
                 current_price = hist['Close'].iloc[-1]
-                prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
-                change = ((current_price - prev_close) / prev_close) * 100
+                # For change, we look at the start of the day
+                day_open = hist['Open'].iloc[0]
+                change = ((current_price - day_open) / day_open) * 100
                 
                 results.append({
                     "symbol": display_name,
@@ -1286,7 +1288,7 @@ def get_market_prices():
         return [
             {"symbol": "XAU/USD", "price": "2,350.12", "change": "+0.45%", "up": True},
             {"symbol": "XAG/USD", "price": "28.12", "change": "-0.12%", "up": False},
-            {"symbol": "XPT/USD", "price": "975.40", "change": "+1.12%", "up": True},
+            {"symbol": "BTC/USD", "price": "62,450.00", "change": "+2.15%", "up": True},
             {"symbol": "BRENT", "price": "82.90", "change": "+1.85%", "up": True}
         ]
 
