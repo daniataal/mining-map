@@ -402,10 +402,7 @@ export default function App() {
           item={dossierItem} 
           marketPrices={marketPrices}
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
-          updateAnnotation={(id, updates) => setUserAnnotations(prev => ({
-            ...prev,
-            [id]: { ...prev[id], ...updates }
-          }))}
+          updateAnnotation={updateAnnotation}
         />
       </div>
 
