@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Dimensions, TextInput, Modal } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Dimensions, TextInput, Modal, ScrollView } from 'react-native';
 import { Marker, Callout, PROVIDER_GOOGLE, Geojson } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { useQuery } from '@tanstack/react-query';
@@ -10,18 +10,27 @@ import { Search, Filter, Crosshair, X, Check } from 'lucide-react-native';
 import DossierModal from '../components/DossierModal';
 import { applyCollocationJitter } from '../lib/geo';
 
-const COMMODITIES = ['All', 'Gold', 'Diamond', 'Bauxite', 'Lithium', 'Iron Ore'];
+/** Matches web `use-mining-data` label normalization for filter options and matching. */
+function normalizeLabel(val: string | undefined): string {
+  const v = (val || 'Unknown').trim();
+  return v
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
 
 export default function MapScreen() {
-  const { data: rawLicenses = [], isLoading, error: fetchError } = useQuery({
+  const { data: rawLicenses = [], isLoading } = useQuery({
     queryKey: ['licenses'],
     queryFn: getLicenses,
   });
 
-  const [geoJsonData, setGeoJsonData] = useState<any>(null);
+  const [geoJsonSource, setGeoJsonSource] = useState<any>(null);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCommodity, setSelectedCommodity] = useState('All');
+  const [selectedCommodities, setSelectedCommodities] = useState<string[]>([]);
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
+  const [selectedLicenseTypes, setSelectedLicenseTypes] = useState<string[]>([]);
   const [isFilterVisible, setFilterVisible] = useState(false);
 
   const [mapRegion, setMapRegion] = useState({
@@ -34,33 +43,85 @@ export default function MapScreen() {
   useEffect(() => {
     fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
       .then(res => res.json())
-      .then(data => {
-        const interested = ['ghana', 'togo', 'benin', 'cote d\'ivoire', 'burkina faso', 'nigeria'];
-        const filtered = {
-          ...data,
-          features: data.features.filter((f: any) => {
-            const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
-            return interested.some(country => name.includes(country));
-          })
-        };
-        setGeoJsonData(filtered);
-      })
+      .then(setGeoJsonSource)
       .catch(err => console.error("[MAP DEBUG] GeoJSON fetch failed:", err));
   }, []);
 
+  // Same idea as web MapComponent: only outline countries that appear in the dataset.
+  const activeCountries = useMemo(() => {
+    const countries = new Set(
+      rawLicenses.map((d) => (d.country ? d.country.toLowerCase() : 'ghana'))
+    );
+    return Array.from(countries);
+  }, [rawLicenses]);
+
+  const filteredGeoJson = useMemo(() => {
+    if (!geoJsonSource) return null;
+    return {
+      ...geoJsonSource,
+      features: geoJsonSource.features.filter((f: any) => {
+        const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
+        return activeCountries.some(
+          (ac) => name.includes(ac) || (ac === 'ghana' && name === 'ghana')
+        );
+      }),
+    };
+  }, [geoJsonSource, activeCountries]);
+
+  const commodityOptions = useMemo(() => {
+    const c = new Set(rawLicenses.map((item) => normalizeLabel(item.commodity)));
+    return Array.from(c).sort();
+  }, [rawLicenses]);
+
+  const countryOptions = useMemo(() => {
+    const c = new Set(rawLicenses.map((item) => item.country || 'Ghana'));
+    return Array.from(c).sort();
+  }, [rawLicenses]);
+
+  const licenseTypeOptions = useMemo(() => {
+    const t = new Set(rawLicenses.map((item) => normalizeLabel(item.licenseType)));
+    return Array.from(t).sort();
+  }, [rawLicenses]);
+
+  const toggleInList = (list: string[], setList: (v: string[]) => void, value: string) => {
+    if (list.includes(value)) setList(list.filter((x) => x !== value));
+    else setList([...list, value]);
+  };
+
+  const filterActiveCount =
+    selectedCommodities.length + selectedCountries.length + selectedLicenseTypes.length;
+
   const filteredLicenses = useMemo(() => {
     let result = rawLicenses;
-    
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(l => 
-        l.company?.toLowerCase().includes(q) || 
-        l.commodity?.toLowerCase().includes(q)
-      );
+
+    if (selectedCountries.length > 0) {
+      result = result.filter((l) => selectedCountries.includes(l.country || 'Ghana'));
     }
 
-    if (selectedCommodity !== 'All') {
-      result = result.filter(l => l.commodity?.toLowerCase().includes(selectedCommodity.toLowerCase()));
+    if (selectedCommodities.length > 0) {
+      result = result.filter((l) => {
+        const normalized = normalizeLabel(l.commodity);
+        return selectedCommodities.includes(normalized);
+      });
+    }
+
+    if (selectedLicenseTypes.length > 0) {
+      result = result.filter((l) => {
+        const normalized = normalizeLabel(l.licenseType);
+        return selectedLicenseTypes.includes(normalized);
+      });
+    }
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (l) =>
+          (l.company && l.company.toLowerCase().includes(q)) ||
+          (l.commodity && l.commodity.toLowerCase().includes(q)) ||
+          (l.licenseType && l.licenseType.toLowerCase().includes(q)) ||
+          (l.region && l.region.toLowerCase().includes(q)) ||
+          (l.country && l.country.toLowerCase().includes(q))
+      );
     }
 
     const jittered = applyCollocationJitter(result);
@@ -71,7 +132,13 @@ export default function MapScreen() {
       !isNaN(item._displayLat) && 
       !isNaN(item._displayLng)
     );
-  }, [rawLicenses, searchQuery, selectedCommodity]);
+  }, [
+    rawLicenses,
+    searchQuery,
+    selectedCommodities,
+    selectedCountries,
+    selectedLicenseTypes,
+  ]);
 
   if (isLoading) {
     return (
@@ -95,19 +162,28 @@ export default function MapScreen() {
         extent={256} // Reduced extent for faster calculations
         nodeSize={32} // Smaller node size
         renderCluster={(cluster) => {
-          const { id, pointCount, coordinate, onPress } = cluster;
-          
-          // CRITICAL SAFETY: Skip clusters with invalid coordinates
-          if (!coordinate || isNaN(coordinate.latitude) || isNaN(coordinate.longitude)) {
+          // Library passes a GeoJSON-like cluster: geometry.coordinates [lng,lat], properties.point_count
+          const { geometry, properties, onPress } = cluster;
+          const coords = geometry?.coordinates;
+          if (!coords || coords.length < 2) return null;
+          const [longitude, latitude] = coords;
+          if (
+            typeof latitude !== 'number' ||
+            typeof longitude !== 'number' ||
+            isNaN(latitude) ||
+            isNaN(longitude)
+          ) {
             return null;
           }
+          const pointCount = properties?.point_count ?? 0;
+          const clusterId = properties?.cluster_id ?? `${longitude},${latitude},${pointCount}`;
 
           return (
-            <Marker 
-              key={`cluster-${id}`} 
-              coordinate={coordinate} 
+            <Marker
+              key={`cluster-${clusterId}`}
+              coordinate={{ latitude, longitude }}
               onPress={onPress}
-              tracksViewChanges={false} // CRITICAL: Stop re-rendering clusters constantly
+              tracksViewChanges={false}
             >
               <View style={styles.clusterWrapper}>
                 <Text style={styles.clusterText}>{pointCount}</Text>
@@ -116,9 +192,9 @@ export default function MapScreen() {
           );
         }}
       >
-        {geoJsonData && (
+        {filteredGeoJson && filteredGeoJson.features?.length > 0 && (
           <Geojson 
-            geojson={geoJsonData}
+            geojson={filteredGeoJson}
             strokeColor={theme.colors.accent + '99'} // Stronger Gold border
             fillColor={theme.colors.accent + '08'} 
             strokeWidth={2}
@@ -170,10 +246,10 @@ export default function MapScreen() {
           )}
         </View>
         <TouchableOpacity 
-          style={[styles.iconButton, selectedCommodity !== 'All' && { borderColor: theme.colors.accent }]}
+          style={[styles.iconButton, filterActiveCount > 0 && { borderColor: theme.colors.accent }]}
           onPress={() => setFilterVisible(true)}
         >
-          <Filter size={20} color={selectedCommodity !== 'All' ? theme.colors.accent : theme.colors.text} />
+          <Filter size={20} color={filterActiveCount > 0 ? theme.colors.accent : theme.colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -191,29 +267,84 @@ export default function MapScreen() {
                 <X size={24} color={theme.colors.text} />
               </TouchableOpacity>
             </View>
-            
-            <Text style={styles.filterLabel}>COMMODITY TYPE</Text>
-            <View style={styles.chipContainer}>
-              {COMMODITIES.map(c => (
-                <TouchableOpacity 
-                  key={c} 
-                  style={[styles.chip, selectedCommodity === c && styles.chipActive]}
-                  onPress={() => setSelectedCommodity(c)}
-                >
-                  <Text style={[styles.chipText, selectedCommodity === c && styles.chipTextActive]}>
-                    {c.toUpperCase()}
-                  </Text>
-                  {selectedCommodity === c && <Check size={12} color={theme.colors.primary} style={{marginLeft: 4}} />}
-                </TouchableOpacity>
-              ))}
-            </View>
 
-            <TouchableOpacity 
-              style={styles.applyBtn}
-              onPress={() => setFilterVisible(false)}
-            >
-              <Text style={styles.applyBtnText}>APPLY FILTERS</Text>
-            </TouchableOpacity>
+            <ScrollView style={styles.filterScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.filterLabel}>COMMODITY TYPE</Text>
+              <Text style={styles.filterHint}>Tap to include; empty = all commodities</Text>
+              <View style={styles.chipContainer}>
+                {commodityOptions.map((c) => {
+                  const active = selectedCommodities.includes(c);
+                  return (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => toggleInList(selectedCommodities, setSelectedCommodities, c)}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {c.toUpperCase()}
+                      </Text>
+                      {active && <Check size={12} color={theme.colors.primary} style={{ marginLeft: 4 }} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.filterLabel}>COUNTRY</Text>
+              <Text style={styles.filterHint}>Empty = all countries</Text>
+              <View style={styles.chipContainer}>
+                {countryOptions.map((c) => {
+                  const active = selectedCountries.includes(c);
+                  return (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => toggleInList(selectedCountries, setSelectedCountries, c)}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {c.toUpperCase()}
+                      </Text>
+                      {active && <Check size={12} color={theme.colors.primary} style={{ marginLeft: 4 }} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.filterLabel}>LICENSE CLASS</Text>
+              <Text style={styles.filterHint}>Empty = all types</Text>
+              <View style={styles.chipContainer}>
+                {licenseTypeOptions.map((c) => {
+                  const active = selectedLicenseTypes.includes(c);
+                  return (
+                    <TouchableOpacity
+                      key={c}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => toggleInList(selectedLicenseTypes, setSelectedLicenseTypes, c)}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {c.toUpperCase()}
+                      </Text>
+                      {active && <Check size={12} color={theme.colors.primary} style={{ marginLeft: 4 }} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterFooter}>
+              <TouchableOpacity
+                style={styles.resetBtn}
+                onPress={() => {
+                  setSelectedCommodities([]);
+                  setSelectedCountries([]);
+                  setSelectedLicenseTypes([]);
+                }}
+              >
+                <Text style={styles.resetBtnText}>RESET</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.applyBtn} onPress={() => setFilterVisible(false)}>
+                <Text style={styles.applyBtnText}>APPLY FILTERS</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -283,11 +414,30 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
-  filterContent: { backgroundColor: theme.colors.background, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: theme.colors.border },
-  filterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  filterContent: {
+    backgroundColor: theme.colors.background,
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    maxHeight: Dimensions.get('window').height * 0.85,
+  },
+  filterScroll: { flexGrow: 0 },
+  filterFooter: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  resetBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  resetBtnText: { color: theme.colors.textMuted, fontWeight: '900', fontSize: 12, letterSpacing: 1 },
+  filterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   filterTitle: { color: theme.colors.text, fontSize: 16, fontWeight: '900', letterSpacing: 2 },
-  filterLabel: { color: theme.colors.textMuted, fontSize: 10, fontWeight: '900', marginBottom: 16, letterSpacing: 1 },
-  chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 30 },
+  filterLabel: { color: theme.colors.textMuted, fontSize: 10, fontWeight: '900', marginBottom: 8, letterSpacing: 1 },
+  filterHint: { color: theme.colors.textMuted, fontSize: 9, fontWeight: '600', marginBottom: 12, opacity: 0.85 },
+  chipContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: theme.colors.border, flexDirection: 'row', alignItems: 'center' },
   chipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   chipText: { color: theme.colors.text, fontSize: 10, fontWeight: '800' },
