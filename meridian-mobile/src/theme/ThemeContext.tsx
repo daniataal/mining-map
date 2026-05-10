@@ -8,12 +8,13 @@ import React, {
 } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AppTheme } from './tokens';
 import {
   darkMapStyle,
   darkTheme,
   lightMapStyle,
   lightTheme,
+  type AppTheme,
+  type GoogleMapStyleRow,
   type MeridianColorSchemePreference,
 } from './tokens';
 
@@ -26,7 +27,7 @@ export type MeridianThemeContextValue = {
   resolvedScheme: 'dark' | 'light';
   isDark: boolean;
   statusBarStyle: 'light' | 'dark';
-  mapCustomStyle: typeof darkMapStyle;
+  mapCustomStyle: GoogleMapStyleRow[];
 };
 
 const ThemeContext = createContext<MeridianThemeContextValue | null>(null);

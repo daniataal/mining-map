@@ -73,8 +73,9 @@ export const lightTheme: AppTheme = {
   roundness,
 };
 
-/** Google Maps JSON styling (Android + Google provider on iOS). */
-export const darkMapStyle = [
+export type GoogleMapStyleRow = Record<string, unknown>;
+
+export const darkMapStyle: GoogleMapStyleRow[] = [
   { elementType: 'geometry', stylers: [{ color: '#020617' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#020617' }] },
@@ -83,10 +84,10 @@ export const darkMapStyle = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
 ];
 
-export const lightMapStyle = [
+export const lightMapStyle: GoogleMapStyleRow[] = [
   { elementType: 'geometry', stylers: [{ color: '#eef2f6' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#f8fafc' }, { lightness: 100 }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#f8fafc' }] },
   {
     featureType: 'administrative.country',
     elementType: 'geometry.stroke',

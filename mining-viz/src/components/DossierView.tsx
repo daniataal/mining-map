@@ -23,6 +23,7 @@ import { AiIntelligenceReport } from './AiIntelligenceReport';
 import TradeContext from './TradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import { LeadValue } from '../types';
+import { API_BASE } from '../lib/api';
 
 interface DossierViewProps {
   isOpen: boolean;
@@ -104,8 +105,6 @@ export default function DossierView({
     if (!item) return;
     setAiAnalysis('');
     setIsAnalyzing(true);
-    const API_BASE =
-      import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
     try {
       const token = localStorage.getItem('mining_token');
       const res = await fetch(`${API_BASE}/api/ai/analyze`, {
@@ -138,8 +137,6 @@ Output requirements:
   useEffect(() => {
     if (isOpen && item) {
       if (!aiAnalysis) runAiAnalysis();
-      const API_BASE =
-        import.meta.env.VITE_API_BASE || `http://${window.location.hostname}:8000`;
       fetch(`${API_BASE}/activity/logs?limit=50`)
         .then(r => r.json())
         .then(logs =>
