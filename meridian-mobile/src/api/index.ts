@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import type { MiningLicense } from '../types';
 
 // Construct the API base URL using the REMOTE_HOST environment variable
 export const API_BASE = `http://${process.env.EXPO_PUBLIC_REMOTE_HOST}:8000`; 
@@ -41,8 +42,8 @@ export const login = async (username: string, password: string) => {
 };
 
 // --- Licenses ---
-export const getLicenses = async () => {
-  const { data } = await apiClient.get('/licenses');
+export const getLicenses = async (): Promise<MiningLicense[]> => {
+  const { data } = await apiClient.get<MiningLicense[]>('/licenses');
   return data;
 };
 

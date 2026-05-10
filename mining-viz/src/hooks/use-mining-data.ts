@@ -1,4 +1,9 @@
 import { useMemo, useState } from 'react';
+import {
+  commodityMatchesQuery,
+  getLicenseCommodityLabels,
+  licenseMatchesSelectedCommodities,
+} from '../lib/commodities';
 import { MiningLicense, UserAnnotation } from '../types';
 
 export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<string, UserAnnotation>) => {
@@ -19,9 +24,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     if (selectedCommodity.length > 0) {
       data = data.filter(item => {
         const annotation = userAnnotations[item.id] || {};
-        const val = (annotation.commodity || item.commodity || 'Unknown').trim();
-        const normalized = val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-        return selectedCommodity.includes(normalized);
+        const labels = getLicenseCommodityLabels(item.commodity, annotation.commodity);
+        return licenseMatchesSelectedCommodities(labels, selectedCommodity);
       });
     }
 
@@ -44,7 +48,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
         return (
           (item.company && item.company.toLowerCase().includes(lower)) ||
           (item.licenseType && item.licenseType.toLowerCase().includes(lower)) ||
-          (commodity.toLowerCase().includes(lower)) ||
+          commodityMatchesQuery(commodity, lower) ||
           (comment.toLowerCase().includes(lower))
         );
       });
@@ -71,12 +75,14 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   }, [rawData]);
 
   const commodities = useMemo(() => {
-    const c = new Set(rawData.map(item => {
+    const c = new Set<string>();
+    for (const item of rawData) {
       const annotation = userAnnotations[item.id] || {};
-      const val = (annotation.commodity || item.commodity || 'Unknown').trim();
-      // Capitalize first letter of each word for professional consistency
-      return val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-    }));
+      const labels = getLicenseCommodityLabels(item.commodity, annotation.commodity);
+      for (const label of labels) {
+        c.add(label);
+      }
+    }
     return Array.from(c).sort();
   }, [rawData, userAnnotations]);
 

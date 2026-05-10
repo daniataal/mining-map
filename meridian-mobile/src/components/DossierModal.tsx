@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View, Text, Modal, TouchableOpacity, ScrollView, Platform } from 'react-native';
-import { theme } from '../theme';
+import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { X, Shield, MapPin, Box, Calendar, Phone, User } from 'lucide-react-native';
 
@@ -10,16 +10,134 @@ interface DossierModalProps {
   onClose: () => void;
 }
 
+function createStyles(theme: AppTheme, isDark: boolean) {
+  return StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: isDark ? 'rgba(2, 6, 23, 0.9)' : 'rgba(15, 23, 42, 0.45)',
+      justifyContent: 'flex-end',
+    },
+    content: {
+      backgroundColor: theme.colors.surface,
+      borderTopLeftRadius: 32,
+      borderTopRightRadius: 32,
+      height: '85%',
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.accent + '40',
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 24,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    headerTitle: {
+      color: theme.colors.text,
+      fontSize: 14,
+      fontWeight: '900',
+      letterSpacing: 2,
+    },
+    closeButton: {
+      padding: 4,
+    },
+    scroll: {
+      padding: 24,
+    },
+    hero: {
+      alignItems: 'center',
+      marginBottom: 32,
+    },
+    companyName: {
+      fontSize: 28,
+      fontWeight: '900',
+      color: theme.colors.text,
+      textAlign: 'center',
+      marginBottom: 12,
+    },
+    statusBadge: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      borderWidth: 1,
+    },
+    statusText: {
+      fontSize: 12,
+      fontWeight: '900',
+      letterSpacing: 1.5,
+    },
+    section: {
+      marginBottom: 32,
+    },
+    sectionLabel: {
+      fontSize: 10,
+      fontWeight: '900',
+      color: theme.colors.accent,
+      letterSpacing: 2,
+      marginBottom: 16,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      gap: 16,
+      alignItems: 'flex-start',
+    },
+    infoLabel: {
+      fontSize: 9,
+      fontWeight: '800',
+      color: theme.colors.textMuted,
+      letterSpacing: 1,
+      marginBottom: 4,
+    },
+    infoValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    coords: {
+      fontSize: 12,
+      color: theme.colors.textMuted,
+      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+      marginTop: 4,
+    },
+    grid: {
+      flexDirection: 'row',
+      gap: 24,
+    },
+    gridItem: {
+      flex: 1,
+      gap: 12,
+    },
+    actionButton: {
+      backgroundColor: theme.colors.accent,
+      borderRadius: 16,
+      padding: 16,
+      alignItems: 'center',
+      marginTop: 12,
+      marginBottom: 40,
+    },
+    actionButtonText: {
+      color: theme.colors.primary,
+      fontWeight: '900',
+      fontSize: 14,
+      letterSpacing: 1.5,
+    },
+  });
+}
+
 export default function DossierModal({ item, isVisible, onClose }: DossierModalProps) {
+  const { theme, isDark } = useMeridianTheme();
+  const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
+
   if (!item) return null;
 
   return (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={isVisible}
-      onRequestClose={onClose}
-    >
+    <Modal animationType="slide" transparent={true} visible={isVisible} onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.content}>
           <View style={styles.header}>
@@ -35,8 +153,18 @@ export default function DossierModal({ item, isVisible, onClose }: DossierModalP
           <ScrollView style={styles.scroll}>
             <View style={styles.hero}>
               <Text style={styles.companyName}>{item.company}</Text>
-              <View style={[styles.statusBadge, { borderColor: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent }]}>
-                <Text style={[styles.statusText, { color: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent }]}>
+              <View
+                style={[
+                  styles.statusBadge,
+                  { borderColor: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent },
+                  ]}
+                >
                   {item.status.toUpperCase()}
                 </Text>
               </View>
@@ -48,8 +176,12 @@ export default function DossierModal({ item, isVisible, onClose }: DossierModalP
                 <MapPin size={18} color={theme.colors.accent} />
                 <View>
                   <Text style={styles.infoLabel}>LOCATION</Text>
-                  <Text style={styles.infoValue}>{item.region}, {item.country}</Text>
-                  <Text style={styles.coords}>{item.lat.toFixed(4)}, {item.lng.toFixed(4)}</Text>
+                  <Text style={styles.infoValue}>
+                    {item.region}, {item.country}
+                  </Text>
+                  <Text style={styles.coords}>
+                    {item.lat.toFixed(4)}, {item.lng.toFixed(4)}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -97,121 +229,3 @@ export default function DossierModal({ item, isVisible, onClose }: DossierModalP
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.9)',
-    justifyContent: 'flex-end',
-  },
-  content: {
-    backgroundColor: theme.colors.surface,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    height: '85%',
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.accent + '40',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerTitle: {
-    color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: 2,
-  },
-  closeButton: {
-    padding: 4,
-  },
-  scroll: {
-    padding: 24,
-  },
-  hero: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  companyName: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: theme.colors.text,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.5,
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: theme.colors.accent,
-    letterSpacing: 2,
-    marginBottom: 16,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    gap: 16,
-    alignItems: 'flex-start',
-  },
-  infoLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: theme.colors.textMuted,
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  infoValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: theme.colors.text,
-  },
-  coords: {
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    marginTop: 4,
-  },
-  grid: {
-    flexDirection: 'row',
-    gap: 24,
-  },
-  gridItem: {
-    flex: 1,
-    gap: 12,
-  },
-  actionButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 40,
-  },
-  actionButtonText: {
-    color: theme.colors.primary,
-    fontWeight: '900',
-    fontSize: 14,
-    letterSpacing: 1.5,
-  }
-});

@@ -1,22 +1,123 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  Image, 
-  KeyboardAvoidingView, 
+import React, { useState, useMemo } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert
+  Alert,
 } from 'react-native';
-import { theme } from '../theme';
+import { useMeridianTheme, type AppTheme } from '../theme';
 import { login } from '../api';
 import * as SecureStore from 'expo-secure-store';
 import { Anchor } from 'lucide-react-native';
 
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    inner: {
+      flex: 1,
+      padding: theme.spacing.xl,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    logoContainer: {
+      alignItems: 'center',
+      marginBottom: 60,
+    },
+    iconCircle: {
+      width: 100,
+      height: 100,
+      borderRadius: 50,
+      backgroundColor: theme.colors.surface,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: theme.colors.accent + '40',
+      marginBottom: 20,
+      shadowColor: theme.colors.accent,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.3,
+      shadowRadius: 15,
+      elevation: 10,
+    },
+    title: {
+      fontSize: 32,
+      fontWeight: '900',
+      color: theme.colors.text,
+      letterSpacing: 4,
+    },
+    subtitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.accent,
+      letterSpacing: 2,
+      marginTop: 4,
+    },
+    form: {
+      width: '100%',
+      maxWidth: 400,
+    },
+    inputContainer: {
+      marginBottom: 24,
+    },
+    label: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: theme.colors.textMuted,
+      letterSpacing: 1.5,
+      marginBottom: 8,
+    },
+    input: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.roundness,
+      padding: theme.spacing.md,
+      color: theme.colors.text,
+      fontSize: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    button: {
+      backgroundColor: theme.colors.accent,
+      borderRadius: theme.roundness,
+      padding: theme.spacing.md,
+      alignItems: 'center',
+      marginTop: 12,
+      shadowColor: theme.colors.accent,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 5,
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    buttonText: {
+      color: theme.colors.primary,
+      fontWeight: '900',
+      fontSize: 14,
+      letterSpacing: 1.5,
+    },
+    footer: {
+      position: 'absolute',
+      bottom: 40,
+      fontSize: 10,
+      color: theme.colors.textMuted,
+      letterSpacing: 1,
+    },
+  });
+}
+
 export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => void }) {
+  const { theme } = useMeridianTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,7 +145,7 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
   };
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
@@ -60,7 +161,7 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
         <View style={styles.form}>
           <View style={styles.inputContainer}>
             <Text style={styles.label}>USERNAME</Text>
-            <TextInput 
+            <TextInput
               style={styles.input}
               placeholder="Enter your username"
               placeholderTextColor={theme.colors.textMuted}
@@ -72,7 +173,7 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
 
           <View style={styles.inputContainer}>
             <Text style={styles.label}>PASSWORD</Text>
-            <TextInput 
+            <TextInput
               style={styles.input}
               placeholder="Enter your password"
               placeholderTextColor={theme.colors.textMuted}
@@ -82,8 +183,8 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
             />
           </View>
 
-          <TouchableOpacity 
-            style={[styles.button, loading && styles.buttonDisabled]} 
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={loading}
           >
@@ -100,100 +201,3 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  inner: {
-    flex: 1,
-    padding: theme.spacing.xl,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 60,
-  },
-  iconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: theme.colors.accent + '40', // 25% opacity
-    marginBottom: 20,
-    shadowColor: theme.colors.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 10,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: theme.colors.text,
-    letterSpacing: 4,
-  },
-  subtitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: theme.colors.accent,
-    letterSpacing: 2,
-    marginTop: 4,
-  },
-  form: {
-    width: '100%',
-    maxWidth: 400,
-  },
-  inputContainer: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: theme.colors.textMuted,
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.roundness,
-    padding: theme.spacing.md,
-    color: theme.colors.text,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  button: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.roundness,
-    padding: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: 12,
-    shadowColor: theme.colors.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: theme.colors.primary,
-    fontWeight: '900',
-    fontSize: 14,
-    letterSpacing: 1.5,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 40,
-    fontSize: 10,
-    color: theme.colors.textMuted,
-    letterSpacing: 1,
-  }
-});

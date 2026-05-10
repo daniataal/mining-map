@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { NavigationContainer, DefaultTheme, DarkTheme, Theme as NavigationTheme } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,27 +8,41 @@ import * as NavigationBar from 'expo-navigation-bar';
 
 import MainNavigator from './src/navigation/MainNavigator';
 import LoginScreen from './src/screens/LoginScreen';
-import { theme } from './src/theme';
+import { ThemeProvider, useMeridianTheme } from './src/theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes (matches web app)
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
     },
   },
 });
 
-export default function App() {
+function AppContent() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const { theme, statusBarStyle, isDark } = useMeridianTheme();
+
+  const navigationTheme = useMemo((): NavigationTheme => {
+    const base = isDark ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: theme.colors.accent,
+        background: theme.colors.background,
+        card: theme.colors.surface,
+        text: theme.colors.text,
+        border: theme.colors.border,
+        notification: theme.colors.notification,
+      },
+    };
+  }, [isDark, theme]);
 
   useEffect(() => {
     checkLoginStatus();
-    
-    // Set Immersive Mode for Android
     if (Platform.OS === 'android') {
-      NavigationBar.setVisibilityAsync('hidden');
-      NavigationBar.setBehaviorAsync('inset-touch'); // Allows swiping to show temporarily
+      void NavigationBar.setVisibilityAsync('hidden');
     }
   }, []);
 
@@ -39,30 +53,37 @@ export default function App() {
 
   if (isLoggedIn === null) {
     return (
-      <View style={styles.loading}>
+      <View style={[styles.loading, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator size="large" color={theme.colors.accent} />
       </View>
     );
   }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <NavigationContainer>
-        <StatusBar style="light" />
-        {isLoggedIn ? (
-          <MainNavigator />
-        ) : (
-          <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />
-        )}
-      </NavigationContainer>
-    </QueryClientProvider>
+    <NavigationContainer theme={navigationTheme}>
+      <StatusBar style={statusBarStyle} />
+      {isLoggedIn ? (
+        <MainNavigator />
+      ) : (
+        <LoginScreen onLoginSuccess={() => setIsLoggedIn(true)} />
+      )}
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AppContent />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
 
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: theme.colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },

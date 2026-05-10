@@ -30,7 +30,15 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-navigation-bar",
+        {
+          "visibility": "hidden",
+          "behavior": "overlay-swipe",
+          "position": "absolute"
+        }
+      ]
     ]
   }
 }
