@@ -39,12 +39,14 @@ export function commodityLabelsForField(raw: string | undefined): string[] {
   return out.length ? out : ['Unknown'];
 }
 
-/** Effective commodity labels for a row (annotation overrides base license). */
+/** Effective commodity labels for a row (annotation overrides base license when non-empty). */
 export function getLicenseCommodityLabels(
   itemCommodity: string | undefined,
   annotationCommodity: string | undefined
 ): string[] {
-  const raw = (annotationCommodity ?? itemCommodity ?? '').trim();
+  const ann = (annotationCommodity ?? '').trim();
+  const item = (itemCommodity ?? '').trim();
+  const raw = ann.length > 0 ? ann : item;
   return commodityLabelsForField(raw.length ? raw : undefined);
 }
 

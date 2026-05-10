@@ -179,7 +179,7 @@ export default function PipelineScreen() {
       <FlatList
         data={licenses}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item: MiningLicense) => item.id}
         contentContainerStyle={styles.list}
       />
       <DossierModal item={selectedItem} isVisible={!!selectedItem} onClose={() => setSelectedItem(null)} />

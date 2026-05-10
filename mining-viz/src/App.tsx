@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE } from './lib/api';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation } from './types';
@@ -22,6 +22,14 @@ import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+function formatLicenseFetchError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return String(e);
+}
 
 function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change?: string, up?: boolean | null }) {
   const ch = change ?? '—';
@@ -189,9 +197,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const apiBase =
-      import.meta.env.VITE_API_BASE ||
-      (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+    const apiBase = API_BASE;
 
     const fetchPrices = async () => {
       // Backend: gold/silver as COMEX GC=F / SI=F (USD/troy oz) + energy/crypto via Yahoo/CoinGecko
@@ -306,6 +312,24 @@ export default function App() {
             </div>
          </div>
       </div>
+
+      {fetchError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t(
+            'טעינת רישיונות נכשלה',
+            'Could not load licenses'
+          )}
+          : {formatLicenseFetchError(fetchError)}
+          {'. '}
+          {t(
+            'בדוק שה־API רץ וש־VITE_API_BASE מוגדר ב־HTTPS',
+            'Ensure the API is running; on HTTPS set VITE_API_BASE or proxy /licenses to your API.'
+          )}
+        </div>
+      )}
 
       {/* 2. Main Discovery Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">

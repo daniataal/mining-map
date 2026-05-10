@@ -188,7 +188,7 @@ export default function OilScreen() {
       <FlatList
         data={flows}
         renderItem={renderItem}
-        keyExtractor={(item, index) => `${item.iso2}-${index}`}
+        keyExtractor={(item: OilTradeFlow, index: number) => `${item.iso2}-${index}`}
         contentContainerStyle={styles.list}
         ListHeaderComponent={() => (
           <View style={styles.header}>

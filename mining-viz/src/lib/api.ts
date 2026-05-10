@@ -29,8 +29,14 @@ export const useLicenses = () => {
   return useQuery<MiningLicense[]>({
     queryKey: ['licenses'],
     queryFn: async () => {
-      const { data } = await apiClient.get('/licenses');
-      return data;
+      const { data } = await apiClient.get<unknown>('/licenses');
+      if (Array.isArray(data)) return data as MiningLicense[];
+      if (data && typeof data === 'object' && 'error' in data) {
+        const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+        throw new Error(msg);
+      }
+      console.warn('[useLicenses] Expected array from /licenses, got:', data);
+      return [];
     },
   });
 };

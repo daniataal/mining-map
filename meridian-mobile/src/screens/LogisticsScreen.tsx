@@ -355,7 +355,7 @@ export default function LogisticsScreen() {
       <FlatList
         data={shipments}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item: { id: string }) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={() => (
           <View style={styles.header}>
@@ -400,7 +400,7 @@ export default function LogisticsScreen() {
                 placeholder="e.g. Ashanti Gold Corp"
                 placeholderTextColor={theme.colors.textMuted}
                 value={newShipment.dealLabel}
-                onChangeText={(val) => setNewShipment({ ...newShipment, dealLabel: val })}
+                onChangeText={(val: string) => setNewShipment({ ...newShipment, dealLabel: val })}
               />
 
               <Text style={styles.inputLabel}>ORIGIN</Text>
@@ -409,7 +409,7 @@ export default function LogisticsScreen() {
                 placeholder="e.g. Accra, Ghana"
                 placeholderTextColor={theme.colors.textMuted}
                 value={newShipment.origin}
-                onChangeText={(val) => setNewShipment({ ...newShipment, origin: val })}
+                onChangeText={(val: string) => setNewShipment({ ...newShipment, origin: val })}
               />
 
               <Text style={styles.inputLabel}>DESTINATION</Text>
@@ -418,7 +418,7 @@ export default function LogisticsScreen() {
                 placeholder="e.g. Dubai, UAE"
                 placeholderTextColor={theme.colors.textMuted}
                 value={newShipment.destination}
-                onChangeText={(val) => setNewShipment({ ...newShipment, destination: val })}
+                onChangeText={(val: string) => setNewShipment({ ...newShipment, destination: val })}
               />
 
               <Text style={styles.inputLabel}>ETA (YYYY-MM-DD)</Text>
@@ -427,7 +427,7 @@ export default function LogisticsScreen() {
                 placeholder="2024-12-31"
                 placeholderTextColor={theme.colors.textMuted}
                 value={newShipment.eta}
-                onChangeText={(val) => setNewShipment({ ...newShipment, eta: val })}
+                onChangeText={(val: string) => setNewShipment({ ...newShipment, eta: val })}
               />
 
               <TouchableOpacity style={styles.submitBtn} onPress={handleAddShipment}>
