@@ -46,14 +46,19 @@ jobs:
         working-directory: meridian-mobile
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build Debug APK
+      - name: Force JS bundling in Debug
+        working-directory: meridian-mobile/android/app
+        run: |
+          sed -i 's/apply from: "..\/..\/node_modules\/react-native\/react.gradle"/project.ext.react = [ bundleInDebug: true ]\napply from: "..\/..\/node_modules\/react-native\/react.gradle"/' build.gradle
+
+      - name: Build Standalone APK
         working-directory: meridian-mobile/android
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload meridian-mobile-debug-apk
+      - name: Upload meridian-mobile-apk
         uses: actions/upload-artifact@v4
         with:
-          name: meridian-mobile-debug-apk
+          name: meridian-mobile-apk
           path: meridian-mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
