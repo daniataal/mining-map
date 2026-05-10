@@ -17,13 +17,14 @@
       "bundleIdentifier": "com.meridian.tradeos"
     },
     "android": {
+      "package": "com.meridian.tradeos",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "package": "com.meridian.tradeos"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"

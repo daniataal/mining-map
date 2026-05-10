@@ -1,11 +1,17 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-// Default to localhost for dev, but should be configurable
-export const API_BASE = 'http://localhost:8000'; 
+// Construct the API base URL using the REMOTE_HOST environment variable
+export const API_BASE = `http://${process.env.EXPO_PUBLIC_REMOTE_HOST}:8000`; 
+
+console.log('--- API_BASE DEBUG ---');
+console.log('Value:', API_BASE);
+console.log('REMOTE_HOST Env:', process.env.EXPO_PUBLIC_REMOTE_HOST);
+console.log('-----------------------');
 
 const apiClient = axios.create({
   baseURL: API_BASE,
+  timeout: 10000, // Add a timeout to prevent infinite hang
   headers: {
     'Content-Type': 'application/json',
   },
@@ -18,6 +24,18 @@ apiClient.interceptors.request.use(async (config) => {
   }
   return config;
 });
+
+// Add a response interceptor to handle 401 Unauthorized errors
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Clear the invalid token so the app redirects to LoginScreen on next mount/reload
+      await SecureStore.deleteItemAsync('mining_token');
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default apiClient;
 
