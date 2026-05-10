@@ -1,12 +1,135 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View, Text, FlatList, ActivityIndicator } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { getOilSummary } from '../api';
-import { theme } from '../theme';
+import { useMeridianTheme, type AppTheme } from '../theme';
 import { OilTradeFlow } from '../types';
 import { Droplets, ArrowUpRight, ArrowDownLeft } from 'lucide-react-native';
 
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    center: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    list: {
+      padding: theme.spacing.md,
+    },
+    header: {
+      alignItems: 'center',
+      marginBottom: 24,
+      marginTop: 12,
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '900',
+      color: theme.colors.text,
+      letterSpacing: 2,
+      marginTop: 12,
+    },
+    headerSubtitle: {
+      fontSize: 10,
+      color: theme.colors.textMuted,
+      marginTop: 4,
+      letterSpacing: 1,
+    },
+    card: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    countryBadge: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    countryCode: {
+      color: theme.colors.accent,
+      fontWeight: '900',
+      fontSize: 14,
+    },
+    headerText: {
+      flex: 1,
+    },
+    countryName: {
+      color: theme.colors.text,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    category: {
+      color: theme.colors.textMuted,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 1,
+      marginTop: 2,
+    },
+    rankBadge: {
+      backgroundColor: theme.colors.background,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 4,
+    },
+    rankText: {
+      color: theme.colors.text,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    valuesRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    valueBox: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      padding: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    valueHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 4,
+    },
+    valueLabel: {
+      color: theme.colors.textMuted,
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+    valueAmount: {
+      color: theme.colors.text,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+  });
+}
+
 export default function OilScreen() {
+  const { theme } = useMeridianTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const { data, isLoading } = useQuery({
     queryKey: ['oil-summary'],
     queryFn: getOilSummary,
@@ -78,121 +201,3 @@ export default function OilScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.background,
-  },
-  list: {
-    padding: theme.spacing.md,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 12,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: theme.colors.text,
-    letterSpacing: 2,
-    marginTop: 12,
-  },
-  headerSubtitle: {
-    fontSize: 10,
-    color: theme.colors.textMuted,
-    marginTop: 4,
-    letterSpacing: 1,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  countryBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: theme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  countryCode: {
-    color: theme.colors.accent,
-    fontWeight: '900',
-    fontSize: 14,
-  },
-  headerText: {
-    flex: 1,
-  },
-  countryName: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  category: {
-    color: theme.colors.textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginTop: 2,
-  },
-  rankBadge: {
-    backgroundColor: theme.colors.background,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  rankText: {
-    color: theme.colors.text,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  valuesRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  valueBox: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  valueHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  valueLabel: {
-    color: theme.colors.textMuted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  valueAmount: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-  }
-});

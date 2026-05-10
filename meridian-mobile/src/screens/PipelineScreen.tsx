@@ -1,14 +1,117 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { StyleSheet, View, Text, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { getLicenses } from '../api';
-import { theme } from '../theme';
+import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { ChevronRight, Box } from 'lucide-react-native';
 import DossierModal from '../components/DossierModal';
-import { useState } from 'react';
+
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    center: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
+    list: {
+      padding: theme.spacing.md,
+    },
+    card: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: 16,
+      padding: theme.spacing.md,
+      marginBottom: theme.spacing.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    iconContainer: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    headerText: {
+      flex: 1,
+    },
+    company: {
+      color: theme.colors.text,
+      fontSize: 16,
+      fontWeight: '900',
+      letterSpacing: 0.5,
+    },
+    licenseId: {
+      color: theme.colors.textMuted,
+      fontSize: 10,
+      fontWeight: '700',
+      marginTop: 2,
+    },
+    statusBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 4,
+      borderWidth: 1,
+    },
+    statusText: {
+      fontSize: 9,
+      fontWeight: '900',
+      letterSpacing: 1,
+    },
+    cardBody: {
+      paddingLeft: 52,
+      marginBottom: 16,
+    },
+    infoRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    label: {
+      color: theme.colors.textMuted,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+    value: {
+      color: theme.colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    cardFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+      paddingTop: 12,
+      paddingLeft: 52,
+    },
+    footerText: {
+      color: theme.colors.textMuted,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 1,
+    },
+  });
+}
 
 export default function PipelineScreen() {
+  const { theme } = useMeridianTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const { data: licenses = [], isLoading } = useQuery({
     queryKey: ['licenses'],
     queryFn: getLicenses,
@@ -26,13 +129,23 @@ export default function PipelineScreen() {
           <Text style={styles.company}>{item.company}</Text>
           <Text style={styles.licenseId}>ID: {item.id.substring(0, 8)}</Text>
         </View>
-        <View style={[styles.statusBadge, { borderColor: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent }]}>
-          <Text style={[styles.statusText, { color: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent }]}>
+        <View
+          style={[
+            styles.statusBadge,
+            { borderColor: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent },
+          ]}
+        >
+          <Text
+            style={[
+              styles.statusText,
+              { color: item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent },
+            ]}
+          >
             {item.status.toUpperCase()}
           </Text>
         </View>
       </View>
-      
+
       <View style={styles.cardBody}>
         <View style={styles.infoRow}>
           <Text style={styles.label}>COMMODITY</Text>
@@ -40,7 +153,9 @@ export default function PipelineScreen() {
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.label}>REGION</Text>
-          <Text style={styles.value}>{item.region}, {item.country}</Text>
+          <Text style={styles.value}>
+            {item.region}, {item.country}
+          </Text>
         </View>
       </View>
 
@@ -64,113 +179,10 @@ export default function PipelineScreen() {
       <FlatList
         data={licenses}
         renderItem={renderItem}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
       />
-      <DossierModal 
-        item={selectedItem} 
-        isVisible={!!selectedItem} 
-        onClose={() => setSelectedItem(null)} 
-      />
+      <DossierModal item={selectedItem} isVisible={!!selectedItem} onClose={() => setSelectedItem(null)} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.background,
-  },
-  list: {
-    padding: theme.spacing.md,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  headerText: {
-    flex: 1,
-  },
-  company: {
-    color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  licenseId: {
-    color: theme.colors.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  cardBody: {
-    paddingLeft: 52,
-    marginBottom: 16,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  label: {
-    color: theme.colors.textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  value: {
-    color: theme.colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    paddingTop: 12,
-    paddingLeft: 52,
-  },
-  footerText: {
-    color: theme.colors.textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  }
-});
