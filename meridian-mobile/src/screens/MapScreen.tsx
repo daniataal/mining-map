@@ -63,7 +63,14 @@ export default function MapScreen() {
       result = result.filter(l => l.commodity?.toLowerCase().includes(selectedCommodity.toLowerCase()));
     }
 
-    return applyCollocationJitter(result);
+    const jittered = applyCollocationJitter(result);
+    // Safety: Filter out any items with missing or invalid (NaN) coordinates to prevent map crashes
+    return jittered.filter(item => 
+      item._displayLat != null && 
+      item._displayLng != null && 
+      !isNaN(item._displayLat) && 
+      !isNaN(item._displayLng)
+    );
   }, [rawLicenses, searchQuery, selectedCommodity]);
 
   if (isLoading) {
@@ -84,17 +91,23 @@ export default function MapScreen() {
         onRegionChangeComplete={setMapRegion}
         preserveClusterPressHierarchy={true}
         spiderLineColor={theme.colors.accent}
-        radius={Dimensions.get('window').width * 0.12} // Responsive cluster radius
-        extent={512}
-        nodeSize={64}
+        radius={70} // Increased radius for fewer clusters (faster)
+        extent={256} // Reduced extent for faster calculations
+        nodeSize={32} // Smaller node size
         renderCluster={(cluster) => {
           const { id, pointCount, coordinate, onPress } = cluster;
+          
+          // CRITICAL SAFETY: Skip clusters with invalid coordinates
+          if (!coordinate || isNaN(coordinate.latitude) || isNaN(coordinate.longitude)) {
+            return null;
+          }
+
           return (
             <Marker 
               key={`cluster-${id}`} 
               coordinate={coordinate} 
               onPress={onPress}
-              tracksViewChanges={false}
+              tracksViewChanges={false} // CRITICAL: Stop re-rendering clusters constantly
             >
               <View style={styles.clusterWrapper}>
                 <Text style={styles.clusterText}>{pointCount}</Text>
