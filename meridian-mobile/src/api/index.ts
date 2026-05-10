@@ -4,14 +4,9 @@ import * as SecureStore from 'expo-secure-store';
 // Construct the API base URL using the REMOTE_HOST environment variable
 export const API_BASE = `http://${process.env.EXPO_PUBLIC_REMOTE_HOST}:8000`; 
 
-console.log('--- API_BASE DEBUG ---');
-console.log('Value:', API_BASE);
-console.log('REMOTE_HOST Env:', process.env.EXPO_PUBLIC_REMOTE_HOST);
-console.log('-----------------------');
-
 const apiClient = axios.create({
   baseURL: API_BASE,
-  timeout: 10000, // Add a timeout to prevent infinite hang
+  timeout: 60000, // Increased to 60s to handle large/slow datasets
   headers: {
     'Content-Type': 'application/json',
   },
@@ -53,6 +48,12 @@ export const getLicenses = async () => {
 
 export const updateLicense = async (id: string, updates: any) => {
   const { data } = await apiClient.put(`/licenses/${id}`, updates);
+  return data;
+};
+
+// --- Miner Listings (Trade Deals) ---
+export const getMinerListings = async () => {
+  const { data } = await apiClient.get('/miner-listings');
   return data;
 };
 
