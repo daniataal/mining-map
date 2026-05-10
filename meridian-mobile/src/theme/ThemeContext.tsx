@@ -14,9 +14,9 @@ import {
   lightMapStyle,
   lightTheme,
   type AppTheme,
-  type GoogleMapStyleRow,
   type MeridianColorSchemePreference,
 } from './tokens';
+import type { MapStyleElement } from 'react-native-maps';
 
 const STORAGE_KEY = 'meridian_theme_preference';
 
@@ -27,7 +27,7 @@ export type MeridianThemeContextValue = {
   resolvedScheme: 'dark' | 'light';
   isDark: boolean;
   statusBarStyle: 'light' | 'dark';
-  mapCustomStyle: GoogleMapStyleRow[];
+  mapCustomStyle: MapStyleElement[];
 };
 
 const ThemeContext = createContext<MeridianThemeContextValue | null>(null);

@@ -1,3 +1,5 @@
+import type { MapStyleElement } from 'react-native-maps';
+
 export type MeridianColorSchemePreference = 'dark' | 'light' | 'system';
 
 export type AppTheme = {
@@ -73,9 +75,7 @@ export const lightTheme: AppTheme = {
   roundness,
 };
 
-export type GoogleMapStyleRow = Record<string, unknown>;
-
-export const darkMapStyle: GoogleMapStyleRow[] = [
+export const darkMapStyle: MapStyleElement[] = [
   { elementType: 'geometry', stylers: [{ color: '#020617' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#020617' }] },
@@ -84,7 +84,7 @@ export const darkMapStyle: GoogleMapStyleRow[] = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
 ];
 
-export const lightMapStyle: GoogleMapStyleRow[] = [
+export const lightMapStyle: MapStyleElement[] = [
   { elementType: 'geometry', stylers: [{ color: '#eef2f6' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#f8fafc' }] },
