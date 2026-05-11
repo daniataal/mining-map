@@ -2,6 +2,13 @@ import axios, { isAxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import type { MiningLicense } from '../types';
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /** Omit Bearer token (login + routes the backend treats as public reads). */
+    skipAuth?: boolean;
+  }
+}
+
 // Construct the API base URL using the REMOTE_HOST environment variable
 export const API_BASE = `http://${process.env.EXPO_PUBLIC_REMOTE_HOST}:8000`; 
 
@@ -14,6 +21,7 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
+  if (config.skipAuth) return config;
   const token = await SecureStore.getItemAsync('mining_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -37,13 +45,13 @@ export default apiClient;
 
 // --- Auth ---
 export const login = async (username: string, password: string) => {
-  const { data } = await apiClient.post('/auth/login', { username, password });
+  const { data } = await apiClient.post('/auth/login', { username, password }, { skipAuth: true });
   return data;
 };
 
 // --- Licenses ---
 export const getLicenses = async (): Promise<MiningLicense[]> => {
-  const { data } = await apiClient.get<MiningLicense[]>('/licenses');
+  const { data } = await apiClient.get<MiningLicense[]>('/licenses', { skipAuth: true });
   return data;
 };
 
@@ -88,18 +96,18 @@ export async function importLicensesCsvText(csv: string): Promise<{ importedCoun
 
 // --- Miner Listings (Trade Deals) ---
 export const getMinerListings = async () => {
-  const { data } = await apiClient.get('/miner-listings');
+  const { data } = await apiClient.get('/miner-listings', { skipAuth: true });
   return data;
 };
 
 // --- Oil ---
 export const getOilSummary = async () => {
-  const { data } = await apiClient.get('/api/oil/summary');
+  const { data } = await apiClient.get('/api/oil/summary', { skipAuth: true });
   return data;
 };
 
 // --- Market ---
 export const getMarketTicker = async () => {
-  const { data } = await apiClient.get('/api/market-ticker');
+  const { data } = await apiClient.get('/api/market-ticker', { skipAuth: true });
   return data;
 };

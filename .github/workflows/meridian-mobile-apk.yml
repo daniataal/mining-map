@@ -17,6 +17,8 @@ jobs:
   build-release-apk:
     name: Assemble Release APK
     runs-on: ubuntu-latest
+    env:
+      GOOGLE_MAPS_ANDROID_API_KEY: ${{ secrets.GOOGLE_MAPS_ANDROID_API_KEY }}
 
     steps:
       - name: Checkout repository
