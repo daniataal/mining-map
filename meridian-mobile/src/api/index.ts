@@ -9,8 +9,11 @@ declare module 'axios' {
   }
 }
 
-// Construct the API base URL using the REMOTE_HOST environment variable
-export const API_BASE = `http://${process.env.EXPO_PUBLIC_REMOTE_HOST}:8000`; 
+const explicitApiBase = process.env.EXPO_PUBLIC_API_BASE?.trim().replace(/\/+$/, '');
+const remoteHost = process.env.EXPO_PUBLIC_REMOTE_HOST?.trim();
+
+// Prefer a full explicit API base so mobile can target the live server path directly.
+export const API_BASE = explicitApiBase || `http://${remoteHost}:8000`;
 
 const apiClient = axios.create({
   baseURL: API_BASE,
