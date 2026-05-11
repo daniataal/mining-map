@@ -36,7 +36,8 @@
         {
           "visibility": "hidden",
           "behavior": "overlay-swipe",
-          "position": "absolute"
+          "position": "absolute",
+          "enforceContrast": false
         }
       ]
     ]

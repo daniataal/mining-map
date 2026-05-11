@@ -24,6 +24,51 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// --- Licenses — bulk CSV import ---
+export type LicenseImportApiError = { row: number; message: string };
+
+export type BulkImportFileResult =
+  | { ok: true; importedCount: number }
+  | { ok: false; errors: LicenseImportApiError[] };
+
+/** Multipart upload to POST /licenses/import (field name `file`). */
+export async function bulkImportLicensesFile(file: File): Promise<BulkImportFileResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('mining_token');
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/licenses/import`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* non-JSON body */
+  }
+
+  if (res.ok && data.status === 'success') {
+    return { ok: true, importedCount: Number(data.imported_count) || 0 };
+  }
+
+  const detail = data.detail as Record<string, unknown> | undefined;
+  const fromDetail = detail?.errors as LicenseImportApiError[] | undefined;
+  if (Array.isArray(fromDetail) && fromDetail.length > 0) {
+    return { ok: false, errors: fromDetail };
+  }
+
+  const msg =
+    (typeof detail?.message === 'string' && detail.message) ||
+    (typeof data.message === 'string' && data.message) ||
+    `Import failed (${res.status})`;
+  return { ok: false, errors: [{ row: 0, message: msg }] };
+}
+
 // --- Licenses ---
 export const useLicenses = () => {
   return useQuery<MiningLicense[]>({

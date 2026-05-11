@@ -12,6 +12,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import OilScreen from '../screens/OilScreen';
 import LogisticsScreen from '../screens/LogisticsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import BulkImportScreen from '../screens/BulkImportScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -121,6 +122,17 @@ export default function MainNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Tabs" component={TabNavigator} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={settingsOptions} />
+      <Stack.Screen
+        name="BulkImport"
+        component={BulkImportScreen}
+        options={{
+          headerShown: true,
+          title: 'BULK IMPORT',
+          headerStyle: { backgroundColor: theme.colors.surface },
+          headerTitleStyle: { color: theme.colors.text, fontWeight: '900' as const, letterSpacing: 2 },
+          headerTintColor: theme.colors.accent,
+        }}
+      />
     </Stack.Navigator>
   );
 }

@@ -2,27 +2,31 @@ import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
-import { 
-  BarChart3, 
-  Globe, 
-  Layers, 
-  Zap, 
-  TrendingUp, 
+import {
+  BarChart3,
+  Globe,
+  Layers,
+  Zap,
+  TrendingUp,
   Anchor,
-  Box
+  Box,
+  Upload,
 } from 'lucide-react';
+import { Button } from './ui/button';
 import { motion } from 'framer-motion';
 
 interface DashboardViewProps {
   licenses: MiningLicense[];
   marketPrices: any[];
   annotations: Record<string, UserAnnotation>;
+  onOpenBulkImport?: () => void;
 }
 
 export default function DashboardView({
   licenses,
   marketPrices,
-  annotations
+  annotations,
+  onOpenBulkImport,
 }: DashboardViewProps) {
   const { t } = useI18n();
 
@@ -67,7 +71,19 @@ export default function DashboardView({
             Global Mining Intelligence • System Status: Online
           </p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-2 sm:gap-4 items-center flex-wrap justify-end">
+          {onOpenBulkImport && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onOpenBulkImport}
+              className="h-9 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-black uppercase text-[9px] tracking-widest gap-2"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {t('ייבוא CSV', 'Bulk CSV')}
+            </Button>
+          )}
           <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 px-4 py-1.5 font-black uppercase text-[10px]">
             {t("פעיל", "Live Stream")}
           </Badge>

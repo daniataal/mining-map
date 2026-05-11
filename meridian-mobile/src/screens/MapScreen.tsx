@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,12 +14,29 @@ import {
 import { Marker, Callout, PROVIDER_GOOGLE, Geojson } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { useQuery } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLicenses } from '../api';
 import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { Search, Filter, Crosshair, X, Check } from 'lucide-react-native';
 import DossierModal from '../components/DossierModal';
 import { applyCollocationJitter, type JitteredLicense } from '../lib/geo';
+import {
+  TACTICAL_CLUSTER,
+  TACTICAL_GEOJSON,
+  TACTICAL_SPIDER_LINE,
+  tacticalMarkerColor,
+  tacticalMarkerDiameterPx,
+} from '../lib/mapTacticalStyle';
+
+const INITIAL_MAP_REGION = {
+  latitude: 7.9465,
+  longitude: -1.0232,
+  latitudeDelta: 10,
+  longitudeDelta: 10,
+} as const;
+
+const TAB_BAR_HEIGHT_APPROX = 70;
 
 function normalizeLabel(val: string | undefined): string {
   const v = (val || 'Unknown').trim();
@@ -32,14 +49,20 @@ function normalizeLabel(val: string | undefined): string {
 function createStyles(theme: AppTheme) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.background },
-    map: { width: Dimensions.get('window').width, height: Dimensions.get('window').height },
+    map: { flex: 1 },
     center: {
       flex: 1,
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: theme.colors.background,
     },
-    topBar: { position: 'absolute', top: 60, left: 20, right: 20, flexDirection: 'row', gap: 12 },
+    topBar: {
+      position: 'absolute',
+      left: 20,
+      right: 20,
+      flexDirection: 'row',
+      gap: 12,
+    },
     searchBar: {
       flex: 1,
       height: 48,
@@ -63,23 +86,24 @@ function createStyles(theme: AppTheme) {
       borderWidth: 1,
       borderColor: theme.colors.border,
     },
-    clusterWrapper: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: theme.colors.accent,
+    clusterOuter: {
+      width: TACTICAL_CLUSTER.outerSize,
+      height: TACTICAL_CLUSTER.outerSize,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    clusterInner: {
+      width: TACTICAL_CLUSTER.innerSize,
+      height: TACTICAL_CLUSTER.innerSize,
+      borderRadius: TACTICAL_CLUSTER.innerSize / 2,
+      backgroundColor: TACTICAL_CLUSTER.background,
       justifyContent: 'center',
       alignItems: 'center',
-      borderWidth: 2,
-      borderColor: theme.colors.primary,
-      elevation: 5,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.5,
-      shadowRadius: 4,
+      borderWidth: TACTICAL_CLUSTER.borderWidth,
+      borderColor: TACTICAL_CLUSTER.border,
     },
     clusterText: {
-      color: theme.colors.primary,
+      color: TACTICAL_CLUSTER.text,
       fontSize: 14,
       fontWeight: '900',
     },
@@ -124,7 +148,6 @@ function createStyles(theme: AppTheme) {
     applyBtnText: { color: theme.colors.primary, fontWeight: '900', fontSize: 12, letterSpacing: 1 },
     fab: {
       position: 'absolute',
-      bottom: 30,
       right: 20,
       width: 56,
       height: 56,
@@ -152,9 +175,42 @@ function createStyles(theme: AppTheme) {
   });
 }
 
+/** Android snapshots custom marker views once; brief true avoids blank clusters, then false for FPS. */
+function TacticalClusterBubble(props: {
+  coordinate: { latitude: number; longitude: number };
+  pointCount: number;
+  onPress?: () => void;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const { coordinate, pointCount, onPress, styles } = props;
+  const [tracksViewChanges, setTracksViewChanges] = useState(() => Platform.OS === 'android');
+
+  useEffect(() => {
+    if (!tracksViewChanges) return;
+    const t = setTimeout(() => setTracksViewChanges(false), 450);
+    return () => clearTimeout(t);
+  }, [tracksViewChanges]);
+
+  return (
+    <Marker
+      coordinate={coordinate}
+      onPress={onPress}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracksViewChanges}
+    >
+      <View style={styles.clusterOuter}>
+        <View style={styles.clusterInner}>
+          <Text style={styles.clusterText}>{pointCount}</Text>
+        </View>
+      </View>
+    </Marker>
+  );
+}
+
 export default function MapScreen() {
   const { theme, mapCustomStyle } = useMeridianTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
 
   const { data: rawLicenses = [], isLoading } = useQuery({
     queryKey: ['licenses'],
@@ -168,13 +224,13 @@ export default function MapScreen() {
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [selectedLicenseTypes, setSelectedLicenseTypes] = useState<string[]>([]);
   const [isFilterVisible, setFilterVisible] = useState(false);
+  /** Defer polygon overlay slightly so tiles + clustering initialize first (perceived startup). */
+  const [geoJsonReady, setGeoJsonReady] = useState(false);
 
-  const [mapRegion, setMapRegion] = useState({
-    latitude: 7.9465,
-    longitude: -1.0232,
-    latitudeDelta: 10,
-    longitudeDelta: 10,
-  });
+  useEffect(() => {
+    const t = requestAnimationFrame(() => setGeoJsonReady(true));
+    return () => cancelAnimationFrame(t);
+  }, []);
 
   useEffect(() => {
     fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
@@ -265,6 +321,100 @@ export default function MapScreen() {
     );
   }, [rawLicenses, searchQuery, selectedCommodities, selectedCountries, selectedLicenseTypes]);
 
+  const onSelectLicense = useCallback((item: MiningLicense) => setSelectedItem(item), []);
+
+  const geoJsonOverlay = useMemo(() => {
+    if (!geoJsonReady || !filteredGeoJson || !filteredGeoJson.features?.length) return null;
+    return (
+      <Geojson
+        geojson={filteredGeoJson}
+        strokeColor={`${TACTICAL_GEOJSON.stroke}${TACTICAL_GEOJSON.strokeAlpha}`}
+        fillColor={`${TACTICAL_GEOJSON.fill}${TACTICAL_GEOJSON.fillAlpha}`}
+        strokeWidth={TACTICAL_GEOJSON.strokeWidth}
+      />
+    );
+  }, [geoJsonReady, filteredGeoJson]);
+
+  const licenseMarkers = useMemo(
+    () =>
+      filteredLicenses.map((item: JitteredLicense, index: number) => {
+        const d = tacticalMarkerDiameterPx(item.commodity);
+        const fill = tacticalMarkerColor(item.commodity);
+        return (
+          <Marker
+            key={`${item.id}:${index}`}
+            coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
+            onPress={() => onSelectLicense(item)}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <View
+              style={{
+                width: d,
+                height: d,
+                borderRadius: d / 2,
+                backgroundColor: fill,
+                borderWidth: 1,
+                borderColor: fill === '#FFD700' ? 'rgba(255, 255, 255, 0.92)' : 'rgba(255, 255, 255, 0.75)',
+              }}
+            />
+            <Callout tooltip onPress={() => onSelectLicense(item)}>
+              <View style={styles.callout}>
+                <Text style={styles.calloutTitle}>{item.company}</Text>
+                <Text style={styles.calloutSubtitle}>
+                  {item.commodity} | {item.status}
+                </Text>
+                {item._wasJittered && (
+                  <Text style={styles.jitterText}>≈ Approx Location ({item._collocatedCount})</Text>
+                )}
+              </View>
+            </Callout>
+          </Marker>
+        );
+      }),
+    [filteredLicenses, onSelectLicense, styles],
+  );
+
+  const topBarPad = Math.max(insets.top, 12);
+  const fabBottom = Math.max(insets.bottom, 12) + TAB_BAR_HEIGHT_APPROX - 22;
+
+  const renderCluster = useCallback(
+    (cluster: {
+      id?: number | string;
+      geometry?: { coordinates?: [number, number] };
+      properties?: { point_count?: number; cluster_id?: number };
+      onPress?: () => void;
+    }) => {
+      const { geometry, properties, onPress, id } = cluster;
+      const coords = geometry?.coordinates;
+      if (!coords || coords.length < 2) return null;
+      const [longitude, latitude] = coords;
+      if (
+        typeof latitude !== 'number' ||
+        typeof longitude !== 'number' ||
+        isNaN(latitude) ||
+        isNaN(longitude)
+      ) {
+        return null;
+      }
+      const pointCount = properties?.point_count ?? 0;
+      const stableKey =
+        typeof id !== 'undefined' ? String(id) : `c-${properties?.cluster_id ?? longitude}-${latitude}-${pointCount}`;
+
+      return (
+        <Fragment key={`cluster-${stableKey}`}>
+          <TacticalClusterBubble
+            coordinate={{ latitude, longitude }}
+            pointCount={pointCount}
+            onPress={onPress}
+            styles={styles}
+          />
+        </Fragment>
+      );
+    },
+    [styles],
+  );
+
   if (isLoading) {
     return (
       <View style={styles.center}>
@@ -278,82 +428,22 @@ export default function MapScreen() {
       <ClusteredMapView
         provider={PROVIDER_GOOGLE}
         style={styles.map}
-        initialRegion={mapRegion}
+        initialRegion={INITIAL_MAP_REGION}
         customMapStyle={mapCustomStyle}
-        onRegionChangeComplete={setMapRegion}
-        spiderLineColor={theme.colors.accent}
+        spiderLineColor={TACTICAL_SPIDER_LINE}
         radius={70}
         extent={256}
         nodeSize={32}
-        renderCluster={(cluster: {
-          geometry?: { coordinates?: [number, number] };
-          properties?: { point_count?: number; cluster_id?: number };
-          onPress?: () => void;
-        }) => {
-          const { geometry, properties, onPress } = cluster;
-          const coords = geometry?.coordinates;
-          if (!coords || coords.length < 2) return null;
-          const [longitude, latitude] = coords;
-          if (
-            typeof latitude !== 'number' ||
-            typeof longitude !== 'number' ||
-            isNaN(latitude) ||
-            isNaN(longitude)
-          ) {
-            return null;
-          }
-          const pointCount = properties?.point_count ?? 0;
-          const clusterId = properties?.cluster_id ?? `${longitude},${latitude},${pointCount}`;
-
-          return (
-            <Marker
-              key={`cluster-${clusterId}`}
-              coordinate={{ latitude, longitude }}
-              onPress={onPress}
-              tracksViewChanges={Platform.OS === 'android'}
-            >
-              <View style={styles.clusterWrapper}>
-                <Text style={styles.clusterText}>{pointCount}</Text>
-              </View>
-            </Marker>
-          );
-        }}
+        renderCluster={renderCluster}
+        tracksViewChanges={false}
       >
-        {filteredGeoJson && filteredGeoJson.features?.length > 0 && (
-          <Geojson
-            geojson={filteredGeoJson}
-            strokeColor={theme.colors.accent + '99'}
-            fillColor={theme.colors.accent + '08'}
-            strokeWidth={2}
-          />
-        )}
-
-        {filteredLicenses.map((item: JitteredLicense, index: number) => (
-          <Marker
-            key={`${item.id}:${index}`}
-            coordinate={{ latitude: item._displayLat, longitude: item._displayLng }}
-            pinColor={item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent}
-            onPress={() => setSelectedItem(item)}
-            tracksViewChanges={false}
-          >
-            <Callout tooltip onPress={() => setSelectedItem(item)}>
-              <View style={styles.callout}>
-                <Text style={styles.calloutTitle}>{item.company}</Text>
-                <Text style={styles.calloutSubtitle}>
-                  {item.commodity} | {item.status}
-                </Text>
-                {item._wasJittered && (
-                  <Text style={styles.jitterText}>≈ Approx Location ({item._collocatedCount})</Text>
-                )}
-              </View>
-            </Callout>
-          </Marker>
-        ))}
+        {geoJsonOverlay}
+        {licenseMarkers}
       </ClusteredMapView>
 
       <DossierModal item={selectedItem} isVisible={!!selectedItem} onClose={() => setSelectedItem(null)} />
 
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: topBarPad }]}>
         <View style={styles.searchBar}>
           <Search size={18} color={theme.colors.textMuted} />
           <TextInput
@@ -468,7 +558,7 @@ export default function MapScreen() {
         </View>
       </Modal>
 
-      <TouchableOpacity style={styles.fab}>
+      <TouchableOpacity style={[styles.fab, { bottom: fabBottom }]}>
         <Crosshair size={24} color={theme.colors.primary} />
       </TouchableOpacity>
     </View>
