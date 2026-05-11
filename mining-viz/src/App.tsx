@@ -558,6 +558,9 @@ export default function App() {
           marketPrices={marketPrices}
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
           updateAnnotation={updateAnnotation}
+          onDeleteLicense={
+            dossierItem ? () => deleteLicense(dossierItem.id) : undefined
+          }
         />
 
         <BulkImportLicensesModal

@@ -2,7 +2,7 @@ import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { MapPin as LucideMapPin, Phone as LucidePhone } from 'lucide-react';
+import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2 } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;
@@ -13,10 +13,11 @@ interface PopupFormProps {
   isOpen: boolean;
 }
 
-export default function PopupForm({ 
-  item, 
-  annotation, 
-  onOpenDossier
+export default function PopupForm({
+  item,
+  annotation,
+  onDelete,
+  onOpenDossier,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -96,6 +97,17 @@ export default function PopupForm({
                      {t("פרטי רשיון", "License Details")}
                    </Button>
                 </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full mt-2 h-9 text-[9px] font-black uppercase tracking-widest border-red-500/40 text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 dark:border-red-500/30 dark:hover:bg-red-500/15 dark:hover:text-red-300"
+                  onClick={onDelete}
+                >
+                  <LucideTrash2 className="w-3.5 h-3.5 mr-1.5 shrink-0" />
+                  {t('מחק רישיון', 'Delete license')}
+                </Button>
 
                 {/* 4. Technical Specs (Flexible) */}
                 <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
