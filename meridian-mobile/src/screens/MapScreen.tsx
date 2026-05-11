@@ -9,6 +9,7 @@ import {
   TextInput,
   Modal,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Marker, Callout, PROVIDER_GOOGLE, Geojson } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
@@ -309,7 +310,7 @@ export default function MapScreen() {
               key={`cluster-${clusterId}`}
               coordinate={{ latitude, longitude }}
               onPress={onPress}
-              tracksViewChanges={false}
+              tracksViewChanges={Platform.OS === 'android'}
             >
               <View style={styles.clusterWrapper}>
                 <Text style={styles.clusterText}>{pointCount}</Text>
@@ -327,9 +328,9 @@ export default function MapScreen() {
           />
         )}
 
-        {filteredLicenses.map((item: JitteredLicense) => (
+        {filteredLicenses.map((item: JitteredLicense, index: number) => (
           <Marker
-            key={item.id}
+            key={`${item.id}:${index}`}
             coordinate={{ latitude: item._displayLat, longitude: item._displayLng }}
             pinColor={item.status === 'APPROVED' ? theme.colors.success : theme.colors.accent}
             onPress={() => setSelectedItem(item)}
