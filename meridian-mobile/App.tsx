@@ -3,7 +3,7 @@ import { NavigationContainer, DefaultTheme, DarkTheme, Theme as NavigationTheme 
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ActivityIndicator, View, StyleSheet, Platform } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, Platform, AppState } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 
 import MainNavigator from './src/navigation/MainNavigator';
@@ -41,10 +41,34 @@ function AppContent() {
 
   useEffect(() => {
     checkLoginStatus();
+  }, []);
+
+  useEffect(() => {
     if (Platform.OS === 'android') {
+      NavigationBar.setStyle(isDark ? 'dark' : 'light');
       void NavigationBar.setVisibilityAsync('hidden');
     }
-  }, []);
+  }, [isDark]);
+
+  /** Re-hide nav bar when the OS shows it (e.g. after overlay swipe) or when returning from background. */
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const hide = () => {
+      NavigationBar.setStyle(isDark ? 'dark' : 'light');
+      void NavigationBar.setVisibilityAsync('hidden');
+    };
+    hide();
+    const visSub = NavigationBar.addVisibilityListener(({ visibility }) => {
+      if (visibility === 'visible') hide();
+    });
+    const appSub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') hide();
+    });
+    return () => {
+      visSub.remove();
+      appSub.remove();
+    };
+  }, [isDark]);
 
   const checkLoginStatus = async () => {
     const token = await SecureStore.getItemAsync('mining_token');

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Response, Header
+from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import psycopg2
@@ -796,6 +796,213 @@ def batch_delete_licenses(request: BatchDeleteRequest):
     conn.close()
     return {"status": "success", "deleted_count": deleted_count}
 
+# --- License bulk import (CSV): shared parsing + validation ----------------------------
+
+_LICENSE_IMPORT_HEADER_ALIASES: dict[str, str] = {
+    "company": "company",
+    "country": "country",
+    "region": "region",
+    "commodity": "commodity",
+    "license_type": "license_type",
+    "licensetype": "license_type",
+    "status": "status",
+    "lat": "lat",
+    "latitude": "lat",
+    "lng": "lng",
+    "lon": "lng",
+    "long": "lng",
+    "longitude": "lng",
+    "phone_number": "phone_number",
+    "phonenumber": "phone_number",
+    "phone": "phone_number",
+    "contact_person": "contact_person",
+    "contactperson": "contact_person",
+    "contact": "contact_person",
+}
+
+
+def _strip_bom(text: str) -> str:
+    t = text.strip()
+    if t.startswith("\ufeff"):
+        return t[1:]
+    return t
+
+
+def _canon_csv_header(cell: str) -> Optional[str]:
+    if cell is None:
+        return None
+    key = cell.strip().lower().replace(" ", "_")
+    return _LICENSE_IMPORT_HEADER_ALIASES.get(key)
+
+
+def parse_license_import_csv(decoded: str) -> dict:
+    """
+    Parse license bulk-import CSV. First row must be headers.
+    Required columns: company, country, lat, lng (aliases allowed; see _LICENSE_IMPORT_HEADER_ALIASES).
+    Returns: { "ok": bool, "rows": [... tuples for executemany ...], "errors": [ {"row": int, "message": str}, ... ] }
+    """
+    text = _strip_bom(decoded)
+    if not text:
+        return {"ok": False, "rows": [], "errors": [{"row": 0, "message": "Empty CSV"}]}
+
+    stream = io.StringIO(text)
+    reader = csv.reader(stream)
+    try:
+        header_cells = next(reader)
+    except StopIteration:
+        return {"ok": False, "rows": [], "errors": [{"row": 0, "message": "Missing header row"}]}
+
+    col_map: list[Optional[str]] = []
+    for h in header_cells:
+        canon = _canon_csv_header(h or "")
+        col_map.append(canon)
+
+    required = {"company", "country", "lat", "lng"}
+    present = {c for c in col_map if c}
+    missing = required - present
+    if missing:
+        return {
+            "ok": False,
+            "rows": [],
+            "errors": [
+                {
+                    "row": 1,
+                    "message": "Missing required columns: "
+                    + ", ".join(sorted(missing))
+                    + ". Expected header includes company, country, lat, lng (see GET /licenses/template).",
+                }
+            ],
+        }
+
+    rows_out: list[tuple] = []
+    errors: list[dict] = []
+    row_num = 1
+
+    for parts in reader:
+        row_num += 1
+        if not parts or all(not (c or "").strip() for c in parts):
+            continue
+
+        row_data: dict[str, str] = {}
+        for idx, raw in enumerate(parts):
+            if idx >= len(col_map):
+                break
+            field = col_map[idx]
+            if not field:
+                continue
+            row_data[field] = (raw or "").strip()
+
+        company = row_data.get("company", "")
+        country = row_data.get("country", "")
+        lat_s = row_data.get("lat", "")
+        lng_s = row_data.get("lng", "")
+
+        row_errors: list[str] = []
+        if not company:
+            row_errors.append("company is required")
+        if not country:
+            row_errors.append("country is required")
+        if not lat_s:
+            row_errors.append("lat is required")
+        if not lng_s:
+            row_errors.append("lng is required")
+
+        if row_errors:
+            errors.append({"row": row_num, "message": "; ".join(row_errors)})
+            continue
+
+        try:
+            lat = float(lat_s)
+            lng = float(lng_s)
+        except ValueError:
+            errors.append(
+                {
+                    "row": row_num,
+                    "message": f"lat and lng must be valid numbers (got lat={lat_s!r}, lng={lng_s!r})",
+                }
+            )
+            continue
+
+        if not -90.0 <= lat <= 90.0:
+            errors.append({"row": row_num, "message": f"lat must be between -90 and 90 (got {lat})"})
+            continue
+        if not -180.0 <= lng <= 180.0:
+            errors.append({"row": row_num, "message": f"lng must be between -180 and 180 (got {lng})"})
+            continue
+
+        region = row_data.get("region", "") or ""
+        commodity = row_data.get("commodity", "") or ""
+        license_type = (row_data.get("license_type", "") or "").strip() or "Unknown"
+        status = (row_data.get("status", "") or "").strip() or "Operating"
+        phone_number = row_data.get("phone_number", "") or ""
+        contact_person = row_data.get("contact_person", "") or ""
+
+        rows_out.append(
+            (
+                str(uuid.uuid4()),
+                company,
+                country,
+                region,
+                commodity,
+                license_type,
+                status,
+                lat,
+                lng,
+                phone_number,
+                contact_person,
+                None,
+            )
+        )
+
+    if not rows_out:
+        if errors:
+            return {"ok": False, "rows": [], "errors": errors}
+        return {"ok": False, "rows": [], "errors": [{"row": 0, "message": "No data rows after header"}]}
+
+    if errors:
+        return {"ok": False, "rows": [], "errors": errors}
+
+    return {"ok": True, "rows": rows_out, "errors": []}
+
+
+def _insert_license_import_rows(rows: list[tuple]) -> int:
+    conn = get_db_connection()
+    c = conn.cursor()
+    try:
+        c.executemany(
+            """
+            INSERT INTO licenses
+            (id, company, country, region, commodity, license_type, status, lat, lng, phone_number, contact_person, date_issued)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            rows,
+        )
+        conn.commit()
+        return len(rows)
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail={"message": str(e)})
+    finally:
+        conn.close()
+
+
+class LicenseImportTextBody(BaseModel):
+    csv: str
+
+
+@app.post("/licenses/import-text")
+def import_licenses_text(body: LicenseImportTextBody):
+    """Bulk-import licenses from raw CSV text (for mobile paste). Same rules as POST /licenses/import."""
+    result = parse_license_import_csv(body.csv)
+    if not result["ok"]:
+        raise HTTPException(
+            status_code=422,
+            detail={"status": "validation_error", "errors": result["errors"]},
+        )
+    imported = _insert_license_import_rows(result["rows"])
+    return {"status": "success", "imported_count": imported}
+
+
 @app.get("/licenses/export")
 def export_licenses():
     conn = get_db_connection()
@@ -842,55 +1049,18 @@ def get_template():
 async def import_licenses(file: UploadFile = File(...)):
     content = await file.read()
     try:
-        decoded = content.decode('utf-8')
+        decoded = content.decode("utf-8")
     except UnicodeDecodeError:
-        # Fallback to latin-1 if utf-8 fails
-        decoded = content.decode('latin-1')
-        
-    csv_reader = csv.DictReader(io.StringIO(decoded))
-    
-    rows_to_insert = []
-    
-    for row in csv_reader:
-        # Basic validation
-        if not row.get("company") or not row.get("lat") or not row.get("lng"):
-            continue
-            
-        rows_to_insert.append((
-            str(uuid.uuid4()), # Generate new ID
-            row.get("company"),
-            row.get("country", "Ghana"),
-            row.get("region", ""),
-            row.get("commodity", ""),
-            row.get("license_type", "Unknown"),
-            row.get("status", "Unknown"),
-            float(row.get("lat", 0)),
-            float(row.get("lng", 0)),
-            row.get("phone_number", ""),
-            row.get("contact_person", ""),
-            None # date_issued
-        ))
-        
-    if not rows_to_insert:
-        return {"status": "error", "message": "No valid rows found or file is empty"}
+        decoded = content.decode("latin-1")
 
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    try:
-        c.executemany('''
-            INSERT INTO licenses 
-            (id, company, country, region, commodity, license_type, status, lat, lng, phone_number, contact_person, date_issued)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', rows_to_insert)
-        conn.commit()
-        count = c.rowcount
-    except Exception as e:
-        conn.close()
-        return {"status": "error", "message": str(e)}
-        
-    conn.close()
-    return {"status": "success", "imported_count": count}
+    result = parse_license_import_csv(decoded)
+    if not result["ok"]:
+        raise HTTPException(
+            status_code=422,
+            detail={"status": "validation_error", "errors": result["errors"]},
+        )
+    imported = _insert_license_import_rows(result["rows"])
+    return {"status": "success", "imported_count": imported}
 
 # --- File Management for Dossiers ---
 from fastapi.staticfiles import StaticFiles

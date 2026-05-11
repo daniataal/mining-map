@@ -12,13 +12,15 @@ import {
   Layers as LucideLayers,
   Settings as LucideSettings,
   Pin as LucidePin,
-  PieChart as LucidePieChart
+  PieChart as LucidePieChart,
+  Upload as LucideUpload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface SidebarProps {
   processedData: MiningLicense[];
   setIsAddModalOpen: (val: boolean) => void;
+  onOpenBulkImport: () => void;
   loading: boolean;
   onLogout: () => void;
   userAnnotations: Record<string, UserAnnotation>;
@@ -42,6 +44,7 @@ export default function Sidebar({
   selectedItem,
   userAnnotations,
   setIsAddModalOpen,
+  onOpenBulkImport,
   viewMode,
   setViewMode,
   onToggleFilter,
@@ -149,14 +152,25 @@ export default function Sidebar({
                <Badge variant="outline" className="text-[10px] border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 bg-black/5 dark:bg-white/5 px-2 h-5 font-black uppercase">
                   {processedData.length} {t("נמצאו", "Total Found")}
                </Badge>
-               <Button 
-                 size="icon" 
-                 variant="ghost" 
-                 className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition-all active:scale-95"
-                 onClick={() => setIsAddModalOpen(true)}
-               >
-                 <LucidePlus className="w-4 h-4 stroke-[3]" />
-               </Button>
+               <div className="flex items-center gap-1">
+                 <Button 
+                   size="icon" 
+                   variant="ghost" 
+                   title={t("ייבוא CSV", "Bulk import CSV")}
+                   className="h-8 w-8 bg-slate-500/10 text-slate-400 hover:bg-slate-500/20 border border-slate-500/20 rounded-lg transition-all active:scale-95"
+                   onClick={onOpenBulkImport}
+                 >
+                   <LucideUpload className="w-4 h-4 stroke-[3]" />
+                 </Button>
+                 <Button 
+                   size="icon" 
+                   variant="ghost" 
+                   className="h-8 w-8 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg transition-all active:scale-95"
+                   onClick={() => setIsAddModalOpen(true)}
+                 >
+                   <LucidePlus className="w-4 h-4 stroke-[3]" />
+                 </Button>
+               </div>
             </div>
           </header>
 

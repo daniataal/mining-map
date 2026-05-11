@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import { useNavigation } from '@react-navigation/native';
 import { useMeridianTheme, type AppTheme, type MeridianColorSchemePreference } from '../theme';
-import { LogOut, User, Shield, Info, Smartphone, Moon, Sun, Monitor } from 'lucide-react-native';
+import { LogOut, User, Shield, Info, Smartphone, Moon, Sun, Monitor, Upload } from 'lucide-react-native';
 
 function createStyles(theme: AppTheme) {
   return StyleSheet.create({
@@ -113,6 +114,7 @@ function createStyles(theme: AppTheme) {
 export default function SettingsScreen() {
   const { theme, colorSchemePreference, setColorSchemePreference } = useMeridianTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const navigation = useNavigation<any>();
 
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('');
@@ -215,6 +217,15 @@ export default function SettingsScreen() {
         <MenuItem icon={Shield} label="Security Protocol" value="Active (AES-256)" />
         <MenuItem icon={Smartphone} label="App Version" value="2.0.0-PRO" />
         <MenuItem icon={Info} label="Backend Status" value="Online" />
+      </View>
+
+      <Text style={styles.sectionTitle}>DATA OPS</Text>
+      <View style={styles.menuGroup}>
+        <MenuItem
+          icon={Upload}
+          label="Bulk import licenses (CSV)"
+          onPress={() => navigation.navigate('BulkImport')}
+        />
       </View>
 
       <Text style={styles.sectionTitle}>SESSION CONTROL</Text>

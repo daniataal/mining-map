@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE } from './lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation } from './types';
@@ -10,6 +11,7 @@ import MapComponent from './components/MapComponent';
 import DossierView from './components/DossierView';
 import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
+import BulkImportLicensesModal from './components/BulkImportLicensesModal';
 import KanbanBoard from './components/KanbanBoard';
 import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
@@ -45,6 +47,7 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 export default function App() {
   const { t, isRtl } = useI18n();
+  const queryClient = useQueryClient();
   
   // Data Fetching
   const { data: rawData = [], isLoading, error: fetchError } = useLicenses();
@@ -72,6 +75,7 @@ export default function App() {
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
   // User Annotations (Local storage for now, ideally backend)
   const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() => {
@@ -345,6 +349,7 @@ export default function App() {
           <Sidebar
             processedData={miningData.processedData}
             setIsAddModalOpen={setIsAddModalOpen}
+            onOpenBulkImport={() => setIsBulkImportOpen(true)}
             loading={isLoading}
             onLogout={handleLogout}
             userAnnotations={userAnnotations}
@@ -451,6 +456,7 @@ export default function App() {
                 licenses={miningData.processedData}
                 marketPrices={marketPrices}
                 annotations={userAnnotations}
+                onOpenBulkImport={() => setIsBulkImportOpen(true)}
               />
             )}
             {viewMode === 'pipeline' && (
@@ -519,7 +525,24 @@ export default function App() {
           updateAnnotation={updateAnnotation}
         />
 
-        {/* Add License Modal */}
+        <BulkImportLicensesModal
+          isOpen={isBulkImportOpen}
+          onClose={() => setIsBulkImportOpen(false)}
+          onSuccess={(n) => {
+            queryClient.invalidateQueries({ queryKey: ['licenses'] });
+            toast.success(t('ייבוא הצליח', 'Import successful'), {
+              description: `${n} ${t('רישיונות יובאו', 'licenses imported')}`,
+            });
+            if (userId && username) {
+              logActivityMutation.mutate({
+                user_id: userId,
+                username,
+                action: 'IMPORT',
+                details: `Bulk CSV import: ${n} licenses`,
+              });
+            }
+          }}
+        />
         <AddLicenseModal
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
