@@ -80,6 +80,11 @@ export const darkMapStyle: MapStyleElement[] = [
   { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#020617' }] },
   { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
+  {
+    featureType: 'administrative.country',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#64748b' }, { weight: 1 }],
+  },
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
 ];

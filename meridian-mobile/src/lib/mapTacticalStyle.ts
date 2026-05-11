@@ -7,10 +7,13 @@ export const TACTICAL_GEOJSON = {
   /** Leaflet GeoJSON stroke/fill in MapComponent */
   stroke: '#06b6d4',
   fill: '#06b6d4',
-  /** RN alpha on colors (hex suffix) */
+  /** RN alpha on colors (hex suffix) — prefer `strokeRgba` / `fillRgba` on native maps */
   strokeAlpha: '99',
   fillAlpha: '14',
   strokeWidth: 2,
+  /** Google Maps / RN color parsing: 8-digit hex is inconsistent; rgba is reliable */
+  strokeRgba: 'rgba(6, 182, 212, 0.6)',
+  fillRgba: 'rgba(6, 182, 212, 0.08)',
 } as const;
 
 /** `.custom-cluster-icon` — blue glass cluster */
