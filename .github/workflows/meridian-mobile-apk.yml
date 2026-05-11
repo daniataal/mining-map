@@ -1,4 +1,4 @@
-name: "Meridian Mobile — Build Debug APK"
+name: "Meridian Mobile — Build Release APK"
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ on:
       - ".github/workflows/meridian-mobile-apk.yml"
 
 jobs:
-  build-debug-apk:
-    name: Assemble Debug APK
+  build-release-apk:
+    name: Assemble Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -46,19 +46,14 @@ jobs:
         working-directory: meridian-mobile
         run: npx expo prebuild --platform android --no-install
 
-      - name: Force JS bundling in Debug
-        working-directory: meridian-mobile/android/app
-        run: |
-          sed -i 's/apply from: "..\/..\/node_modules\/react-native\/react.gradle"/project.ext.react = [ bundleInDebug: true ]\napply from: "..\/..\/node_modules\/react-native\/react.gradle"/' build.gradle
-
-      - name: Build Standalone APK
+      - name: Build release APK
         working-directory: meridian-mobile/android
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload meridian-mobile-apk
+      - name: Upload meridian-mobile-release-apk
         uses: actions/upload-artifact@v4
         with:
-          name: meridian-mobile-apk
-          path: meridian-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: meridian-mobile-release-apk
+          path: meridian-mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
