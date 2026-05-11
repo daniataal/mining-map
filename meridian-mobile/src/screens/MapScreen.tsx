@@ -9,7 +9,6 @@ import {
   TextInput,
   Modal,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { Marker, Callout, PROVIDER_GOOGLE, Geojson } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
@@ -183,7 +182,8 @@ function TacticalClusterBubble(props: {
   styles: ReturnType<typeof createStyles>;
 }) {
   const { coordinate, pointCount, onPress, styles } = props;
-  const [tracksViewChanges, setTracksViewChanges] = useState(() => Platform.OS === 'android');
+  /** Brief true on all platforms so the marker snapshot includes the custom cluster view. */
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
   useEffect(() => {
     if (!tracksViewChanges) return;
@@ -196,6 +196,7 @@ function TacticalClusterBubble(props: {
       coordinate={coordinate}
       onPress={onPress}
       anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={1000}
       tracksViewChanges={tracksViewChanges}
     >
       <View style={styles.clusterOuter}>
@@ -328,9 +329,10 @@ export default function MapScreen() {
     return (
       <Geojson
         geojson={filteredGeoJson}
-        strokeColor={`${TACTICAL_GEOJSON.stroke}${TACTICAL_GEOJSON.strokeAlpha}`}
-        fillColor={`${TACTICAL_GEOJSON.fill}${TACTICAL_GEOJSON.fillAlpha}`}
+        strokeColor={TACTICAL_GEOJSON.strokeRgba}
+        fillColor={TACTICAL_GEOJSON.fillRgba}
         strokeWidth={TACTICAL_GEOJSON.strokeWidth}
+        zIndex={0}
       />
     );
   }, [geoJsonReady, filteredGeoJson]);
@@ -346,6 +348,7 @@ export default function MapScreen() {
             coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
             onPress={() => onSelectLicense(item)}
             anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={500}
             tracksViewChanges={false}
           >
             <View
