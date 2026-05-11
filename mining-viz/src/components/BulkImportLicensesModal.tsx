@@ -64,8 +64,8 @@ export default function BulkImportLicensesModal({ isOpen, onClose, onSuccess }: 
         <div className="space-y-3 text-xs text-slate-400 leading-relaxed">
           <p>
             {t(
-              'שורת כותרת חובה; שדות חובה: company, country, lat, lng.',
-              'Header row required. Required fields: company, country, lat, lng.'
+              'שורת כותרת חובה; חובה: company, country, ואילו lat+lng או עמודת location (קואורדינטות או שם אזור בגאנה — ראו תיעוד).',
+              'Header row required. Required: company, country, and either lat + lng or a location column (coordinate pair, or Ghana region/district label — see LICENSE_BULK_IMPORT.md).'
             )}
           </p>
           <p>

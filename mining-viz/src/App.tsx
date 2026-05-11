@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
@@ -47,6 +47,10 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 export default function App() {
   const { t, isRtl } = useI18n();
+  const licenseFetchTroubleshooting = useMemo(() => {
+    const h = describeLicenseFetchFailureContext();
+    return t(h.he, h.en);
+  }, [t]);
   const queryClient = useQueryClient();
   
   // Data Fetching
@@ -328,10 +332,7 @@ export default function App() {
           )}
           : {formatLicenseFetchError(fetchError)}
           {'. '}
-          {t(
-            'בדוק שה־API רץ וש־VITE_API_BASE מוגדר ב־HTTPS',
-            'Ensure the API is running; on HTTPS set VITE_API_BASE or proxy /licenses to your API.'
-          )}
+          {licenseFetchTroubleshooting}
         </div>
       )}
 

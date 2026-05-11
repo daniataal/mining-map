@@ -68,7 +68,7 @@ export default function BulkImportScreen() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const queryClient = useQueryClient();
   const [text, setText] = useState(
-    'company,country,region,commodity,license_type,status,lat,lng,phone_number,contact_person\n',
+    'company,country,region,commodity,license_type,status,lat,lng,location,phone_number,contact_person\n',
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,10 +97,11 @@ export default function BulkImportScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>CSV BULK IMPORT</Text>
       <Text style={styles.body}>
-        Paste UTF-8 CSV with the same columns as the web template. Required: company, country, lat, lng. Import is
-        all-or-nothing: any bad row cancels the whole paste. See LICENSE_BULK_IMPORT.md in the repo root.
+        Paste UTF-8 CSV like the web template. Required: company, country, and either lat + lng or a location column
+        (decimal pair in one cell, or Ghana region/district name from the import lookup table). Import is all-or-nothing.
+        See LICENSE_BULK_IMPORT.md at the repo root.
       </Text>
-      <Text style={styles.mono}>company,country,region,commodity,license_type,status,lat,lng,...</Text>
+      <Text style={styles.mono}>company,country,...,lat,lng,location,...</Text>
       <TextInput
         style={styles.input}
         multiline

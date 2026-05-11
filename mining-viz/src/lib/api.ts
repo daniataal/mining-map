@@ -8,6 +8,24 @@ export const API_BASE = import.meta.env.VITE_API_BASE ||
     ? ''
     : `http://${window.location.hostname}:8000`);
 
+/** Context-aware troubleshooting when GET /licenses fails (network / mixed content / wrong base URL). */
+export function describeLicenseFetchFailureContext(): { en: string; he: string } {
+  const base =
+    typeof window !== 'undefined'
+      ? API_BASE || '(same origin — empty base)'
+      : '(server render)';
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return {
+      en: `Ensure the API process is running and reachable. This page is HTTPS — browsers block non-secure API calls to http:// URLs (mixed content). Current resolved API base: ${base}. Set VITE_API_BASE to your public https:// API URL, put the API behind TLS, or proxy /licenses through the same origin.`,
+      he: `ודא שה־API רץ ונגיש. הדף ב־HTTPS — הדפדפן חוסם קריאות ל־http:// (mixed content). בסיס ה־API הנוכחי: ${base}. הגדר VITE_API_BASE לכתובת https תקינה, או TLS ל־API, או פרוקסי ל־/licenses מאותו מקור.`,
+    };
+  }
+  return {
+    en: `Ensure the API is running and reachable at ${base} (see Network tab / CORS). If your backend uses another host or port, set VITE_API_BASE before building the web app.`,
+    he: `ודא שה־API רץ וזמין ב־${base} (שורת Network / CORS). אם ה־API במארח או פורט אחרים, הגדר VITE_API_BASE לפני בניית האפליקציה.`,
+  };
+}
+
 const apiClient = axios.create({
   baseURL: API_BASE,
   headers: {

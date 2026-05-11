@@ -11,6 +11,8 @@ import uuid
 from pydantic import BaseModel
 from typing import Optional
 
+from license_import_geo import resolve_location_to_coords, validate_lat_lng_range
+
 app = FastAPI()
 
 # Allow CORS for local development (so React/Vite can fetch from us)
@@ -561,9 +563,6 @@ def read_licenses():
     
     return results
 
-from pydantic import BaseModel
-from typing import Optional
-
 class LicenseCreate(BaseModel):
     company: str
     country: str
@@ -812,6 +811,10 @@ _LICENSE_IMPORT_HEADER_ALIASES: dict[str, str] = {
     "lon": "lng",
     "long": "lng",
     "longitude": "lng",
+    "location": "location",
+    "place": "location",
+    "site": "location",
+    "area": "location",
     "phone_number": "phone_number",
     "phonenumber": "phone_number",
     "phone": "phone_number",
@@ -838,7 +841,7 @@ def _canon_csv_header(cell: str) -> Optional[str]:
 def parse_license_import_csv(decoded: str) -> dict:
     """
     Parse license bulk-import CSV. First row must be headers.
-    Required columns: company, country, lat, lng (aliases allowed; see _LICENSE_IMPORT_HEADER_ALIASES).
+    Required: company, country, and either (lat + lng) or location — see LICENSE_BULK_IMPORT.md.
     Returns: { "ok": bool, "rows": [... tuples for executemany ...], "errors": [ {"row": int, "message": str}, ... ] }
     """
     text = _strip_bom(decoded)
@@ -857,19 +860,29 @@ def parse_license_import_csv(decoded: str) -> dict:
         canon = _canon_csv_header(h or "")
         col_map.append(canon)
 
-    required = {"company", "country", "lat", "lng"}
     present = {c for c in col_map if c}
-    missing = required - present
-    if missing:
+    if "company" not in present or "country" not in present:
         return {
             "ok": False,
             "rows": [],
             "errors": [
                 {
                     "row": 1,
-                    "message": "Missing required columns: "
-                    + ", ".join(sorted(missing))
-                    + ". Expected header includes company, country, lat, lng (see GET /licenses/template).",
+                    "message": "Missing required columns: company and country must appear in the header row.",
+                }
+            ],
+        }
+    has_lat_lng = "lat" in present and "lng" in present
+    has_location = "location" in present
+    if not has_lat_lng and not has_location:
+        return {
+            "ok": False,
+            "rows": [],
+            "errors": [
+                {
+                    "row": 1,
+                    "message": "Include either columns lat and lng, or a location column (CSV may use place/site aliases). "
+                    "See GET /licenses/template and LICENSE_BULK_IMPORT.md.",
                 }
             ],
         }
@@ -894,43 +907,77 @@ def parse_license_import_csv(decoded: str) -> dict:
 
         company = row_data.get("company", "")
         country = row_data.get("country", "")
-        lat_s = row_data.get("lat", "")
-        lng_s = row_data.get("lng", "")
+        lat_s = row_data.get("lat", "") if has_lat_lng else ""
+        lng_s = row_data.get("lng", "") if has_lat_lng else ""
+        loc_s = row_data.get("location", "") if has_location else ""
 
         row_errors: list[str] = []
         if not company:
             row_errors.append("company is required")
         if not country:
             row_errors.append("country is required")
-        if not lat_s:
-            row_errors.append("lat is required")
-        if not lng_s:
-            row_errors.append("lng is required")
+
+        lat: Optional[float] = None
+        lng: Optional[float] = None
+
+        if lat_s or lng_s:
+            if not lat_s:
+                row_errors.append("lat is required when lng is provided")
+            if not lng_s:
+                row_errors.append("lng is required when lat is provided")
+
+        if not row_errors and lat_s and lng_s:
+            try:
+                lat = float(lat_s)
+                lng = float(lng_s)
+            except ValueError:
+                errors.append(
+                    {
+                        "row": row_num,
+                        "message": f"lat and lng must be valid numbers (got lat={lat_s!r}, lng={lng_s!r})",
+                    }
+                )
+                continue
+            rng = validate_lat_lng_range(lat, lng)
+            if rng:
+                errors.append({"row": row_num, "message": rng})
+                continue
+
+        elif not row_errors and loc_s:
+            resolved = resolve_location_to_coords(loc_s, country)
+            if resolved is None:
+                errors.append(
+                    {
+                        "row": row_num,
+                        "message": "Could not get coordinates from location: use lat/lng, "
+                        "put decimal degrees in the location column (e.g. 6.5,-1.5), "
+                        "or for Ghana use a known region/district label from the import lookup table "
+                        "(see LICENSE_BULK_IMPORT.md).",
+                    }
+                )
+                continue
+            lat, lng, _how = resolved
+            rng = validate_lat_lng_range(lat, lng)
+            if rng:
+                errors.append({"row": row_num, "message": rng})
+                continue
+        elif not row_errors:
+            row_errors.append(
+                "provide both lat and lng, or a non-empty location (coordinates or Ghana place name)"
+            )
 
         if row_errors:
             errors.append({"row": row_num, "message": "; ".join(row_errors)})
             continue
 
-        try:
-            lat = float(lat_s)
-            lng = float(lng_s)
-        except ValueError:
-            errors.append(
-                {
-                    "row": row_num,
-                    "message": f"lat and lng must be valid numbers (got lat={lat_s!r}, lng={lng_s!r})",
-                }
-            )
-            continue
-
-        if not -90.0 <= lat <= 90.0:
-            errors.append({"row": row_num, "message": f"lat must be between -90 and 90 (got {lat})"})
-            continue
-        if not -180.0 <= lng <= 180.0:
-            errors.append({"row": row_num, "message": f"lng must be between -180 and 180 (got {lng})"})
+        if lat is None or lng is None:
+            errors.append({"row": row_num, "message": "Internal parse error: coordinates missing"})
             continue
 
         region = row_data.get("region", "") or ""
+        if not region.strip() and loc_s:
+            region = loc_s.splitlines()[0].strip()
+
         commodity = row_data.get("commodity", "") or ""
         license_type = (row_data.get("license_type", "") or "").strip() or "Unknown"
         status = (row_data.get("status", "") or "").strip() or "Operating"
@@ -1035,10 +1082,27 @@ def export_licenses():
 def get_template():
     output = io.StringIO()
     writer = csv.writer(output)
-    # Required/Standard Headers
-    headers = ["company", "country", "region", "commodity", "license_type", "status", "lat", "lng", "phone_number", "contact_person"]
+    # Required: company, country, and either (lat + lng) or location — see LICENSE_BULK_IMPORT.md
+    headers = [
+        "company",
+        "country",
+        "region",
+        "commodity",
+        "license_type",
+        "status",
+        "lat",
+        "lng",
+        "location",
+        "phone_number",
+        "contact_person",
+    ]
     writer.writerow(headers)
-    writer.writerow(["Example Mining Co", "Ghana", "Ashanti", "Gold", "Large Scale", "Operating", "6.5", "-1.5", "+233...", "John Doe"])
+    writer.writerow(
+        ["Example Mining Co", "Ghana", "Ashanti", "Gold", "Large Scale", "Operating", "6.5", "-1.5", "", "+233...", "John Doe"]
+    )
+    writer.writerow(
+        ["Regional Holdings", "Ghana", "", "Gold", "Small Scale", "Operating", "", "", "Western Region", "", ""]
+    )
     
     output.seek(0)
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
