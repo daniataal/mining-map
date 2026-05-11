@@ -13,6 +13,7 @@ import {
   Zap as LucideZap,
   User as LucideUser,
   Phone as LucidePhone,
+  Trash2 as LucideTrash2,
   Camera as LucideCamera,
   Share2 as LucideShare2,
   Pencil as LucidePencil,
@@ -32,6 +33,7 @@ interface DossierViewProps {
   annotation: UserAnnotation;
   marketPrices: any[];
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
+  onDeleteLicense?: () => void;
 }
 
 const KANBAN_STAGES = ['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const;
@@ -67,6 +69,7 @@ export default function DossierView({
   annotation,
   marketPrices,
   updateAnnotation,
+  onDeleteLicense,
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
@@ -976,6 +979,22 @@ Output requirements:
                             placeholder={t('הוסף הערות...', 'Add notes...')}
                           />
                         </div>
+                      </div>
+                    )}
+                    {onDeleteLicense && (
+                      <div className="mt-8 pt-6 border-t border-red-500/20">
+                        <p className="text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">
+                          {t('אזור מסוכן', 'Danger zone')}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full h-11 text-[10px] font-black uppercase tracking-widest border-red-500/40 text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 dark:border-red-500/30 dark:hover:bg-red-500/15"
+                          onClick={onDeleteLicense}
+                        >
+                          <LucideTrash2 className="w-4 h-4 mr-2 shrink-0" />
+                          {t('מחק רישיון לצמיתות', 'Delete license permanently')}
+                        </Button>
                       </div>
                     )}
                   </Card>
