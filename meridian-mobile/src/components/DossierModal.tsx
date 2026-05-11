@@ -1,8 +1,21 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, View, Text, Modal, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { X, Shield, MapPin, Box, Calendar, Phone, User } from 'lucide-react-native';
+import { deleteLicense } from '../api';
 
 interface DossierModalProps {
   item: MiningLicense | null;
@@ -127,12 +140,63 @@ function createStyles(theme: AppTheme, isDark: boolean) {
       fontSize: 14,
       letterSpacing: 1.5,
     },
+    deleteButton: {
+      borderRadius: 16,
+      padding: 16,
+      alignItems: 'center',
+      marginTop: 12,
+      marginBottom: 40,
+      borderWidth: 1,
+      borderColor: theme.colors.error,
+      backgroundColor: theme.colors.error + '14',
+    },
+    deleteButtonText: {
+      color: theme.colors.error,
+      fontWeight: '900',
+      fontSize: 14,
+      letterSpacing: 1.5,
+    },
   });
 }
 
 export default function DossierModal({ item, isVisible, onClose }: DossierModalProps) {
   const { theme, isDark } = useMeridianTheme();
   const styles = useMemo(() => createStyles(theme, isDark), [theme, isDark]);
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: (licenseId: string) => deleteLicense(licenseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['licenses'] });
+      onClose();
+      Alert.alert('License deleted', 'The license was removed from the server.');
+    },
+    onError: (err: unknown) => {
+      let message = 'Delete failed';
+      if (isAxiosError(err)) {
+        const d = err.response?.data as { detail?: string } | undefined;
+        if (typeof d?.detail === 'string') message = d.detail;
+        else if (err.message) message = err.message;
+      } else if (err instanceof Error) message = err.message;
+      Alert.alert('Could not delete', message);
+    },
+  });
+
+  const confirmDelete = () => {
+    if (!item) return;
+    Alert.alert(
+      'Delete license?',
+      `This permanently removes “${item.company}”. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteMutation.mutate(item.id),
+        },
+      ]
+    );
+  };
 
   if (!item) return null;
 
@@ -222,6 +286,18 @@ export default function DossierModal({ item, isVisible, onClose }: DossierModalP
 
             <TouchableOpacity style={styles.actionButton}>
               <Text style={styles.actionButtonText}>UPDATE INTELLIGENCE</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={confirmDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <ActivityIndicator color={theme.colors.error} />
+              ) : (
+                <Text style={styles.deleteButtonText}>DELETE LICENSE</Text>
+              )}
             </TouchableOpacity>
           </ScrollView>
         </View>

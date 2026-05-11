@@ -60,6 +60,11 @@ export const updateLicense = async (id: string, updates: any) => {
   return data;
 };
 
+export const deleteLicense = async (id: string) => {
+  const { data } = await apiClient.delete<{ status: string; deleted_id: string }>(`/licenses/${id}`);
+  return data;
+};
+
 export type LicenseImportRowError = { row: number; message: string };
 
 /** Paste the same CSV as the web template (header row + data). */
