@@ -179,13 +179,47 @@ export default function App() {
 
   const deleteLicense = useCallback((id: string) => {
     if (!confirm(t("האם אתה בטוח שברצונך למחוק רישיון זה?", "Are you sure you want to delete this license?"))) return;
+    const closeDossierIfDeleted = () => {
+      setDossierItem((prev) => {
+        if (prev?.id === id) {
+          setIsDossierOpen(false);
+          return null;
+        }
+        return prev;
+      });
+    };
+    const isLocalOnly = localLicenses.some((l) => l.id === id);
+    if (isLocalOnly) {
+      setLocalLicenses((prev) => prev.filter((l) => l.id !== id));
+      setSelectedItem(null);
+      closeDossierIfDeleted();
+      toast.info(t("הרישיון נמחק", "License deleted"));
+      if (userId && username) {
+        logActivityMutation.mutate({
+          user_id: userId,
+          username,
+          action: 'DELETE_LICENSE',
+          details: `Deleted local license ${id}`,
+        });
+      }
+      return;
+    }
     deleteLicenseMutation.mutate(id, {
       onSuccess: () => {
         setSelectedItem(null);
+        closeDossierIfDeleted();
         toast.info(t("הרישיון נמחק", "License deleted"));
-      }
+        if (userId && username) {
+          logActivityMutation.mutate({
+            user_id: userId,
+            username,
+            action: 'DELETE_LICENSE',
+            details: `Deleted license ${id}`,
+          });
+        }
+      },
     });
-  }, [t, deleteLicenseMutation]);
+  }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
   
