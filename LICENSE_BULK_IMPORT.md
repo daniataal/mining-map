@@ -4,12 +4,25 @@ Use the same CSV format in the **web app** (file upload), **Meridian mobile** (p
 
 ## Required columns
 
-| Column   | Description                          |
-|----------|--------------------------------------|
-| `company` | Non-empty name                       |
-| `country` | Non-empty country                  |
-| `lat`    | Decimal latitude (−90 … 90)          |
-| `lng`    | Decimal longitude (−180 … 180)      |
+| Column   | Description |
+|----------|-------------|
+| `company` | Non-empty name |
+| `country` | Non-empty country |
+
+## Location (choose one style per row)
+
+You must provide coordinates in one of these ways:
+
+1. **`lat` + `lng`** — decimal degrees (`latitude` / `longitude` / `lon` aliases are accepted in the header row).
+2. **`location`** — either:
+   - **Coordinate pair in one cell:** formats such as `6.5,-1.5`, `6.5; -1.5`, or two numbers separated by whitespace (works for **any** country), or
+   - **Ghana place name:** when `country` is Ghana (see below), the cell may be a region or district label matched against the same approximate centroid table used in data conversion (`backend/ghana_location_centroids.py`). These coordinates are **regional centroids**, not surveyed mine positions.
+
+Header aliases for `location`: `place`, `site`, `area`.
+
+For countries **other than Ghana**, named place resolution is **not** applied — use `lat`/`lng` or a coordinate pair in `location`.
+
+Optional: if the `region` column is empty and `location` carried a place label, `region` is filled from the first line of `location` for display.
 
 ## Optional columns
 
@@ -25,10 +38,11 @@ These header names are accepted (case-insensitive, spaces become underscores):
 - `phoneNumber` → `phone_number`
 - `contactPerson` → `contact_person`
 - `latitude` / `longitude` → `lat` / `lng`
+- `place` / `site` / `area` → `location`
 
 ## Template files
 
-- **Download from API:** `GET /licenses/template` (returns `import_template.csv`)
+- **Download from API:** `GET /licenses/template` (returns CSV with example rows)
 - **Repo copy:** `mining-viz/public/licenses-import-template.csv`
 
 ## Rules
@@ -42,3 +56,7 @@ These header names are accepted (case-insensitive, spaces become underscores):
 
 - `POST /licenses/import` — multipart form field `file` (CSV).
 - `POST /licenses/import-text` — JSON body `{ "csv": "<full CSV text>" }` (for mobile paste).
+
+## After import: precise coordinates
+
+Admin-facing HTTP geocoding for existing rows (Nominatim / optional Mapbox) lives at `POST /api/admin/geocode-licenses` and is documented in the backend — it is **not** invoked during CSV import.
