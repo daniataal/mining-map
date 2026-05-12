@@ -10,6 +10,11 @@ from typing import Any, Iterable, Optional
 
 from .open_data_sync import _clean_text, _default_db_connection, _normalize_date
 
+try:
+    from backend.services.entity_relationships import sync_license_relationships_for_row
+except ImportError:
+    from services.entity_relationships import sync_license_relationships_for_row
+
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
@@ -42,13 +47,31 @@ def _normalize_country(value: Any) -> Optional[str]:
     return mapping.get(lowered, cleaned)
 
 
+def _extract_row_value(row: dict[str, Any], *keys: str) -> Optional[str]:
+    for key in keys:
+        value = _clean_text(row.get(key))
+        if value:
+            return value
+
+    normalized_lookup = {
+        str(key).strip().lower().replace(" ", "_"): value for key, value in row.items()
+    }
+    for key in keys:
+        value = _clean_text(normalized_lookup.get(key.strip().lower().replace(" ", "_")))
+        if value:
+            return value
+
+    return None
+
+
 def _infer_sector(row: dict[str, Any]) -> str:
+    commodity = _extract_row_value(row, "commodity", "main commodity", "main_commodity")
     joined = " ".join(
         filter(
             None,
             [
                 _clean_text(row.get("license_type")),
-                _clean_text(row.get("commodity")),
+                commodity,
                 _clean_text(row.get("company")),
             ],
         )
@@ -87,13 +110,14 @@ def normalize_csv_row(
         return None
 
     region = _clean_text(row.get("region")) or _clean_text(row.get("matched_location")) or ""
+    commodity = _extract_row_value(row, "commodity", "main commodity", "main_commodity") or "Minerals"
     record_id = f"{source_id}:{row_id}"
     return {
         "id": record_id,
         "company": _clean_text(row.get("company")) or row_id,
         "country": country,
         "region": region,
-        "commodity": _clean_text(row.get("commodity")) or "Minerals",
+        "commodity": commodity,
         "license_type": _clean_text(row.get("license_type")) or "Mining licence",
         "status": _clean_text(row.get("status")) or "Imported",
         "lat": _parse_float(row.get("lat")),
@@ -277,6 +301,7 @@ def import_csv_rows(
                         record["raw_payload"],
                     ),
                 )
+                sync_license_relationships_for_row(conn, record)
                 inserted += 1
                 per_country[record["country"]] += 1
                 per_sector[record["sector"]] += 1

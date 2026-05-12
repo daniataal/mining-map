@@ -1,5 +1,5 @@
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, MarketTickerRow } from '../types';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 import {
@@ -17,7 +17,7 @@ import { motion } from 'framer-motion';
 
 interface DashboardViewProps {
   licenses: MiningLicense[];
-  marketPrices: any[];
+  marketPrices: MarketTickerRow[];
   annotations: Record<string, UserAnnotation>;
   onOpenBulkImport?: () => void;
 }

@@ -35,6 +35,17 @@ interface SidebarProps {
   isPinned: boolean;
   setIsPinned: (val: boolean) => void;
   isCollapsed: boolean;
+  infrastructureStats?: {
+    total: number;
+    countries: number;
+    ports: number;
+    withLocode: number;
+    portLinked: number;
+    withOperator: number;
+    withCapacity: number;
+    highConfidence: number;
+    topCountries: Array<{ country: string; count: number }>;
+  };
 }
 
 export default function Sidebar({
@@ -53,7 +64,8 @@ export default function Sidebar({
   isFilterOpen,
   isPinned,
   setIsPinned,
-  isCollapsed
+  isCollapsed,
+  infrastructureStats,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -173,6 +185,53 @@ export default function Sidebar({
                  </Button>
                </div>
             </div>
+            {infrastructureStats && infrastructureStats.total > 0 && (
+              <div className="mt-4 rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-3 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Nodes</p>
+                    <p className="text-sm font-black text-slate-900 dark:text-white">{infrastructureStats.total}</p>
+                  </div>
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Countries</p>
+                    <p className="text-sm font-black text-slate-900 dark:text-white">{infrastructureStats.countries}</p>
+                  </div>
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Ports</p>
+                    <p className="text-sm font-black text-emerald-500">{infrastructureStats.ports}</p>
+                  </div>
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">With LOCODE</p>
+                    <p className="text-sm font-black text-cyan-500">{infrastructureStats.withLocode}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">Port Linked</p>
+                    <p className="text-sm font-black text-emerald-500">{infrastructureStats.portLinked}</p>
+                  </div>
+                  <div className="rounded-xl bg-black/5 dark:bg-white/5 p-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">High Confidence</p>
+                    <p className="text-sm font-black text-cyan-500">{infrastructureStats.highConfidence}</p>
+                  </div>
+                </div>
+                {infrastructureStats.topCountries.length > 0 && (
+                  <div>
+                    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                      Top Countries
+                    </p>
+                    <div className="space-y-1.5">
+                      {infrastructureStats.topCountries.slice(0, 4).map((row) => (
+                        <div key={row.country} className="flex items-center justify-between text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                          <span className="truncate pr-3">{row.country}</span>
+                          <span>{row.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </header>
 
           <ScrollArea className="min-h-0 flex-1 overflow-hidden">
@@ -208,6 +267,23 @@ export default function Sidebar({
                     <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
                        <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
                        <span className="truncate">{item.region}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {item.entitySubtype && (
+                        <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[8px] font-black uppercase">
+                          {item.entitySubtype.replaceAll('_', ' ')}
+                        </Badge>
+                      )}
+                      {item.operatorName && (
+                        <Badge className="bg-slate-900/5 dark:bg-white/5 text-slate-500 dark:text-slate-300 border-none text-[8px] font-black uppercase">
+                          {item.operatorName}
+                        </Badge>
+                      )}
+                      {item.nearbyPort?.name && (
+                        <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[8px] font-black uppercase">
+                          Port {item.nearbyPort.name}
+                        </Badge>
+                      )}
                     </div>
                   </motion.div>
                 );

@@ -3,10 +3,12 @@ from datetime import datetime
 
 from backend.services.ingest.open_data_sync import (
     OPEN_DATA_SOURCES,
+    _build_syncable_source_coverage,
     _build_syncable_africa_coverage,
     _normalize_date,
     AFRICA_COVERAGE_OVERRIDES,
     arcgis_geometry_centroid,
+    get_source_registry_index,
     normalize_feature,
 )
 from backend.services.ingest.csv_fallback_import import normalize_csv_row
@@ -80,6 +82,12 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(coverage[("Zambia", "oil_and_gas")]["status"], "official_syncable")
         self.assertEqual(coverage[("South Africa", "oil_and_gas")]["status"], "official_syncable")
 
+    def test_syncable_world_coverage_includes_new_world_sources(self):
+        coverage = _build_syncable_source_coverage()
+        self.assertEqual(coverage[("New Zealand", "oil_and_gas")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Canada", "mining")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Canada", "oil_and_gas")]["status"], "official_syncable")
+
     def test_overrides_mark_restricted_and_portal_only_countries(self):
         self.assertEqual(
             AFRICA_COVERAGE_OVERRIDES["Namibia"]["mining"]["status"],
@@ -120,6 +128,58 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(record["source_name"], "User-provided CSV fallback (licenses_export.csv)")
         self.assertAlmostEqual(record["lat"], -26.3167)
         self.assertAlmostEqual(record["lng"], 26.8167)
+
+    def test_normalize_csv_row_accepts_main_commodity_header(self):
+        record = normalize_csv_row(
+            {
+                "id": "42",
+                "company": "Atlas Mixed Metals",
+                "license_type": "Exploration",
+                "main commodity": "Copper; Silver",
+                "status": "Imported",
+                "country": "Ghana",
+                "region": "Ashanti",
+                "lat": "6.70",
+                "lng": "-1.62",
+            },
+            "user_csv:mixed_metals",
+            "User-provided CSV fallback (mixed.csv)",
+        )
+
+        assert record is not None
+        self.assertEqual(record["commodity"], "Copper; Silver")
+        self.assertEqual(record["sector"], "mining")
+
+    def test_normalize_feature_supports_global_fallback_country_and_record_url(self):
+        mrds_source = next(source for source in OPEN_DATA_SOURCES if source.source_id == "usgs_mrds_global")
+        record = normalize_feature(
+            mrds_source,
+            {
+                "attributes": {
+                    "DEP_ID": "12345",
+                    "SITE_NAME": "Example Prospect",
+                    "COUNTRY": "Peru",
+                    "DEV_STAT": "Prospect",
+                    "CODE_LIST": "CU,AU",
+                    "URL": "https://mrdata.usgs.gov/mrds/record/12345",
+                },
+                "geometry": {"x": -76.2, "y": -12.1},
+            },
+        )
+
+        self.assertEqual(record["country"], "Peru")
+        self.assertEqual(record["record_origin"], "global_open_fallback")
+        self.assertEqual(record["source_record_url"], "https://mrdata.usgs.gov/mrds/record/12345")
+        self.assertEqual(record["license_type"], "Mine / occurrence")
+        self.assertEqual(record["status"], "Prospect")
+        self.assertIn("CU", record["commodity"])
+
+    def test_source_registry_marks_official_and_fallback_sources(self):
+        registry = get_source_registry_index()
+        self.assertEqual(registry["british_columbia_mineral_tenure"]["source_kind"], "official_registry")
+        self.assertEqual(registry["british_columbia_mineral_tenure"]["coverage_state"], "official_syncable")
+        self.assertEqual(registry["usgs_mrds_global"]["source_kind"], "global_open_fallback")
+        self.assertEqual(registry["usgs_mrds_global"]["coverage_state"], "global_fallback_only")
 
 
 if __name__ == "__main__":

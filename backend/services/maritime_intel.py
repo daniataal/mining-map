@@ -411,6 +411,51 @@ def fetch_wikidata_vessel_identity(*, imo: str = "", mmsi: str = "") -> Optional
     }
 
 
+def build_maritime_relationships(
+    *,
+    identity: Optional[dict[str, Any]],
+    vessel_name: str = "",
+    imo: str = "",
+    mmsi: str = "",
+) -> list[dict[str, Any]]:
+    if not identity:
+        return []
+
+    source_entity_ref = _clean_text(imo) or _clean_text(mmsi) or _clean_text(vessel_name) or "unknown-vessel"
+    relationships: list[dict[str, Any]] = []
+    for relationship_type in ("owner", "operator"):
+        target_name = _clean_text((identity or {}).get(relationship_type))
+        if not target_name:
+            continue
+        relationships.append(
+            {
+                "id": f"vessel:{source_entity_ref}:{relationship_type}:{target_name.lower()}",
+                "source_entity_kind": "vessel",
+                "source_entity_ref": source_entity_ref,
+                "target_entity_kind": "entity",
+                "target_entity_ref": None,
+                "target_name": target_name,
+                "relationship_type": relationship_type,
+                "relationship_label": None,
+                "ownership_pct": None,
+                "effective_date": None,
+                "source_name": identity.get("source_label"),
+                "source_url": identity.get("source_url"),
+                "source_type": "open_knowledge_graph",
+                "confidence_score": identity.get("confidence"),
+                "raw_payload": {
+                    "matched_by": identity.get("matched_by"),
+                    "flag": identity.get("flag"),
+                    "registry_port": identity.get("registry_port"),
+                },
+                "extracted_from": f"wikidata.{relationship_type}",
+                "verified_at": None,
+                "last_seen_at": _now_iso(),
+            }
+        )
+    return relationships
+
+
 def build_company_links(company: str, owner: str = "", operator: str = "") -> list[dict[str, Any]]:
     candidates = []
     for label in [company, owner, operator]:
@@ -682,6 +727,12 @@ def get_maritime_context(
     destination: str = "",
 ) -> dict[str, Any]:
     identity = fetch_wikidata_vessel_identity(imo=imo, mmsi=mmsi)
+    relationships = build_maritime_relationships(
+        identity=identity,
+        vessel_name=vessel_name,
+        imo=imo,
+        mmsi=mmsi,
+    )
     company_links = build_company_links(
         company=company or vessel_name,
         owner=(identity or {}).get("owner") or "",
@@ -723,6 +774,7 @@ def get_maritime_context(
         "nearest_ports": nearest_ports,
         "evidence": evidence,
         "identity": identity,
+        "relationships": relationships,
         "counterparty_proxies": counterparty_proxies,
         "bol_coverage_note": (
             "True bill-of-lading buyer/seller data is usually commercial or government-restricted. "

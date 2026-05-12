@@ -60,12 +60,21 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
 // which is exactly the bug that made popups fail to open over collocated
 // points.
 const SELECTED_CLASS = 'is-selected';
+const PORTS_MAP_RENDER_LIMIT = 3000;
 
-const getMarkerColor = (commodity?: string, userStatus?: string, sector?: string) => {
+const getMarkerColor = (
+  commodity?: string,
+  userStatus?: string,
+  sector?: string,
+  entitySubtype?: string | null
+) => {
     if (userStatus === 'good' || userStatus === 'Approved') return '#22c55e';
     if (userStatus === 'bad' || userStatus === 'Rejected') return '#ef4444';
     if (userStatus === 'maybe' || userStatus === 'Needs Review' || userStatus === 'Investigating') return '#f59e0b';
     if (userStatus === 'Escalated') return '#ef4444';
+
+    if (entitySubtype === 'tank_farm') return '#f97316';
+    if (entitySubtype === 'storage_terminal') return '#06b6d4';
 
     if (sector) {
       const s = sector.toLowerCase();
@@ -194,16 +203,28 @@ export default function MapComponent({
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
     const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+    const mapDisplayData = useMemo(() => {
+        if (viewModeKey !== 'ports' || displayData.length <= PORTS_MAP_RENDER_LIMIT) {
+            return displayData;
+        }
+        const capped = displayData.slice(0, PORTS_MAP_RENDER_LIMIT);
+        if (!selectedItem) return capped;
+        const selected = displayData.find((item) => item.id === selectedItem.id);
+        if (!selected || capped.some((item) => item.id === selected.id)) {
+            return capped;
+        }
+        return [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
+    }, [displayData, selectedItem, viewModeKey]);
     const maritimeEnabled = viewModeKey === 'oil_and_gas';
     const { data: maritimeFeed, isLoading: isMaritimeLoading } = useMaritimeVessels(maritimeEnabled, 18);
     const maritimeVessels = maritimeFeed?.vessels ?? [];
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
-        const j = displayData.find(d => d.id === selectedItem.id);
+        const j = mapDisplayData.find(d => d.id === selectedItem.id) || displayData.find(d => d.id === selectedItem.id);
         if (!j || j._displayLat == null || j._displayLng == null) return null;
         return { lat: j._displayLat, lng: j._displayLng };
-    }, [selectedItem, displayData]);
+    }, [selectedItem, displayData, mapDisplayData]);
 
     // Selection-driven side effects:
     //   - toggle a CSS class on the previous & next markers (no setIcon swap
@@ -261,8 +282,8 @@ export default function MapComponent({
             {processedData.length === 0 && maritimeVessels.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
-                    <h3 className="text-lg font-bold">{t("לא נמצאו רישיונות", "No Licenses Found")}</h3>
-                    <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים", "Try adjusting your filters")}</p>
+                    <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
+                    <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
             )}
             {maritimeEnabled && (
@@ -296,7 +317,20 @@ export default function MapComponent({
                     onSelectMaritimeVessel(null);
                 }} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
-                <DataBoundsEffect data={displayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
+                <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
+                {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
+                            {t('מפה מוגבלת לביצועים', 'Map limited for performance')}
+                        </p>
+                        <p className="text-[10px] text-slate-400 text-center">
+                            {t(
+                                'מוצגים רק 3000 הצמתים הראשונים אחרי סינון. השתמש בחיפוש/מדינה כדי לצמצם.',
+                                'Showing only the first 3000 filtered nodes. Use search or country filters to narrow.'
+                            )}
+                        </p>
+                    </div>
+                )}
                 
                 {/* key forces remount when theme changes so `checked` re-applies */}
                 <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
@@ -339,10 +373,10 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
-                    {displayData.map((item, index) => {
+                    {mapDisplayData.map((item, index) => {
                         if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
-                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector);
+                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
 
                         return (
                             <Marker
@@ -383,6 +417,11 @@ export default function MapComponent({
                                 <Tooltip direction="top" offset={[0, -20]} opacity={1}>
                                     <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
                                         <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
+                                        {item.entitySubtype && (
+                                          <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
+                                            {item.entitySubtype.replaceAll('_', ' ')}
+                                          </p>
+                                        )}
                                         {item._wasJittered && (
                                           <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
                                         )}

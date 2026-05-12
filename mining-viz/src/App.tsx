@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useAfricaCoverage } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation, MaritimeVessel } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
@@ -92,7 +92,17 @@ export default function App() {
   
   // Data Fetching
   const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
-  const { data: africaCoverage } = useAfricaCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
+  const { data: worldCoverage } = useWorldCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
+  const {
+    data: storageTerminalResponse,
+    isLoading: isStorageLoading,
+    error: storageError,
+  } = useStorageTerminals(viewMode === 'oil_and_gas');
+  const {
+    data: portLogisticsResponse,
+    isLoading: isPortsLoading,
+    error: portsError,
+  } = usePortLogisticsEntities(viewMode === 'ports');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -141,9 +151,31 @@ export default function App() {
     localStorage.setItem('mining_local_licenses', JSON.stringify(localLicenses));
   }, [localLicenses]);
 
+  const visibleLocalLicenses = useMemo(
+    () =>
+      licenseSector
+        ? localLicenses.filter((item) => (item.sector || 'mining') === licenseSector)
+        : localLicenses,
+    [licenseSector, localLicenses]
+  );
+  const storageEntities = storageTerminalResponse?.entities || [];
+  const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
-    () => [...rawData, ...localLicenses],
-    [rawData, localLicenses]
+    () => {
+      if (viewMode === 'ports') {
+        return portEntities;
+      }
+      return [
+        ...rawData,
+        ...visibleLocalLicenses,
+        ...(viewMode === 'oil_and_gas' ? storageEntities : []),
+      ];
+    },
+    [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
+  );
+  const entityIndex = useMemo(
+    () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
+    [allLicenses]
   );
 
   // Filtering Hook
@@ -204,6 +236,11 @@ export default function App() {
       return next;
     });
 
+    const targetEntity = entityIndex[id];
+    if (targetEntity?.entityKind === 'storage_terminal') {
+      return;
+    }
+
     // Map to backend fields
     const backendPayload: any = {};
     if (updates.price !== undefined) backendPayload.pricePerKg = parseFloat(updates.price.toString());
@@ -214,9 +251,19 @@ export default function App() {
     if (Object.keys(backendPayload).length > 0) {
       updateLicenseMutation.mutate({ id, updates: backendPayload });
     }
-  }, [updateLicenseMutation]);
+  }, [updateLicenseMutation, entityIndex]);
 
   const deleteLicense = useCallback((id: string) => {
+    const targetEntity = entityIndex[id];
+    if (targetEntity?.entityKind === 'storage_terminal') {
+      toast.info(t('רשומת תשתית פתוחה', 'Open infrastructure record'), {
+        description: t(
+          'רשומות OSM/Overpass הן לקריאה בלבד ואינן נמחקות מהמפה מתוך הלקוח.',
+          'OSM/Overpass infrastructure records are read-only and cannot be deleted from the client.'
+        ),
+      });
+      return;
+    }
     if (!confirm(t("האם אתה בטוח שברצונך למחוק רישיון זה?", "Are you sure you want to delete this license?"))) return;
     const closeDossierIfDeleted = () => {
       setDossierItem((prev) => {
@@ -258,14 +305,14 @@ export default function App() {
         }
       },
     });
-  }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation]);
+  }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
   
   // Market Prices State
-  const [marketPrices, setMarketPrices] = useState<any[]>([]);
+  const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
   const sectorCoverageSummary =
-    licenseSector && africaCoverage ? africaCoverage.summary[licenseSector] : null;
+    licenseSector && worldCoverage ? worldCoverage.summary[licenseSector] : null;
   const sidebarViewMode =
     viewMode === 'admin'
       ? 'admin'
@@ -413,7 +460,7 @@ export default function App() {
          </div>
       </div>
 
-      {fetchError && (
+      {viewMode !== 'ports' && fetchError && (
         <div
           className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
           role="alert"
@@ -425,6 +472,27 @@ export default function App() {
           : {formatLicenseFetchError(fetchError)}
           {'. '}
           {licenseFetchTroubleshooting}
+        </div>
+      )}
+      {viewMode === 'ports' && portsError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t('טעינת נמלים נכשלה', 'Could not load ports and logistics nodes')}
+          : {formatLicenseFetchError(portsError)}
+        </div>
+      )}
+      {viewMode === 'oil_and_gas' && storageError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-amber-950/95 border-b border-amber-500/30 text-amber-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t(
+            'שכבת האחסון הפתוחה לא נטענה כרגע',
+            'Open storage infrastructure layer is unavailable right now'
+          )}
+          : {formatLicenseFetchError(storageError)}
         </div>
       )}
 
@@ -443,7 +511,11 @@ export default function App() {
             processedData={miningData.processedData}
             setIsAddModalOpen={setIsAddModalOpen}
             onOpenBulkImport={() => setIsBulkImportOpen(true)}
-            loading={isLoading}
+            loading={
+              viewMode === 'ports'
+                ? isPortsLoading
+                : Boolean(isLoading || (viewMode === 'oil_and_gas' && isStorageLoading))
+            }
             onLogout={handleLogout}
             userAnnotations={userAnnotations}
             selectedItem={selectedItem}
@@ -459,6 +531,11 @@ export default function App() {
             isPinned={isSidebarPinned}
             setIsPinned={setIsSidebarPinned}
             isCollapsed={isSidebarCollapsed && !isSidebarPinned}
+            infrastructureStats={
+              viewMode === 'oil_and_gas' || viewMode === 'ports'
+                ? miningData.infrastructureStats
+                : undefined
+            }
           />
         </aside>
 
@@ -482,7 +559,7 @@ export default function App() {
                   </div>
                   {sectorCoverageSummary && (
                     <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
-                      {t("כיסוי אפריקה", "Africa coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("מסונכרן", "syncable")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {sectorCoverageSummary.unavailable || 0} {t("לא זמין", "unavailable")}
+                      {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
                     </div>
                   )}
               </div>
@@ -619,9 +696,19 @@ export default function App() {
           setUserStatusFilter={miningData.setUserStatusFilter}
           selectedLicenseType={miningData.selectedLicenseType}
           setSelectedLicenseType={miningData.setSelectedLicenseType}
+          selectedEntitySubtype={miningData.selectedEntitySubtype}
+          setSelectedEntitySubtype={miningData.setSelectedEntitySubtype}
+          selectedSourceLabel={miningData.selectedSourceLabel}
+          setSelectedSourceLabel={miningData.setSelectedSourceLabel}
+          selectedConfidenceBucket={miningData.selectedConfidenceBucket}
+          setSelectedConfidenceBucket={miningData.setSelectedConfidenceBucket}
+          portLinkedOnly={miningData.portLinkedOnly}
+          setPortLinkedOnly={miningData.setPortLinkedOnly}
           commodities={miningData.commodities}
           countries={miningData.countries}
           licenseTypes={miningData.licenseTypes}
+          entitySubtypes={miningData.entitySubtypes}
+          sourceLabels={miningData.sourceLabels}
         />
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
@@ -633,7 +720,9 @@ export default function App() {
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
           updateAnnotation={updateAnnotation}
           onDeleteLicense={
-            dossierItem ? () => deleteLicense(dossierItem.id) : undefined
+            dossierItem && dossierItem.entityKind !== 'storage_terminal'
+              ? () => deleteLicense(dossierItem.id)
+              : undefined
           }
         />
 

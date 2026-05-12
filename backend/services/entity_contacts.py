@@ -346,24 +346,11 @@ def build_license_contact_candidates(row: dict[str, Any]) -> list[dict[str, Any]
     )
 
 
-def sync_license_contacts_for_row(conn: Any, row: dict[str, Any]) -> int:
-    entity_id = _clean_text(row.get("id"))
-    if not entity_id:
+def upsert_entity_contact_candidates(conn: Any, candidates: list[dict[str, Any]]) -> int:
+    if not candidates:
         return 0
 
-    candidates = build_license_contact_candidates(row)
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            DELETE FROM entity_contacts
-            WHERE entity_kind = 'license'
-              AND entity_id = %s
-              AND source_type IN ('official_open_data', 'source_backed_record')
-            """,
-            (entity_id,),
-        )
-        if not candidates:
-            return 0
         for candidate in candidates:
             cur.execute(
                 """
@@ -422,6 +409,25 @@ def sync_license_contacts_for_row(conn: Any, row: dict[str, Any]) -> int:
                 ),
             )
     return len(candidates)
+
+
+def sync_license_contacts_for_row(conn: Any, row: dict[str, Any]) -> int:
+    entity_id = _clean_text(row.get("id"))
+    if not entity_id:
+        return 0
+
+    candidates = build_license_contact_candidates(row)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM entity_contacts
+            WHERE entity_kind = 'license'
+              AND entity_id = %s
+              AND source_type IN ('official_open_data', 'source_backed_record')
+            """,
+            (entity_id,),
+        )
+    return upsert_entity_contact_candidates(conn, candidates)
 
 
 def sync_license_contacts(conn: Any, license_id: str) -> int:
