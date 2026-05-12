@@ -631,6 +631,71 @@ def init_db():
 # Re-call init_db because we updated the definition
 init_db()
 
+import threading
+import time
+
+def _auto_seed_arcgis():
+    time.sleep(5) # Wait for server to fully start
+    
+    while True:
+        print("[Auto-Seed] Reading massive historical cadastre dataset from local licenses.json...")
+        
+        try:
+            import json
+            import os
+            
+            # The file is now copied into the backend directory
+            file_path = os.path.join(os.path.dirname(__file__), "licenses.json")
+            
+            if not os.path.exists(file_path):
+                print(f"[Auto-Seed] Could not find {file_path}")
+                time.sleep(86400)
+                continue
+                
+            with open(file_path, "r", encoding="utf-8") as f:
+                licenses_data = json.load(f)
+                
+            conn = get_db_connection()
+            cur = conn.cursor()
+            
+            # Clean up the old hardcoded mines
+            cur.execute("DELETE FROM licenses")
+            
+            inserted_count = 0
+            for item in licenses_data:
+                # Fallback to defaults if missing
+                item_id = item.get("id") or str(uuid.uuid4())
+                company = item.get("company", "Unknown Company")
+                country = item.get("country", "Unknown")
+                region = item.get("region", "")
+                commodity = item.get("commodity", "Unknown")
+                license_type = item.get("licenseType", "Unknown")
+                status = item.get("status", "ACTIVE")
+                lat = item.get("lat")
+                lng = item.get("lng")
+                
+                # Allow missing coordinates because _license_display_coords() will generate 
+                # regional fallback coordinates at runtime for any licenses missing them
+                
+                cur.execute("""
+                    INSERT INTO licenses (id, company, country, region, commodity, license_type, status, lat, lng)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (item_id, company, country, region, commodity, license_type, status, lat, lng))
+                inserted_count += 1
+                
+            conn.commit()
+            cur.close()
+            conn.close()
+            print(f"[Auto-Seed] BOOM! Successfully injected {inserted_count} REAL African mining cadastre licenses into the map!")
+        except Exception as e:
+            print(f"[Auto-Seed] DB Insertion failed: {e}")
+                
+        print("[Auto-Seed] Sync cycle complete. Sleeping for 24 hours...")
+        time.sleep(86400) # 24 hours in seconds
+
+threading.Thread(target=_auto_seed_arcgis, daemon=True).start()
+
 # --- Auth Endpoints ---
 
 @app.post("/auth/login")
@@ -2741,6 +2806,102 @@ def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[
     try:
         result = revert_geocoded(limit=request.limit, country_filter=request.country)
         return {"status": "success", **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+class ArcGISIngestRequest(BaseModel):
+    layer_url: str
+    country_map: Optional[str] = "Ghana" # Used for mapping rules
+    batch_size: Optional[int] = 1000
+
+@app.post("/api/admin/ingest/arcgis")
+def ingest_arcgis_cadastre(request: ArcGISIngestRequest, x_admin_token: Optional[str] = Header(None)):
+    """
+    Scrapes an ArcGIS REST feature layer and ingests licenses into the database.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    try:
+        from backend.services.ingest.arcgis_adapter import ArcGISCadastreAdapter
+        from backend.services.resolve.entity_resolution import EntityResolutionEngine
+    except ImportError:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.dirname(__file__))
+        from services.ingest.arcgis_adapter import ArcGISCadastreAdapter
+        from services.resolve.entity_resolution import EntityResolutionEngine
+
+    try:
+        adapter = ArcGISCadastreAdapter(request.layer_url)
+        raw_features = adapter.fetch_all_licenses(batch_size=request.batch_size)
+        
+        # Determine basic field map based on country (rough mapping)
+        field_map = {
+            'id': 'OBJECTID',
+            'company': 'COMP_NAME',
+            'licenseType': 'TYPE',
+            'commodity': 'COMMODITY',
+            'status': 'STATUS'
+        }
+        
+        if request.country_map.lower() == 'mali':
+            field_map['company'] = 'SOCIETE'
+            field_map['licenseType'] = 'TYPE_PERMI'
+            field_map['status'] = 'STATUT'
+            field_map['commodity'] = 'SUBSTANCES'
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Load existing entities for resolution
+        cur.execute("SELECT id, company, lat, lng FROM licenses")
+        existing_licenses = []
+        for row in cur.fetchall():
+            existing_licenses.append({"id": row[0], "company": row[1], "lat": row[2], "lng": row[3]})
+            
+        resolver = EntityResolutionEngine()
+        
+        inserted = 0
+        updated = 0
+        
+        for feature in raw_features:
+            mapped = adapter.map_to_standard_schema(feature, field_map)
+            
+            # Entity Resolution
+            matches = resolver.find_matches(mapped, existing_licenses)
+            if matches and matches[0][1] > 0.85:
+                # Update existing
+                existing_id = matches[0][0]['id']
+                cur.execute("""
+                    UPDATE licenses 
+                    SET company = %s, commodity = %s, license_type = %s, status = %s
+                    WHERE id = %s
+                """, (mapped.get('company'), mapped.get('commodity'), mapped.get('licenseType'), mapped.get('status'), existing_id))
+                updated += 1
+            else:
+                # Insert new
+                if not mapped.get('id'):
+                    mapped['id'] = str(uuid.uuid4())
+                cur.execute("""
+                    INSERT INTO licenses (id, company, commodity, license_type, status, lat, lng, country)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (mapped.get('id'), mapped.get('company'), mapped.get('commodity'), 
+                      mapped.get('licenseType'), mapped.get('status'), 
+                      mapped.get('lat'), mapped.get('lng'), request.country_map))
+                inserted += 1
+                
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": f"Ingested {len(raw_features)} raw features.",
+            "inserted": inserted,
+            "updated": updated
+        }
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
