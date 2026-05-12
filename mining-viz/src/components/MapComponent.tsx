@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
 // @ts-ignore
@@ -8,6 +8,7 @@ import 'leaflet/dist/leaflet.css';
 import { MiningLicense, UserAnnotation } from '../types';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
+import COUNTRY_BORDERS from '../data/countryBorders';
 import PopupForm from './PopupForm';
 
 // Fix for default marker icon in React Leaflet
@@ -129,20 +130,9 @@ export default function MapComponent({
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
-    const [geoJsonData, setGeoJsonData] = useState<any>(null);
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        // Natural Earth 1:10m via datasets/geo-countries — accurate enough to show
-        // narrow features like Namibia's Caprivi/Zambezi Strip without corner-cutting.
-        // (johan/world.geo.json was 1:110m and visibly misaligned against tile basemaps.)
-        fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
-            .then(res => res.json())
-            .then(data => setGeoJsonData(data))
-            .catch(err => console.error("Failed to load country borders", err));
-    }, []);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -198,17 +188,17 @@ export default function MapComponent({
     }, [processedData]);
 
     const filteredGeoJson = useMemo(() => {
-        if (!geoJsonData) return null;
         return {
-            ...geoJsonData,
-            features: geoJsonData.features.filter((f: any) => {
+            ...COUNTRY_BORDERS,
+            features: COUNTRY_BORDERS.features.filter((f) => {
                 // datasets/geo-countries (Natural Earth 1:10m) uses "ADMIN"; older
                 // johan dataset used "name" — support both so a source swap doesn't break filtering.
-                const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
+                const properties = f.properties ?? {};
+                const name = String(properties.ADMIN ?? properties.name ?? '').toLowerCase();
                 return activeCountries.some(ac => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
             })
         };
-    }, [geoJsonData, activeCountries]);
+    }, [activeCountries]);
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
