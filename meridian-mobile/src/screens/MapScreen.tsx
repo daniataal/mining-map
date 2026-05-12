@@ -19,6 +19,7 @@ import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { Search, Filter, Crosshair, X, Check } from 'lucide-react-native';
 import DossierModal from '../components/DossierModal';
+import COUNTRY_BORDERS from '../data/countryBorders';
 import { applyCollocationJitter, type JitteredLicense } from '../lib/geo';
 import {
   TACTICAL_CLUSTER,
@@ -218,7 +219,6 @@ export default function MapScreen() {
     queryFn: getLicenses,
   });
 
-  const [geoJsonSource, setGeoJsonSource] = useState<any>(null);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCommodities, setSelectedCommodities] = useState<string[]>([]);
@@ -233,28 +233,21 @@ export default function MapScreen() {
     return () => cancelAnimationFrame(t);
   }, []);
 
-  useEffect(() => {
-    fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
-      .then((res) => res.json())
-      .then(setGeoJsonSource)
-      .catch((err) => console.error('[MAP DEBUG] GeoJSON fetch failed:', err));
-  }, []);
-
   const activeCountries = useMemo(() => {
     const countries = new Set(rawLicenses.map((d) => (d.country ? d.country.toLowerCase() : 'ghana')));
     return Array.from(countries);
   }, [rawLicenses]);
 
   const filteredGeoJson = useMemo(() => {
-    if (!geoJsonSource) return null;
     return {
-      ...geoJsonSource,
-      features: geoJsonSource.features.filter((f: any) => {
-        const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
+      ...COUNTRY_BORDERS,
+      features: COUNTRY_BORDERS.features.filter((feature) => {
+        const properties = feature.properties ?? {};
+        const name = String(properties.ADMIN ?? properties.name ?? '').toLowerCase();
         return activeCountries.some((ac) => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
       }),
     };
-  }, [geoJsonSource, activeCountries]);
+  }, [activeCountries]);
 
   const commodityOptions = useMemo(() => {
     const c = new Set(rawLicenses.map((item) => normalizeLabel(item.commodity)));
