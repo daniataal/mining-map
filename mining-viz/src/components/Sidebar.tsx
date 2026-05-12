@@ -16,6 +16,7 @@ import {
   Upload as LucideUpload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -177,13 +178,13 @@ export default function Sidebar({
           <ScrollArea className="min-h-0 flex-1 overflow-hidden">
             <div className="p-3 space-y-2">
             <AnimatePresence mode="popLayout">
-              {processedData.slice(0, displayCount).map((item) => {
+              {processedData.slice(0, displayCount).map((item, index) => {
                 const annotation = userAnnotations[item.id] || {};
                 const isSelected = selectedItem?.id === item.id;
 
                 return (
                   <motion.div
-                    key={item.id}
+                    key={getLicenseRenderKey(item, index)}
                     layout
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

@@ -25,12 +25,45 @@ import ThemeToggle from './components/ThemeToggle';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 
-function formatLicenseFetchError(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === 'object' && e !== null && 'message' in e) {
-    return String((e as { message: unknown }).message);
+function extractErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
   }
-  return String(e);
+  if (value instanceof Error) return value.message;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nested = extractErrorMessage(entry);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    for (const key of ['detail', 'message', 'error']) {
+      const nested = extractErrorMessage(record[key]);
+      if (nested) return nested;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  if (value == null) return null;
+  return String(value);
+}
+
+function formatLicenseFetchError(e: unknown): string {
+  return extractErrorMessage(e) ?? 'Unknown error';
+}
+
+function formatAuthError(e: unknown): string {
+  const responseData =
+    typeof e === 'object' && e !== null && 'response' in e
+      ? (e as { response?: { data?: unknown } }).response?.data
+      : undefined;
+  return extractErrorMessage(responseData ?? e) ?? 'Invalid credentials';
 }
 
 function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change?: string, up?: boolean | null }) {
@@ -134,8 +167,8 @@ export default function App() {
       setUserId(data.id);
       setAuthError(null);
       logActivityMutation.mutate({ user_id: data.id, username: data.username, action: 'LOGIN', details: 'User logged in' });
-    } catch (err: any) {
-      setAuthError(err.response?.data || 'Invalid credentials');
+    } catch (err: unknown) {
+      setAuthError(formatAuthError(err));
     }
   };
 

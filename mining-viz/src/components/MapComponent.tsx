@@ -10,6 +10,7 @@ import { MiningLicense, UserAnnotation } from '../types';
 import { getCountryBorders } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
 
 // Fix for default marker icon in React Leaflet
@@ -259,14 +260,14 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
-                    {displayData.map((item) => {
+                    {displayData.map((item, index) => {
                         if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
                         const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
 
                         return (
                             <Marker
-                                key={item.id}
+                                key={getLicenseRenderKey(item, index)}
                                 position={[item._displayLat, item._displayLng]}
                                 icon={createCustomIcon(color, false)}
                                 ref={(el) => {
