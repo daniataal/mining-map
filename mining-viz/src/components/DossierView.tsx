@@ -204,6 +204,16 @@ Output requirements:
                   <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
                     {item.commodity}
                   </Badge>
+                  {item.sector && (
+                    <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
+                      {item.sector.replaceAll('_', ' ')}
+                    </Badge>
+                  )}
+                  {item.sourceName && (
+                    <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
+                      {item.sourceName}
+                    </Badge>
+                  )}
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
                     {item.region}, {item.country}
                   </span>

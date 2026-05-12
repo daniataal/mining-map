@@ -35,7 +35,13 @@ const apiClient = axios.create({
   },
 });
 
-const LICENSES_FALLBACK_DATA = bundledLicenses as MiningLicense[];
+const LICENSES_FALLBACK_DATA = (bundledLicenses as MiningLicense[]).map((item) => ({
+  ...item,
+  sector: item.sector || 'mining',
+  recordOrigin: item.recordOrigin || 'bundled_json',
+  sourceId: item.sourceId || 'bundled_json',
+  sourceName: item.sourceName || 'Bundled JSON fallback',
+}));
 export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
 
 function normalizeCountryBordersParam(countries: string[]): string[] {
@@ -103,12 +109,17 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-export const useLicenses = () => {
+export const useLicenses = (sector?: 'mining' | 'oil_and_gas') => {
   return useQuery<MiningLicense[]>({
-    queryKey: ['licenses'],
+    queryKey: ['licenses', sector ?? 'all'],
     queryFn: async () => {
       try {
-        const { data } = await apiClient.get<unknown>('/licenses');
+        const { data } = await apiClient.get<unknown>('/licenses', {
+          params: {
+            prefer_open_data: true,
+            ...(sector ? { sector } : {}),
+          },
+        });
         if (Array.isArray(data)) return data as MiningLicense[];
         if (data && typeof data === 'object' && 'error' in data) {
           const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
@@ -118,7 +129,8 @@ export const useLicenses = () => {
         return [];
       } catch (error) {
         console.error('[useLicenses] Falling back to bundled license dataset because /licenses failed.', error);
-        return LICENSES_FALLBACK_DATA;
+        if (sector === 'oil_and_gas') return [];
+        return sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
       }
     },
   });

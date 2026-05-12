@@ -18,7 +18,6 @@ import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
 import LogisticsDesk from './components/LogisticsDesk';
-import OilMapView from './components/OilMapView';
 import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
@@ -80,6 +79,13 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 export default function App() {
   const { t, isRtl } = useI18n();
+  const [viewMode, setViewMode] = useState<'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'admin'>('global');
+  const licenseSector =
+    viewMode === 'mining'
+      ? 'mining'
+      : viewMode === 'oil_and_gas'
+        ? 'oil_and_gas'
+        : undefined;
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -87,7 +93,7 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: rawData = [], isLoading, error: fetchError } = useLicenses();
+  const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -101,7 +107,6 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'admin'>('global');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
@@ -511,6 +516,7 @@ export default function App() {
                 userAnnotations={userAnnotations}
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
+                viewModeKey={viewMode}
                 setSelectedItem={setSelectedItem}
                 handleOpenDossier={handleOpenDossier}
                 mapCenter={mapCenter}

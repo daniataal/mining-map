@@ -96,6 +96,7 @@ interface MapComponentProps {
   deleteLicense: (id: string) => void;
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
+  viewModeKey: string;
 }
 
 const MapEffect = ({
@@ -128,6 +129,45 @@ const MapClickHandler = ({ onMapClick }: { onMapClick: () => void }) => {
     return null;
 };
 
+const DataBoundsEffect = ({
+    data,
+    selectedItem,
+    viewModeKey,
+}: {
+    data: Array<MiningLicense & { _displayLat?: number | null; _displayLng?: number | null }>;
+    selectedItem: MiningLicense | null;
+    viewModeKey: string;
+}) => {
+    const map = useMap();
+    const lastSignatureRef = useRef<string>('');
+
+    useEffect(() => {
+        if (selectedItem) return;
+        const coords = data
+            .filter((item) => item._displayLat != null && item._displayLng != null)
+            .map((item) => [item._displayLat as number, item._displayLng as number] as [number, number]);
+        if (coords.length === 0) return;
+
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        const signature = `${viewModeKey}:${coords.length}:${first[0].toFixed(3)}:${first[1].toFixed(3)}:${last[0].toFixed(3)}:${last[1].toFixed(3)}`;
+        if (lastSignatureRef.current === signature) return;
+        lastSignatureRef.current = signature;
+
+        if (coords.length === 1) {
+            map.setView(coords[0], Math.max(map.getZoom(), 6), { animate: true });
+            return;
+        }
+
+        map.fitBounds(L.latLngBounds(coords).pad(0.18), {
+            animate: true,
+            maxZoom: 6,
+        });
+    }, [data, map, selectedItem, viewModeKey]);
+
+    return null;
+};
+
 export default function MapComponent({
   processedData,
   userAnnotations,
@@ -137,7 +177,8 @@ export default function MapComponent({
   updateAnnotation,
   deleteLicense,
   handleOpenDossier,
-  mapFlyTrigger
+  mapFlyTrigger,
+  viewModeKey,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -228,6 +269,7 @@ export default function MapComponent({
                 <ZoomControl position="bottomleft" />
                 <MapClickHandler onMapClick={() => setSelectedItem(null)} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <DataBoundsEffect data={displayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
                 
                 {/* key forces remount when theme changes so `checked` re-applies */}
                 <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">

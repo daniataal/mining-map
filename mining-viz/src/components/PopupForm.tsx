@@ -58,6 +58,11 @@ export default function PopupForm({
                        {t("קו פעיל", "ACTIVE LINE")}
                      </Badge>
                    )}
+                   {item.sourceName && (
+                     <Badge className="bg-slate-950/80 text-white border-none text-[9px] font-black uppercase px-2 h-5">
+                       {item.sourceName}
+                     </Badge>
+                   )}
                 </div>
             </div>
 
@@ -128,7 +133,8 @@ export default function PopupForm({
                 </div>
 
                 <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
-                  ID: #{item.id.slice(0, 8)} • {t("עודכן לאחרונה: לפני שעה", "Last updated: 1h ago")}
+                  ID: #{item.id.slice(0, 8)}
+                  {item.lastSyncedAt ? ` • ${t("סונכרן", "Synced")} ${new Date(item.lastSyncedAt).toLocaleDateString()}` : ''}
                 </p>
             </div>
         </div>
