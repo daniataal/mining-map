@@ -101,7 +101,7 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin' | 'dashboard' | 'logistics' | 'oil'>('map');
+  const [viewMode, setViewMode] = useState<'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'admin'>('global');
   const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
@@ -429,7 +429,7 @@ export default function App() {
         <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
           {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
-          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics') && (
+          {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'due_diligence' || viewMode === 'raw_evidence') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
@@ -448,36 +448,47 @@ export default function App() {
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
                   <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
-                      onClick={() => setViewMode('map')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('global')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      {t("מפה", "Map")}
+                      {t("עולמי", "Global")}
                     </button>
                     <button
-                      onClick={() => setViewMode('dashboard')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'dashboard' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('mining')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      <span className="hidden xs:inline">{t("לוח בקרה", "Dashboard")}</span>
-                      <span className="xs:hidden">{t("לוח", "Dash")}</span>
+                      {t("כרייה", "Mining")}
                     </button>
                     <button
-                      onClick={() => setViewMode('pipeline')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
-                    >
-                      {t("צנרת", "Pipeline")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('logistics')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'logistics' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
-                    >
-                      {t("לוגיסטיקה", "Logistics")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('oil')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('oil_and_gas')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
-                      {t("נפט", "Oil")}
+                      {t("נפט וגז", "Oil & Gas")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('suppliers')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("ספקים", "Suppliers")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('ports')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'ports' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("נמלים", "Ports")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('due_diligence')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'due_diligence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("בדיקת נאותות", "Due Diligence")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('raw_evidence')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'raw_evidence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("ראיות גולמיות", "Raw Evidence")}
                     </button>
                   </div>
 
@@ -494,7 +505,7 @@ export default function App() {
           )}
 
           <div className="w-full h-full z-0">
-            {viewMode === 'map' && (
+            {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'oil_and_gas') && (
               <MapComponent
                 processedData={miningData.processedData}
                 userAnnotations={userAnnotations}
@@ -507,15 +518,7 @@ export default function App() {
                 deleteLicense={deleteLicense}
               />
             )}
-            {viewMode === 'dashboard' && (
-              <DashboardView 
-                licenses={miningData.processedData}
-                marketPrices={marketPrices}
-                annotations={userAnnotations}
-                onOpenBulkImport={() => setIsBulkImportOpen(true)}
-              />
-            )}
-            {viewMode === 'pipeline' && (
+            {viewMode === 'due_diligence' && (
               <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">
                 <KanbanBoard
                   processedData={miningData.processedData}
@@ -526,24 +529,24 @@ export default function App() {
                 />
               </div>
             )}
+            {viewMode === 'raw_evidence' && (
+              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
+                <div className="p-4 overflow-y-auto h-full text-sm font-mono text-slate-800 dark:text-slate-200">
+                  <h2 className="text-xl mb-4 font-sans font-bold">Raw Evidence Viewer</h2>
+                  <p className="text-slate-500 mb-4 font-sans">Select an entity on the map to see its raw evidence JSON payloads.</p>
+                </div>
+              </div>
+            )}
             {viewMode === 'admin' && (
               <div className="h-full bg-white dark:bg-slate-950">
                 <AdminPanel 
                   isOpen={true} 
-                  onClose={() => setViewMode('map')} 
+                  onClose={() => setViewMode('global')} 
                   token={token || undefined} 
                   isFullPage={true}
                   currentUserId={userId}
                 />
               </div>
-            )}
-            {viewMode === 'logistics' && (
-              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
-                <LogisticsDesk licenses={allLicenses} />
-              </div>
-            )}
-            {viewMode === 'oil' && (
-              <OilMapView onBack={() => setViewMode('map')} />
             )}
           </div>
         </main>
@@ -621,39 +624,39 @@ export default function App() {
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
       <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
         <button
-          onClick={() => setViewMode('map')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'map' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('global')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("מפה", "Map")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
         </button>
         <button
-          onClick={() => setViewMode('pipeline')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'pipeline' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('mining')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("צנרת", "Pipeline")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("כרייה", "Mining")}</span>
         </button>
         <button
-          onClick={() => setViewMode('dashboard')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'dashboard' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <LucidePieChart className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("דאשבורד", "Dash")}</span>
-        </button>
-        <button
-          onClick={() => setViewMode('logistics')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'logistics' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <LucideAnchor className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("לוגיסטיקה", "Logistics")}</span>
-        </button>
-        <button
-          onClick={() => setViewMode('oil')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('oil_and_gas')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideDroplets className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט", "Oil")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט וגז", "Oil & Gas")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('due_diligence')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'due_diligence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("בדיקת נאותות", "DD")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('raw_evidence')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'raw_evidence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideAnchor className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("ראיות", "Evidence")}</span>
         </button>
         <button
           onClick={() => setIsFilterOpen(!isFilterOpen)}

@@ -36,30 +36,33 @@ interface DossierViewProps {
   onDeleteLicense?: () => void;
 }
 
-const KANBAN_STAGES = ['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const;
+const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
 
 const LIFECYCLE_STEPS = [
-  { id: 'New', label: 'Lead' },
-  { id: 'Contacted', label: 'LOI Sent' },
-  { id: 'Diligence', label: 'Due Diligence' },
-  { id: 'Closed', label: 'Closed Deal' },
+  { id: 'New', label: 'New' },
+  { id: 'Needs Review', label: 'Needs Review' },
+  { id: 'Investigating', label: 'Investigating' },
+  { id: 'Escalated', label: 'Escalated' },
+  { id: 'Approved', label: 'Approved' },
+  { id: 'Rejected', label: 'Rejected' },
 ] as const;
 
-// Map Kanban stage → lifecycle step index (0-3)
 const STAGE_TO_LIFECYCLE: Record<string, number> = {
-  New: 0,
-  Contacted: 1,
-  Diligence: 2,
-  Verified: 2,
-  Closed: 3,
+  'New': 0,
+  'Needs Review': 1,
+  'Investigating': 2,
+  'Escalated': 3,
+  'Approved': 4,
+  'Rejected': 5,
 };
 
-// Clicking a lifecycle step sets this Kanban stage
 const LIFECYCLE_TO_STAGE: Record<number, string> = {
   0: 'New',
-  1: 'Contacted',
-  2: 'Diligence',
-  3: 'Closed',
+  1: 'Needs Review',
+  2: 'Investigating',
+  3: 'Escalated',
+  4: 'Approved',
+  5: 'Rejected',
 };
 
 export default function DossierView({
@@ -117,12 +120,12 @@ export default function DossierView({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          query: `Analyze the mining potential, risks, and opportunities for ${item.company} located in ${item.region}, ${item.country}. Primary commodity: ${item.commodity}. License type: ${item.licenseType}. License ID: ${item.id}.
+          query: `Analyze the intelligence potential, risks, and operational profile for ${item.company} located in ${item.region}, ${item.country}. Sector: ${item.sector || 'Mining'}. Primary commodity/focus: ${item.commodity}. Entity Type: ${item.licenseType}. Entity ID: ${item.id}.
 
 Output requirements:
-- Use Markdown only. Start with "## License snapshot" and 4–6 short bullet lines (company, location, commodity, lease type, license ID, status note).
-- Then "## Mining potential", "## Risk rating" (give X/10 and a compact table: Category | Score | One-line why), and "## Recommendation" (numbered steps, plain language).
-- Keep paragraphs to 2–4 sentences. Avoid dense pipe tables except the risk matrix. Flag items that must be verified with authorities.`,
+- Use Markdown only. Start with "## Entity Snapshot" and 4–6 short bullet lines (company, location, sector, focus, entity type, ID, status note).
+- Then "## Operational Analysis", "## Risk Rating" (give X/10 and a compact table: Category | Score | One-line why), and "## Tactical Recommendation" (numbered steps, plain language).
+- Keep paragraphs to 2–4 sentences. Avoid dense pipe tables except the risk matrix. Flag items that must be verified through raw evidence.`,
           context: { type: 'DOSSIER', item_id: item.id },
         }),
       });
@@ -272,18 +275,27 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'execution', 'trade', 'logs', 'tech-specs', 'owners', 'intelligence', 'news'].map(tab => (
+              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'intelligence', 'raw-evidence', 'human-notes'].map(tab => {
+                const tabLabels: Record<string, string> = {
+                  'overview': 'Overview',
+                  'operations': 'Operations',
+                  'exports-imports': 'Exports and Imports',
+                  'news': 'News',
+                  'satellite': 'Satellite',
+                  'owners': 'Ownership',
+                  'counterparties': 'Counterparties',
+                  'intelligence': 'AI Due Diligence',
+                  'raw-evidence': 'Raw Evidence',
+                  'human-notes': 'Human Notes'
+                };
+                return (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`px-3 sm:px-6 py-3 sm:py-4 text-[10px] font-black uppercase tracking-widest transition-all relative z-10 whitespace-nowrap min-h-[44px]
                   ${activeTab === tab ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                 >
-                  {tab === 'trade'
-                    ? t('מסחר וכלכלה', 'Trade Context')
-                    : tab === 'execution'
-                    ? '⚡ Execution'
-                    : tab.replace('-', ' ')}
+                  {tabLabels[tab]}
                   {activeTab === tab && (
                     <motion.div
                       layoutId="tab-underline"
@@ -291,7 +303,7 @@ Output requirements:
                     />
                   )}
                 </button>
-              ))}
+              )})}
             </nav>
 
             {/* EXECUTION TAB */}

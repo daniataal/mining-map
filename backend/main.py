@@ -299,6 +299,148 @@ def init_db():
         conn = get_db_connection()
         cur = conn.cursor()
         
+        # Enable PostGIS
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+            conn.commit()
+        except Exception as e:
+            print(f"PostGIS extension failed: {e}")
+            conn.rollback()
+
+        # Entities core table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entities (
+                id VARCHAR(255) PRIMARY KEY,
+                name TEXT NOT NULL,
+                sector VARCHAR(50),
+                subtype VARCHAR(100),
+                country VARCHAR(100),
+                coordinates GEOMETRY(Point, 4326),
+                operational_status VARCHAR(50) DEFAULT 'UNKNOWN',
+                confidence_score FLOAT DEFAULT 0.0,
+                last_activity TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Entity Aliases
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entity_aliases (
+                id SERIAL PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                alias TEXT NOT NULL
+            );
+        """)
+
+        # Entity Sources
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entity_sources (
+                id SERIAL PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                source_type VARCHAR(100),
+                source_url TEXT,
+                confidence FLOAT
+            );
+        """)
+
+        # Entity Signals
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entity_signals (
+                id SERIAL PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                signal_type VARCHAR(100),
+                value FLOAT,
+                explanation TEXT,
+                signal_time TIMESTAMP
+            );
+        """)
+
+        # Entity Relationships
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entity_relationships (
+                id SERIAL PRIMARY KEY,
+                source_entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                target_entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                rel_type VARCHAR(100)
+            );
+        """)
+
+        # Dossier Notes
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dossier_notes (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                user_id VARCHAR(255),
+                note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # DD Tasks (Kanban)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dd_tasks (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                title TEXT,
+                description TEXT,
+                status VARCHAR(50) DEFAULT 'New',
+                assignee_id VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Raw Documents
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS raw_documents (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                source TEXT,
+                payload JSONB,
+                ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Trade Records
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS trade_records (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                buyer TEXT,
+                seller TEXT,
+                commodity TEXT,
+                quantity FLOAT,
+                price FLOAT,
+                trade_date TIMESTAMP
+            );
+        """)
+
+        # Satellite Observations
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS satellite_observations (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                satellite TEXT,
+                scene_id TEXT,
+                cloud_cover FLOAT,
+                observation_date TIMESTAMP
+            );
+        """)
+
+        # News Mentions
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS news_mentions (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) REFERENCES entities(id) ON DELETE CASCADE,
+                source TEXT,
+                title TEXT,
+                url TEXT,
+                sentiment FLOAT,
+                published_at TIMESTAMP
+            );
+        """)
+        
         # Licenses Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS licenses (
@@ -1431,13 +1573,13 @@ def analyze_with_ai(request: AIRequest):
     ]
 
     system_prompt = (
-        "You are an advisor on West African mining licenses for experienced buyers. "
-        "Decide GO / NO GO with evidence, not hype. Give a risk score 1–10 (10 = do not proceed). "
-        "Cover: local discount potential, logistics, license validity/compliance. "
+        "You are an elite intelligence analyst evaluating global entities across multiple sectors (mining, oil & gas, logistics, ports). "
+        "Decide GO / NO GO / ESCALATE with evidence, avoiding hype. Give a risk score 1–10 (10 = do not proceed). "
+        "Cover: operational viability, compliance, supply chain risks, and market context. "
         "Reply in Markdown only. Use ## for main sections. Keep paragraphs short (2–4 sentences). "
         "Put basic facts in bullets, not huge tables. Use one compact table only for risk breakdown "
         "(Category | Score | One-line rationale). Number tactical steps. "
-        "Call out what must be verified with regulators. Tone: direct, scannable, plain language."
+        "Call out what must be verified with primary sources or regulators. Tone: direct, scannable, objective, plain language."
     )
 
     # Attempt Cascade

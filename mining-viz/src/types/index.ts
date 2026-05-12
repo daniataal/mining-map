@@ -5,6 +5,7 @@ export interface MiningLicense {
   company: string;
   licenseType: string;
   commodity: string;
+  sector?: string;
   status: LicenseStatus;
   date: string | null;
   country: string;

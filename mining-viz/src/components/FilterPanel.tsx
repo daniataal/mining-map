@@ -97,12 +97,48 @@ export default function FilterPanel({
           </section>
 
           <section className="space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t("סטטוס אישי", "Intelligence Status")}</label>
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Operation Status</label>
             <MultiSelect
-              options={['good', 'maybe', 'bad', 'unmarked']}
+              options={['ACTIVE', 'LIKELY_ACTIVE', 'DEGRADED', 'LIKELY_INACTIVE', 'INACTIVE', 'UNKNOWN']}
               selected={userStatusFilter}
               onChange={setUserStatusFilter}
-              placeholder={t("כל הסטטוסים", "All Statuses")}
+              placeholder="All Statuses"
+            />
+          </section>
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Confidence Score</label>
+            <input type="range" className="w-full accent-amber-500" min="0" max="100" />
+            <div className="flex justify-between text-[10px] text-slate-400"><span>0</span><span>100</span></div>
+          </section>
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Source Type</label>
+            <MultiSelect
+              options={['AISStream', 'GDELT', 'Copernicus', 'NASA FIRMS', 'OSM', 'UN Comtrade']}
+              selected={[]}
+              onChange={() => {}}
+              placeholder="All Sources"
+            />
+          </section>
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Last Activity Window</label>
+            <select className="w-full bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-lg text-xs p-2 text-slate-700 dark:text-slate-300">
+              <option>Any Time</option>
+              <option>Last 24 Hours</option>
+              <option>Last 7 Days</option>
+              <option>Last 30 Days</option>
+            </select>
+          </section>
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Tags</label>
+            <MultiSelect
+              options={['Sanctioned', 'Strike', 'Disruption', 'High Yield', 'Watchlist']}
+              selected={[]}
+              onChange={() => {}}
+              placeholder="Any Tags"
             />
           </section>
         </div>
