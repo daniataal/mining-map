@@ -6,6 +6,7 @@ import { Card, CardContent } from './ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { ScrollArea } from './ui/scroll-area';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 
 interface KanbanBoardProps {
   processedData: MiningLicense[];
@@ -86,7 +87,7 @@ export default function KanbanBoard({
 
       <ScrollArea className="flex-1 p-3">
         <div className="space-y-3">
-          {columns[stage].map(item => {
+          {columns[stage].map((item, index) => {
             const annotation = userAnnotations[item.id] || {};
             const isGold =
               item.commodity?.toLowerCase().includes('gold') ||
@@ -96,7 +97,7 @@ export default function KanbanBoard({
 
             return (
               <Card
-                key={item.id}
+                key={getLicenseRenderKey(item, index)}
                 className={`cursor-pointer border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all hover:shadow-lg hover:-translate-y-1 group
                 ${isGold ? 'border-amber-200/50 dark:border-amber-900/30' : ''}`}
                 onClick={() => onCardClick(item)}

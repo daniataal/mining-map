@@ -8,6 +8,7 @@ import {
   MapPin, ArrowRight, AlertTriangle, Anchor,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 
 const INCOTERMS = ['EXW', 'FCA', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP', 'FAS', 'FOB', 'CFR', 'CIF'];
 
@@ -83,8 +84,8 @@ function ShipmentForm({ initial, licenses, onSave, onCancel }: ShipmentFormProps
             }}
           >
             <option value="">— Select license / deal (optional) —</option>
-            {licenses.map(l => (
-              <option key={l.id} value={l.id}>{l.company} — {l.commodity}</option>
+            {licenses.map((l, index) => (
+              <option key={getLicenseRenderKey(l, index)} value={l.id}>{l.company} — {l.commodity}</option>
             ))}
           </select>
         </div>
