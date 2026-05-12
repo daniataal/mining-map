@@ -22,17 +22,29 @@ WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 REQUEST_TIMEOUT_SECONDS = 12
 UNLOCODE_CACHE_TTL_SECONDS = 60 * 60 * 24
 AIS_CACHE_TTL_SECONDS = 60
+AIS_DEFAULT_MAX_VESSELS = 60
+AIS_MAX_VESSELS = 120
+AIS_DEFAULT_CAPTURE_WINDOW_SECONDS = 10
+AIS_MIN_CAPTURE_WINDOW_SECONDS = 4
+AIS_MAX_CAPTURE_WINDOW_SECONDS = 18
+AIS_MAX_VIEWPORT_WIDTH_DEGREES = 90.0
+AIS_MAX_VIEWPORT_HEIGHT_DEGREES = 55.0
+AIS_MAX_FALLBACK_REGION_COUNT = 6
 
-# Major oil and gas corridors. This is intentionally broad enough for an MVP
-# without subscribing to the entire globe, which would be noisy and expensive.
-AISSTREAM_OIL_BBOXES = [
-    [[28.0, 47.0], [18.0, 58.5]],     # Arabian Gulf
-    [[32.5, 29.0], [12.0, 44.0]],     # Red Sea + Suez approaches
-    [[46.0, -7.0], [30.0, 37.0]],     # Mediterranean
-    [[14.0, -20.0], [-30.0, 20.0]],   # West Africa offshore
-    [[31.0, -98.0], [18.0, -79.0]],   # Gulf of Mexico / Caribbean
-    [[62.0, -5.0], [50.0, 9.0]],      # North Sea
-    [[9.0, 95.0], [-8.0, 108.0]],     # Malacca / Singapore
+# Curated fallback regions used when a viewport is absent or too wide to watch
+# honestly as a single AIS subscription. Bboxes are (south, west, north, east).
+AISSTREAM_WATCH_REGIONS = [
+    {"id": "arabian_gulf", "label": "Arabian Gulf", "bbox": (18.0, 47.0, 30.0, 58.5)},
+    {"id": "red_sea_suez", "label": "Red Sea and Suez", "bbox": (12.0, 29.0, 32.5, 44.0)},
+    {"id": "east_mediterranean", "label": "Mediterranean", "bbox": (30.0, -7.0, 46.0, 37.0)},
+    {"id": "west_africa", "label": "West Africa offshore", "bbox": (-30.0, -20.0, 14.0, 20.0)},
+    {"id": "gulf_of_mexico", "label": "Gulf of Mexico and Caribbean", "bbox": (18.0, -98.0, 31.0, -79.0)},
+    {"id": "north_sea", "label": "North Sea", "bbox": (50.0, -5.0, 62.0, 12.0)},
+    {"id": "east_africa_arabian_sea", "label": "East Africa and Arabian Sea", "bbox": (-6.0, 38.0, 23.0, 78.0)},
+    {"id": "malacca", "label": "Malacca and Singapore", "bbox": (-8.0, 95.0, 12.0, 108.0)},
+    {"id": "south_china_sea", "label": "South China Sea", "bbox": (1.0, 105.0, 24.0, 122.0)},
+    {"id": "northeast_asia", "label": "Northeast Asia", "bbox": (30.0, 122.0, 45.0, 145.0)},
+    {"id": "brazil_offshore", "label": "Brazil offshore", "bbox": (-35.0, -55.0, 5.0, -25.0)},
 ]
 
 OIL_PORT_KEYWORDS = (
@@ -51,7 +63,7 @@ OIL_PORT_KEYWORDS = (
 UNLOCODE_OFFICIAL_SOURCE_URL = "https://unece.org/trade/cefact/UNLOCODE-Download"
 
 _unlocode_cache: dict[str, Any] = {"loaded_at": 0.0, "rows": []}
-_ais_cache: dict[str, Any] = {"loaded_at": 0.0, "result": None}
+_ais_cache: dict[str, Any] = {"items": {}}
 
 _COORD_RE = re.compile(
     r"^(?P<lat_deg>\d{2})(?P<lat_min>\d{2})(?P<lat_hem>[NS])\s+(?P<lon_deg>\d{3})(?P<lon_min>\d{2})(?P<lon_hem>[EW])$"
@@ -76,6 +88,141 @@ def _normalize_token(value: Any) -> str:
         return ""
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
+
+
+def _clip(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _normalize_requested_bbox(
+    bbox: Optional[tuple[float, float, float, float]],
+) -> Optional[tuple[float, float, float, float]]:
+    if bbox is None:
+        return None
+    try:
+        south, west, north, east = (float(part) for part in bbox)
+    except (TypeError, ValueError):
+        return None
+
+    south = _clip(south, -85.0, 85.0)
+    north = _clip(north, -85.0, 85.0)
+    west = _clip(west, -180.0, 180.0)
+    east = _clip(east, -180.0, 180.0)
+
+    if north <= south or east <= west:
+        return None
+
+    return (
+        round(south, 4),
+        round(west, 4),
+        round(north, 4),
+        round(east, 4),
+    )
+
+
+def _bbox_to_ais_box(bbox: tuple[float, float, float, float]) -> list[list[float]]:
+    south, west, north, east = bbox
+    return [[north, west], [south, east]]
+
+
+def _bbox_intersects(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> bool:
+    left_south, left_west, left_north, left_east = left
+    right_south, right_west, right_north, right_east = right
+    return not (
+        left_east < right_west
+        or right_east < left_west
+        or left_north < right_south
+        or right_north < left_south
+    )
+
+
+def _normalize_vessel_scope(scope: str) -> str:
+    return "all_vessels" if _clean_text(scope).lower() == "all_vessels" else "oil_tankers"
+
+
+def _ship_matches_scope(ship_type_label: str, vessel_scope: str) -> bool:
+    normalized_scope = _normalize_vessel_scope(vessel_scope)
+    if normalized_scope == "all_vessels":
+        return True
+    return ship_type_label == "Tanker"
+
+
+def _build_ais_subscription_plan(
+    viewport_bbox: Optional[tuple[float, float, float, float]] = None,
+) -> dict[str, Any]:
+    requested_bbox = _normalize_requested_bbox(viewport_bbox)
+    if requested_bbox is not None:
+        south, west, north, east = requested_bbox
+        width = east - west
+        height = north - south
+        if width <= AIS_MAX_VIEWPORT_WIDTH_DEGREES and height <= AIS_MAX_VIEWPORT_HEIGHT_DEGREES:
+            return {
+                "boxes": [_bbox_to_ais_box(requested_bbox)],
+                "requested_bbox": list(requested_bbox),
+                "geography_mode": "viewport_bbox",
+                "geography_note": "Watching the current map viewport only.",
+                "region_labels": [],
+            }
+
+        intersecting_regions = [
+            region
+            for region in AISSTREAM_WATCH_REGIONS
+            if _bbox_intersects(requested_bbox, region["bbox"])
+        ]
+        if not intersecting_regions:
+            intersecting_regions = AISSTREAM_WATCH_REGIONS
+        sampled_regions = intersecting_regions[:AIS_MAX_FALLBACK_REGION_COUNT]
+        return {
+            "boxes": [_bbox_to_ais_box(region["bbox"]) for region in sampled_regions],
+            "requested_bbox": list(requested_bbox),
+            "geography_mode": "sampled_viewport_regions",
+            "geography_note": (
+                "Viewport is very wide, so the watch samples curated maritime regions inside the current view "
+                "instead of claiming every vessel globally."
+            ),
+            "region_labels": [region["label"] for region in sampled_regions],
+        }
+
+    sampled_regions = AISSTREAM_WATCH_REGIONS[:AIS_MAX_FALLBACK_REGION_COUNT]
+    return {
+        "boxes": [_bbox_to_ais_box(region["bbox"]) for region in sampled_regions],
+        "requested_bbox": None,
+        "geography_mode": "default_regions",
+        "geography_note": (
+            "No viewport was supplied, so the watch falls back to curated maritime regions rather than an unbounded global feed."
+        ),
+        "region_labels": [region["label"] for region in sampled_regions],
+    }
+
+
+def _build_empty_ais_response(
+    *,
+    source: str,
+    limitations: list[str],
+    vessel_scope: str,
+    capture_window_seconds: int,
+    max_vessels: int,
+    plan: dict[str, Any],
+    live_positions_enabled: bool = False,
+) -> dict[str, Any]:
+    return {
+        "vessels": [],
+        "source": source,
+        "data_as_of": _now_iso(),
+        "live_positions_enabled": live_positions_enabled,
+        "limitations": limitations,
+        "scope": _normalize_vessel_scope(vessel_scope),
+        "capture_window_seconds": capture_window_seconds,
+        "max_vessels": max_vessels,
+        "geography_mode": plan.get("geography_mode"),
+        "geography_note": plan.get("geography_note"),
+        "requested_bbox": plan.get("requested_bbox"),
+        "effective_bbox_count": len(plan.get("boxes") or []),
+        "region_labels": plan.get("region_labels") or [],
+    }
 
 
 def parse_unlocode_coordinates(value: str) -> tuple[Optional[float], Optional[float]]:
@@ -585,36 +732,51 @@ def _parse_ais_message(raw_message: dict[str, Any]) -> tuple[Optional[str], dict
     return mmsi, parsed
 
 
-async def _collect_ais_snapshot(timeout_seconds: float = 6.0, max_vessels: int = 24) -> dict[str, Any]:
+async def _collect_ais_snapshot(
+    *,
+    timeout_seconds: float = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
+    max_vessels: int = AIS_DEFAULT_MAX_VESSELS,
+    vessel_scope: str = "oil_tankers",
+    viewport_bbox: Optional[tuple[float, float, float, float]] = None,
+) -> dict[str, Any]:
+    normalized_scope = _normalize_vessel_scope(vessel_scope)
+    normalized_window = max(
+        AIS_MIN_CAPTURE_WINDOW_SECONDS,
+        min(int(timeout_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
+    )
+    normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
+    plan = _build_ais_subscription_plan(viewport_bbox)
     api_key = os.getenv("AISSTREAM_API_KEY", "").strip()
     if not api_key:
-        return {
-            "vessels": [],
-            "source": "AISStream (not configured)",
-            "data_as_of": _now_iso(),
-            "live_positions_enabled": False,
-            "limitations": [
+        return _build_empty_ais_response(
+            source="AISStream (not configured)",
+            limitations=[
                 "AISStream requires AISSTREAM_API_KEY on the backend. Without it, the maritime map layer stays empty while dossier enrichment still works.",
             ],
-        }
+            vessel_scope=normalized_scope,
+            capture_window_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            plan=plan,
+        )
 
     try:
         import websockets  # type: ignore
     except Exception:
-        return {
-            "vessels": [],
-            "source": "AISStream (websocket client unavailable)",
-            "data_as_of": _now_iso(),
-            "live_positions_enabled": False,
-            "limitations": [
+        return _build_empty_ais_response(
+            source="AISStream (websocket client unavailable)",
+            limitations=[
                 "AISSTREAM_API_KEY is set, but the Python websockets package is unavailable in this runtime.",
             ],
-        }
+            vessel_scope=normalized_scope,
+            capture_window_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            plan=plan,
+        )
 
     vessels: dict[str, dict[str, Any]] = {}
     subscription = {
         "APIKey": api_key,
-        "BoundingBoxes": AISSTREAM_OIL_BBOXES,
+        "BoundingBoxes": plan["boxes"],
         "FilterMessageTypes": [
             "PositionReport",
             "StandardClassBPositionReport",
@@ -628,8 +790,12 @@ async def _collect_ais_snapshot(timeout_seconds: float = 6.0, max_vessels: int =
         async with websockets.connect(AISSTREAM_URL, ping_interval=None, close_timeout=1) as websocket:
             await websocket.send(json.dumps(subscription))
             started = time.monotonic()
-            while time.monotonic() - started < timeout_seconds:
-                remaining = timeout_seconds - (time.monotonic() - started)
+            raw_target_count = min(
+                max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 40),
+                500,
+            )
+            while time.monotonic() - started < normalized_window:
+                remaining = normalized_window - (time.monotonic() - started)
                 if remaining <= 0:
                     break
                 try:
@@ -643,21 +809,22 @@ async def _collect_ais_snapshot(timeout_seconds: float = 6.0, max_vessels: int =
                     continue
                 current = vessels.setdefault(mmsi, {"mmsi": mmsi})
                 current.update({key: value for key, value in parsed.items() if value not in (None, "", [])})
-                if len(vessels) >= max_vessels * 2:
+                if len(vessels) >= raw_target_count:
                     break
     except Exception as exc:
-        return {
-            "vessels": [],
-            "source": "AISStream",
-            "data_as_of": _now_iso(),
-            "live_positions_enabled": False,
-            "limitations": [f"AIS snapshot failed: {exc}"],
-        }
+        return _build_empty_ais_response(
+            source="AISStream",
+            limitations=[f"AIS watch failed: {exc}"],
+            vessel_scope=normalized_scope,
+            capture_window_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            plan=plan,
+        )
 
     results = []
     for vessel in vessels.values():
         ship_type_code, ship_type_label = classify_ais_ship_type(vessel.get("raw_type"))
-        if ship_type_label not in {"Tanker", "Cargo"}:
+        if not _ship_matches_scope(ship_type_label, normalized_scope):
             continue
         if vessel.get("lat") is None or vessel.get("lng") is None:
             continue
@@ -688,28 +855,87 @@ async def _collect_ais_snapshot(timeout_seconds: float = 6.0, max_vessels: int =
         )
 
     results.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
+    source_label = {
+        "viewport_bbox": "AISStream viewport watch",
+        "sampled_viewport_regions": "AISStream sampled viewport watch",
+        "default_regions": "AISStream regional watch",
+    }.get(plan.get("geography_mode"), "AISStream watch")
+
+    limitations = []
+    if plan.get("geography_note"):
+        limitations.append(str(plan["geography_note"]))
+    if normalized_scope == "oil_tankers":
+        limitations.append(
+            "Scope is limited to tanker-class AIS messages for an oil-focused watch. Switch to all vessels to widen coverage."
+        )
+    else:
+        limitations.append(
+            "All-vessels mode is still capped by the requested viewport, capture window, and vessel limit for performance."
+        )
+    limitations.append(
+        "AIS ownership/operator enrichment depends on whether the MMSI or IMO can be matched in open sources such as Wikidata."
+    )
     return {
-        "vessels": results[:max_vessels],
-        "source": "AISStream chokepoint snapshot",
+        "vessels": results[:normalized_max_vessels],
+        "source": source_label,
         "data_as_of": _now_iso(),
         "live_positions_enabled": True,
-        "limitations": [
-            "AISStream is a live open/free feed with backend API-key setup; this MVP samples major oil and gas chokepoints rather than every ocean basin.",
-            "AIS ownership/operator enrichment depends on whether the MMSI/IMO can be matched in open sources such as Wikidata.",
-        ],
+        "limitations": limitations,
+        "scope": normalized_scope,
+        "capture_window_seconds": normalized_window,
+        "max_vessels": normalized_max_vessels,
+        "geography_mode": plan.get("geography_mode"),
+        "geography_note": plan.get("geography_note"),
+        "requested_bbox": plan.get("requested_bbox"),
+        "effective_bbox_count": len(plan.get("boxes") or []),
+        "region_labels": plan.get("region_labels") or [],
     }
 
 
-def get_maritime_vessel_feed(max_vessels: int = 24) -> dict[str, Any]:
-    age = time.time() - float(_ais_cache.get("loaded_at") or 0.0)
-    if _ais_cache.get("result") and age < AIS_CACHE_TTL_SECONDS:
-        cached = dict(_ais_cache["result"])
+def get_maritime_vessel_feed(
+    *,
+    max_vessels: int = AIS_DEFAULT_MAX_VESSELS,
+    capture_window_seconds: int = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
+    vessel_scope: str = "oil_tankers",
+    bbox: Optional[tuple[float, float, float, float]] = None,
+) -> dict[str, Any]:
+    normalized_scope = _normalize_vessel_scope(vessel_scope)
+    normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
+    normalized_window = max(
+        AIS_MIN_CAPTURE_WINDOW_SECONDS,
+        min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
+    )
+    normalized_bbox = _normalize_requested_bbox(bbox)
+    cache_key = json.dumps(
+        {
+            "max_vessels": normalized_max_vessels,
+            "capture_window_seconds": normalized_window,
+            "scope": normalized_scope,
+            "bbox": normalized_bbox,
+        },
+        sort_keys=True,
+    )
+
+    cache_items = _ais_cache.setdefault("items", {})
+    cached_entry = cache_items.get(cache_key)
+    age = time.time() - float((cached_entry or {}).get("loaded_at") or 0.0)
+    if cached_entry and cached_entry.get("result") and age < AIS_CACHE_TTL_SECONDS:
+        cached = dict(cached_entry["result"])
         cached["cached"] = True
         return cached
 
-    result = asyncio.run(_collect_ais_snapshot(max_vessels=max_vessels))
-    _ais_cache["loaded_at"] = time.time()
-    _ais_cache["result"] = result
+    result = asyncio.run(
+        _collect_ais_snapshot(
+            timeout_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            vessel_scope=normalized_scope,
+            viewport_bbox=normalized_bbox,
+        )
+    )
+    cache_items[cache_key] = {
+        "loaded_at": time.time(),
+        "result": result,
+    }
     return dict(result)
 
 

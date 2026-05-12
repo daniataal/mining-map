@@ -88,7 +88,7 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
           <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4 col-span-2">
             <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Destination</p>
             <p className="text-[10px] font-bold text-slate-900 dark:text-white">
-              {fmtValue(vessel.destination, t('לא דווח', 'Not reported in snapshot'))}
+              {fmtValue(vessel.destination, t('לא דווח', 'Not reported in current watch'))}
             </p>
           </div>
         </div>

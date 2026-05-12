@@ -363,12 +363,29 @@ export interface MaritimeVessel {
   nearest_port?: MaritimePortReference | null;
 }
 
+export type MaritimeVesselScope = 'oil_tankers' | 'all_vessels';
+
+export interface MaritimeViewportBounds {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
 export interface MaritimeVesselFeedResponse {
   vessels: MaritimeVessel[];
   source: string;
   data_as_of: string;
   live_positions_enabled: boolean;
   limitations: string[];
+  scope: MaritimeVesselScope;
+  capture_window_seconds: number;
+  max_vessels: number;
+  geography_mode?: 'viewport_bbox' | 'sampled_viewport_regions' | 'default_regions' | string;
+  geography_note?: string | null;
+  requested_bbox?: [number, number, number, number] | null;
+  effective_bbox_count?: number;
+  region_labels?: string[];
   cached?: boolean;
 }
 

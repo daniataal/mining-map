@@ -3167,14 +3167,30 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
 
 
 @app.get("/api/maritime/vessels")
-def get_maritime_vessels(max_vessels: int = 24):
+def get_maritime_vessels(
+    max_vessels: int = 60,
+    capture_window_seconds: int = 10,
+    scope: str = "oil_tankers",
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
     """Optional live AIS maritime layer for oil and gas mode."""
     try:
         try:
             from backend.services.maritime_intel import get_maritime_vessel_feed
         except ImportError:
             from services.maritime_intel import get_maritime_vessel_feed
-        return get_maritime_vessel_feed(max_vessels=max(1, min(max_vessels, 50)))
+        bbox = None
+        if all(value is not None for value in (south, west, north, east)):
+            bbox = (float(south), float(west), float(north), float(east))
+        return get_maritime_vessel_feed(
+            max_vessels=max_vessels,
+            capture_window_seconds=capture_window_seconds,
+            vessel_scope=scope,
+            bbox=bbox,
+        )
     except Exception as exc:
         return {
             "vessels": [],
@@ -3182,6 +3198,14 @@ def get_maritime_vessels(max_vessels: int = 24):
             "data_as_of": datetime.utcnow().isoformat(),
             "live_positions_enabled": False,
             "limitations": [f"Maritime vessel feed failed: {exc}"],
+            "scope": "oil_tankers" if scope != "all_vessels" else "all_vessels",
+            "capture_window_seconds": capture_window_seconds,
+            "max_vessels": max_vessels,
+            "geography_mode": "viewport_bbox" if all(value is not None for value in (south, west, north, east)) else "default_regions",
+            "geography_note": None,
+            "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
+            "effective_bbox_count": 0,
+            "region_labels": [],
         }
 
 
