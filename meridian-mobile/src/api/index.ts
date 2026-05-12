@@ -1,5 +1,6 @@
 import axios, { isAxiosError } from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import type { MiningLicense } from '../types';
 
 declare module 'axios' {
@@ -46,6 +47,18 @@ apiClient.interceptors.response.use(
 
 export default apiClient;
 
+export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
+
+function normalizeCountryBordersParam(countries: string[]): string[] {
+  return Array.from(
+    new Set(
+      countries
+        .map((country) => country.trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
 // --- Auth ---
 export const login = async (username: string, password: string) => {
   const { data } = await apiClient.post('/auth/login', { username, password }, { skipAuth: true });
@@ -55,6 +68,15 @@ export const login = async (username: string, password: string) => {
 // --- Licenses ---
 export const getLicenses = async (): Promise<MiningLicense[]> => {
   const { data } = await apiClient.get<MiningLicense[]>('/licenses', { skipAuth: true });
+  return data;
+};
+
+export const getCountryBorders = async (countries: string[]): Promise<CountryBordersGeoJson> => {
+  const normalizedCountries = normalizeCountryBordersParam(countries);
+  const { data } = await apiClient.get<CountryBordersGeoJson>('/api/map/country-borders', {
+    skipAuth: true,
+    params: normalizedCountries.length > 0 ? { countries: normalizedCountries.join(',') } : undefined,
+  });
   return data;
 };
 

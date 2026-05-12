@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
 // @ts-ignore
@@ -6,9 +7,9 @@ import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MiningLicense, UserAnnotation } from '../types';
+import { getCountryBorders } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
-import COUNTRY_BORDERS from '../data/countryBorders';
 import PopupForm from './PopupForm';
 
 // Fix for default marker icon in React Leaflet
@@ -182,23 +183,19 @@ export default function MapComponent({
         prevSelectedIdRef.current = selectedItem.id;
     }, [selectedItem?.id]);
 
-    const activeCountries = useMemo(() => {
+    const borderCountries = useMemo(() => {
         const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
-        return Array.from(countries);
+        return Array.from(countries).sort((a, b) => a.localeCompare(b));
     }, [processedData]);
 
-    const filteredGeoJson = useMemo(() => {
-        return {
-            ...COUNTRY_BORDERS,
-            features: COUNTRY_BORDERS.features.filter((f) => {
-                // datasets/geo-countries (Natural Earth 1:10m) uses "ADMIN"; older
-                // johan dataset used "name" — support both so a source swap doesn't break filtering.
-                const properties = f.properties ?? {};
-                const name = String(properties.ADMIN ?? properties.name ?? '').toLowerCase();
-                return activeCountries.some(ac => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
-            })
-        };
-    }, [activeCountries]);
+    const { data: filteredGeoJson } = useQuery({
+        queryKey: ['country-borders', borderCountries],
+        queryFn: () => getCountryBorders(borderCountries),
+        enabled: borderCountries.length > 0,
+        staleTime: 1000 * 60 * 60 * 24,
+        gcTime: 1000 * 60 * 60 * 24 * 7,
+        placeholderData: (previousData) => previousData,
+    });
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
@@ -239,7 +236,7 @@ export default function MapComponent({
                     {filteredGeoJson && (
                         <LayersControl.Overlay checked name={t("גבולות מדינות", "Country Borders")}>
                             <GeoJSON 
-                                key={activeCountries.join(',')}
+                                key={borderCountries.join(',')}
                                 data={filteredGeoJson} 
                                 style={{ 
                                   fillColor: '#06b6d4', 

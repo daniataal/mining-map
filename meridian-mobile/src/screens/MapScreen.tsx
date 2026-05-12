@@ -14,12 +14,11 @@ import { Marker, Callout, PROVIDER_GOOGLE, Geojson } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getLicenses } from '../api';
+import { getCountryBorders, getLicenses } from '../api';
 import { useMeridianTheme, type AppTheme } from '../theme';
 import { MiningLicense } from '../types';
 import { Search, Filter, Crosshair, X, Check } from 'lucide-react-native';
 import DossierModal from '../components/DossierModal';
-import COUNTRY_BORDERS from '../data/countryBorders';
 import { applyCollocationJitter, type JitteredLicense } from '../lib/geo';
 import {
   TACTICAL_CLUSTER,
@@ -233,21 +232,19 @@ export default function MapScreen() {
     return () => cancelAnimationFrame(t);
   }, []);
 
-  const activeCountries = useMemo(() => {
+  const borderCountries = useMemo(() => {
     const countries = new Set(rawLicenses.map((d) => (d.country ? d.country.toLowerCase() : 'ghana')));
-    return Array.from(countries);
+    return Array.from(countries).sort((a, b) => a.localeCompare(b));
   }, [rawLicenses]);
 
-  const filteredGeoJson = useMemo(() => {
-    return {
-      ...COUNTRY_BORDERS,
-      features: COUNTRY_BORDERS.features.filter((feature) => {
-        const properties = feature.properties ?? {};
-        const name = String(properties.ADMIN ?? properties.name ?? '').toLowerCase();
-        return activeCountries.some((ac) => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
-      }),
-    };
-  }, [activeCountries]);
+  const { data: filteredGeoJson } = useQuery({
+    queryKey: ['country-borders', borderCountries],
+    queryFn: () => getCountryBorders(borderCountries),
+    enabled: borderCountries.length > 0,
+    staleTime: 1000 * 60 * 60 * 24,
+    gcTime: 1000 * 60 * 60 * 24 * 7,
+    placeholderData: (previousData) => previousData,
+  });
 
   const commodityOptions = useMemo(() => {
     const c = new Set(rawLicenses.map((item) => normalizeLabel(item.commodity)));
