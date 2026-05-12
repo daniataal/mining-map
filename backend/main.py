@@ -485,6 +485,18 @@ def init_db():
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS original_lat FLOAT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS original_lng FLOAT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS geocoded_at TIMESTAMP;")
+            # Open-data provenance. We preserve the existing licenses table and
+            # interaction model, but the primary source should now be live
+            # official/open registries rather than the bundled JSON snapshot.
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS sector TEXT DEFAULT 'mining';")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS record_origin VARCHAR(50) DEFAULT 'manual';")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_id TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_name TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_url TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_record_url TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_updated_at TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS raw_payload TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;")
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -634,67 +646,53 @@ init_db()
 import threading
 import time
 
-def _auto_seed_arcgis():
-    time.sleep(5) # Wait for server to fully start
-    
-    while True:
-        print("[Auto-Seed] Reading massive historical cadastre dataset from local licenses.json...")
-        
-        try:
-            import json
-            import os
-            
-            # The file is now copied into the backend directory
-            file_path = os.path.join(os.path.dirname(__file__), "licenses.json")
-            
-            if not os.path.exists(file_path):
-                print(f"[Auto-Seed] Could not find {file_path}")
-                time.sleep(86400)
-                continue
-                
-            with open(file_path, "r", encoding="utf-8") as f:
-                licenses_data = json.load(f)
-                
-            conn = get_db_connection()
-            cur = conn.cursor()
-            
-            # Clean up the old hardcoded mines
-            cur.execute("DELETE FROM licenses")
-            
-            inserted_count = 0
-            for item in licenses_data:
-                # Fallback to defaults if missing
-                item_id = item.get("id") or str(uuid.uuid4())
-                company = item.get("company", "Unknown Company")
-                country = item.get("country", "Unknown")
-                region = item.get("region", "")
-                commodity = item.get("commodity", "Unknown")
-                license_type = item.get("licenseType", "Unknown")
-                status = item.get("status", "ACTIVE")
-                lat = item.get("lat")
-                lng = item.get("lng")
-                
-                # Allow missing coordinates because _license_display_coords() will generate 
-                # regional fallback coordinates at runtime for any licenses missing them
-                
-                cur.execute("""
-                    INSERT INTO licenses (id, company, country, region, commodity, license_type, status, lat, lng)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING
-                """, (item_id, company, country, region, commodity, license_type, status, lat, lng))
-                inserted_count += 1
-                
-            conn.commit()
-            cur.close()
-            conn.close()
-            print(f"[Auto-Seed] BOOM! Successfully injected {inserted_count} REAL African mining cadastre licenses into the map!")
-        except Exception as e:
-            print(f"[Auto-Seed] DB Insertion failed: {e}")
-                
-        print("[Auto-Seed] Sync cycle complete. Sleeping for 24 hours...")
-        time.sleep(86400) # 24 hours in seconds
+def _bootstrap_open_data():
+    """One-shot startup bootstrap for live open-data sources.
 
-threading.Thread(target=_auto_seed_arcgis, daemon=True).start()
+    Historical behaviour deleted the entire table every day and reloaded a
+    bundled JSON file. That kept the app pinned to imported snapshot data.
+    The new bootstrap keeps the existing schema/UI intact, upserts official
+    open-data rows, and only falls back to the bundled JSON if all live
+    source fetches fail.
+    """
+    time.sleep(3)
+
+    try:
+        try:
+            from backend.services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
+        except ImportError:
+            from services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
+
+        summary = sync_open_data_sources()
+        print(
+            f"[OpenData] Synced {summary.get('records_written', 0)} normalized records "
+            f"from {len(summary.get('sources', []))} official sources."
+        )
+        for error in summary.get("errors", []):
+            print(f"[OpenData] Source warning: {error}")
+
+        if not summary.get("records_written"):
+            conn = get_db_connection()
+            try:
+                inserted = seed_bundled_json_fallback(conn)
+                print(f"[OpenData] No live sources succeeded. Seeded bundled fallback rows: {inserted}")
+            finally:
+                conn.close()
+
+        try:
+            from ingest_oil_trades import ingest as ingest_oil_trades
+            oil_summary = ingest_oil_trades(seed_only=True)
+            print(
+                f"[OpenData] Oil trade context seeded with "
+                f"{oil_summary.get('seed_rows_written', 0)} rows."
+            )
+        except Exception as exc:
+            print(f"[OpenData] Oil trade seeding skipped: {exc}")
+    except Exception as exc:
+        print(f"[OpenData] Bootstrap failed: {exc}")
+
+
+threading.Thread(target=_bootstrap_open_data, daemon=True).start()
 
 # --- Auth Endpoints ---
 
@@ -874,7 +872,7 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 @app.get("/licenses")
-def read_licenses():
+def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     
@@ -888,6 +886,22 @@ def read_licenses():
         return {"error": f"Database error: {str(e)}"}
     
     conn.close()
+
+    normalized_sector = (sector or "").strip().lower()
+    if normalized_sector:
+        rows = [
+            row for row in rows
+            if (row.get("sector") or "mining").strip().lower() == normalized_sector
+        ]
+
+    # Once live/open records exist for the current sector, hide the old bundled
+    # JSON snapshot rows from the primary map feed. Manual / CSV imports remain.
+    has_open_data_rows = any((row.get("record_origin") or "").lower() == "open_data" for row in rows)
+    if prefer_open_data and has_open_data_rows:
+        rows = [
+            row for row in rows
+            if (row.get("record_origin") or "").lower() != "bundled_json"
+        ]
     
     # Transform to list of dicts with keys matching what the Reac app expects
     results = []
@@ -903,10 +917,18 @@ def read_licenses():
             "date": row["date_issued"],        # Frontend expects 'date'
             "country": row["country"],
             "region": row["region"],
+            "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
             "lat": display_lat,
             "lng": display_lng,
             "phoneNumber": row["phone_number"] if "phone_number" in keys else None,
             "contactPerson": row["contact_person"] if "contact_person" in keys else None,
+            "recordOrigin": row["record_origin"] if "record_origin" in keys else None,
+            "sourceId": row["source_id"] if "source_id" in keys else None,
+            "sourceName": row["source_name"] if "source_name" in keys else None,
+            "sourceUrl": row["source_url"] if "source_url" in keys else None,
+            "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
+            "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
+            "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
             # Geocoding provenance — read-only on the frontend; drives the
             # "≈ approx location" badge and lets users distinguish surveyed
             # points from district-centroid backfills.
@@ -2635,6 +2657,11 @@ class OilIngestRequest(BaseModel):
     seed_only: bool = False
 
 
+class OpenDataSyncRequest(BaseModel):
+    source_ids: Optional[list[str]] = None
+    include_bundled_fallback: bool = False
+
+
 @app.post("/api/admin/oil/ingest")
 def admin_oil_ingest(request: OilIngestRequest):
     """
@@ -2664,6 +2691,30 @@ def admin_oil_ingest(request: OilIngestRequest):
             return {"status": "success", **result}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/open-data/sync")
+def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[str] = Header(None)):
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    try:
+        try:
+            from backend.services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
+        except ImportError:
+            from services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
+
+        summary = sync_open_data_sources(source_ids=request.source_ids)
+        if request.include_bundled_fallback and not summary.get("records_written"):
+            conn = get_db_connection()
+            try:
+                summary["bundled_fallback_inserted"] = seed_bundled_json_fallback(conn)
+            finally:
+                conn.close()
+        return {"status": "success", **summary}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

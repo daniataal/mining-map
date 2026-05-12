@@ -6,6 +6,7 @@ export interface MiningLicense {
   licenseType: string;
   commodity: string;
   sector?: string;
+  recordOrigin?: 'open_data' | 'bundled_json' | 'manual' | 'csv_import' | string | null;
   status: LicenseStatus;
   date: string | null;
   country: string;
@@ -17,6 +18,12 @@ export interface MiningLicense {
   pricePerKg?: number;
   capacity?: number;
   isExported?: boolean;
+  sourceId?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+  sourceRecordUrl?: string | null;
+  sourceUpdatedAt?: string | null;
+  lastSyncedAt?: string | null;
   // Geocoding provenance. Populated by the backend after a backfill run.
   // Frontend only reads these — never write them back from the map UI.
   geoSource?: 'user' | 'csv-import' | 'gazetteer' | 'nominatim' | 'mapbox' | 'manual-fix' | string | null;
