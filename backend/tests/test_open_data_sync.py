@@ -3,10 +3,13 @@ from datetime import datetime
 
 from backend.services.ingest.open_data_sync import (
     OPEN_DATA_SOURCES,
+    _build_syncable_africa_coverage,
     _normalize_date,
+    AFRICA_COVERAGE_OVERRIDES,
     arcgis_geometry_centroid,
     normalize_feature,
 )
+from backend.services.ingest.csv_fallback_import import normalize_csv_row
 
 
 class OpenDataSyncTests(unittest.TestCase):
@@ -69,6 +72,54 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertIsNotNone(record["raw_payload"])
         self.assertAlmostEqual(record["lat"], -0.6)
         self.assertAlmostEqual(record["lng"], 36.4)
+
+    def test_syncable_africa_coverage_includes_zambia_and_south_africa(self):
+        coverage = _build_syncable_africa_coverage()
+        self.assertEqual(coverage[("Kenya", "mining")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Zambia", "mining")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Zambia", "oil_and_gas")]["status"], "official_syncable")
+        self.assertEqual(coverage[("South Africa", "oil_and_gas")]["status"], "official_syncable")
+
+    def test_overrides_mark_restricted_and_portal_only_countries(self):
+        self.assertEqual(
+            AFRICA_COVERAGE_OVERRIDES["Namibia"]["mining"]["status"],
+            "official_api_restricted",
+        )
+        self.assertEqual(
+            AFRICA_COVERAGE_OVERRIDES["Ghana"]["mining"]["status"],
+            "official_portal_only",
+        )
+
+    def test_normalize_csv_row_marks_user_import_provenance(self):
+        record = normalize_csv_row(
+            {
+                "id": "15814",
+                "company": "420 ORGANIK",
+                "license_type": "MINE OPENCAST",
+                "commodity": "DIAMONDS ALLUVIAL",
+                "status": "Operating",
+                "date_issued": "",
+                "country": "South Africa",
+                "region": "VENTERSDORP NORTH-WEST",
+                "lat": "-26.3167",
+                "lng": "26.8167",
+                "matched_location": "",
+                "phone_number": "",
+                "contact_person": "",
+            },
+            "user_csv:licenses_export",
+            "User-provided CSV fallback (licenses_export.csv)",
+        )
+
+        assert record is not None
+        self.assertEqual(record["id"], "user_csv:licenses_export:15814")
+        self.assertEqual(record["country"], "South Africa")
+        self.assertEqual(record["sector"], "mining")
+        self.assertEqual(record["record_origin"], "user_import_csv")
+        self.assertEqual(record["source_id"], "user_csv:licenses_export")
+        self.assertEqual(record["source_name"], "User-provided CSV fallback (licenses_export.csv)")
+        self.assertAlmostEqual(record["lat"], -26.3167)
+        self.assertAlmostEqual(record["lng"], 26.8167)
 
 
 if __name__ == "__main__":

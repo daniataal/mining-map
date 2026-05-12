@@ -20,6 +20,34 @@ from license_import_geo import resolve_location_to_coords, validate_lat_lng_rang
 app = FastAPI()
 
 
+def _load_entity_contact_services():
+    try:
+        from backend.services.entity_contacts import sync_all_license_contacts, sync_license_contacts
+    except ImportError:
+        from services.entity_contacts import sync_all_license_contacts, sync_license_contacts
+    return sync_all_license_contacts, sync_license_contacts
+
+
+def _serialize_entity_contact(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "entityKind": row.get("entity_kind"),
+        "entityId": row.get("entity_id"),
+        "contactType": row.get("contact_type"),
+        "contactScope": row.get("contact_scope"),
+        "label": row.get("label"),
+        "value": row.get("value"),
+        "sourceName": row.get("source_name"),
+        "sourceUrl": row.get("source_url"),
+        "sourceType": row.get("source_type"),
+        "confidenceScore": row.get("confidence_score"),
+        "rawPayload": row.get("raw_payload"),
+        "extractedFrom": row.get("extracted_from"),
+        "verifiedAt": row.get("verified_at"),
+        "lastSeenAt": row.get("last_seen_at"),
+    }
+
+
 def _coords_need_fallback(lat, lng) -> bool:
     """Treat null/NaN and the legacy 0,0 placeholder as missing coordinates."""
     if lat is None or lng is None:
@@ -402,6 +430,33 @@ def init_db():
             );
         """)
 
+        # General, source-backed contact store. This is separate from private
+        # CRM notes so the dossier can surface reviewable public business
+        # numbers/emails/sites without guessing or mixing in internal notes.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS entity_contacts (
+                id VARCHAR(255) PRIMARY KEY,
+                fingerprint TEXT UNIQUE NOT NULL,
+                entity_kind VARCHAR(50) NOT NULL DEFAULT 'license',
+                entity_id VARCHAR(255) NOT NULL,
+                contact_type VARCHAR(50) NOT NULL,
+                contact_scope VARCHAR(50) NOT NULL DEFAULT 'public_business',
+                label TEXT,
+                value TEXT NOT NULL,
+                normalized_value TEXT,
+                source_name TEXT,
+                source_url TEXT,
+                source_type TEXT,
+                confidence_score FLOAT DEFAULT 0.0,
+                raw_payload JSONB,
+                extracted_from TEXT,
+                verified_at TIMESTAMP,
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         # Trade Records
         cur.execute("""
             CREATE TABLE IF NOT EXISTS trade_records (
@@ -628,6 +683,13 @@ def init_db():
                 (admin_id, 'admin', admin_hash, 'admin')
             )
             print("Default admin created: admin / admin123")
+
+        try:
+            sync_all_license_contacts, _ = _load_entity_contact_services()
+            synced_contacts = sync_all_license_contacts(conn)
+            print(f"Entity contact sync completed for {synced_contacts} records.")
+        except Exception as contact_exc:
+            print(f"Entity contact sync skipped: {contact_exc}")
 
         conn.commit()
         cur.close()
@@ -942,6 +1004,58 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
     return results
 
 
+@app.get("/entities/{entity_id:path}/contacts")
+def read_entity_contacts(entity_id: str, entity_kind: str = "license"):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if (entity_kind or "").strip().lower() == "license":
+            _, sync_license_contacts = _load_entity_contact_services()
+            sync_license_contacts(conn, entity_id)
+            conn.commit()
+
+        c.execute(
+            """
+            SELECT
+                id,
+                entity_kind,
+                entity_id,
+                contact_type,
+                contact_scope,
+                label,
+                value,
+                source_name,
+                source_url,
+                source_type,
+                confidence_score,
+                raw_payload,
+                extracted_from,
+                verified_at,
+                last_seen_at
+            FROM entity_contacts
+            WHERE entity_id = %s
+              AND entity_kind = %s
+            ORDER BY
+                CASE contact_type
+                    WHEN 'phone' THEN 1
+                    WHEN 'email' THEN 2
+                    WHEN 'website' THEN 3
+                    WHEN 'address' THEN 4
+                    ELSE 5
+                END,
+                confidence_score DESC NULLS LAST,
+                value ASC
+            """,
+            (entity_id, entity_kind),
+        )
+        return [_serialize_entity_contact(row) for row in c.fetchall()]
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
 @app.get("/api/map/country-borders")
 def read_country_borders(
     countries: Optional[str] = None,
@@ -1002,6 +1116,11 @@ def create_license(item: LicenseCreate):
         item.licenseType, item.status, item.lat, item.lng, 
         item.phoneNumber, item.contactPerson, None
     ))
+    try:
+        _, sync_license_contacts = _load_entity_contact_services()
+        sync_license_contacts(conn, new_id)
+    except Exception as contact_exc:
+        print(f"Entity contact sync skipped for {new_id}: {contact_exc}")
     conn.commit()
     conn.close()
     
@@ -1125,6 +1244,11 @@ def update_license(license_id: str, item: LicenseUpdate):
         if final_status == 'APPROVED' and not already_exported:
             # Gather all data for export (merge existing with updates)
             # Simplest is to just use what we have, or re-fetch. Re-fetching is safer.
+            try:
+                _, sync_license_contacts = _load_entity_contact_services()
+                sync_license_contacts(conn, license_id)
+            except Exception as contact_exc:
+                print(f"Entity contact sync skipped for {license_id}: {contact_exc}")
             conn.commit() # Commit the update first
             
             c.execute("SELECT * FROM licenses WHERE id = %s", (license_id,))
@@ -1135,6 +1259,11 @@ def update_license(license_id: str, item: LicenseUpdate):
                 conn.commit()
                 return {"status": "updated", "exported": True}
         else:
+            try:
+                _, sync_license_contacts = _load_entity_contact_services()
+                sync_license_contacts(conn, license_id)
+            except Exception as contact_exc:
+                print(f"Entity contact sync skipped for {license_id}: {contact_exc}")
             conn.commit()
 
         return {"status": "updated", "exported": False}
@@ -2466,6 +2595,77 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     }
 
 
+@app.get("/api/maritime/vessels")
+def get_maritime_vessels(max_vessels: int = 24):
+    """Optional live AIS maritime layer for oil and gas mode."""
+    try:
+        try:
+            from backend.services.maritime_intel import get_maritime_vessel_feed
+        except ImportError:
+            from services.maritime_intel import get_maritime_vessel_feed
+        return get_maritime_vessel_feed(max_vessels=max(1, min(max_vessels, 50)))
+    except Exception as exc:
+        return {
+            "vessels": [],
+            "source": "maritime_intel_error",
+            "data_as_of": datetime.utcnow().isoformat(),
+            "live_positions_enabled": False,
+            "limitations": [f"Maritime vessel feed failed: {exc}"],
+        }
+
+
+@app.get("/api/maritime/context")
+def get_maritime_context(
+    company: str = "",
+    country: str = "",
+    commodity: str = "",
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    vessel_name: str = "",
+    mmsi: str = "",
+    imo: str = "",
+    destination: str = "",
+):
+    """
+    Open/free maritime context for oil & gas screening.
+
+    This endpoint is explicit about scope: it returns vessel/company/port/news
+    evidence and counterparty proxies, not true bill-of-lading coverage.
+    """
+    try:
+        try:
+            from backend.services.maritime_intel import get_maritime_context as build_maritime_context
+        except ImportError:
+            from services.maritime_intel import get_maritime_context as build_maritime_context
+        codes = _resolve_codes(country) if country else {}
+        return build_maritime_context(
+            company=company,
+            country=country,
+            country_iso2=codes.get("iso2", ""),
+            commodity=commodity,
+            lat=lat,
+            lng=lng,
+            vessel_name=vessel_name,
+            mmsi=mmsi,
+            imo=imo,
+            destination=destination,
+        )
+    except Exception as exc:
+        return {
+            "source_labels": [],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "company_links": [],
+            "nearest_ports": [],
+            "evidence": [],
+            "identity": None,
+            "counterparty_proxies": [],
+            "bol_coverage_note": (
+                "Bill-of-lading buyer/seller coverage is not reliably available from free/open sources."
+            ),
+            "limitations": [f"Maritime context failed: {exc}"],
+        }
+
+
 # ======================================================================
 # Oil & Petroleum Trade Flows
 # ======================================================================
@@ -2715,6 +2915,54 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
             finally:
                 conn.close()
         return {"status": "success", **summary}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/open-data/coverage/africa")
+def get_africa_open_data_coverage():
+    try:
+        try:
+            from backend.services.ingest.open_data_sync import get_africa_coverage
+        except ImportError:
+            from services.ingest.open_data_sync import get_africa_coverage
+
+        return get_africa_coverage()
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/import/extracted-csv")
+async def admin_import_extracted_csv(
+    file: UploadFile = File(...),
+    countries: Optional[str] = None,
+    source_name: Optional[str] = None,
+    sector: str = "mining",
+    x_admin_token: Optional[str] = Header(None),
+):
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    try:
+        try:
+            from backend.services.ingest.csv_fallback_import import import_csv_text
+        except ImportError:
+            from services.ingest.csv_fallback_import import import_csv_text
+
+        content = await file.read()
+        text = content.decode("utf-8")
+        allowed_countries = [part.strip() for part in (countries or "").split(",") if part.strip()]
+        result = import_csv_text(
+            text,
+            filename=file.filename or "uploaded.csv",
+            countries=allowed_countries or None,
+            source_name=source_name or None,
+            sector=sector,
+        )
+        return {"status": "success", **result}
+    except UnicodeDecodeError:
+        return {"status": "error", "message": "CSV must be UTF-8 encoded."}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

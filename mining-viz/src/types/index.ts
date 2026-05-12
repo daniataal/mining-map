@@ -41,6 +41,24 @@ export interface User {
   created_at: string;
 }
 
+export interface EntityContact {
+  id: string;
+  entityKind: string;
+  entityId: string;
+  contactType: 'phone' | 'email' | 'website' | 'address' | string;
+  contactScope?: 'public_business' | 'unknown' | string | null;
+  label?: string | null;
+  value: string;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  confidenceScore?: number | null;
+  rawPayload?: Record<string, unknown> | null;
+  extractedFrom?: string | null;
+  verifiedAt?: string | null;
+  lastSeenAt?: string | null;
+}
+
 export interface ActivityLog {
   id: string;
   user_id: string;
@@ -149,5 +167,144 @@ export interface OilSummaryResponse {
   source: string;
   data_as_of: string;
   limitations: string[];
+}
+
+export interface MaritimePortReference {
+  name: string;
+  unlocode?: string | null;
+  country_iso2?: string | null;
+  subdivision?: string | null;
+  lat: number;
+  lng: number;
+  distance_km?: number | null;
+  role?: string | null;
+  source_label: string;
+  source_url?: string | null;
+  confidence?: number | null;
+  matched_on?: string | null;
+}
+
+export interface MaritimeCompanyLink {
+  label: string;
+  url: string;
+  source_label: string;
+  description?: string | null;
+  company_name?: string | null;
+  confidence?: number | null;
+}
+
+export interface MaritimeEvidenceItem {
+  id: string;
+  title: string;
+  url: string;
+  source_label: string;
+  source_domain?: string | null;
+  seen_at?: string | null;
+  evidence_type: string;
+  confidence: number;
+  summary?: string | null;
+  matched_terms?: string[];
+}
+
+export interface MaritimeIdentity {
+  owner?: string | null;
+  operator?: string | null;
+  flag?: string | null;
+  registry_port?: string | null;
+  matched_by?: string | null;
+  confidence?: number | null;
+  source_label: string;
+  source_url?: string | null;
+}
+
+export interface MaritimeCounterpartyProxy {
+  id: string;
+  label: string;
+  description: string;
+  proxy_type: string;
+  confidence: number;
+  source_label: string;
+  url?: string | null;
+}
+
+export interface MaritimeContextResponse {
+  source_labels: string[];
+  data_as_of: string;
+  company_links: MaritimeCompanyLink[];
+  nearest_ports: MaritimePortReference[];
+  evidence: MaritimeEvidenceItem[];
+  identity?: MaritimeIdentity | null;
+  counterparty_proxies: MaritimeCounterpartyProxy[];
+  bol_coverage_note: string;
+  limitations: string[];
+}
+
+export interface MaritimeVessel {
+  id: string;
+  mmsi: string;
+  vessel_name: string;
+  lat: number;
+  lng: number;
+  observed_at: string;
+  source_label: string;
+  source_url?: string | null;
+  speed_knots?: number | null;
+  course_over_ground?: number | null;
+  true_heading?: number | null;
+  ship_type_code?: number | null;
+  ship_type_label?: string | null;
+  call_sign?: string | null;
+  imo?: string | null;
+  destination?: string | null;
+  nearest_port?: MaritimePortReference | null;
+}
+
+export interface MaritimeVesselFeedResponse {
+  vessels: MaritimeVessel[];
+  source: string;
+  data_as_of: string;
+  live_positions_enabled: boolean;
+  limitations: string[];
+  cached?: boolean;
+}
+
+export type CoverageStatus =
+  | 'official_syncable'
+  | 'official_api_restricted'
+  | 'official_portal_only'
+  | 'decommissioned'
+  | 'unavailable';
+
+export interface CoverageReference {
+  name: string;
+  url: string;
+  access: string;
+}
+
+export interface CountrySectorCoverage {
+  status: CoverageStatus;
+  note: string;
+  references: CoverageReference[];
+  source_ids: string[];
+  record_count: number;
+  last_synced_at: string | null;
+  fallback_record_count: number;
+  fallback_last_synced_at: string | null;
+  fallback_sources: string[];
+}
+
+export interface AfricaCoverageCountry {
+  country: string;
+  iso2: string;
+  sectors: {
+    mining: CountrySectorCoverage;
+    oil_and_gas: CountrySectorCoverage;
+  };
+}
+
+export interface AfricaCoverageResponse {
+  generated_at: string;
+  summary: Record<'mining' | 'oil_and_gas', Record<string, number>>;
+  countries: AfricaCoverageCountry[];
 }
 

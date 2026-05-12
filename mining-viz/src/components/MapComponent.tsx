@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip, CircleMarker } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MiningLicense, UserAnnotation } from '../types';
-import { getCountryBorders } from '../lib/api';
+import { MiningLicense, UserAnnotation, MaritimeVessel } from '../types';
+import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
@@ -97,6 +97,8 @@ interface MapComponentProps {
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
   viewModeKey: string;
+  selectedMaritimeVessel: MaritimeVessel | null;
+  onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
 }
 
 const MapEffect = ({
@@ -179,6 +181,8 @@ export default function MapComponent({
   handleOpenDossier,
   mapFlyTrigger,
   viewModeKey,
+  selectedMaritimeVessel,
+  onSelectMaritimeVessel,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -190,6 +194,9 @@ export default function MapComponent({
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
     const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+    const maritimeEnabled = viewModeKey === 'oil_and_gas';
+    const { data: maritimeFeed, isLoading: isMaritimeLoading } = useMaritimeVessels(maritimeEnabled, 18);
+    const maritimeVessels = maritimeFeed?.vessels ?? [];
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
@@ -251,11 +258,28 @@ export default function MapComponent({
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
-            {processedData.length === 0 && (
+            {processedData.length === 0 && maritimeVessels.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו רישיונות", "No Licenses Found")}</h3>
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים", "Try adjusting your filters")}</p>
+                </div>
+            )}
+            {maritimeEnabled && (
+                <div className="absolute left-4 bottom-4 z-[950] max-w-[320px] rounded-2xl border border-black/10 dark:border-white/10 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl px-4 py-3 shadow-2xl">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-cyan-500">
+                        {t('מעקב ימי', 'Maritime Watch')}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                        {isMaritimeLoading
+                            ? t('טוען שכבת כלי שיט...', 'Loading vessel layer...')
+                            : maritimeFeed?.live_positions_enabled
+                                ? t(`AISStream · ${maritimeVessels.length} כלי שיט`, `AISStream · ${maritimeVessels.length} vessels`)
+                                : t(
+                                    'AIS חי לא מוגדר. מודיעין ימי בתיק קיים, שכבת כלי שיט תופעל כשמוגדר AISSTREAM_API_KEY.',
+                                    'Live AIS is not configured. Maritime dossier context still works; vessel markers appear once AISSTREAM_API_KEY is set.'
+                                  )}
+                    </p>
                 </div>
             )}
             <MapContainer 
@@ -267,7 +291,10 @@ export default function MapComponent({
               ref={mapRef}
             >
                 <ZoomControl position="bottomleft" />
-                <MapClickHandler onMapClick={() => setSelectedItem(null)} />
+                <MapClickHandler onMapClick={() => {
+                    setSelectedItem(null);
+                    onSelectMaritimeVessel(null);
+                }} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <DataBoundsEffect data={displayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
                 
@@ -348,6 +375,7 @@ export default function MapComponent({
                                         // collocated/duplicate-coord points appeared to
                                         // ignore clicks.
                                         e.target.openPopup();
+                                        onSelectMaritimeVessel(null);
                                         setSelectedItem(item);
                                     },
                                 }}
@@ -374,6 +402,37 @@ export default function MapComponent({
                         );
                     })}
                 </MarkerClusterGroup>
+                {maritimeEnabled && maritimeVessels.map((vessel) => (
+                    <CircleMarker
+                        key={vessel.id}
+                        center={[vessel.lat, vessel.lng]}
+                        radius={selectedMaritimeVessel?.id === vessel.id ? 8 : 5}
+                        pathOptions={{
+                            color: '#22d3ee',
+                            weight: selectedMaritimeVessel?.id === vessel.id ? 2 : 1,
+                            fillColor: '#22d3ee',
+                            fillOpacity: selectedMaritimeVessel?.id === vessel.id ? 0.9 : 0.7,
+                        }}
+                        eventHandlers={{
+                            click: (e) => {
+                                L.DomEvent.stopPropagation(e);
+                                setSelectedItem(null);
+                                onSelectMaritimeVessel(vessel);
+                            },
+                        }}
+                    >
+                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
+                                    {vessel.vessel_name}
+                                </span>
+                                <p className="text-[9px] text-slate-400">
+                                    {[vessel.ship_type_label, vessel.nearest_port?.name].filter(Boolean).join(' · ')}
+                                </p>
+                            </div>
+                        </Tooltip>
+                    </CircleMarker>
+                ))}
             </MapContainer>
         </div>
     );
