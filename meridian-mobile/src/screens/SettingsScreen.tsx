@@ -1,0 +1,239 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { useNavigation } from '@react-navigation/native';
+import { useMeridianTheme, type AppTheme, type MeridianColorSchemePreference } from '../theme';
+import { LogOut, User, Shield, Info, Smartphone, Moon, Sun, Monitor, Upload } from 'lucide-react-native';
+
+function createStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    content: {
+      padding: theme.spacing.md,
+    },
+    profileSection: {
+      alignItems: 'center',
+      paddingVertical: 32,
+      backgroundColor: theme.colors.surface,
+      borderRadius: 24,
+      marginBottom: 24,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    avatar: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: theme.colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
+      borderWidth: 2,
+      borderColor: theme.colors.accent + '40',
+    },
+    username: {
+      color: theme.colors.text,
+      fontSize: 20,
+      fontWeight: '900',
+      letterSpacing: 2,
+    },
+    role: {
+      color: theme.colors.accent,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 1.5,
+      marginTop: 4,
+    },
+    sectionTitle: {
+      fontSize: 10,
+      fontWeight: '900',
+      color: theme.colors.textMuted,
+      letterSpacing: 2,
+      marginBottom: 12,
+      marginLeft: 4,
+    },
+    menuGroup: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      overflow: 'hidden',
+      marginBottom: 24,
+    },
+    menuItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    menuItemActive: {
+      backgroundColor: theme.colors.card,
+    },
+    menuLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    menuIcon: {
+      width: 32,
+      height: 32,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    menuLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
+    menuValue: {
+      color: theme.colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    checkMark: {
+      color: theme.colors.accent,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    footer: {
+      textAlign: 'center',
+      fontSize: 9,
+      color: theme.colors.textMuted,
+      letterSpacing: 1,
+      marginTop: 20,
+      marginBottom: 40,
+    },
+  });
+}
+
+export default function SettingsScreen() {
+  const { theme, colorSchemePreference, setColorSchemePreference } = useMeridianTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const navigation = useNavigation<any>();
+
+  const [username, setUsername] = useState('');
+  const [role, setRole] = useState('');
+
+  useEffect(() => {
+    loadUserData();
+  }, []);
+
+  const loadUserData = async () => {
+    const u = await SecureStore.getItemAsync('mining_username');
+    const r = await SecureStore.getItemAsync('mining_role');
+    setUsername(u || 'User');
+    setRole(r || 'Standard');
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to terminate the secure session?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          await SecureStore.deleteItemAsync('mining_token');
+          Alert.alert('Logged Out', 'Secure session terminated. Please restart the app.');
+        },
+      },
+    ]);
+  };
+
+  const MenuItem = ({
+    icon: Icon,
+    label,
+    value,
+    onPress,
+    color = theme.colors.text,
+    active,
+  }: {
+    icon: typeof Moon;
+    label: string;
+    value?: string;
+    onPress?: () => void;
+    color?: string;
+    active?: boolean;
+  }) => (
+    <TouchableOpacity
+      style={[styles.menuItem, active && styles.menuItemActive]}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={styles.menuLeft}>
+        <View style={styles.menuIcon}>
+          <Icon size={20} color={color} />
+        </View>
+        <Text style={[styles.menuLabel, { color }]}>{label}</Text>
+      </View>
+      {value && !active && <Text style={styles.menuValue}>{value}</Text>}
+      {active && <Text style={styles.checkMark}>✓</Text>}
+    </TouchableOpacity>
+  );
+
+  const setAppearance = (next: MeridianColorSchemePreference) => {
+    void setColorSchemePreference(next);
+  };
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.profileSection}>
+        <View style={styles.avatar}>
+          <User size={40} color={theme.colors.accent} />
+        </View>
+        <Text style={styles.username}>{username.toUpperCase()}</Text>
+        <Text style={styles.role}>{role.toUpperCase()} ACCESS LEVEL</Text>
+      </View>
+
+      <Text style={styles.sectionTitle}>APPEARANCE</Text>
+      <View style={styles.menuGroup}>
+        <MenuItem
+          icon={Monitor}
+          label="Match system"
+          onPress={() => setAppearance('system')}
+          active={colorSchemePreference === 'system'}
+        />
+        <MenuItem
+          icon={Moon}
+          label="Dark tactical"
+          onPress={() => setAppearance('dark')}
+          active={colorSchemePreference === 'dark'}
+        />
+        <MenuItem
+          icon={Sun}
+          label="Light / chart mode"
+          onPress={() => setAppearance('light')}
+          active={colorSchemePreference === 'light'}
+          color={theme.colors.text}
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>SYSTEM STATUS</Text>
+      <View style={styles.menuGroup}>
+        <MenuItem icon={Shield} label="Security Protocol" value="Active (AES-256)" />
+        <MenuItem icon={Smartphone} label="App Version" value="2.0.0-PRO" />
+        <MenuItem icon={Info} label="Backend Status" value="Online" />
+      </View>
+
+      <Text style={styles.sectionTitle}>DATA OPS</Text>
+      <View style={styles.menuGroup}>
+        <MenuItem
+          icon={Upload}
+          label="Bulk import licenses (CSV)"
+          onPress={() => navigation.navigate('BulkImport')}
+        />
+      </View>
+
+      <Text style={styles.sectionTitle}>SESSION CONTROL</Text>
+      <View style={styles.menuGroup}>
+        <MenuItem icon={LogOut} label="TERMINATE SESSION" onPress={handleLogout} color={theme.colors.error} />
+      </View>
+
+      <Text style={styles.footer}>MERIDIAN TRADE INTELLIGENCE OS • CLASSIFIED</Text>
+    </ScrollView>
+  );
+}

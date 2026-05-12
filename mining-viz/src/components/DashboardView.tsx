@@ -1,28 +1,32 @@
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, MarketTickerRow } from '../types';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
-import { 
-  BarChart3, 
-  Globe, 
-  Layers, 
-  Zap, 
-  TrendingUp, 
+import {
+  BarChart3,
+  Globe,
+  Layers,
+  Zap,
+  TrendingUp,
   Anchor,
-  Box
+  Box,
+  Upload,
 } from 'lucide-react';
+import { Button } from './ui/button';
 import { motion } from 'framer-motion';
 
 interface DashboardViewProps {
   licenses: MiningLicense[];
-  marketPrices: any[];
+  marketPrices: MarketTickerRow[];
   annotations: Record<string, UserAnnotation>;
+  onOpenBulkImport?: () => void;
 }
 
 export default function DashboardView({
   licenses,
   marketPrices,
-  annotations
+  annotations,
+  onOpenBulkImport,
 }: DashboardViewProps) {
   const { t } = useI18n();
 
@@ -43,9 +47,9 @@ export default function DashboardView({
   // 2. Precious metals — always surface on dashboard even if /spot failed (ticker omits them)
   const goldEntry = marketPrices.find((p) => /GOLD/i.test(p.symbol));
   const silverEntry = marketPrices.find((p) => /SILVER/i.test(p.symbol));
-  const parsePx = (s?: string) => parseFloat((s || '').replace(/[$,]/g, '')) || 0;
-  const activeGoldPrice = parsePx(goldEntry?.price) || 2350;
-  const activeSilverPrice = parsePx(silverEntry?.price) || 28;
+  const parsePx = (s?: string) => parseFloat((s || '').replace(/[$,]/g, '').replace(/—/g, '')) || 0;
+  const activeGoldPrice = parsePx(goldEntry?.price);
+  const activeSilverPrice = parsePx(silverEntry?.price);
   const metalsForTicker = [
     goldEntry ?? { symbol: 'GOLD/oz', price: '$—', category: 'Metal' },
     silverEntry ?? { symbol: 'SILVER/oz', price: '$—', category: 'Metal' },
@@ -67,7 +71,19 @@ export default function DashboardView({
             Global Mining Intelligence • System Status: Online
           </p>
         </div>
-        <div className="flex gap-4">
+        <div className="flex gap-2 sm:gap-4 items-center flex-wrap justify-end">
+          {onOpenBulkImport && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onOpenBulkImport}
+              className="h-9 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 font-black uppercase text-[9px] tracking-widest gap-2"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {t('ייבוא CSV', 'Bulk CSV')}
+            </Button>
+          )}
           <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 px-4 py-1.5 font-black uppercase text-[10px]">
             {t("פעיל", "Live Stream")}
           </Badge>
@@ -100,16 +116,24 @@ export default function DashboardView({
         <KPICard 
           icon={<TrendingUp className="w-5 h-5 text-amber-400" />}
           label={t("מחיר זהב", "Gold Spot")}
-          value={goldEntry?.price?.trim() ? goldEntry.price : `$${activeGoldPrice.toLocaleString()}`}
-          subValue={t("מחיר אונקיה", "Per Troy Oz")}
-          trend={goldEntry ? '+0.45%' : undefined}
+          value={
+            activeGoldPrice > 0
+              ? goldEntry?.price?.trim() || `$${activeGoldPrice.toLocaleString()}`
+              : '$—'
+          }
+          subValue={t("מחיר אונקיה", "Per Troy Oz · indicative")}
+          trend={activeGoldPrice > 0 && goldEntry?.change && goldEntry.change !== '—' ? goldEntry.change : undefined}
         />
         <KPICard 
           icon={<TrendingUp className="w-5 h-5 text-slate-300" />}
           label={t("מחיר כסף", "Silver Spot")}
-          value={silverEntry?.price?.trim() ? silverEntry.price : `$${activeSilverPrice.toFixed(2)}`}
-          subValue={t("מחיר אונקיה", "Per Troy Oz")}
-          trend={silverEntry ? '+0.45%' : undefined}
+          value={
+            activeSilverPrice > 0
+              ? silverEntry?.price?.trim() || `$${activeSilverPrice.toFixed(2)}`
+              : '$—'
+          }
+          subValue={t("מחיר אונקיה", "Per Troy Oz · indicative")}
+          trend={activeSilverPrice > 0 && silverEntry?.change && silverEntry.change !== '—' ? silverEntry.change : undefined}
         />
       </div>
 

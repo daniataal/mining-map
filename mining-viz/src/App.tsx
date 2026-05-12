@@ -1,27 +1,67 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
 import MapComponent from './components/MapComponent';
 import DossierView from './components/DossierView';
-import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
+import BulkImportLicensesModal from './components/BulkImportLicensesModal';
 import KanbanBoard from './components/KanbanBoard';
-import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
-import LogisticsDesk from './components/LogisticsDesk';
-import OilMapView from './components/OilMapView';
+import OilMaritimePanel from './components/OilMaritimePanel';
 import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+function extractErrorMessage(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (value instanceof Error) return value.message;
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nested = extractErrorMessage(entry);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    for (const key of ['detail', 'message', 'error']) {
+      const nested = extractErrorMessage(record[key]);
+      if (nested) return nested;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  if (value == null) return null;
+  return String(value);
+}
+
+function formatLicenseFetchError(e: unknown): string {
+  return extractErrorMessage(e) ?? 'Unknown error';
+}
+
+function formatAuthError(e: unknown): string {
+  const responseData =
+    typeof e === 'object' && e !== null && 'response' in e
+      ? (e as { response?: { data?: unknown } }).response?.data
+      : undefined;
+  return extractErrorMessage(responseData ?? e) ?? 'Invalid credentials';
+}
 
 function TickerItem({ symbol, price, change, up }: { symbol: string, price: string, change?: string, up?: boolean | null }) {
   const ch = change ?? '—';
@@ -37,33 +77,54 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 export default function App() {
   const { t, isRtl } = useI18n();
+  const [viewMode, setViewMode] = useState<'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'admin'>('global');
+  const licenseSector =
+    viewMode === 'mining'
+      ? 'mining'
+      : viewMode === 'oil_and_gas'
+        ? 'oil_and_gas'
+        : undefined;
+  const licenseFetchTroubleshooting = useMemo(() => {
+    const h = describeLicenseFetchFailureContext();
+    return t(h.he, h.en);
+  }, [t]);
+  const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: rawData = [], isLoading, error: fetchError } = useLicenses();
+  const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
+  const { data: worldCoverage } = useWorldCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
+  const {
+    data: storageTerminalResponse,
+    isLoading: isStorageLoading,
+    error: storageError,
+  } = useStorageTerminals(viewMode === 'oil_and_gas');
+  const {
+    data: portLogisticsResponse,
+    isLoading: isPortsLoading,
+    error: portsError,
+  } = usePortLogisticsEntities(viewMode === 'ports');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
 
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
-  const [userRole, setUserRole] = useState<string | null>(localStorage.getItem('mining_role'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('mining_userid'));
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [viewMode, setViewMode] = useState<'map' | 'pipeline' | 'admin' | 'dashboard' | 'logistics' | 'oil'>('map');
-  const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
-  const [hoveredItem, setHoveredItem] = useState<MiningLicense | null>(null);
+  const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
   // User Annotations (Local storage for now, ideally backend)
   const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() => {
@@ -90,9 +151,31 @@ export default function App() {
     localStorage.setItem('mining_local_licenses', JSON.stringify(localLicenses));
   }, [localLicenses]);
 
+  const visibleLocalLicenses = useMemo(
+    () =>
+      licenseSector
+        ? localLicenses.filter((item) => (item.sector || 'mining') === licenseSector)
+        : localLicenses,
+    [licenseSector, localLicenses]
+  );
+  const storageEntities = storageTerminalResponse?.entities || [];
+  const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
-    () => [...rawData, ...localLicenses],
-    [rawData, localLicenses]
+    () => {
+      if (viewMode === 'ports') {
+        return portEntities;
+      }
+      return [
+        ...rawData,
+        ...visibleLocalLicenses,
+        ...(viewMode === 'oil_and_gas' ? storageEntities : []),
+      ];
+    },
+    [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
+  );
+  const entityIndex = useMemo(
+    () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
+    [allLicenses]
   );
 
   // Filtering Hook
@@ -113,13 +196,12 @@ export default function App() {
       localStorage.setItem('mining_userid', data.id);
 
       setToken(data.access_token);
-      setUserRole(data.role);
       setUsername(data.username);
       setUserId(data.id);
       setAuthError(null);
       logActivityMutation.mutate({ user_id: data.id, username: data.username, action: 'LOGIN', details: 'User logged in' });
-    } catch (err: any) {
-      setAuthError(err.response?.data || 'Invalid credentials');
+    } catch (err: unknown) {
+      setAuthError(formatAuthError(err));
     }
   };
 
@@ -129,12 +211,12 @@ export default function App() {
     localStorage.removeItem('mining_username');
     localStorage.removeItem('mining_userid');
     setToken(null);
-    setUserRole(null);
     setUsername(null);
     setUserId(null);
   };
 
   const handleOpenDossier = useCallback((item: MiningLicense) => {
+    setSelectedMaritimeVessel(null);
     setDossierItem(item);
     setIsDossierOpen(true);
     if (userId && username) {
@@ -142,12 +224,22 @@ export default function App() {
     }
   }, [userId, username, logActivityMutation]);
 
+  const handleSelectItem = useCallback((item: MiningLicense | null) => {
+    setSelectedMaritimeVessel(null);
+    setSelectedItem(item);
+  }, []);
+
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
     setUserAnnotations(prev => {
       const next = { ...prev, [id]: { ...(prev[id] || {}), ...updates } };
       localStorage.setItem('mining_user_data', JSON.stringify(next));
       return next;
     });
+
+    const targetEntity = entityIndex[id];
+    if (targetEntity?.entityKind === 'storage_terminal') {
+      return;
+    }
 
     // Map to backend fields
     const backendPayload: any = {};
@@ -159,42 +251,97 @@ export default function App() {
     if (Object.keys(backendPayload).length > 0) {
       updateLicenseMutation.mutate({ id, updates: backendPayload });
     }
-  }, [updateLicenseMutation]);
+  }, [updateLicenseMutation, entityIndex]);
 
   const deleteLicense = useCallback((id: string) => {
+    const targetEntity = entityIndex[id];
+    if (targetEntity?.entityKind === 'storage_terminal') {
+      toast.info(t('רשומת תשתית פתוחה', 'Open infrastructure record'), {
+        description: t(
+          'רשומות OSM/Overpass הן לקריאה בלבד ואינן נמחקות מהמפה מתוך הלקוח.',
+          'OSM/Overpass infrastructure records are read-only and cannot be deleted from the client.'
+        ),
+      });
+      return;
+    }
     if (!confirm(t("האם אתה בטוח שברצונך למחוק רישיון זה?", "Are you sure you want to delete this license?"))) return;
+    const closeDossierIfDeleted = () => {
+      setDossierItem((prev) => {
+        if (prev?.id === id) {
+          setIsDossierOpen(false);
+          return null;
+        }
+        return prev;
+      });
+    };
+    const isLocalOnly = localLicenses.some((l) => l.id === id);
+    if (isLocalOnly) {
+      setLocalLicenses((prev) => prev.filter((l) => l.id !== id));
+      setSelectedItem(null);
+      closeDossierIfDeleted();
+      toast.info(t("הרישיון נמחק", "License deleted"));
+      if (userId && username) {
+        logActivityMutation.mutate({
+          user_id: userId,
+          username,
+          action: 'DELETE_LICENSE',
+          details: `Deleted local license ${id}`,
+        });
+      }
+      return;
+    }
     deleteLicenseMutation.mutate(id, {
       onSuccess: () => {
         setSelectedItem(null);
+        closeDossierIfDeleted();
         toast.info(t("הרישיון נמחק", "License deleted"));
-      }
+        if (userId && username) {
+          logActivityMutation.mutate({
+            user_id: userId,
+            username,
+            action: 'DELETE_LICENSE',
+            details: `Deleted license ${id}`,
+          });
+        }
+      },
     });
-  }, [t, deleteLicenseMutation]);
+  }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
   const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
   
   // Market Prices State
-  const [marketPrices, setMarketPrices] = useState<any[]>([]);
-
-  const [filteredGeoJson, setFilteredGeoJson] = useState<any>(null);
+  const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
+  const sectorCoverageSummary =
+    licenseSector && worldCoverage ? worldCoverage.summary[licenseSector] : null;
+  const sidebarViewMode =
+    viewMode === 'admin'
+      ? 'admin'
+      : viewMode === 'due_diligence'
+        ? 'dashboard'
+        : viewMode === 'raw_evidence'
+          ? 'pipeline'
+          : 'map';
+  const handleSidebarViewModeChange = (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => {
+    if (mode === 'admin') {
+      setViewMode('admin');
+      return;
+    }
+    if (mode === 'dashboard') {
+      setViewMode('due_diligence');
+      return;
+    }
+    if (mode === 'pipeline') {
+      setViewMode('raw_evidence');
+      return;
+    }
+    setViewMode('global');
+  };
 
   useEffect(() => {
-    // Loading Global Tactical Boundaries for the entire world
-    fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
-      .then(res => res.json())
-      .then(data => {
-        setFilteredGeoJson(data);
-      })
-      .catch(err => console.error("Global GeoJSON load failed", err));
-  }, []);
-
-  useEffect(() => {
-    const apiBase =
-      import.meta.env.VITE_API_BASE ||
-      (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+    const apiBase = API_BASE;
 
     const fetchPrices = async () => {
-      // Prefer backend: live WTI/Brent/etc. via Yahoo (server-side), metals.live, CoinGecko
+      // Backend: gold/silver as COMEX GC=F / SI=F (USD/troy oz) + energy/crypto via Yahoo/CoinGecko
       try {
         const tickerRes = await fetch(`${apiBase}/api/market-ticker`);
         if (tickerRes.ok) {
@@ -205,41 +352,15 @@ export default function App() {
           }
         }
       } catch (_) {
-        /* offline or CORS — use client fallbacks */
+        /* offline or CORS — minimal client fallbacks (no demo spot numbers) */
       }
 
       const results: any[] = [];
 
-      try {
-        const metalsRes = await fetch('https://api.metals.live/v1/spot');
-        if (metalsRes.ok) {
-          const metals: any[] = await metalsRes.json();
-          const map: Record<string, number> = {};
-          metals.forEach((entry: any) => Object.assign(map, entry));
-          if (map.gold) {
-            results.push({
-              symbol: 'GOLD/oz',
-              price: `$${map.gold.toLocaleString()}`,
-              category: 'Metal',
-              up: true,
-              change: 'LIVE',
-            });
-          }
-          if (map.silver) {
-            results.push({
-              symbol: 'SILVER/oz',
-              price: `$${map.silver.toFixed(2)}`,
-              category: 'Metal',
-              up: true,
-              change: 'LIVE',
-            });
-          }
-        }
-      } catch (_) {}
       if (!results.some((r) => r.symbol === 'GOLD/oz')) {
         results.push({
           symbol: 'GOLD/oz',
-          price: '$2,350',
+          price: '$—',
           category: 'Metal',
           change: '—',
           up: null,
@@ -248,7 +369,7 @@ export default function App() {
       if (!results.some((r) => r.symbol === 'SILVER/oz')) {
         results.push({
           symbol: 'SILVER/oz',
-          price: '$28.00',
+          price: '$—',
           category: 'Metal',
           change: '—',
           up: null,
@@ -301,6 +422,12 @@ export default function App() {
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas') {
+      setSelectedMaritimeVessel(null);
+    }
+  }, [viewMode]);
+
   return (
     <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* 1. Global Market Ticker (Entrepreneur Desk) */}
@@ -333,13 +460,49 @@ export default function App() {
          </div>
       </div>
 
+      {viewMode !== 'ports' && fetchError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t(
+            'טעינת רישיונות נכשלה',
+            'Could not load licenses'
+          )}
+          : {formatLicenseFetchError(fetchError)}
+          {'. '}
+          {licenseFetchTroubleshooting}
+        </div>
+      )}
+      {viewMode === 'ports' && portsError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t('טעינת נמלים נכשלה', 'Could not load ports and logistics nodes')}
+          : {formatLicenseFetchError(portsError)}
+        </div>
+      )}
+      {viewMode === 'oil_and_gas' && storageError && (
+        <div
+          className="shrink-0 px-4 py-2 bg-amber-950/95 border-b border-amber-500/30 text-amber-100 text-[11px] font-bold text-center"
+          role="alert"
+        >
+          {t(
+            'שכבת האחסון הפתוחה לא נטענה כרגע',
+            'Open storage infrastructure layer is unavailable right now'
+          )}
+          : {formatLicenseFetchError(storageError)}
+        </div>
+      )}
+
       {/* 2. Main Discovery Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {!token && <AuthOverlay onLogin={handleLogin} error={authError} />}
         
         {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
-          className={`hidden md:block transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          className={`hidden min-h-0 md:flex md:flex-col md:h-full transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
           ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
           onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
           onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
@@ -347,22 +510,32 @@ export default function App() {
           <Sidebar
             processedData={miningData.processedData}
             setIsAddModalOpen={setIsAddModalOpen}
-            loading={isLoading}
+            onOpenBulkImport={() => setIsBulkImportOpen(true)}
+            loading={
+              viewMode === 'ports'
+                ? isPortsLoading
+                : Boolean(isLoading || (viewMode === 'oil_and_gas' && isStorageLoading))
+            }
             onLogout={handleLogout}
             userAnnotations={userAnnotations}
             selectedItem={selectedItem}
             setSelectedItem={(item: MiningLicense) => {
-              setSelectedItem(item);
+              handleSelectItem(item);
               setMapFlyTrigger(prev => prev + 1);
             }}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
+            viewMode={sidebarViewMode}
+            setViewMode={handleSidebarViewModeChange}
             onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
             onToggleAdmin={() => setViewMode('admin')}
             isFilterOpen={isFilterOpen}
             isPinned={isSidebarPinned}
             setIsPinned={setIsSidebarPinned}
             isCollapsed={isSidebarCollapsed && !isSidebarPinned}
+            infrastructureStats={
+              viewMode === 'oil_and_gas' || viewMode === 'ports'
+                ? miningData.infrastructureStats
+                : undefined
+            }
           />
         </aside>
 
@@ -370,7 +543,7 @@ export default function App() {
         <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
           {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
-          {(viewMode === 'map' || viewMode === 'pipeline' || viewMode === 'logistics') && (
+          {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'due_diligence' || viewMode === 'raw_evidence') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
@@ -384,41 +557,57 @@ export default function App() {
                       onChange={(e) => miningData.setFilter(e.target.value)}
                     />
                   </div>
+                  {sectorCoverageSummary && (
+                    <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                      {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
+                    </div>
+                  )}
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
                   <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
-                      onClick={() => setViewMode('map')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'map' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('global')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      {t("מפה", "Map")}
+                      {t("עולמי", "Global")}
                     </button>
                     <button
-                      onClick={() => setViewMode('dashboard')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'dashboard' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('mining')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      <span className="hidden xs:inline">{t("לוח בקרה", "Dashboard")}</span>
-                      <span className="xs:hidden">{t("לוח", "Dash")}</span>
+                      {t("כרייה", "Mining")}
                     </button>
                     <button
-                      onClick={() => setViewMode('pipeline')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'pipeline' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
-                    >
-                      {t("צנרת", "Pipeline")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('logistics')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'logistics' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
-                    >
-                      {t("לוגיסטיקה", "Logistics")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('oil')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('oil_and_gas')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
-                      {t("נפט", "Oil")}
+                      {t("נפט וגז", "Oil & Gas")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('suppliers')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("ספקים", "Suppliers")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('ports')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'ports' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("נמלים", "Ports")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('due_diligence')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'due_diligence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("בדיקת נאותות", "Due Diligence")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('raw_evidence')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'raw_evidence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      {t("ראיות גולמיות", "Raw Evidence")}
                     </button>
                   </div>
 
@@ -435,27 +624,28 @@ export default function App() {
           )}
 
           <div className="w-full h-full z-0">
-            {viewMode === 'map' && (
+            {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'oil_and_gas') && (
               <MapComponent
                 processedData={miningData.processedData}
                 userAnnotations={userAnnotations}
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
-                setSelectedItem={setSelectedItem}
+                viewModeKey={viewMode}
+                setSelectedItem={handleSelectItem}
                 handleOpenDossier={handleOpenDossier}
                 mapCenter={mapCenter}
                 updateAnnotation={updateAnnotation}
                 deleteLicense={deleteLicense}
+                selectedMaritimeVessel={selectedMaritimeVessel}
+                onSelectMaritimeVessel={setSelectedMaritimeVessel}
               />
             )}
-            {viewMode === 'dashboard' && (
-              <DashboardView 
-                licenses={miningData.processedData}
-                marketPrices={marketPrices}
-                annotations={userAnnotations}
-              />
+            {viewMode === 'oil_and_gas' && selectedMaritimeVessel && !isDossierOpen && (
+              <div className="absolute top-20 right-4 z-[1100]">
+                <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
+              </div>
             )}
-            {viewMode === 'pipeline' && (
+            {viewMode === 'due_diligence' && (
               <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">
                 <KanbanBoard
                   processedData={miningData.processedData}
@@ -466,24 +656,24 @@ export default function App() {
                 />
               </div>
             )}
+            {viewMode === 'raw_evidence' && (
+              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
+                <div className="p-4 overflow-y-auto h-full text-sm font-mono text-slate-800 dark:text-slate-200">
+                  <h2 className="text-xl mb-4 font-sans font-bold">Raw Evidence Viewer</h2>
+                  <p className="text-slate-500 mb-4 font-sans">Select an entity on the map to see its raw evidence JSON payloads.</p>
+                </div>
+              </div>
+            )}
             {viewMode === 'admin' && (
               <div className="h-full bg-white dark:bg-slate-950">
                 <AdminPanel 
                   isOpen={true} 
-                  onClose={() => setViewMode('map')} 
+                  onClose={() => setViewMode('global')} 
                   token={token || undefined} 
                   isFullPage={true}
                   currentUserId={userId}
                 />
               </div>
-            )}
-            {viewMode === 'logistics' && (
-              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
-                <LogisticsDesk licenses={allLicenses} />
-              </div>
-            )}
-            {viewMode === 'oil' && (
-              <OilMapView onBack={() => setViewMode('map')} />
             )}
           </div>
         </main>
@@ -506,9 +696,19 @@ export default function App() {
           setUserStatusFilter={miningData.setUserStatusFilter}
           selectedLicenseType={miningData.selectedLicenseType}
           setSelectedLicenseType={miningData.setSelectedLicenseType}
+          selectedEntitySubtype={miningData.selectedEntitySubtype}
+          setSelectedEntitySubtype={miningData.setSelectedEntitySubtype}
+          selectedSourceLabel={miningData.selectedSourceLabel}
+          setSelectedSourceLabel={miningData.setSelectedSourceLabel}
+          selectedConfidenceBucket={miningData.selectedConfidenceBucket}
+          setSelectedConfidenceBucket={miningData.setSelectedConfidenceBucket}
+          portLinkedOnly={miningData.portLinkedOnly}
+          setPortLinkedOnly={miningData.setPortLinkedOnly}
           commodities={miningData.commodities}
           countries={miningData.countries}
           licenseTypes={miningData.licenseTypes}
+          entitySubtypes={miningData.entitySubtypes}
+          sourceLabels={miningData.sourceLabels}
         />
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
@@ -519,9 +719,31 @@ export default function App() {
           marketPrices={marketPrices}
           annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
           updateAnnotation={updateAnnotation}
+          onDeleteLicense={
+            dossierItem && dossierItem.entityKind !== 'storage_terminal'
+              ? () => deleteLicense(dossierItem.id)
+              : undefined
+          }
         />
 
-        {/* Add License Modal */}
+        <BulkImportLicensesModal
+          isOpen={isBulkImportOpen}
+          onClose={() => setIsBulkImportOpen(false)}
+          onSuccess={(n) => {
+            queryClient.invalidateQueries({ queryKey: ['licenses'] });
+            toast.success(t('ייבוא הצליח', 'Import successful'), {
+              description: `${n} ${t('רישיונות יובאו', 'licenses imported')}`,
+            });
+            if (userId && username) {
+              logActivityMutation.mutate({
+                user_id: userId,
+                username,
+                action: 'IMPORT',
+                details: `Bulk CSV import: ${n} licenses`,
+              });
+            }
+          }}
+        />
         <AddLicenseModal
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
@@ -541,39 +763,39 @@ export default function App() {
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
       <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
         <button
-          onClick={() => setViewMode('map')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'map' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('global')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("מפה", "Map")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
         </button>
         <button
-          onClick={() => setViewMode('pipeline')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'pipeline' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('mining')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("צנרת", "Pipeline")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("כרייה", "Mining")}</span>
         </button>
         <button
-          onClick={() => setViewMode('dashboard')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'dashboard' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <LucidePieChart className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("דאשבורד", "Dash")}</span>
-        </button>
-        <button
-          onClick={() => setViewMode('logistics')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'logistics' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <LucideAnchor className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("לוגיסטיקה", "Logistics")}</span>
-        </button>
-        <button
-          onClick={() => setViewMode('oil')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('oil_and_gas')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideDroplets className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט", "Oil")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט וגז", "Oil & Gas")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('due_diligence')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'due_diligence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucidePieChart className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("בדיקת נאותות", "DD")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('raw_evidence')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'raw_evidence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideAnchor className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("ראיות", "Evidence")}</span>
         </button>
         <button
           onClick={() => setIsFilterOpen(!isFilterOpen)}

@@ -18,9 +18,19 @@ interface FilterPanelProps {
   setUserStatusFilter: (val: string[]) => void;
   selectedLicenseType: string[];
   setSelectedLicenseType: (val: string[]) => void;
+  selectedEntitySubtype: string[];
+  setSelectedEntitySubtype: (val: string[]) => void;
+  selectedSourceLabel: string[];
+  setSelectedSourceLabel: (val: string[]) => void;
+  selectedConfidenceBucket: string[];
+  setSelectedConfidenceBucket: (val: string[]) => void;
+  portLinkedOnly: boolean;
+  setPortLinkedOnly: (val: boolean) => void;
   commodities: string[];
   countries: string[];
   licenseTypes: string[];
+  entitySubtypes: string[];
+  sourceLabels: string[];
   isOpen: boolean;
   onClose: () => void;
 }
@@ -30,7 +40,11 @@ export default function FilterPanel({
   selectedCountry, setSelectedCountry,
   userStatusFilter, setUserStatusFilter,
   selectedLicenseType, setSelectedLicenseType,
-  commodities, countries, licenseTypes,
+  selectedEntitySubtype, setSelectedEntitySubtype,
+  selectedSourceLabel, setSelectedSourceLabel,
+  selectedConfidenceBucket, setSelectedConfidenceBucket,
+  portLinkedOnly, setPortLinkedOnly,
+  commodities, countries, licenseTypes, entitySubtypes, sourceLabels,
   isOpen, onClose
 }: FilterPanelProps) {
   const { t } = useI18n();
@@ -40,9 +54,21 @@ export default function FilterPanel({
     setSelectedCountry([]);
     setUserStatusFilter([]);
     setSelectedLicenseType([]);
+    setSelectedEntitySubtype([]);
+    setSelectedSourceLabel([]);
+    setSelectedConfidenceBucket([]);
+    setPortLinkedOnly(false);
   };
 
-  const activeCount = selectedCommodity.length + selectedCountry.length + userStatusFilter.length + selectedLicenseType.length;
+  const activeCount =
+    selectedCommodity.length +
+    selectedCountry.length +
+    userStatusFilter.length +
+    selectedLicenseType.length +
+    selectedEntitySubtype.length +
+    selectedSourceLabel.length +
+    selectedConfidenceBucket.length +
+    (portLinkedOnly ? 1 : 0);
 
   return (
     <motion.div
@@ -54,7 +80,7 @@ export default function FilterPanel({
       <header className="p-5 border-b border-black/5 dark:border-white/5 flex items-center justify-between bg-black/5 dark:bg-white/5">
         <div className="flex items-center gap-2">
           <LucideFilter className="w-4 h-4 text-amber-500" />
-          <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">{t("מסנני רישיון", "License Filters")}</h3>
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">{t("מסנני ישות", "Entity Filters")}</h3>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-slate-500 hover:text-white">
           <LucideX className="w-4 h-4" />
@@ -86,7 +112,7 @@ export default function FilterPanel({
           </section>
 
           <section className="space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t("סוג רישיון", "License Class")}</label>
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t("סוג ישות", "Entity Class")}</label>
             <MultiSelect
               options={licenseTypes}
               selected={selectedLicenseType}
@@ -96,14 +122,74 @@ export default function FilterPanel({
             />
           </section>
 
+          {entitySubtypes.length > 0 && (
+            <section className="space-y-3">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {t("תת-סוג תשתית", "Infrastructure Subtype")}
+              </label>
+              <MultiSelect
+                options={entitySubtypes}
+                selected={selectedEntitySubtype}
+                onChange={setSelectedEntitySubtype}
+                placeholder={t("כל התת-סוגים", "All subtypes")}
+              />
+            </section>
+          )}
+
           <section className="space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t("סטטוס אישי", "Intelligence Status")}</label>
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Operation Status</label>
             <MultiSelect
-              options={['good', 'maybe', 'bad', 'unmarked']}
+              options={['Good', 'Maybe', 'Bad', 'Unmarked']}
               selected={userStatusFilter}
               onChange={setUserStatusFilter}
-              placeholder={t("כל הסטטוסים", "All Statuses")}
+              placeholder="All Pipeline States"
             />
+          </section>
+
+          {sourceLabels.length > 0 && (
+            <section className="space-y-3">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {t("מקור נתונים", "Source Provenance")}
+              </label>
+              <MultiSelect
+                options={sourceLabels}
+                selected={selectedSourceLabel}
+                onChange={setSelectedSourceLabel}
+                placeholder={t("כל המקורות", "All sources")}
+              />
+            </section>
+          )}
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {t("רמת ביטחון", "Confidence Bucket")}
+            </label>
+            <MultiSelect
+              options={['High confidence', 'Medium confidence', 'Needs review']}
+              selected={selectedConfidenceBucket}
+              onChange={setSelectedConfidenceBucket}
+              placeholder={t("כל הרמות", "All confidence levels")}
+            />
+          </section>
+
+          <section className="space-y-3">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {t("הקשר נמל", "Port Context")}
+            </label>
+            <Button
+              type="button"
+              variant={portLinkedOnly ? 'default' : 'outline'}
+              className={`w-full h-10 text-[10px] font-black uppercase tracking-widest ${
+                portLinkedOnly
+                  ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950'
+                  : 'border-black/10 dark:border-white/10 bg-transparent text-slate-500 dark:text-slate-400'
+              }`}
+              onClick={() => setPortLinkedOnly(!portLinkedOnly)}
+            >
+              {portLinkedOnly
+                ? t("רק נכסים עם הקשר נמל", "Only assets with nearby-port context")
+                : t("כלל הנכסים", "Show all assets")}
+            </Button>
           </section>
         </div>
       </ScrollArea>

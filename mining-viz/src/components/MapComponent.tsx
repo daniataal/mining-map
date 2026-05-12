@@ -1,14 +1,21 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip, CircleMarker } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MiningLicense, UserAnnotation } from '../types';
+import { Radar, RefreshCw, Ship } from 'lucide-react';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope } from '../types';
+import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 // Fix for default marker icon in React Leaflet
 // @ts-ignore
@@ -57,11 +64,30 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
 // which is exactly the bug that made popups fail to open over collocated
 // points.
 const SELECTED_CLASS = 'is-selected';
+const PORTS_MAP_RENDER_LIMIT = 3000;
+const MARITIME_MAX_VESSEL_OPTIONS = ['30', '60', '90'];
+const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
 
-const getMarkerColor = (commodity?: string, userStatus?: string) => {
-    if (userStatus === 'good') return '#22c55e';
-    if (userStatus === 'bad') return '#ef4444';
-    if (userStatus === 'maybe') return '#f59e0b';
+const getMarkerColor = (
+  commodity?: string,
+  userStatus?: string,
+  sector?: string,
+  entitySubtype?: string | null
+) => {
+    if (userStatus === 'good' || userStatus === 'Approved') return '#22c55e';
+    if (userStatus === 'bad' || userStatus === 'Rejected') return '#ef4444';
+    if (userStatus === 'maybe' || userStatus === 'Needs Review' || userStatus === 'Investigating') return '#f59e0b';
+    if (userStatus === 'Escalated') return '#ef4444';
+
+    if (entitySubtype === 'tank_farm') return '#f97316';
+    if (entitySubtype === 'storage_terminal') return '#06b6d4';
+
+    if (sector) {
+      const s = sector.toLowerCase();
+      if (s === 'oil_and_gas' || s === 'oil') return '#000000';
+      if (s === 'suppliers' || s === 'logistics') return '#6366f1';
+      if (s === 'ports') return '#0ea5e9';
+    }
 
     if (!commodity) return '#64748b';
     const c = commodity.toLowerCase();
@@ -70,6 +96,8 @@ const getMarkerColor = (commodity?: string, userStatus?: string) => {
     if (c.includes('bauxite')) return '#f87171';
     if (c.includes('manganese')) return '#a78bfa';
     if (c.includes('lithium')) return '#34d399';
+    if (c.includes('oil') || c.includes('petroleum')) return '#000000';
+    if (c.includes('gas')) return '#94a3b8';
     return '#64748b';
 };
 
@@ -83,6 +111,9 @@ interface MapComponentProps {
   deleteLicense: (id: string) => void;
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
+  viewModeKey: string;
+  selectedMaritimeVessel: MaritimeVessel | null;
+  onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
 }
 
 const MapEffect = ({
@@ -115,6 +146,88 @@ const MapClickHandler = ({ onMapClick }: { onMapClick: () => void }) => {
     return null;
 };
 
+const DataBoundsEffect = ({
+    data,
+    selectedItem,
+    viewModeKey,
+}: {
+    data: Array<MiningLicense & { _displayLat?: number | null; _displayLng?: number | null }>;
+    selectedItem: MiningLicense | null;
+    viewModeKey: string;
+}) => {
+    const map = useMap();
+    const lastSignatureRef = useRef<string>('');
+
+    useEffect(() => {
+        if (selectedItem) return;
+        const coords = data
+            .filter((item) => item._displayLat != null && item._displayLng != null)
+            .map((item) => [item._displayLat as number, item._displayLng as number] as [number, number]);
+        if (coords.length === 0) return;
+
+        const first = coords[0];
+        const last = coords[coords.length - 1];
+        const signature = `${viewModeKey}:${coords.length}:${first[0].toFixed(3)}:${first[1].toFixed(3)}:${last[0].toFixed(3)}:${last[1].toFixed(3)}`;
+        if (lastSignatureRef.current === signature) return;
+        lastSignatureRef.current = signature;
+
+        if (coords.length === 1) {
+            map.setView(coords[0], Math.max(map.getZoom(), 6), { animate: true });
+            return;
+        }
+
+        map.fitBounds(L.latLngBounds(coords).pad(0.18), {
+            animate: true,
+            maxZoom: 6,
+        });
+    }, [data, map, selectedItem, viewModeKey]);
+
+    return null;
+};
+
+const ViewportBoundsTracker = ({
+    active,
+    onBoundsChange,
+}: {
+    active: boolean;
+    onBoundsChange: (bbox: MaritimeViewportBounds | null) => void;
+}) => {
+    const map = useMap();
+    const lastSignatureRef = useRef<string>('');
+
+    const emitBounds = useCallback(() => {
+        if (!active) return;
+        const bounds = map.getBounds();
+        if (!bounds.isValid()) return;
+        const nextBounds = {
+            south: Number(bounds.getSouth().toFixed(4)),
+            west: Number(bounds.getWest().toFixed(4)),
+            north: Number(bounds.getNorth().toFixed(4)),
+            east: Number(bounds.getEast().toFixed(4)),
+        };
+        const signature = `${nextBounds.south}:${nextBounds.west}:${nextBounds.north}:${nextBounds.east}`;
+        if (signature === lastSignatureRef.current) return;
+        lastSignatureRef.current = signature;
+        onBoundsChange(nextBounds);
+    }, [active, map, onBoundsChange]);
+
+    useEffect(() => {
+        if (!active) {
+            lastSignatureRef.current = '';
+            onBoundsChange(null);
+            return;
+        }
+        emitBounds();
+    }, [active, emitBounds, onBoundsChange]);
+
+    useMapEvents({
+        moveend: emitBounds,
+        zoomend: emitBounds,
+    });
+
+    return null;
+};
+
 export default function MapComponent({
   processedData,
   userAnnotations,
@@ -124,36 +237,104 @@ export default function MapComponent({
   updateAnnotation,
   deleteLicense,
   handleOpenDossier,
-  mapFlyTrigger
+  mapFlyTrigger,
+  viewModeKey,
+  selectedMaritimeVessel,
+  onSelectMaritimeVessel,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
-    const [geoJsonData, setGeoJsonData] = useState<any>(null);
+    const isOilAndGasView = viewModeKey === 'oil_and_gas';
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        // Natural Earth 1:10m via datasets/geo-countries — accurate enough to show
-        // narrow features like Namibia's Caprivi/Zambezi Strip without corner-cutting.
-        // (johan/world.geo.json was 1:110m and visibly misaligned against tile basemaps.)
-        fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
-            .then(res => res.json())
-            .then(data => setGeoJsonData(data))
-            .catch(err => console.error("Failed to load country borders", err));
-    }, []);
+    const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
+    const [maritimeScope, setMaritimeScope] = useState<MaritimeVesselScope>('oil_tankers');
+    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('60');
+    const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+    const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
     const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+    const mapDisplayData = useMemo(() => {
+        if (viewModeKey !== 'ports' || displayData.length <= PORTS_MAP_RENDER_LIMIT) {
+            return displayData;
+        }
+        const capped = displayData.slice(0, PORTS_MAP_RENDER_LIMIT);
+        if (!selectedItem) return capped;
+        const selected = displayData.find((item) => item.id === selectedItem.id);
+        if (!selected || capped.some((item) => item.id === selected.id)) {
+            return capped;
+        }
+        return [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
+    }, [displayData, selectedItem, viewModeKey]);
+    const {
+        data: maritimeFeed,
+        isLoading: isMaritimeLoading,
+        isFetching: isMaritimeFetching,
+        error: maritimeError,
+        refetch: refetchMaritime,
+    } = useMaritimeVessels({
+        enabled: isOilAndGasView && isMaritimeLayerEnabled,
+        maxVessels: Number(maritimeMaxVessels),
+        captureWindowSeconds: Number(maritimeCaptureWindow),
+        scope: maritimeScope,
+        bbox: maritimeViewport,
+    });
+    const maritimeVessels = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
+
+    useEffect(() => {
+        if (isOilAndGasView) return;
+        setIsMaritimeLayerEnabled(false);
+        setMaritimeViewport(null);
+        onSelectMaritimeVessel(null);
+    }, [isOilAndGasView, onSelectMaritimeVessel]);
+
+    useEffect(() => {
+        if (isMaritimeLayerEnabled) return;
+        onSelectMaritimeVessel(null);
+    }, [isMaritimeLayerEnabled, onSelectMaritimeVessel]);
+
+    useEffect(() => {
+        if (!selectedMaritimeVessel) return;
+        if (maritimeVessels.some((vessel) => vessel.id === selectedMaritimeVessel.id)) return;
+        onSelectMaritimeVessel(null);
+    }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
+
+    const maritimeStatusText = !isMaritimeLayerEnabled
+        ? t(
+            'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
+            'Vessels stay off by default in Oil & Gas. Turn the layer on to load only the visible map area.'
+          )
+        : isMaritimeLoading && !maritimeFeed
+            ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
+            : maritimeError
+                ? t('טעינת כלי השיט נכשלה. נסה רענון או שנה היקף/תצוגה.', 'Vessel loading failed. Try refresh or adjust the view/scope.')
+                : !maritimeFeed?.live_positions_enabled
+                    ? t(
+                        'AIS חי אינו זמין כרגע. ההקשר הימי בתיק עדיין פעיל גם בלי שכבת כלי שיט.',
+                        'Live AIS is not available right now. Maritime dossier context still works without the vessel layer.'
+                      )
+                    : maritimeVessels.length === 0
+                        ? t(
+                            'לא נמצאו כלי שיט בתצוגה ובחלון הלכידה הנוכחיים. נסה להזיז מפה, להגדיל חלון או לעבור לכל כלי השיט.',
+                            'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
+                          )
+                        : t(
+                            `נצפו ${maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
+                            `${maritimeVessels.length} vessels observed in the current watch.`
+                          );
+    const maritimeLimitationText =
+        maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
-        const j = displayData.find(d => d.id === selectedItem.id);
+        const j = mapDisplayData.find(d => d.id === selectedItem.id) || displayData.find(d => d.id === selectedItem.id);
         if (!j || j._displayLat == null || j._displayLng == null) return null;
         return { lat: j._displayLat, lng: j._displayLng };
-    }, [selectedItem, displayData]);
+    }, [selectedItem, displayData, mapDisplayData]);
 
     // Selection-driven side effects:
     //   - toggle a CSS class on the previous & next markers (no setIcon swap
@@ -192,31 +373,183 @@ export default function MapComponent({
         prevSelectedIdRef.current = selectedItem.id;
     }, [selectedItem?.id]);
 
-    const activeCountries = useMemo(() => {
+    const borderCountries = useMemo(() => {
         const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
-        return Array.from(countries);
+        return Array.from(countries).sort((a, b) => a.localeCompare(b));
     }, [processedData]);
 
-    const filteredGeoJson = useMemo(() => {
-        if (!geoJsonData) return null;
-        return {
-            ...geoJsonData,
-            features: geoJsonData.features.filter((f: any) => {
-                // datasets/geo-countries (Natural Earth 1:10m) uses "ADMIN"; older
-                // johan dataset used "name" — support both so a source swap doesn't break filtering.
-                const name = (f.properties.ADMIN || f.properties.name || '').toLowerCase();
-                return activeCountries.some(ac => name.includes(ac) || (ac === 'ghana' && name === 'ghana'));
-            })
-        };
-    }, [geoJsonData, activeCountries]);
+    const { data: filteredGeoJson } = useQuery({
+        queryKey: ['country-borders', borderCountries],
+        queryFn: () => getCountryBorders(borderCountries),
+        enabled: borderCountries.length > 0,
+        staleTime: 1000 * 60 * 60 * 24,
+        gcTime: 1000 * 60 * 60 * 24 * 7,
+        placeholderData: (previousData) => previousData,
+    });
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
-            {processedData.length === 0 && (
+            {processedData.length === 0 && maritimeVessels.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
-                    <h3 className="text-lg font-bold">{t("לא נמצאו רישיונות", "No Licenses Found")}</h3>
-                    <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים", "Try adjusting your filters")}</p>
+                    <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
+                    <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
+                </div>
+            )}
+            {isOilAndGasView && (
+                <div className="absolute left-4 bottom-4 z-[950] max-w-[360px] rounded-3xl border border-black/10 dark:border-white/10 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl px-4 py-4 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
+                                    <Radar className="h-4 w-4 text-cyan-500" />
+                                </div>
+                                <div>
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-cyan-500">
+                                        {t('מעקב ימי', 'Maritime Watch')}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500">
+                                        {t('בחירה מפורשת לפי תצוגת מפה', 'Explicit, viewport-driven vessel watch')}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => setIsMaritimeLayerEnabled((current) => !current)}
+                            className={`h-8 rounded-2xl px-3 text-[9px] font-black uppercase tracking-widest ${
+                                isMaritimeLayerEnabled
+                                    ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950'
+                                    : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                            }`}
+                        >
+                            <Ship className="mr-1.5 h-3.5 w-3.5" />
+                            {isMaritimeLayerEnabled
+                                ? t('כבה כלי שיט', 'Hide vessels')
+                                : t('טען כלי שיט', 'Load vessels')}
+                        </Button>
+                    </div>
+
+                    <p className="mt-3 text-[10px] leading-snug text-slate-500">
+                        {maritimeStatusText}
+                    </p>
+
+                    {isMaritimeLayerEnabled && (
+                        <div className="mt-3 space-y-2">
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                <div>
+                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                        {t('היקף', 'Scope')}
+                                    </p>
+                                    <Select value={maritimeScope} onValueChange={(value) => setMaritimeScope(value as MaritimeVesselScope)}>
+                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                            <SelectItem value="oil_tankers">{t('מכליות נפט', 'Oil tankers')}</SelectItem>
+                                            <SelectItem value="all_vessels">{t('כל כלי השיט', 'All vessels')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                        {t('מכסה', 'Cap')}
+                                    </p>
+                                    <Select value={maritimeMaxVessels} onValueChange={setMaritimeMaxVessels}>
+                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                            {MARITIME_MAX_VESSEL_OPTIONS.map((value) => (
+                                                <SelectItem key={value} value={value}>
+                                                    {value} {t('כלי שיט', 'vessels')}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                        {t('חלון לכידה', 'Capture')}
+                                    </p>
+                                    <Select value={maritimeCaptureWindow} onValueChange={setMaritimeCaptureWindow}>
+                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                            {MARITIME_CAPTURE_WINDOW_OPTIONS.map((value) => (
+                                                <SelectItem key={value} value={value}>
+                                                    {value}s
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-500">
+                                    {maritimeScope === 'oil_tankers'
+                                        ? t('מכליות בלבד', 'Tankers only')
+                                        : t('כל כלי השיט', 'All vessels')}
+                                </Badge>
+                                <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                    {Number(maritimeCaptureWindow)}s
+                                </Badge>
+                                <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                    {t('מכסה', 'Cap')} {Number(maritimeMaxVessels)}
+                                </Badge>
+                                {maritimeFeed?.cached && (
+                                    <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
+                                        {t('מטמון', 'Cached')}
+                                    </Badge>
+                                )}
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="truncate text-[9px] font-black uppercase tracking-widest text-slate-500">
+                                        {maritimeFeed?.source || t('ממתין לטעינה', 'Waiting to load')}
+                                    </p>
+                                    <p className="text-[9px] text-slate-500">
+                                        {maritimeFeed?.geography_mode === 'viewport_bbox'
+                                            ? t('מבוסס על גבולות המפה הנוכחיים', 'Using the current map bounds')
+                                            : maritimeFeed?.geography_mode === 'sampled_viewport_regions'
+                                                ? t('תצוגה רחבה מדי ולכן מתבצע דגימה אזורית בתוך המבט', 'View is too wide, so the watch samples regions inside it')
+                                                : t('ללא bbox זמין מוחלות גאוגרפיות ברירת מחדל', 'Default watch regions apply when no viewport bbox is available')}
+                                    </p>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => void refetchMaritime()}
+                                    disabled={isMaritimeFetching}
+                                    className="h-8 rounded-2xl border border-black/10 px-3 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-cyan-500 dark:border-white/10"
+                                >
+                                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isMaritimeFetching ? 'animate-spin' : ''}`} />
+                                    {t('רענון', 'Refresh')}
+                                </Button>
+                            </div>
+
+                            {maritimeFeed?.geography_note && (
+                                <p className="text-[9px] leading-snug text-slate-500">
+                                    {maritimeFeed.geography_note}
+                                </p>
+                            )}
+                            {maritimeLimitationText && (
+                                <p className="text-[9px] leading-snug text-slate-500">
+                                    {maritimeLimitationText}
+                                </p>
+                            )}
+                            {maritimeError && (
+                                <p className="text-[9px] leading-snug text-red-500">
+                                    {maritimeError instanceof Error ? maritimeError.message : t('שגיאת טעינה לא ידועה', 'Unknown vessel loading error')}
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
             <MapContainer 
@@ -228,8 +561,26 @@ export default function MapComponent({
               ref={mapRef}
             >
                 <ZoomControl position="bottomleft" />
-                <MapClickHandler onMapClick={() => setSelectedItem(null)} />
+                <MapClickHandler onMapClick={() => {
+                    setSelectedItem(null);
+                    onSelectMaritimeVessel(null);
+                }} />
+                <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
+                {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
+                            {t('מפה מוגבלת לביצועים', 'Map limited for performance')}
+                        </p>
+                        <p className="text-[10px] text-slate-400 text-center">
+                            {t(
+                                'מוצגים רק 3000 הצמתים הראשונים אחרי סינון. השתמש בחיפוש/מדינה כדי לצמצם.',
+                                'Showing only the first 3000 filtered nodes. Use search or country filters to narrow.'
+                            )}
+                        </p>
+                    </div>
+                )}
                 
                 {/* key forces remount when theme changes so `checked` re-applies */}
                 <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
@@ -249,7 +600,7 @@ export default function MapComponent({
                     {filteredGeoJson && (
                         <LayersControl.Overlay checked name={t("גבולות מדינות", "Country Borders")}>
                             <GeoJSON 
-                                key={activeCountries.join(',')}
+                                key={borderCountries.join(',')}
                                 data={filteredGeoJson} 
                                 style={{ 
                                   fillColor: '#06b6d4', 
@@ -272,14 +623,14 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
-                    {displayData.map((item) => {
+                    {mapDisplayData.map((item, index) => {
                         if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
-                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
+                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
 
                         return (
                             <Marker
-                                key={item.id}
+                                key={getLicenseRenderKey(item, index)}
                                 position={[item._displayLat, item._displayLng]}
                                 icon={createCustomIcon(color, false)}
                                 ref={(el) => {
@@ -308,6 +659,7 @@ export default function MapComponent({
                                         // collocated/duplicate-coord points appeared to
                                         // ignore clicks.
                                         e.target.openPopup();
+                                        onSelectMaritimeVessel(null);
                                         setSelectedItem(item);
                                     },
                                 }}
@@ -315,6 +667,11 @@ export default function MapComponent({
                                 <Tooltip direction="top" offset={[0, -20]} opacity={1}>
                                     <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
                                         <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
+                                        {item.entitySubtype && (
+                                          <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
+                                            {item.entitySubtype.replaceAll('_', ' ')}
+                                          </p>
+                                        )}
                                         {item._wasJittered && (
                                           <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
                                         )}
@@ -334,6 +691,37 @@ export default function MapComponent({
                         );
                     })}
                 </MarkerClusterGroup>
+                {isMaritimeLayerEnabled && maritimeVessels.map((vessel) => (
+                    <CircleMarker
+                        key={vessel.id}
+                        center={[vessel.lat, vessel.lng]}
+                        radius={selectedMaritimeVessel?.id === vessel.id ? 8 : 5}
+                        pathOptions={{
+                            color: '#22d3ee',
+                            weight: selectedMaritimeVessel?.id === vessel.id ? 2 : 1,
+                            fillColor: '#22d3ee',
+                            fillOpacity: selectedMaritimeVessel?.id === vessel.id ? 0.9 : 0.7,
+                        }}
+                        eventHandlers={{
+                            click: (e) => {
+                                L.DomEvent.stopPropagation(e);
+                                setSelectedItem(null);
+                                onSelectMaritimeVessel(vessel);
+                            },
+                        }}
+                    >
+                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
+                                    {vessel.vessel_name}
+                                </span>
+                                <p className="text-[9px] text-slate-400">
+                                    {[vessel.ship_type_label, vessel.nearest_port?.name].filter(Boolean).join(' · ')}
+                                </p>
+                            </div>
+                        </Tooltip>
+                    </CircleMarker>
+                ))}
             </MapContainer>
         </div>
     );

@@ -1,0 +1,4 @@
+company,country,region,commodity,license_type,status,lat,lng,location,phone_number,contact_person
+Example Mining Co,Ghana,Ashanti,Gold,Large Scale,Operating,6.5,-1.5,,+233201234567,John Doe
+Regional Holdings,Ghana,,Gold,Small Scale,Operating,,,Western Region,,Jane Smith
+Third Corp,Canada,,Silver,Exploration,Pending,45.4,-75.7,,,
