@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Fragment, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -36,6 +36,14 @@ const INITIAL_MAP_REGION = {
 } as const;
 
 const TAB_BAR_HEIGHT_APPROX = 70;
+const MAP_EDGE_PADDING = {
+  horizontal: 32,
+  top: 56,
+  bottom: 56,
+} as const;
+const MOBILE_CLUSTER_RADIUS = 56;
+const MOBILE_CLUSTER_EXTENT = 512;
+const MOBILE_CLUSTER_NODE_SIZE = 48;
 
 function normalizeLabel(val: string | undefined): string {
   const v = (val || 'Unknown').trim();
@@ -88,13 +96,18 @@ function createStyles(theme: AppTheme) {
     clusterOuter: {
       width: TACTICAL_CLUSTER.outerSize,
       height: TACTICAL_CLUSTER.outerSize,
+      borderRadius: TACTICAL_CLUSTER.outerSize / 2,
       alignItems: 'center',
       justifyContent: 'center',
+      backgroundColor: TACTICAL_CLUSTER.outerBackground,
+      borderWidth: 1,
+      borderColor: TACTICAL_CLUSTER.outerBorder,
     },
     clusterInner: {
       width: TACTICAL_CLUSTER.innerSize,
       height: TACTICAL_CLUSTER.innerSize,
       borderRadius: TACTICAL_CLUSTER.innerSize / 2,
+      overflow: 'hidden',
       backgroundColor: TACTICAL_CLUSTER.background,
       justifyContent: 'center',
       alignItems: 'center',
@@ -103,8 +116,9 @@ function createStyles(theme: AppTheme) {
     },
     clusterText: {
       color: TACTICAL_CLUSTER.text,
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: '900',
+      letterSpacing: 0.2,
     },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 20 },
     filterContent: {
@@ -184,6 +198,7 @@ function TacticalClusterBubble(props: {
   const { coordinate, pointCount, onPress, styles } = props;
   /** Brief true on all platforms so the marker snapshot includes the custom cluster view. */
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
+  const clusterLabel = pointCount > 999 ? '999+' : String(pointCount);
 
   useEffect(() => {
     if (!tracksViewChanges) return;
@@ -201,7 +216,9 @@ function TacticalClusterBubble(props: {
     >
       <View style={styles.clusterOuter} collapsable={false}>
         <View style={styles.clusterInner}>
-          <Text style={styles.clusterText}>{pointCount}</Text>
+          <Text style={[styles.clusterText, clusterLabel.length > 3 && { fontSize: 11 }]}>
+            {clusterLabel}
+          </Text>
         </View>
       </View>
     </Marker>
@@ -211,10 +228,11 @@ function TacticalClusterBubble(props: {
 function TacticalLicenseMarker(props: {
   item: JitteredLicense;
   markerKey: string;
+  coordinate: { latitude: number; longitude: number };
   styles: ReturnType<typeof createStyles>;
   onSelectLicense: (item: MiningLicense) => void;
 }) {
-  const { item, markerKey, styles, onSelectLicense } = props;
+  const { item, markerKey, coordinate, styles, onSelectLicense } = props;
   const d = tacticalMarkerDiameterPx(item.commodity);
   const fill = tacticalMarkerColor(item.commodity);
   /** Android must snapshot custom marker views once before freezing updates. */
@@ -229,7 +247,7 @@ function TacticalLicenseMarker(props: {
   return (
     <Marker
       key={markerKey}
-      coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
+      coordinate={coordinate}
       onPress={() => onSelectLicense(item)}
       anchor={{ x: 0.5, y: 0.5 }}
       zIndex={500}
@@ -265,6 +283,8 @@ export default function MapScreen() {
   const { theme, mapCustomStyle } = useMeridianTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<any>(null);
+  const hasAutoFitToData = useRef(false);
 
   const { data: rawLicenses = [], isLoading } = useQuery({
     queryKey: ['licenses'],
@@ -388,6 +408,7 @@ export default function MapScreen() {
             key={`${item.id}:${index}`}
             item={item}
             markerKey={`${item.id}:${index}`}
+            coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
             onSelectLicense={onSelectLicense}
             styles={styles}
           />
@@ -398,6 +419,58 @@ export default function MapScreen() {
 
   const topBarPad = Math.max(insets.top, 12);
   const fabBottom = Math.max(insets.bottom, 12) + TAB_BAR_HEIGHT_APPROX - 22;
+  const mapEdgePadding = useMemo(
+    () => ({
+      top: topBarPad + MAP_EDGE_PADDING.top,
+      right: MAP_EDGE_PADDING.horizontal,
+      bottom: fabBottom + MAP_EDGE_PADDING.bottom,
+      left: MAP_EDGE_PADDING.horizontal,
+    }),
+    [fabBottom, topBarPad],
+  );
+
+  const fitToVisibleLicenses = useCallback(
+    (animated = true) => {
+      if (!mapRef.current || filteredLicenses.length === 0) return false;
+
+      const coordinates = filteredLicenses.map((item) => ({
+        latitude: item._displayLat!,
+        longitude: item._displayLng!,
+      }));
+
+      if (coordinates.length === 1) {
+        const onlyPoint = coordinates[0];
+        mapRef.current.animateToRegion(
+          {
+            latitude: onlyPoint.latitude,
+            longitude: onlyPoint.longitude,
+            latitudeDelta: 1.5,
+            longitudeDelta: 1.5,
+          },
+          animated ? 350 : 0,
+        );
+        return true;
+      }
+
+      mapRef.current.fitToCoordinates(coordinates, {
+        animated,
+        edgePadding: mapEdgePadding,
+      });
+      return true;
+    },
+    [filteredLicenses, mapEdgePadding],
+  );
+
+  useEffect(() => {
+    if (hasAutoFitToData.current || filteredLicenses.length === 0) return;
+
+    const t = setTimeout(() => {
+      const didFit = fitToVisibleLicenses();
+      if (didFit) hasAutoFitToData.current = true;
+    }, 350);
+
+    return () => clearTimeout(t);
+  }, [filteredLicenses, fitToVisibleLicenses]);
 
   const renderCluster = useCallback(
     (cluster: {
@@ -447,14 +520,16 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       <ClusteredMapView
+        ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={styles.map}
         initialRegion={INITIAL_MAP_REGION}
         customMapStyle={mapCustomStyle}
         spiderLineColor={TACTICAL_SPIDER_LINE}
-        radius={70}
-        extent={256}
-        nodeSize={32}
+        radius={MOBILE_CLUSTER_RADIUS}
+        extent={MOBILE_CLUSTER_EXTENT}
+        nodeSize={MOBILE_CLUSTER_NODE_SIZE}
+        edgePadding={mapEdgePadding}
         renderCluster={renderCluster}
         tracksViewChanges={false}
       >
@@ -579,7 +654,7 @@ export default function MapScreen() {
         </View>
       </Modal>
 
-      <TouchableOpacity style={[styles.fab, { bottom: fabBottom }]}>
+      <TouchableOpacity style={[styles.fab, { bottom: fabBottom }]} onPress={() => fitToVisibleLicenses()}>
         <Crosshair size={24} color={theme.colors.primary} />
       </TouchableOpacity>
     </View>
