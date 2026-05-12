@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
 import time
 import os
@@ -10,6 +11,7 @@ import io
 import uuid
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 from license_import_geo import resolve_location_to_coords, validate_lat_lng_range
 
@@ -31,26 +33,70 @@ DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "mining_db")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
+DB_MAINTENANCE_NAME = os.getenv("DB_MAINTENANCE_NAME", "postgres")
+
+def _target_db_connect():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL, connect_timeout=5)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        connect_timeout=5,
+    )
+
+def _maintenance_db_connect():
+    if DATABASE_URL:
+        parsed = urlparse(DATABASE_URL)
+        maintenance_url = urlunparse(parsed._replace(path=f"/{DB_MAINTENANCE_NAME}"))
+        return psycopg2.connect(maintenance_url, connect_timeout=5)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_MAINTENANCE_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        connect_timeout=5,
+    )
+
+def _database_missing_error(err: Exception) -> bool:
+    msg = str(err)
+    return getattr(err, "pgcode", None) == "3D000" or f'database "{DB_NAME}" does not exist' in msg
+
+def _ensure_database_exists():
+    conn = _maintenance_db_connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
+        if cur.fetchone():
+            return
+        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_NAME)))
+        print(f"[db] created missing database: {DB_NAME}")
+    finally:
+        cur.close()
+        conn.close()
 
 def get_db_connection():
     # Simple retry logic for container startup
     retries = 5
     last_error = None
+    attempted_create_missing_db = False
     while retries > 0:
         try:
-            if DATABASE_URL:
-                conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
-            else:
-                conn = psycopg2.connect(
-                    host=DB_HOST,
-                    port=DB_PORT,
-                    database=DB_NAME,
-                    user=DB_USER,
-                    password=DB_PASSWORD,
-                    connect_timeout=5,
-                )
-            return conn
+            return _target_db_connect()
         except psycopg2.OperationalError as e:
+            if _database_missing_error(e) and not attempted_create_missing_db:
+                attempted_create_missing_db = True
+                try:
+                    print(f"[db] target database {DB_NAME} is missing; attempting bootstrap")
+                    _ensure_database_exists()
+                    continue
+                except Exception as create_exc:
+                    last_error = create_exc
+                    print(f"[db] failed to create missing database {DB_NAME}: {create_exc}")
             last_error = e
             print(f"Waiting for DB... ({5-retries}/5)")
             time.sleep(2)
