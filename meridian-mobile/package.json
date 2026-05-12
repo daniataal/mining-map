@@ -8,8 +8,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build:android": "npx expo prebuild --platform android && cd android && ./gradlew assembleDebug",
-    "generate:borders": "python3 ../scripts/generate_country_borders.py"
+    "build:android": "npx expo prebuild --platform android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

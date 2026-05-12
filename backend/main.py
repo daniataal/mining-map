@@ -19,6 +19,93 @@ from license_import_geo import resolve_location_to_coords, validate_lat_lng_rang
 
 app = FastAPI()
 
+
+def _coords_need_fallback(lat, lng) -> bool:
+    """Treat null/NaN and the legacy 0,0 placeholder as missing coordinates."""
+    if lat is None or lng is None:
+        return True
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except (TypeError, ValueError):
+        return True
+    if lat_f != lat_f or lng_f != lng_f:  # NaN check without extra imports
+        return True
+    return lat_f == 0.0 and lng_f == 0.0
+
+
+def _build_geo_cache_query_key(country: Optional[str], region: Optional[str]) -> Optional[str]:
+    region_lines = [part.strip() for part in (region or "").strip().splitlines() if part and part.strip()]
+    region_first = region_lines[0] if region_lines else ""
+    parts = [part for part in ((region_first or "").strip(), (country or "").strip()) if part]
+    if not parts:
+        return None
+    return ", ".join(parts).lower()
+
+
+def _load_cached_geo_fallbacks(cur, rows) -> dict[str, dict]:
+    keys = sorted(
+        {
+            key
+            for row in rows
+            if _coords_need_fallback(row.get("lat"), row.get("lng"))
+            for key in [_build_geo_cache_query_key(row.get("country"), row.get("region"))]
+            if key
+        }
+    )
+    if not keys:
+        return {}
+    try:
+        placeholders = ", ".join(["%s"] * len(keys))
+        cur.execute(
+            f"""
+            SELECT query_key, lat, lng, confidence, source, display_name
+            FROM geo_cache
+            WHERE query_key IN ({placeholders})
+            """,
+            tuple(keys),
+        )
+        cached = {}
+        for row in cur.fetchall():
+            if row.get("source") == "not_found":
+                continue
+            if row.get("lat") is None or row.get("lng") is None:
+                continue
+            cached[row["query_key"]] = row
+        return cached
+    except Exception:
+        # geo_cache is optional; normal reads must still succeed when it is absent.
+        return {}
+
+
+def _license_display_coords(row: dict, cached_geo: dict[str, dict]) -> tuple:
+    lat = row.get("lat")
+    lng = row.get("lng")
+    geo_source = row.get("geo_source")
+    geo_approximated = row.get("geo_approximated")
+    geo_confidence = row.get("geo_confidence")
+
+    if not _coords_need_fallback(lat, lng):
+        return lat, lng, geo_source, geo_approximated, geo_confidence
+
+    cache_key = _build_geo_cache_query_key(row.get("country"), row.get("region"))
+    cached = cached_geo.get(cache_key) if cache_key else None
+    if cached is not None:
+        return (
+            cached.get("lat"),
+            cached.get("lng"),
+            cached.get("source") or geo_source,
+            True,
+            cached.get("confidence"),
+        )
+
+    resolved = resolve_location_to_coords(row.get("region") or "", row.get("country") or "")
+    if resolved is not None:
+        fallback_lat, fallback_lng, fallback_source = resolved
+        return fallback_lat, fallback_lng, fallback_source, True, geo_confidence or 0.25
+
+    return lat, lng, geo_source, geo_approximated, geo_confidence
+
 # Allow CORS for local development (so React/Vite can fetch from us)
 app.add_middleware(
     CORSMiddleware,
@@ -588,6 +675,7 @@ def read_licenses():
     try:
         c.execute("SELECT * FROM licenses")
         rows = c.fetchall()
+        cached_geo = _load_cached_geo_fallbacks(c, rows)
     except Exception as e:
         conn.close()
         return {"error": f"Database error: {str(e)}"}
@@ -598,6 +686,7 @@ def read_licenses():
     results = []
     for row in rows:
         keys = row.keys()
+        display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(row, cached_geo)
         results.append({
             "id": row["id"],
             "company": row["company"],
@@ -607,16 +696,16 @@ def read_licenses():
             "date": row["date_issued"],        # Frontend expects 'date'
             "country": row["country"],
             "region": row["region"],
-            "lat": row["lat"],
-            "lng": row["lng"],
+            "lat": display_lat,
+            "lng": display_lng,
             "phoneNumber": row["phone_number"] if "phone_number" in keys else None,
             "contactPerson": row["contact_person"] if "contact_person" in keys else None,
             # Geocoding provenance — read-only on the frontend; drives the
             # "≈ approx location" badge and lets users distinguish surveyed
             # points from district-centroid backfills.
-            "geoSource": row["geo_source"] if "geo_source" in keys else None,
-            "geoApproximated": row["geo_approximated"] if "geo_approximated" in keys else None,
-            "geoConfidence": row["geo_confidence"] if "geo_confidence" in keys else None,
+            "geoSource": display_geo_source if "geo_source" in keys else None,
+            "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
+            "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
             "originalLat": row["original_lat"] if "original_lat" in keys else None,
             "originalLng": row["original_lng"] if "original_lng" in keys else None,
         })

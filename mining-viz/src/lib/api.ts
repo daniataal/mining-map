@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import { MiningLicense, User, ActivityLog, OilSummaryResponse, OilTradeFlow } from '../types';
 import bundledLicenses from '../data/licenses.json';
 
@@ -35,6 +36,17 @@ const apiClient = axios.create({
 });
 
 const LICENSES_FALLBACK_DATA = bundledLicenses as MiningLicense[];
+export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
+
+function normalizeCountryBordersParam(countries: string[]): string[] {
+  return Array.from(
+    new Set(
+      countries
+        .map((country) => country.trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
 
 // Request interceptor for auth
 apiClient.interceptors.request.use((config) => {
@@ -111,6 +123,14 @@ export const useLicenses = () => {
     },
   });
 };
+
+export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {
+  const normalizedCountries = normalizeCountryBordersParam(countries);
+  const { data } = await apiClient.get<CountryBordersGeoJson>('/api/map/country-borders', {
+    params: normalizedCountries.length > 0 ? { countries: normalizedCountries.join(',') } : undefined,
+  });
+  return data;
+}
 
 export const useUpdateLicense = () => {
   const queryClient = useQueryClient();
