@@ -6,6 +6,7 @@ import { Card, CardContent } from './ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { ScrollArea } from './ui/scroll-area';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
+import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 
 interface KanbanBoardProps {
   processedData: MiningLicense[];
@@ -15,23 +16,25 @@ interface KanbanBoardProps {
   isMobile?: boolean;
 }
 
-const STAGES = ['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const;
+const STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
 type Stage = typeof STAGES[number];
 
 const STAGE_COLORS: Record<Stage, string> = {
-  New: 'bg-slate-500',
-  Contacted: 'bg-blue-500',
-  Diligence: 'bg-amber-500',
-  Verified: 'bg-emerald-500',
-  Closed: 'bg-slate-700',
+  'New': 'bg-slate-500',
+  'Needs Review': 'bg-blue-500',
+  'Investigating': 'bg-amber-500',
+  'Escalated': 'bg-red-500',
+  'Approved': 'bg-emerald-500',
+  'Rejected': 'bg-slate-700',
 };
 
 const STAGE_BADGE_COLORS: Record<Stage, string> = {
-  New: 'bg-slate-500/20 text-slate-400',
-  Contacted: 'bg-blue-500/20 text-blue-400',
-  Diligence: 'bg-amber-500/20 text-amber-400',
-  Verified: 'bg-emerald-500/20 text-emerald-400',
-  Closed: 'bg-slate-700/40 text-slate-500',
+  'New': 'bg-slate-500/20 text-slate-400',
+  'Needs Review': 'bg-blue-500/20 text-blue-400',
+  'Investigating': 'bg-amber-500/20 text-amber-400',
+  'Escalated': 'bg-red-500/20 text-red-400',
+  'Approved': 'bg-emerald-500/20 text-emerald-400',
+  'Rejected': 'bg-slate-700/40 text-slate-500',
 };
 
 export default function KanbanBoard({
@@ -86,7 +89,7 @@ export default function KanbanBoard({
 
       <ScrollArea className="flex-1 p-3">
         <div className="space-y-3">
-          {columns[stage].map(item => {
+          {columns[stage].map((item, index) => {
             const annotation = userAnnotations[item.id] || {};
             const isGold =
               item.commodity?.toLowerCase().includes('gold') ||
@@ -96,7 +99,7 @@ export default function KanbanBoard({
 
             return (
               <Card
-                key={item.id}
+                key={getLicenseRenderKey(item, index)}
                 className={`cursor-pointer border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all hover:shadow-lg hover:-translate-y-1 group
                 ${isGold ? 'border-amber-200/50 dark:border-amber-900/30' : ''}`}
                 onClick={() => onCardClick(item)}

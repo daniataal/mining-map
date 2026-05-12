@@ -16,6 +16,7 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
+      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
     depends_on:
       db:
         condition: service_healthy
@@ -45,7 +46,7 @@ services:
       - backend
 
   db:
-    image: postgres:15-alpine
+    image: postgis/postgis:15-3.3-alpine
     container_name: mining-db
     restart: always
     environment:

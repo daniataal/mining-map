@@ -2,7 +2,7 @@ import { useI18n } from '../lib/i18n';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { MapPin as LucideMapPin, Phone as LucidePhone } from 'lucide-react';
+import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2 } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;
@@ -13,15 +13,18 @@ interface PopupFormProps {
   isOpen: boolean;
 }
 
-export default function PopupForm({ 
-  item, 
-  annotation, 
-  onOpenDossier
+export default function PopupForm({
+  item,
+  annotation,
+  onDelete,
+  onOpenDossier,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
     const isGold = commodity.includes('gold');
     const isDiamond = commodity.includes('diamond');
+    const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
+    const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
     
     // Tactical Asset Selection (Portable)
     const heroImage = isGold 
@@ -55,6 +58,16 @@ export default function PopupForm({
                    {(item.phoneNumber || annotation.phoneNumber) && (
                      <Badge className="bg-emerald-500 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5">
                        {t("קו פעיל", "ACTIVE LINE")}
+                     </Badge>
+                   )}
+                   {item.sourceName && (
+                     <Badge className="bg-slate-950/80 text-white border-none text-[9px] font-black uppercase px-2 h-5">
+                       {item.sourceName}
+                     </Badge>
+                   )}
+                   {sourceKindLabel && (
+                     <Badge className={getSourceKindBadgeClass(item.sourceKind)}>
+                       {sourceKindLabel}
                      </Badge>
                    )}
                 </div>
@@ -93,9 +106,22 @@ export default function PopupForm({
                      className="h-9 text-[9px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center gap-2"
                      onClick={onOpenDossier}
                    >
-                     {t("פרטי רשיון", "License Details")}
+                     {t("פרטי נכס", "Open Dossier")}
                    </Button>
                 </div>
+
+                {!isManagedInfrastructureEntity && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-2 h-9 text-[9px] font-black uppercase tracking-widest border-red-500/40 text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 dark:border-red-500/30 dark:hover:bg-red-500/15 dark:hover:text-red-300"
+                    onClick={onDelete}
+                  >
+                    <LucideTrash2 className="w-3.5 h-3.5 mr-1.5 shrink-0" />
+                    {t('מחק רישיון', 'Delete license')}
+                  </Button>
+                )}
 
                 {/* 4. Technical Specs (Flexible) */}
                 <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
@@ -113,12 +139,52 @@ export default function PopupForm({
                          <span className="text-amber-500">{item.commodity}</span> • {item.licenseType || 'ML'}
                        </span>
                     </div>
+                    {isManagedInfrastructureEntity && (
+                      <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                          {t("מזהה והקשר", "Locator & Context")}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white uppercase tracking-tight leading-tight break-words">
+                          {item.locode || '—'}
+                          {item.nearbyPort?.name ? ` • ${item.nearbyPort.name}` : item.operatorName ? ` • ${item.operatorName}` : ''}
+                        </span>
+                      </div>
+                    )}
                 </div>
 
                 <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
-                  ID: #{item.id.slice(0, 8)} • {t("עודכן לאחרונה: לפני שעה", "Last updated: 1h ago")}
+                  ID: #{item.id.slice(0, 8)}
+                  {item.lastSyncedAt ? ` • ${t("סונכרן", "Synced")} ${new Date(item.lastSyncedAt).toLocaleDateString()}` : ''}
                 </p>
             </div>
         </div>
     );
+}
+
+function formatSourceKindLabel(sourceKind?: string | null): string | null {
+  switch ((sourceKind || '').toLowerCase()) {
+    case 'official_registry':
+      return 'Official registry';
+    case 'global_open_fallback':
+      return 'Global fallback';
+    case 'user_import_csv':
+      return 'User CSV';
+    case 'bundled_json':
+      return 'Bundled fallback';
+    default:
+      return null;
+  }
+}
+
+function getSourceKindBadgeClass(sourceKind?: string | null): string {
+  switch ((sourceKind || '').toLowerCase()) {
+    case 'official_registry':
+      return 'bg-cyan-500/90 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5';
+    case 'global_open_fallback':
+      return 'bg-violet-500/90 text-white border-none text-[9px] font-black uppercase px-2 h-5';
+    case 'user_import_csv':
+      return 'bg-amber-500/90 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5';
+    default:
+      return 'bg-slate-700/90 text-white border-none text-[9px] font-black uppercase px-2 h-5';
+  }
 }

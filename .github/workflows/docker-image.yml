@@ -44,17 +44,23 @@ jobs:
 
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
+      env:
+        AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
+        envs: AISSTREAM_API_KEY
         script: |
           VERSION="v${{ env.BUILD_NUMBER }}"
           
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
           cd /opt/mining-map
+
+          # Persist runtime-only backend secrets on the VM for docker compose.
+          printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY" | sudo tee backend.env >/dev/null
 
           # Create the modern split-service docker-compose.yml
           # We don't escape the $VERSION here so the actual value is written to the file
@@ -64,6 +70,8 @@ jobs:
               image: dannyatalla/mining-backend:$VERSION
               container_name: mining-backend
               restart: always
+              env_file:
+                - backend.env
               ports:
                 - "8000:8000"
               environment:

@@ -1,0 +1,24 @@
+diff --git a/node_modules/react-native-map-clustering/lib/helpers.js b/node_modules/react-native-map-clustering/lib/helpers.js
+index 0000000..1111111 100644
+--- a/node_modules/react-native-map-clustering/lib/helpers.js
++++ b/node_modules/react-native-map-clustering/lib/helpers.js
+@@ -14,10 +14,15 @@
+   if (region.longitudeDelta < 0) lngD = region.longitudeDelta + 360;
+   else lngD = region.longitudeDelta;
+ 
++  // react-native-maps Region deltas are full visible spans (see Android
++  // RegionChangeEvent: ne - sw). Cluster bounds must use half-span from center.
++  const halfLatDelta = region.latitudeDelta / 2;
++  const halfLngDelta = lngD / 2;
++
+   return [
+-    region.longitude - lngD, // westLng - min lng
+-    region.latitude - region.latitudeDelta, // southLat - min lat
+-    region.longitude + lngD, // eastLng - max lng
+-    region.latitude + region.latitudeDelta, // northLat - max lat
++    region.longitude - halfLngDelta, // westLng - min lng
++    region.latitude - halfLatDelta, // southLat - min lat
++    region.longitude + halfLngDelta, // eastLng - max lng
++    region.latitude + halfLatDelta, // northLat - max lat
+   ];
+ };

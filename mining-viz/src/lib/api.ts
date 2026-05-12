@@ -1,9 +1,51 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MiningLicense, User, ActivityLog, OilSummaryResponse, OilTradeFlow } from '../types';
+import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
+import {
+  MiningLicense,
+  User,
+  ActivityLog,
+  OilSummaryResponse,
+  OilTradeFlow,
+  AfricaCoverageResponse,
+  WorldCoverageResponse,
+  EntityContact,
+  EntityRelationship,
+  DdReport,
+  MaritimeVesselFeedResponse,
+  MaritimeViewportBounds,
+  MaritimeVesselScope,
+  MaritimeContextResponse,
+  StorageTerminalDetails,
+  StorageTerminalResponse,
+  PortLogisticsDetails,
+  PortLogisticsResponse,
+} from '../types';
+import bundledLicenses from '../data/licenses.json';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 
-  (window.location.protocol === 'https:' ? '' : `http://${window.location.hostname}:8000`);
+/** Same base URL for fetch() and axios — import this in AdminPanel to avoid localhost vs prod drift. */
+export const API_BASE = import.meta.env.VITE_API_BASE ||
+  (typeof window !== 'undefined' && window.location.protocol === 'https:'
+    ? ''
+    : `http://${window.location.hostname}:8000`);
+
+/** Context-aware troubleshooting when GET /licenses fails (network / mixed content / wrong base URL). */
+export function describeLicenseFetchFailureContext(): { en: string; he: string } {
+  const base =
+    typeof window !== 'undefined'
+      ? API_BASE || '(same origin — empty base)'
+      : '(server render)';
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    return {
+      en: `Ensure the API process is running and reachable. This page is HTTPS — browsers block non-secure API calls to http:// URLs (mixed content). Current resolved API base: ${base}. Set VITE_API_BASE to your public https:// API URL, put the API behind TLS, or proxy /licenses through the same origin.`,
+      he: `ודא שה־API רץ ונגיש. הדף ב־HTTPS — הדפדפן חוסם קריאות ל־http:// (mixed content). בסיס ה־API הנוכחי: ${base}. הגדר VITE_API_BASE לכתובת https תקינה, או TLS ל־API, או פרוקסי ל־/licenses מאותו מקור.`,
+    };
+  }
+  return {
+    en: `Ensure the API is running and reachable at ${base} (see Network tab / CORS). If your backend uses another host or port, set VITE_API_BASE before building the web app.`,
+    he: `ודא שה־API רץ וזמין ב־${base} (שורת Network / CORS). אם ה־API במארח או פורט אחרים, הגדר VITE_API_BASE לפני בניית האפליקציה.`,
+  };
+}
 
 const apiClient = axios.create({
   baseURL: API_BASE,
@@ -11,6 +53,25 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const LICENSES_FALLBACK_DATA = (bundledLicenses as MiningLicense[]).map((item) => ({
+  ...item,
+  sector: item.sector || 'mining',
+  recordOrigin: item.recordOrigin || 'bundled_json',
+  sourceId: item.sourceId || 'bundled_json',
+  sourceName: item.sourceName || 'Bundled JSON fallback',
+}));
+export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
+
+function normalizeCountryBordersParam(countries: string[]): string[] {
+  return Array.from(
+    new Set(
+      countries
+        .map((country) => country.trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
 
 // Request interceptor for auth
 apiClient.interceptors.request.use((config) => {
@@ -21,16 +82,116 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// --- Licenses — bulk CSV import ---
+export type LicenseImportApiError = { row: number; message: string };
+
+export type BulkImportFileResult =
+  | { ok: true; importedCount: number }
+  | { ok: false; errors: LicenseImportApiError[] };
+
+/** Multipart upload to POST /licenses/import (field name `file`). */
+export async function bulkImportLicensesFile(file: File): Promise<BulkImportFileResult> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('mining_token');
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/licenses/import`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* non-JSON body */
+  }
+
+  if (res.ok && data.status === 'success') {
+    return { ok: true, importedCount: Number(data.imported_count) || 0 };
+  }
+
+  const detail = data.detail as Record<string, unknown> | undefined;
+  const fromDetail = detail?.errors as LicenseImportApiError[] | undefined;
+  if (Array.isArray(fromDetail) && fromDetail.length > 0) {
+    return { ok: false, errors: fromDetail };
+  }
+
+  const msg =
+    (typeof detail?.message === 'string' && detail.message) ||
+    (typeof data.message === 'string' && data.message) ||
+    `Import failed (${res.status})`;
+  return { ok: false, errors: [{ row: 0, message: msg }] };
+}
+
 // --- Licenses ---
-export const useLicenses = () => {
+export const useLicenses = (sector?: 'mining' | 'oil_and_gas') => {
   return useQuery<MiningLicense[]>({
-    queryKey: ['licenses'],
+    queryKey: ['licenses', sector ?? 'all'],
     queryFn: async () => {
-      const { data } = await apiClient.get('/licenses');
-      return data;
+      try {
+        const { data } = await apiClient.get<unknown>('/licenses', {
+          params: {
+            prefer_open_data: true,
+            ...(sector ? { sector } : {}),
+          },
+        });
+        if (Array.isArray(data)) return data as MiningLicense[];
+        if (data && typeof data === 'object' && 'error' in data) {
+          const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+          throw new Error(msg);
+        }
+        console.warn('[useLicenses] Expected array from /licenses, got:', data);
+        return [];
+      } catch (error) {
+        console.error('[useLicenses] Falling back to bundled license dataset because /licenses failed.', error);
+        if (sector === 'oil_and_gas') return [];
+        return sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
+      }
     },
   });
 };
+
+export async function getEntityContacts(entityId: string, entityKind = 'license'): Promise<EntityContact[]> {
+  const { data } = await apiClient.get<EntityContact[]>(
+    `/entities/${encodeURIComponent(entityId)}/contacts`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getEntityRelationships(entityId: string, entityKind = 'license'): Promise<EntityRelationship[]> {
+  const { data } = await apiClient.get<EntityRelationship[]>(
+    `/entities/${encodeURIComponent(entityId)}/relationships`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getLatestDdReport(entityId: string, entityKind = 'license'): Promise<DdReport | null> {
+  const { data } = await apiClient.get<DdReport | null>(
+    `/entities/${encodeURIComponent(entityId)}/dd/latest`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return data && typeof data === 'object' ? data : null;
+}
+
+export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {
+  const normalizedCountries = normalizeCountryBordersParam(countries);
+  const { data } = await apiClient.get<CountryBordersGeoJson>('/api/map/country-borders', {
+    params: normalizedCountries.length > 0 ? { countries: normalizedCountries.join(',') } : undefined,
+  });
+  return data;
+}
 
 export const useUpdateLicense = () => {
   const queryClient = useQueryClient();
@@ -83,6 +244,20 @@ export const login = async (username: string, password: string) => {
   const { data } = await apiClient.post('/auth/login', { username, password });
   return data;
 };
+
+/**
+ * Requires an admin JWT. Pass `bearerToken` from app state when available so the header
+ * matches the logged-in session even if localStorage is out of sync.
+ */
+export async function deleteAuthUser(userId: string, bearerToken?: string | null): Promise<void> {
+  const t = (bearerToken?.trim() || localStorage.getItem('mining_token') || '').trim();
+  if (!t) {
+    throw new Error('Not authenticated — log in again, then retry delete.');
+  }
+  await apiClient.delete(`/auth/users/${userId}`, {
+    headers: { Authorization: `Bearer ${t}` },
+  });
+}
 
 // ─── Oil / Petroleum ──────────────────────────────────────────────────────────
 // TODO: Agent A — implement GET /api/oil/summary returning OilSummaryResponse.
@@ -243,5 +418,149 @@ export const useOilSummary = (enabled = true) => {
     },
     enabled,
     staleTime: 5 * 60_000,
+  });
+};
+
+export interface MaritimeContextQuery {
+  company?: string;
+  country?: string;
+  commodity?: string;
+  lat?: number;
+  lng?: number;
+  vessel_name?: string;
+  mmsi?: string;
+  imo?: string;
+  destination?: string;
+}
+
+export interface MaritimeVesselQueryOptions {
+  enabled?: boolean;
+  maxVessels?: number;
+  captureWindowSeconds?: number;
+  scope?: MaritimeVesselScope;
+  bbox?: MaritimeViewportBounds | null;
+}
+
+export const useMaritimeVessels = ({
+  enabled = true,
+  maxVessels = 60,
+  captureWindowSeconds = 10,
+  scope = 'oil_tankers',
+  bbox = null,
+}: MaritimeVesselQueryOptions = {}) => {
+  return useQuery<MaritimeVesselFeedResponse>({
+    queryKey: ['maritime-vessels', scope, maxVessels, captureWindowSeconds, bbox],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MaritimeVesselFeedResponse>('/api/maritime/vessels', {
+        params: {
+          max_vessels: maxVessels,
+          capture_window_seconds: captureWindowSeconds,
+          scope,
+          ...(bbox ?? {}),
+        },
+      });
+      return data;
+    },
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: enabled ? 90_000 : false,
+    placeholderData: (previousData) => previousData,
+  });
+};
+
+export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
+  const hasUsefulQuery =
+    Boolean(params.company?.trim()) ||
+    Boolean(params.country?.trim()) ||
+    Boolean(params.vessel_name?.trim()) ||
+    Boolean(params.mmsi?.trim()) ||
+    Boolean(params.imo?.trim());
+
+  return useQuery<MaritimeContextResponse>({
+    queryKey: ['maritime-context', params],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MaritimeContextResponse>('/api/maritime/context', {
+        params,
+      });
+      return data;
+    },
+    enabled: enabled && hasUsefulQuery,
+    staleTime: 2 * 60_000,
+  });
+};
+
+export const useStorageTerminals = (enabled = true) => {
+  return useQuery<StorageTerminalResponse>({
+    queryKey: ['storage-terminals'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals');
+      return data;
+    },
+    enabled,
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const useStorageTerminalDetails = (terminalId?: string, enabled = true) => {
+  return useQuery<StorageTerminalDetails>({
+    queryKey: ['storage-terminal-detail', terminalId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<StorageTerminalDetails>(
+        `/api/storage/terminals/${encodeURIComponent(terminalId || '')}`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(terminalId),
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const usePortLogisticsEntities = (enabled = true) => {
+  return useQuery<PortLogisticsResponse>({
+    queryKey: ['port-logistics-entities'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortLogisticsResponse>('/api/logistics/ports');
+      return data;
+    },
+    enabled,
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const usePortLogisticsDetails = (entityId?: string, enabled = true) => {
+  return useQuery<PortLogisticsDetails>({
+    queryKey: ['port-logistics-detail', entityId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortLogisticsDetails>(
+        `/api/logistics/ports/${encodeURIComponent(entityId || '')}`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(entityId),
+    staleTime: 15 * 60_000,
+  });
+};
+
+export const useAfricaCoverage = (enabled = true) => {
+  return useQuery<AfricaCoverageResponse>({
+    queryKey: ['africa-coverage'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<AfricaCoverageResponse>('/api/open-data/coverage/africa');
+      return data;
+    },
+    enabled,
+    staleTime: 15 * 60_000,
+  });
+};
+
+export const useWorldCoverage = (enabled = true) => {
+  return useQuery<WorldCoverageResponse>({
+    queryKey: ['world-coverage'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<WorldCoverageResponse>('/api/open-data/coverage/world');
+      return data;
+    },
+    enabled,
+    staleTime: 15 * 60_000,
   });
 };
