@@ -13,6 +13,8 @@ import {
   EntityRelationship,
   DdReport,
   MaritimeVesselFeedResponse,
+  MaritimeViewportBounds,
+  MaritimeVesselScope,
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
@@ -431,18 +433,38 @@ export interface MaritimeContextQuery {
   destination?: string;
 }
 
-export const useMaritimeVessels = (enabled = true, maxVessels = 24) => {
+export interface MaritimeVesselQueryOptions {
+  enabled?: boolean;
+  maxVessels?: number;
+  captureWindowSeconds?: number;
+  scope?: MaritimeVesselScope;
+  bbox?: MaritimeViewportBounds | null;
+}
+
+export const useMaritimeVessels = ({
+  enabled = true,
+  maxVessels = 60,
+  captureWindowSeconds = 10,
+  scope = 'oil_tankers',
+  bbox = null,
+}: MaritimeVesselQueryOptions = {}) => {
   return useQuery<MaritimeVesselFeedResponse>({
-    queryKey: ['maritime-vessels', maxVessels],
+    queryKey: ['maritime-vessels', scope, maxVessels, captureWindowSeconds, bbox],
     queryFn: async () => {
       const { data } = await apiClient.get<MaritimeVesselFeedResponse>('/api/maritime/vessels', {
-        params: { max_vessels: maxVessels },
+        params: {
+          max_vessels: maxVessels,
+          capture_window_seconds: captureWindowSeconds,
+          scope,
+          ...(bbox ?? {}),
+        },
       });
       return data;
     },
     enabled,
     staleTime: 60_000,
     refetchInterval: enabled ? 90_000 : false,
+    placeholderData: (previousData) => previousData,
   });
 };
 

@@ -1,6 +1,9 @@
 import unittest
 
 from backend.services.maritime_intel import (
+    _build_ais_subscription_plan,
+    _normalize_requested_bbox,
+    _ship_matches_scope,
     build_counterparty_proxies,
     classify_ais_ship_type,
     classify_evidence_type,
@@ -27,6 +30,27 @@ class MaritimeIntelTests(unittest.TestCase):
     def test_classify_evidence_type_counterparty(self):
         title = "Buyer signs LNG supply deal after tanker discharge"
         self.assertEqual(classify_evidence_type(title), "counterparty_signal")
+
+    def test_normalize_requested_bbox_clamps_and_rounds(self):
+        bbox = _normalize_requested_bbox((-95.0, -181.0, 91.23456, 181.98765))
+        self.assertEqual(bbox, (-85.0, -180.0, 85.0, 180.0))
+
+    def test_build_ais_subscription_plan_uses_viewport_bbox_when_reasonable(self):
+        plan = _build_ais_subscription_plan((10.0, 20.0, 25.0, 38.0))
+        self.assertEqual(plan["geography_mode"], "viewport_bbox")
+        self.assertEqual(plan["boxes"], [[[25.0, 20.0], [10.0, 38.0]]])
+        self.assertEqual(plan["requested_bbox"], [10.0, 20.0, 25.0, 38.0])
+
+    def test_build_ais_subscription_plan_samples_regions_for_wide_view(self):
+        plan = _build_ais_subscription_plan((-40.0, -120.0, 55.0, 140.0))
+        self.assertEqual(plan["geography_mode"], "sampled_viewport_regions")
+        self.assertGreaterEqual(len(plan["boxes"]), 1)
+        self.assertGreaterEqual(len(plan["region_labels"]), 1)
+
+    def test_ship_scope_matches_tankers_only_by_default(self):
+        self.assertTrue(_ship_matches_scope("Tanker", "oil_tankers"))
+        self.assertFalse(_ship_matches_scope("Cargo", "oil_tankers"))
+        self.assertTrue(_ship_matches_scope("Cargo", "all_vessels"))
 
     def test_build_counterparty_proxies_keeps_destination_and_port_proxy(self):
         proxies = build_counterparty_proxies(
