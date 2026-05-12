@@ -10,11 +10,38 @@ declare module 'axios' {
   }
 }
 
-const explicitApiBase = process.env.EXPO_PUBLIC_API_BASE?.trim().replace(/\/+$/, '');
-const remoteHost = process.env.EXPO_PUBLIC_REMOTE_HOST?.trim();
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, '');
+}
 
-// Prefer a full explicit API base so mobile can target the live server path directly.
-export const API_BASE = explicitApiBase || `http://${remoteHost}:8000`;
+function normalizeApiBase(value: string): string {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  const withProtocol = /^https?:\/\//i.test(trimmedValue) ? trimmedValue : `http://${trimmedValue}`;
+  return trimTrailingSlashes(withProtocol);
+}
+
+function resolveApiBase(): string {
+  const explicitApiBase = process.env.EXPO_PUBLIC_API_BASE?.trim();
+  if (explicitApiBase) {
+    return normalizeApiBase(explicitApiBase);
+  }
+
+  const legacyRemoteHost = process.env.EXPO_PUBLIC_REMOTE_HOST?.trim();
+  if (legacyRemoteHost) {
+    return normalizeApiBase(legacyRemoteHost);
+  }
+
+  throw new Error(
+    'Missing mobile API configuration. Set EXPO_PUBLIC_API_BASE (preferred) or EXPO_PUBLIC_REMOTE_HOST in meridian-mobile/.env.',
+  );
+}
+
+// Prefer a full explicit API base so mobile relies on env config instead of source fallbacks.
+export const API_BASE = resolveApiBase();
 
 const apiClient = axios.create({
   baseURL: API_BASE,
@@ -49,6 +76,54 @@ export default apiClient;
 
 export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
 
+export function getApiErrorMessage(error: unknown, fallbackMessage = 'Request failed'): string {
+  if (isAxiosError(error)) {
+    const responseData = error.response?.data as
+      | string
+      | { detail?: unknown; message?: unknown }
+      | undefined;
+
+    if (typeof responseData === 'string' && responseData.trim()) {
+      return responseData;
+    }
+
+    if (responseData && typeof responseData === 'object') {
+      if (typeof responseData.detail === 'string' && responseData.detail.trim()) {
+        return responseData.detail;
+      }
+      if (typeof responseData.message === 'string' && responseData.message.trim()) {
+        return responseData.message;
+      }
+      if (
+        responseData.detail &&
+        typeof responseData.detail === 'object' &&
+        'message' in responseData.detail &&
+        typeof responseData.detail.message === 'string' &&
+        responseData.detail.message.trim()
+      ) {
+        return responseData.detail.message;
+      }
+    }
+
+    if (!error.response) {
+      return `Could not reach the Meridian backend at ${API_BASE}. Check device connectivity and Android cleartext settings.`;
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      return `Connection to ${API_BASE} timed out.`;
+    }
+  }
+
+  return error instanceof Error && error.message ? error.message : fallbackMessage;
+}
+
+function normalizeCountryBordersResponse(data: CountryBordersGeoJson | string): CountryBordersGeoJson {
+  if (typeof data === 'string') {
+    return JSON.parse(data) as CountryBordersGeoJson;
+  }
+  return data;
+}
+
 function normalizeCountryBordersParam(countries: string[]): string[] {
   return Array.from(
     new Set(
@@ -73,11 +148,11 @@ export const getLicenses = async (): Promise<MiningLicense[]> => {
 
 export const getCountryBorders = async (countries: string[]): Promise<CountryBordersGeoJson> => {
   const normalizedCountries = normalizeCountryBordersParam(countries);
-  const { data } = await apiClient.get<CountryBordersGeoJson>('/api/map/country-borders', {
+  const { data } = await apiClient.get<CountryBordersGeoJson | string>('/api/map/country-borders', {
     skipAuth: true,
     params: normalizedCountries.length > 0 ? { countries: normalizedCountries.join(',') } : undefined,
   });
-  return data;
+  return normalizeCountryBordersResponse(data);
 };
 
 export const updateLicense = async (id: string, updates: any) => {
