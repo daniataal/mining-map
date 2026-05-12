@@ -18,13 +18,14 @@ export const TACTICAL_GEOJSON = {
 
 /** `.custom-cluster-icon` — blue glass cluster */
 export const TACTICAL_CLUSTER = {
-  background: 'rgba(59, 130, 246, 0.25)',
-  border: 'rgba(59, 130, 246, 0.65)',
-  text: '#FFFFFF',
-  /** Outer hit/snapshot padding so the circle isn’t clipped on Android markers */
-  outerSize: 56,
-  innerSize: 40,
-  borderWidth: 1,
+  background: 'rgba(37, 99, 235, 0.58)',
+  border: 'rgba(186, 230, 253, 0.92)',
+  text: '#F8FAFC',
+  outerBackground: 'rgba(59, 130, 246, 0.16)',
+  outerBorder: 'rgba(125, 211, 252, 0.38)',
+  outerSize: 54,
+  innerSize: 38,
+  borderWidth: 1.5,
 } as const;
 
 /** Spider legs in web: `#64748b` @ 0.5 opacity */
