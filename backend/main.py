@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+import json
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
+from country_borders import get_country_borders_geojson, parse_requested_countries
 from license_import_geo import resolve_location_to_coords, validate_lat_lng_range
 
 app = FastAPI()
@@ -620,6 +622,36 @@ def read_licenses():
         })
     
     return results
+
+
+@app.get("/api/map/country-borders")
+def read_country_borders(
+    countries: Optional[str] = None,
+    if_none_match: Optional[str] = Header(None),
+):
+    try:
+        requested = parse_requested_countries(countries)
+        payload, etag = get_country_borders_geojson(requested)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="Country borders dataset is missing on the backend. Regenerate backend/data/country_borders.geojson.",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid country borders dataset: {exc}")
+
+    headers = {
+        "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+        "ETag": etag,
+    }
+    if if_none_match == etag:
+        return Response(status_code=304, headers=headers)
+
+    return Response(
+        content=json.dumps(payload, ensure_ascii=True),
+        media_type="application/geo+json",
+        headers=headers,
+    )
 
 class LicenseCreate(BaseModel):
     company: str
