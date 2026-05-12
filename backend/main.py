@@ -25,7 +25,9 @@ app.add_middleware(
 )
 
 # Database connection parameters
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "mining_db")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
@@ -33,21 +35,31 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
 def get_db_connection():
     # Simple retry logic for container startup
     retries = 5
+    last_error = None
     while retries > 0:
         try:
-            conn = psycopg2.connect(
-                host=DB_HOST,
-                database=DB_NAME,
-                user=DB_USER,
-                password=DB_PASSWORD
-            )
+            if DATABASE_URL:
+                conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+            else:
+                conn = psycopg2.connect(
+                    host=DB_HOST,
+                    port=DB_PORT,
+                    database=DB_NAME,
+                    user=DB_USER,
+                    password=DB_PASSWORD,
+                    connect_timeout=5,
+                )
             return conn
         except psycopg2.OperationalError as e:
+            last_error = e
             print(f"Waiting for DB... ({5-retries}/5)")
             time.sleep(2)
             retries -= 1
-            if retries == 0:
-                raise e
+    target = "DATABASE_URL" if DATABASE_URL else f"{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    detail = f"Database unavailable at {target}. Check the Postgres service and backend env vars."
+    if last_error:
+        print(f"[db] connection failed for {target}: {last_error}")
+    raise HTTPException(status_code=503, detail=detail)
 
 # ... existing imports
 import bcrypt

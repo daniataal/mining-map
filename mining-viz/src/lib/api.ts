@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MiningLicense, User, ActivityLog, OilSummaryResponse, OilTradeFlow } from '../types';
+import bundledLicenses from '../data/licenses.json';
 
 /** Same base URL for fetch() and axios — import this in AdminPanel to avoid localhost vs prod drift. */
 export const API_BASE = import.meta.env.VITE_API_BASE ||
@@ -32,6 +33,8 @@ const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+const LICENSES_FALLBACK_DATA = bundledLicenses as MiningLicense[];
 
 // Request interceptor for auth
 apiClient.interceptors.request.use((config) => {
@@ -92,14 +95,19 @@ export const useLicenses = () => {
   return useQuery<MiningLicense[]>({
     queryKey: ['licenses'],
     queryFn: async () => {
-      const { data } = await apiClient.get<unknown>('/licenses');
-      if (Array.isArray(data)) return data as MiningLicense[];
-      if (data && typeof data === 'object' && 'error' in data) {
-        const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-        throw new Error(msg);
+      try {
+        const { data } = await apiClient.get<unknown>('/licenses');
+        if (Array.isArray(data)) return data as MiningLicense[];
+        if (data && typeof data === 'object' && 'error' in data) {
+          const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+          throw new Error(msg);
+        }
+        console.warn('[useLicenses] Expected array from /licenses, got:', data);
+        return [];
+      } catch (error) {
+        console.error('[useLicenses] Falling back to bundled license dataset because /licenses failed.', error);
+        return LICENSES_FALLBACK_DATA;
       }
-      console.warn('[useLicenses] Expected array from /licenses, got:', data);
-      return [];
     },
   });
 };
