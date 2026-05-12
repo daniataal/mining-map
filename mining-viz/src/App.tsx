@@ -1,23 +1,21 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useAfricaCoverage } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
 import MapComponent from './components/MapComponent';
 import DossierView from './components/DossierView';
-import PopupForm from './components/PopupForm';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
 import KanbanBoard from './components/KanbanBoard';
-import DashboardView from './components/DashboardView';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
-import LogisticsDesk from './components/LogisticsDesk';
+import OilMaritimePanel from './components/OilMaritimePanel';
 import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
@@ -94,25 +92,24 @@ export default function App() {
   
   // Data Fetching
   const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
+  const { data: africaCoverage } = useAfricaCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
 
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
-  const [userRole, setUserRole] = useState<string | null>(localStorage.getItem('mining_role'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('mining_userid'));
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
 
   // UI State
-  const [mobileTab, setMobileTab] = useState<'map' | 'list' | 'pipeline'>('map');
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
-  const [hoveredItem, setHoveredItem] = useState<MiningLicense | null>(null);
+  const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -167,7 +164,6 @@ export default function App() {
       localStorage.setItem('mining_userid', data.id);
 
       setToken(data.access_token);
-      setUserRole(data.role);
       setUsername(data.username);
       setUserId(data.id);
       setAuthError(null);
@@ -183,18 +179,23 @@ export default function App() {
     localStorage.removeItem('mining_username');
     localStorage.removeItem('mining_userid');
     setToken(null);
-    setUserRole(null);
     setUsername(null);
     setUserId(null);
   };
 
   const handleOpenDossier = useCallback((item: MiningLicense) => {
+    setSelectedMaritimeVessel(null);
     setDossierItem(item);
     setIsDossierOpen(true);
     if (userId && username) {
       logActivityMutation.mutate({ user_id: userId, username, action: 'VIEW_DOSSIER', details: `Viewed ${item.company} (${item.id})` });
     }
   }, [userId, username, logActivityMutation]);
+
+  const handleSelectItem = useCallback((item: MiningLicense | null) => {
+    setSelectedMaritimeVessel(null);
+    setSelectedItem(item);
+  }, []);
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
     setUserAnnotations(prev => {
@@ -263,6 +264,31 @@ export default function App() {
   
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<any[]>([]);
+  const sectorCoverageSummary =
+    licenseSector && africaCoverage ? africaCoverage.summary[licenseSector] : null;
+  const sidebarViewMode =
+    viewMode === 'admin'
+      ? 'admin'
+      : viewMode === 'due_diligence'
+        ? 'dashboard'
+        : viewMode === 'raw_evidence'
+          ? 'pipeline'
+          : 'map';
+  const handleSidebarViewModeChange = (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => {
+    if (mode === 'admin') {
+      setViewMode('admin');
+      return;
+    }
+    if (mode === 'dashboard') {
+      setViewMode('due_diligence');
+      return;
+    }
+    if (mode === 'pipeline') {
+      setViewMode('raw_evidence');
+      return;
+    }
+    setViewMode('global');
+  };
 
   useEffect(() => {
     const apiBase = API_BASE;
@@ -349,6 +375,12 @@ export default function App() {
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas') {
+      setSelectedMaritimeVessel(null);
+    }
+  }, [viewMode]);
+
   return (
     <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* 1. Global Market Ticker (Entrepreneur Desk) */}
@@ -416,11 +448,11 @@ export default function App() {
             userAnnotations={userAnnotations}
             selectedItem={selectedItem}
             setSelectedItem={(item: MiningLicense) => {
-              setSelectedItem(item);
+              handleSelectItem(item);
               setMapFlyTrigger(prev => prev + 1);
             }}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
+            viewMode={sidebarViewMode}
+            setViewMode={handleSidebarViewModeChange}
             onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
             onToggleAdmin={() => setViewMode('admin')}
             isFilterOpen={isFilterOpen}
@@ -448,6 +480,11 @@ export default function App() {
                       onChange={(e) => miningData.setFilter(e.target.value)}
                     />
                   </div>
+                  {sectorCoverageSummary && (
+                    <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                      {t("כיסוי אפריקה", "Africa coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("מסונכרן", "syncable")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {sectorCoverageSummary.unavailable || 0} {t("לא זמין", "unavailable")}
+                    </div>
+                  )}
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
@@ -517,12 +554,19 @@ export default function App() {
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
                 viewModeKey={viewMode}
-                setSelectedItem={setSelectedItem}
+                setSelectedItem={handleSelectItem}
                 handleOpenDossier={handleOpenDossier}
                 mapCenter={mapCenter}
                 updateAnnotation={updateAnnotation}
                 deleteLicense={deleteLicense}
+                selectedMaritimeVessel={selectedMaritimeVessel}
+                onSelectMaritimeVessel={setSelectedMaritimeVessel}
               />
+            )}
+            {viewMode === 'oil_and_gas' && selectedMaritimeVessel && !isDossierOpen && (
+              <div className="absolute top-20 right-4 z-[1100]">
+                <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
+              </div>
             )}
             {viewMode === 'due_diligence' && (
               <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">

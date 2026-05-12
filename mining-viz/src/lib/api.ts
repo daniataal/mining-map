@@ -1,7 +1,17 @@
 import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
-import { MiningLicense, User, ActivityLog, OilSummaryResponse, OilTradeFlow } from '../types';
+import {
+  MiningLicense,
+  User,
+  ActivityLog,
+  OilSummaryResponse,
+  OilTradeFlow,
+  AfricaCoverageResponse,
+  EntityContact,
+  MaritimeVesselFeedResponse,
+  MaritimeContextResponse,
+} from '../types';
 import bundledLicenses from '../data/licenses.json';
 
 /** Same base URL for fetch() and axios — import this in AdminPanel to avoid localhost vs prod drift. */
@@ -135,6 +145,16 @@ export const useLicenses = (sector?: 'mining' | 'oil_and_gas') => {
     },
   });
 };
+
+export async function getEntityContacts(entityId: string, entityKind = 'license'): Promise<EntityContact[]> {
+  const { data } = await apiClient.get<EntityContact[]>(
+    `/entities/${encodeURIComponent(entityId)}/contacts`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return Array.isArray(data) ? data : [];
+}
 
 export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {
   const normalizedCountries = normalizeCountryBordersParam(countries);
@@ -369,5 +389,65 @@ export const useOilSummary = (enabled = true) => {
     },
     enabled,
     staleTime: 5 * 60_000,
+  });
+};
+
+export interface MaritimeContextQuery {
+  company?: string;
+  country?: string;
+  commodity?: string;
+  lat?: number;
+  lng?: number;
+  vessel_name?: string;
+  mmsi?: string;
+  imo?: string;
+  destination?: string;
+}
+
+export const useMaritimeVessels = (enabled = true, maxVessels = 24) => {
+  return useQuery<MaritimeVesselFeedResponse>({
+    queryKey: ['maritime-vessels', maxVessels],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MaritimeVesselFeedResponse>('/api/maritime/vessels', {
+        params: { max_vessels: maxVessels },
+      });
+      return data;
+    },
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: enabled ? 90_000 : false,
+  });
+};
+
+export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
+  const hasUsefulQuery =
+    Boolean(params.company?.trim()) ||
+    Boolean(params.country?.trim()) ||
+    Boolean(params.vessel_name?.trim()) ||
+    Boolean(params.mmsi?.trim()) ||
+    Boolean(params.imo?.trim());
+
+  return useQuery<MaritimeContextResponse>({
+    queryKey: ['maritime-context', params],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MaritimeContextResponse>('/api/maritime/context', {
+        params,
+      });
+      return data;
+    },
+    enabled: enabled && hasUsefulQuery,
+    staleTime: 2 * 60_000,
+  });
+};
+
+export const useAfricaCoverage = (enabled = true) => {
+  return useQuery<AfricaCoverageResponse>({
+    queryKey: ['africa-coverage'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<AfricaCoverageResponse>('/api/open-data/coverage/africa');
+      return data;
+    },
+    enabled,
+    staleTime: 15 * 60_000,
   });
 };

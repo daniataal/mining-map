@@ -12,6 +12,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+try:
+    from backend.services.entity_contacts import sync_license_contacts_for_row
+except ImportError:
+    from services.entity_contacts import sync_license_contacts_for_row
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_USER_AGENT = os.getenv(
@@ -118,7 +123,7 @@ def _blm_oil_region(attrs: dict[str, Any]) -> str:
     return _join_parts(attrs.get("ADMIN_STATE"), attrs.get("GEO_STATE"))
 
 
-def _kenya_region(attrs: dict[str, Any]) -> str:
+def _landfolio_region(attrs: dict[str, Any]) -> str:
     return _join_parts(attrs.get("Region"), attrs.get("MapRef"))
 
 
@@ -132,6 +137,13 @@ def _south_africa_region(prefix: str) -> Callable[[dict[str, Any]], str]:
         )
 
     return builder
+
+
+def _zambia_petroleum_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(
+        f"Block {attrs.get('Block_No')}" if attrs.get("Block_No") is not None else None,
+        attrs.get("Company"),
+    )
 
 
 @dataclass(frozen=True)
@@ -160,13 +172,23 @@ class ArcGISOpenDataSource:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
-    ArcGISOpenDataSource(
-        source_id="kenya_mining_cadastre",
-        source_name="Kenya Mining Cadastre Portal",
-        layer_url="https://portal.miningcadastre.go.ke/arcgis/rest/services/LandfolioSOEv2_0_7/MapServer/0",
+def _landfolio_mining_source(
+    *,
+    source_id: str,
+    source_name: str,
+    layer_url: str,
+    country: str,
+    metadata: Optional[dict[str, Any]] = None,
+    max_records: Optional[int] = None,
+    order_by: Optional[str] = "DteGranted DESC",
+    default_status: str = "Active",
+) -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id=source_id,
+        source_name=source_name,
+        layer_url=layer_url,
         sector="mining",
-        country="Kenya",
+        country=country,
         external_id_fields=("guidShape", "guidLicense", "Code", "ESRI_OID"),
         company_fields=("Parties", "Name", "Code"),
         commodity_fields=("Commodities",),
@@ -174,15 +196,57 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
         status_fields=("Status",),
         issued_fields=("DteGranted", "DteApplied"),
         updated_fields=("DteGranted", "DteApplied"),
-        region_builder=_kenya_region,
+        region_builder=_landfolio_region,
         default_commodity="Minerals",
         default_license_type="Mining Licence",
-        default_status="Application",
-        order_by="DteGranted DESC",
-        max_records=1500,
+        default_status=default_status,
+        order_by=order_by,
+        max_records=max_records,
         page_size=250,
+        metadata=metadata or {},
+    )
+
+
+def _zambia_mining_sources() -> tuple[ArcGISOpenDataSource, ...]:
+    base = "https://ags1.landfolio.com/arcgis/rest/services/ZambiaMapPortal/Active/MapServer"
+    layers = [
+        (0, "Small Scale Exploration Licences"),
+        (1, "Large Scale Exploration Licences"),
+        (2, "Large Scale Mining Licences"),
+        (3, "Small Scale Mining Licences"),
+        (4, "Artisanal Mining Rights"),
+        (5, "Mineral Processing Licences"),
+        (6, "Prospecting Permits (2008)"),
+        (7, "Prospecting Licences (2008)"),
+        (8, "Large Scale Gemstone Licences (2008)"),
+    ]
+    return tuple(
+        _landfolio_mining_source(
+            source_id=f"zambia_mining_{layer_id}",
+            source_name=f"Zambia Cadastre - {layer_name}",
+            layer_url=f"{base}/{layer_id}",
+            country="Zambia",
+            metadata={
+                "kind": "official_arcgis_registry",
+                "coverage": "africa",
+                "layer_name": layer_name,
+            },
+        )
+        for layer_id, layer_name in layers
+    )
+
+
+OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
+    _landfolio_mining_source(
+        source_id="kenya_mining_cadastre",
+        source_name="Kenya Mining Cadastre Portal",
+        layer_url="https://portal.miningcadastre.go.ke/arcgis/rest/services/LandfolioSOEv2_0_7/MapServer/0",
+        country="Kenya",
+        max_records=1500,
+        default_status="Application",
         metadata={"kind": "official_arcgis_registry", "coverage": "africa"},
     ),
+    *_zambia_mining_sources(),
     ArcGISOpenDataSource(
         source_id="us_blm_mining_claims",
         source_name="US BLM MLRS Mining Claims (Not Closed)",
@@ -233,6 +297,24 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
             "coverage": "us",
             "note": "Capped for MVP because the live service contains tens of thousands of polygons.",
         },
+    ),
+    ArcGISOpenDataSource(
+        source_id="zambia_petroleum_licenses",
+        source_name="Zambia Petroleum Licences",
+        layer_url="https://ags1.landfolio.com/arcgis/rest/services/ZambiaMapPortal/PetroleumLicences/MapServer/0",
+        sector="oil_and_gas",
+        country="Zambia",
+        external_id_fields=("Licence_No", "OBJECTID", "Block_No"),
+        company_fields=("Company", "Licence_No"),
+        status_fields=("Status",),
+        issued_fields=("Grant_Date",),
+        updated_fields=("Renewal_Da",),
+        region_builder=_zambia_petroleum_region,
+        default_commodity="Oil & Gas",
+        default_license_type="Petroleum Licence",
+        default_status="Granted",
+        page_size=100,
+        metadata={"kind": "official_arcgis_registry", "coverage": "africa"},
     ),
     ArcGISOpenDataSource(
         source_id="south_africa_onshore_petroleum",
@@ -286,6 +368,236 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
         metadata={"kind": "official_arcgis_registry", "coverage": "africa"},
     ),
 )
+
+
+AFRICAN_COUNTRIES: tuple[tuple[str, str], ...] = (
+    ("DZ", "Algeria"),
+    ("AO", "Angola"),
+    ("BJ", "Benin"),
+    ("BW", "Botswana"),
+    ("BF", "Burkina Faso"),
+    ("BI", "Burundi"),
+    ("CV", "Cabo Verde"),
+    ("CM", "Cameroon"),
+    ("CF", "Central African Republic"),
+    ("TD", "Chad"),
+    ("KM", "Comoros"),
+    ("CG", "Republic of the Congo"),
+    ("CD", "Democratic Republic of the Congo"),
+    ("CI", "Cote d'Ivoire"),
+    ("DJ", "Djibouti"),
+    ("EG", "Egypt"),
+    ("GQ", "Equatorial Guinea"),
+    ("ER", "Eritrea"),
+    ("SZ", "Eswatini"),
+    ("ET", "Ethiopia"),
+    ("GA", "Gabon"),
+    ("GM", "Gambia"),
+    ("GH", "Ghana"),
+    ("GN", "Guinea"),
+    ("GW", "Guinea-Bissau"),
+    ("KE", "Kenya"),
+    ("LS", "Lesotho"),
+    ("LR", "Liberia"),
+    ("LY", "Libya"),
+    ("MG", "Madagascar"),
+    ("MW", "Malawi"),
+    ("ML", "Mali"),
+    ("MR", "Mauritania"),
+    ("MU", "Mauritius"),
+    ("MA", "Morocco"),
+    ("MZ", "Mozambique"),
+    ("NA", "Namibia"),
+    ("NE", "Niger"),
+    ("NG", "Nigeria"),
+    ("RW", "Rwanda"),
+    ("ST", "Sao Tome and Principe"),
+    ("SN", "Senegal"),
+    ("SC", "Seychelles"),
+    ("SL", "Sierra Leone"),
+    ("SO", "Somalia"),
+    ("ZA", "South Africa"),
+    ("SS", "South Sudan"),
+    ("SD", "Sudan"),
+    ("TZ", "Tanzania"),
+    ("TG", "Togo"),
+    ("TN", "Tunisia"),
+    ("UG", "Uganda"),
+    ("ZM", "Zambia"),
+    ("ZW", "Zimbabwe"),
+)
+
+
+AFRICA_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "Botswana": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": "Official mining cadastre portal exists, but no public queryable licence layer was discovered in the open ArcGIS directory.",
+            "references": [
+                {
+                    "name": "Botswana Mining Cadastre Portal",
+                    "url": "https://portal.miningcadastre.gov.bw/",
+                    "access": "official_portal_only",
+                }
+            ],
+        }
+    },
+    "Ghana": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": "Official mining cadastre repository is public, but a stable machine-readable licence API was not verified in this pass.",
+            "references": [
+                {
+                    "name": "Ghana Mining Cadastre Repository",
+                    "url": "https://ghana.revenuedev.org/",
+                    "access": "official_portal_only",
+                }
+            ],
+        }
+    },
+    "Liberia": {
+        "mining": {
+            "status": "decommissioned",
+            "note": "The previously public Landfolio concessions portal reports that it was decommissioned in December 2025.",
+            "references": [
+                {
+                    "name": "Liberia Landfolio Portal",
+                    "url": "https://portals.landfolio.com/Liberia/",
+                    "access": "decommissioned",
+                }
+            ],
+        }
+    },
+    "Mauritania": {
+        "mining": {
+            "status": "official_api_restricted",
+            "note": "Official mining cadastre ArcGIS services are discoverable from the public portal, but direct feature access currently returns token-required responses.",
+            "references": [
+                {
+                    "name": "Mauritania Cadastre Portal",
+                    "url": "https://portals.landfolio.com/mauritania/fr/",
+                    "access": "token_required",
+                }
+            ],
+        }
+    },
+    "Mozambique": {
+        "mining": {
+            "status": "official_api_restricted",
+            "note": "INAMI ArcGIS licensing services are visible but require an ArcGIS token for direct access.",
+            "references": [
+                {
+                    "name": "Mozambique INAMI Licenses",
+                    "url": "https://licenses.inami.gov.mz/arcgis/rest/services",
+                    "access": "token_required",
+                }
+            ],
+        },
+        "oil_and_gas": {
+            "status": "official_api_restricted",
+            "note": "The official Hydrocarbons ArcGIS service is visible in the public portal but requires a token for direct access.",
+            "references": [
+                {
+                    "name": "Mozambique INAMI Hydrocarbons",
+                    "url": "https://licenses.inami.gov.mz/arcgis/rest/services/MapPortal/Hydrocarbons/MapServer",
+                    "access": "token_required",
+                }
+            ],
+        },
+    },
+    "Namibia": {
+        "mining": {
+            "status": "official_api_restricted",
+            "note": "Official active mining FeatureServer endpoints are embedded in the public portal, but direct feature access currently requires a token.",
+            "references": [
+                {
+                    "name": "Namibia Active Mining Layer",
+                    "url": "https://services1.arcgis.com/AYIukXzftCPbklHN/arcgis/rest/services/NamibiaPortal_ActiveMiningLayer_1/FeatureServer",
+                    "access": "token_required",
+                }
+            ],
+        },
+        "oil_and_gas": {
+            "status": "official_api_restricted",
+            "note": "Official active petroleum FeatureServer endpoints are embedded in the public portal, but direct feature access currently requires a token.",
+            "references": [
+                {
+                    "name": "Namibia Active Petroleum Layer",
+                    "url": "https://services1.arcgis.com/AYIukXzftCPbklHN/arcgis/rest/services/NamibiaPortal_ActivePetroleumLayer_1/FeatureServer",
+                    "access": "token_required",
+                }
+            ],
+        },
+    },
+    "South Africa": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": "SAMRAD and the Mining Licensing System are official DMRE mining-rights portals, but a stable open machine-readable mining layer was not verified in this pass.",
+            "references": [
+                {
+                    "name": "SAMRAD Online",
+                    "url": "https://portal-samradonline.dmre.gov.za/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "South Africa Mining Licensing System",
+                    "url": "https://mininglicense.dmpr.gov.za/indwe/splash.html",
+                    "access": "official_portal_only",
+                },
+            ],
+        }
+    },
+    "Sierra Leone": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": "The National Minerals Agency repository is public, but a stable machine-readable licence endpoint was not verified in this pass.",
+            "references": [
+                {
+                    "name": "Sierra Leone Repository",
+                    "url": "https://sierraleone.revenuedev.org/",
+                    "access": "official_portal_only",
+                }
+            ],
+        }
+    },
+    "South Sudan": {
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": "The Ministry of Petroleum publishes an official open-blocks page with GIS/download references, but we did not identify a stable direct API/feature service during this pass.",
+            "references": [
+                {
+                    "name": "South Sudan Open Blocks",
+                    "url": "https://www.mop.gov.ss/open-blocks",
+                    "access": "official_download_page",
+                }
+            ],
+        }
+    },
+    "Uganda": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": "An official Uganda mining cadastre portal exists, but no public machine-readable layer endpoint was verified in this pass.",
+            "references": [
+                {
+                    "name": "Uganda Mining Cadastre Portal",
+                    "url": "https://portals.landfolio.com/uganda/",
+                    "access": "official_portal_only",
+                }
+            ],
+        },
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": "PAU publishes an official maps portal for petroleum information, but we did not verify an open licence/block feature service in this pass.",
+            "references": [
+                {
+                    "name": "PAU Maps",
+                    "url": "https://paumaps.pau.go.ug/portal/home/",
+                    "access": "official_portal_only",
+                }
+            ],
+        },
+    },
+}
 
 
 def _fetch_json(url: str, retries: int = 3, pause_seconds: float = 1.0) -> dict[str, Any]:
@@ -473,6 +785,7 @@ def upsert_open_data_records(conn: Any, records: Iterable[dict[str, Any]]) -> in
                     record["raw_payload"],
                 ),
             )
+            sync_license_contacts_for_row(conn, record)
             written += 1
     conn.commit()
     return written
@@ -626,6 +939,140 @@ def sync_open_data_sources(
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
         return summary
+    finally:
+        if own_connection and conn is not None:
+            conn.close()
+
+
+def _query_record_origin_stats(conn: Any, record_origin: str) -> dict[tuple[str, str], dict[str, Any]]:
+    stats: dict[tuple[str, str], dict[str, Any]] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                country,
+                sector,
+                COUNT(*) AS record_count,
+                MAX(last_synced_at) AS last_synced_at,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT source_name), NULL) AS source_names
+            FROM licenses
+            WHERE record_origin = %s
+            GROUP BY country, sector
+            """,
+            (record_origin,),
+        )
+        for country, sector, record_count, last_synced_at, source_names in cur.fetchall():
+            stats[(country, sector)] = {
+                "record_count": int(record_count or 0),
+                "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+                "source_names": list(source_names or []),
+            }
+    return stats
+
+
+def _build_syncable_africa_coverage() -> dict[tuple[str, str], dict[str, Any]]:
+    coverage: dict[tuple[str, str], dict[str, Any]] = {}
+    for source in OPEN_DATA_SOURCES:
+        if source.metadata.get("coverage") != "africa":
+            continue
+        key = (source.country, source.sector)
+        entry = coverage.setdefault(
+            key,
+            {
+                "status": "official_syncable",
+                "note": "Official machine-readable source is configured for live sync.",
+                "references": [],
+                "source_ids": [],
+            },
+        )
+        entry["source_ids"].append(source.source_id)
+        entry["references"].append(
+            {
+                "name": source.source_name,
+                "url": source.layer_url,
+                "access": "open_machine_readable",
+            }
+        )
+    return coverage
+
+
+def get_africa_coverage(conn: Any | None = None) -> dict[str, Any]:
+    own_connection = conn is None
+    if conn is None:
+        conn = _default_db_connection()
+
+    try:
+        live_stats = _query_record_origin_stats(conn, "open_data")
+        fallback_stats = _query_record_origin_stats(conn, "user_import_csv")
+        syncable = _build_syncable_africa_coverage()
+        countries: list[dict[str, Any]] = []
+        summary: dict[str, dict[str, int]] = {
+            "mining": {},
+            "oil_and_gas": {},
+        }
+
+        for iso2, country in AFRICAN_COUNTRIES:
+            sector_coverage: dict[str, dict[str, Any]] = {}
+            overrides = AFRICA_COVERAGE_OVERRIDES.get(country, {})
+            for sector in ("mining", "oil_and_gas"):
+                base = {
+                    "status": "unavailable",
+                    "note": "No verified open official registry or portal was confirmed in the current research pass.",
+                    "references": [],
+                    "source_ids": [],
+                    "record_count": 0,
+                    "last_synced_at": None,
+                    "fallback_record_count": 0,
+                    "fallback_last_synced_at": None,
+                    "fallback_sources": [],
+                }
+
+                derived = syncable.get((country, sector))
+                if derived:
+                    base.update(
+                        {
+                            "status": derived["status"],
+                            "note": derived["note"],
+                            "references": list(derived["references"]),
+                            "source_ids": list(derived["source_ids"]),
+                        }
+                    )
+
+                override = overrides.get(sector)
+                if override:
+                    base.update(override)
+                    base["references"] = list(override.get("references", base["references"]))
+                    base["source_ids"] = list(override.get("source_ids", base["source_ids"]))
+
+                stat = live_stats.get((country, sector))
+                if stat:
+                    base["record_count"] = stat["record_count"]
+                    base["last_synced_at"] = stat["last_synced_at"]
+
+                summary_bucket = summary[sector]
+                fallback = fallback_stats.get((country, sector))
+                if fallback:
+                    base["fallback_record_count"] = fallback["record_count"]
+                    base["fallback_last_synced_at"] = fallback["last_synced_at"]
+                    base["fallback_sources"] = fallback["source_names"]
+                    summary_bucket["fallback_imported"] = summary_bucket.get("fallback_imported", 0) + 1
+
+                summary_bucket[base["status"]] = summary_bucket.get(base["status"], 0) + 1
+                sector_coverage[sector] = base
+
+            countries.append(
+                {
+                    "country": country,
+                    "iso2": iso2,
+                    "sectors": sector_coverage,
+                }
+            )
+
+        return {
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "summary": summary,
+            "countries": countries,
+        }
     finally:
         if own_connection and conn is not None:
             conn.close()

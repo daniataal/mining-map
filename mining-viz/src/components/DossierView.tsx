@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, EntityContact, LeadValue, OilHsCategory } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -13,6 +13,8 @@ import {
   Zap as LucideZap,
   User as LucideUser,
   Phone as LucidePhone,
+  Mail as LucideMail,
+  Globe as LucideGlobe,
   Trash2 as LucideTrash2,
   Camera as LucideCamera,
   Share2 as LucideShare2,
@@ -22,9 +24,10 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
 import TradeContext from './TradeContext';
+import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
-import { LeadValue } from '../types';
-import { API_BASE } from '../lib/api';
+import MaritimeContextPanel from './MaritimeContextPanel';
+import { API_BASE, getEntityContacts } from '../lib/api';
 
 interface DossierViewProps {
   isOpen: boolean;
@@ -65,6 +68,14 @@ const LIFECYCLE_TO_STAGE: Record<number, string> = {
   5: 'Rejected',
 };
 
+function inferOilCategory(commodity?: string | null): OilHsCategory {
+  const normalized = (commodity || '').toLowerCase();
+  if (normalized.includes('lng') || normalized.includes('lpg') || normalized.includes('gas')) return 'gas';
+  if (normalized.includes('refin') || normalized.includes('diesel') || normalized.includes('petrol')) return 'refined';
+  if (normalized.includes('oil') || normalized.includes('petroleum') || normalized.includes('crude')) return 'crude';
+  return 'other';
+}
+
 export default function DossierView({
   isOpen,
   onClose,
@@ -80,6 +91,9 @@ export default function DossierView({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingLOI, setIsGeneratingLOI] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [entityContacts, setEntityContacts] = useState<EntityContact[]>([]);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
 
   // CRM edit state
   const [isEditing, setIsEditing] = useState(false);
@@ -106,6 +120,8 @@ export default function DossierView({
   // Current pipeline stage
   const currentStage = annotation.stage || 'New';
   const lifecycleStep = STAGE_TO_LIFECYCLE[currentStage] ?? 0;
+  const isOilAndGas = (item?.sector || '').toLowerCase() === 'oil_and_gas';
+  const oilCategory = inferOilCategory(item?.commodity);
 
   const runAiAnalysis = async () => {
     if (!item) return;
@@ -157,6 +173,43 @@ Output requirements:
     }
   }, [isOpen, item]);
 
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item) {
+      setEntityContacts([]);
+      setContactsError(null);
+      setIsLoadingContacts(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingContacts(true);
+    setContactsError(null);
+
+    getEntityContacts(item.id)
+      .then((contacts) => {
+        if (!isCancelled) {
+          setEntityContacts(contacts);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setEntityContacts([]);
+          setContactsError('Unable to load verified public contacts right now.');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingContacts(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id]);
+
   // Reset edit state when item changes
   useEffect(() => {
     setIsEditing(false);
@@ -183,6 +236,14 @@ Output requirements:
   };
 
   if (!item) return null;
+
+  const publicBusinessContacts = entityContacts.filter(
+    (contact) => (contact.contactScope || 'public_business') === 'public_business'
+  );
+  const publicPhoneContact = publicBusinessContacts.find((contact) => contact.contactType === 'phone');
+  const publicWebsiteContact = publicBusinessContacts.find((contact) => contact.contactType === 'website');
+  const privateLeadName = annotation.contactPerson || item.contactPerson || t('לא ידוע', 'Not identified');
+  const privateLeadPhone = annotation.phoneNumber || item.phoneNumber || '—';
 
   return (
     <AnimatePresence>
@@ -385,9 +446,11 @@ Output requirements:
               </div>
             )}
 
-            {/* TRADE TAB */}
-            {activeTab === 'trade' && (
-              <TradeContext item={item} />
+            {/* EXPORTS / IMPORTS TAB */}
+            {activeTab === 'exports-imports' && (
+              isOilAndGas
+                ? <OilTradeContext country={item.country} category={oilCategory} />
+                : <TradeContext item={item} />
             )}
 
             {/* LOGS TAB */}
@@ -478,6 +541,76 @@ Output requirements:
                     />
                   </div>
                 </div>
+                {isOilAndGas && (
+                  <MaritimeContextPanel
+                    query={{
+                      company: item.company,
+                      country: item.country,
+                      commodity: item.commodity,
+                      lat: item.lat,
+                      lng: item.lng,
+                    }}
+                    section="owners"
+                  />
+                )}
+              </div>
+            )}
+
+            {/* COUNTERPARTIES TAB */}
+            {activeTab === 'counterparties' && (
+              <div className="max-w-3xl space-y-4">
+                {isOilAndGas ? (
+                  <MaritimeContextPanel
+                    query={{
+                      company: item.company,
+                      country: item.country,
+                      commodity: item.commodity,
+                      lat: item.lat,
+                      lng: item.lng,
+                    }}
+                    section="counterparties"
+                  />
+                ) : (
+                  <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                      Counterparty context
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      Counterparty proxies are currently enabled for oil and gas maritime workflows.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* RAW EVIDENCE TAB */}
+            {activeTab === 'raw-evidence' && (
+              <div className="max-w-3xl space-y-4">
+                <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl space-y-3">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    Source provenance
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <SpecItem label="Primary Source" value={item.sourceName || 'Manual / local'} />
+                    <SpecItem label="Source ID" value={item.sourceId || 'N/A'} />
+                    <SpecItem label="Source URL" value={item.sourceUrl || 'N/A'} />
+                    <SpecItem label="Record URL" value={item.sourceRecordUrl || 'N/A'} />
+                    <SpecItem label="Source Updated" value={item.sourceUpdatedAt || 'N/A'} />
+                    <SpecItem label="Last Synced" value={item.lastSyncedAt || 'N/A'} />
+                  </div>
+                </div>
+                {isOilAndGas && (
+                  <MaritimeContextPanel
+                    query={{
+                      company: item.company,
+                      country: item.country,
+                      commodity: item.commodity,
+                      lat: item.lat,
+                      lng: item.lng,
+                    }}
+                    section="evidence"
+                  />
+                )}
               </div>
             )}
 
@@ -630,17 +763,21 @@ Output requirements:
                         value={`$${(annotation.price ?? item.pricePerKg ?? 0).toLocaleString()}`}
                       />
                       <SpecItem
-                        label={t('נקודת מגע', 'Primary Contact')}
+                        label={t('ליד פנימי', 'Internal Lead')}
                         value={
-                          annotation.contactPerson ||
-                          item.contactPerson ||
-                          t('חסוי', 'Confidential')
+                          annotation.contactPerson || item.contactPerson || t('חסוי', 'Confidential')
                         }
                       />
-                      {(item.phoneNumber || annotation.phoneNumber) && (
+                      {publicPhoneContact && (
                         <SpecItem
-                          label={t('טלפון', 'Phone')}
-                          value={annotation.phoneNumber || item.phoneNumber || ''}
+                          label={t('טלפון ציבורי', 'Public Phone')}
+                          value={publicPhoneContact.value}
+                        />
+                      )}
+                      {publicWebsiteContact && (
+                        <SpecItem
+                          label={t('אתר אינטרנט', 'Website')}
+                          value={publicWebsiteContact.value}
                         />
                       )}
                       {item.date && (
@@ -803,48 +940,125 @@ Output requirements:
                   <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-8">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                       <LucideUser className="w-4 h-4 text-amber-500" />{' '}
-                      {t('מודיעין קשר', 'Contact Intelligence')}
+                      {t('אנשי קשר ציבוריים', 'Public Business Contacts')}
                     </h4>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5">
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
-                            {t('איש קשר', 'Direct Lead')}
-                          </span>
-                          <span className="text-sm font-black text-slate-900 dark:text-white">
-                            {annotation.contactPerson ||
-                              item.contactPerson ||
-                              t('לא ידוע', 'Not Identified')}
-                          </span>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
+                      {t(
+                        'מוצגים כאן רק פרטי קשר עסקיים ציבוריים ומבוססי מקור. לא מוצגים מספרים פרטיים או מידע משוער.',
+                        'Only source-backed public business contacts appear here. Private numbers and guessed details are intentionally excluded.'
+                      )}
+                    </p>
+                    <div className="space-y-3">
+                      {isLoadingContacts ? (
+                        <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                          <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            <div className="h-4 w-4 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
+                            {t('טוען מקורות קשר', 'Loading contact sources')}
+                          </div>
                         </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-10 w-10 text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                        >
-                          <LucideUser className="w-4 h-4" />
-                        </Button>
+                      ) : publicBusinessContacts.length > 0 ? (
+                        publicBusinessContacts.map((contact) => {
+                          const href = buildContactHref(contact);
+                          const sourceDate = formatContactTimestamp(contact.verifiedAt || contact.lastSeenAt);
+                          const confidenceLabel = formatConfidenceLabel(contact.confidenceScore);
+                          const ContactIcon = getContactIcon(contact.contactType);
+                          const displayLabel =
+                            contact.label && contact.label.toLowerCase() !== contact.contactType.toLowerCase()
+                              ? contact.label
+                              : formatContactTypeLabel(contact.contactType);
+
+                          return (
+                            <div
+                              key={contact.id}
+                              className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                    <Badge className="bg-amber-500/15 text-amber-500 border-none text-[9px] font-black uppercase">
+                                      {formatContactTypeLabel(contact.contactType)}
+                                    </Badge>
+                                    {confidenceLabel && (
+                                      <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
+                                        {confidenceLabel}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                                    {displayLabel}
+                                  </div>
+                                  {href ? (
+                                    <a
+                                      href={href}
+                                      target={contact.contactType === 'website' ? '_blank' : undefined}
+                                      rel={contact.contactType === 'website' ? 'noreferrer' : undefined}
+                                      className="block text-sm font-black text-slate-900 dark:text-white break-all hover:text-amber-500 transition-colors"
+                                    >
+                                      {contact.value}
+                                    </a>
+                                  ) : (
+                                    <div className="text-sm font-black text-slate-900 dark:text-white break-words">
+                                      {contact.value}
+                                    </div>
+                                  )}
+                                  <div className="mt-3 space-y-1">
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      {contact.sourceName || t('מקור פומבי', 'Public source')}
+                                      {sourceDate ? ` · ${sourceDate}` : ''}
+                                    </p>
+                                    {contact.extractedFrom && (
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 break-all">
+                                        {t('שדה מקור', 'Source field')}: {contact.extractedFrom}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-3 shrink-0">
+                                  <div className="h-10 w-10 rounded-full bg-white/60 dark:bg-slate-950/60 border border-black/5 dark:border-white/5 flex items-center justify-center text-emerald-500">
+                                    <ContactIcon className="w-4 h-4" />
+                                  </div>
+                                  {contact.sourceUrl && (
+                                    <a
+                                      href={contact.sourceUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-[10px] font-black uppercase tracking-widest text-cyan-500 hover:text-cyan-400"
+                                    >
+                                      {t('צפה במקור', 'View source')}
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4">
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">
+                            {t('אין עדיין פרטי קשר ציבוריים מאומתים.', 'No verified public contacts on record yet.')}
+                          </p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                            {t(
+                              'כאשר המקורות הרשמיים לא מפרסמים טלפון, אימייל או אתר ברור, אנחנו משאירים את האזור ריק במקום לנחש.',
+                              'When official/open sources do not publish a clear phone, email, website, or address, this section stays empty instead of guessing.'
+                            )}
+                          </p>
+                        </div>
+                      )}
+
+                      {contactsError && (
+                        <p className="text-[10px] text-red-500 font-bold">{contactsError}</p>
+                      )}
+
+                      <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-white/60 dark:bg-slate-950/60 p-4">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">
+                          {t('הערות ליד פנימיות', 'Internal Lead Notes')}
+                        </div>
+                        <div className="space-y-2">
+                          <ReadRow label={t('איש קשר', 'Lead')} value={privateLeadName} />
+                          <ReadRow label={t('טלפון', 'Phone Note')} value={privateLeadPhone} />
+                        </div>
                       </div>
-                      <a
-                        href={
-                          annotation.phoneNumber || item.phoneNumber
-                            ? `tel:${annotation.phoneNumber || item.phoneNumber}`
-                            : '#'
-                        }
-                        className="flex items-center justify-between p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                      >
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-500 font-black uppercase tracking-widest">
-                            {t('טלפון', 'Phone Line')}
-                          </span>
-                          <span className="text-sm font-black text-slate-900 dark:text-white">
-                            {annotation.phoneNumber || item.phoneNumber || '--- --- ---'}
-                          </span>
-                        </div>
-                        <div className="h-10 w-10 flex items-center justify-center text-emerald-500">
-                          <LucidePhone className="w-4 h-4" />
-                        </div>
-                      </a>
                     </div>
                   </Card>
 
@@ -1028,6 +1242,65 @@ Output requirements:
       )}
     </AnimatePresence>
   );
+}
+
+function formatContactTypeLabel(contactType: string): string {
+  switch (contactType) {
+    case 'phone':
+      return 'Phone';
+    case 'email':
+      return 'Email';
+    case 'website':
+      return 'Website';
+    case 'address':
+      return 'Address';
+    default:
+      return contactType.replaceAll('_', ' ');
+  }
+}
+
+function formatConfidenceLabel(confidence?: number | null): string | null {
+  if (typeof confidence !== 'number' || Number.isNaN(confidence)) {
+    return null;
+  }
+  if (confidence >= 0.9) return 'High confidence';
+  if (confidence >= 0.75) return 'Medium confidence';
+  return 'Review source';
+}
+
+function formatContactTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return `Verified ${parsed.toLocaleDateString()}`;
+}
+
+function buildContactHref(contact: EntityContact): string | null {
+  if (contact.contactType === 'phone') {
+    return `tel:${contact.value}`;
+  }
+  if (contact.contactType === 'email') {
+    return `mailto:${contact.value}`;
+  }
+  if (contact.contactType === 'website') {
+    return /^https?:\/\//i.test(contact.value) ? contact.value : `https://${contact.value}`;
+  }
+  return null;
+}
+
+function getContactIcon(contactType: string) {
+  switch (contactType) {
+    case 'phone':
+      return LucidePhone;
+    case 'email':
+      return LucideMail;
+    case 'website':
+      return LucideGlobe;
+    case 'address':
+      return LucideMapPin;
+    default:
+      return LucideUser;
+  }
 }
 
 function SpecItem({
