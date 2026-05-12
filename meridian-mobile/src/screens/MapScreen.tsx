@@ -199,11 +199,64 @@ function TacticalClusterBubble(props: {
       zIndex={1000}
       tracksViewChanges={tracksViewChanges}
     >
-      <View style={styles.clusterOuter}>
+      <View style={styles.clusterOuter} collapsable={false}>
         <View style={styles.clusterInner}>
           <Text style={styles.clusterText}>{pointCount}</Text>
         </View>
       </View>
+    </Marker>
+  );
+}
+
+function TacticalLicenseMarker(props: {
+  item: JitteredLicense;
+  markerKey: string;
+  styles: ReturnType<typeof createStyles>;
+  onSelectLicense: (item: MiningLicense) => void;
+}) {
+  const { item, markerKey, styles, onSelectLicense } = props;
+  const d = tacticalMarkerDiameterPx(item.commodity);
+  const fill = tacticalMarkerColor(item.commodity);
+  /** Android must snapshot custom marker views once before freezing updates. */
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+
+  useEffect(() => {
+    if (!tracksViewChanges) return;
+    const t = setTimeout(() => setTracksViewChanges(false), 450);
+    return () => clearTimeout(t);
+  }, [tracksViewChanges]);
+
+  return (
+    <Marker
+      key={markerKey}
+      coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
+      onPress={() => onSelectLicense(item)}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={500}
+      tracksViewChanges={tracksViewChanges}
+    >
+      <View
+        collapsable={false}
+        style={{
+          width: d,
+          height: d,
+          borderRadius: d / 2,
+          backgroundColor: fill,
+          borderWidth: 1,
+          borderColor: fill === '#FFD700' ? 'rgba(255, 255, 255, 0.92)' : 'rgba(255, 255, 255, 0.75)',
+        }}
+      />
+      <Callout tooltip onPress={() => onSelectLicense(item)}>
+        <View style={styles.callout}>
+          <Text style={styles.calloutTitle}>{item.company}</Text>
+          <Text style={styles.calloutSubtitle}>
+            {item.commodity} | {item.status}
+          </Text>
+          {item._wasJittered && (
+            <Text style={styles.jitterText}>≈ Approx Location ({item._collocatedCount})</Text>
+          )}
+        </View>
+      </Callout>
     </Marker>
   );
 }
@@ -330,39 +383,14 @@ export default function MapScreen() {
   const licenseMarkers = useMemo(
     () =>
       filteredLicenses.map((item: JitteredLicense, index: number) => {
-        const d = tacticalMarkerDiameterPx(item.commodity);
-        const fill = tacticalMarkerColor(item.commodity);
         return (
-          <Marker
+          <TacticalLicenseMarker
             key={`${item.id}:${index}`}
-            coordinate={{ latitude: item._displayLat!, longitude: item._displayLng! }}
-            onPress={() => onSelectLicense(item)}
-            anchor={{ x: 0.5, y: 0.5 }}
-            zIndex={500}
-            tracksViewChanges={false}
-          >
-            <View
-              style={{
-                width: d,
-                height: d,
-                borderRadius: d / 2,
-                backgroundColor: fill,
-                borderWidth: 1,
-                borderColor: fill === '#FFD700' ? 'rgba(255, 255, 255, 0.92)' : 'rgba(255, 255, 255, 0.75)',
-              }}
-            />
-            <Callout tooltip onPress={() => onSelectLicense(item)}>
-              <View style={styles.callout}>
-                <Text style={styles.calloutTitle}>{item.company}</Text>
-                <Text style={styles.calloutSubtitle}>
-                  {item.commodity} | {item.status}
-                </Text>
-                {item._wasJittered && (
-                  <Text style={styles.jitterText}>≈ Approx Location ({item._collocatedCount})</Text>
-                )}
-              </View>
-            </Callout>
-          </Marker>
+            item={item}
+            markerKey={`${item.id}:${index}`}
+            onSelectLicense={onSelectLicense}
+            styles={styles}
+          />
         );
       }),
     [filteredLicenses, onSelectLicense, styles],

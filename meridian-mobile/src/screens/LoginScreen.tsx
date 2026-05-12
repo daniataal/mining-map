@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { useMeridianTheme, type AppTheme } from '../theme';
-import { login } from '../api';
+import { getApiErrorMessage, login } from '../api';
 import * as SecureStore from 'expo-secure-store';
 import { Anchor } from 'lucide-react-native';
 
@@ -136,9 +136,9 @@ export default function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => 
       await SecureStore.setItemAsync('mining_role', data.role);
       await SecureStore.setItemAsync('mining_userid', data.id);
       onLoginSuccess();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      Alert.alert('Login Failed', err.response?.data?.detail || 'Invalid credentials');
+      Alert.alert('Login Failed', getApiErrorMessage(err, 'Invalid credentials'));
     } finally {
       setLoading(false);
     }
