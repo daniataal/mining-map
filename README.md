@@ -46,6 +46,8 @@ If you see **"Database error"** or permissions issues:
 
 ## 🛠️ Local Development
 
+If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
+
 ### Backend (Python/FastAPI)
 ```bash
 cd backend

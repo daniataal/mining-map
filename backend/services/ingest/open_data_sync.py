@@ -17,6 +17,11 @@ try:
 except ImportError:
     from services.entity_contacts import sync_license_contacts_for_row
 
+try:
+    from backend.services.entity_relationships import sync_license_relationships_for_row
+except ImportError:
+    from services.entity_relationships import sync_license_relationships_for_row
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_USER_AGENT = os.getenv(
@@ -146,6 +151,49 @@ def _zambia_petroleum_region(attrs: dict[str, Any]) -> str:
     )
 
 
+def _fixed_region(label: str) -> Callable[[dict[str, Any]], str]:
+    def builder(_: dict[str, Any]) -> str:
+        return label
+
+    return builder
+
+
+def _megagiant_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(attrs.get("STATE"), attrs.get("REG_NAME"))
+
+
+def _resolve_country(source: "ArcGISOpenDataSource", attrs: dict[str, Any]) -> str:
+    dynamic_country = _coalesce(attrs, source.country_fields)
+    return dynamic_country or source.country
+
+
+def _resolve_source_record_url(
+    source: "ArcGISOpenDataSource",
+    attrs: dict[str, Any],
+    external_ref: str,
+) -> Optional[str]:
+    direct = _coalesce(attrs, source.source_record_url_fields)
+    if direct:
+        return direct
+    if not source.layer_url:
+        return None
+    return _build_source_record_url(source.layer_url, external_ref)
+
+
+def _source_summary_note(source: "ArcGISOpenDataSource") -> str:
+    explicit = _clean_text(source.metadata.get("summary_note"))
+    if explicit:
+        return explicit
+
+    jurisdiction_label = _clean_text(source.metadata.get("jurisdiction_label"))
+    jurisdiction_scope = _clean_text(source.metadata.get("jurisdiction_scope")) or "country"
+    if jurisdiction_scope == "subnational" and jurisdiction_label:
+        return f"Official machine-readable source is configured for {jurisdiction_label} only."
+    if jurisdiction_scope == "federal" and jurisdiction_label:
+        return f"Official machine-readable source is configured for {jurisdiction_label}."
+    return "Official machine-readable source is configured for live sync."
+
+
 @dataclass(frozen=True)
 class ArcGISOpenDataSource:
     source_id: str
@@ -155,20 +203,24 @@ class ArcGISOpenDataSource:
     country: str
     external_id_fields: tuple[str, ...]
     company_fields: tuple[str, ...]
+    country_fields: tuple[str, ...] = ()
     commodity_fields: tuple[str, ...] = ()
     license_type_fields: tuple[str, ...] = ()
     status_fields: tuple[str, ...] = ()
     issued_fields: tuple[str, ...] = ()
     updated_fields: tuple[str, ...] = ()
     region_builder: Optional[Callable[[dict[str, Any]], str]] = None
+    source_record_url_fields: tuple[str, ...] = ()
     default_commodity: str = ""
     default_license_type: str = ""
     default_status: str = "Active"
+    record_origin: str = "open_data"
     where: str = "1=1"
     order_by: Optional[str] = None
     max_records: Optional[int] = None
     page_size: int = 250
     request_pause_seconds: float = 0.0
+    sync_contacts: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -233,6 +285,160 @@ def _zambia_mining_sources() -> tuple[ArcGISOpenDataSource, ...]:
             },
         )
         for layer_id, layer_name in layers
+    )
+
+
+def _new_zealand_petroleum_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="new_zealand_petroleum_active_permits",
+        source_name="New Zealand Petroleum Active Permits",
+        layer_url="https://gis.nzpam.govt.nz/server/rest/services/Public/Permits_Petroleum_Layers/FeatureServer/1",
+        sector="oil_and_gas",
+        country="New Zealand",
+        external_id_fields=("Permit_Number", "OBJECTID"),
+        company_fields=("Operator", "Owners", "Permit_Number"),
+        commodity_fields=("Minerals", "Commodity"),
+        license_type_fields=("Permit_Type_Description", "Permit_Type_Code"),
+        status_fields=("Permit_Status",),
+        issued_fields=("Permit_Grant_Date", "Permit_Commencement_Date"),
+        updated_fields=("Permit_Status_Date",),
+        region_builder=lambda attrs: _join_parts(
+            attrs.get("Permit_Location"),
+            attrs.get("Permit_Offshore_Onshore"),
+        ),
+        default_commodity="Oil & Gas",
+        default_license_type="Petroleum permit",
+        default_status="Active",
+        order_by="Permit_Status_Date DESC",
+        page_size=500,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "world",
+            "summary_note": "Official machine-readable source is configured for New Zealand petroleum active permits.",
+        },
+    )
+
+
+def _british_columbia_mining_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="british_columbia_mineral_tenure",
+        source_name="British Columbia Mineral Tenure",
+        layer_url="https://delivery.maps.gov.bc.ca/arcgis/rest/services/mpcm/bcgwpub/MapServer/213",
+        sector="mining",
+        country="Canada",
+        external_id_fields=("TENURE_NUMBER_ID", "OBJECTID"),
+        company_fields=("OWNER_NAME", "CLAIM_NAME", "TENURE_NUMBER_ID"),
+        license_type_fields=("TENURE_TYPE_DESCRIPTION",),
+        issued_fields=("ISSUE_DATE",),
+        updated_fields=("UPDATE_TIMESTAMP",),
+        region_builder=_fixed_region("British Columbia"),
+        default_commodity="Minerals",
+        default_license_type="Mineral tenure",
+        default_status="Active",
+        order_by="UPDATE_TIMESTAMP DESC",
+        max_records=5000,
+        page_size=1000,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "world",
+            "jurisdiction_scope": "subnational",
+            "jurisdiction_label": "British Columbia",
+            "summary_note": "Official machine-readable source is configured for British Columbia mineral tenure only.",
+            "note": "Capped for MVP because the live provincial tenure layer is large.",
+        },
+    )
+
+
+def _canada_northern_oil_rights_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="canada_northern_oil_gas_rights",
+        source_name="Canada Northern Oil and Gas Rights",
+        layer_url="https://services.sac-isc.gc.ca/geomatics/rest/services/Donnees_Ouvertes-Open_Data/Droits_petroliers_et_gaziers_Oil_and_Gas_Rights/FeatureServer/0",
+        sector="oil_and_gas",
+        country="Canada",
+        external_id_fields=("LICENCE_NUMBER", "OBJECTID"),
+        company_fields=("LICENCE_NUMBER",),
+        license_type_fields=("AGRMT_TYPE_E",),
+        issued_fields=("LICENCE_ISSUE_DATE",),
+        region_builder=lambda attrs: _join_parts(attrs.get("REGION_E"), attrs.get("AGRMT_TYPE_E")),
+        default_commodity="Oil & Gas",
+        default_license_type="Oil & Gas Right",
+        default_status="Current",
+        page_size=500,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "world",
+            "jurisdiction_scope": "subnational",
+            "jurisdiction_label": "Canada northern oil and gas rights areas",
+            "summary_note": "Official machine-readable source is configured for Canada's northern oil and gas rights areas.",
+        },
+    )
+
+
+def _usgs_mrds_global_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="usgs_mrds_global",
+        source_name="USGS Mineral Resources Data System (MRDS)",
+        layer_url="https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/Mineral_Resources_Data_System_MRDS_Compact_Version/FeatureServer/0",
+        sector="mining",
+        country="Global",
+        external_id_fields=("DEP_ID", "OBJECTID"),
+        company_fields=("SITE_NAME", "DEP_ID"),
+        country_fields=("COUNTRY",),
+        commodity_fields=("CODE_LIST",),
+        status_fields=("DEV_STAT",),
+        source_record_url_fields=("URL",),
+        default_commodity="Minerals",
+        default_license_type="Mine / occurrence",
+        default_status="Recorded site",
+        record_origin="global_open_fallback",
+        order_by="OBJECTID ASC",
+        max_records=15000,
+        page_size=2000,
+        sync_contacts=False,
+        metadata={
+            "kind": "global_open_fallback",
+            "coverage": "world",
+            "summary_note": (
+                "Open global mining site/deposit visibility from USGS MRDS. "
+                "Not an official licence or concession registry."
+            ),
+            "note": (
+                "MRDS remains a useful global mining fallback but USGS notes that systematic updates ceased after 2011. "
+                "The live sync is capped for MVP volume."
+            ),
+        },
+    )
+
+
+def _megagiant_oil_gas_fields_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="megagiant_oil_gas_fields_world",
+        source_name="Megagiant Oil & Gas Fields of the World",
+        layer_url="https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/Megagiant_Oil_Gas_Fields_of_the_World/FeatureServer/0",
+        sector="oil_and_gas",
+        country="Global",
+        external_id_fields=("FIELD_ID", "ObjectId"),
+        company_fields=("FLD_NAME", "FIELD_ID"),
+        country_fields=("COUNTRY",),
+        commodity_fields=("FIELD_TYPE",),
+        status_fields=("SIZE_CLASS",),
+        region_builder=_megagiant_region,
+        default_commodity="Oil & Gas",
+        default_license_type="Oil & Gas Field",
+        default_status="Field",
+        record_origin="global_open_fallback",
+        page_size=1000,
+        sync_contacts=False,
+        metadata={
+            "kind": "global_open_fallback",
+            "coverage": "world",
+            "summary_note": (
+                "Open global petroleum fallback for major oil and gas fields. "
+                "Not an official licence or block registry."
+            ),
+            "note": "Coverage is biased toward very large fields and does not represent full terminal, lease, or permit coverage.",
+        },
     )
 
 
@@ -367,6 +573,11 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
         page_size=100,
         metadata={"kind": "official_arcgis_registry", "coverage": "africa"},
     ),
+    _new_zealand_petroleum_source(),
+    _british_columbia_mining_source(),
+    _canada_northern_oil_rights_source(),
+    _usgs_mrds_global_source(),
+    _megagiant_oil_gas_fields_source(),
 )
 
 
@@ -668,6 +879,7 @@ def normalize_feature(source: ArcGISOpenDataSource, feature: dict[str, Any]) -> 
     commodity = _coalesce(attrs, source.commodity_fields) or source.default_commodity or source.sector.replace("_", " ").title()
     license_type = _coalesce(attrs, source.license_type_fields) or source.default_license_type or "License"
     status = _coalesce(attrs, source.status_fields) or source.default_status or "Active"
+    country = _resolve_country(source, attrs)
     region = source.region_builder(attrs) if source.region_builder else ""
     issued_at = None
     for field_name in source.issued_fields:
@@ -683,7 +895,7 @@ def normalize_feature(source: ArcGISOpenDataSource, feature: dict[str, Any]) -> 
     return {
         "id": f"{source.source_id}:{external_ref}",
         "company": company,
-        "country": source.country,
+        "country": country,
         "region": region,
         "commodity": commodity,
         "license_type": license_type,
@@ -692,11 +904,11 @@ def normalize_feature(source: ArcGISOpenDataSource, feature: dict[str, Any]) -> 
         "lng": lng,
         "date_issued": issued_at,
         "sector": source.sector,
-        "record_origin": "open_data",
+        "record_origin": source.record_origin,
         "source_id": source.source_id,
         "source_name": source.source_name,
         "source_url": source.layer_url,
-        "source_record_url": _build_source_record_url(source.layer_url, external_ref),
+        "source_record_url": _resolve_source_record_url(source, attrs, external_ref),
         "source_updated_at": source_updated_at.isoformat() if source_updated_at else None,
         "raw_payload": json.dumps(attrs, ensure_ascii=True, sort_keys=True, default=str),
     }
@@ -758,7 +970,12 @@ UPSERT_SQL = """
 """
 
 
-def upsert_open_data_records(conn: Any, records: Iterable[dict[str, Any]]) -> int:
+def upsert_open_data_records(
+    conn: Any,
+    records: Iterable[dict[str, Any]],
+    *,
+    sync_contacts: bool = True,
+) -> int:
     written = 0
     with conn.cursor() as cur:
         for record in records:
@@ -785,7 +1002,9 @@ def upsert_open_data_records(conn: Any, records: Iterable[dict[str, Any]]) -> in
                     record["raw_payload"],
                 ),
             )
-            sync_license_contacts_for_row(conn, record)
+            if sync_contacts:
+                sync_license_contacts_for_row(conn, record)
+                sync_license_relationships_for_row(conn, record)
             written += 1
     conn.commit()
     return written
@@ -922,7 +1141,7 @@ def sync_open_data_sources(
             try:
                 features = fetch_arcgis_features(source)
                 records = _dedupe_by_id(normalize_feature(source, feature) for feature in features)
-                written = upsert_open_data_records(conn, records)
+                written = upsert_open_data_records(conn, records, sync_contacts=source.sync_contacts)
                 summary["records_fetched"] += len(features)
                 summary["records_written"] += written
                 summary["sources"].append(
@@ -954,33 +1173,137 @@ def _query_record_origin_stats(conn: Any, record_origin: str) -> dict[tuple[str,
                 sector,
                 COUNT(*) AS record_count,
                 MAX(last_synced_at) AS last_synced_at,
-                ARRAY_REMOVE(ARRAY_AGG(DISTINCT source_name), NULL) AS source_names
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT source_name), NULL) AS source_names,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT source_id), NULL) AS source_ids
             FROM licenses
             WHERE record_origin = %s
             GROUP BY country, sector
             """,
             (record_origin,),
         )
-        for country, sector, record_count, last_synced_at, source_names in cur.fetchall():
+        for country, sector, record_count, last_synced_at, source_names, source_ids in cur.fetchall():
             stats[(country, sector)] = {
                 "record_count": int(record_count or 0),
                 "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
                 "source_names": list(source_names or []),
+                "source_ids": list(source_ids or []),
             }
     return stats
 
 
-def _build_syncable_africa_coverage() -> dict[tuple[str, str], dict[str, Any]]:
+def _query_source_stats(conn: Any) -> dict[str, dict[str, Any]]:
+    stats: dict[str, dict[str, Any]] = {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                source_id,
+                COUNT(*) AS record_count,
+                MAX(last_synced_at) AS last_synced_at,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT country), NULL) AS countries_seen
+            FROM licenses
+            WHERE source_id IS NOT NULL
+              AND source_id != ''
+            GROUP BY source_id
+            """
+        )
+        for source_id, record_count, last_synced_at, countries_seen in cur.fetchall():
+            stats[source_id] = {
+                "record_count": int(record_count or 0),
+                "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+                "countries_seen": list(countries_seen or []),
+            }
+    return stats
+
+
+def get_source_registry_index() -> dict[str, dict[str, Any]]:
+    registry: dict[str, dict[str, Any]] = {}
+    for source in OPEN_DATA_SOURCES:
+        kind = _clean_text(source.metadata.get("kind")) or "official_arcgis_registry"
+        if kind == "official_arcgis_registry":
+            source_kind = "official_registry"
+            source_access = _clean_text(source.metadata.get("source_access")) or "open_machine_readable"
+            coverage_state = "official_syncable"
+            provenance_note = _source_summary_note(source)
+        else:
+            source_kind = "global_open_fallback"
+            source_access = _clean_text(source.metadata.get("source_access")) or "open_machine_readable"
+            coverage_state = "global_fallback_only"
+            provenance_note = _clean_text(source.metadata.get("summary_note")) or (
+                "Open global dataset provides broad site visibility but is not an official licence registry."
+            )
+
+        registry[source.source_id] = {
+            "source_kind": source_kind,
+            "source_access": source_access,
+            "coverage_state": coverage_state,
+            "provenance_note": provenance_note,
+            "coverage_scope": source.metadata.get("coverage") or "world",
+            "jurisdiction_scope": source.metadata.get("jurisdiction_scope") or "country",
+            "jurisdiction_label": source.metadata.get("jurisdiction_label"),
+            "note": source.metadata.get("note"),
+        }
+    return registry
+
+
+def describe_license_source_record(source_id: Optional[str], record_origin: Optional[str]) -> dict[str, Any]:
+    registry = get_source_registry_index()
+    if source_id and source_id in registry:
+        return dict(registry[source_id])
+    normalized_origin = (record_origin or "").strip().lower()
+    if normalized_origin == "user_import_csv":
+        return {
+            "source_kind": "user_import_csv",
+            "source_access": "user_import",
+            "coverage_state": "user_import_csv",
+            "provenance_note": "User-imported CSV fallback. Not an official live registry sync.",
+            "coverage_scope": "ad_hoc",
+            "jurisdiction_scope": "ad_hoc",
+            "jurisdiction_label": None,
+            "note": None,
+        }
+    if normalized_origin == "bundled_json":
+        return {
+            "source_kind": "bundled_json",
+            "source_access": "bundled_snapshot",
+            "coverage_state": "bundled_json",
+            "provenance_note": "Bundled JSON snapshot fallback used when live sources are unavailable.",
+            "coverage_scope": "snapshot",
+            "jurisdiction_scope": "snapshot",
+            "jurisdiction_label": None,
+            "note": None,
+        }
+    return {
+        "source_kind": "unknown",
+        "source_access": "unknown",
+        "coverage_state": "unknown",
+        "provenance_note": None,
+        "coverage_scope": "unknown",
+        "jurisdiction_scope": "unknown",
+        "jurisdiction_label": None,
+        "note": None,
+    }
+
+
+def _build_syncable_source_coverage(
+    predicate: Optional[Callable[[ArcGISOpenDataSource], bool]] = None,
+) -> dict[tuple[str, str], dict[str, Any]]:
     coverage: dict[tuple[str, str], dict[str, Any]] = {}
     for source in OPEN_DATA_SOURCES:
-        if source.metadata.get("coverage") != "africa":
+        if source.record_origin != "open_data":
+            continue
+        if source.metadata.get("kind") != "official_arcgis_registry":
+            continue
+        if predicate and not predicate(source):
+            continue
+        if not source.country or source.country == "Global":
             continue
         key = (source.country, source.sector)
         entry = coverage.setdefault(
             key,
             {
                 "status": "official_syncable",
-                "note": "Official machine-readable source is configured for live sync.",
+                "note": _source_summary_note(source),
                 "references": [],
                 "source_ids": [],
             },
@@ -990,10 +1313,164 @@ def _build_syncable_africa_coverage() -> dict[tuple[str, str], dict[str, Any]]:
             {
                 "name": source.source_name,
                 "url": source.layer_url,
-                "access": "open_machine_readable",
+                "access": source.metadata.get("source_access") or "open_machine_readable",
             }
         )
     return coverage
+
+
+def _build_syncable_africa_coverage() -> dict[tuple[str, str], dict[str, Any]]:
+    return _build_syncable_source_coverage(
+        lambda source: source.metadata.get("coverage") == "africa"
+    )
+
+
+def _build_world_source_catalog(conn: Any) -> list[dict[str, Any]]:
+    registry = get_source_registry_index()
+    stats = _query_source_stats(conn)
+    catalog: list[dict[str, Any]] = []
+    for source in OPEN_DATA_SOURCES:
+        meta = registry.get(source.source_id, {})
+        live = stats.get(source.source_id, {})
+        catalog.append(
+            {
+                "source_id": source.source_id,
+                "source_name": source.source_name,
+                "sector": source.sector,
+                "country": source.country,
+                "source_url": source.layer_url,
+                "source_kind": meta.get("source_kind"),
+                "source_access": meta.get("source_access"),
+                "coverage_state": meta.get("coverage_state"),
+                "coverage_scope": meta.get("coverage_scope"),
+                "jurisdiction_scope": meta.get("jurisdiction_scope"),
+                "jurisdiction_label": meta.get("jurisdiction_label"),
+                "provenance_note": meta.get("provenance_note"),
+                "note": meta.get("note"),
+                "record_count": live.get("record_count", 0),
+                "last_synced_at": live.get("last_synced_at"),
+                "countries_seen": live.get("countries_seen", []),
+            }
+        )
+    return sorted(
+        catalog,
+        key=lambda item: (
+            item.get("sector") or "",
+            item.get("source_kind") or "",
+            item.get("country") or "",
+            item.get("source_name") or "",
+        ),
+    )
+
+
+def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
+    own_connection = conn is None
+    if conn is None:
+        conn = _default_db_connection()
+
+    try:
+        official_stats = _query_record_origin_stats(conn, "open_data")
+        global_fallback_stats = _query_record_origin_stats(conn, "global_open_fallback")
+        user_import_stats = _query_record_origin_stats(conn, "user_import_csv")
+        syncable = _build_syncable_source_coverage()
+        countries_seen = {country for _, country in AFRICAN_COUNTRIES}
+        countries_seen.update(country for country, _sector in syncable.keys())
+        countries_seen.update(country for country, _sector in official_stats.keys())
+        countries_seen.update(country for country, _sector in global_fallback_stats.keys())
+        countries_seen.update(country for country, _sector in user_import_stats.keys())
+
+        countries: list[dict[str, Any]] = []
+        summary: dict[str, dict[str, int]] = {
+            "mining": {},
+            "oil_and_gas": {},
+        }
+
+        africa_overrides = AFRICA_COVERAGE_OVERRIDES
+
+        for country in sorted(countries_seen):
+            sector_coverage: dict[str, dict[str, Any]] = {}
+            overrides = africa_overrides.get(country, {})
+            for sector in ("mining", "oil_and_gas"):
+                base = {
+                    "status": "unavailable",
+                    "note": "No verified open official registry or global fallback is configured yet for this country and sector.",
+                    "references": [],
+                    "source_ids": [],
+                    "record_count": 0,
+                    "last_synced_at": None,
+                    "fallback_record_count": 0,
+                    "fallback_last_synced_at": None,
+                    "fallback_sources": [],
+                    "global_fallback_record_count": 0,
+                    "global_fallback_last_synced_at": None,
+                    "global_fallback_sources": [],
+                }
+
+                derived = syncable.get((country, sector))
+                if derived:
+                    base.update(
+                        {
+                            "status": derived["status"],
+                            "note": derived["note"],
+                            "references": list(derived["references"]),
+                            "source_ids": list(derived["source_ids"]),
+                        }
+                    )
+
+                override = overrides.get(sector)
+                if override:
+                    base.update(override)
+                    base["references"] = list(override.get("references", base["references"]))
+                    base["source_ids"] = list(override.get("source_ids", base["source_ids"]))
+
+                official = official_stats.get((country, sector))
+                if official:
+                    base["record_count"] = official["record_count"]
+                    base["last_synced_at"] = official["last_synced_at"]
+
+                summary_bucket = summary[sector]
+
+                global_fallback = global_fallback_stats.get((country, sector))
+                if global_fallback:
+                    base["global_fallback_record_count"] = global_fallback["record_count"]
+                    base["global_fallback_last_synced_at"] = global_fallback["last_synced_at"]
+                    base["global_fallback_sources"] = global_fallback["source_names"]
+                    summary_bucket["countries_with_global_fallback"] = (
+                        summary_bucket.get("countries_with_global_fallback", 0) + 1
+                    )
+                    if base["status"] == "unavailable":
+                        base["status"] = "global_fallback_only"
+                        base["note"] = (
+                            "No verified open official registry is configured right now; "
+                            "global fallback datasets provide site or field visibility here."
+                        )
+
+                imported = user_import_stats.get((country, sector))
+                if imported:
+                    base["fallback_record_count"] = imported["record_count"]
+                    base["fallback_last_synced_at"] = imported["last_synced_at"]
+                    base["fallback_sources"] = imported["source_names"]
+                    summary_bucket["fallback_imported"] = summary_bucket.get("fallback_imported", 0) + 1
+
+                summary_bucket[base["status"]] = summary_bucket.get(base["status"], 0) + 1
+                sector_coverage[sector] = base
+
+            countries.append(
+                {
+                    "country": country,
+                    "sectors": sector_coverage,
+                }
+            )
+
+        return {
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "summary": summary,
+            "countries": countries,
+            "sources": _build_world_source_catalog(conn),
+        }
+    finally:
+        if own_connection and conn is not None:
+            conn.close()
 
 
 def get_africa_coverage(conn: Any | None = None) -> dict[str, Any]:

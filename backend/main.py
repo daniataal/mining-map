@@ -4,14 +4,14 @@ from fastapi.responses import StreamingResponse
 import json
 import psycopg2
 from psycopg2 import sql
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 import time
 import os
 import csv
 import io
 import uuid
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
 
 from country_borders import get_country_borders_geojson, parse_requested_countries
@@ -26,6 +26,48 @@ def _load_entity_contact_services():
     except ImportError:
         from services.entity_contacts import sync_all_license_contacts, sync_license_contacts
     return sync_all_license_contacts, sync_license_contacts
+
+
+def _load_entity_relationship_services():
+    try:
+        from backend.services.entity_relationships import (
+            sync_all_license_relationships,
+            sync_license_relationships,
+        )
+    except ImportError:
+        from services.entity_relationships import (
+            sync_all_license_relationships,
+            sync_license_relationships,
+        )
+    return sync_all_license_relationships, sync_license_relationships
+
+
+def _load_entity_contact_helpers():
+    try:
+        from backend.services.entity_contacts import (
+            build_license_contact_candidates,
+            upsert_entity_contact_candidates,
+        )
+    except ImportError:
+        from services.entity_contacts import (
+            build_license_contact_candidates,
+            upsert_entity_contact_candidates,
+        )
+    return build_license_contact_candidates, upsert_entity_contact_candidates
+
+
+def _load_dd_services():
+    try:
+        from backend.services.dd.orchestrator import (
+            build_promotable_contact_candidates,
+            generate_dd_report,
+        )
+    except ImportError:
+        from services.dd.orchestrator import (
+            build_promotable_contact_candidates,
+            generate_dd_report,
+        )
+    return generate_dd_report, build_promotable_contact_candidates
 
 
 def _serialize_entity_contact(row: dict) -> dict:
@@ -45,6 +87,197 @@ def _serialize_entity_contact(row: dict) -> dict:
         "extractedFrom": row.get("extracted_from"),
         "verifiedAt": row.get("verified_at"),
         "lastSeenAt": row.get("last_seen_at"),
+    }
+
+
+def _serialize_entity_relationship(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "sourceEntityKind": row.get("source_entity_kind"),
+        "sourceEntityRef": row.get("source_entity_ref"),
+        "targetEntityKind": row.get("target_entity_kind"),
+        "targetEntityRef": row.get("target_entity_ref"),
+        "targetName": row.get("target_name"),
+        "relationshipType": row.get("relationship_type") or row.get("rel_type"),
+        "relationshipLabel": row.get("relationship_label"),
+        "ownershipPct": row.get("ownership_pct"),
+        "effectiveDate": row.get("effective_date"),
+        "sourceName": row.get("source_name"),
+        "sourceUrl": row.get("source_url"),
+        "sourceType": row.get("source_type"),
+        "confidenceScore": row.get("confidence_score"),
+        "rawPayload": row.get("raw_payload"),
+        "extractedFrom": row.get("extracted_from"),
+        "verifiedAt": row.get("verified_at"),
+        "lastSeenAt": row.get("last_seen_at"),
+    }
+
+
+def _serialize_dd_contact(contact: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contactType": contact.get("contact_type"),
+        "value": contact.get("value"),
+        "label": contact.get("label"),
+        "contactScope": contact.get("contact_scope"),
+        "contactRole": contact.get("contact_role"),
+        "sourceName": contact.get("source_name"),
+        "sourceUrl": contact.get("source_url"),
+        "evidenceSnippet": contact.get("evidence_snippet"),
+        "extractedFrom": contact.get("extracted_from"),
+        "sourceBasis": contact.get("source_basis"),
+        "confidence": contact.get("confidence"),
+        "verifiedAt": contact.get("verified_at"),
+        "autoPromoted": contact.get("auto_promoted"),
+        "promotedContactId": contact.get("promoted_contact_id"),
+    }
+
+
+def _serialize_dd_report(row: dict) -> dict:
+    source_snapshot = row.get("source_snapshot") if isinstance(row.get("source_snapshot"), dict) else {}
+    source_summary = source_snapshot.get("source") if isinstance(source_snapshot.get("source"), dict) else {}
+    extracted_contacts = row.get("extracted_contacts")
+    if not isinstance(extracted_contacts, list):
+        extracted_contacts = []
+    promoted_contacts = row.get("promoted_contacts")
+    if not isinstance(promoted_contacts, list):
+        promoted_contacts = []
+
+    return {
+        "id": row.get("id"),
+        "entityKind": row.get("entity_kind"),
+        "entityId": row.get("entity_id"),
+        "status": row.get("status"),
+        "provider": row.get("provider"),
+        "model": row.get("model"),
+        "extractionProvider": row.get("extraction_provider"),
+        "extractionModel": row.get("extraction_model"),
+        "promptVersion": row.get("prompt_version"),
+        "analysis": row.get("analysis_text"),
+        "sourceSummary": {
+            "sourceName": source_summary.get("source_name"),
+            "sourceUrl": source_summary.get("source_url"),
+            "sourceRecordUrl": source_summary.get("source_record_url"),
+            "recordOrigin": source_summary.get("record_origin"),
+            "lastSyncedAt": source_summary.get("last_synced_at"),
+        },
+        "extractedContacts": [
+            _serialize_dd_contact(contact)
+            for contact in extracted_contacts
+            if isinstance(contact, dict)
+        ],
+        "promotedContacts": promoted_contacts,
+        "createdAt": row.get("created_at"),
+    }
+
+
+def _safe_json_load(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _normalize_promoted_lookup_key(contact_type: str, value: Any, source_url: Any) -> tuple[str, str, str]:
+    normalized_type = (contact_type or "").strip().lower()
+    raw_value = str(value or "").strip()
+    if normalized_type == "phone":
+        normalized_value = "".join(ch for ch in raw_value if ch.isdigit())
+    elif normalized_type == "website":
+        normalized_value = raw_value.lower().removeprefix("https://").removeprefix("http://").rstrip("/")
+    else:
+        normalized_value = raw_value.lower()
+    return normalized_type, normalized_value, str(source_url or "").strip().lower()
+
+
+def _annotate_dd_contacts(
+    extracted_contacts: list[dict[str, Any]],
+    promoted_candidates: list[dict[str, Any]],
+    *,
+    default_source_name: Optional[str],
+    default_source_url: Optional[str],
+) -> list[dict[str, Any]]:
+    promoted_lookup = {
+        _normalize_promoted_lookup_key(
+            candidate.get("contact_type"),
+            candidate.get("value"),
+            candidate.get("source_url"),
+        ): candidate
+        for candidate in promoted_candidates
+    }
+    annotated: list[dict[str, Any]] = []
+    for contact in extracted_contacts:
+        merged = dict(contact)
+        if not merged.get("source_name"):
+            merged["source_name"] = default_source_name
+        if not merged.get("source_url"):
+            merged["source_url"] = default_source_url
+        promoted = promoted_lookup.get(
+            _normalize_promoted_lookup_key(
+                merged.get("contact_type"),
+                merged.get("value"),
+                merged.get("source_url"),
+            )
+        )
+        merged["auto_promoted"] = promoted is not None
+        merged["promoted_contact_id"] = promoted.get("id") if promoted else None
+        annotated.append(merged)
+    return annotated
+
+
+def _load_license_dd_snapshot(conn, entity_id: str) -> Optional[dict[str, Any]]:
+    build_license_contact_candidates, _ = _load_entity_contact_helpers()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("SELECT * FROM licenses WHERE id = %s", (entity_id,))
+        row = cur.fetchone()
+    if not row:
+        return None
+
+    raw_payload = _safe_json_load(row.get("raw_payload"))
+    contact_row = dict(row)
+    contact_row["raw_payload"] = raw_payload
+    source_backed_contacts = [
+        {
+            "contact_type": contact.get("contact_type"),
+            "value": contact.get("value"),
+            "label": contact.get("label"),
+            "source_name": contact.get("source_name"),
+            "source_url": contact.get("source_url"),
+            "source_type": contact.get("source_type"),
+            "confidence_score": contact.get("confidence_score"),
+            "extracted_from": contact.get("extracted_from"),
+        }
+        for contact in build_license_contact_candidates(contact_row)
+    ]
+
+    return {
+        "entity": {
+            "id": row.get("id"),
+            "company": row.get("company"),
+            "country": row.get("country"),
+            "region": row.get("region"),
+            "commodity": row.get("commodity"),
+            "sector": row.get("sector") or "mining",
+            "license_type": row.get("license_type"),
+            "status": row.get("status"),
+        },
+        "source": {
+            "record_origin": row.get("record_origin"),
+            "source_name": row.get("source_name"),
+            "source_url": row.get("source_url"),
+            "source_record_url": row.get("source_record_url"),
+            "source_updated_at": row.get("source_updated_at"),
+            "last_synced_at": row.get("last_synced_at"),
+        },
+        "legacy_license_fields": {
+            "phone_number": row.get("phone_number"),
+            "contact_person": row.get("contact_person"),
+        },
+        "source_backed_contacts": source_backed_contacts,
+        "raw_payload": raw_payload,
     }
 
 
@@ -430,6 +663,36 @@ def init_db():
             );
         """)
 
+        # Persisted AI due-diligence runs. We keep the rendered analysis plus
+        # source snapshot and any structured contacts extracted from it so the
+        # dossier can be reloaded without re-running the model.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dd_reports (
+                id VARCHAR(255) PRIMARY KEY,
+                entity_kind VARCHAR(50) NOT NULL DEFAULT 'license',
+                entity_id VARCHAR(255) NOT NULL,
+                status VARCHAR(50) NOT NULL,
+                provider TEXT,
+                model TEXT,
+                extraction_provider TEXT,
+                extraction_model TEXT,
+                prompt_version TEXT,
+                query TEXT,
+                analysis_text TEXT,
+                request_context JSONB,
+                source_snapshot JSONB,
+                extracted_contacts JSONB,
+                promoted_contacts JSONB,
+                analysis_raw_response JSONB,
+                extraction_raw_response JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_dd_reports_entity_created
+            ON dd_reports (entity_kind, entity_id, created_at DESC);
+        """)
+
         # General, source-backed contact store. This is separate from private
         # CRM notes so the dossier can surface reviewable public business
         # numbers/emails/sites without guessing or mixing in internal notes.
@@ -552,6 +815,32 @@ def init_db():
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_updated_at TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS raw_payload TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;")
+            # Normalized relationship layer for cross-sector role transparency.
+            # We preserve the old rel_type/source_entity_id columns for backward
+            # compatibility and add richer source-backed provenance fields here.
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS fingerprint TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS source_entity_kind VARCHAR(50) DEFAULT 'entity';")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS source_entity_ref VARCHAR(255);")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS target_entity_kind VARCHAR(50) DEFAULT 'entity';")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS target_entity_ref VARCHAR(255);")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS target_name TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS relationship_type VARCHAR(100);")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS relationship_label TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS ownership_pct FLOAT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS effective_date TIMESTAMP;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS source_name TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS source_url TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS source_type TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.0;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS raw_payload JSONB;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS extracted_from TEXT;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint) WHERE fingerprint IS NOT NULL;")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);")
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -709,13 +998,13 @@ import threading
 import time
 
 def _bootstrap_open_data():
-    """One-shot startup bootstrap for live open-data sources.
+    """One-shot startup bootstrap for live official + fallback sources.
 
     Historical behaviour deleted the entire table every day and reloaded a
     bundled JSON file. That kept the app pinned to imported snapshot data.
     The new bootstrap keeps the existing schema/UI intact, upserts official
-    open-data rows, and only falls back to the bundled JSON if all live
-    source fetches fail.
+    open-data rows plus configured global fallback datasets, and only falls
+    back to the bundled JSON if all live source fetches fail.
     """
     time.sleep(3)
 
@@ -728,7 +1017,7 @@ def _bootstrap_open_data():
         summary = sync_open_data_sources()
         print(
             f"[OpenData] Synced {summary.get('records_written', 0)} normalized records "
-            f"from {len(summary.get('sources', []))} official sources."
+            f"from {len(summary.get('sources', []))} configured sources."
         )
         for error in summary.get("errors", []):
             print(f"[OpenData] Source warning: {error}")
@@ -750,6 +1039,19 @@ def _bootstrap_open_data():
             )
         except Exception as exc:
             print(f"[OpenData] Oil trade seeding skipped: {exc}")
+
+        try:
+            try:
+                from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
+            except ImportError:
+                from services.storage_terminals import get_storage_terminals as warm_storage_terminals
+            storage_summary = warm_storage_terminals(force_refresh=False)
+            print(
+                f"[OpenData] Storage terminal cache ready with "
+                f"{storage_summary.get('stats', {}).get('total', 0)} entities."
+            )
+        except Exception as exc:
+            print(f"[OpenData] Storage terminal warmup skipped: {exc}")
     except Exception as exc:
         print(f"[OpenData] Bootstrap failed: {exc}")
 
@@ -956,20 +1258,38 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             if (row.get("sector") or "mining").strip().lower() == normalized_sector
         ]
 
-    # Once live/open records exist for the current sector, hide the old bundled
-    # JSON snapshot rows from the primary map feed. Manual / CSV imports remain.
-    has_open_data_rows = any((row.get("record_origin") or "").lower() == "open_data" for row in rows)
-    if prefer_open_data and has_open_data_rows:
+    # Once live/open or global fallback rows exist for the current sector, hide
+    # the old bundled JSON snapshot rows from the primary map feed. Manual /
+    # CSV imports remain visible because they are user-supplied.
+    preferred_live_origins = {"open_data", "global_open_fallback"}
+    has_preferred_live_rows = any((row.get("record_origin") or "").lower() in preferred_live_origins for row in rows)
+    if prefer_open_data and has_preferred_live_rows:
         rows = [
             row for row in rows
             if (row.get("record_origin") or "").lower() != "bundled_json"
         ]
-    
+
+    try:
+        try:
+            from backend.services.ingest.open_data_sync import describe_license_source_record
+        except ImportError:
+            from services.ingest.open_data_sync import describe_license_source_record
+    except Exception:
+        describe_license_source_record = None
+
     # Transform to list of dicts with keys matching what the Reac app expects
     results = []
     for row in rows:
         keys = row.keys()
         display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(row, cached_geo)
+        provenance = (
+            describe_license_source_record(
+                row["source_id"] if "source_id" in keys else None,
+                row["record_origin"] if "record_origin" in keys else None,
+            )
+            if describe_license_source_record
+            else {}
+        )
         results.append({
             "id": row["id"],
             "company": row["company"],
@@ -991,6 +1311,11 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
             "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
             "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
+            "sourceKind": provenance.get("source_kind"),
+            "sourceAccess": provenance.get("source_access"),
+            "coverageState": provenance.get("coverage_state"),
+            "provenanceNote": provenance.get("provenance_note"),
+            "entityKind": "license",
             # Geocoding provenance — read-only on the frontend; drives the
             # "≈ approx location" badge and lets users distinguish surveyed
             # points from district-centroid backfills.
@@ -1049,6 +1374,105 @@ def read_entity_contacts(entity_id: str, entity_kind: str = "license"):
             (entity_id, entity_kind),
         )
         return [_serialize_entity_contact(row) for row in c.fetchall()]
+    except Exception as e:
+        conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/dd/latest")
+def read_latest_dd_report(entity_id: str, entity_kind: str = "license"):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        c.execute(
+            """
+            SELECT
+                id,
+                entity_kind,
+                entity_id,
+                status,
+                provider,
+                model,
+                extraction_provider,
+                extraction_model,
+                prompt_version,
+                analysis_text,
+                source_snapshot,
+                extracted_contacts,
+                promoted_contacts,
+                created_at
+            FROM dd_reports
+            WHERE entity_id = %s
+              AND entity_kind = %s
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (entity_id, entity_kind),
+        )
+        row = c.fetchone()
+        return _serialize_dd_report(row) if row else None
+    except Exception as e:
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/relationships")
+def read_entity_relationships(entity_id: str, entity_kind: str = "license"):
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        if (entity_kind or "").strip().lower() == "license":
+            _, sync_license_relationships = _load_entity_relationship_services()
+            sync_license_relationships(conn, entity_id)
+            conn.commit()
+
+        c.execute(
+            """
+            SELECT
+                COALESCE(fingerprint, id::text) AS id,
+                source_entity_kind,
+                source_entity_ref,
+                target_entity_kind,
+                target_entity_ref,
+                target_name,
+                COALESCE(relationship_type, rel_type) AS relationship_type,
+                relationship_label,
+                ownership_pct,
+                effective_date,
+                source_name,
+                source_url,
+                source_type,
+                confidence_score,
+                raw_payload,
+                extracted_from,
+                verified_at,
+                last_seen_at
+            FROM entity_relationships
+            WHERE source_entity_ref = %s
+              AND source_entity_kind = %s
+            ORDER BY
+                CASE COALESCE(relationship_type, rel_type)
+                    WHEN 'beneficial_owner' THEN 1
+                    WHEN 'parent_company' THEN 2
+                    WHEN 'subsidiary' THEN 3
+                    WHEN 'owner' THEN 4
+                    WHEN 'license_holder' THEN 5
+                    WHEN 'operator' THEN 6
+                    WHEN 'manager' THEN 7
+                    WHEN 'charterer' THEN 8
+                    WHEN 'trader' THEN 9
+                    WHEN 'counterparty' THEN 10
+                    ELSE 99
+                END,
+                confidence_score DESC NULLS LAST,
+                COALESCE(target_name, '') ASC
+            """,
+            (entity_id, entity_kind),
+        )
+        return [_serialize_entity_relationship(row) for row in c.fetchall()]
     except Exception as e:
         conn.rollback()
         return Response(str(e), status_code=500)
@@ -1339,6 +1763,8 @@ _LICENSE_IMPORT_HEADER_ALIASES: dict[str, str] = {
     "country": "country",
     "region": "region",
     "commodity": "commodity",
+    "main_commodity": "commodity",
+    "maincommodity": "commodity",
     "license_type": "license_type",
     "licensetype": "license_type",
     "status": "status",
@@ -1591,7 +2017,37 @@ def import_licenses_text(body: LicenseImportTextBody):
 def export_licenses():
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute("SELECT * FROM licenses")
+    c.execute(
+        """
+        SELECT
+            licenses.*,
+            public_phone.value AS public_business_phone,
+            public_phone.source_name AS public_business_phone_source,
+            public_phone.source_type AS public_business_phone_source_type
+        FROM licenses
+        LEFT JOIN LATERAL (
+            SELECT
+                value,
+                source_name,
+                source_type
+            FROM entity_contacts
+            WHERE entity_id = licenses.id
+              AND entity_kind = 'license'
+              AND contact_type = 'phone'
+              AND contact_scope = 'public_business'
+            ORDER BY
+                CASE source_type
+                    WHEN 'official_open_data' THEN 1
+                    WHEN 'source_backed_record' THEN 2
+                    WHEN 'llm_extracted_from_source' THEN 3
+                    ELSE 4
+                END,
+                confidence_score DESC NULLS LAST,
+                last_seen_at DESC NULLS LAST
+            LIMIT 1
+        ) AS public_phone ON TRUE
+        """
+    )
     rows = c.fetchall()
     conn.close()
 
@@ -1599,7 +2055,23 @@ def export_licenses():
     writer = csv.writer(output)
     
     # Write Header
-    headers = ["id", "company", "country", "region", "commodity", "license_type", "status", "lat", "lng", "phone_number", "contact_person", "date_issued"]
+    headers = [
+        "id",
+        "company",
+        "country",
+        "region",
+        "commodity",
+        "license_type",
+        "status",
+        "lat",
+        "lng",
+        "phone_number",
+        "contact_person",
+        "public_business_phone",
+        "public_business_phone_source",
+        "public_business_phone_source_type",
+        "date_issued",
+    ]
     writer.writerow(headers)
     
     # Write Data
@@ -1607,7 +2079,9 @@ def export_licenses():
         writer.writerow([
             row["id"], row["company"], row["country"], row["region"], row["commodity"], 
             row["license_type"], row["status"], row["lat"], row["lng"], 
-            row["phone_number"], row["contact_person"], row["date_issued"]
+            row["phone_number"], row["contact_person"], row["public_business_phone"],
+            row["public_business_phone_source"], row["public_business_phone_source_type"],
+            row["date_issued"]
         ])
     
     output.seek(0)
@@ -1780,52 +2254,149 @@ class AIRequest(BaseModel):
 @app.post("/api/ai/analyze")
 def analyze_with_ai(request: AIRequest):
     """
-    Executes the AI Waterfall. 
-    Cascade: Groq -> OpenRouter -> Pollinations (Free Proxy)
+    Executes the AI DD pipeline.
+    For dossier runs we persist the rendered analysis plus any structured,
+    source-backed contact extraction for future reuse.
     """
-    providers = [
-        {"name": "Groq", "url": "https://api.groq.com/openai/v1/chat/completions", "key": os.getenv("GROQ_API_KEY")},
-        {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1/chat/completions", "key": os.getenv("OPENROUTER_API_KEY")}
-    ]
+    generate_dd_report, build_promotable_contact_candidates = _load_dd_services()
+    _, upsert_entity_contact_candidates = _load_entity_contact_helpers()
 
-    system_prompt = (
-        "You are an elite intelligence analyst evaluating global entities across multiple sectors (mining, oil & gas, logistics, ports). "
-        "Decide GO / NO GO / ESCALATE with evidence, avoiding hype. Give a risk score 1–10 (10 = do not proceed). "
-        "Cover: operational viability, compliance, supply chain risks, and market context. "
-        "Reply in Markdown only. Use ## for main sections. Keep paragraphs short (2–4 sentences). "
-        "Put basic facts in bullets, not huge tables. Use one compact table only for risk breakdown "
-        "(Category | Score | One-line rationale). Number tactical steps. "
-        "Call out what must be verified with primary sources or regulators. Tone: direct, scannable, objective, plain language."
-    )
+    context = request.context or {}
+    entity_kind = (context.get("entity_kind") or context.get("entityKind") or "license").strip().lower()
+    entity_id = context.get("item_id") or context.get("itemId") or context.get("entity_id") or context.get("entityId")
+    should_persist = context.get("type") == "DOSSIER" and bool(entity_id)
 
-    # Attempt Cascade
-    import requests
-    for provider in providers:
-        if provider["key"]:
-            try:
-                headers = {"Authorization": f"Bearer {provider['key']}", "Content-Type": "application/json"}
-                payload = {
-                    "model": "llama3-70b-8192" if provider["name"] == "Groq" else "meta-llama/llama-3-8b-instruct:free",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": request.query}
-                    ]
-                }
-                response = requests.post(provider["url"], headers=headers, json=payload, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    content = data['choices'][0]['message']['content']
-                    return {"status": "success", "provider": provider["name"], "analysis": content}
-            except Exception as e:
-                print(f"Provider {provider['name']} failed: {e}")
-
-    # Ultimate Fallback (Free Proxy)
+    conn = None
     try:
-        url = f"https://text.pollinations.ai/{requests.utils.quote(system_prompt + ' ' + request.query)}"
-        response = requests.get(url, timeout=20)
-        return {"status": "success", "provider": "Pollinations (Fallback)", "analysis": response.text}
-    except:
-        return {"status": "error", "message": "All intelligence providers are offline."}
+        source_snapshot = None
+        source_summary = {}
+        if should_persist:
+            conn = get_db_connection()
+            if entity_kind == "license":
+                source_snapshot = _load_license_dd_snapshot(conn, entity_id)
+            if isinstance(source_snapshot, dict):
+                source_summary = source_snapshot.get("source") if isinstance(source_snapshot.get("source"), dict) else {}
+
+        report = generate_dd_report(request.query, source_snapshot)
+        if report.get("status") != "success" or not report.get("analysis"):
+            return {"status": "error", "message": report.get("message") or "All intelligence providers are offline."}
+
+        serialized_report = None
+        if should_persist and conn is not None:
+            report_id = str(uuid.uuid4())
+            promoted_candidates = build_promotable_contact_candidates(
+                entity_kind=entity_kind,
+                entity_id=entity_id,
+                extracted_contacts=report.get("extracted_contacts", []),
+                default_source_name=source_summary.get("source_name"),
+                default_source_url=source_summary.get("source_record_url") or source_summary.get("source_url"),
+                report_id=report_id,
+            )
+            if promoted_candidates:
+                upsert_entity_contact_candidates(conn, promoted_candidates)
+
+            annotated_contacts = _annotate_dd_contacts(
+                report.get("extracted_contacts", []),
+                promoted_candidates,
+                default_source_name=source_summary.get("source_name"),
+                default_source_url=source_summary.get("source_record_url") or source_summary.get("source_url"),
+            )
+            promoted_contacts_payload = [
+                {
+                    "id": candidate.get("id"),
+                    "contactType": candidate.get("contact_type"),
+                    "value": candidate.get("value"),
+                    "sourceName": candidate.get("source_name"),
+                    "sourceUrl": candidate.get("source_url"),
+                    "sourceType": candidate.get("source_type"),
+                    "confidenceScore": candidate.get("confidence_score"),
+                }
+                for candidate in promoted_candidates
+            ]
+            created_at = datetime.utcnow()
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO dd_reports (
+                        id,
+                        entity_kind,
+                        entity_id,
+                        status,
+                        provider,
+                        model,
+                        extraction_provider,
+                        extraction_model,
+                        prompt_version,
+                        query,
+                        analysis_text,
+                        request_context,
+                        source_snapshot,
+                        extracted_contacts,
+                        promoted_contacts,
+                        analysis_raw_response,
+                        extraction_raw_response,
+                        created_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        report_id,
+                        entity_kind,
+                        entity_id,
+                        report.get("status"),
+                        report.get("provider"),
+                        report.get("model"),
+                        report.get("extraction_provider"),
+                        report.get("extraction_model"),
+                        report.get("prompt_version"),
+                        request.query,
+                        report.get("analysis"),
+                        Json(context),
+                        Json(source_snapshot) if source_snapshot is not None else None,
+                        Json(annotated_contacts),
+                        Json(promoted_contacts_payload),
+                        Json(report.get("analysis_raw_response")) if report.get("analysis_raw_response") is not None else None,
+                        Json(report.get("extraction_raw_response")) if report.get("extraction_raw_response") is not None else None,
+                        created_at,
+                    ),
+                )
+
+            conn.commit()
+            serialized_report = _serialize_dd_report(
+                {
+                    "id": report_id,
+                    "entity_kind": entity_kind,
+                    "entity_id": entity_id,
+                    "status": report.get("status"),
+                    "provider": report.get("provider"),
+                    "model": report.get("model"),
+                    "extraction_provider": report.get("extraction_provider"),
+                    "extraction_model": report.get("extraction_model"),
+                    "prompt_version": report.get("prompt_version"),
+                    "analysis_text": report.get("analysis"),
+                    "source_snapshot": source_snapshot,
+                    "extracted_contacts": annotated_contacts,
+                    "promoted_contacts": promoted_contacts_payload,
+                    "created_at": created_at,
+                }
+            )
+
+        return {
+            "status": "success",
+            "provider": report.get("provider"),
+            "analysis": report.get("analysis"),
+            "ddReport": serialized_report,
+        }
+    except Exception as e:
+        if conn is not None:
+            conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        if conn is not None:
+            conn.close()
 
 # --- Deal Execution: LOI Generator ---
 
@@ -2658,12 +3229,108 @@ def get_maritime_context(
             "nearest_ports": [],
             "evidence": [],
             "identity": None,
+            "relationships": [],
             "counterparty_proxies": [],
             "bol_coverage_note": (
                 "Bill-of-lading buyer/seller coverage is not reliably available from free/open sources."
             ),
             "limitations": [f"Maritime context failed: {exc}"],
         }
+
+
+@app.get("/api/storage/terminals")
+def get_storage_terminals(force_refresh: bool = False):
+    """Live open/global storage terminal feed for the oil-and-gas view."""
+    try:
+        try:
+            from backend.services.storage_terminals import get_storage_terminals as build_storage_terminals
+        except ImportError:
+            from services.storage_terminals import get_storage_terminals as build_storage_terminals
+        return build_storage_terminals(force_refresh=force_refresh)
+    except Exception as exc:
+        return {
+            "entities": [],
+            "source_labels": ["OpenStreetMap", "Overpass", "UN/LOCODE"],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "coverage_note": "Storage-terminal feed failed before any live global entities could be returned.",
+            "limitations": [f"Storage terminal feed failed: {exc}"],
+            "stats": {
+                "total": 0,
+                "countries": 0,
+                "with_operator": 0,
+                "with_capacity": 0,
+                "with_nearby_port": 0,
+                "high_confidence": 0,
+                "by_subtype": {},
+                "top_countries": [],
+            },
+        }
+
+
+@app.get("/api/storage/terminals/{terminal_id:path}")
+def get_storage_terminal_detail(terminal_id: str):
+    try:
+        try:
+            from backend.services.storage_terminals import get_storage_terminal_details
+        except ImportError:
+            from services.storage_terminals import get_storage_terminal_details
+
+        result = get_storage_terminal_details(terminal_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Storage terminal not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Storage terminal detail failed: {exc}")
+
+
+@app.get("/api/logistics/ports")
+def get_port_logistics_entities(force_refresh: bool = False):
+    """Global open/free port and logistics-node feed for the ports view."""
+    try:
+        try:
+            from backend.services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
+        except ImportError:
+            from services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
+        return build_port_logistics_entities(force_refresh=force_refresh)
+    except Exception as exc:
+        return {
+            "entities": [],
+            "source_labels": ["UN/LOCODE", "OpenStreetMap", "GDELT DOC 2.0"],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "coverage_note": "Port/logistics feed failed before any live global entities could be returned.",
+            "limitations": [f"Port/logistics feed failed: {exc}"],
+            "stats": {
+                "total": 0,
+                "countries": 0,
+                "ports": 0,
+                "with_locode": 0,
+                "with_nearby_port": 0,
+                "high_confidence": 0,
+                "by_subtype": {},
+                "top_countries": [],
+                "map_render_limit": 3000,
+            },
+        }
+
+
+@app.get("/api/logistics/ports/{entity_id:path}")
+def get_port_logistics_detail(entity_id: str):
+    try:
+        try:
+            from backend.services.port_logistics import get_port_logistics_details
+        except ImportError:
+            from services.port_logistics import get_port_logistics_details
+
+        result = get_port_logistics_details(entity_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Port/logistics entity not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Port/logistics detail failed: {exc}")
 
 
 # ======================================================================
@@ -2928,6 +3595,19 @@ def get_africa_open_data_coverage():
             from services.ingest.open_data_sync import get_africa_coverage
 
         return get_africa_coverage()
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/open-data/coverage/world")
+def get_world_open_data_coverage():
+    try:
+        try:
+            from backend.services.ingest.open_data_sync import get_world_coverage
+        except ImportError:
+            from services.ingest.open_data_sync import get_world_coverage
+
+        return get_world_coverage()
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

@@ -8,9 +8,16 @@ import {
   OilSummaryResponse,
   OilTradeFlow,
   AfricaCoverageResponse,
+  WorldCoverageResponse,
   EntityContact,
+  EntityRelationship,
+  DdReport,
   MaritimeVesselFeedResponse,
   MaritimeContextResponse,
+  StorageTerminalDetails,
+  StorageTerminalResponse,
+  PortLogisticsDetails,
+  PortLogisticsResponse,
 } from '../types';
 import bundledLicenses from '../data/licenses.json';
 
@@ -154,6 +161,26 @@ export async function getEntityContacts(entityId: string, entityKind = 'license'
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+export async function getEntityRelationships(entityId: string, entityKind = 'license'): Promise<EntityRelationship[]> {
+  const { data } = await apiClient.get<EntityRelationship[]>(
+    `/entities/${encodeURIComponent(entityId)}/relationships`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getLatestDdReport(entityId: string, entityKind = 'license'): Promise<DdReport | null> {
+  const { data } = await apiClient.get<DdReport | null>(
+    `/entities/${encodeURIComponent(entityId)}/dd/latest`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  return data && typeof data === 'object' ? data : null;
 }
 
 export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {
@@ -440,11 +467,75 @@ export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true)
   });
 };
 
+export const useStorageTerminals = (enabled = true) => {
+  return useQuery<StorageTerminalResponse>({
+    queryKey: ['storage-terminals'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals');
+      return data;
+    },
+    enabled,
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const useStorageTerminalDetails = (terminalId?: string, enabled = true) => {
+  return useQuery<StorageTerminalDetails>({
+    queryKey: ['storage-terminal-detail', terminalId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<StorageTerminalDetails>(
+        `/api/storage/terminals/${encodeURIComponent(terminalId || '')}`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(terminalId),
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const usePortLogisticsEntities = (enabled = true) => {
+  return useQuery<PortLogisticsResponse>({
+    queryKey: ['port-logistics-entities'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortLogisticsResponse>('/api/logistics/ports');
+      return data;
+    },
+    enabled,
+    staleTime: 30 * 60_000,
+  });
+};
+
+export const usePortLogisticsDetails = (entityId?: string, enabled = true) => {
+  return useQuery<PortLogisticsDetails>({
+    queryKey: ['port-logistics-detail', entityId],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortLogisticsDetails>(
+        `/api/logistics/ports/${encodeURIComponent(entityId || '')}`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(entityId),
+    staleTime: 15 * 60_000,
+  });
+};
+
 export const useAfricaCoverage = (enabled = true) => {
   return useQuery<AfricaCoverageResponse>({
     queryKey: ['africa-coverage'],
     queryFn: async () => {
       const { data } = await apiClient.get<AfricaCoverageResponse>('/api/open-data/coverage/africa');
+      return data;
+    },
+    enabled,
+    staleTime: 15 * 60_000,
+  });
+};
+
+export const useWorldCoverage = (enabled = true) => {
+  return useQuery<WorldCoverageResponse>({
+    queryKey: ['world-coverage'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<WorldCoverageResponse>('/api/open-data/coverage/world');
       return data;
     },
     enabled,

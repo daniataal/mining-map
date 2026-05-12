@@ -7,6 +7,7 @@ import { Badge } from './ui/badge';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { useI18n } from '../lib/i18n';
+import EntityRelationshipPanel from './EntityRelationshipPanel';
 import {
   AlertTriangle as IconAlert,
   Anchor as IconAnchor,
@@ -94,6 +95,7 @@ export default function MaritimeContextPanel({
   const showOwners = visibleSections.has('owners');
   const showCounterparties = visibleSections.has('counterparties');
   const showEvidence = visibleSections.has('evidence');
+  const normalizedRelationships = data.relationships || [];
 
   return (
     <div className="space-y-4">
@@ -117,26 +119,13 @@ export default function MaritimeContextPanel({
             </h4>
           </div>
 
-          {data.identity ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
-                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Owner</p>
-                <p className="text-sm font-bold text-slate-100">{data.identity.owner || 'Not found in open match'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
-                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Operator</p>
-                <p className="text-sm font-bold text-slate-100">{data.identity.operator || 'Not found in open match'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
-                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Flag</p>
-                <p className="text-sm font-bold text-slate-100">{data.identity.flag || 'Unknown'}</p>
-              </div>
-              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
-                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Match Quality</p>
-                <p className="text-sm font-bold text-slate-100">
-                  {data.identity.matched_by || 'Open match'} · {fmtConfidence(data.identity.confidence)}
-                </p>
-              </div>
+          {normalizedRelationships.length > 0 ? (
+            <div className="mb-4">
+              <EntityRelationshipPanel
+                relationships={normalizedRelationships}
+                emptyTitle="No maritime role split found"
+                emptyMessage="No source-backed owner/operator split was found in the open maritime sources for this query."
+              />
             </div>
           ) : (
             <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 mb-4">
@@ -149,6 +138,25 @@ export default function MaritimeContextPanel({
                   'No MMSI/IMO ownership match was found in the open sources we can use here. Registry links below are provided for manual follow-up.'
                 )}
               </p>
+            </div>
+          )}
+
+          {data.identity && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Flag</p>
+                <p className="text-sm font-bold text-slate-100">{data.identity.flag || 'Unknown'}</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Registry Port</p>
+                <p className="text-sm font-bold text-slate-100">{data.identity.registry_port || 'Unknown'}</p>
+              </div>
+              <div className="rounded-2xl border border-white/5 bg-black/10 p-4 md:col-span-2">
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Match Quality</p>
+                <p className="text-sm font-bold text-slate-100">
+                  {data.identity.matched_by || 'Open match'} · {fmtConfidence(data.identity.confidence)}
+                </p>
+              </div>
             </div>
           )}
 

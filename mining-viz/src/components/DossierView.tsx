@@ -1,6 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation, EntityContact, LeadValue, OilHsCategory } from '../types';
+import {
+  MiningLicense,
+  UserAnnotation,
+  EntityContact,
+  EntityRelationship,
+  DdReport,
+  LeadValue,
+  OilHsCategory,
+  MarketTickerRow,
+} from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -27,14 +36,24 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import MaritimeContextPanel from './MaritimeContextPanel';
-import { API_BASE, getEntityContacts } from '../lib/api';
+import PortLogisticsPanel from './PortLogisticsPanel';
+import EntityRelationshipPanel from './EntityRelationshipPanel';
+import {
+  API_BASE,
+  getEntityContacts,
+  getEntityRelationships,
+  getLatestDdReport,
+  useStorageTerminalDetails,
+} from '../lib/api';
+import { getLicenseCommodityLabels } from '../lib/commodities';
+import { getCommodityMarketSnapshot } from '../lib/commodityMarket';
 
 interface DossierViewProps {
   isOpen: boolean;
   onClose: () => void;
   item: MiningLicense | null;
   annotation: UserAnnotation;
-  marketPrices: any[];
+  marketPrices: MarketTickerRow[];
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDeleteLicense?: () => void;
 }
@@ -92,36 +111,61 @@ export default function DossierView({
   const [isGeneratingLOI, setIsGeneratingLOI] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [entityContacts, setEntityContacts] = useState<EntityContact[]>([]);
+  const [entityRelationships, setEntityRelationships] = useState<EntityRelationship[]>([]);
+  const [latestDdReport, setLatestDdReport] = useState<DdReport | null>(null);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
+  const [isLoadingDdReport, setIsLoadingDdReport] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
+  const [selectedCommodity, setSelectedCommodity] = useState('');
 
   // CRM edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<UserAnnotation>>({});
 
-  // Gold/silver from ticker: COMEX-style USD/troy oz (same as GC=F / SI=F feed)
-  const goldPriceObj = marketPrices.find(p => p.symbol === 'GOLD/oz');
-  const goldPricePerOz = goldPriceObj
-    ? parseFloat(goldPriceObj.price.replace(/[$,]/g, '').replace(/—/g, ''))
-    : NaN;
-  const goldSpotOk = Number.isFinite(goldPricePerOz) && goldPricePerOz > 100;
-  const rawGoldPricePerKg = goldSpotOk ? goldPricePerOz * 32.1507 : NaN;
-  const discount = 0.12;
-  const logistics = 2400;
-  const netGoldProfit = goldSpotOk ? rawGoldPricePerKg * (1 - discount) - logistics : NaN;
+  const effectiveCommodityRaw = useMemo(() => {
+    const annotated = (annotation.commodity ?? '').trim();
+    const base = (item?.commodity ?? '').trim();
+    return annotated || base;
+  }, [annotation.commodity, item?.commodity]);
 
-  const silverPriceObj = marketPrices.find(p => p.symbol === 'SILVER/oz');
-  const silverPricePerOz = silverPriceObj
-    ? parseFloat(silverPriceObj.price.replace(/[$,]/g, '').replace(/—/g, ''))
-    : NaN;
-  const silverSpotOk = Number.isFinite(silverPricePerOz) && silverPricePerOz > 1;
-  const silverPricePerKg = silverSpotOk ? silverPricePerOz * 32.1507 : NaN;
+  const commodityLabels = useMemo(
+    () =>
+      item
+        ? getLicenseCommodityLabels(item.commodity, annotation.commodity).filter(
+            (label) => label !== 'Unknown'
+          )
+        : [],
+    [annotation.commodity, item?.commodity]
+  );
+  const primaryCommodityLabel = commodityLabels[0] || '';
+  const activeCommodityLabel = selectedCommodity || primaryCommodityLabel;
+  const commodityListLabel = effectiveCommodityRaw || activeCommodityLabel || 'Unknown';
+  const commoditySummaryLabel =
+    commodityLabels.length === 0
+      ? 'Unknown'
+      : commodityLabels.length === 1
+        ? commodityLabels[0]
+        : `${commodityLabels[0]} +${commodityLabels.length - 1}`;
+  const commoditySearchLabel = activeCommodityLabel || commodityListLabel;
+  const activeCommodityMarket = useMemo(
+    () => getCommodityMarketSnapshot(activeCommodityLabel, marketPrices),
+    [activeCommodityLabel, marketPrices]
+  );
 
   // Current pipeline stage
   const currentStage = annotation.stage || 'New';
   const lifecycleStep = STAGE_TO_LIFECYCLE[currentStage] ?? 0;
   const isOilAndGas = (item?.sector || '').toLowerCase() === 'oil_and_gas';
-  const oilCategory = inferOilCategory(item?.commodity);
+  const isStorageTerminal = item?.entityKind === 'storage_terminal';
+  const isPortLogistics = item?.entityKind === 'port' || item?.entityKind === 'logistics_node';
+  const oilCategory = inferOilCategory(effectiveCommodityRaw);
+  const { data: storageTerminalDetails, isLoading: isLoadingStorageTerminal } =
+    useStorageTerminalDetails(
+      isStorageTerminal ? item?.id : undefined,
+      Boolean(isOpen && isStorageTerminal && item?.id)
+    );
 
   const runAiAnalysis = async () => {
     if (!item) return;
@@ -136,16 +180,19 @@ export default function DossierView({
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          query: `Analyze the intelligence potential, risks, and operational profile for ${item.company} located in ${item.region}, ${item.country}. Sector: ${item.sector || 'Mining'}. Primary commodity/focus: ${item.commodity}. Entity Type: ${item.licenseType}. Entity ID: ${item.id}.
+          query: `Analyze the intelligence potential, risks, and operational profile for ${item.company} located in ${item.region}, ${item.country}. Sector: ${item.sector || 'Mining'}. Primary commodity/focus: ${commodityListLabel}. Entity Type: ${item.licenseType}. Entity ID: ${item.id}.
 
 Output requirements:
 - Use Markdown only. Start with "## Entity Snapshot" and 4–6 short bullet lines (company, location, sector, focus, entity type, ID, status note).
 - Then "## Operational Analysis", "## Risk Rating" (give X/10 and a compact table: Category | Score | One-line why), and "## Tactical Recommendation" (numbered steps, plain language).
 - Keep paragraphs to 2–4 sentences. Avoid dense pipe tables except the risk matrix. Flag items that must be verified through raw evidence.`,
-          context: { type: 'DOSSIER', item_id: item.id },
+          context: { type: 'DOSSIER', item_id: item.id, entity_kind: item.entityKind || 'license' },
         }),
       });
       const data = await res.json();
+      if (data?.ddReport && typeof data.ddReport === 'object') {
+        setLatestDdReport(data.ddReport as DdReport);
+      }
       setAiAnalysis(
         data.analysis || data.response || 'No tactical data available for this site.'
       );
@@ -158,7 +205,6 @@ Output requirements:
 
   useEffect(() => {
     if (isOpen && item) {
-      if (!aiAnalysis) runAiAnalysis();
       fetch(`${API_BASE}/activity/logs?limit=50`)
         .then(r => r.json())
         .then(logs =>
@@ -176,6 +222,45 @@ Output requirements:
   useEffect(() => {
     let isCancelled = false;
     if (!isOpen || !item) {
+      setLatestDdReport(null);
+      setAiAnalysis('');
+      setIsLoadingDdReport(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingDdReport(true);
+    getLatestDdReport(item.id, item.entityKind || 'license')
+      .then((report) => {
+        if (isCancelled) return;
+        setLatestDdReport(report);
+        if (report?.analysis?.trim()) {
+          setAiAnalysis(report.analysis);
+          return;
+        }
+        void runAiAnalysis();
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setLatestDdReport(null);
+          void runAiAnalysis();
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingDdReport(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item) {
       setEntityContacts([]);
       setContactsError(null);
       setIsLoadingContacts(false);
@@ -187,7 +272,7 @@ Output requirements:
     setIsLoadingContacts(true);
     setContactsError(null);
 
-    getEntityContacts(item.id)
+    getEntityContacts(item.id, item.entityKind || 'license')
       .then((contacts) => {
         if (!isCancelled) {
           setEntityContacts(contacts);
@@ -209,6 +294,53 @@ Output requirements:
       isCancelled = true;
     };
   }, [isOpen, item?.id]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item) {
+      setEntityRelationships([]);
+      setRelationshipsError(null);
+      setIsLoadingRelationships(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingRelationships(true);
+    setRelationshipsError(null);
+
+    getEntityRelationships(item.id, item.entityKind || 'license')
+      .then((relationships) => {
+        if (!isCancelled) {
+          setEntityRelationships(relationships);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setEntityRelationships([]);
+          setRelationshipsError('Unable to load ownership and operator roles right now.');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingRelationships(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id]);
+
+  useEffect(() => {
+    if (commodityLabels.length === 0) {
+      setSelectedCommodity('');
+      return;
+    }
+    setSelectedCommodity((current) =>
+      commodityLabels.includes(current) ? current : commodityLabels[0]
+    );
+  }, [commodityLabels, item?.id]);
 
   // Reset edit state when item changes
   useEffect(() => {
@@ -236,14 +368,43 @@ Output requirements:
   };
 
   if (!item) return null;
+  const terminalDetails = isStorageTerminal ? { ...item, ...(storageTerminalDetails || {}) } : item;
 
   const publicBusinessContacts = entityContacts.filter(
     (contact) => (contact.contactScope || 'public_business') === 'public_business'
   );
   const publicPhoneContact = publicBusinessContacts.find((contact) => contact.contactType === 'phone');
   const publicWebsiteContact = publicBusinessContacts.find((contact) => contact.contactType === 'website');
+  const ddExtractedContacts = latestDdReport?.extractedContacts || [];
+  const ddAutoPromotedPhones = ddExtractedContacts.filter(
+    (contact) => contact.contactType === 'phone' && contact.autoPromoted
+  );
+  const ddLastRunLabel = formatDdTimestamp(latestDdReport?.createdAt);
   const privateLeadName = annotation.contactPerson || item.contactPerson || t('לא ידוע', 'Not identified');
   const privateLeadPhone = annotation.phoneNumber || item.phoneNumber || '—';
+  const sourceKindLabel = formatSourceKindLabel(terminalDetails.sourceKind);
+  const coverageStateLabel = formatCoverageStateLabel(terminalDetails.coverageState);
+  const roleLabelMap: Record<string, string> = {
+    beneficial_owner: 'Beneficial owner',
+    parent_company: 'Parent company',
+    subsidiary: 'Subsidiary',
+    owner: 'Owner',
+    license_holder: 'License holder',
+    operator: 'Operator',
+    manager: 'Manager',
+    charterer: 'Charterer',
+    trader: 'Trader',
+    counterparty: 'Counterparty',
+  };
+  const roleSummary = Array.from(
+    new Set(
+      entityRelationships
+        .map((relationship) => relationship.relationshipType)
+        .filter(Boolean)
+        .map((role) => roleLabelMap[role] || role.replaceAll('_', ' '))
+    )
+  ).join(' · ');
+  const ownershipStatusLabel = roleSummary || 'Source-backed split pending';
 
   return (
     <AnimatePresence>
@@ -263,8 +424,13 @@ Output requirements:
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
-                    {item.commodity}
+                    {commoditySummaryLabel}
                   </Badge>
+                  {commodityLabels.length > 1 && (
+                    <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
+                      {t('רב-סחורה', 'Multi-commodity')}
+                    </Badge>
+                  )}
                   {item.sector && (
                     <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
                       {item.sector.replaceAll('_', ' ')}
@@ -273,6 +439,11 @@ Output requirements:
                   {item.sourceName && (
                     <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
                       {item.sourceName}
+                    </Badge>
+                  )}
+                  {sourceKindLabel && (
+                    <Badge className={getSourceKindBadgeClass(terminalDetails.sourceKind)}>
+                      {sourceKindLabel}
                     </Badge>
                   )}
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
@@ -493,8 +664,8 @@ Output requirements:
                 <SpecItem label="License Type" value={item.licenseType || 'N/A'} />
                 <SpecItem
                   label="Commodity"
-                  value={item.commodity || 'N/A'}
-                  isGold={item.commodity?.toLowerCase().includes('gold')}
+                  value={commodityListLabel || 'N/A'}
+                  isGold={commodityListLabel.toLowerCase().includes('gold')}
                 />
                 <SpecItem label="Status" value={item.status || 'N/A'} />
                 <SpecItem label="Country" value={item.country || 'N/A'} />
@@ -520,10 +691,40 @@ Output requirements:
             {activeTab === 'owners' && (
               <div className="space-y-4 max-w-2xl">
                 <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl space-y-5">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                    Registered Operator
-                  </p>
-                  <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase">{item.company}</h3>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        Role breakdown
+                      </p>
+                      <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase">
+                        {item.company}
+                      </h3>
+                    </div>
+                    {roleSummary && (
+                      <Badge className="bg-cyan-500/10 text-cyan-400 border-none text-[9px] font-black uppercase tracking-widest shrink-0">
+                        {roleSummary}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {isLoadingRelationships ? (
+                    <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
+                        Loading ownership roles
+                      </p>
+                    </div>
+                  ) : (
+                    <EntityRelationshipPanel
+                      relationships={entityRelationships}
+                      emptyTitle="No verified owner/operator split yet"
+                      emptyMessage="This dossier stays explicit about uncertainty. When the source only exposes one named company, we do not invent extra ownership roles."
+                    />
+                  )}
+
+                  {relationshipsError && (
+                    <p className="text-[10px] text-red-500 font-bold">{relationshipsError}</p>
+                  )}
+
                   <div className="grid grid-cols-2 gap-4">
                     <SpecItem label="Country" value={item.country || 'N/A'} />
                     <SpecItem label="Region" value={item.region || 'N/A'} />
@@ -546,7 +747,7 @@ Output requirements:
                     query={{
                       company: item.company,
                       country: item.country,
-                      commodity: item.commodity,
+                      commodity: commodityListLabel,
                       lat: item.lat,
                       lng: item.lng,
                     }}
@@ -564,7 +765,7 @@ Output requirements:
                     query={{
                       company: item.company,
                       country: item.country,
-                      commodity: item.commodity,
+                      commodity: commodityListLabel,
                       lat: item.lat,
                       lng: item.lng,
                     }}
@@ -591,25 +792,125 @@ Output requirements:
                     Source provenance
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <SpecItem label="Primary Source" value={item.sourceName || 'Manual / local'} />
-                    <SpecItem label="Source ID" value={item.sourceId || 'N/A'} />
-                    <SpecItem label="Source URL" value={item.sourceUrl || 'N/A'} />
-                    <SpecItem label="Record URL" value={item.sourceRecordUrl || 'N/A'} />
-                    <SpecItem label="Source Updated" value={item.sourceUpdatedAt || 'N/A'} />
-                    <SpecItem label="Last Synced" value={item.lastSyncedAt || 'N/A'} />
+                    <SpecItem label="Primary Source" value={terminalDetails.sourceName || 'Manual / local'} />
+                    <SpecItem label="Source Class" value={sourceKindLabel || 'Unknown'} />
+                    <SpecItem label="Source ID" value={terminalDetails.sourceId || 'N/A'} />
+                    <SpecItem label="Coverage State" value={coverageStateLabel || 'N/A'} />
+                    <SpecItem label="Source URL" value={terminalDetails.sourceUrl || 'N/A'} />
+                    <SpecItem label="Record URL" value={terminalDetails.sourceRecordUrl || 'N/A'} />
+                    <SpecItem label="Source Updated" value={terminalDetails.sourceUpdatedAt || 'N/A'} />
+                    <SpecItem label="Last Synced" value={terminalDetails.lastSyncedAt || 'N/A'} />
                   </div>
+                  {terminalDetails.provenanceNote && (
+                    <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      {terminalDetails.provenanceNote}
+                    </p>
+                  )}
                 </div>
+                <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl space-y-3">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    Stored DD output
+                  </p>
+                  {isLoadingDdReport ? (
+                    <p className="text-[11px] text-slate-500">Loading the last saved DD run...</p>
+                  ) : latestDdReport ? (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <SpecItem label="Last Run" value={ddLastRunLabel || 'Just now'} />
+                        <SpecItem label="Analysis Provider" value={latestDdReport.provider || 'Unknown'} />
+                        <SpecItem label="Extracted Contacts" value={String(ddExtractedContacts.length)} />
+                        <SpecItem label="Auto-Promoted Phones" value={String(ddAutoPromotedPhones.length)} />
+                      </div>
+                      {ddExtractedContacts.slice(0, 2).map((contact, index) => (
+                        <div
+                          key={`${contact.contactType}-${contact.value}-${index}`}
+                          className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <Badge className="bg-indigo-500/10 text-indigo-400 border-none text-[9px] font-black uppercase">
+                              {formatContactTypeLabel(contact.contactType)}
+                            </Badge>
+                            {contact.autoPromoted && (
+                              <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
+                                Auto-promoted
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm font-black text-slate-900 dark:text-white break-all">
+                            {contact.value}
+                          </p>
+                          {contact.evidenceSnippet && (
+                            <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+                              {contact.evidenceSnippet}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-slate-500">
+                      No saved DD run yet. Running the scan stores the analysis and any source-backed contact extraction for reuse.
+                    </p>
+                  )}
+                </div>
+                {isStorageTerminal && (
+                  <div className="space-y-3">
+                    {isLoadingStorageTerminal ? (
+                      <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                          Loading open-source evidence
+                        </p>
+                      </div>
+                    ) : (
+                      (storageTerminalDetails?.evidence || []).map((evidence) => (
+                        <div
+                          key={evidence.id}
+                          className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                                {evidence.title}
+                              </p>
+                              <p className="mt-1 text-[10px] text-slate-500">
+                                {evidence.source_label} · {Math.round(evidence.confidence * 100)}%
+                              </p>
+                              {evidence.summary && (
+                                <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+                                  {evidence.summary}
+                                </p>
+                              )}
+                            </div>
+                            {evidence.url && (
+                              <a
+                                href={evidence.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[10px] font-black uppercase tracking-widest text-cyan-500 shrink-0"
+                              >
+                                {t('צפה במקור', 'View source')}
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
                 {isOilAndGas && (
                   <MaritimeContextPanel
                     query={{
-                      company: item.company,
-                      country: item.country,
-                      commodity: item.commodity,
-                      lat: item.lat,
-                      lng: item.lng,
+                      company: terminalDetails.company,
+                      country: terminalDetails.country,
+                      commodity: commodityListLabel,
+                      lat: terminalDetails.lat,
+                      lng: terminalDetails.lng,
                     }}
                     section="evidence"
                   />
+                )}
+                {isPortLogistics && (
+                  <PortLogisticsPanel item={terminalDetails} section="evidence" />
                 )}
               </div>
             )}
@@ -617,16 +918,73 @@ Output requirements:
             {/* INTELLIGENCE TAB */}
             {activeTab === 'intelligence' && (
               <div className="max-w-3xl space-y-6">
+                <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6">
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <Badge className="bg-indigo-500/10 text-indigo-400 border-none text-[9px] font-black uppercase">
+                      {latestDdReport?.provider || 'AI DD'}
+                    </Badge>
+                    {ddLastRunLabel && (
+                      <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
+                        Saved {ddLastRunLabel}
+                      </Badge>
+                    )}
+                    {ddAutoPromotedPhones.length > 0 && (
+                      <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
+                        {ddAutoPromotedPhones.length} phone synced
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Persisted DD runs are reused when this dossier opens again. Public business phones only sync when the source snapshot includes explicit evidence, a source URL or source name, and a high-confidence business label.
+                  </p>
+                  {ddExtractedContacts.length > 0 && (
+                    <div className="mt-4 space-y-3">
+                      {ddExtractedContacts.slice(0, 3).map((contact, index) => (
+                        <div
+                          key={`${contact.contactType}-${contact.value}-${index}`}
+                          className="rounded-2xl border border-black/5 dark:border-white/5 bg-white/60 dark:bg-slate-950/60 p-4"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <Badge className="bg-amber-500/15 text-amber-500 border-none text-[9px] font-black uppercase">
+                              {formatContactTypeLabel(contact.contactType)}
+                            </Badge>
+                            {contact.confidence != null && (
+                              <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
+                                {formatConfidenceLabel(contact.confidence) || 'Review source'}
+                              </Badge>
+                            )}
+                            {contact.autoPromoted && (
+                              <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[9px] font-black uppercase">
+                                In contacts DB
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm font-black text-slate-900 dark:text-white break-all">
+                            {contact.value}
+                          </p>
+                          {contact.label && (
+                            <p className="mt-1 text-[10px] text-slate-500">{contact.label}</p>
+                          )}
+                          {contact.evidenceSnippet && (
+                            <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+                              {contact.evidenceSnippet}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-3xl p-8">
                   <h4 className="text-[12px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                     <LucideBrain className="w-4 h-4" /> AI Intelligence Report
                   </h4>
                   <div className="min-h-[150px] w-full max-h-[min(70vh,640px)] overflow-y-auto pr-1">
-                    {isAnalyzing ? (
+                    {isAnalyzing || isLoadingDdReport ? (
                       <div className="flex min-h-[150px] flex-col items-center justify-center gap-3">
                         <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                         <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">
-                          Analyzing Intelligence...
+                          {isAnalyzing ? 'Analyzing Intelligence...' : 'Loading saved DD...'}
                         </span>
                       </div>
                     ) : aiAnalysis.trim() ? (
@@ -658,8 +1016,8 @@ Output requirements:
                     source: 'Google News',
                   },
                   {
-                    title: `${item.commodity} market news`,
-                    url: `https://www.google.com/search?q=${encodeURIComponent(item.commodity + ' mining market')}&tbm=nws`,
+                    title: `${commoditySearchLabel} market news`,
+                    url: `https://www.google.com/search?q=${encodeURIComponent(commoditySearchLabel + ' mining market')}&tbm=nws`,
                     source: 'Google News',
                   },
                   {
@@ -700,9 +1058,9 @@ Output requirements:
                     <div className="h-[200px] sm:h-[400px] w-full relative">
                       <img
                         src={
-                          item.commodity?.toLowerCase().includes('gold')
+                          commoditySearchLabel.toLowerCase().includes('gold')
                             ? '/assets/commodities/gold.png'
-                            : item.commodity?.toLowerCase().includes('diamond')
+                            : commoditySearchLabel.toLowerCase().includes('diamond')
                             ? '/assets/commodities/diamond.png'
                             : '/assets/commodities/satellite.png'
                         }
@@ -745,15 +1103,45 @@ Output requirements:
                       />
                       <SpecItem
                         label={t('סחורה עיקרית', 'Main Commodity')}
-                        value={item.commodity}
-                        isGold={item.commodity?.toLowerCase().includes('gold')}
+                        value={commodityListLabel}
+                        isGold={commodityListLabel.toLowerCase().includes('gold')}
                       />
                       <SpecItem label={t('אזור', 'Region')} value={item.region} />
                       <SpecItem label={t('מדינה', 'Country')} value={item.country} />
                       <SpecItem
                         label={t('בעלות', 'Ownership Status')}
-                        value={t('פרטי', 'Private Entity')}
+                        value={ownershipStatusLabel}
                       />
+                      {terminalDetails.entitySubtype && (
+                        <SpecItem
+                          label={t('סוג תשתית', 'Infrastructure Type')}
+                          value={terminalDetails.entitySubtype.replaceAll('_', ' ')}
+                        />
+                      )}
+                      {terminalDetails.operatorName && (
+                        <SpecItem
+                          label={t('מפעיל', 'Operator')}
+                          value={terminalDetails.operatorName}
+                        />
+                      )}
+                      {terminalDetails.nearbyPort?.name && (
+                        <SpecItem
+                          label={t('נמל קרוב', 'Nearby Port')}
+                          value={terminalDetails.nearbyPort.name}
+                        />
+                      )}
+                      {terminalDetails.capacityText && (
+                        <SpecItem
+                          label={t('קיבולת מסומנת', 'Tagged Capacity')}
+                          value={terminalDetails.capacityText}
+                        />
+                      )}
+                      {terminalDetails.confidenceScore != null && (
+                        <SpecItem
+                          label={t('רמת ביטחון', 'Confidence')}
+                          value={`${Math.round((terminalDetails.confidenceScore || 0) * 100)}%`}
+                        />
+                      )}
                       <SpecItem
                         label={t('נפח מוערך', 'Estimated Volume')}
                         value={`${annotation.quantity ?? item.capacity ?? 0} KG`}
@@ -790,6 +1178,51 @@ Output requirements:
                       )}
                     </div>
                   </Card>
+
+                  <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-4 sm:p-8">
+                    <div className="flex items-center justify-between gap-3 mb-6">
+                      <div>
+                        <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em]">
+                          {t('מפת תפקידים', 'Role Transparency')}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
+                          {t(
+                            'בעלים מול מפעיל מול מחזיק רשיון, רק כאשר המקור תומך בכך.',
+                            'Owner vs operator vs holder, only when the source actually supports that split.'
+                          )}
+                        </p>
+                      </div>
+                      {roleSummary && (
+                        <Badge className="bg-cyan-500/10 text-cyan-400 border-none text-[9px] font-black uppercase tracking-widest">
+                          {roleSummary}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {isLoadingRelationships ? (
+                      <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
+                          {t('טוען תפקידי ישות', 'Loading entity roles')}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2">
+                          {t('קורא שדות בעלות/הפעלה ממקורות גלויים.', 'Reading owner/operator/holder fields from the source-backed record.')}
+                        </p>
+                      </div>
+                    ) : (
+                      <EntityRelationshipPanel
+                        relationships={entityRelationships}
+                        emptyTitle="No verified role split yet"
+                        emptyMessage="This record is visible, but the current source does not yet expose a distinct owner/operator/holder split we can verify."
+                      />
+                    )}
+
+                    {relationshipsError && (
+                      <p className="text-[10px] text-red-500 font-bold mt-3">{relationshipsError}</p>
+                    )}
+                  </Card>
+                  {isPortLogistics && (
+                    <PortLogisticsPanel item={terminalDetails} section="summary" />
+                  )}
                 </div>
 
                 {/* Right Column */}
@@ -835,83 +1268,151 @@ Output requirements:
                     </div>
                   </Card>
 
-                  {/* Gold ROI Engine */}
+                  {/* Commodity Market Engine */}
                   <Card className="bg-emerald-500/10 border-emerald-500/20 rounded-3xl p-8 relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10">
                       <LucideZap className="w-20 h-20 text-emerald-500" />
                     </div>
                     <h4 className="text-[12px] font-black text-emerald-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                       <LucideBrain className="w-4 h-4" />{' '}
-                      {t('מחשבון רווח - זהב', 'Gold ROI Engine')}
+                      {commodityLabels.length > 0 && activeCommodityLabel
+                        ? t('מנוע שוק לסחורה', `${activeCommodityLabel} Market Engine`)
+                        : t('מנוע שוק לסחורה', 'Commodity Market Engine')}
                     </h4>
                     <div className="space-y-3">
-                      <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase">
-                          {t('מחיר זהב (LIVE)', 'Gold Market (LIVE)')}
-                        </span>
-                        <span className="text-xs font-black text-amber-500 dark:text-amber-400">
-                          {goldSpotOk
-                            ? `$${rawGoldPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
-                            : '—'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase">
-                          {t('מחיר כסף (REF)', 'Silver Ref (LIVE)')}
-                        </span>
-                        <span className="text-xs font-black text-slate-500 dark:text-slate-400">
-                          {silverSpotOk
-                            ? `$${silverPricePerKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
-                            : '—'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase">
-                          {t('דיסקאונט מקומי', 'Local Discount')}
-                        </span>
-                        <span className="text-xs font-black text-emerald-500 dark:text-emerald-400">- 12%</span>
-                      </div>
-                      <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
-                        <span className="text-[9px] font-black text-slate-500 uppercase">
-                          {t('לוגיסטיקה ומיסים', 'Logistics & Taxes')}
-                        </span>
-                        <span className="text-xs font-black text-red-400">
-                          ${logistics.toLocaleString()} / KG
-                        </span>
-                      </div>
-                      <div className="pt-3 border-t border-black/5 dark:border-white/5">
-                        <div className="flex justify-between items-end">
-                          <div className="flex flex-col">
+                      {commodityLabels.length === 0 ? (
+                        <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-white/60 dark:bg-slate-950/60 p-4">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            {t('אין סחורה מתויגת', 'No commodity on record')}
+                          </p>
+                          <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+                            {t(
+                              'האתר נשאר זמין לבדיקה, אבל מנוע השוק נשאר כבוי עד שמופיע שדה סחורה.',
+                              'The dossier stays usable, but market and ROI signals remain disabled until this record carries a commodity field.'
+                            )}
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {commodityLabels.length > 1 && (
+                            <div className="flex flex-wrap gap-2">
+                              {commodityLabels.map((label) => (
+                                <button
+                                  key={label}
+                                  type="button"
+                                  onClick={() => setSelectedCommodity(label)}
+                                  className={`rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-widest transition-colors ${
+                                    activeCommodityLabel === label
+                                      ? 'border-emerald-500 bg-emerald-500 text-slate-950'
+                                      : 'border-black/10 bg-white/70 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-300 dark:hover:bg-slate-900'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                              <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black h-7 px-2 uppercase">
+                                {t('רב-סחורה', 'Multi-commodity')}
+                              </Badge>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
                             <span className="text-[9px] font-black text-slate-500 uppercase">
-                              {t('רווח נקי - זהב', 'Est. Net Profit (Gold)')}
+                              {activeCommodityMarket.benchmarkLabel}
                             </span>
-                            <span className="text-2xl font-black text-emerald-500">
-                              {goldSpotOk ? (
-                                <>
-                                  $
-                                  {netGoldProfit.toLocaleString(undefined, {
-                                    maximumFractionDigits: 0,
-                                  })}{' '}
-                                  / KG
-                                </>
-                              ) : (
-                                '—'
-                              )}
+                            <span
+                              className={`text-xs font-black ${
+                                activeCommodityMarket.priceOk
+                                  ? 'text-amber-500 dark:text-amber-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}
+                            >
+                              {activeCommodityMarket.benchmarkDisplayPrice}
                             </span>
                           </div>
-                          <Badge className="bg-emerald-500 text-slate-950 font-black text-[10px] mb-1">
-                            {goldSpotOk ? 'HIGH MARGIN' : 'NO FEED'}
-                          </Badge>
-                        </div>
-                      </div>
+                          <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                            <span className="text-[9px] font-black text-slate-500 uppercase">
+                              {t('כיסוי שוק', 'Market Coverage')}
+                            </span>
+                            <span className="text-xs font-black text-emerald-500 dark:text-emerald-400">
+                              {activeCommodityMarket.supportLabel}
+                            </span>
+                          </div>
+                          <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-white/60 dark:bg-slate-950/60 p-4">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                              {t('הערת כיסוי', 'Coverage Note')}
+                            </p>
+                            <p className="mt-2 text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                              {activeCommodityMarket.supportDetail}
+                            </p>
+                            {activeCommodityMarket.benchmarkSymbol && (
+                              <p className="mt-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                {t('פיד', 'Feed')}: {activeCommodityMarket.benchmarkSymbol}
+                              </p>
+                            )}
+                          </div>
+                          {activeCommodityMarket.supportLevel === 'roi_supported' &&
+                            activeCommodityMarket.discountPct != null &&
+                            activeCommodityMarket.logisticsCost != null &&
+                            activeCommodityMarket.netbackPerUnit != null && (
+                              <>
+                                <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                                  <span className="text-[9px] font-black text-slate-500 uppercase">
+                                    {t('דיסקאונט מקומי', 'Local Discount')}
+                                  </span>
+                                  <span className="text-xs font-black text-emerald-500 dark:text-emerald-400">
+                                    - {activeCommodityMarket.discountPct}%
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center bg-white/60 dark:bg-slate-950/60 p-3 rounded-xl border border-black/5 dark:border-white/5">
+                                  <span className="text-[9px] font-black text-slate-500 uppercase">
+                                    {t('לוגיסטיקה ומיסים', 'Logistics & Taxes')}
+                                  </span>
+                                  <span className="text-xs font-black text-red-400">
+                                    ${activeCommodityMarket.logisticsCost.toLocaleString()} /{' '}
+                                    {activeCommodityMarket.logisticsUnit}
+                                  </span>
+                                </div>
+                                <div className="pt-3 border-t border-black/5 dark:border-white/5">
+                                  <div className="flex justify-between items-end gap-3">
+                                    <div className="flex flex-col">
+                                      <span className="text-[9px] font-black text-slate-500 uppercase">
+                                        {t(
+                                          'רווח נקי משוער',
+                                          `Indicative Netback (${activeCommodityLabel})`
+                                        )}
+                                      </span>
+                                      <span className="text-2xl font-black text-emerald-500">
+                                        $
+                                        {activeCommodityMarket.netbackPerUnit.toLocaleString(undefined, {
+                                          maximumFractionDigits: 0,
+                                        })}{' '}
+                                        / {activeCommodityMarket.netbackUnit}
+                                      </span>
+                                    </div>
+                                    <Badge className="bg-emerald-500 text-slate-950 font-black text-[10px] mb-1">
+                                      {activeCommodityMarket.supportLabel}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                        </>
+                      )}
                       <Button
                         onClick={() => {
                           setIsGeneratingLOI(true);
                           setTimeout(() => {
-                            const profitLine = goldSpotOk
-                              ? `Est. Net Profit (Gold): $${netGoldProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })} / KG`
-                              : 'Est. Net Profit (Gold): N/A (spot feed unavailable)';
-                            const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${item.commodity}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\n${profitLine}\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
+                            const profitLine =
+                              commodityLabels.length === 0
+                                ? 'Commodity benchmark: N/A (commodity not tagged on this record)'
+                                : activeCommodityMarket.supportLevel === 'roi_supported' &&
+                                    activeCommodityMarket.netbackPerUnit != null &&
+                                    activeCommodityMarket.netbackUnit
+                                  ? `Indicative ${activeCommodityLabel} netback: $${activeCommodityMarket.netbackPerUnit.toLocaleString(undefined, { maximumFractionDigits: 0 })} / ${activeCommodityMarket.netbackUnit}`
+                                  : activeCommodityMarket.priceOk
+                                    ? `${activeCommodityMarket.benchmarkLabel}: ${activeCommodityMarket.benchmarkDisplayPrice} (${activeCommodityMarket.supportDetail})`
+                                    : `${activeCommodityLabel || commodityListLabel} benchmark: N/A (${activeCommodityMarket.supportDetail})`;
+                            const loi = `LETTER OF INTENT\n\nDate: ${new Date().toLocaleDateString()}\n\nRE: Mining License Acquisition — ${item.company}\n\nTo Whom It May Concern,\n\nWe hereby express our intent to enter into a formal acquisition agreement for the following mining license:\n\nCompany: ${item.company}\nLicense ID: ${item.id}\nCommodity: ${commodityListLabel}\nRegion: ${item.region}, ${item.country}\nLicense Type: ${item.licenseType}\n${profitLine}\n\nThis letter is non-binding and subject to due diligence.\n\nSincerely,\n[Your Name]\n[Company]`;
                             const blob = new Blob([loi], { type: 'text/plain' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
@@ -940,16 +1441,39 @@ Output requirements:
                   <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-8">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                       <LucideUser className="w-4 h-4 text-amber-500" />{' '}
-                      {t('אנשי קשר ציבוריים', 'Public Business Contacts')}
+                      {isStorageTerminal
+                        ? t('פרופיל תשתית', 'Infrastructure Profile')
+                        : t('אנשי קשר ציבוריים', 'Public Business Contacts')}
                     </h4>
                     <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
-                      {t(
-                        'מוצגים כאן רק פרטי קשר עסקיים ציבוריים ומבוססי מקור. לא מוצגים מספרים פרטיים או מידע משוער.',
-                        'Only source-backed public business contacts appear here. Private numbers and guessed details are intentionally excluded.'
-                      )}
+                      {isStorageTerminal
+                        ? t(
+                            'לשכבת האחסון אנחנו מציגים רק פרטי מפעיל/נמל/קיבולת שמופיעים במקור הפתוח עצמו. אין ניחוש של בעלות מסחרית.',
+                            'For storage infrastructure we only show operator, port, and capacity fields that appear in the open source itself. Commercial ownership is never guessed.'
+                          )
+                        : t(
+                            'מוצגים כאן רק פרטי קשר עסקיים ציבוריים ומבוססי מקור. לא מוצגים מספרים פרטיים או מידע משוער.',
+                            'Only source-backed public business contacts appear here. Private numbers and guessed details are intentionally excluded.'
+                          )}
                     </p>
                     <div className="space-y-3">
-                      {isLoadingContacts ? (
+                      {isStorageTerminal ? (
+                        <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
+                          <div className="space-y-2">
+                            <ReadRow label={t('תת-סוג', 'Subtype')} value={terminalDetails.entitySubtype?.replaceAll('_', ' ') || '—'} />
+                            <ReadRow label={t('מפעיל', 'Operator')} value={terminalDetails.operatorName || '—'} />
+                            <ReadRow label={t('נמל קרוב', 'Nearby Port')} value={terminalDetails.nearbyPort?.name || '—'} />
+                            <ReadRow label={t('מרחק לנמל', 'Port Distance')} value={terminalDetails.nearbyPort?.distance_km != null ? `${terminalDetails.nearbyPort.distance_km} km` : '—'} />
+                            <ReadRow label={t('קיבולת מסומנת', 'Tagged Capacity')} value={terminalDetails.capacityText || '—'} />
+                            <ReadRow label={t('הסבר ביטחון', 'Confidence Note')} value={terminalDetails.confidenceNote || '—'} wide />
+                          </div>
+                          {isLoadingStorageTerminal && (
+                            <p className="mt-3 text-[10px] text-slate-500">
+                              {t('טוען פרטי ראיות מלאים...', 'Loading full evidence details...')}
+                            </p>
+                          )}
+                        </div>
+                      ) : isLoadingContacts ? (
                         <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
                           <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
                             <div className="h-4 w-4 rounded-full border-2 border-amber-500 border-t-transparent animate-spin" />
@@ -1244,6 +1768,49 @@ Output requirements:
   );
 }
 
+function formatSourceKindLabel(sourceKind?: string | null): string | null {
+  switch ((sourceKind || '').toLowerCase()) {
+    case 'official_registry':
+      return 'Official registry';
+    case 'global_open_fallback':
+      return 'Global fallback';
+    case 'user_import_csv':
+      return 'User CSV';
+    case 'bundled_json':
+      return 'Bundled fallback';
+    default:
+      return null;
+  }
+}
+
+function getSourceKindBadgeClass(sourceKind?: string | null): string {
+  switch ((sourceKind || '').toLowerCase()) {
+    case 'official_registry':
+      return 'bg-cyan-500/10 text-cyan-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0';
+    case 'global_open_fallback':
+      return 'bg-violet-500/10 text-violet-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0';
+    case 'user_import_csv':
+      return 'bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0';
+    default:
+      return 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0';
+  }
+}
+
+function formatCoverageStateLabel(coverageState?: string | null): string | null {
+  switch ((coverageState || '').toLowerCase()) {
+    case 'official_syncable':
+      return 'Official syncable';
+    case 'global_fallback_only':
+      return 'Global fallback only';
+    case 'user_import_csv':
+      return 'User CSV fallback';
+    case 'bundled_json':
+      return 'Bundled fallback';
+    default:
+      return coverageState || null;
+  }
+}
+
 function formatContactTypeLabel(contactType: string): string {
   switch (contactType) {
     case 'phone':
@@ -1273,6 +1840,13 @@ function formatContactTimestamp(value?: string | null): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return `Verified ${parsed.toLocaleDateString()}`;
+}
+
+function formatDdTimestamp(value?: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleString();
 }
 
 function buildContactHref(contact: EntityContact): string | null {
