@@ -61,10 +61,18 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
 // points.
 const SELECTED_CLASS = 'is-selected';
 
-const getMarkerColor = (commodity?: string, userStatus?: string) => {
-    if (userStatus === 'good') return '#22c55e';
-    if (userStatus === 'bad') return '#ef4444';
-    if (userStatus === 'maybe') return '#f59e0b';
+const getMarkerColor = (commodity?: string, userStatus?: string, sector?: string) => {
+    if (userStatus === 'good' || userStatus === 'Approved') return '#22c55e';
+    if (userStatus === 'bad' || userStatus === 'Rejected') return '#ef4444';
+    if (userStatus === 'maybe' || userStatus === 'Needs Review' || userStatus === 'Investigating') return '#f59e0b';
+    if (userStatus === 'Escalated') return '#ef4444';
+
+    if (sector) {
+      const s = sector.toLowerCase();
+      if (s === 'oil_and_gas' || s === 'oil') return '#000000';
+      if (s === 'suppliers' || s === 'logistics') return '#6366f1';
+      if (s === 'ports') return '#0ea5e9';
+    }
 
     if (!commodity) return '#64748b';
     const c = commodity.toLowerCase();
@@ -73,6 +81,8 @@ const getMarkerColor = (commodity?: string, userStatus?: string) => {
     if (c.includes('bauxite')) return '#f87171';
     if (c.includes('manganese')) return '#a78bfa';
     if (c.includes('lithium')) return '#34d399';
+    if (c.includes('oil') || c.includes('petroleum')) return '#000000';
+    if (c.includes('gas')) return '#94a3b8';
     return '#64748b';
 };
 
@@ -263,7 +273,7 @@ export default function MapComponent({
                     {displayData.map((item, index) => {
                         if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
-                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status);
+                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector);
 
                         return (
                             <Marker

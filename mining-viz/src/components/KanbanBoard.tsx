@@ -16,23 +16,25 @@ interface KanbanBoardProps {
   isMobile?: boolean;
 }
 
-const STAGES = ['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const;
+const STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
 type Stage = typeof STAGES[number];
 
 const STAGE_COLORS: Record<Stage, string> = {
-  New: 'bg-slate-500',
-  Contacted: 'bg-blue-500',
-  Diligence: 'bg-amber-500',
-  Verified: 'bg-emerald-500',
-  Closed: 'bg-slate-700',
+  'New': 'bg-slate-500',
+  'Needs Review': 'bg-blue-500',
+  'Investigating': 'bg-amber-500',
+  'Escalated': 'bg-red-500',
+  'Approved': 'bg-emerald-500',
+  'Rejected': 'bg-slate-700',
 };
 
 const STAGE_BADGE_COLORS: Record<Stage, string> = {
-  New: 'bg-slate-500/20 text-slate-400',
-  Contacted: 'bg-blue-500/20 text-blue-400',
-  Diligence: 'bg-amber-500/20 text-amber-400',
-  Verified: 'bg-emerald-500/20 text-emerald-400',
-  Closed: 'bg-slate-700/40 text-slate-500',
+  'New': 'bg-slate-500/20 text-slate-400',
+  'Needs Review': 'bg-blue-500/20 text-blue-400',
+  'Investigating': 'bg-amber-500/20 text-amber-400',
+  'Escalated': 'bg-red-500/20 text-red-400',
+  'Approved': 'bg-emerald-500/20 text-emerald-400',
+  'Rejected': 'bg-slate-700/40 text-slate-500',
 };
 
 export default function KanbanBoard({
