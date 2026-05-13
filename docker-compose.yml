@@ -91,9 +91,11 @@ services:
     image: caddy:alpine
     container_name: mining-caddy
     restart: unless-stopped
+    # Host :80/:443 are often taken (nginx, AirPlay Receiver, other stacks).
+    # Override in .env: MINING_MAP_CADDY_HTTP=80 MINING_MAP_CADDY_HTTPS=443
     ports:
-      - "80:80"
-      - "443:443"
+      - "${MINING_MAP_CADDY_HTTP:-8080}:80"
+      - "${MINING_MAP_CADDY_HTTPS:-8443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data

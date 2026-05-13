@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, startTransition } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
@@ -123,8 +123,38 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: rawData = [], isLoading, isFetching, error: fetchError } = useLicenses(licenseSector, licenseBoundsForApi);
-  const { data: worldCoverage } = useWorldCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
+  const { data: worldCoverage } = useWorldCoverage(true);
+  const licenseFetchCountries = useMemo(
+    () => deriveLicenseFetchCountries(licenseSector, worldCoverage),
+    [licenseSector, worldCoverage],
+  );
+  const {
+    data: rawData = [],
+    isLoading,
+    isFetching,
+    error: fetchError,
+    stillLoadingCountryCount,
+    failedCountryQueryCount,
+  } = useLicenses(licenseSector, licenseBoundsForApi, licenseFetchCountries);
+  const licensesPartialMapHint = useMemo(() => {
+    if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
+    const n = stillLoadingCountryCount;
+    return t(
+      `עדיין נטענות ${n} מדינות…`,
+      `Still loading ${n} ${n === 1 ? 'country' : 'countries'}…`,
+    );
+  }, [stillLoadingCountryCount, rawData.length, t]);
+  const licenseLoadPartialFailuresHint = useMemo(() => {
+    if (failedCountryQueryCount <= 0 || fetchError) return null;
+    if (rawData.length === 0) return null;
+    const n = failedCountryQueryCount;
+    return t(
+      `${n} הזנות מדינה לא נטענו — המפה מציגה את הזמין.`,
+      `${n} country ${n === 1 ? 'feed' : 'feeds'} could not be loaded — the map shows available data.`,
+    );
+  }, [failedCountryQueryCount, fetchError, rawData.length, t]);
+  const licensesMapSecondaryStatus =
+    [licensesPartialMapHint, licenseLoadPartialFailuresHint].filter(Boolean).join(' \u00b7 ') || null;
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
@@ -693,6 +723,7 @@ export default function App() {
                 licensesRefetching={
                   (viewMode === 'mining' || viewMode === 'oil_and_gas') && isFetching && !isLoading && !fetchError
                 }
+                licensesSecondaryStatus={licensesMapSecondaryStatus}
                 trackLicenseViewport={viewMode === 'mining' || viewMode === 'oil_and_gas'}
                 onLicenseViewportChange={setLicenseViewportDraft}
                 setSelectedItem={handleSelectItem}
