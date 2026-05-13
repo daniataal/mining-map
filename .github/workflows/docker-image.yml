@@ -125,6 +125,12 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
+              healthcheck:
+                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)"]
+                interval: 15s
+                timeout: 8s
+                retries: 5
+                start_period: 180s
               depends_on:
                 db:
                   condition: service_healthy
@@ -160,7 +166,8 @@ jobs:
               environment:
                 - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
               depends_on:
-                - backend
+                backend:
+                  condition: service_healthy
 
             db:
               image: postgis/postgis:15-3.3-alpine
