@@ -189,10 +189,13 @@ jobs:
           sudo docker compose pull
           sudo docker compose up -d --remove-orphans
 
-          # Wait for backend API to become healthy enough for admin import.
+          # Wait until /licenses returns 200 (schema init may take minutes on cold DB).
+          # Do not use curl -f: 503 means the server is up but still initializing.
           BACKEND_READY="false"
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8000/licenses >/dev/null; then
+          for i in $(seq 1 90); do
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 120 \
+              "http://localhost:8000/licenses" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
               BACKEND_READY="true"
               break
             fi
