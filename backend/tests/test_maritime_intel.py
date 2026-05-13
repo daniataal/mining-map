@@ -117,6 +117,8 @@ class MaritimeIntelTests(unittest.TestCase):
                 "metadata": {"geography_mode": "default_regions"},
             },
             max_vessels=60,
+            offset=0,
+            total_available=1,
             capture_window_seconds=10,
             vessel_scope="oil_tankers",
             bbox=None,
@@ -125,6 +127,9 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(len(response["vessels"]), 1)
         self.assertTrue(response["live_positions_enabled"])
         self.assertFalse(response["stale"])
+        self.assertEqual(response["total_available"], 1)
+        self.assertEqual(response["returned_count"], 1)
+        self.assertFalse(response["cap_applied"])
         self.assertEqual(response["worker"]["status"], "ok")
         self.assertEqual(response["vessels"][0]["last_seen_at"], now.isoformat())
 
@@ -142,6 +147,8 @@ class MaritimeIntelTests(unittest.TestCase):
                 "metadata": {},
             },
             max_vessels=60,
+            offset=0,
+            total_available=0,
             capture_window_seconds=10,
             vessel_scope="all_vessels",
             bbox=(0.0, 0.0, 10.0, 10.0),
@@ -149,6 +156,9 @@ class MaritimeIntelTests(unittest.TestCase):
 
         self.assertFalse(response["live_positions_enabled"])
         self.assertTrue(response["stale"])
+        self.assertEqual(response["total_available"], 0)
+        self.assertEqual(response["returned_count"], 0)
+        self.assertFalse(response["cap_applied"])
         self.assertEqual(response["worker"]["last_error"], "temporary websocket failure")
         self.assertEqual(response["requested_bbox"], [0.0, 0.0, 10.0, 10.0])
 

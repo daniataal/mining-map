@@ -3308,9 +3308,10 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
 
 @app.get("/api/maritime/vessels")
 def get_maritime_vessels(
-    max_vessels: int = 60,
+    max_vessels: int = 300,
     capture_window_seconds: int = 10,
     scope: str = "oil_tankers",
+    offset: int = 0,
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
@@ -3330,6 +3331,7 @@ def get_maritime_vessels(
             capture_window_seconds=capture_window_seconds,
             vessel_scope=scope,
             bbox=bbox,
+            offset=offset,
         )
     except Exception as exc:
         return {
@@ -3341,6 +3343,10 @@ def get_maritime_vessels(
             "scope": "oil_tankers" if scope != "all_vessels" else "all_vessels",
             "capture_window_seconds": capture_window_seconds,
             "max_vessels": max_vessels,
+            "offset": offset,
+            "total_available": 0,
+            "returned_count": 0,
+            "cap_applied": False,
             "geography_mode": "viewport_bbox" if all(value is not None for value in (south, west, north, east)) else "default_regions",
             "geography_note": None,
             "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
