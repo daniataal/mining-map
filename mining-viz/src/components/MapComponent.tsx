@@ -240,6 +240,8 @@ const getMarkerColor = (
 
 interface MapComponentProps {
   processedData: MiningLicense[];
+  /** Full unfiltered license dataset for the current sector — used to determine which countries get borders. */
+  allLicenses: MiningLicense[];
   userAnnotations: Record<string, UserAnnotation>;
   selectedItem: MiningLicense | null;
   setSelectedItem: (item: MiningLicense | null) => void;
@@ -377,6 +379,7 @@ const ViewportBoundsTracker = ({
 
 export default function MapComponent({
   processedData,
+  allLicenses,
   userAnnotations,
   selectedItem,
   setSelectedItem,
@@ -557,35 +560,20 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
-        const ordered: string[] = [];
-        const seenKey = new Set<string>();
-
-        // 1. Add countries from visible markers/processedData
-        for (const d of processedData) {
-            const raw = d.country?.trim();
-            if (!raw) continue;
-            const dedupeKey = raw.toLowerCase();
-            if (seenKey.has(dedupeKey)) continue;
-            seenKey.add(dedupeKey);
-            ordered.push(raw);
-        }
-
-        // 2. Add countries from world coverage (Global mode / background stats)
-        // This ensures borders are shown for all countries where we know we have data,
-        // even if individual license markers haven't loaded yet or are capped by the API.
-        if (worldCoverage?.countries) {
-            for (const c of worldCoverage.countries) {
-                const raw = c.country?.trim();
-                if (!raw) continue;
-                const dedupeKey = raw.toLowerCase();
-                if (seenKey.has(dedupeKey)) continue;
-                seenKey.add(dedupeKey);
-                ordered.push(raw);
-            }
-        }
-
+    // Use allLicenses (full unfiltered set for current sector) so borders reflect
+    // every country with data in this tab — regardless of active search/filters.
+    const ordered: string[] = [];
+    const seenKey = new Set<string>();
+    for (const d of allLicenses) {
+        const raw = d.country?.trim();
+        if (!raw) continue;
+        const dedupeKey = raw.toLowerCase();
+        if (seenKey.has(dedupeKey)) continue;
+        seenKey.add(dedupeKey);
+        ordered.push(raw);
+    }
         return ordered.sort((a, b) => a.localeCompare(b));
-    }, [processedData, worldCoverage]);
+    }, [allLicenses]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
