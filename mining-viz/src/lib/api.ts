@@ -553,12 +553,43 @@ export const useAfricaCoverage = (enabled = true) => {
   });
 };
 
+const EMPTY_COVERAGE_SUMMARY: Record<string, number> = {};
+const EMPTY_WORLD_COVERAGE: WorldCoverageResponse = {
+  generated_at: '',
+  summary: {
+    mining: EMPTY_COVERAGE_SUMMARY,
+    oil_and_gas: EMPTY_COVERAGE_SUMMARY,
+  },
+  countries: [],
+  sources: [],
+};
+
+function isWorldCoverageResponse(value: unknown): value is WorldCoverageResponse {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as Partial<WorldCoverageResponse>;
+  return (
+    Boolean(data.summary) &&
+    typeof data.summary === 'object' &&
+    typeof data.summary?.mining === 'object' &&
+    typeof data.summary?.oil_and_gas === 'object' &&
+    Array.isArray(data.countries) &&
+    Array.isArray(data.sources)
+  );
+}
+
 export const useWorldCoverage = (enabled = true) => {
   return useQuery<WorldCoverageResponse>({
     queryKey: ['world-coverage'],
     queryFn: async () => {
-      const { data } = await apiClient.get<WorldCoverageResponse>('/api/open-data/coverage/world');
-      return data;
+      try {
+        const { data } = await apiClient.get<unknown>('/api/open-data/coverage/world');
+        if (isWorldCoverageResponse(data)) return data;
+        console.warn('[useWorldCoverage] Invalid coverage payload; falling back to empty coverage.', data);
+        return EMPTY_WORLD_COVERAGE;
+      } catch (error) {
+        console.warn('[useWorldCoverage] Coverage request failed; falling back to empty coverage.', error);
+        return EMPTY_WORLD_COVERAGE;
+      }
     },
     enabled,
     staleTime: 15 * 60_000,

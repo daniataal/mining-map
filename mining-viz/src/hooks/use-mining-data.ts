@@ -50,7 +50,10 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     let data = [...rawData];
 
     if (selectedCountry.length > 0) {
-      data = data.filter(item => selectedCountry.includes(item.country || 'Ghana'));
+      data = data.filter((item) => {
+        const country = item.country?.trim();
+        return country ? selectedCountry.includes(country) : false;
+      });
     }
 
     if (selectedCommodity.length > 0) {
@@ -150,7 +153,11 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   ]);
 
   const countries = useMemo(() => {
-    const c = new Set(rawData.map(item => item.country || 'Ghana'));
+    const c = new Set(
+      rawData
+        .map((item) => item.country?.trim())
+        .filter((country): country is string => Boolean(country))
+    );
     return Array.from(c).sort();
   }, [rawData]);
 

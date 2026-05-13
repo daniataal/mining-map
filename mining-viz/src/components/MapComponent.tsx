@@ -374,7 +374,11 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
-        const countries = new Set(processedData.map(d => d.country ? d.country.toLowerCase() : 'ghana'));
+        const countries = new Set(
+            processedData
+                .map((d) => d.country?.trim().toLowerCase())
+                .filter((country): country is string => Boolean(country))
+        );
         return Array.from(countries).sort((a, b) => a.localeCompare(b));
     }, [processedData]);
 
@@ -554,7 +558,7 @@ export default function MapComponent({
             )}
             <MapContainer 
               center={mapCenter} 
-              zoom={7} 
+              zoom={viewModeKey === 'ports' ? 3 : 7} 
               className="w-full h-full"
               zoomControl={false}
               // @ts-ignore
