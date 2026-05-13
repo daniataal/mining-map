@@ -63,6 +63,18 @@ const LICENSES_FALLBACK_DATA = (bundledLicenses as MiningLicense[]).map((item) =
 }));
 export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
 
+function canUseBundledLicenseFallback(): boolean {
+  const envFallbackFlag =
+    typeof process !== 'undefined'
+      ? (process as { env?: Record<string, string | undefined> }).env?.VITE_ALLOW_BUNDLED_LICENSE_FALLBACK
+      : '';
+  const fallbackFlag = String(envFallbackFlag || '').toLowerCase();
+  if (fallbackFlag === '1' || fallbackFlag === 'true' || fallbackFlag === 'yes') return true;
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
 function normalizeCountryBordersParam(countries: string[]): string[] {
   return Array.from(
     new Set(
@@ -147,9 +159,14 @@ export const useLicenses = (sector?: 'mining' | 'oil_and_gas') => {
         console.warn('[useLicenses] Expected array from /licenses, got:', data);
         return [];
       } catch (error) {
-        console.error('[useLicenses] Falling back to bundled license dataset because /licenses failed.', error);
-        if (sector === 'oil_and_gas') return [];
-        return sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
+        if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
+          console.warn(
+            '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
+            error
+          );
+          return sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
+        }
+        throw error;
       }
     },
   });
