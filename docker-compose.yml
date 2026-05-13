@@ -43,25 +43,13 @@ services:
       db:
         condition: service_healthy
 
-  frontend-admin:
+  frontend:
     build:
       context: ./mining-viz
-    container_name: mining-frontend-admin
+    container_name: mining-frontend
     restart: always
     ports:
       - "5173:5173"
-    environment:
-      - VITE_API_BASE=http://localhost:8000
-    depends_on:
-      - backend
-
-  frontend-community:
-    build:
-      context: ./community-miner-viz
-    container_name: mining-frontend-community
-    restart: always
-    ports:
-      - "5174:5174"
     environment:
       - VITE_API_BASE=http://localhost:8000
     depends_on:
@@ -97,8 +85,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - frontend-admin
-      - frontend-community
+      - frontend
 
 volumes:
   postgres_data:

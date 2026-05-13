@@ -32,15 +32,10 @@ jobs:
         docker build -t dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }} ./backend
         docker push dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }}
 
-    - name: Build and Push Admin Frontend
+    - name: Build and Push Mining Viz Frontend
       run: |
-        docker build -t dannyatalla/mining-frontend-admin:v${{ env.BUILD_NUMBER }} ./mining-viz
-        docker push dannyatalla/mining-frontend-admin:v${{ env.BUILD_NUMBER }}
-
-    - name: Build and Push Community Frontend
-      run: |
-        docker build -t dannyatalla/mining-frontend-community:v${{ env.BUILD_NUMBER }} ./community-miner-viz
-        docker push dannyatalla/mining-frontend-community:v${{ env.BUILD_NUMBER }}
+        docker build -t dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }} ./mining-viz
+        docker push dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }}
 
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
@@ -84,23 +79,34 @@ jobs:
                 db:
                   condition: service_healthy
 
-            frontend-admin:
-              image: dannyatalla/mining-frontend-admin:$VERSION
-              container_name: mining-frontend-admin
+            maritime-worker:
+              image: dannyatalla/mining-backend:$VERSION
+              container_name: mining-maritime-worker
+              restart: always
+              command: ["python", "maritime_worker.py"]
+              env_file:
+                - backend.env
+              environment:
+                - DB_HOST=db
+                - DB_PORT=5432
+                - DB_NAME=mining_db
+                - DB_USER=postgres
+                - DB_PASSWORD=password
+                - MARITIME_WORKER_INTERVAL_SECONDS=60
+                - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=10
+                - MARITIME_WORKER_MAX_VESSELS=120
+                - MARITIME_WORKER_SCOPE=all_vessels
+                - MARITIME_SNAPSHOT_TTL_SECONDS=300
+              depends_on:
+                db:
+                  condition: service_healthy
+
+            frontend:
+              image: dannyatalla/mining-frontend:$VERSION
+              container_name: mining-frontend
               restart: always
               ports:
                 - "5173:5173"
-              environment:
-                - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
-              depends_on:
-                - backend
-
-            frontend-community:
-              image: dannyatalla/mining-frontend-community:$VERSION
-              container_name: mining-frontend-community
-              restart: always
-              ports:
-                - "5174:5174"
               environment:
                 - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
               depends_on:
