@@ -1371,7 +1371,7 @@ def upsert_open_data_records(
                     record["raw_payload"],
                 ),
             )
-            if sync_contacts:
+            if sync_contacts and record.get("record_origin") != "global_open_fallback":
                 try:
                     sync_license_contacts_for_row(conn, record)
                 except Exception as contact_exc:
@@ -1380,7 +1380,10 @@ def upsert_open_data_records(
                     sync_license_relationships_for_row(conn, record)
                 except Exception as rel_exc:
                     print(f"[OpenData] Relationship sync skipped for {record.get('id')}: {rel_exc}")
+            
             written += 1
+            if written % 100 == 0:
+                conn.commit()
     conn.commit()
     return written
 

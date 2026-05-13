@@ -1,15 +1,13 @@
-{
+:80, :443 {
     auto_https disable_redirects
-}
-
-:443 {
-    tls internal
     encode gzip zstd
 
+    # Proxy all API and Auth requests to the backend container
     @backend {
         path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
     }
     reverse_proxy @backend backend:8000
 
+    # Everything else goes to the frontend
     reverse_proxy * frontend:5173
 }

@@ -14,4 +14,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    proxy: {
+      '/licenses': 'http://backend:8000',
+      '/api': 'http://backend:8000',
+      '/auth': 'http://backend:8000',
+      '/activity': 'http://backend:8000',
+      '/docs': 'http://backend:8000',
+      '/openapi.json': 'http://backend:8000',
+    },
+  },
 });
