@@ -253,6 +253,8 @@ interface MapComponentProps {
   licensesFetchPending?: boolean;
   /** Background refetch (e.g. after map pan) — lighter cue than initial load. */
   licensesRefetching?: boolean;
+  /** Optional status line while some country feeds are still loading or failed (non-blocking). */
+  licensesSecondaryStatus?: string | null;
   /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
   trackLicenseViewport?: boolean;
   onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
@@ -385,6 +387,7 @@ export default function MapComponent({
   viewModeKey,
   licensesFetchPending = false,
   licensesRefetching = false,
+  licensesSecondaryStatus = null,
   trackLicenseViewport = false,
   onLicenseViewportChange,
   selectedMaritimeVessel,
@@ -623,6 +626,15 @@ export default function MapComponent({
                 >
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" aria-hidden />
                     <span>{t('מעדכן רישיונות…', 'Updating licenses…')}</span>
+                </div>
+            )}
+            {licensesSecondaryStatus && (
+                <div
+                    className="pointer-events-none absolute left-1/2 top-32 z-[600] max-w-[min(90vw,28rem)] -translate-x-1/2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-center text-[9px] font-bold uppercase tracking-wide text-amber-900 shadow-md dark:border-amber-400/20 dark:bg-amber-500/15 dark:text-amber-100"
+                    role="status"
+                    aria-live="polite"
+                >
+                    {licensesSecondaryStatus}
                 </div>
             )}
             {((onGroundVisible ? processedData.length : 0) === 0) && ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
