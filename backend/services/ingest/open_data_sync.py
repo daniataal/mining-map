@@ -162,6 +162,22 @@ def _megagiant_region(attrs: dict[str, Any]) -> str:
     return _join_parts(attrs.get("STATE"), attrs.get("REG_NAME"))
 
 
+def _norway_production_licence_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(
+        attrs.get("prlMainArea"),
+        attrs.get("prlPhaseCurrent"),
+        attrs.get("prlStratigraphical"),
+    )
+
+
+def _queensland_mineral_tenement_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(attrs.get("tensymbol"), attrs.get("tentype"))
+
+
+def _finland_mining_area_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(attrs.get("ALUEENNIMI"), attrs.get("ALUETUNNUS"))
+
+
 def _resolve_country(source: "ArcGISOpenDataSource", attrs: dict[str, Any]) -> str:
     dynamic_country = _coalesce(attrs, source.country_fields)
     return dynamic_country or source.country
@@ -393,7 +409,7 @@ def _usgs_mrds_global_source() -> ArcGISOpenDataSource:
         default_status="Recorded site",
         record_origin="global_open_fallback",
         order_by="OBJECTID ASC",
-        max_records=15000,
+        max_records=25000,
         page_size=2000,
         sync_contacts=False,
         metadata={
@@ -407,6 +423,103 @@ def _usgs_mrds_global_source() -> ArcGISOpenDataSource:
                 "MRDS remains a useful global mining fallback but USGS notes that systematic updates ceased after 2011. "
                 "The live sync is capped for MVP volume."
             ),
+        },
+    )
+
+
+def _norway_production_licences_current_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="norway_npd_production_licences_current",
+        source_name="Norwegian Offshore Directorate — Production licences (current, with geometry)",
+        layer_url="https://factmaps.sodir.no/api/rest/services/Factmaps/FactMapsWGS84/FeatureServer/616",
+        sector="oil_and_gas",
+        country="Norway",
+        external_id_fields=("prlNpdidLicence", "OBJECTID"),
+        company_fields=("cmpLongName", "prlName"),
+        license_type_fields=("prlLicensingActivityName",),
+        status_fields=("prlStatus",),
+        issued_fields=("prlDateGranted",),
+        updated_fields=("prlDateUpdatedMax", "prlDateUpdated", "prlDateLastChanged"),
+        region_builder=_norway_production_licence_region,
+        source_record_url_fields=("prlFactPageUrl", "prlFactMapUrl"),
+        default_commodity="Oil & Gas",
+        default_license_type="Production licence",
+        default_status="Current",
+        order_by="prlDateUpdatedMax DESC",
+        max_records=2500,
+        page_size=500,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "europe",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Norway",
+            "summary_note": "Official Norwegian Offshore Directorate (NPD) Factmaps service for current production licences.",
+        },
+    )
+
+
+def _finland_active_mining_areas_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="finland_tukes_active_mining_areas",
+        source_name="Finland Tukes — Active mining areas (Kaivosalueet voimassa)",
+        layer_url="https://gtkdata.gtk.fi/arcgis/rest/services/Tukes/Kaivosrekisteri/MapServer/15",
+        sector="mining",
+        country="Finland",
+        external_id_fields=("ALUETUNNUS", "OBJECTID"),
+        company_fields=("HAKIJA", "ALUETUNNUS"),
+        commodity_fields=("KIVENNAISET",),
+        license_type_fields=("ALUESTATUS",),
+        status_fields=("ALUESTATUS",),
+        issued_fields=("PAATOSPVM",),
+        updated_fields=("VOIMASSAOLOPVM", "SAAPUMISPVM"),
+        region_builder=_finland_mining_area_region,
+        default_commodity="Minerals",
+        default_license_type="Mining area",
+        default_status="Active",
+        order_by="OBJECTID DESC",
+        max_records=500,
+        page_size=100,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "europe",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Finland",
+            "summary_note": "Official Finnish mining safety authority (Tukes) register layer published via GTK spatial services.",
+        },
+    )
+
+
+def _queensland_mineral_tenement_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="australia_queensland_mineral_tenement",
+        source_name="Queensland Government — Mineral and coal exploration / production authorities",
+        layer_url="https://spatial-gis.information.qld.gov.au/arcgis/rest/services/Economy/MineralTenement/FeatureServer/0",
+        sector="mining",
+        country="Australia",
+        external_id_fields=("tenid", "objectid"),
+        company_fields=("tenowner", "tenname", "tenid"),
+        commodity_fields=("tenmineral",),
+        license_type_fields=("tentype",),
+        status_fields=("tenstatus",),
+        issued_fields=("grantdate", "appdate"),
+        updated_fields=("expiredate",),
+        region_builder=_queensland_mineral_tenement_region,
+        default_commodity="Minerals",
+        default_license_type="Mineral / coal authority",
+        default_status="Active",
+        order_by="objectid DESC",
+        max_records=4500,
+        page_size=1000,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "asia_pacific",
+            "jurisdiction_scope": "subnational",
+            "jurisdiction_label": "Queensland, Australia",
+            "summary_note": "Official Queensland spatial catalogue mineral and coal tenement layer (state-level, not whole-of-Australia).",
+            "note": "Capped for performance; very large statewide tenure layer.",
         },
     )
 
@@ -576,6 +689,9 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
     _new_zealand_petroleum_source(),
     _british_columbia_mining_source(),
     _canada_northern_oil_rights_source(),
+    _norway_production_licences_current_source(),
+    _finland_active_mining_areas_source(),
+    _queensland_mineral_tenement_source(),
     _usgs_mrds_global_source(),
     _megagiant_oil_gas_fields_source(),
 )
@@ -809,6 +925,258 @@ AFRICA_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
         },
     },
 }
+
+
+# Countries frequently checked for ME / Europe / Asia visibility. These are included in
+# `/api/open-data/coverage/world` even when the DB has zero rows so gaps stay explicit.
+WORLD_COVERAGE_ATTENTION_COUNTRIES: tuple[str, ...] = (
+    # Middle East & West Asia (non-African list)
+    "Bahrain",
+    "Iran",
+    "Iraq",
+    "Israel",
+    "Jordan",
+    "Kuwait",
+    "Lebanon",
+    "Oman",
+    "Qatar",
+    "Saudi Arabia",
+    "Syria",
+    "Turkey",
+    "United Arab Emirates",
+    "Yemen",
+    # Europe (representative set; Norway/Finland appear via live sources)
+    "Austria",
+    "Belgium",
+    "Czech Republic",
+    "Denmark",
+    "France",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "Ireland",
+    "Italy",
+    "Netherlands",
+    "Poland",
+    "Portugal",
+    "Romania",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "United Kingdom",
+    # Asia & Pacific (Australia appears via Queensland tenure; NZ already elsewhere)
+    "Bangladesh",
+    "China",
+    "India",
+    "Indonesia",
+    "Japan",
+    "Kazakhstan",
+    "Malaysia",
+    "Mongolia",
+    "Nepal",
+    "Pakistan",
+    "Papua New Guinea",
+    "Philippines",
+    "South Korea",
+    "Sri Lanka",
+    "Thailand",
+    "Turkmenistan",
+    "Uzbekistan",
+    "Vietnam",
+)
+
+
+AFRICAN_COUNTRY_NAMES: frozenset[str] = frozenset(name for _iso, name in AFRICAN_COUNTRIES)
+
+_MIDDLE_EAST_AND_WEST_ASIA: frozenset[str] = frozenset(
+    {
+        "Bahrain",
+        "Iran",
+        "Iraq",
+        "Israel",
+        "Jordan",
+        "Kuwait",
+        "Lebanon",
+        "Oman",
+        "Qatar",
+        "Saudi Arabia",
+        "Syria",
+        "Turkey",
+        "United Arab Emirates",
+        "Yemen",
+    }
+)
+
+_EUROPE_NAMES: frozenset[str] = frozenset(
+    {
+        "Albania",
+        "Andorra",
+        "Austria",
+        "Belarus",
+        "Belgium",
+        "Bosnia and Herzegovina",
+        "Bulgaria",
+        "Croatia",
+        "Cyprus",
+        "Czech Republic",
+        "Denmark",
+        "Estonia",
+        "Finland",
+        "France",
+        "Germany",
+        "Greece",
+        "Hungary",
+        "Iceland",
+        "Ireland",
+        "Italy",
+        "Latvia",
+        "Liechtenstein",
+        "Lithuania",
+        "Luxembourg",
+        "Malta",
+        "Moldova",
+        "Monaco",
+        "Montenegro",
+        "Netherlands",
+        "North Macedonia",
+        "Norway",
+        "Poland",
+        "Portugal",
+        "Romania",
+        "Russia",
+        "Russian Federation",
+        "San Marino",
+        "Serbia",
+        "Slovakia",
+        "Slovenia",
+        "Spain",
+        "Sweden",
+        "Switzerland",
+        "Ukraine",
+        "United Kingdom",
+        "Vatican City",
+    }
+)
+
+_ASIA_PACIFIC_NAMES: frozenset[str] = frozenset(
+    {
+        "Afghanistan",
+        "Armenia",
+        "Azerbaijan",
+        "Bangladesh",
+        "Bhutan",
+        "Brunei",
+        "Cambodia",
+        "China",
+        "Georgia",
+        "India",
+        "Indonesia",
+        "Japan",
+        "Kazakhstan",
+        "Kyrgyzstan",
+        "Laos",
+        "Malaysia",
+        "Maldives",
+        "Mongolia",
+        "Myanmar",
+        "Nepal",
+        "North Korea",
+        "Pakistan",
+        "Philippines",
+        "Singapore",
+        "South Korea",
+        "Sri Lanka",
+        "Taiwan",
+        "Tajikistan",
+        "Thailand",
+        "Timor-Leste",
+        "Turkmenistan",
+        "Uzbekistan",
+        "Vietnam",
+        "Australia",
+        "Fiji",
+        "New Zealand",
+        "Papua New Guinea",
+    }
+)
+
+_AMERICAS_NAMES: frozenset[str] = frozenset(
+    {
+        "Argentina",
+        "Belize",
+        "Bolivia",
+        "Brazil",
+        "Canada",
+        "Chile",
+        "Colombia",
+        "Costa Rica",
+        "Cuba",
+        "Dominican Republic",
+        "Ecuador",
+        "El Salvador",
+        "Guatemala",
+        "Guyana",
+        "Haiti",
+        "Honduras",
+        "Jamaica",
+        "Mexico",
+        "Nicaragua",
+        "Panama",
+        "Paraguay",
+        "Peru",
+        "Suriname",
+        "Trinidad and Tobago",
+        "United States",
+        "Uruguay",
+        "Venezuela",
+    }
+)
+
+
+def infer_world_macro_region(country: str) -> str:
+    """Coarse macro-region label for coverage dashboards (not a legal jurisdiction)."""
+    label = (country or "").strip()
+    if not label or label == "Global":
+        return "other"
+    if label in AFRICAN_COUNTRY_NAMES:
+        return "africa"
+    if label in _MIDDLE_EAST_AND_WEST_ASIA:
+        return "middle_east"
+    if label in _EUROPE_NAMES:
+        return "europe"
+    if label in _ASIA_PACIFIC_NAMES:
+        return "asia_pacific"
+    if label in _AMERICAS_NAMES:
+        return "americas"
+    return "other"
+
+
+# Non-African coverage notes (token walls, portal-only cadastres, etc.).
+WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "Philippines": {
+        "mining": {
+            "status": "official_api_restricted",
+            "note": (
+                "The Philippines MGB publishes a public geospatial portal, but the Approved Mining Tenement "
+                "FeatureServer used by the map viewer currently requires an ArcGIS token for direct feature queries."
+            ),
+            "references": [
+                {
+                    "name": "MGB Philippines Geospatial (control map)",
+                    "url": "https://controlmap.mgb.gov.ph/",
+                    "access": "token_required",
+                }
+            ],
+        }
+    },
+}
+
+
+def _sector_coverage_overrides(country: str, sector: str) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    merged.update(WORLD_COVERAGE_OVERRIDES.get(country, {}).get(sector, {}))
+    merged.update(AFRICA_COVERAGE_OVERRIDES.get(country, {}).get(sector, {}))
+    return merged
 
 
 def _fetch_json(url: str, retries: int = 3, pause_seconds: float = 1.0) -> dict[str, Any]:
@@ -1369,7 +1737,7 @@ def _build_world_source_catalog(conn: Any) -> list[dict[str, Any]]:
     )
 
 
-def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
+def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) -> dict[str, Any]:
     own_connection = conn is None
     if conn is None:
         conn = _default_db_connection()
@@ -1380,6 +1748,7 @@ def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
         user_import_stats = _query_record_origin_stats(conn, "user_import_csv")
         syncable = _build_syncable_source_coverage()
         countries_seen = {country for _, country in AFRICAN_COUNTRIES}
+        countries_seen.update(WORLD_COVERAGE_ATTENTION_COUNTRIES)
         countries_seen.update(country for country, _sector in syncable.keys())
         countries_seen.update(country for country, _sector in official_stats.keys())
         countries_seen.update(country for country, _sector in global_fallback_stats.keys())
@@ -1391,11 +1760,8 @@ def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
             "oil_and_gas": {},
         }
 
-        africa_overrides = AFRICA_COVERAGE_OVERRIDES
-
         for country in sorted(countries_seen):
             sector_coverage: dict[str, dict[str, Any]] = {}
-            overrides = africa_overrides.get(country, {})
             for sector in ("mining", "oil_and_gas"):
                 base = {
                     "status": "unavailable",
@@ -1423,7 +1789,7 @@ def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
                         }
                     )
 
-                override = overrides.get(sector)
+                override = _sector_coverage_overrides(country, sector)
                 if override:
                     base.update(override)
                     base["references"] = list(override.get("references", base["references"]))
@@ -1464,14 +1830,45 @@ def get_world_coverage(conn: Any | None = None) -> dict[str, Any]:
             countries.append(
                 {
                     "country": country,
+                    "macro_region": infer_world_macro_region(country),
                     "sectors": sector_coverage,
                 }
             )
 
+        all_countries = list(countries)
+
+        regional_summary: dict[str, dict[str, dict[str, int]]] = {}
+        for entry in all_countries:
+            macro = entry.get("macro_region") or "other"
+            bucket = regional_summary.setdefault(macro, {"mining": {}, "oil_and_gas": {}})
+            for sector in ("mining", "oil_and_gas"):
+                status = entry["sectors"][sector]["status"]
+                sector_bucket = bucket[sector]
+                sector_bucket[status] = sector_bucket.get(status, 0) + 1
+
+        region_aliases = {
+            "middle east": "middle_east",
+            "middle_east": "middle_east",
+            "me": "middle_east",
+            "mena": "middle_east",
+            "asia": "asia_pacific",
+            "apac": "asia_pacific",
+            "eu": "europe",
+        }
+        raw_region = (region or "").strip().lower().replace("-", "_")
+        normalized_region = region_aliases.get(raw_region, raw_region)
+        filtered_countries = all_countries
+        if normalized_region and normalized_region != "all":
+            filtered_countries = [
+                item for item in all_countries if (item.get("macro_region") or "other") == normalized_region
+            ]
+
         return {
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "summary": summary,
-            "countries": countries,
+            "regional_summary": regional_summary,
+            "region_filter": normalized_region or None,
+            "countries": filtered_countries,
             "sources": _build_world_source_catalog(conn),
         }
     finally:

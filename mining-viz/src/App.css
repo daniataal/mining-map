@@ -1253,9 +1253,6 @@
 .custom-marker.is-selected {
   z-index: 1100 !important;
 }
-.custom-marker.is-selected > div {
-  transform: scale(1.6);
-  transform-origin: center;
-  border-color: #fff !important;
-  box-shadow: 0 0 18px rgba(255, 215, 0, 0.85), 0 0 8px rgba(255, 255, 255, 0.5) !important;
+.vessel-marker.is-selected {
+  z-index: 1100 !important;
 }

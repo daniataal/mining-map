@@ -32,6 +32,117 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
+/** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
+type VesselCategoryKey =
+    | 'tanker'
+    | 'cargo'
+    | 'passenger'
+    | 'fishing'
+    | 'tug'
+    | 'service'
+    | 'pleasure'
+    | 'fast'
+    | 'other';
+
+const VESSEL_CATEGORY_COLORS: Record<VesselCategoryKey, string> = {
+    tanker: '#fbbf24',
+    cargo: '#38bdf8',
+    passenger: '#34d399',
+    fishing: '#2dd4bf',
+    tug: '#a78bfa',
+    service: '#94a3b8',
+    pleasure: '#f472b6',
+    fast: '#fb923c',
+    other: '#64748b',
+};
+
+function vesselCategoryFromTypeCode(code: number | null | undefined): VesselCategoryKey | null {
+    if (code == null || !Number.isFinite(code)) return null;
+    const c = Math.floor(code);
+    if (c === 0) return 'other';
+    if (c >= 80 && c <= 89) return 'tanker';
+    if (c >= 70 && c <= 79) return 'cargo';
+    if (c >= 60 && c <= 69) return 'passenger';
+    if (c === 30) return 'fishing';
+    if (c === 31 || c === 32 || c === 52) return 'tug';
+    if ([33, 34, 35, 50, 51, 53, 54, 55, 58, 59].includes(c)) return 'service';
+    if (c === 36 || c === 37) return 'pleasure';
+    if ((c >= 40 && c <= 49) || (c >= 20 && c <= 29)) return 'fast';
+    if (c >= 90 && c <= 99) return 'other';
+    return null;
+}
+
+function vesselCategoryFromLabel(label: string | null | undefined): VesselCategoryKey | null {
+    if (!label) return null;
+    const s = label.toLowerCase();
+    if (s.includes('tank')) return 'tanker';
+    if (s.includes('cargo') || s.includes('container') || s.includes('bulk') || s.includes('carrier')) return 'cargo';
+    if (s.includes('passenger') || s.includes('cruise')) return 'passenger';
+    if (s.includes('fish')) return 'fishing';
+    if (s.includes('tug') || s.includes('tow')) return 'tug';
+    if (
+        s.includes('pilot') ||
+        s.includes('search') ||
+        s.includes('sar') ||
+        s.includes('rescue') ||
+        s.includes('military') ||
+        s.includes('law') ||
+        s.includes('dredg') ||
+        s.includes('port tender') ||
+        s.includes('anti-pollution')
+    )
+        return 'service';
+    if (s.includes('pleasure') || s.includes('sailing') || s.includes('yacht')) return 'pleasure';
+    if (s.includes('high speed') || s.includes('hsc') || s.includes('wig')) return 'fast';
+    return null;
+}
+
+function getVesselMarkerColor(vessel: MaritimeVessel): string {
+    const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
+    if (fromCode) return VESSEL_CATEGORY_COLORS[fromCode];
+    const fromLabel = vesselCategoryFromLabel(vessel.ship_type_label);
+    if (fromLabel) return VESSEL_CATEGORY_COLORS[fromLabel];
+    return VESSEL_CATEGORY_COLORS.other;
+}
+
+/** Prefer true heading; else course over ground; invalid AIS (511) ignored. */
+function getVesselHeadingDegrees(vessel: MaritimeVessel): number {
+    const th = vessel.true_heading;
+    if (th != null && Number.isFinite(th) && th !== 511 && th >= 0 && th < 360) return th;
+    const cog = vessel.course_over_ground;
+    if (cog != null && Number.isFinite(cog)) {
+        let c = cog % 360;
+        if (c < 0) c += 360;
+        if (Math.abs(c - 360) < 1e-6 || c === 360) return 0;
+        return c;
+    }
+    return 0;
+}
+
+const MARITIME_LEGEND_KEYS: VesselCategoryKey[] = [
+    'tanker',
+    'cargo',
+    'passenger',
+    'fishing',
+    'tug',
+    'service',
+    'pleasure',
+    'fast',
+    'other',
+];
+
+const VESSEL_LEGEND_T: Record<VesselCategoryKey, [string, string]> = {
+    tanker: ['מכלית', 'Tanker'],
+    cargo: ['מטען', 'Cargo'],
+    passenger: ['נוסעים', 'Passenger'],
+    fishing: ['דיג', 'Fishing'],
+    tug: ['גוררת', 'Tug'],
+    service: ['שירות', 'Service'],
+    pleasure: ['שייט', 'Pleasure'],
+    fast: ['מהיר', 'Fast'],
+    other: ['אחר/לא ידוע', 'Other'],
+};
+
 const createCustomIcon = (color: string, isHovered: boolean) => {
     const isGold = color === '#FFD700';
     const size = isHovered ? 24 : (isGold ? 14 : 10);
@@ -57,13 +168,30 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
     });
 };
 
-const createVesselIcon = (isSelected: boolean) =>
-    new L.DivIcon({
-        className: 'vessel-marker',
-        html: `<div style="background-color: #22d3ee; width: ${isSelected ? 14 : 10}px; height: ${isSelected ? 14 : 10}px; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 0 ${isSelected ? 14 : 8}px rgba(34, 211, 238, 0.65);"></div>`,
-        iconSize: isSelected ? [14, 14] : [10, 10],
-        iconAnchor: isSelected ? [7, 7] : [5, 5],
+const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
+    const heading = getVesselHeadingDegrees(vessel);
+    const color = getVesselMarkerColor(vessel);
+    const dim = isSelected ? 26 : 20;
+    const half = dim / 2;
+    const scale = isSelected ? 1.12 : 1;
+    const glow =
+        isSelected
+            ? 'drop-shadow(0 0 8px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(34,211,238,0.35))'
+            : 'drop-shadow(0 0 5px rgba(0,0,0,0.75))';
+    const svgSize = Math.round(dim * 0.85);
+    const stroke = 'rgba(255,255,255,0.92)';
+    const inner = `<div class="vessel-marker-inner" style="width:${dim}px;height:${dim}px;display:flex;align-items:center;justify-content:center;transform:rotate(${heading}deg) scale(${scale});filter:${glow};">
+<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" style="display:block" aria-hidden="true">
+<path d="M12 2.5 L21.5 20.5 L12 15.2 L2.5 20.5 Z" fill="${color}" stroke="${stroke}" stroke-width="1.15" stroke-linejoin="round"/>
+</svg></div>`;
+    return new L.DivIcon({
+        className: `vessel-marker${isSelected ? ' is-selected' : ''}`,
+        html: inner,
+        iconSize: [dim, dim],
+        iconAnchor: [half, half],
+        popupAnchor: [0, -half],
     });
+};
 
 // Applied to the marker root (.leaflet-marker-icon) when an item is the
 // active selection. We toggle a class instead of calling setIcon() because
@@ -522,6 +650,33 @@ export default function MapComponent({
                                 </div>
                             </div>
 
+                            <div className="rounded-2xl border border-black/5 bg-black/[0.03] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
+                                <p className="mb-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                    {t('מקרא סימני כלי שיט', 'Vessel markers')}
+                                </p>
+                                <p className="mb-1 text-[9px] leading-snug text-slate-500">
+                                    {t(
+                                        'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS.',
+                                        'Chevron points along heading (north up). Fill color follows AIS ship-type category.'
+                                    )}
+                                </p>
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                    {MARITIME_LEGEND_KEYS.map((key) => (
+                                        <span
+                                            key={key}
+                                            className="inline-flex items-center gap-0.5 text-[8px] text-slate-400"
+                                        >
+                                            <span
+                                                className="h-2 w-2 shrink-0 rounded-[1px] border border-white/25"
+                                                style={{ backgroundColor: VESSEL_CATEGORY_COLORS[key] }}
+                                                aria-hidden
+                                            />
+                                            <span>{t(VESSEL_LEGEND_T[key][0], VESSEL_LEGEND_T[key][1])}</span>
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+
                             <div className="flex flex-wrap items-center gap-1.5">
                                 <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-500">
                                     {maritimeScope === 'oil_tankers'
@@ -765,7 +920,7 @@ export default function MapComponent({
                     <Marker
                         key={vessel.id}
                         position={[vessel.lat, vessel.lng]}
-                        icon={createVesselIcon(selectedMaritimeVessel?.id === vessel.id)}
+                        icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id)}
                         eventHandlers={{
                             click: (e) => {
                                 L.DomEvent.stopPropagation(e);
@@ -781,6 +936,28 @@ export default function MapComponent({
                                 </span>
                                 <p className="text-[9px] text-slate-400">
                                     {[vessel.ship_type_label, vessel.nearest_port?.name].filter(Boolean).join(' · ')}
+                                </p>
+                                <p className="text-[8px] text-slate-500">
+                                    {(() => {
+                                        const th = vessel.true_heading;
+                                        const usesHdg =
+                                            th != null &&
+                                            Number.isFinite(th) &&
+                                            th !== 511 &&
+                                            th >= 0 &&
+                                            th < 360;
+                                        const cog = vessel.course_over_ground;
+                                        const usesCog = cog != null && Number.isFinite(cog);
+                                        if (usesHdg) {
+                                            const deg = Math.round(th as number);
+                                            return t(`כיוון: ${deg}° (HDG)`, `Heading: ${deg}° (HDG)`);
+                                        }
+                                        if (usesCog) {
+                                            const deg = Math.round(getVesselHeadingDegrees(vessel));
+                                            return t(`כיוון: ${deg}° (COG)`, `Heading: ${deg}° (COG)`);
+                                        }
+                                        return t('כיוון לא דווח', 'No heading reported');
+                                    })()}
                                 </p>
                             </div>
                         </Tooltip>

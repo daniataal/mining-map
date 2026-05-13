@@ -531,6 +531,7 @@ export interface AfricaCoverageResponse {
 
 export interface WorldCoverageCountry {
   country: string;
+  macro_region?: string;
   sectors: {
     mining: CountrySectorCoverage;
     oil_and_gas: CountrySectorCoverage;
@@ -559,6 +560,8 @@ export interface SourceCatalogEntry {
 export interface WorldCoverageResponse {
   generated_at: string;
   summary: Record<'mining' | 'oil_and_gas', Record<string, number>>;
+  regional_summary?: Record<string, Record<'mining' | 'oil_and_gas', Record<string, number>>>;
+  region_filter?: string | null;
   countries: WorldCoverageCountry[];
   sources: SourceCatalogEntry[];
 }
