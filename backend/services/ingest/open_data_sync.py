@@ -1622,10 +1622,15 @@ def get_source_registry_index() -> dict[str, dict[str, Any]]:
     return registry
 
 
-def describe_license_source_record(source_id: Optional[str], record_origin: Optional[str]) -> dict[str, Any]:
-    registry = get_source_registry_index()
-    if source_id and source_id in registry:
-        return dict(registry[source_id])
+def describe_license_source_record(
+    source_id: Optional[str],
+    record_origin: Optional[str],
+    *,
+    registry: Optional[dict[str, dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    reg = registry if registry is not None else get_source_registry_index()
+    if source_id and source_id in reg:
+        return dict(reg[source_id])
     normalized_origin = (record_origin or "").strip().lower()
     if normalized_origin == "user_import_csv":
         return {
