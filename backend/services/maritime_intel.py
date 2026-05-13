@@ -165,12 +165,21 @@ def _parse_datetime(value: Any) -> Optional[datetime]:
         raw = value.strip()
         if not raw:
             return None
+        # Some upstream payloads include values like "... +0000 UTC" which are
+        # valid timestamps semantically but not valid for PostgreSQL casts.
+        normalized = re.sub(r"\s+UTC$", "", raw, flags=re.IGNORECASE)
         try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
                 return parsed.replace(tzinfo=timezone.utc)
             return parsed.astimezone(timezone.utc)
         except ValueError:
+            for fmt in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S %z"):
+                try:
+                    parsed = datetime.strptime(normalized, fmt)
+                    return parsed.astimezone(timezone.utc)
+                except ValueError:
+                    continue
             return None
     return None
 
@@ -1291,6 +1300,7 @@ def persist_maritime_vessel_feed(conn, feed: dict[str, Any]) -> int:
             lng = vessel.get("lng")
             if not mmsi or lat is None or lng is None:
                 continue
+            observed_at = _parse_datetime(vessel.get("observed_at")) or datetime.now(timezone.utc)
             cur.execute(
                 """
                 INSERT INTO maritime_vessel_snapshots (
@@ -1326,13 +1336,13 @@ def persist_maritime_vessel_feed(conn, feed: dict[str, Any]) -> int:
                     vessel.get("vessel_name"),
                     float(lat),
                     float(lng),
-                    vessel.get("observed_at"),
+                    observed_at,
                     vessel.get("source_label") or "AISStream",
                     vessel.get("source_url") or "https://aisstream.io/documentation",
                     vessel.get("ship_type_code"),
                     vessel.get("ship_type_label"),
                     Json(vessel),
-                    vessel.get("observed_at"),
+                    observed_at,
                 ),
             )
             upserted += 1

@@ -873,7 +873,20 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
             cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
             cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint) WHERE fingerprint IS NOT NULL;")
+            # Older deployments created a partial unique index on fingerprint.
+            # ON CONFLICT (fingerprint) cannot infer partial indexes reliably,
+            # so we normalize to a plain unique index after de-duping rows.
+            cur.execute(
+                """
+                DELETE FROM entity_relationships er
+                USING entity_relationships newer
+                WHERE er.fingerprint = newer.fingerprint
+                  AND er.fingerprint IS NOT NULL
+                  AND er.ctid < newer.ctid;
+                """
+            )
+            cur.execute("DROP INDEX IF EXISTS idx_entity_relationships_fingerprint;")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);")
             conn.commit()
