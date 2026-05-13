@@ -6,7 +6,7 @@
     tls internal
 
     @backend {
-        path /auth/* /licenses* /activity/* /files/* /docs /openapi.json
+        path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
     }
     reverse_proxy @backend backend:8000
 
