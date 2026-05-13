@@ -1582,7 +1582,7 @@ def read_licenses(
 
     def _bbox_query(c) -> tuple[list, dict[str, dict], bool]:
         min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
-        safe_limit = max(1, min(int(limit or 5000), 15000))
+        safe_limit = max(1, min(int(limit or 10000), 15000))
         sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
         country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
         exists_sql = f"""
@@ -1661,7 +1661,7 @@ def read_licenses(
 
     start_time = time.time()
     c = conn.cursor(cursor_factory=RealDictCursor)
-    safe_limit = max(1, min(int(limit or 5000), 15000))
+    safe_limit = max(1, min(int(limit or 10000), 15000))
     try:
         print(f"[licenses] Starting fetch for sector={normalized_sector_key} countries={requested_countries}")
         db_start = time.time()
