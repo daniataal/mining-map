@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, startTransition } from 'react';
+import { useState, useMemo, useEffect, useCallback, startTransition, useRef } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
@@ -32,6 +32,28 @@ function licenseViewportUsesBbox(bounds: MaritimeViewportBounds): boolean {
   if (latSpan <= 0 || lngSpan <= 0) return false;
   if (latSpan >= LICENSE_MAP_BBOX_MAX_LAT_SPAN || lngSpan >= LICENSE_MAP_BBOX_MAX_LNG_SPAN) return false;
   return true;
+}
+
+const LICENSE_VIEWPORT_DEBOUNCE_MS = 1200;
+const LICENSE_VIEWPORT_MIN_CHANGE_FRAC = 0.12;
+
+function licenseViewportChangedEnough(
+  prev: MaritimeViewportBounds,
+  next: MaritimeViewportBounds,
+  minFrac: number,
+): boolean {
+  const prevLat = prev.north - prev.south;
+  const prevLng = prev.east - prev.west;
+  const nextLat = next.north - next.south;
+  const nextLng = next.east - next.west;
+  if (![prevLat, prevLng, nextLat, nextLng].every((x) => Number.isFinite(x) && x > 0)) return true;
+  const latDelta = Math.abs(nextLat - prevLat) / Math.max(prevLat, 1e-9);
+  const lngDelta = Math.abs(nextLng - prevLng) / Math.max(prevLng, 1e-9);
+  const centerLatDelta =
+    Math.abs((next.north + next.south) / 2 - (prev.north + prev.south) / 2) / Math.max(prevLat, 1e-9);
+  const centerLngDelta =
+    Math.abs((next.east + next.west) / 2 - (prev.east + prev.west) / 2) / Math.max(prevLng, 1e-9);
+  return Math.max(latDelta, lngDelta, centerLatDelta, centerLngDelta) >= minFrac;
 }
 
 function extractErrorMessage(value: unknown): string | null {
@@ -98,14 +120,32 @@ export default function App() {
         : undefined;
   const [licenseViewportDraft, setLicenseViewportDraft] = useState<MaritimeViewportBounds | null>(null);
   const [licenseViewportDebounced, setLicenseViewportDebounced] = useState<MaritimeViewportBounds | null>(null);
+  const lastCommittedLicenseViewport = useRef<MaritimeViewportBounds | null>(null);
 
   useEffect(() => {
     if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') {
       setLicenseViewportDraft(null);
       setLicenseViewportDebounced(null);
+      lastCommittedLicenseViewport.current = null;
       return;
     }
-    const timer = window.setTimeout(() => setLicenseViewportDebounced(licenseViewportDraft), 400);
+    const timer = window.setTimeout(() => {
+      if (!licenseViewportDraft) {
+        lastCommittedLicenseViewport.current = null;
+        setLicenseViewportDebounced(null);
+        return;
+      }
+      const prev = lastCommittedLicenseViewport.current;
+      const next = licenseViewportDraft;
+      if (
+        prev &&
+        !licenseViewportChangedEnough(prev, next, LICENSE_VIEWPORT_MIN_CHANGE_FRAC)
+      ) {
+        return;
+      }
+      lastCommittedLicenseViewport.current = next;
+      setLicenseViewportDebounced(next);
+    }, LICENSE_VIEWPORT_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [licenseViewportDraft, viewMode]);
 
@@ -140,8 +180,8 @@ export default function App() {
     if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
     const n = stillLoadingCountryCount;
     return t(
-      `עדיין נטענות ${n} מדינות…`,
-      `Still loading ${n} ${n === 1 ? 'country' : 'countries'}…`,
+      `עדיין נטענות ${n} קבוצות רישיונות…`,
+      `Still loading ${n} ${n === 1 ? 'license request' : 'license requests'}…`,
     );
   }, [stillLoadingCountryCount, rawData.length, t]);
   const licenseLoadPartialFailuresHint = useMemo(() => {
@@ -149,8 +189,8 @@ export default function App() {
     if (rawData.length === 0) return null;
     const n = failedCountryQueryCount;
     return t(
-      `${n} הזנות מדינה לא נטענו — המפה מציגה את הזמין.`,
-      `${n} country ${n === 1 ? 'feed' : 'feeds'} could not be loaded — the map shows available data.`,
+      `${n} קבוצות רישיונות לא נטענו — המפה מציגה את הזמין.`,
+      `${n} license ${n === 1 ? 'request' : 'requests'} could not be loaded — the map shows available data.`,
     );
   }, [failedCountryQueryCount, fetchError, rawData.length, t]);
   const licensesMapSecondaryStatus =

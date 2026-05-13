@@ -55,6 +55,24 @@ services:
       db:
         condition: service_healthy
 
+  license-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-license-sync-worker
+    restart: always
+    command: ["python", "license_daily_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=${LICENSE_DAILY_SYNC_INTERVAL_SECONDS:-86400}
+      - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=${LICENSE_DAILY_SYNC_BACKOFF_SECONDS:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./mining-viz
