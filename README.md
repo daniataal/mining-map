@@ -1,6 +1,6 @@
-# Mining Map Visualization
+# MadSan Global Intelligence
 
-A full-stack application for visualizing mining licenses on an interactive map.
+A full-stack intelligence platform for visualizing mining licenses on an interactive map.
 
 ## ✨ New Features
 *   **Secure Authentication**: Map interactions are locked until login.
@@ -66,7 +66,7 @@ npm run dev
 
 ## 📂 Project Structure
 *   `/backend` - FastAPI server, Postgres/SQLite logic, and Auth handling.
-*   `/mining-viz` - React frontend with Leaflet maps and Admin Panel.
+*   `/mining-viz` - React frontend for MadSan Global Intelligence, with Leaflet maps and Admin Panel.
 *   `/meridian-android` - **Meridian Trade OS** — native Kotlin/Compose Android app ([README](meridian-android/README.md)).
 *   `Dockerfile` - Container definition.
 *   `start.sh` - Startup script that handles DB persistence and permissions.

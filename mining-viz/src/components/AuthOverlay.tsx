@@ -35,7 +35,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                             <LucideLock className="w-6 h-6 text-amber-500" />
                         </div>
                         <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {t("גישה למערכת", "Mining Map Access")}
+                            {t("גישה למערכת", "MadSan Global Intelligence")}
                         </CardTitle>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                             {t("אנא התחבר כדי לצפות ולנהל נתוני רישיונות", "Please sign in to view and manage license data.")}
@@ -96,7 +96,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                             <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
                         </div>
                         <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
-                            {t("צוות מורשה בלבד • 2026 מודיעין כריה", "Authorized Personnel Only • 2026 Mining Intelligence")}
+                            {t("צוות מורשה בלבד • 2026 MadSan Global Intelligence", "Authorized Personnel Only • 2026 MadSan Global Intelligence")}
                         </p>
                     </CardFooter>
                 </Card>

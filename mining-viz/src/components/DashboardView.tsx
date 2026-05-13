@@ -68,7 +68,7 @@ export default function DashboardView({
             {t("לוח בקרה טקטי", "Tactical Command Center")}
           </h1>
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mt-1">
-            Global Mining Intelligence • System Status: Online
+            MadSan Global Intelligence • System Status: Online
           </p>
         </div>
         <div className="flex gap-2 sm:gap-4 items-center flex-wrap justify-end">
