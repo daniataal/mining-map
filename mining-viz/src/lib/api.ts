@@ -2,7 +2,6 @@ import axios, { isCancel } from 'axios';
 import { useMemo, useRef, useEffect } from 'react';
 import {
   useQuery,
-  useQueries,
   useMutation,
   useQueryClient,
   type QueryFunctionContext,
@@ -162,13 +161,15 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
+// No longer batching — single request covers all countries for a clean one-shot map load.
 
-/** When world coverage is empty, keep a short list so we do not fire dozens of parallel requests. */
+/** Fallback country list used when world-coverage metadata is unavailable. */
 const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Ghana',
   'South Africa',
   'Kenya',
-  'United States of America',
+  'United Arab Emirates',
+  'Saudi Arabia',
   'Zambia',
   'Nigeria',
   'Tanzania',
@@ -177,12 +178,13 @@ const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Peru',
   'Chile',
   'Brazil',
+  'Iraq',
+  'Oman',
 ];
 
-/** Max distinct countries to pull for the map (rest appear after filter / other views). */
-const MAX_LICENSE_FETCH_COUNTRIES = 22;
-/** Several countries per GET /licenses to cut HTTP count and browser connection-queue stalls. */
-const LICENSE_COUNTRY_BATCH_SIZE = 8;
+/** Max distinct countries returned by deriveLicenseFetchCountries (all passed in one request). */
+const MAX_LICENSE_FETCH_COUNTRIES = 50;
+
 
 function countrySectorHasRows(c: WorldCoverageCountry, s: 'mining' | 'oil_and_gas'): boolean {
   const sec = c.sectors?.[s];
@@ -267,98 +269,72 @@ export const useLicenses = (
       ? `${viewportBounds.south.toFixed(4)},${viewportBounds.west.toFixed(4)},${viewportBounds.north.toFixed(4)},${viewportBounds.east.toFixed(4)}`
       : 'full';
 
-  const sortedCountries = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (countries?.length ? countries : FALLBACK_LICENSE_FETCH_COUNTRIES)
-            .map((c) => c.trim())
-            .filter(Boolean),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [countries],
-  );
+  // All countries in one sorted, deduplicated string for the query key and param
+  const countriesParam = useMemo(() => {
+    const list = Array.from(
+      new Set(
+        (countries?.length ? countries : [])
+          .map((c) => c.trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+    return list.join(',');
+  }, [countries]);
 
-  const countryBatches = useMemo(() => {
-    const batches: string[][] = [];
-    for (let i = 0; i < sortedCountries.length; i += LICENSE_COUNTRY_BATCH_SIZE) {
-      batches.push(sortedCountries.slice(i, i + LICENSE_COUNTRY_BATCH_SIZE));
-    }
-    return batches;
-  }, [sortedCountries]);
-
-  const licenseQueries = useMemo(
-    () =>
-      countryBatches.map((batch) => ({
-        queryKey: ['licenses', sector ?? 'all', bboxKey, batch.join('|')] as const,
-        staleTime: 300_000,
-        retry: 1,
-        refetchOnWindowFocus: false,
-        placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
-        queryFn: async ({ signal }: QueryFunctionContext) => {
-          const countriesParam = batch.join(',');
-          const countrySet = new Set(batch.map((b) => b.trim().toLowerCase()));
-          try {
-            const useBbox = Boolean(viewportBounds);
-            const { data } = await apiClient.get<unknown>('/licenses', {
-              signal,
-              timeout: LICENSE_GET_TIMEOUT_MS,
-              params: {
-                prefer_open_data: true,
-                countries: countriesParam,
-                ...(sector ? { sector } : {}),
-                ...(useBbox && viewportBounds
-                  ? {
-                      min_lat: viewportBounds.south,
-                      max_lat: viewportBounds.north,
-                      min_lng: viewportBounds.west,
-                      max_lng: viewportBounds.east,
-                    }
-                  : {}),
-              },
-            });
-            if (Array.isArray(data)) return data as MiningLicense[];
-            if (data && typeof data === 'object' && 'error' in data) {
-              const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-              throw new Error(msg);
-            }
-            console.warn('[useLicenses] Expected array from /licenses, got:', data);
-            return [];
-          } catch (error) {
-            if (isLicensesRequestAborted(error)) {
-              throw error;
-            }
-            if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
-              console.warn(
-                '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
-                error
-              );
-              const base = sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
-              return base.filter((item) => countrySet.has((item.country ?? '').trim().toLowerCase()));
-            }
-            throw error;
-          }
-        },
-      })),
-    [countryBatches, sector, bboxKey, viewportBounds],
-  );
-
-  const results = useQueries({ queries: licenseQueries });
-
-  const mergedData = useMemo(() => {
-    const byId = new Map<string, MiningLicense>();
-    for (const q of results) {
-      const arr = q.data;
-      if (!Array.isArray(arr)) continue;
-      for (const lic of arr) {
-        if (lic?.id) byId.set(lic.id, lic);
+  const query = useQuery({
+    queryKey: ['licenses', sector ?? 'all', bboxKey, countriesParam] as const,
+    staleTime: 300_000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      try {
+        const useBbox = Boolean(viewportBounds);
+        const { data } = await apiClient.get<unknown>('/licenses', {
+          signal,
+          timeout: LICENSE_GET_TIMEOUT_MS,
+          params: {
+            prefer_open_data: true,
+            limit: 10000,
+            ...(countriesParam ? { countries: countriesParam } : {}),
+            ...(sector ? { sector } : {}),
+            ...(useBbox && viewportBounds
+              ? {
+                  min_lat: viewportBounds.south,
+                  max_lat: viewportBounds.north,
+                  min_lng: viewportBounds.west,
+                  max_lng: viewportBounds.east,
+                }
+              : {}),
+          },
+        });
+        if (Array.isArray(data)) return data as MiningLicense[];
+        if (data && typeof data === 'object' && 'error' in data) {
+          const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+          throw new Error(msg);
+        }
+        console.warn('[useLicenses] Expected array from /licenses, got:', data);
+        return [];
+      } catch (error) {
+        if (isLicensesRequestAborted(error)) {
+          throw error;
+        }
+        if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
+          console.warn(
+            '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
+            error
+          );
+          return LICENSES_FALLBACK_DATA.filter((item) =>
+            sector ? item.sector === sector : true
+          );
+        }
+        throw error;
       }
-    }
-    return Array.from(byId.values());
-  }, [results]);
+    },
+  });
 
   /** Bbox changes should not wipe the map: keep last good rows until new data arrives. */
-  const cacheEpoch = `${sector ?? 'all'}::${sortedCountries.join('|')}`;
+  const cacheEpoch = `${sector ?? 'all'}::${countriesParam}`;
   const cacheEpochRef = useRef(cacheEpoch);
   const lastStableLicenses = useRef<MiningLicense[]>([]);
 
@@ -370,50 +346,35 @@ export const useLicenses = (
   }, [cacheEpoch]);
 
   useEffect(() => {
-    if (mergedData.length > 0) {
-      lastStableLicenses.current = mergedData;
+    if ((query.data?.length ?? 0) > 0) {
+      lastStableLicenses.current = query.data!;
     }
-  }, [mergedData]);
+  }, [query.data]);
 
   const displayData =
-    mergedData.length > 0 ? mergedData : lastStableLicenses.current;
+    (query.data?.length ?? 0) > 0 ? query.data! : lastStableLicenses.current;
 
-  const isLoading = useMemo(() => {
-    if (!results.length) return false;
-    if (displayData.length > 0) return false;
-    const allFetched = results.every((r) => r.isFetched);
-    return !allFetched;
-  }, [displayData.length, results]);
-
-  const isFetching = useMemo(() => results.some((r) => r.isFetching), [results]);
-
-  const error = useMemo((): Error | null => {
-    if (displayData.length > 0) return null;
-    if (!results.length) return null;
-    const settled = results.filter((r) => !r.isPending);
-    if (settled.length < results.length) return null;
-    const failed = settled.filter((r) => r.error);
-    if (failed.length !== settled.length) return null;
-    const first = failed[0]?.error;
-    return first instanceof Error ? first : new Error(String(first ?? 'Licenses request failed'));
-  }, [displayData.length, results]);
-
-  const stillLoadingCountryCount = useMemo(
-    () => results.filter((r) => !r.isFetched).length,
-    [results],
-  );
-
-  const failedCountryQueryCount = useMemo(() => results.filter((r) => r.isError).length, [results]);
+  const isLoading = !query.isFetched && displayData.length === 0;
+  const isFetching = query.isFetching;
+  const error: Error | null =
+    displayData.length > 0
+      ? null
+      : query.error instanceof Error
+        ? query.error
+        : query.error
+          ? new Error(String(query.error))
+          : null;
 
   return {
     data: displayData,
     isLoading,
     isFetching,
     error,
-    stillLoadingCountryCount,
-    failedCountryQueryCount,
+    stillLoadingCountryCount: isLoading ? 1 : 0,
+    failedCountryQueryCount: query.isError ? 1 : 0,
   };
 };
+
 
 export async function getEntityContacts(entityId: string, entityKind = 'license'): Promise<EntityContact[]> {
   const { data } = await apiClient.get<EntityContact[]>(

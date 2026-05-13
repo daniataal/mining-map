@@ -525,6 +525,31 @@ def _queensland_mineral_tenement_source() -> ArcGISOpenDataSource:
     )
 
 
+def _mena_oil_fields_static_source() -> ArcGISOpenDataSource:
+    """Placeholder — MENA oil fields are seeded via seed_mena_oil_fields() due to lack of open ArcGIS endpoints."""
+    # This is intentionally a minimal stub; actual data comes from seed_mena_oil_fields()
+    return ArcGISOpenDataSource(
+        source_id="mena_oil_fields_static_placeholder",
+        source_name="MENA Oil Fields (placeholder)",
+        layer_url="https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/Megagiant_Oil_Gas_Fields_of_the_World/FeatureServer/0",
+        sector="oil_and_gas",
+        country="Global",
+        external_id_fields=("FIELD_ID", "ObjectId"),
+        company_fields=("FLD_NAME", "FIELD_ID"),
+        country_fields=("COUNTRY",),
+        record_origin="global_open_fallback",
+        max_records=0,  # Do not sync — seeded separately
+        sync_contacts=False,
+        metadata={
+            "kind": "global_open_fallback",
+            "coverage": "world",
+            "summary_note": "MENA oil fields are seeded via static reference data.",
+        },
+    )
+
+
+
+
 def _megagiant_oil_gas_fields_source() -> ArcGISOpenDataSource:
     return ArcGISOpenDataSource(
         source_id="megagiant_oil_gas_fields_world",
