@@ -1071,13 +1071,6 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
             return True
         return False
 
-# ... existing code ...
-# (You need to re-run init_db() call as it was in the original file)
-# But since we are replacing the bottom part, carefully reconstruct order.
-
-# Re-call init_db because we updated the definition
-if not ensure_schema_initialized(force=True):
-    print("[startup] initial schema bootstrap failed; startup hook will retry")
 
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
@@ -1143,10 +1136,15 @@ def _bootstrap_open_data():
 
 @app.on_event("startup")
 def startup_schema_bootstrap():
-    if not ensure_schema_initialized():
-        print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
-        return
-    threading.Thread(target=_bootstrap_open_data, daemon=True).start()
+    """Bind the HTTP port before heavy DB work: init runs in a background thread."""
+
+    def _warm():
+        if not ensure_schema_initialized():
+            print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
+            return
+        _bootstrap_open_data()
+
+    threading.Thread(target=_warm, daemon=True).start()
 
 # --- Auth Endpoints ---
 
