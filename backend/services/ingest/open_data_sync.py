@@ -1386,6 +1386,14 @@ def upsert_open_data_records(
 
 
 def mark_existing_bundled_rows(conn: Any) -> int:
+    with conn.cursor() as cur:
+        # Optimization: Check if we actually have work to do.
+        # If there are no 'manual' or origin-less rows, skip the expensive ID-check loop.
+        cur.execute("SELECT COUNT(*) FROM licenses WHERE record_origin IS NULL OR record_origin = '' OR record_origin = 'manual'")
+        count_needs_check = cur.fetchone()[0]
+        if count_needs_check == 0:
+            return 0
+
     bundled_path = BACKEND_ROOT / "licenses.json"
     if not bundled_path.exists():
         return 0
@@ -1395,7 +1403,7 @@ def mark_existing_bundled_rows(conn: Any) -> int:
         return 0
 
     updated = 0
-    chunk_size = 250
+    chunk_size = 500
     with conn.cursor() as cur:
         for idx in range(0, len(bundled_ids), chunk_size):
             chunk = bundled_ids[idx: idx + chunk_size]
@@ -1410,12 +1418,15 @@ def mark_existing_bundled_rows(conn: Any) -> int:
                     source_name = 'Bundled JSON fallback'
                 WHERE id IN ({placeholders})
                   AND (
-                    source_id IS NULL OR source_id = '' OR source_id = 'bundled_json'
+                    record_origin IS NULL OR record_origin = '' OR record_origin = 'manual'
                   )
                 """,
                 tuple(chunk),
             )
             updated += cur.rowcount
+            # Commit every few chunks to release locks
+            if updated % 2500 == 0:
+                conn.commit()
     conn.commit()
     return updated
 
