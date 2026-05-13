@@ -31,11 +31,11 @@ import {
 } from '../types';
 import bundledLicenses from '../data/licenses.json';
 
-/** Same base URL for fetch() and axios — import this in AdminPanel to avoid localhost vs prod drift. */
-export const API_BASE = import.meta.env.VITE_API_BASE ||
-  (typeof window !== 'undefined' && window.location.protocol === 'https:'
-    ? ''
-    : `http://${window.location.hostname}:8000`);
+/** Same base URL for fetch() and axios. 
+ *  Empty string means 'same origin', which works because we use Vite proxy in dev 
+ *  and Caddy reverse proxy in production. 
+ */
+export const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 /** Context-aware troubleshooting when GET /licenses fails (network / mixed content / wrong base URL). */
 export function describeLicenseFetchFailureContext(): { en: string; he: string } {

@@ -1008,6 +1008,18 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             conn.rollback() 
             print(f"Schema migration skipped or failed (might already exist): {e}")
 
+        # Geo Cache Table (used for fallback coordinate lookups)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS geo_cache (
+                query_key TEXT PRIMARY KEY,
+                lat FLOAT NOT NULL,
+                lng FLOAT NOT NULL,
+                confidence FLOAT DEFAULT 1.0,
+                source TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         # Files Table
         cur.execute("""
             CREATE TABLE IF NOT EXISTS license_files (
@@ -1160,7 +1172,9 @@ def init_db(*, raise_on_error: bool = False) -> bool:
         print("Database initialized successfully.")
         return True
     except Exception as e:
-        print(f"Failed to initialize database: {e}")
+        # Don't rollback the whole connection here as some parts might have succeeded.
+        # But we print the error clearly.
+        print(f"Database initialization step failed: {e}")
         if raise_on_error:
             raise
         return False
