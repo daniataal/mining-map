@@ -944,6 +944,8 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 CREATE INDEX IF NOT EXISTS idx_licenses_sector_lat_lng
                 ON licenses (sector, lat, lng)
                 WHERE lat IS NOT NULL AND lng IS NOT NULL;
+                
+                CREATE INDEX IF NOT EXISTS idx_licenses_country ON licenses (country);
                 """
             )
             # Normalized relationship layer for cross-sector role transparency.

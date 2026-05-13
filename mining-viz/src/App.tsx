@@ -755,6 +755,7 @@ export default function App() {
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
                 viewModeKey={viewMode}
+                worldCoverage={worldCoverage}
                 licensesFetchPending={
                   (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
                   isLoading &&

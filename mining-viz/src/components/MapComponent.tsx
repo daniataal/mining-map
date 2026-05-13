@@ -249,6 +249,7 @@ interface MapComponentProps {
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
   viewModeKey: string;
+  worldCoverage?: { countries: { country: string }[] };
   /** True while the active sector's license query has no data yet (keeps map from feeling frozen on sector switch). */
   licensesFetchPending?: boolean;
   /** Background refetch (e.g. after map pan) — lighter cue than initial load. */
@@ -392,6 +393,7 @@ export default function MapComponent({
   onLicenseViewportChange,
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
+  worldCoverage,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -557,16 +559,33 @@ export default function MapComponent({
     const borderCountries = useMemo(() => {
         const ordered: string[] = [];
         const seenKey = new Set<string>();
+
+        // 1. Add countries from visible markers/processedData
         for (const d of processedData) {
             const raw = d.country?.trim();
             if (!raw) continue;
-            const dedupeKey = raw.toLocaleLowerCase();
+            const dedupeKey = raw.toLowerCase();
             if (seenKey.has(dedupeKey)) continue;
             seenKey.add(dedupeKey);
             ordered.push(raw);
         }
+
+        // 2. Add countries from world coverage (Global mode / background stats)
+        // This ensures borders are shown for all countries where we know we have data,
+        // even if individual license markers haven't loaded yet or are capped by the API.
+        if (worldCoverage?.countries) {
+            for (const c of worldCoverage.countries) {
+                const raw = c.country?.trim();
+                if (!raw) continue;
+                const dedupeKey = raw.toLowerCase();
+                if (seenKey.has(dedupeKey)) continue;
+                seenKey.add(dedupeKey);
+                ordered.push(raw);
+            }
+        }
+
         return ordered.sort((a, b) => a.localeCompare(b));
-    }, [processedData]);
+    }, [processedData, worldCoverage]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
