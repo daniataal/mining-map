@@ -27,6 +27,42 @@ jobs:
       run: |
         echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
+    - name: Resolve CSV auto-import inputs
+      id: csv_import
+      run: |
+        AUTO_IMPORT="${{ vars.AUTO_IMPORT_LICENSES_CSV }}"
+        if [ -z "$AUTO_IMPORT" ]; then
+          AUTO_IMPORT="true"
+        fi
+
+        CSV_PATH=""
+        if [ -f "licenses_export.csv" ]; then
+          CSV_PATH="licenses_export.csv"
+        elif [ -f "mining-viz/licenses_export.csv" ]; then
+          CSV_PATH="mining-viz/licenses_export.csv"
+        fi
+
+        if [ -n "$CSV_PATH" ]; then
+          echo "csv_exists=true" >> "$GITHUB_OUTPUT"
+          echo "csv_path=$CSV_PATH" >> "$GITHUB_OUTPUT"
+        else
+          echo "csv_exists=false" >> "$GITHUB_OUTPUT"
+          echo "csv_path=" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "enabled=$AUTO_IMPORT" >> "$GITHUB_OUTPUT"
+
+    - name: Upload fallback CSV to remote VM
+      if: steps.csv_import.outputs.enabled == 'true' && steps.csv_import.outputs.csv_exists == 'true'
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.REMOTE_HOST }}
+        username: ${{ secrets.REMOTE_USER }}
+        port: 22
+        key: ${{ secrets.REMOTE_SSH_KEY }}
+        source: ${{ steps.csv_import.outputs.csv_path }}
+        target: /tmp/
+
     - name: Build and Push Backend
       run: |
         docker build -t dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }} ./backend
@@ -41,21 +77,35 @@ jobs:
       uses: appleboy/ssh-action@v1.1.0
       env:
         AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+        ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        AUTO_IMPORT_LICENSES_CSV: ${{ steps.csv_import.outputs.enabled }}
+        CSV_UPLOADED: ${{ steps.csv_import.outputs.csv_exists }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY
+        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED
         script: |
           VERSION="v${{ env.BUILD_NUMBER }}"
           
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
+          sudo mkdir -p /opt/mining-map/data
           cd /opt/mining-map
 
           # Persist runtime-only backend secrets on the VM for docker compose.
-          printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY" | sudo tee backend.env >/dev/null
+          {
+            printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
+            printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
+          } | sudo tee backend.env >/dev/null
+
+          # Move uploaded CSV (if present) into a stable, writable location.
+          if [ "$CSV_UPLOADED" = "true" ] && [ -f /tmp/licenses_export.csv ]; then
+            sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
+            sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
+            echo "Fallback CSV prepared at /opt/mining-map/data/licenses_export.csv"
+          fi
 
           # Create the modern split-service docker-compose.yml
           # We don't escape the $VERSION here so the actual value is written to the file
@@ -138,6 +188,40 @@ jobs:
           # Pull and Restart using the new split architecture
           sudo docker compose pull
           sudo docker compose up -d --remove-orphans
+
+          # Wait for backend API to become healthy enough for admin import.
+          BACKEND_READY="false"
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/licenses >/dev/null; then
+              BACKEND_READY="true"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$BACKEND_READY" != "true" ]; then
+            echo "Backend did not become ready in time; skipping CSV auto-import."
+          elif [ "${AUTO_IMPORT_LICENSES_CSV}" != "true" ]; then
+            echo "AUTO_IMPORT_LICENSES_CSV disabled; skipping CSV auto-import."
+          elif [ ! -f /opt/mining-map/data/licenses_export.csv ]; then
+            echo "No fallback CSV found at /opt/mining-map/data/licenses_export.csv; skipping CSV auto-import."
+          elif [ -z "${ADMIN_TOKEN}" ]; then
+            echo "ADMIN_TOKEN is not set; skipping CSV auto-import."
+          else
+            IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \
+              -X POST "http://localhost:8000/api/admin/import/extracted-csv?countries=South%20Africa,Ghana&sector=mining" \
+              -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              -F "file=@/opt/mining-map/data/licenses_export.csv")
+
+            if [[ "$IMPORT_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+              echo "CSV auto-import completed (HTTP ${IMPORT_STATUS})."
+            else
+              echo "CSV auto-import failed (HTTP ${IMPORT_STATUS}); continuing deploy."
+              if [ -f /tmp/licenses_import_response.json ]; then
+                cat /tmp/licenses_import_response.json
+              fi
+            fi
+          fi
           
           # Deep Clean: Remove ALL unused images to reclaim maximum disk space
           sudo docker image prune -af

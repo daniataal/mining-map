@@ -56,6 +56,32 @@ Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. Aft
 
 Production compose now keeps Postgres on the internal Docker network only (no host `5432` publish). Backend and worker still connect through `DB_HOST=db` / `DB_PORT=5432`, so app behavior is unchanged. If your VM previously exposed `5432`, immediately block it at firewall/security-group level and rotate the DB password.
 
+### Deploy-time fallback CSV auto-import
+
+The GitHub Actions deploy workflow now supports automatic fallback CSV import for
+South Africa + Ghana after services are up.
+
+Required repository secrets:
+
+*   `ADMIN_TOKEN`: used both by the backend (`backend.env`) and by the workflow
+    when calling `POST /api/admin/import/extracted-csv`.
+*   `AISSTREAM_API_KEY`: unchanged existing secret.
+
+Optional repository variable:
+
+*   `AUTO_IMPORT_LICENSES_CSV` (default: `true`): set to `false` to skip the
+    auto-import step without changing the workflow file.
+
+Behavior:
+
+*   If `licenses_export.csv` exists in the repo root (or
+    `mining-viz/licenses_export.csv`), the workflow uploads it to the VM and
+    stores it at `/opt/mining-map/data/licenses_export.csv`.
+*   After deploy, the workflow waits for backend readiness and calls the local
+    import endpoint with `countries=South Africa,Ghana` and `sector=mining`.
+*   If CSV is missing, backend is not ready, token is missing, or import fails,
+    the workflow logs and continues deployment (no hard fail by default).
+
 ### Backend (Python/FastAPI)
 ```bash
 cd backend
