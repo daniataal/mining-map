@@ -48,6 +48,10 @@ If you see **"Database error"** or permissions issues:
 
 If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
 
+### Remote PostGIS Recovery
+
+Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. After the workflow deploys this image, recreate the stack with `sudo docker compose pull && sudo docker compose up -d --remove-orphans`; only delete the `postgres_data` volume if the existing remote database is disposable, because that reset permanently removes DB data.
+
 ### Backend (Python/FastAPI)
 ```bash
 cd backend
