@@ -389,11 +389,25 @@ def _licenses_sector_sql_fragment(normalized_sector: Optional[str]) -> tuple[str
 
 
 def _licenses_countries_sql_fragment(requested_countries: list[str]) -> tuple[str, list[Any]]:
-    """Case-insensitive trimmed match on ``licenses.country`` (same normalization idea as country borders parsing)."""
-    norms = [c.strip().lower() for c in requested_countries if c and str(c).strip()]
+    """Index-friendly match on ``licenses.country``."""
+    if not requested_countries:
+        return "TRUE", []
+    
+    # We use the raw country column to hit the index.
+    # We provide both original and lowercase versions to maximize match probability.
+    norms = []
+    for c in requested_countries:
+        if not c: continue
+        s = str(c).strip()
+        if not s: continue
+        norms.append(s)
+        if s.lower() != s:
+            norms.append(s.lower())
+
     if not norms:
         return "TRUE", []
-    return ("LOWER(TRIM(COALESCE(country, ''))) = ANY(%s)", [norms])
+        
+    return ("country = ANY(%s) OR LOWER(country) = ANY(%s)", [norms, [n.lower() for n in norms]])
 
 
 def _build_license_api_results(
@@ -946,6 +960,7 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 WHERE lat IS NOT NULL AND lng IS NOT NULL;
                 
                 CREATE INDEX IF NOT EXISTS idx_licenses_country ON licenses (country);
+                CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
                 """
             )
             # Normalized relationship layer for cross-sector role transparency.
@@ -1169,17 +1184,30 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
 
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
-
-    Historical behaviour deleted the entire table every day and reloaded a
-    bundled JSON file. That kept the app pinned to imported snapshot data.
-    The new bootstrap keeps the existing schema/UI intact, upserts official
-    open-data rows plus configured global fallback datasets, and only falls
-    back to the bundled JSON if all live source fetches fail.
+    
+    Now optimized to skip the full sync if the database already contains
+    substantial data (e.g. from a previous run or persistent volume),
+    keeping startup fast.
     """
     time.sleep(3)
     if not ensure_schema_initialized():
         print("[OpenData] Skipping bootstrap until schema is ready.")
         return
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM licenses")
+            count = cur.fetchone()[0]
+            # If we have more than 50k records, we assume the DB is already seeded.
+            # The background worker will handle regular updates.
+            if count > 50000:
+                print(f"[OpenData] Database already has {count} records. Skipping heavy bootstrap sync.")
+                return
+    except Exception as e:
+        print(f"[OpenData] Could not check record count: {e}")
+    finally:
+        conn.close()
 
     try:
         try:

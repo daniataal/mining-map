@@ -16,7 +16,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
+# Copy large static data first to leverage Docker layer caching
+# This 45MB layer will only be rebuilt if files in backend/data change.
+COPY data/ ./data/
+
+# Copy the rest of the backend code
 COPY . .
 
 # Expose backend port
