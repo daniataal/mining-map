@@ -1452,16 +1452,27 @@ def _fetch_license_rows_for_api(
     c,
     normalized_sector: str | None,
     country_filters: list[str] | None = None,
+    limit: int = 5000,
 ) -> tuple[list, dict[str, dict]]:
     """Load license rows with optional sector and optional country filters (matches client query semantics)."""
     sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector)
     country_sql, country_params = _licenses_countries_sql_fragment(list(country_filters or []))
+    
+    # We explicitly omit 'raw_payload' because it can be multiple megabytes per row and crashes the API response time
+    columns = (
+        "id, company, license_type, commodity, status, date_issued, country, region, "
+        "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
+        "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
+        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+    )
+    
     c.execute(
         f"""
-        SELECT * FROM licenses
+        SELECT {columns} FROM licenses
         WHERE ({sector_sql}) AND ({country_sql})
+        LIMIT %s
         """,
-        tuple(sector_params + country_params),
+        tuple(sector_params + country_params + [limit]),
     )
     rows = c.fetchall()
     return rows, _load_cached_geo_fallbacks(c, rows)
@@ -1545,8 +1556,14 @@ def read_licenses(
         open_clause = ""
         if prefer_open_data and has_preferred_live_rows:
             open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+        columns = (
+            "id, company, license_type, commodity, status, date_issued, country, region, "
+            "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
+            "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
+            "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+        )
         list_sql = f"""
-            SELECT * FROM licenses
+            SELECT {columns} FROM licenses
             WHERE {sector_sql}
               AND ({country_sql})
               AND lat IS NOT NULL AND lng IS NOT NULL
@@ -1600,15 +1617,16 @@ def read_licenses(
         return results
 
     c = conn.cursor(cursor_factory=RealDictCursor)
+    safe_limit = max(1, min(int(limit or 5000), 15000))
     try:
-        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries)
+        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries, limit=safe_limit)
     except Exception as e:
         conn.close()
         if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
             conn = get_db_connection()
             c = conn.cursor(cursor_factory=RealDictCursor)
             try:
-                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries)
+                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries, limit=safe_limit)
             except Exception as retry_exc:
                 conn.close()
                 return {"error": f"Database error: {str(retry_exc)}"}
