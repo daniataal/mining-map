@@ -45,6 +45,26 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const [selectedSourceLabel, setSelectedSourceLabel] = useState<string[]>([]);
   const [selectedConfidenceBucket, setSelectedConfidenceBucket] = useState<string[]>([]);
   const [portLinkedOnly, setPortLinkedOnly] = useState(false);
+  const activeFilterCount =
+    selectedCommodity.length +
+    selectedCountry.length +
+    userStatusFilter.length +
+    selectedLicenseType.length +
+    selectedEntitySubtype.length +
+    selectedSourceLabel.length +
+    selectedConfidenceBucket.length +
+    (portLinkedOnly ? 1 : 0);
+
+  const resetFilters = () => {
+    setSelectedCommodity([]);
+    setSelectedCountry([]);
+    setUserStatusFilter([]);
+    setSelectedLicenseType([]);
+    setSelectedEntitySubtype([]);
+    setSelectedSourceLabel([]);
+    setSelectedConfidenceBucket([]);
+    setPortLinkedOnly(false);
+  };
 
   const processedData = useMemo(() => {
     let data = [...rawData];
@@ -272,5 +292,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setSelectedConfidenceBucket,
     portLinkedOnly,
     setPortLinkedOnly,
+    activeFilterCount,
+    resetFilters,
   };
 };

@@ -562,6 +562,18 @@ export default function App() {
                       {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
                     </div>
                   )}
+                  {miningData.activeFilterCount > 0 && (
+                    <div className="hidden lg:flex items-center gap-2 px-3 h-10 rounded-2xl bg-amber-500/10 backdrop-blur-2xl border border-amber-500/30 shadow-2xl text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                      {t("מסננים פעילים", "Active filters")}: {miningData.activeFilterCount}
+                      <button
+                        type="button"
+                        onClick={miningData.resetFilters}
+                        className="rounded-lg border border-amber-500/50 px-2 py-1 text-[8px] font-black uppercase tracking-widest hover:bg-amber-500/20"
+                      >
+                        {t("נקה", "Clear")}
+                      </button>
+                    </div>
+                  )}
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
