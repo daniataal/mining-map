@@ -8,7 +8,7 @@
     @backend {
         path /auth/* /licenses* /activity/* /files/* /docs /openapi.json
     }
-    reverse_proxy @backend app:8000
+    reverse_proxy @backend backend:8000
 
-    reverse_proxy * app:5173
+    reverse_proxy * frontend:5173
 }
