@@ -6,7 +6,7 @@ import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, P
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Radar, RefreshCw, Ship } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import { useI18n } from '../lib/i18n';
@@ -392,6 +392,7 @@ export default function MapComponent({
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -425,14 +426,20 @@ export default function MapComponent({
     const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
     const onGroundVisible = !isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only';
     const vesselsVisible = isOilAndGasView && oilAndGasDisplayMode !== 'on_ground_only';
+    const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
     useEffect(() => {
         if (isOilAndGasView) return;
         setIsMaritimeLayerEnabled(false);
         setOilAndGasDisplayMode('combined');
         setMaritimeViewport(null);
+        setMaritimeAdvancedOpen(false);
         onSelectMaritimeVessel(null);
     }, [isOilAndGasView, onSelectMaritimeVessel]);
+
+    useEffect(() => {
+        if (!isMaritimeLayerEnabled) setMaritimeAdvancedOpen(false);
+    }, [isMaritimeLayerEnabled]);
 
     useEffect(() => {
         if (isMaritimeLayerEnabled) return;
@@ -445,10 +452,28 @@ export default function MapComponent({
         onSelectMaritimeVessel(null);
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
-    const maritimeStatusText = !isMaritimeLayerEnabled
+    const maritimeIdleHint = t(
+        'כבוי כברירת מחדל — הפעל כדי לטעון לפי גבולות המפה הנוכחיים.',
+        'Off by default — enable to load vessels for the current map bounds.'
+    );
+    const maritimeHeadlineStatus = !isMaritimeLayerEnabled
+        ? ''
+        : isMaritimeLoading && !maritimeFeed
+            ? t('טוען מעקב כלי שיט…', 'Loading vessel watch…')
+            : maritimeError
+                ? t('טעינה נכשלה', 'Load failed')
+                : !maritimeFeed?.live_positions_enabled
+                    ? t('AIS חי לא זמין', 'Live AIS unavailable')
+                    : maritimeVessels.length === 0
+                        ? t('אין כלי שיט בתצוגה', 'No vessels in view')
+                        : t(
+                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בפיקוח`,
+                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels on watch`
+                          );
+    const maritimeDetailNote = !isMaritimeLayerEnabled
         ? t(
-            'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
-            'Vessels stay off by default in Oil & Gas. Turn the layer on to load only the visible map area.'
+              'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
+              'Vessels stay off by default in Oil & Gas. Turn the layer on to load only the visible map area.'
           )
         : isMaritimeLoading && !maritimeFeed
             ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
@@ -456,17 +481,17 @@ export default function MapComponent({
                 ? t('טעינת כלי השיט נכשלה. נסה רענון או שנה היקף/תצוגה.', 'Vessel loading failed. Try refresh or adjust the view/scope.')
                 : !maritimeFeed?.live_positions_enabled
                     ? t(
-                        'AIS חי אינו זמין כרגע. ההקשר הימי בתיק עדיין פעיל גם בלי שכבת כלי שיט.',
-                        'Live AIS is not available right now. Maritime dossier context still works without the vessel layer.'
+                          'AIS חי אינו זמין כרגע. ההקשר הימי בתיק עדיין פעיל גם בלי שכבת כלי שיט.',
+                          'Live AIS is not available right now. Maritime dossier context still works without the vessel layer.'
                       )
                     : maritimeVessels.length === 0
                         ? t(
-                            'לא נמצאו כלי שיט בתצוגה ובחלון הלכידה הנוכחיים. נסה להזיז מפה, להגדיל חלון או לעבור לכל כלי השיט.',
-                            'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
+                              'לא נמצאו כלי שיט בתצוגה ובחלון הלכידה הנוכחיים. נסה להזיז מפה, להגדיל חלון או לעבור לכל כלי השיט.',
+                              'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
                           )
                         : t(
-                            `נצפו ${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
-                            `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels observed in the current watch.`
+                              `נצפו ${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
+                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels observed in the current watch.`
                           );
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
@@ -532,6 +557,33 @@ export default function MapComponent({
         gcTime: 1000 * 60 * 60 * 24 * 7,
         placeholderData: (previousData) => previousData,
     });
+
+    /** High-contrast strokes on dark Carto tiles; cyan at 50% opacity + weight 1 was nearly invisible. */
+    const countryBorderPathStyle = useMemo(
+        () =>
+            isDark
+                ? {
+                      className: 'map-country-border map-country-border--dark',
+                      fillColor: '#0e7490',
+                      color: '#cbd5e1',
+                      weight: 2.5,
+                      opacity: 1,
+                      fillOpacity: 0.05,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  }
+                : {
+                      className: 'map-country-border map-country-border--light',
+                      fillColor: '#06b6d4',
+                      color: '#334155',
+                      weight: 2,
+                      opacity: 0.92,
+                      fillOpacity: 0.07,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  },
+        [isDark]
+    );
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
@@ -816,18 +868,12 @@ export default function MapComponent({
                     </LayersControl.BaseLayer>
 
                     {filteredGeoJson && (
-                        <LayersControl.Overlay checked name={t("גבולות מדינות", "Country Borders")}>
-                            <GeoJSON 
-                                key={borderCountries.join(',')}
-                                data={filteredGeoJson} 
-                                style={{ 
-                                  fillColor: '#06b6d4', 
-                                  weight: 1, 
-                                  color: '#06b6d4', 
-                                  fillOpacity: 0.02,
-                                  opacity: 0.5,
-                                  lineCap: 'round'
-                                }} 
+                        <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
+                            <GeoJSON
+                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}`}
+                                data={filteredGeoJson}
+                                interactive={false}
+                                style={countryBorderPathStyle}
                             />
                         </LayersControl.Overlay>
                     )}
