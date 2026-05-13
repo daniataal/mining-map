@@ -10,6 +10,7 @@ import os
 import csv
 import io
 import uuid
+import threading
 from pydantic import BaseModel
 from typing import Any, Optional
 from urllib.parse import urlparse, urlunparse
@@ -384,6 +385,8 @@ DB_NAME = os.getenv("DB_NAME", "mining_db")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
 DB_MAINTENANCE_NAME = os.getenv("DB_MAINTENANCE_NAME", "postgres")
+_SCHEMA_INIT_LOCK = threading.Lock()
+_SCHEMA_READY = False
 
 def _target_db_connect():
     if DATABASE_URL:
@@ -475,6 +478,12 @@ def get_db_connection():
     if last_error:
         print(f"[db] connection failed for {target}: {last_error}")
     raise HTTPException(status_code=503, detail=detail)
+
+
+def _is_missing_relation_error(err: Exception, relation_name: str = "licenses") -> bool:
+    message = str(err).lower()
+    missing_relation = f'relation "{relation_name}" does not exist' in message
+    return getattr(err, "pgcode", None) == "42P01" or missing_relation
 
 # ... existing imports
 import bcrypt
@@ -574,7 +583,7 @@ class MinerListingUpdate(BaseModel):
     meeting_date: Optional[str] = None
 
 # DB Init Update
-def init_db():
+def init_db(*, raise_on_error: bool = False) -> bool:
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -1016,18 +1025,35 @@ def init_db():
         cur.close()
         conn.close()
         print("Database initialized successfully.")
+        return True
     except Exception as e:
         print(f"Failed to initialize database: {e}")
+        if raise_on_error:
+            raise
+        return False
+
+
+def ensure_schema_initialized(*, force: bool = False) -> bool:
+    global _SCHEMA_READY
+
+    if _SCHEMA_READY and not force:
+        return True
+
+    with _SCHEMA_INIT_LOCK:
+        if _SCHEMA_READY and not force:
+            return True
+        initialized = init_db(raise_on_error=False)
+        if initialized:
+            _SCHEMA_READY = True
+            return True
+        return False
 
 # ... existing code ...
 # (You need to re-run init_db() call as it was in the original file)
 # But since we are replacing the bottom part, carefully reconstruct order.
 
 # Re-call init_db because we updated the definition
-init_db()
-
-import threading
-import time
+ensure_schema_initialized(force=True)
 
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
@@ -1089,6 +1115,12 @@ def _bootstrap_open_data():
 
 
 threading.Thread(target=_bootstrap_open_data, daemon=True).start()
+
+
+@app.on_event("startup")
+def startup_schema_bootstrap():
+    if not ensure_schema_initialized():
+        print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
 
 # --- Auth Endpoints ---
 
@@ -1269,6 +1301,7 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 @app.get("/licenses")
 def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
+    ensure_schema_initialized()
     try:
         conn = get_db_connection()
     except HTTPException as exc:
@@ -1285,7 +1318,19 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
         cached_geo = _load_cached_geo_fallbacks(c, rows)
     except Exception as e:
         conn.close()
-        return {"error": f"Database error: {str(e)}"}
+        if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
+            conn = get_db_connection()
+            c = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                c.execute("SELECT * FROM licenses")
+                rows = c.fetchall()
+                cached_geo = _load_cached_geo_fallbacks(c, rows)
+            except Exception as retry_exc:
+                conn.close()
+                return {"error": f"Database error: {str(retry_exc)}"}
+            conn.close()
+        else:
+            return {"error": f"Database error: {str(e)}"}
     
     conn.close()
 
@@ -3650,26 +3695,36 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
 
 @app.get("/api/open-data/coverage/africa")
 def get_africa_open_data_coverage():
+    ensure_schema_initialized()
     try:
         try:
             from backend.services.ingest.open_data_sync import get_africa_coverage
         except ImportError:
             from services.ingest.open_data_sync import get_africa_coverage
-
-        return get_africa_coverage()
+        try:
+            return get_africa_coverage()
+        except Exception as exc:
+            if _is_missing_relation_error(exc, "licenses") and ensure_schema_initialized(force=True):
+                return get_africa_coverage()
+            raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
 
 @app.get("/api/open-data/coverage/world")
 def get_world_open_data_coverage():
+    ensure_schema_initialized()
     try:
         try:
             from backend.services.ingest.open_data_sync import get_world_coverage
         except ImportError:
             from services.ingest.open_data_sync import get_world_coverage
-
-        return get_world_coverage()
+        try:
+            return get_world_coverage()
+        except Exception as exc:
+            if _is_missing_relation_error(exc, "licenses") and ensure_schema_initialized(force=True):
+                return get_world_coverage()
+            raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
