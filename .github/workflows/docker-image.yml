@@ -125,6 +125,7 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
+                - UVICORN_WORKERS=1
               depends_on:
                 db:
                   condition: service_healthy
@@ -143,6 +144,7 @@ jobs:
                 - DB_USER=postgres
                 - DB_PASSWORD=password
                 - MARITIME_WORKER_INTERVAL_SECONDS=60
+                - MARITIME_WORKER_BACKOFF_SECONDS=15
                 - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=10
                 - MARITIME_WORKER_MAX_VESSELS=120
                 - MARITIME_WORKER_SCOPE=all_vessels

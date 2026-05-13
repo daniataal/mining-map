@@ -48,6 +48,35 @@ If you see **"Database error"** or permissions issues:
 
 If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
 
+### Performance on small VMs
+
+Swap space helps the kernel avoid **OOM kills** when memory spikes, but it does **not** replace RAM for interactive latency. When Postgres, Node, or Python processes routinely page to disk, the whole stack feels frozen and request latencies explode. Treat swap as an emergency buffer, not extra capacity.
+
+**What this repo already does (honest inventory):**
+
+- **Maritime worker** is configurable via env (`MARITIME_WORKER_INTERVAL_SECONDS`, `MARITIME_WORKER_BACKOFF_SECONDS`, `MARITIME_WORKER_MAX_VESSELS`, capture window, scope, snapshot TTL). Compose passes these through with defaults; `backend/maritime_worker.py` enforces minimum intervals (15s loop / 5s backoff).
+- **API and UI caps** reduce worst-case work: maritime vessel responses expose `cap_applied`; the map limits port markers (`PORTS_MAP_RENDER_LIMIT` ≈ 3000 in `MapComponent.tsx`) and soft-caps maritime markers (`MARITIME_RENDER_SOFT_CAP` ≈ 1200); `port_logistics` documents a similar map render limit for terminal nodes.
+- **Backend process model**: `python main.py` runs Uvicorn; `UVICORN_WORKERS` defaults to **1** (set explicitly in compose). Values greater than 1 fork multiple workers and **increase** RAM use—only raise this on larger hosts.
+- **Gaps / trade-offs**: root `docker-compose.yml` does **not** set CPU/memory limits, custom `postgresql.conf`, or `shm_size` for Postgres. The `mining-viz` container image runs **`vite` dev** (`npm run dev`), which is convenient for development but heavier than serving a production `npm run build` static bundle behind Caddy.
+
+**Practical tips on a ~1 vCPU / ~1 GB RAM host:**
+
+1. Prefer **conservative concurrency**: keep `UVICORN_WORKERS=1`; avoid running extra heavy jobs on the same VM during ingest or LLM traffic.
+2. **Do not rely on swap for steady-state performance**—if `maritime-worker` + Postgres + backend + Node regularly swap, raise `MARITIME_WORKER_INTERVAL_SECONDS`, lower `MARITIME_WORKER_MAX_VESSELS`, or stop the worker temporarily while debugging.
+3. **Split roles when possible**: avoid running dev `vite` on the same machine as production traffic; for production-like hosting, build static assets and point Caddy at `dist/` instead of the dev server (requires a Dockerfile or deploy step change not included in the default compose path).
+4. **Optional compose merge**: `docker-compose.small-vm.yml` supplies gentler maritime defaults (longer interval, fewer vessels). Use: `docker compose -f docker-compose.yml -f docker-compose.small-vm.yml up -d`. Default `docker compose up` is unchanged.
+5. **Linux `vm.swappiness`** (host only, not in compose): lowering it (e.g. toward 10) makes the kernel prefer keeping app pages in RAM before swapping; raising it favors swap. Changes are global and easy to get wrong—only tune with monitoring (`vmstat`, `free -h`) and revert if latency worsens.
+
+**Compose-related env vars** (defaults in `docker-compose.yml` unless overridden):
+
+| Variable | Typical default | Notes |
+| --- | --- | --- |
+| `UVICORN_WORKERS` | `1` | Passed to backend; values greater than 1 multiply RAM. |
+| `MARITIME_WORKER_INTERVAL_SECONDS` | `60` | Min **15** in `maritime_worker.py`. |
+| `MARITIME_WORKER_BACKOFF_SECONDS` | `15` | Min **5** after a failed collection. |
+| `MARITIME_WORKER_MAX_VESSELS` | `120` | Fewer reduces AIS/DB write load. |
+| `MARITIME_SNAPSHOT_TTL_SECONDS` | `300` | Staleness window for cached vessel snapshots. |
+
 ### Remote PostGIS Recovery
 
 Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. After the workflow deploys this image, recreate the stack with `sudo docker compose pull && sudo docker compose up -d --remove-orphans`; only delete the `postgres_data` volume if the existing remote database is disposable, because that reset permanently removes DB data.

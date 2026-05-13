@@ -1,0 +1,12 @@
+# Merge for ~1 GB RAM hosts: less AIS/DB churn; default dev unchanged if you omit this file.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.small-vm.yml up -d
+services:
+  backend:
+    environment:
+      - UVICORN_WORKERS=1
+
+  maritime-worker:
+    environment:
+      - MARITIME_WORKER_INTERVAL_SECONDS=300
+      - MARITIME_WORKER_MAX_VESSELS=60
+      - MARITIME_WORKER_BACKOFF_SECONDS=60

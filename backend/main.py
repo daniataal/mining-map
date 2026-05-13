@@ -4248,5 +4248,14 @@ def delete_shipment(shipment_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+
     # Run slightly different port than typical default to avoid collisions if any
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        workers = int(os.getenv("UVICORN_WORKERS", "1") or "1")
+    except ValueError:
+        workers = 1
+    workers = max(1, workers)
+    if workers == 1:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    else:
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, workers=workers)
