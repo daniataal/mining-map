@@ -1355,6 +1355,22 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 
+def _fetch_license_rows_for_api(c, normalized_sector: str | None) -> tuple[list, dict[str, dict]]:
+    """Load license rows with optional sector filter (matches client sector query semantics)."""
+    if normalized_sector:
+        c.execute(
+            """
+            SELECT * FROM licenses
+            WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(sector), ''), 'mining'))) = %s
+            """,
+            (normalized_sector,),
+        )
+    else:
+        c.execute("SELECT * FROM licenses")
+    rows = c.fetchall()
+    return rows, _load_cached_geo_fallbacks(c, rows)
+
+
 @app.get("/licenses")
 def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
     if not ensure_schema_initialized():
@@ -1367,21 +1383,17 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             return []
         raise
     c = conn.cursor(cursor_factory=RealDictCursor)
-    
-    # Select all rows
+    normalized_sector = (sector or "").strip().lower() or None
+
     try:
-        c.execute("SELECT * FROM licenses")
-        rows = c.fetchall()
-        cached_geo = _load_cached_geo_fallbacks(c, rows)
+        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector)
     except Exception as e:
         conn.close()
         if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
             conn = get_db_connection()
             c = conn.cursor(cursor_factory=RealDictCursor)
             try:
-                c.execute("SELECT * FROM licenses")
-                rows = c.fetchall()
-                cached_geo = _load_cached_geo_fallbacks(c, rows)
+                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector)
             except Exception as retry_exc:
                 conn.close()
                 return {"error": f"Database error: {str(retry_exc)}"}
@@ -1389,16 +1401,10 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
         else:
             print(f"[licenses] query failed: {e}")
             return _schema_unavailable_response("reading licenses")
-    
-    conn.close()
+    else:
+        conn.close()
 
     count_all = len(rows)
-    normalized_sector = (sector or "").strip().lower()
-    if normalized_sector:
-        rows = [
-            row for row in rows
-            if (row.get("sector") or "mining").strip().lower() == normalized_sector
-        ]
     count_after_sector = len(rows)
 
     # Once live/open or global fallback rows exist for the current sector, hide
@@ -1416,11 +1422,22 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
 
     try:
         try:
-            from backend.services.ingest.open_data_sync import describe_license_source_record
+            from backend.services.ingest.open_data_sync import (
+                describe_license_source_record,
+                get_source_registry_index,
+            )
         except ImportError:
-            from services.ingest.open_data_sync import describe_license_source_record
+            from services.ingest.open_data_sync import (
+                describe_license_source_record,
+                get_source_registry_index,
+            )
     except Exception:
         describe_license_source_record = None
+        get_source_registry_index = None  # type: ignore[assignment]
+
+    source_registry = None
+    if describe_license_source_record and get_source_registry_index:
+        source_registry = get_source_registry_index()
 
     # Transform to list of dicts with keys matching what the Reac app expects
     results = []
@@ -1431,6 +1448,7 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             describe_license_source_record(
                 row["source_id"] if "source_id" in keys else None,
                 row["record_origin"] if "record_origin" in keys else None,
+                registry=source_registry,
             )
             if describe_license_source_record
             else {}
