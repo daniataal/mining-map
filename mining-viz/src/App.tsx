@@ -175,7 +175,7 @@ export default function App() {
     error: fetchError,
     stillLoadingCountryCount,
     failedCountryQueryCount,
-  } = useLicenses(licenseSector, licenseBoundsForApi, licenseFetchCountries);
+  } = useLicenses(licenseSector, null, licenseFetchCountries);
   const licensesPartialMapHint = useMemo(() => {
     if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
     const n = stillLoadingCountryCount;
@@ -751,6 +751,7 @@ export default function App() {
             {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'oil_and_gas') && (
               <MapComponent
                 processedData={miningData.processedData}
+                allLicenses={allLicenses}
                 userAnnotations={userAnnotations}
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
@@ -765,7 +766,7 @@ export default function App() {
                   (viewMode === 'mining' || viewMode === 'oil_and_gas') && isFetching && !isLoading && !fetchError
                 }
                 licensesSecondaryStatus={licensesMapSecondaryStatus}
-                trackLicenseViewport={viewMode === 'mining' || viewMode === 'oil_and_gas'}
+                trackLicenseViewport={false}
                 onLicenseViewportChange={setLicenseViewportDraft}
                 setSelectedItem={handleSelectItem}
                 handleOpenDossier={handleOpenDossier}
