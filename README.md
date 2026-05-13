@@ -52,6 +52,10 @@ If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-
 
 Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. After the workflow deploys this image, recreate the stack with `sudo docker compose pull && sudo docker compose up -d --remove-orphans`; only delete the `postgres_data` volume if the existing remote database is disposable, because that reset permanently removes DB data.
 
+### Postgres Exposure Hardening
+
+Production compose now keeps Postgres on the internal Docker network only (no host `5432` publish). Backend and worker still connect through `DB_HOST=db` / `DB_PORT=5432`, so app behavior is unchanged. If your VM previously exposed `5432`, immediately block it at firewall/security-group level and rotate the DB password.
+
 ### Backend (Python/FastAPI)
 ```bash
 cd backend

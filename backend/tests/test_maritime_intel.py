@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from backend.services.maritime_intel import (
     _build_ais_subscription_plan,
     _build_stored_feed_response,
+    _parse_datetime,
     _normalize_requested_bbox,
     _ship_matches_scope,
     build_counterparty_proxies,
@@ -53,6 +54,13 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertTrue(_ship_matches_scope("Tanker", "oil_tankers"))
         self.assertFalse(_ship_matches_scope("Cargo", "oil_tankers"))
         self.assertTrue(_ship_matches_scope("Cargo", "all_vessels"))
+
+    def test_parse_datetime_accepts_trailing_utc_suffix(self):
+        parsed = _parse_datetime("2026-05-13 11:42:00 +0000 UTC")
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed.tzinfo, timezone.utc)
+        self.assertEqual(parsed.year, 2026)
 
     def test_build_counterparty_proxies_keeps_destination_and_port_proxy(self):
         proxies = build_counterparty_proxies(

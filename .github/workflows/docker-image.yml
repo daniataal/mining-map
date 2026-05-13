@@ -120,8 +120,6 @@ jobs:
                 POSTGRES_DB: mining_db
                 POSTGRES_USER: postgres
                 POSTGRES_PASSWORD: password
-              ports:
-                - "5432:5432"
               volumes:
                 - postgres_data:/var/lib/postgresql/data
               healthcheck:
