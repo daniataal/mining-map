@@ -4,7 +4,9 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+import uuid
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -365,20 +367,35 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
         }
 
 
-def _source_snapshot_prompt(source_snapshot: dict[str, Any], max_chars: int = 16000) -> str:
-    serialized = json.dumps(source_snapshot, ensure_ascii=True, sort_keys=True)
-    if len(serialized) <= max_chars:
-        return serialized
+def _json_default_for_snapshot(obj: Any) -> Any:
+    """Values that appear in DB-backed dicts but are not JSON-native."""
+    if isinstance(obj, (datetime, date, time)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return bytes(obj).decode("utf-8", errors="replace")
+    if isinstance(obj, set):
+        return sorted(obj) if all(isinstance(x, (str, int, float, bool, type(None))) else False for x in obj) else list(obj)
+```
 
-    compact = dict(source_snapshot)
-    raw_payload = compact.pop("raw_payload", None)
-    compact["raw_payload_truncated"] = raw_payload is not None
-    if raw_payload is not None:
-        raw_payload_json = json.dumps(raw_payload, ensure_ascii=True, sort_keys=True)
-        compact["raw_payload_excerpt"] = raw_payload_json[:8000]
+Wait, I made a syntax error in the set branch - `else False` is wrong. Let me simplify:
 
-    serialized = json.dumps(compact, ensure_ascii=True, sort_keys=True)
-    return serialized[:max_chars]
+```python
+    if isinstance(obj, set):
+        return list(obj)
+```
+
+That's fine for sort_keys consistency on parent - inner set becomes list.
+
+Let me fix the replacement - I accidentally included broken code. I'll read the file and fix.
+
+Fixing a mistake in the set-handling line.
+
+
+Read
 
 
 def normalize_extracted_contacts(raw_contacts: Any) -> list[dict[str, Any]]:
