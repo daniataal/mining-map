@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip, CircleMarker } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Radar, RefreshCw, Ship } from 'lucide-react';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope } from '../types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { applyCollocationJitter } from '../lib/geo';
@@ -57,6 +57,14 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
     });
 };
 
+const createVesselIcon = (isSelected: boolean) =>
+    new L.DivIcon({
+        className: 'vessel-marker',
+        html: `<div style="background-color: #22d3ee; width: ${isSelected ? 14 : 10}px; height: ${isSelected ? 14 : 10}px; border-radius: 9999px; border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 0 ${isSelected ? 14 : 8}px rgba(34, 211, 238, 0.65);"></div>`,
+        iconSize: isSelected ? [14, 14] : [10, 10],
+        iconAnchor: isSelected ? [7, 7] : [5, 5],
+    });
+
 // Applied to the marker root (.leaflet-marker-icon) when an item is the
 // active selection. We toggle a class instead of calling setIcon() because
 // setIcon replaces the marker's _icon DOM node — and replacing that node
@@ -65,8 +73,9 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
 // points.
 const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
-const MARITIME_MAX_VESSEL_OPTIONS = ['30', '60', '90'];
+const MARITIME_MAX_VESSEL_OPTIONS = ['100', '300', '600', '1000'];
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
+const MARITIME_RENDER_SOFT_CAP = 1200;
 
 const getMarkerColor = (
   commodity?: string,
@@ -251,8 +260,9 @@ export default function MapComponent({
     const prevSelectedIdRef = useRef<string | null>(null);
     const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
     const [maritimeScope, setMaritimeScope] = useState<MaritimeVesselScope>('oil_tankers');
-    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('60');
+    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('300');
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+    const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
 
     // Jitter rows that share exact coordinates so each marker has a unique
@@ -284,10 +294,14 @@ export default function MapComponent({
         bbox: maritimeViewport,
     });
     const maritimeVessels = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
+    const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
+    const onGroundVisible = !isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only';
+    const vesselsVisible = isOilAndGasView && oilAndGasDisplayMode !== 'on_ground_only';
 
     useEffect(() => {
         if (isOilAndGasView) return;
         setIsMaritimeLayerEnabled(false);
+        setOilAndGasDisplayMode('combined');
         setMaritimeViewport(null);
         onSelectMaritimeVessel(null);
     }, [isOilAndGasView, onSelectMaritimeVessel]);
@@ -323,8 +337,8 @@ export default function MapComponent({
                             'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
                           )
                         : t(
-                            `נצפו ${maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
-                            `${maritimeVessels.length} vessels observed in the current watch.`
+                            `נצפו ${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
+                            `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels observed in the current watch.`
                           );
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
@@ -393,7 +407,7 @@ export default function MapComponent({
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
-            {processedData.length === 0 && maritimeVessels.length === 0 && (
+            {((onGroundVisible ? processedData.length : 0) === 0) && ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
@@ -438,6 +452,22 @@ export default function MapComponent({
                     <p className="mt-3 text-[10px] leading-snug text-slate-500">
                         {maritimeStatusText}
                     </p>
+
+                    <div className="mt-3">
+                        <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                            {t('תצוגה', 'Display')}
+                        </p>
+                        <Select value={oilAndGasDisplayMode} onValueChange={(value) => setOilAndGasDisplayMode(value as OilAndGasDisplayMode)}>
+                            <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                <SelectItem value="combined">{t('משולב', 'Combined')}</SelectItem>
+                                <SelectItem value="vessels_only">{t('כלי שיט בלבד', 'Vessels only')}</SelectItem>
+                                <SelectItem value="on_ground_only">{t('קרקע בלבד', 'On-ground only')}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
 
                     {isMaritimeLayerEnabled && (
                         <div className="mt-3 space-y-2">
@@ -504,6 +534,11 @@ export default function MapComponent({
                                 <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
                                     {t('מכסה', 'Cap')} {Number(maritimeMaxVessels)}
                                 </Badge>
+                                {maritimeFeed?.cap_applied && (
+                                    <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
+                                        {t('לא הכל נטען', 'Cap applied')}
+                                    </Badge>
+                                )}
                                 {maritimeFeed?.cached && (
                                     <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
                                         {t('מטמון', 'Cached')}
@@ -540,6 +575,30 @@ export default function MapComponent({
                             {maritimeFeed?.geography_note && (
                                 <p className="text-[9px] leading-snug text-slate-500">
                                     {maritimeFeed.geography_note}
+                                </p>
+                            )}
+                            {maritimeFeed?.total_available != null && (
+                                <p className="text-[9px] leading-snug text-slate-500">
+                                    {t(
+                                        `זמינים ${maritimeFeed.total_available}, הוחזרו ${maritimeFeed.returned_count ?? maritimeVessels.length}.`,
+                                        `${maritimeFeed.total_available} available, ${maritimeFeed.returned_count ?? maritimeVessels.length} returned.`
+                                    )}
+                                </p>
+                            )}
+                            {maritimeFeed?.cap_applied && (
+                                <p className="text-[9px] leading-snug text-slate-500">
+                                    {t(
+                                        'המכסה מגבילה את התוצאה לביצועים. הגדל מכסה או הזז/קרב מפה כדי לראות יותר.',
+                                        'Cap limits this result for performance. Increase cap or narrow the viewport to see more.'
+                                    )}
+                                </p>
+                            )}
+                            {maritimeVessels.length > MARITIME_RENDER_SOFT_CAP && (
+                                <p className="text-[9px] leading-snug text-slate-500">
+                                    {t(
+                                        `התצוגה מוגבלת ל-${MARITIME_RENDER_SOFT_CAP} סמנים למניעת עומס.`,
+                                        `Rendering is limited to ${MARITIME_RENDER_SOFT_CAP} markers to keep the map smooth.`
+                                    )}
                                 </p>
                             )}
                             {maritimeLimitationText && (
@@ -623,6 +682,7 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
+                {onGroundVisible && (
                 <MarkerClusterGroup
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
@@ -695,17 +755,17 @@ export default function MapComponent({
                         );
                     })}
                 </MarkerClusterGroup>
-                {isMaritimeLayerEnabled && maritimeVessels.map((vessel) => (
-                    <CircleMarker
+                )}
+                {isMaritimeLayerEnabled && vesselsVisible && (
+                <MarkerClusterGroup
+                    showCoverageOnHover={false}
+                    spiderLegPolylineOptions={{ weight: 1.5, color: '#22d3ee', opacity: 0.45, interactive: false }}
+                >
+                {maritimeVisibleVessels.map((vessel) => (
+                    <Marker
                         key={vessel.id}
-                        center={[vessel.lat, vessel.lng]}
-                        radius={selectedMaritimeVessel?.id === vessel.id ? 8 : 5}
-                        pathOptions={{
-                            color: '#22d3ee',
-                            weight: selectedMaritimeVessel?.id === vessel.id ? 2 : 1,
-                            fillColor: '#22d3ee',
-                            fillOpacity: selectedMaritimeVessel?.id === vessel.id ? 0.9 : 0.7,
-                        }}
+                        position={[vessel.lat, vessel.lng]}
+                        icon={createVesselIcon(selectedMaritimeVessel?.id === vessel.id)}
                         eventHandlers={{
                             click: (e) => {
                                 L.DomEvent.stopPropagation(e);
@@ -724,8 +784,10 @@ export default function MapComponent({
                                 </p>
                             </div>
                         </Tooltip>
-                    </CircleMarker>
+                    </Marker>
                 ))}
+                </MarkerClusterGroup>
+                )}
             </MapContainer>
         </div>
     );

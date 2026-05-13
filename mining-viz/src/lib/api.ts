@@ -438,6 +438,7 @@ export interface MaritimeVesselQueryOptions {
   maxVessels?: number;
   captureWindowSeconds?: number;
   scope?: MaritimeVesselScope;
+  offset?: number;
   bbox?: MaritimeViewportBounds | null;
 }
 
@@ -446,16 +447,18 @@ export const useMaritimeVessels = ({
   maxVessels = 60,
   captureWindowSeconds = 10,
   scope = 'oil_tankers',
+  offset = 0,
   bbox = null,
 }: MaritimeVesselQueryOptions = {}) => {
   return useQuery<MaritimeVesselFeedResponse>({
-    queryKey: ['maritime-vessels', scope, maxVessels, captureWindowSeconds, bbox],
+    queryKey: ['maritime-vessels', scope, maxVessels, captureWindowSeconds, offset, bbox],
     queryFn: async () => {
       const { data } = await apiClient.get<MaritimeVesselFeedResponse>('/api/maritime/vessels', {
         params: {
           max_vessels: maxVessels,
           capture_window_seconds: captureWindowSeconds,
           scope,
+          offset,
           ...(bbox ?? {}),
         },
       });

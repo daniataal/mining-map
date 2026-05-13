@@ -23,8 +23,8 @@ WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 REQUEST_TIMEOUT_SECONDS = 12
 UNLOCODE_CACHE_TTL_SECONDS = 60 * 60 * 24
 AIS_CACHE_TTL_SECONDS = 60
-AIS_DEFAULT_MAX_VESSELS = 60
-AIS_MAX_VESSELS = 120
+AIS_DEFAULT_MAX_VESSELS = 300
+AIS_MAX_VESSELS = 2000
 AIS_DEFAULT_CAPTURE_WINDOW_SECONDS = 10
 AIS_MIN_CAPTURE_WINDOW_SECONDS = 4
 AIS_MAX_CAPTURE_WINDOW_SECONDS = 18
@@ -320,6 +320,8 @@ def _build_stored_feed_response(
     rows: list[dict[str, Any]],
     status: Optional[dict[str, Any]],
     max_vessels: int,
+    offset: int,
+    total_available: int,
     capture_window_seconds: int,
     vessel_scope: str,
     bbox: Optional[tuple[float, float, float, float]],
@@ -380,6 +382,8 @@ def _build_stored_feed_response(
     if not isinstance(metadata, dict):
         metadata = {}
 
+    returned_count = len(vessels)
+    cap_applied = bool(total_available > (offset + returned_count))
     return {
         "vessels": vessels,
         "source": "AISStream persisted snapshot",
@@ -389,6 +393,10 @@ def _build_stored_feed_response(
         "scope": normalized_scope,
         "capture_window_seconds": capture_window_seconds,
         "max_vessels": max_vessels,
+        "offset": offset,
+        "total_available": total_available,
+        "returned_count": returned_count,
+        "cap_applied": cap_applied,
         "geography_mode": plan.get("geography_mode"),
         "geography_note": plan.get("geography_note"),
         "requested_bbox": plan.get("requested_bbox"),
@@ -465,6 +473,10 @@ def _build_empty_ais_response(
     vessel_scope: str,
     capture_window_seconds: int,
     max_vessels: int,
+    offset: int = 0,
+    total_available: int = 0,
+    returned_count: int = 0,
+    cap_applied: bool = False,
     plan: dict[str, Any],
     live_positions_enabled: bool = False,
 ) -> dict[str, Any]:
@@ -477,6 +489,10 @@ def _build_empty_ais_response(
         "scope": _normalize_vessel_scope(vessel_scope),
         "capture_window_seconds": capture_window_seconds,
         "max_vessels": max_vessels,
+        "offset": offset,
+        "total_available": total_available,
+        "returned_count": returned_count,
+        "cap_applied": cap_applied,
         "geography_mode": plan.get("geography_mode"),
         "geography_note": plan.get("geography_note"),
         "requested_bbox": plan.get("requested_bbox"),
@@ -1052,7 +1068,7 @@ async def _collect_ais_snapshot(
             started = time.monotonic()
             raw_target_count = min(
                 max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 40),
-                500,
+                4000,
             )
             while time.monotonic() - started < normalized_window:
                 remaining = normalized_window - (time.monotonic() - started)
@@ -1158,6 +1174,7 @@ def get_maritime_vessel_feed(
     capture_window_seconds: int = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
     vessel_scope: str = "oil_tankers",
     bbox: Optional[tuple[float, float, float, float]] = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     normalized_scope = _normalize_vessel_scope(vessel_scope)
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
@@ -1165,6 +1182,7 @@ def get_maritime_vessel_feed(
         AIS_MIN_CAPTURE_WINDOW_SECONDS,
         min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
     )
+    normalized_offset = max(0, int(offset))
     normalized_bbox = _normalize_requested_bbox(bbox)
     plan = _build_ais_subscription_plan(normalized_bbox)
 
@@ -1181,6 +1199,7 @@ def get_maritime_vessel_feed(
             capture_window_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
             plan=plan,
+            offset=normalized_offset,
         )
 
     try:
@@ -1198,7 +1217,21 @@ def get_maritime_vessel_feed(
             params.extend([south, north])
             where.append("lng BETWEEN %s AND %s")
             params.extend([west, east])
-        params.append(normalized_max_vessels)
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            count_where = list(where)
+            count_params: list[Any] = list(params)
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM maritime_vessel_snapshots
+                WHERE {" AND ".join(count_where)}
+                """,
+                tuple(count_params),
+            )
+            count_row = cur.fetchone()
+            total_available = int((count_row or {}).get("total") or 0)
+
+        params.extend([normalized_max_vessels, normalized_offset])
 
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -1219,6 +1252,7 @@ def get_maritime_vessel_feed(
                 WHERE {" AND ".join(where)}
                 ORDER BY last_seen_at DESC, observed_at DESC NULLS LAST
                 LIMIT %s
+                OFFSET %s
                 """,
                 tuple(params),
             )
@@ -1237,6 +1271,8 @@ def get_maritime_vessel_feed(
             rows=rows,
             status=dict(status_row) if status_row else None,
             max_vessels=normalized_max_vessels,
+            offset=normalized_offset,
+            total_available=total_available,
             capture_window_seconds=normalized_window,
             vessel_scope=normalized_scope,
             bbox=normalized_bbox,
@@ -1253,6 +1289,7 @@ def get_maritime_vessel_feed(
             capture_window_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
             plan=plan,
+            offset=normalized_offset,
         )
     finally:
         conn.close()

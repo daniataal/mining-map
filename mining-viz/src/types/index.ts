@@ -364,6 +364,7 @@ export interface MaritimeVessel {
 }
 
 export type MaritimeVesselScope = 'oil_tankers' | 'all_vessels';
+export type OilAndGasDisplayMode = 'combined' | 'vessels_only' | 'on_ground_only';
 
 export interface MaritimeViewportBounds {
   south: number;
@@ -381,6 +382,10 @@ export interface MaritimeVesselFeedResponse {
   scope: MaritimeVesselScope;
   capture_window_seconds: number;
   max_vessels: number;
+  offset?: number;
+  total_available?: number;
+  returned_count?: number;
+  cap_applied?: boolean;
   geography_mode?: 'viewport_bbox' | 'sampled_viewport_regions' | 'default_regions' | string;
   geography_note?: string | null;
   requested_bbox?: [number, number, number, number] | null;
