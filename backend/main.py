@@ -19,6 +19,11 @@ from urllib.parse import urlparse, urlunparse
 from country_borders import get_country_borders_geojson, parse_requested_countries
 from license_import_geo import resolve_location_to_coords, validate_lat_lng_range
 
+try:
+    from backend.license_bbox import licenses_bbox_tuple_if_valid
+except ImportError:
+    from license_bbox import licenses_bbox_tuple_if_valid
+
 app = FastAPI()
 
 logger = logging.getLogger(__name__)
@@ -370,6 +375,76 @@ def _license_display_coords(row: dict, cached_geo: dict[str, dict]) -> tuple:
         return fallback_lat, fallback_lng, fallback_source, True, geo_confidence or 0.25
 
     return lat, lng, geo_source, geo_approximated, geo_confidence
+
+
+def _licenses_sector_sql_fragment(normalized_sector: Optional[str]) -> tuple[str, list[Any]]:
+    """SQL boolean expression + bind values for optional sector filter (matches Python row filter)."""
+    if not (normalized_sector or "").strip():
+        return "TRUE", []
+    return (
+        "LOWER(TRIM(COALESCE(NULLIF(TRIM(sector), ''), 'mining'))) = %s",
+        [normalized_sector.strip().lower()],
+    )
+
+
+def _build_license_api_results(
+    rows: list,
+    cached_geo: dict[str, dict],
+    describe_license_source_record: Any,
+    source_registry: Any,
+) -> list[dict[str, Any]]:
+    """Map DB rows to the camelCase JSON shape expected by mining-viz."""
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        keys = row.keys()
+        display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(
+            row, cached_geo
+        )
+        provenance = (
+            describe_license_source_record(
+                row["source_id"] if "source_id" in keys else None,
+                row["record_origin"] if "record_origin" in keys else None,
+                registry=source_registry,
+            )
+            if describe_license_source_record
+            else {}
+        )
+        results.append(
+            {
+                "id": row["id"],
+                "company": row["company"],
+                "licenseType": row["license_type"],
+                "commodity": row["commodity"],
+                "status": row["status"],
+                "date": row["date_issued"],
+                "country": row["country"],
+                "region": row["region"],
+                "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
+                "lat": display_lat,
+                "lng": display_lng,
+                "phoneNumber": row["phone_number"] if "phone_number" in keys else None,
+                "contactPerson": row["contact_person"] if "contact_person" in keys else None,
+                "recordOrigin": row["record_origin"] if "record_origin" in keys else None,
+                "sourceId": row["source_id"] if "source_id" in keys else None,
+                "sourceName": row["source_name"] if "source_name" in keys else None,
+                "sourceUrl": row["source_url"] if "source_url" in keys else None,
+                "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
+                "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
+                "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
+                "sourceKind": provenance.get("source_kind"),
+                "sourceAccess": provenance.get("source_access"),
+                "coverageState": provenance.get("coverage_state"),
+                "provenanceNote": provenance.get("provenance_note"),
+                "entityKind": "license",
+                "geoSource": display_geo_source if "geo_source" in keys else None,
+                "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
+                "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
+                "originalLat": row["original_lat"] if "original_lat" in keys else None,
+                "originalLng": row["original_lng"] if "original_lng" in keys else None,
+            }
+        )
+    return results
+
 
 # Allow CORS for local development (so React/Vite can fetch from us)
 app.add_middleware(
@@ -853,6 +928,14 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_updated_at TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS raw_payload TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;")
+            # Speed up viewport queries (GET /licenses with bbox); partial index skips null coords.
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_licenses_sector_lat_lng
+                ON licenses (sector, lat, lng)
+                WHERE lat IS NOT NULL AND lng IS NOT NULL;
+                """
+            )
             # Normalized relationship layer for cross-sector role transparency.
             # We preserve the old rel_type/source_entity_id columns for backward
             # compatibility and add richer source-backed provenance fields here.
@@ -1372,53 +1455,27 @@ def _fetch_license_rows_for_api(c, normalized_sector: str | None) -> tuple[list,
 
 
 @app.get("/licenses")
-def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
+def read_licenses(
+    sector: Optional[str] = None,
+    prefer_open_data: bool = True,
+    min_lat: Optional[float] = None,
+    max_lat: Optional[float] = None,
+    min_lng: Optional[float] = None,
+    max_lng: Optional[float] = None,
+    limit: int = 5000,
+):
+    """Return licenses for the map and admin views.
+
+    Optional viewport filter: pass all four of ``min_lat``, ``max_lat``, ``min_lng``, ``max_lng``
+    as a valid non-degenerate axis-aligned box to restrict rows in SQL (rows with null ``lat`` /
+    ``lng`` are excluded in this mode). Partial or invalid bbox params are ignored and the legacy
+    full-table read is used instead.
+
+    When a bbox is applied, responses are capped for safety: ``limit`` defaults to 5000 and is
+    clamped to a maximum of 15000 regardless of the client value.
+    """
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing license schema")
-    try:
-        conn = get_db_connection()
-    except HTTPException as exc:
-        if exc.status_code == 503:
-            print("[licenses] database unavailable; returning empty dataset for graceful degradation")
-            return []
-        raise
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    normalized_sector = (sector or "").strip().lower() or None
-
-    try:
-        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector)
-    except Exception as e:
-        conn.close()
-        if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
-            conn = get_db_connection()
-            c = conn.cursor(cursor_factory=RealDictCursor)
-            try:
-                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector)
-            except Exception as retry_exc:
-                conn.close()
-                return {"error": f"Database error: {str(retry_exc)}"}
-            conn.close()
-        else:
-            print(f"[licenses] query failed: {e}")
-            return _schema_unavailable_response("reading licenses")
-    else:
-        conn.close()
-
-    count_all = len(rows)
-    count_after_sector = len(rows)
-
-    # Once live/open or global fallback rows exist for the current sector, hide
-    # the old bundled JSON snapshot rows from the primary map feed. Manual /
-    # CSV imports remain visible because they are user-supplied.
-    preferred_live_origins = {"open_data", "global_open_fallback"}
-    has_preferred_live_rows = any((row.get("record_origin") or "").lower() in preferred_live_origins for row in rows)
-    if prefer_open_data and has_preferred_live_rows:
-        rows = [
-            row for row in rows
-            if (row.get("record_origin") or "").lower() != "bundled_json"
-        ]
-
-    count_after_open_pref = len(rows)
 
     try:
         try:
@@ -1439,62 +1496,125 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
     if describe_license_source_record and get_source_registry_index:
         source_registry = get_source_registry_index()
 
-    # Transform to list of dicts with keys matching what the Reac app expects
-    results = []
-    for row in rows:
-        keys = row.keys()
-        display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(row, cached_geo)
-        provenance = (
-            describe_license_source_record(
-                row["source_id"] if "source_id" in keys else None,
-                row["record_origin"] if "record_origin" in keys else None,
-                registry=source_registry,
+    normalized_sector_key = (sector or "").strip().lower() or None
+    bbox = licenses_bbox_tuple_if_valid(min_lat, max_lat, min_lng, max_lng)
+
+    try:
+        conn = get_db_connection()
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            print("[licenses] database unavailable; returning empty dataset for graceful degradation")
+            return []
+        raise
+
+    def _bbox_query(c) -> tuple[list, dict[str, dict], bool]:
+        min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
+        safe_limit = max(1, min(int(limit or 5000), 15000))
+        sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
+        exists_sql = f"""
+            SELECT EXISTS (
+                SELECT 1 FROM licenses
+                WHERE {sector_sql}
+                  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
             )
-            if describe_license_source_record
-            else {}
-        )
-        results.append({
-            "id": row["id"],
-            "company": row["company"],
-            "licenseType": row["license_type"], # Frontend expects camelCase
-            "commodity": row["commodity"],
-            "status": row["status"],
-            "date": row["date_issued"],        # Frontend expects 'date'
-            "country": row["country"],
-            "region": row["region"],
-            "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
-            "lat": display_lat,
-            "lng": display_lng,
-            "phoneNumber": row["phone_number"] if "phone_number" in keys else None,
-            "contactPerson": row["contact_person"] if "contact_person" in keys else None,
-            "recordOrigin": row["record_origin"] if "record_origin" in keys else None,
-            "sourceId": row["source_id"] if "source_id" in keys else None,
-            "sourceName": row["source_name"] if "source_name" in keys else None,
-            "sourceUrl": row["source_url"] if "source_url" in keys else None,
-            "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
-            "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
-            "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
-            "sourceKind": provenance.get("source_kind"),
-            "sourceAccess": provenance.get("source_access"),
-            "coverageState": provenance.get("coverage_state"),
-            "provenanceNote": provenance.get("provenance_note"),
-            "entityKind": "license",
-            # Geocoding provenance — read-only on the frontend; drives the
-            # "≈ approx location" badge and lets users distinguish surveyed
-            # points from district-centroid backfills.
-            "geoSource": display_geo_source if "geo_source" in keys else None,
-            "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
-            "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
-            "originalLat": row["original_lat"] if "original_lat" in keys else None,
-            "originalLng": row["original_lng"] if "original_lng" in keys else None,
-        })
-    
+        """
+        c.execute(exists_sql, tuple(sector_params))
+        has_row = c.fetchone() or {}
+        has_preferred_live_rows = bool(has_row.get("exists"))
+        open_clause = ""
+        if prefer_open_data and has_preferred_live_rows:
+            open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+        list_sql = f"""
+            SELECT * FROM licenses
+            WHERE {sector_sql}
+              AND lat IS NOT NULL AND lng IS NOT NULL
+              AND lat BETWEEN %s AND %s
+              AND lng BETWEEN %s AND %s
+              {open_clause}
+            ORDER BY id
+            LIMIT %s
+        """
+        list_params: list[Any] = [*sector_params, min_la, max_la, min_lo, max_lo, safe_limit]
+        c.execute(list_sql, tuple(list_params))
+        rows = c.fetchall()
+        cached_geo = _load_cached_geo_fallbacks(c, rows)
+        return rows, cached_geo, has_preferred_live_rows
+
+    if bbox is not None:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        try:
+            rows, cached_geo, has_preferred_live_rows = _bbox_query(c)
+        except Exception as e:
+            conn.close()
+            if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
+                conn = get_db_connection()
+                c = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    rows, cached_geo, has_preferred_live_rows = _bbox_query(c)
+                except Exception as retry_exc:
+                    conn.close()
+                    return {"error": f"Database error: {str(retry_exc)}"}
+                conn.close()
+                results = _build_license_api_results(
+                    rows, cached_geo, describe_license_source_record, source_registry
+                )
+                if not results:
+                    print(
+                        "[licenses] empty feed (bbox) "
+                        f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
+                        f"has_live_origin_signal={has_preferred_live_rows}"
+                    )
+                return results
+            print(f"[licenses] bbox query failed: {e}")
+            return _schema_unavailable_response("reading licenses")
+        conn.close()
+        results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
+        if not results:
+            print(
+                "[licenses] empty feed (bbox) "
+                f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
+                f"has_live_origin_signal={has_preferred_live_rows}"
+            )
+        return results
+
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key)
+    except Exception as e:
+        conn.close()
+        if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
+            conn = get_db_connection()
+            c = conn.cursor(cursor_factory=RealDictCursor)
+            try:
+                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key)
+            except Exception as retry_exc:
+                conn.close()
+                return {"error": f"Database error: {str(retry_exc)}"}
+            conn.close()
+        else:
+            print(f"[licenses] query failed: {e}")
+            return _schema_unavailable_response("reading licenses")
+    else:
+        conn.close()
+
+    count_all = len(rows)
+    count_after_sector = len(rows)
+
+    preferred_live_origins = {"open_data", "global_open_fallback"}
+    has_preferred_live_rows = any((row.get("record_origin") or "").lower() in preferred_live_origins for row in rows)
+    if prefer_open_data and has_preferred_live_rows:
+        rows = [row for row in rows if (row.get("record_origin") or "").lower() != "bundled_json"]
+
+    count_after_open_pref = len(rows)
+
+    results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
+
     if not results:
         print(
             "[licenses] empty feed "
-            f"sector={normalized_sector or 'all'} prefer_open_data={prefer_open_data} "
+            f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
             f"counts db_all={count_all} after_sector={count_after_sector} after_open_pref={count_after_open_pref} "
-            f"has_live_origin_signal={has_preferred_live_rows}"
+            f"has_live_origin_signal={has_preferred_live_rows} bbox_sql=0"
         )
 
     return results

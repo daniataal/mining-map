@@ -18,14 +18,18 @@ COUNTRY_ALIASES = {
     "congo kinshasa": "democratic republic of the congo",
     "congo brazzaville": "republic of the congo",
     "cote divoire": "cote d ivoire",
+    "czech republic": "czechia",
     "dem rep congo": "democratic republic of the congo",
     "democratic republic of congo": "democratic republic of the congo",
     "drc": "democratic republic of the congo",
     "ivory coast": "cote d ivoire",
     "laos": "lao pdr",
+    "macedonia": "north macedonia",
     "myanmar burma": "myanmar",
     "palestine": "state of palestine",
     "republic of congo": "republic of the congo",
+    "republic of moldova": "moldova",
+    "republic of north macedonia": "north macedonia",
     "russia": "russian federation",
     "south korea": "korea",
     "swaziland": "eswatini",
@@ -33,6 +37,7 @@ COUNTRY_ALIASES = {
     "tanzania": "united republic of tanzania",
     "the bahamas": "bahamas",
     "the gambia": "gambia",
+    "timor leste": "east timor",
     "uae": "united arab emirates",
     "uk": "united kingdom",
     "usa": "united states of america",
@@ -59,7 +64,7 @@ def normalize_country_name(value: str) -> str:
 def parse_requested_countries(raw_countries: str | None) -> list[str]:
     if not raw_countries:
         return []
-    return [part.strip() for part in raw_countries.split(",") if part.strip()]
+    return [re.sub(r"\s+", " ", part).strip() for part in raw_countries.split(",") if part.strip()]
 
 
 @dataclass

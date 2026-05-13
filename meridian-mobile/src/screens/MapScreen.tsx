@@ -306,8 +306,17 @@ export default function MapScreen() {
   }, []);
 
   const borderCountries = useMemo(() => {
-    const countries = new Set(rawLicenses.map((d) => (d.country ? d.country.toLowerCase() : 'ghana')));
-    return Array.from(countries).sort((a, b) => a.localeCompare(b));
+    const ordered: string[] = [];
+    const seenKey = new Set<string>();
+    for (const d of rawLicenses) {
+      const raw = d.country?.trim();
+      if (!raw) continue;
+      const dedupeKey = raw.toLocaleLowerCase();
+      if (seenKey.has(dedupeKey)) continue;
+      seenKey.add(dedupeKey);
+      ordered.push(raw);
+    }
+    return ordered.sort((a, b) => a.localeCompare(b));
   }, [rawLicenses]);
 
   const { data: filteredGeoJson } = useQuery({
