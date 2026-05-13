@@ -32,7 +32,7 @@ jobs:
         docker build -t dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }} ./backend
         docker push dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }}
 
-    - name: Build and Push Mining Viz Frontend
+    - name: Build and Push Frontend (MadSan Global Intelligence)
       run: |
         docker build -t dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }} ./mining-viz
         docker push dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }}
