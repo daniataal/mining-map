@@ -41,7 +41,7 @@ jobs:
         tags: |
           dannyatalla/mining-backend:latest
           dannyatalla/mining-backend:v${{ github.run_number }}
-          dannyatalla/mining-backend:$(git rev-parse --short HEAD)
+          dannyatalla/mining-backend:${{ steps.version.outputs.short_sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -53,7 +53,7 @@ jobs:
         tags: |
           dannyatalla/mining-frontend:latest
           dannyatalla/mining-frontend:v${{ github.run_number }}
-          dannyatalla/mining-frontend:$(git rev-parse --short HEAD)
+          dannyatalla/mining-frontend:${{ steps.version.outputs.short_sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
