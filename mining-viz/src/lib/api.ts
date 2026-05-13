@@ -1,5 +1,5 @@
 import axios, { isCancel } from 'axios';
-import { useMemo } from 'react';
+import { useMemo, useRef, useEffect } from 'react';
 import {
   useQuery,
   useQueries,
@@ -163,39 +163,26 @@ export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
 
-/** When world coverage is empty or unavailable, still split requests instead of one unbounded read. */
+/** When world coverage is empty, keep a short list so we do not fire dozens of parallel requests. */
 const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Ghana',
   'South Africa',
   'Kenya',
+  'United States of America',
+  'Zambia',
   'Nigeria',
   'Tanzania',
-  'Zambia',
-  'Botswana',
-  'Namibia',
-  'Mozambique',
-  'Sierra Leone',
-  'Liberia',
-  'Mali',
-  'Burkina Faso',
-  'Democratic Republic of the Congo',
-  'Angola',
-  'Gabon',
-  'Cameroon',
-  'Sudan',
-  'Ethiopia',
-  'Uganda',
-  'Zimbabwe',
   'Australia',
   'Canada',
   'Peru',
   'Chile',
-  'United States of America',
   'Brazil',
-  'India',
-  'Indonesia',
-  'Mexico',
 ];
+
+/** Max distinct countries to pull for the map (rest appear after filter / other views). */
+const MAX_LICENSE_FETCH_COUNTRIES = 22;
+/** Several countries per GET /licenses to cut HTTP count and browser connection-queue stalls. */
+const LICENSE_COUNTRY_BATCH_SIZE = 8;
 
 function countrySectorHasRows(c: WorldCoverageCountry, s: 'mining' | 'oil_and_gas'): boolean {
   const sec = c.sectors?.[s];
@@ -207,8 +194,23 @@ function countrySectorHasRows(c: WorldCoverageCountry, s: 'mining' | 'oil_and_ga
   );
 }
 
+function countryRowWeight(row: WorldCoverageCountry, sector: 'mining' | 'oil_and_gas' | undefined): number {
+  const pick = (s: 'mining' | 'oil_and_gas') => {
+    const sec = row.sectors?.[s];
+    if (!sec) return 0;
+    return (
+      (sec.record_count ?? 0) +
+      (sec.fallback_record_count ?? 0) +
+      (sec.global_fallback_record_count ?? 0)
+    );
+  };
+  if (!sector) return pick('mining') + pick('oil_and_gas');
+  return pick(sector);
+}
+
 /**
- * Canonical country names for parallel GET /licenses?countries=… (aligned with world coverage rows).
+ * Country names for GET /licenses — from world coverage when available, ordered by
+ * approximate row counts (heaviest first), capped to keep the map fast.
  */
 export function deriveLicenseFetchCountries(
   sector: 'mining' | 'oil_and_gas' | undefined,
@@ -216,19 +218,26 @@ export function deriveLicenseFetchCountries(
 ): string[] {
   const rows = worldCoverage?.countries;
   if (rows?.length) {
-    const names: string[] = [];
+    const scored: { name: string; w: number }[] = [];
     for (const row of rows) {
       const name = row.country?.trim();
       if (!name) continue;
       if (!sector) {
         if (countrySectorHasRows(row, 'mining') || countrySectorHasRows(row, 'oil_and_gas')) {
-          names.push(name);
+          scored.push({ name, w: countryRowWeight(row, undefined) });
         }
       } else if (countrySectorHasRows(row, sector)) {
-        names.push(name);
+        scored.push({ name, w: countryRowWeight(row, sector) });
       }
     }
-    const unique = Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+    const byName = new Map<string, number>();
+    for (const { name, w } of scored) {
+      byName.set(name, Math.max(byName.get(name) ?? 0, w));
+    }
+    const unique = Array.from(byName.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name]) => name)
+      .slice(0, MAX_LICENSE_FETCH_COUNTRIES);
     if (unique.length) return unique;
   }
   return [...FALLBACK_LICENSE_FETCH_COUNTRIES];
@@ -239,7 +248,7 @@ export type UseLicensesResult = {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  /** First-pass fetches not yet completed (for “still loading N countries”). */
+  /** Sub-queries not yet fetched (batched country groups, not individual ISO rows). */
   stillLoadingCountryCount: number;
   failedCountryQueryCount: number;
 };
@@ -270,14 +279,25 @@ export const useLicenses = (
     [countries],
   );
 
+  const countryBatches = useMemo(() => {
+    const batches: string[][] = [];
+    for (let i = 0; i < sortedCountries.length; i += LICENSE_COUNTRY_BATCH_SIZE) {
+      batches.push(sortedCountries.slice(i, i + LICENSE_COUNTRY_BATCH_SIZE));
+    }
+    return batches;
+  }, [sortedCountries]);
+
   const licenseQueries = useMemo(
     () =>
-      sortedCountries.map((country) => ({
-        queryKey: ['licenses', sector ?? 'all', bboxKey, country] as const,
-        staleTime: 60_000,
+      countryBatches.map((batch) => ({
+        queryKey: ['licenses', sector ?? 'all', bboxKey, batch.join('|')] as const,
+        staleTime: 300_000,
         retry: 1,
+        refetchOnWindowFocus: false,
         placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
         queryFn: async ({ signal }: QueryFunctionContext) => {
+          const countriesParam = batch.join(',');
+          const countrySet = new Set(batch.map((b) => b.trim().toLowerCase()));
           try {
             const useBbox = Boolean(viewportBounds);
             const { data } = await apiClient.get<unknown>('/licenses', {
@@ -285,7 +305,7 @@ export const useLicenses = (
               timeout: LICENSE_GET_TIMEOUT_MS,
               params: {
                 prefer_open_data: true,
-                countries: country,
+                countries: countriesParam,
                 ...(sector ? { sector } : {}),
                 ...(useBbox && viewportBounds
                   ? {
@@ -314,13 +334,13 @@ export const useLicenses = (
                 error
               );
               const base = sector ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector) : LICENSES_FALLBACK_DATA;
-              return base.filter((item) => item.country?.trim().toLowerCase() === country.trim().toLowerCase());
+              return base.filter((item) => countrySet.has((item.country ?? '').trim().toLowerCase()));
             }
             throw error;
           }
         },
       })),
-    [sortedCountries, sector, bboxKey, viewportBounds],
+    [countryBatches, sector, bboxKey, viewportBounds],
   );
 
   const results = useQueries({ queries: licenseQueries });
@@ -337,20 +357,38 @@ export const useLicenses = (
     return Array.from(byId.values());
   }, [results]);
 
+  /** Bbox changes should not wipe the map: keep last good rows until new data arrives. */
+  const cacheEpoch = `${sector ?? 'all'}::${sortedCountries.join('|')}`;
+  const cacheEpochRef = useRef(cacheEpoch);
+  const lastStableLicenses = useRef<MiningLicense[]>([]);
+
+  useEffect(() => {
+    if (cacheEpochRef.current !== cacheEpoch) {
+      cacheEpochRef.current = cacheEpoch;
+      lastStableLicenses.current = [];
+    }
+  }, [cacheEpoch]);
+
+  useEffect(() => {
+    if (mergedData.length > 0) {
+      lastStableLicenses.current = mergedData;
+    }
+  }, [mergedData]);
+
+  const displayData =
+    mergedData.length > 0 ? mergedData : lastStableLicenses.current;
+
   const isLoading = useMemo(() => {
     if (!results.length) return false;
-    if (mergedData.length > 0) return false;
-    // TanStack: do not rely on isPending alone — wait until each observer has finished
-    // at least one attempt, otherwise the map overlay can spin forever if queries were
-    // constantly re-registered (unstable `queries` array before memoization).
+    if (displayData.length > 0) return false;
     const allFetched = results.every((r) => r.isFetched);
     return !allFetched;
-  }, [mergedData.length, results]);
+  }, [displayData.length, results]);
 
   const isFetching = useMemo(() => results.some((r) => r.isFetching), [results]);
 
   const error = useMemo((): Error | null => {
-    if (mergedData.length > 0) return null;
+    if (displayData.length > 0) return null;
     if (!results.length) return null;
     const settled = results.filter((r) => !r.isPending);
     if (settled.length < results.length) return null;
@@ -358,7 +396,7 @@ export const useLicenses = (
     if (failed.length !== settled.length) return null;
     const first = failed[0]?.error;
     return first instanceof Error ? first : new Error(String(first ?? 'Licenses request failed'));
-  }, [mergedData.length, results]);
+  }, [displayData.length, results]);
 
   const stillLoadingCountryCount = useMemo(
     () => results.filter((r) => !r.isFetched).length,
@@ -368,7 +406,7 @@ export const useLicenses = (
   const failedCountryQueryCount = useMemo(() => results.filter((r) => r.isError).length, [results]);
 
   return {
-    data: mergedData,
+    data: displayData,
     isLoading,
     isFetching,
     error,
