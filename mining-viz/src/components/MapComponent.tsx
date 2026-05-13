@@ -249,6 +249,13 @@ interface MapComponentProps {
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
   viewModeKey: string;
+  /** True while the active sector's license query has no data yet (keeps map from feeling frozen on sector switch). */
+  licensesFetchPending?: boolean;
+  /** Background refetch (e.g. after map pan) — lighter cue than initial load. */
+  licensesRefetching?: boolean;
+  /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
+  trackLicenseViewport?: boolean;
+  onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
 }
@@ -376,6 +383,10 @@ export default function MapComponent({
   handleOpenDossier,
   mapFlyTrigger,
   viewModeKey,
+  licensesFetchPending = false,
+  licensesRefetching = false,
+  trackLicenseViewport = false,
+  onLicenseViewportChange,
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
 }: MapComponentProps) {
@@ -541,12 +552,17 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
-        const countries = new Set(
-            processedData
-                .map((d) => d.country?.trim().toLowerCase())
-                .filter((country): country is string => Boolean(country))
-        );
-        return Array.from(countries).sort((a, b) => a.localeCompare(b));
+        const ordered: string[] = [];
+        const seenKey = new Set<string>();
+        for (const d of processedData) {
+            const raw = d.country?.trim();
+            if (!raw) continue;
+            const dedupeKey = raw.toLocaleLowerCase();
+            if (seenKey.has(dedupeKey)) continue;
+            seenKey.add(dedupeKey);
+            ordered.push(raw);
+        }
+        return ordered.sort((a, b) => a.localeCompare(b));
     }, [processedData]);
 
     const { data: filteredGeoJson } = useQuery({
@@ -587,6 +603,28 @@ export default function MapComponent({
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
+            {licensesFetchPending && (
+                <div
+                    className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center bg-white/30 dark:bg-slate-950/35 backdrop-blur-[2px]"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <div className="flex items-center gap-2 rounded-2xl border border-black/10 bg-white/90 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-xl dark:border-white/10 dark:bg-slate-900/90 dark:text-slate-200">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-500" aria-hidden />
+                        <span>{t('טוען רישיונות…', 'Loading licenses…')}</span>
+                    </div>
+                </div>
+            )}
+            {licensesRefetching && !licensesFetchPending && (
+                <div
+                    className="pointer-events-none absolute left-1/2 top-20 z-[600] flex -translate-x-1/2 items-center gap-2 rounded-full border border-black/10 bg-white/90 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-lg dark:border-white/10 dark:bg-slate-900/90 dark:text-slate-300"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" aria-hidden />
+                    <span>{t('מעדכן רישיונות…', 'Updating licenses…')}</span>
+                </div>
+            )}
             {((onGroundVisible ? processedData.length : 0) === 0) && ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
@@ -877,6 +915,12 @@ export default function MapComponent({
                     onSelectMaritimeVessel(null);
                 }} />
                 <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
+                {onLicenseViewportChange && (
+                  <ViewportBoundsTracker
+                    active={trackLicenseViewport}
+                    onBoundsChange={onLicenseViewportChange}
+                  />
+                )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (

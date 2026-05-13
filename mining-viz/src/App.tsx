@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, startTransition } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow, MaritimeViewportBounds } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
@@ -21,6 +21,18 @@ import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+const LICENSE_MAP_BBOX_MAX_LAT_SPAN = 85;
+const LICENSE_MAP_BBOX_MAX_LNG_SPAN = 300;
+
+function licenseViewportUsesBbox(bounds: MaritimeViewportBounds): boolean {
+  const latSpan = bounds.north - bounds.south;
+  const lngSpan = bounds.east - bounds.west;
+  if (!Number.isFinite(latSpan) || !Number.isFinite(lngSpan)) return false;
+  if (latSpan <= 0 || lngSpan <= 0) return false;
+  if (latSpan >= LICENSE_MAP_BBOX_MAX_LAT_SPAN || lngSpan >= LICENSE_MAP_BBOX_MAX_LNG_SPAN) return false;
+  return true;
+}
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -84,6 +96,26 @@ export default function App() {
       : viewMode === 'oil_and_gas'
         ? 'oil_and_gas'
         : undefined;
+  const [licenseViewportDraft, setLicenseViewportDraft] = useState<MaritimeViewportBounds | null>(null);
+  const [licenseViewportDebounced, setLicenseViewportDebounced] = useState<MaritimeViewportBounds | null>(null);
+
+  useEffect(() => {
+    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') {
+      setLicenseViewportDraft(null);
+      setLicenseViewportDebounced(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setLicenseViewportDebounced(licenseViewportDraft), 400);
+    return () => window.clearTimeout(timer);
+  }, [licenseViewportDraft, viewMode]);
+
+  const licenseBoundsForApi = useMemo(() => {
+    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') return null;
+    if (!licenseViewportDebounced) return null;
+    if (!licenseViewportUsesBbox(licenseViewportDebounced)) return null;
+    return licenseViewportDebounced;
+  }, [licenseViewportDebounced, viewMode]);
+
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -91,7 +123,7 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
+  const { data: rawData = [], isLoading, isFetching, error: fetchError } = useLicenses(licenseSector, licenseBoundsForApi);
   const { data: worldCoverage } = useWorldCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
   const {
     data: storageTerminalResponse,
@@ -337,6 +369,10 @@ export default function App() {
     setViewMode('global');
   };
 
+  const switchSectorView = useCallback((mode: 'global' | 'mining' | 'oil_and_gas') => {
+    startTransition(() => setViewMode(mode));
+  }, []);
+
   useEffect(() => {
     const apiBase = API_BASE;
 
@@ -514,7 +550,13 @@ export default function App() {
             loading={
               viewMode === 'ports'
                 ? isPortsLoading
-                : Boolean(isLoading || (viewMode === 'oil_and_gas' && isStorageLoading))
+                : Boolean(
+                    isLoading ||
+                      (isFetching &&
+                        !isLoading &&
+                        (viewMode === 'mining' || viewMode === 'oil_and_gas')) ||
+                      (viewMode === 'oil_and_gas' && isStorageLoading),
+                  )
             }
             onLogout={handleLogout}
             userAnnotations={userAnnotations}
@@ -579,19 +621,19 @@ export default function App() {
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
                   <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
-                      onClick={() => setViewMode('global')}
+                      onClick={() => switchSectorView('global')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("עולמי", "Global")}
                     </button>
                     <button
-                      onClick={() => setViewMode('mining')}
+                      onClick={() => switchSectorView('mining')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("כרייה", "Mining")}
                     </button>
                     <button
-                      onClick={() => setViewMode('oil_and_gas')}
+                      onClick={() => switchSectorView('oil_and_gas')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
@@ -643,6 +685,16 @@ export default function App() {
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
                 viewModeKey={viewMode}
+                licensesFetchPending={
+                  (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                  isLoading &&
+                  !fetchError
+                }
+                licensesRefetching={
+                  (viewMode === 'mining' || viewMode === 'oil_and_gas') && isFetching && !isLoading && !fetchError
+                }
+                trackLicenseViewport={viewMode === 'mining' || viewMode === 'oil_and_gas'}
+                onLicenseViewportChange={setLicenseViewportDraft}
                 setSelectedItem={handleSelectItem}
                 handleOpenDossier={handleOpenDossier}
                 mapCenter={mapCenter}
@@ -775,21 +827,21 @@ export default function App() {
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
       <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
         <button
-          onClick={() => setViewMode('global')}
+          onClick={() => switchSectorView('global')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
         </button>
         <button
-          onClick={() => setViewMode('mining')}
+          onClick={() => switchSectorView('mining')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("כרייה", "Mining")}</span>
         </button>
         <button
-          onClick={() => setViewMode('oil_and_gas')}
+          onClick={() => switchSectorView('oil_and_gas')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideDroplets className="w-5 h-5" />

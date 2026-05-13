@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryFunctionContext } from '@tanstack/react-query';
 import type { FeatureCollection, Geometry, GeoJsonProperties } from 'geojson';
 import {
   MiningLicense,
@@ -140,15 +140,42 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-export const useLicenses = (sector?: 'mining' | 'oil_and_gas') => {
+/** Viewport for GET /licenses bbox params (south/west/north/east). */
+export type LicenseViewportBounds = MaritimeViewportBounds;
+
+export const useLicenses = (
+  sector?: 'mining' | 'oil_and_gas',
+  viewportBounds?: LicenseViewportBounds | null,
+) => {
+  const bboxKey =
+    viewportBounds &&
+    Number.isFinite(viewportBounds.south) &&
+    Number.isFinite(viewportBounds.west) &&
+    Number.isFinite(viewportBounds.north) &&
+    Number.isFinite(viewportBounds.east)
+      ? `${viewportBounds.south.toFixed(4)},${viewportBounds.west.toFixed(4)},${viewportBounds.north.toFixed(4)},${viewportBounds.east.toFixed(4)}`
+      : 'full';
+
   return useQuery<MiningLicense[]>({
-    queryKey: ['licenses', sector ?? 'all'],
-    queryFn: async () => {
+    queryKey: ['licenses', sector ?? 'all', bboxKey],
+    staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
       try {
+        const useBbox = Boolean(viewportBounds);
         const { data } = await apiClient.get<unknown>('/licenses', {
+          signal,
           params: {
             prefer_open_data: true,
             ...(sector ? { sector } : {}),
+            ...(useBbox && viewportBounds
+              ? {
+                  min_lat: viewportBounds.south,
+                  max_lat: viewportBounds.north,
+                  min_lng: viewportBounds.west,
+                  max_lng: viewportBounds.east,
+                }
+              : {}),
           },
         });
         if (Array.isArray(data)) return data as MiningLicense[];

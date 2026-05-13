@@ -67,7 +67,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   };
 
   const processedData = useMemo(() => {
-    let data = [...rawData];
+    let data: MiningLicense[] = rawData;
 
     if (selectedCountry.length > 0) {
       data = data.filter((item) => {
@@ -152,7 +152,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       });
     }
 
-    return data.sort((a, b) => {
+    return data.slice().sort((a, b) => {
       const valA = (a[sortBy] ?? '').toString().toLowerCase();
       const valB = (b[sortBy] ?? '').toString().toLowerCase();
       return valA.localeCompare(valB);
