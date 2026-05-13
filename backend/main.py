@@ -485,6 +485,13 @@ def _is_missing_relation_error(err: Exception, relation_name: str = "licenses") 
     missing_relation = f'relation "{relation_name}" does not exist' in message
     return getattr(err, "pgcode", None) == "42P01" or missing_relation
 
+
+def _schema_unavailable_response(scope: str = "schema initialization") -> Response:
+    return Response(
+        f"Service unavailable while {scope}. Please retry shortly.",
+        status_code=503,
+    )
+
 # ... existing imports
 import bcrypt
 import jwt
@@ -1053,7 +1060,8 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
 # But since we are replacing the bottom part, carefully reconstruct order.
 
 # Re-call init_db because we updated the definition
-ensure_schema_initialized(force=True)
+if not ensure_schema_initialized(force=True):
+    print("[startup] initial schema bootstrap failed; startup hook will retry")
 
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
@@ -1065,6 +1073,9 @@ def _bootstrap_open_data():
     back to the bundled JSON if all live source fetches fail.
     """
     time.sleep(3)
+    if not ensure_schema_initialized():
+        print("[OpenData] Skipping bootstrap until schema is ready.")
+        return
 
     try:
         try:
@@ -1114,18 +1125,19 @@ def _bootstrap_open_data():
         print(f"[OpenData] Bootstrap failed: {exc}")
 
 
-threading.Thread(target=_bootstrap_open_data, daemon=True).start()
-
-
 @app.on_event("startup")
 def startup_schema_bootstrap():
     if not ensure_schema_initialized():
         print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
+        return
+    threading.Thread(target=_bootstrap_open_data, daemon=True).start()
 
 # --- Auth Endpoints ---
 
 @app.post("/auth/login")
 def login(user: UserLogin):
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -1143,6 +1155,28 @@ def login(user: UserLogin):
             "role": db_user['role'],
             "id": db_user['id']
         }
+    except Exception as e:
+        if _is_missing_relation_error(e, "users") and ensure_schema_initialized(force=True):
+            try:
+                c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+                db_user = c.fetchone()
+                if not db_user or not verify_password(user.password, db_user["password_hash"]):
+                    return Response("Invalid credentials", status_code=401)
+                access_token = create_access_token(
+                    data={"sub": db_user["username"], "role": db_user["role"], "id": db_user["id"]}
+                )
+                return {
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "username": db_user["username"],
+                    "role": db_user["role"],
+                    "id": db_user["id"],
+                }
+            except Exception as retry_exc:
+                print(f"[auth/login] users table unavailable after schema retry: {retry_exc}")
+                return _schema_unavailable_response("initializing users table")
+        print(f"[auth/login] unexpected DB failure: {e}")
+        return _schema_unavailable_response("servicing auth request")
     finally:
         conn.close()
 
@@ -1151,6 +1185,8 @@ def register(user: UserCreate):
     # In a real app, check for Admin token here. For MVP, we'll assume the frontend enforces 'Admin Panel' access.
     # ideally verify jwt token from header.
     
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
     c = conn.cursor()
     try:
@@ -1175,6 +1211,8 @@ def register(user: UserCreate):
 
 @app.get("/auth/users")
 def get_users():
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -1197,6 +1235,8 @@ def delete_user(user_id: str, authorization: Optional[str] = Header(None)):
     if actor_id is not None and str(actor_id) == str(user_id):
         return Response("Cannot delete your own account", status_code=400)
 
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
     c = conn.cursor()
     try:
@@ -1219,6 +1259,8 @@ def delete_user(user_id: str, authorization: Optional[str] = Header(None)):
 
 @app.put("/auth/users/{user_id}")
 def update_user(user_id: str, user: UserUpdate):
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
     c = conn.cursor()
     try:
@@ -1301,7 +1343,8 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 @app.get("/licenses")
 def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
-    ensure_schema_initialized()
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing license schema")
     try:
         conn = get_db_connection()
     except HTTPException as exc:
@@ -1330,7 +1373,8 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
                 return {"error": f"Database error: {str(retry_exc)}"}
             conn.close()
         else:
-            return {"error": f"Database error: {str(e)}"}
+            print(f"[licenses] query failed: {e}")
+            return _schema_unavailable_response("reading licenses")
     
     conn.close()
 
