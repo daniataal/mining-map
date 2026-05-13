@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useI18n } from '../lib/i18n';
 import {
   MiningLicense,
@@ -47,6 +47,23 @@ import {
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
 import { getCommodityMarketSnapshot } from '../lib/commodityMarket';
+
+/** Client-side cap so hung requests release the UI (server may use longer LLM timeouts). */
+const AI_ANALYZE_CLIENT_TIMEOUT_MS = 180_000;
+
+function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    const m = (payload as { message?: unknown }).message;
+    if (typeof m === 'string' && m.trim()) return m.trim();
+  }
+  if (status === 503) {
+    return 'Intelligence providers are busy or unreachable. Try again in a moment.';
+  }
+  if (status === 502) {
+    return 'The intelligence service could not complete this request. Please try again.';
+  }
+  return 'Intelligence request failed.';
+}
 
 interface DossierViewProps {
   isOpen: boolean;
@@ -116,6 +133,9 @@ export default function DossierView({
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
   const [isLoadingDdReport, setIsLoadingDdReport] = useState(false);
+  const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  const [aiSlowNetworkHint, setAiSlowNetworkHint] = useState(false);
+  const aiRunInFlightRef = useRef(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
@@ -169,12 +189,19 @@ export default function DossierView({
 
   const runAiAnalysis = async () => {
     if (!item) return;
+    if (aiRunInFlightRef.current) return;
+    aiRunInFlightRef.current = true;
+    setAiAnalysisError(null);
+    setAiSlowNetworkHint(false);
     setAiAnalysis('');
     setIsAnalyzing(true);
+    const controller = new AbortController();
+    const clientTimeout = window.setTimeout(() => controller.abort(), AI_ANALYZE_CLIENT_TIMEOUT_MS);
     try {
       const token = localStorage.getItem('mining_token');
       const res = await fetch(`${API_BASE}/api/ai/analyze`, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -189,19 +216,52 @@ Output requirements:
           context: { type: 'DOSSIER', item_id: item.id, entity_kind: item.entityKind || 'license' },
         }),
       });
-      const data = await res.json();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = (await res.json()) as Record<string, unknown>;
+      } catch {
+        data = null;
+      }
+      if (!res.ok) {
+        setAiAnalysis('');
+        setAiAnalysisError(formatAiAnalyzeFailureMessage(res.status, data));
+        return;
+      }
       if (data?.ddReport && typeof data.ddReport === 'object') {
         setLatestDdReport(data.ddReport as DdReport);
       }
       setAiAnalysis(
-        data.analysis || data.response || 'No tactical data available for this site.'
+        (typeof data?.analysis === 'string' && data.analysis) ||
+          (typeof data?.response === 'string' && data.response) ||
+          'No tactical data available for this site.'
       );
-    } catch (_) {
-      setAiAnalysis('Intelligence link failed. Manual verification recommended.');
+    } catch (err: unknown) {
+      setAiAnalysis('');
+      const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+      if (name === 'AbortError') {
+        setAiAnalysisError(
+          'This scan is taking a long time and was stopped on this device. The network or upstream AI may be slow — try again in a minute.'
+        );
+      } else {
+        setAiAnalysisError('Intelligence link failed. Manual verification recommended.');
+      }
     } finally {
+      window.clearTimeout(clientTimeout);
+      aiRunInFlightRef.current = false;
       setIsAnalyzing(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAnalyzing) {
+      setAiSlowNetworkHint(false);
+      return;
+    }
+    const t = window.setTimeout(() => setAiSlowNetworkHint(true), 8000);
+    return () => {
+      window.clearTimeout(t);
+    };
+  }, [isAnalyzing]);
 
   useEffect(() => {
     if (isOpen && item) {
@@ -224,6 +284,7 @@ Output requirements:
     if (!isOpen || !item) {
       setLatestDdReport(null);
       setAiAnalysis('');
+      setAiAnalysisError(null);
       setIsLoadingDdReport(false);
       return () => {
         isCancelled = true;
@@ -237,6 +298,7 @@ Output requirements:
         setLatestDdReport(report);
         if (report?.analysis?.trim()) {
           setAiAnalysis(report.analysis);
+          setAiAnalysisError(null);
           return;
         }
         void runAiAnalysis();
@@ -982,22 +1044,32 @@ Output requirements:
                   <div className="min-h-[150px] w-full max-h-[min(70vh,640px)] overflow-y-auto pr-1">
                     {isAnalyzing || isLoadingDdReport ? (
                       <div className="flex min-h-[150px] flex-col items-center justify-center gap-3">
-                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">
+                        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse text-center px-2">
                           {isAnalyzing ? 'Analyzing Intelligence...' : 'Loading saved DD...'}
                         </span>
+                        {isAnalyzing && aiSlowNetworkHint && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 text-center max-w-xs leading-relaxed">
+                            Still working — slow networks or busy AI hosts can take over a minute.
+                          </span>
+                        )}
                       </div>
                     ) : aiAnalysis.trim() ? (
                       <AiIntelligenceReport content={aiAnalysis} />
                     ) : (
-                      <p className="text-sm text-slate-400 leading-relaxed py-4">
-                        {t('אין ניתוח עדיין. לחץ להרצה.', 'No analysis yet. Use the button below to run a scan.')}
-                      </p>
+                      <div className="space-y-2 py-4">
+                        <p className="text-sm text-slate-400 leading-relaxed">
+                          {t('אין ניתוח עדיין. לחץ להרצה.', 'No analysis yet. Use the button below to run a scan.')}
+                        </p>
+                        {aiAnalysisError && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">{aiAnalysisError}</p>
+                        )}
+                      </div>
                     )}
                   </div>
                   <Button
                     onClick={runAiAnalysis}
-                    disabled={isAnalyzing}
+                    disabled={isAnalyzing || isLoadingDdReport}
                     className="mt-6 w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px]"
                   >
                     {isAnalyzing ? 'Analyzing...' : 'Re-Run Intelligence Scan'}
@@ -1238,27 +1310,44 @@ Output requirements:
                     </h4>
                     <div className="space-y-6">
                       <div className="bg-white/60 dark:bg-slate-950/60 backdrop-blur-md rounded-2xl p-5 border border-indigo-500/20 min-h-[120px] w-full max-h-[min(55vh,520px)] overflow-y-auto">
-                        {isAnalyzing ? (
+                        {isAnalyzing || isLoadingDdReport ? (
                           <div className="flex min-h-[120px] flex-col items-center justify-center gap-3">
-                            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                            <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">
-                              {t('מנתח...', 'Analyzing Intelligence...')}
+                            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse text-center px-2">
+                              {isAnalyzing
+                                ? t('מנתח...', 'Analyzing Intelligence...')
+                                : t('טוען DD...', 'Loading saved DD...')}
                             </span>
+                            {isAnalyzing && aiSlowNetworkHint && (
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 text-center max-w-xs leading-relaxed">
+                                {t(
+                                  'רשת איטית — עדיין מעבד',
+                                  'Still working — slow networks or busy AI can take over a minute.'
+                                )}
+                              </span>
+                            )}
                           </div>
                         ) : aiAnalysis.trim() ? (
                           <AiIntelligenceReport content={aiAnalysis} className="text-left" />
                         ) : (
-                          <p className="text-xs text-slate-500 leading-relaxed py-2">
-                            {t(
-                              'הרץ סריקה לקבלת סיכום',
-                              'Run a scan to see a readable briefing here.'
+                          <div className="space-y-2 py-2">
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              {t(
+                                'הרץ סריקה לקבלת סיכום',
+                                'Run a scan to see a readable briefing here.'
+                              )}
+                            </p>
+                            {aiAnalysisError && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                                {aiAnalysisError}
+                              </p>
                             )}
-                          </p>
+                          </div>
                         )}
                       </div>
                       <Button
                         onClick={runAiAnalysis}
-                        disabled={isAnalyzing}
+                        disabled={isAnalyzing || isLoadingDdReport}
                         className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px] shadow-2xl"
                       >
                         {isAnalyzing

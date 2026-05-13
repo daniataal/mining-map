@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -123,6 +124,39 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _env_int_bounded(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        v = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, v))
+
+
+def _ai_http_timeout_seconds() -> float:
+    """Per-attempt socket timeout for outbound LLM HTTP calls (Groq, OpenRouter, Pollinations)."""
+    return float(_env_int_bounded("AI_HTTP_TIMEOUT_SECONDS", 90, minimum=5, maximum=600))
+
+
+def _ai_http_extra_retries() -> int:
+    """Retries after the first failed attempt (timeouts, connection errors, retryable HTTP status)."""
+    return _env_int_bounded("AI_HTTP_MAX_RETRIES", 2, minimum=0, maximum=6)
+
+
+def _retry_backoff_seconds(attempt_idx: int) -> float:
+    return min(30.0, 0.75 * (2 ** attempt_idx))
+
+
+def _is_retryable_http_status(code: int) -> bool:
+    return code in (408, 429, 502, 503, 504)
+
+
+def _pollinations_fallback_enabled() -> bool:
+    return (os.getenv("DISABLE_POLLINATIONS_FALLBACK") or "").strip().lower() not in ("1", "true", "yes", "on")
+
+
 def _provider_specs() -> list[dict[str, Any]]:
     return [
         {
@@ -159,17 +193,51 @@ def _request_chat_completion(
             {"role": "user", "content": user_prompt},
         ],
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=20)
-    if response.status_code != 200:
-        raise RuntimeError(f"{provider_name} returned {response.status_code}: {response.text[:500]}")
-    data = response.json()
-    content = data["choices"][0]["message"]["content"]
-    return {
-        "provider": provider_name,
-        "model": model,
-        "content": content,
-        "raw_response": data,
-    }
+    timeout = _ai_http_timeout_seconds()
+    attempts = 1 + _ai_http_extra_retries()
+    last_exc: Optional[BaseException] = None
+
+    for attempt in range(attempts):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            if response.status_code == 200:
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                return {
+                    "provider": provider_name,
+                    "model": model,
+                    "content": content,
+                    "raw_response": data,
+                }
+            if _is_retryable_http_status(response.status_code) and attempt < attempts - 1:
+                logger.warning(
+                    "%s model %s HTTP %s; retrying (%s/%s)",
+                    provider_name,
+                    model,
+                    response.status_code,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise RuntimeError(f"{provider_name} returned {response.status_code}: {response.text[:500]}")
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                logger.warning(
+                    "%s model %s transient network error: %s; retrying (%s/%s)",
+                    provider_name,
+                    model,
+                    exc,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"{provider_name} request failed after {attempts} attempts")
 
 
 def _run_provider_cascade(system_prompt: str, user_prompt: str) -> Optional[dict[str, Any]]:
@@ -198,15 +266,42 @@ def _pollinations_analysis(system_prompt: str, user_prompt: str) -> Optional[dic
     import requests
 
     url = f"https://text.pollinations.ai/{requests.utils.quote(system_prompt + ' ' + user_prompt)}"
-    response = requests.get(url, timeout=20)
-    if response.status_code != 200:
-        raise RuntimeError(f"Pollinations returned {response.status_code}")
-    return {
-        "provider": "Pollinations (Fallback)",
-        "model": "text-proxy",
-        "content": response.text,
-        "raw_response": {"text": response.text},
-    }
+    timeout = _ai_http_timeout_seconds()
+    attempts = 1 + _ai_http_extra_retries()
+    last_exc: Optional[BaseException] = None
+
+    for attempt in range(attempts):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 200:
+                return {
+                    "provider": "Pollinations (Fallback)",
+                    "model": "text-proxy",
+                    "content": response.text,
+                    "raw_response": {"text": response.text},
+                }
+            if _is_retryable_http_status(response.status_code) and attempt < attempts - 1:
+                logger.warning(
+                    "Pollinations HTTP %s; retrying (%s/%s)",
+                    response.status_code,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise RuntimeError(f"Pollinations returned {response.status_code}")
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                logger.warning(
+                    "Pollinations transient error: %s; retrying (%s/%s)", exc, attempt + 2, attempts
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Pollinations request failed")
 
 
 def generate_markdown_analysis(query: str) -> dict[str, Any]:
@@ -230,6 +325,21 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "raw_response": provider_result["raw_response"],
         }
 
+    if not _pollinations_fallback_enabled():
+        logger.info("Pollinations fallback skipped (DISABLE_POLLINATIONS_FALLBACK is set)")
+        return {
+            "status": "error",
+            "provider": None,
+            "model": None,
+            "analysis": None,
+            "raw_response": None,
+            "error_code": "AI_ALL_PROVIDERS_FAILED",
+            "message": (
+                "No configured AI API returned a result and the Pollinations fallback is disabled. "
+                "Set GROQ_API_KEY or OPENROUTER_API_KEY, or unset DISABLE_POLLINATIONS_FALLBACK."
+            ),
+        }
+
     try:
         fallback = _pollinations_analysis(system_prompt, query)
         return {
@@ -247,7 +357,11 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "model": None,
             "analysis": None,
             "raw_response": None,
-            "message": "All intelligence providers are offline.",
+            "error_code": "AI_ALL_PROVIDERS_FAILED",
+            "message": (
+                "All intelligence providers are offline or timed out. "
+                "For faster, more reliable analysis, set GROQ_API_KEY or OPENROUTER_API_KEY."
+            ),
         }
 
 
@@ -372,6 +486,7 @@ def generate_dd_report(query: str, source_snapshot: Optional[dict[str, Any]] = N
         "prompt_version": DD_PROMPT_VERSION,
         "source_snapshot": source_snapshot,
         "message": analysis_result.get("message"),
+        "error_code": analysis_result.get("error_code"),
     }
 
 

@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 import json
+import logging
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import Json, RealDictCursor
@@ -19,6 +20,8 @@ from country_borders import get_country_borders_geojson, parse_requested_countri
 from license_import_geo import resolve_location_to_coords, validate_lat_lng_range
 
 app = FastAPI()
+
+logger = logging.getLogger(__name__)
 
 
 def _load_entity_contact_services():
@@ -2383,9 +2386,9 @@ def delete_file(file_id: str):
     finally:
         conn.close()
 
-# --- AI Analysis Endpoint (Free via Pollinations.ai) ---
+# --- AI Analysis: Groq / OpenRouter first, Pollinations optional fallback ---
 
-# --- AI Intelligence Waterfall (Groq, OpenRouter, AwanLLM) ---
+# --- AI Intelligence Waterfall (Groq, OpenRouter, optional Pollinations) ---
 
 class AIRequest(BaseModel):
     query: str
@@ -2419,7 +2422,15 @@ def analyze_with_ai(request: AIRequest):
 
         report = generate_dd_report(request.query, source_snapshot)
         if report.get("status") != "success" or not report.get("analysis"):
-            return {"status": "error", "message": report.get("message") or "All intelligence providers are offline."}
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "error_code": report.get("error_code") or "AI_UPSTREAM_UNAVAILABLE",
+                    "message": report.get("message")
+                    or "All intelligence providers are offline or timed out.",
+                },
+            )
 
         serialized_report = None
         if should_persist and conn is not None:
@@ -2530,10 +2541,18 @@ def analyze_with_ai(request: AIRequest):
             "analysis": report.get("analysis"),
             "ddReport": serialized_report,
         }
-    except Exception as e:
+    except Exception:
         if conn is not None:
             conn.rollback()
-        return Response(str(e), status_code=500)
+        logger.exception("analyze_with_ai failed")
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "error_code": "AI_INTERNAL_ERROR",
+                "message": "The intelligence service could not complete this request. Please try again.",
+            },
+        )
     finally:
         if conn is not None:
             conn.close()
