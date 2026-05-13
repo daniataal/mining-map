@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 import json
 import logging
@@ -387,6 +388,14 @@ def _licenses_sector_sql_fragment(normalized_sector: Optional[str]) -> tuple[str
     )
 
 
+def _licenses_countries_sql_fragment(requested_countries: list[str]) -> tuple[str, list[Any]]:
+    """Case-insensitive trimmed match on ``licenses.country`` (same normalization idea as country borders parsing)."""
+    norms = [c.strip().lower() for c in requested_countries if c and str(c).strip()]
+    if not norms:
+        return "TRUE", []
+    return ("LOWER(TRIM(COALESCE(country, ''))) = ANY(%s)", [norms])
+
+
 def _build_license_api_results(
     rows: list,
     cached_geo: dict[str, dict],
@@ -454,6 +463,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=800)
 
 # Database connection parameters
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -1438,18 +1448,21 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 
-def _fetch_license_rows_for_api(c, normalized_sector: str | None) -> tuple[list, dict[str, dict]]:
-    """Load license rows with optional sector filter (matches client sector query semantics)."""
-    if normalized_sector:
-        c.execute(
-            """
-            SELECT * FROM licenses
-            WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(sector), ''), 'mining'))) = %s
-            """,
-            (normalized_sector,),
-        )
-    else:
-        c.execute("SELECT * FROM licenses")
+def _fetch_license_rows_for_api(
+    c,
+    normalized_sector: str | None,
+    country_filters: list[str] | None = None,
+) -> tuple[list, dict[str, dict]]:
+    """Load license rows with optional sector and optional country filters (matches client query semantics)."""
+    sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector)
+    country_sql, country_params = _licenses_countries_sql_fragment(list(country_filters or []))
+    c.execute(
+        f"""
+        SELECT * FROM licenses
+        WHERE ({sector_sql}) AND ({country_sql})
+        """,
+        tuple(sector_params + country_params),
+    )
     rows = c.fetchall()
     return rows, _load_cached_geo_fallbacks(c, rows)
 
@@ -1463,6 +1476,7 @@ def read_licenses(
     min_lng: Optional[float] = None,
     max_lng: Optional[float] = None,
     limit: int = 5000,
+    countries: Optional[str] = None,
 ):
     """Return licenses for the map and admin views.
 
@@ -1470,6 +1484,10 @@ def read_licenses(
     as a valid non-degenerate axis-aligned box to restrict rows in SQL (rows with null ``lat`` /
     ``lng`` are excluded in this mode). Partial or invalid bbox params are ignored and the legacy
     full-table read is used instead.
+
+    Optional ``countries``: comma-separated names (e.g. ``Ghana,South%20Africa``). Parsed with the
+    same trimming rules as country borders; matched case-insensitively on ``licenses.country``.
+    When omitted, all countries are included (subject to sector / bbox / ``prefer_open_data``).
 
     When a bbox is applied, responses are capped for safety: ``limit`` defaults to 5000 and is
     clamped to a maximum of 15000 regardless of the client value.
@@ -1498,6 +1516,7 @@ def read_licenses(
 
     normalized_sector_key = (sector or "").strip().lower() or None
     bbox = licenses_bbox_tuple_if_valid(min_lat, max_lat, min_lng, max_lng)
+    requested_countries = parse_requested_countries(countries)
 
     try:
         conn = get_db_connection()
@@ -1511,14 +1530,16 @@ def read_licenses(
         min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
         safe_limit = max(1, min(int(limit or 5000), 15000))
         sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
+        country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
         exists_sql = f"""
             SELECT EXISTS (
                 SELECT 1 FROM licenses
                 WHERE {sector_sql}
+                  AND ({country_sql})
                   AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
             )
         """
-        c.execute(exists_sql, tuple(sector_params))
+        c.execute(exists_sql, tuple(sector_params + country_params))
         has_row = c.fetchone() or {}
         has_preferred_live_rows = bool(has_row.get("exists"))
         open_clause = ""
@@ -1527,6 +1548,7 @@ def read_licenses(
         list_sql = f"""
             SELECT * FROM licenses
             WHERE {sector_sql}
+              AND ({country_sql})
               AND lat IS NOT NULL AND lng IS NOT NULL
               AND lat BETWEEN %s AND %s
               AND lng BETWEEN %s AND %s
@@ -1534,7 +1556,7 @@ def read_licenses(
             ORDER BY id
             LIMIT %s
         """
-        list_params: list[Any] = [*sector_params, min_la, max_la, min_lo, max_lo, safe_limit]
+        list_params: list[Any] = [*sector_params, *country_params, min_la, max_la, min_lo, max_lo, safe_limit]
         c.execute(list_sql, tuple(list_params))
         rows = c.fetchall()
         cached_geo = _load_cached_geo_fallbacks(c, rows)
@@ -1579,14 +1601,14 @@ def read_licenses(
 
     c = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key)
+        rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries)
     except Exception as e:
         conn.close()
         if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
             conn = get_db_connection()
             c = conn.cursor(cursor_factory=RealDictCursor)
             try:
-                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key)
+                rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries)
             except Exception as retry_exc:
                 conn.close()
                 return {"error": f"Database error: {str(retry_exc)}"}

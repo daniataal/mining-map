@@ -4,6 +4,7 @@
 
 :443 {
     tls internal
+    encode gzip zstd
 
     @backend {
         path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
