@@ -423,8 +423,27 @@ def _ensure_database_exists():
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
         if cur.fetchone():
             return
-        cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_NAME)))
-        print(f"[db] created missing database: {DB_NAME}")
+        try:
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(DB_NAME)))
+            print(f"[db] created missing database: {DB_NAME}")
+        except psycopg2.Error as create_exc:
+            if getattr(create_exc, "pgcode", None) == "42P04":
+                # Another process created it between SELECT and CREATE.
+                return
+            msg = str(create_exc)
+            # Some Postgres images fail when template1 collation metadata is stale.
+            # Retry from template0, which avoids template1 locale metadata.
+            template1_collation_issue = (
+                "template database \"template1\" has a collation version" in msg
+                or "no actual collation version could be determined" in msg
+            )
+            if not template1_collation_issue:
+                raise
+            print(f"[db] template1 collation issue detected; retrying CREATE DATABASE {DB_NAME} FROM template0")
+            cur.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(DB_NAME))
+            )
+            print(f"[db] created missing database from template0: {DB_NAME}")
     finally:
         cur.close()
         conn.close()
@@ -962,6 +981,19 @@ def init_db():
                 ON oil_trade_flows (reporter, year);
         """)
 
+        try:
+            cur.execute("SAVEPOINT maritime_schema")
+            try:
+                from backend.services.maritime_intel import ensure_maritime_tables
+            except ImportError:
+                from services.maritime_intel import ensure_maritime_tables
+            ensure_maritime_tables(conn)
+            cur.execute("RELEASE SAVEPOINT maritime_schema")
+        except Exception as maritime_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT maritime_schema")
+            cur.execute("RELEASE SAVEPOINT maritime_schema")
+            print(f"Maritime snapshot table init skipped: {maritime_exc}")
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -1237,7 +1269,13 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 @app.get("/licenses")
 def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
-    conn = get_db_connection()
+    try:
+        conn = get_db_connection()
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            print("[licenses] database unavailable; returning empty dataset for graceful degradation")
+            return []
+        raise
     c = conn.cursor(cursor_factory=RealDictCursor)
     
     # Select all rows
@@ -3176,7 +3214,7 @@ def get_maritime_vessels(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Optional live AIS maritime layer for oil and gas mode."""
+    """Optional AIS maritime layer for oil and gas mode, served from worker snapshots."""
     try:
         try:
             from backend.services.maritime_intel import get_maritime_vessel_feed

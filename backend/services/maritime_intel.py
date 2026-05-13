@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse, urlunparse
 from urllib.parse import quote_plus, urlencode
 from urllib.request import Request, urlopen
 
@@ -30,6 +31,9 @@ AIS_MAX_CAPTURE_WINDOW_SECONDS = 18
 AIS_MAX_VIEWPORT_WIDTH_DEGREES = 90.0
 AIS_MAX_VIEWPORT_HEIGHT_DEGREES = 55.0
 AIS_MAX_FALLBACK_REGION_COUNT = 6
+MARITIME_SNAPSHOT_TTL_SECONDS = int(os.getenv("MARITIME_SNAPSHOT_TTL_SECONDS", "300"))
+MARITIME_SNAPSHOT_RETENTION_SECONDS = int(os.getenv("MARITIME_SNAPSHOT_RETENTION_SECONDS", str(60 * 60 * 24)))
+MARITIME_WORKER_STATUS_ID = "aisstream"
 
 # Curated fallback regions used when a viewport is absent or too wide to watch
 # honestly as a single AIS subscription. Bboxes are (south, west, north, east).
@@ -148,6 +152,253 @@ def _ship_matches_scope(ship_type_label: str, vessel_scope: str) -> bool:
     if normalized_scope == "all_vessels":
         return True
     return ship_type_label == "Tanker"
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
+def _seconds_since(value: Any) -> Optional[int]:
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        return None
+    return max(0, int((datetime.now(timezone.utc) - parsed).total_seconds()))
+
+
+def _iso_datetime(value: Any) -> Any:
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        return value
+    return parsed.isoformat()
+
+
+def _db_connect():
+    import psycopg2
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return psycopg2.connect(database_url, connect_timeout=5)
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "mining_db"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD", "password"),
+        connect_timeout=5,
+    )
+
+
+def _maintenance_db_connect():
+    import psycopg2
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    maintenance_name = os.getenv("DB_MAINTENANCE_NAME", "postgres")
+    if database_url:
+        parsed = urlparse(database_url)
+        maintenance_url = urlunparse(parsed._replace(path=f"/{maintenance_name}"))
+        return psycopg2.connect(maintenance_url, connect_timeout=5)
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=maintenance_name,
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD", "password"),
+        connect_timeout=5,
+    )
+
+
+def ensure_maritime_database_exists() -> None:
+    import psycopg2
+    from psycopg2 import sql
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    db_name = os.getenv("DB_NAME", "mining_db")
+    if database_url:
+        parsed = urlparse(database_url)
+        db_name = parsed.path.lstrip("/") or db_name
+
+    conn = _maintenance_db_connect()
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+            if cur.fetchone():
+                return
+            try:
+                cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+            except psycopg2.Error as exc:
+                if getattr(exc, "pgcode", None) == "42P04":
+                    return
+                raise
+    finally:
+        conn.close()
+
+
+def ensure_maritime_tables(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS maritime_vessel_snapshots (
+                mmsi TEXT PRIMARY KEY,
+                vessel_name TEXT,
+                lat DOUBLE PRECISION NOT NULL,
+                lng DOUBLE PRECISION NOT NULL,
+                observed_at TIMESTAMPTZ,
+                source_label TEXT,
+                source_url TEXT,
+                ship_type_code INTEGER,
+                ship_type_label TEXT,
+                payload JSONB NOT NULL,
+                last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_maritime_vessel_snapshots_position
+            ON maritime_vessel_snapshots (lat, lng);
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_maritime_vessel_snapshots_seen
+            ON maritime_vessel_snapshots (last_seen_at DESC);
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_maritime_vessel_snapshots_type
+            ON maritime_vessel_snapshots (ship_type_label);
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS maritime_ingest_status (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                source TEXT,
+                last_attempt_at TIMESTAMPTZ,
+                last_success_at TIMESTAMPTZ,
+                last_error TEXT,
+                snapshot_count INTEGER DEFAULT 0,
+                metadata JSONB,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+
+
+def _build_stored_feed_response(
+    *,
+    rows: list[dict[str, Any]],
+    status: Optional[dict[str, Any]],
+    max_vessels: int,
+    capture_window_seconds: int,
+    vessel_scope: str,
+    bbox: Optional[tuple[float, float, float, float]],
+) -> dict[str, Any]:
+    normalized_scope = _normalize_vessel_scope(vessel_scope)
+    normalized_bbox = _normalize_requested_bbox(bbox)
+    plan = _build_ais_subscription_plan(normalized_bbox)
+    vessels = []
+    latest_seen = None
+    for row in rows[:max_vessels]:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        vessel = dict(payload)
+        vessel.update(
+            {
+                "id": payload.get("id") or f"ais:{row.get('mmsi')}",
+                "mmsi": row.get("mmsi"),
+                "vessel_name": row.get("vessel_name") or payload.get("vessel_name") or f"MMSI {row.get('mmsi')}",
+                "lat": row.get("lat"),
+                "lng": row.get("lng"),
+                "observed_at": _iso_datetime(row.get("observed_at") or payload.get("observed_at")),
+                "source_label": row.get("source_label") or payload.get("source_label") or "AISStream",
+                "source_url": row.get("source_url") or payload.get("source_url"),
+                "ship_type_code": row.get("ship_type_code"),
+                "ship_type_label": row.get("ship_type_label") or payload.get("ship_type_label"),
+                "last_seen_at": _iso_datetime(row.get("last_seen_at")),
+            }
+        )
+        vessels.append(vessel)
+        parsed_seen = _parse_datetime(row.get("last_seen_at") or row.get("observed_at"))
+        if parsed_seen is not None and (latest_seen is None or parsed_seen > latest_seen):
+            latest_seen = parsed_seen
+
+    last_success_at = (status or {}).get("last_success_at")
+    freshness_anchor = latest_seen or _parse_datetime(last_success_at)
+    snapshot_age_seconds = _seconds_since(freshness_anchor)
+    is_stale = snapshot_age_seconds is None or snapshot_age_seconds > MARITIME_SNAPSHOT_TTL_SECONDS
+
+    limitations = []
+    if plan.get("geography_note"):
+        limitations.append(str(plan["geography_note"]))
+    if normalized_scope == "oil_tankers":
+        limitations.append(
+            "Scope is limited to tanker-class AIS snapshots persisted by the maritime worker."
+        )
+    else:
+        limitations.append(
+            "All-vessels mode is capped by the stored AIS snapshot and requested viewport for performance."
+        )
+    if is_stale:
+        limitations.append(
+            "Persisted AIS snapshots are stale or unavailable; check the maritime-worker container and AISSTREAM_API_KEY."
+        )
+    limitations.append(
+        "AIS ownership/operator enrichment depends on whether the MMSI or IMO can be matched in open sources such as Wikidata."
+    )
+
+    metadata = (status or {}).get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    return {
+        "vessels": vessels,
+        "source": "AISStream persisted snapshot",
+        "data_as_of": (freshness_anchor.isoformat() if freshness_anchor else _now_iso()),
+        "live_positions_enabled": not is_stale,
+        "limitations": limitations,
+        "scope": normalized_scope,
+        "capture_window_seconds": capture_window_seconds,
+        "max_vessels": max_vessels,
+        "geography_mode": plan.get("geography_mode"),
+        "geography_note": plan.get("geography_note"),
+        "requested_bbox": plan.get("requested_bbox"),
+        "effective_bbox_count": len(plan.get("boxes") or []),
+        "region_labels": plan.get("region_labels") or [],
+        "cached": True,
+        "stale": is_stale,
+        "snapshot_age_seconds": snapshot_age_seconds,
+        "stale_after_seconds": MARITIME_SNAPSHOT_TTL_SECONDS,
+        "worker": {
+            "status": (status or {}).get("status") or "unknown",
+            "source": (status or {}).get("source") or "AISStream",
+            "last_attempt_at": _iso_datetime((status or {}).get("last_attempt_at")),
+            "last_success_at": _iso_datetime(last_success_at),
+            "last_error": (status or {}).get("last_error"),
+            "snapshot_count": (status or {}).get("snapshot_count") or 0,
+            "metadata": metadata,
+        },
+    }
 
 
 def _build_ais_subscription_plan(
@@ -906,25 +1157,113 @@ def get_maritime_vessel_feed(
         min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
     )
     normalized_bbox = _normalize_requested_bbox(bbox)
-    cache_key = json.dumps(
-        {
-            "max_vessels": normalized_max_vessels,
-            "capture_window_seconds": normalized_window,
-            "scope": normalized_scope,
-            "bbox": normalized_bbox,
-        },
-        sort_keys=True,
+    plan = _build_ais_subscription_plan(normalized_bbox)
+
+    try:
+        conn = _db_connect()
+    except Exception as exc:
+        return _build_empty_ais_response(
+            source="AISStream persisted snapshot (database unavailable)",
+            limitations=[
+                f"Maritime snapshots could not be read from Postgres: {exc}",
+                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+            ],
+            vessel_scope=normalized_scope,
+            capture_window_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            plan=plan,
+        )
+
+    try:
+        from psycopg2.extras import RealDictCursor
+
+        ensure_maritime_tables(conn)
+        where = ["last_seen_at >= NOW() - (%s * INTERVAL '1 second')"]
+        params: list[Any] = [MARITIME_SNAPSHOT_RETENTION_SECONDS]
+        if normalized_scope != "all_vessels":
+            where.append("ship_type_label = %s")
+            params.append("Tanker")
+        if normalized_bbox is not None:
+            south, west, north, east = normalized_bbox
+            where.append("lat BETWEEN %s AND %s")
+            params.extend([south, north])
+            where.append("lng BETWEEN %s AND %s")
+            params.extend([west, east])
+        params.append(normalized_max_vessels)
+
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    mmsi,
+                    vessel_name,
+                    lat,
+                    lng,
+                    observed_at,
+                    source_label,
+                    source_url,
+                    ship_type_code,
+                    ship_type_label,
+                    payload,
+                    last_seen_at
+                FROM maritime_vessel_snapshots
+                WHERE {" AND ".join(where)}
+                ORDER BY last_seen_at DESC, observed_at DESC NULLS LAST
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT status, source, last_attempt_at, last_success_at, last_error, snapshot_count, metadata
+                FROM maritime_ingest_status
+                WHERE id = %s
+                """,
+                (MARITIME_WORKER_STATUS_ID,),
+            )
+            status_row = cur.fetchone()
+        conn.commit()
+        return _build_stored_feed_response(
+            rows=rows,
+            status=dict(status_row) if status_row else None,
+            max_vessels=normalized_max_vessels,
+            capture_window_seconds=normalized_window,
+            vessel_scope=normalized_scope,
+            bbox=normalized_bbox,
+        )
+    except Exception as exc:
+        conn.rollback()
+        return _build_empty_ais_response(
+            source="AISStream persisted snapshot (read error)",
+            limitations=[
+                f"Maritime snapshots could not be read from Postgres: {exc}",
+                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+            ],
+            vessel_scope=normalized_scope,
+            capture_window_seconds=normalized_window,
+            max_vessels=normalized_max_vessels,
+            plan=plan,
+        )
+    finally:
+        conn.close()
+
+
+def collect_live_maritime_vessel_feed(
+    *,
+    max_vessels: int = AIS_MAX_VESSELS,
+    capture_window_seconds: int = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
+    vessel_scope: str = "all_vessels",
+    bbox: Optional[tuple[float, float, float, float]] = None,
+) -> dict[str, Any]:
+    normalized_scope = _normalize_vessel_scope(vessel_scope)
+    normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
+    normalized_window = max(
+        AIS_MIN_CAPTURE_WINDOW_SECONDS,
+        min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
     )
-
-    cache_items = _ais_cache.setdefault("items", {})
-    cached_entry = cache_items.get(cache_key)
-    age = time.time() - float((cached_entry or {}).get("loaded_at") or 0.0)
-    if cached_entry and cached_entry.get("result") and age < AIS_CACHE_TTL_SECONDS:
-        cached = dict(cached_entry["result"])
-        cached["cached"] = True
-        return cached
-
-    result = asyncio.run(
+    normalized_bbox = _normalize_requested_bbox(bbox)
+    return asyncio.run(
         _collect_ais_snapshot(
             timeout_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
@@ -932,11 +1271,136 @@ def get_maritime_vessel_feed(
             viewport_bbox=normalized_bbox,
         )
     )
-    cache_items[cache_key] = {
-        "loaded_at": time.time(),
-        "result": result,
-    }
-    return dict(result)
+
+
+def persist_maritime_vessel_feed(conn, feed: dict[str, Any]) -> int:
+    from psycopg2.extras import Json
+
+    ensure_maritime_tables(conn)
+    vessels = feed.get("vessels") if isinstance(feed, dict) else []
+    if not isinstance(vessels, list):
+        vessels = []
+
+    upserted = 0
+    with conn.cursor() as cur:
+        for vessel in vessels:
+            if not isinstance(vessel, dict):
+                continue
+            mmsi = _clean_text(vessel.get("mmsi"))
+            lat = vessel.get("lat")
+            lng = vessel.get("lng")
+            if not mmsi or lat is None or lng is None:
+                continue
+            cur.execute(
+                """
+                INSERT INTO maritime_vessel_snapshots (
+                    mmsi,
+                    vessel_name,
+                    lat,
+                    lng,
+                    observed_at,
+                    source_label,
+                    source_url,
+                    ship_type_code,
+                    ship_type_label,
+                    payload,
+                    last_seen_at,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, NOW()), NOW())
+                ON CONFLICT (mmsi) DO UPDATE SET
+                    vessel_name = EXCLUDED.vessel_name,
+                    lat = EXCLUDED.lat,
+                    lng = EXCLUDED.lng,
+                    observed_at = EXCLUDED.observed_at,
+                    source_label = EXCLUDED.source_label,
+                    source_url = EXCLUDED.source_url,
+                    ship_type_code = EXCLUDED.ship_type_code,
+                    ship_type_label = EXCLUDED.ship_type_label,
+                    payload = EXCLUDED.payload,
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    updated_at = NOW()
+                """,
+                (
+                    mmsi,
+                    vessel.get("vessel_name"),
+                    float(lat),
+                    float(lng),
+                    vessel.get("observed_at"),
+                    vessel.get("source_label") or "AISStream",
+                    vessel.get("source_url") or "https://aisstream.io/documentation",
+                    vessel.get("ship_type_code"),
+                    vessel.get("ship_type_label"),
+                    Json(vessel),
+                    vessel.get("observed_at"),
+                ),
+            )
+            upserted += 1
+    return upserted
+
+
+def update_maritime_ingest_status(
+    conn,
+    *,
+    status: str,
+    source: str = "AISStream",
+    snapshot_count: int = 0,
+    last_error: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
+    mark_success: bool = False,
+) -> None:
+    from psycopg2.extras import Json
+
+    ensure_maritime_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO maritime_ingest_status (
+                id,
+                status,
+                source,
+                last_attempt_at,
+                last_success_at,
+                last_error,
+                snapshot_count,
+                metadata,
+                updated_at
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                NOW(),
+                CASE WHEN %s THEN NOW() ELSE NULL END,
+                %s,
+                %s,
+                %s,
+                NOW()
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                source = EXCLUDED.source,
+                last_attempt_at = EXCLUDED.last_attempt_at,
+                last_success_at = CASE
+                    WHEN %s THEN EXCLUDED.last_success_at
+                    ELSE maritime_ingest_status.last_success_at
+                END,
+                last_error = EXCLUDED.last_error,
+                snapshot_count = EXCLUDED.snapshot_count,
+                metadata = EXCLUDED.metadata,
+                updated_at = NOW()
+            """,
+            (
+                MARITIME_WORKER_STATUS_ID,
+                status,
+                source,
+                mark_success,
+                last_error,
+                snapshot_count,
+                Json(metadata or {}),
+                mark_success,
+            ),
+        )
 
 
 def get_maritime_context(

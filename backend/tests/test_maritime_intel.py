@@ -1,7 +1,9 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from backend.services.maritime_intel import (
     _build_ais_subscription_plan,
+    _build_stored_feed_response,
     _normalize_requested_bbox,
     _ship_matches_scope,
     build_counterparty_proxies,
@@ -78,6 +80,69 @@ class MaritimeIntelTests(unittest.TestCase):
 
     def test_match_destination_to_port_handles_empty(self):
         self.assertIsNone(match_destination_to_port(""))
+
+    def test_stored_feed_response_marks_fresh_worker_snapshots_live(self):
+        now = datetime.now(timezone.utc)
+        response = _build_stored_feed_response(
+            rows=[
+                {
+                    "mmsi": "123456789",
+                    "vessel_name": "Test Tanker",
+                    "lat": 5.5,
+                    "lng": 1.2,
+                    "observed_at": now,
+                    "source_label": "AISStream",
+                    "source_url": "https://aisstream.io/documentation",
+                    "ship_type_code": 82,
+                    "ship_type_label": "Tanker",
+                    "payload": {"destination": "Tema"},
+                    "last_seen_at": now,
+                }
+            ],
+            status={
+                "status": "ok",
+                "source": "AISStream regional watch",
+                "last_attempt_at": now,
+                "last_success_at": now,
+                "last_error": None,
+                "snapshot_count": 1,
+                "metadata": {"geography_mode": "default_regions"},
+            },
+            max_vessels=60,
+            capture_window_seconds=10,
+            vessel_scope="oil_tankers",
+            bbox=None,
+        )
+
+        self.assertEqual(len(response["vessels"]), 1)
+        self.assertTrue(response["live_positions_enabled"])
+        self.assertFalse(response["stale"])
+        self.assertEqual(response["worker"]["status"], "ok")
+        self.assertEqual(response["vessels"][0]["last_seen_at"], now.isoformat())
+
+    def test_stored_feed_response_exposes_stale_worker_snapshots(self):
+        old_seen = datetime.now(timezone.utc) - timedelta(hours=2)
+        response = _build_stored_feed_response(
+            rows=[],
+            status={
+                "status": "error",
+                "source": "AISStream",
+                "last_attempt_at": old_seen,
+                "last_success_at": old_seen,
+                "last_error": "temporary websocket failure",
+                "snapshot_count": 0,
+                "metadata": {},
+            },
+            max_vessels=60,
+            capture_window_seconds=10,
+            vessel_scope="all_vessels",
+            bbox=(0.0, 0.0, 10.0, 10.0),
+        )
+
+        self.assertFalse(response["live_positions_enabled"])
+        self.assertTrue(response["stale"])
+        self.assertEqual(response["worker"]["last_error"], "temporary websocket failure")
+        self.assertEqual(response["requested_bbox"], [0.0, 0.0, 10.0, 10.0])
 
 
 if __name__ == "__main__":

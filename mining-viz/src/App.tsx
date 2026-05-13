@@ -307,12 +307,12 @@ export default function App() {
     });
   }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
-  const mapCenter: [number, number] = [7.9465, -1.0232]; // Ghana
+  const mapCenter: [number, number] = viewMode === 'ports' ? [20, 0] : [7.9465, -1.0232];
   
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
   const sectorCoverageSummary =
-    licenseSector && worldCoverage ? worldCoverage.summary[licenseSector] : null;
+    licenseSector ? (worldCoverage?.summary?.[licenseSector] ?? null) : null;
   const sidebarViewMode =
     viewMode === 'admin'
       ? 'admin'

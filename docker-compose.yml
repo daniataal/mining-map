@@ -21,6 +21,28 @@ services:
       db:
         condition: service_healthy
 
+  maritime-worker:
+    build:
+      context: ./backend
+    container_name: mining-maritime-worker
+    restart: always
+    command: ["python", "maritime_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+      - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-60}
+      - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-10}
+      - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-120}
+      - MARITIME_WORKER_SCOPE=${MARITIME_WORKER_SCOPE:-all_vessels}
+      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-300}
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend-admin:
     build:
       context: ./mining-viz
