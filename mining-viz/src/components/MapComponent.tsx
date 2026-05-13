@@ -595,231 +595,272 @@ export default function MapComponent({
                 </div>
             )}
             {isOilAndGasView && (
-                <div className="absolute left-4 bottom-4 z-[950] max-w-[360px] rounded-3xl border border-black/10 dark:border-white/10 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl px-4 py-4 shadow-2xl">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-cyan-500/20 bg-cyan-500/10">
-                                    <Radar className="h-4 w-4 text-cyan-500" />
-                                </div>
-                                <div>
-                                    <p className="text-[9px] font-black uppercase tracking-widest text-cyan-500">
-                                        {t('מעקב ימי', 'Maritime Watch')}
-                                    </p>
-                                    <p className="text-[10px] text-slate-500">
-                                        {t('בחירה מפורשת לפי תצוגת מפה', 'Explicit, viewport-driven vessel watch')}
-                                    </p>
-                                </div>
+                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,320px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
+                    <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
+                        <div className="flex items-center gap-2.5">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10">
+                                <Radar className="h-4 w-4 text-cyan-500" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500">
+                                    {t('מעקב ימי', 'Maritime Watch')}
+                                </p>
+                                <p className="truncate text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                                    {t('AIS לפי גבולות המפה', 'AIS for current map bounds')}
+                                </p>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="space-y-3 px-3.5 pb-3.5 pt-3">
                         <Button
                             type="button"
-                            size="sm"
                             onClick={() => setIsMaritimeLayerEnabled((current) => !current)}
-                            className={`h-8 rounded-2xl px-3 text-[9px] font-black uppercase tracking-widest ${
+                            className={`h-10 w-full rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${
                                 isMaritimeLayerEnabled
-                                    ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950'
+                                    ? 'border border-black/10 bg-slate-900 text-white hover:bg-slate-800 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100'
                                     : 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
                             }`}
                         >
-                            <Ship className="mr-1.5 h-3.5 w-3.5" />
+                            {isMaritimeLayerEnabled && isMaritimeLoading && !maritimeFeed ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Ship className="mr-2 h-4 w-4" />
+                            )}
                             {isMaritimeLayerEnabled
-                                ? t('כבה כלי שיט', 'Hide vessels')
+                                ? t('כבה כלי שיט', 'Turn off vessels')
                                 : t('טען כלי שיט', 'Load vessels')}
                         </Button>
-                    </div>
 
-                    <p className="mt-3 text-[10px] leading-snug text-slate-500">
-                        {maritimeStatusText}
-                    </p>
+                        {!isMaritimeLayerEnabled && (
+                            <p className="text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">{maritimeIdleHint}</p>
+                        )}
 
-                    <div className="mt-3">
-                        <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                            {t('תצוגה', 'Display')}
-                        </p>
-                        <Select value={oilAndGasDisplayMode} onValueChange={(value) => setOilAndGasDisplayMode(value as OilAndGasDisplayMode)}>
-                            <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
-                                <SelectItem value="combined">{t('משולב', 'Combined')}</SelectItem>
-                                <SelectItem value="vessels_only">{t('כלי שיט בלבד', 'Vessels only')}</SelectItem>
-                                <SelectItem value="on_ground_only">{t('קרקע בלבד', 'On-ground only')}</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    {isMaritimeLayerEnabled && (
-                        <div className="mt-3 space-y-2">
-                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                <div>
-                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                                        {t('היקף', 'Scope')}
-                                    </p>
-                                    <Select value={maritimeScope} onValueChange={(value) => setMaritimeScope(value as MaritimeVesselScope)}>
-                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
-                                            <SelectItem value="oil_tankers">{t('מכליות נפט', 'Oil tankers')}</SelectItem>
-                                            <SelectItem value="all_vessels">{t('כל כלי השיט', 'All vessels')}</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                                        {t('מכסה', 'Cap')}
-                                    </p>
-                                    <Select value={maritimeMaxVessels} onValueChange={setMaritimeMaxVessels}>
-                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
-                                            {MARITIME_MAX_VESSEL_OPTIONS.map((value) => (
-                                                <SelectItem key={value} value={value}>
-                                                    {value} {t('כלי שיט', 'vessels')}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                                        {t('חלון לכידה', 'Capture')}
-                                    </p>
-                                    <Select value={maritimeCaptureWindow} onValueChange={setMaritimeCaptureWindow}>
-                                        <SelectTrigger className="h-8 w-full border-black/10 bg-white/70 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
-                                            {MARITIME_CAPTURE_WINDOW_OPTIONS.map((value) => (
-                                                <SelectItem key={value} value={value}>
-                                                    {value}s
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-black/5 bg-black/[0.03] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
-                                <p className="mb-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                                    {t('מקרא סימני כלי שיט', 'Vessel markers')}
-                                </p>
-                                <p className="mb-1 text-[9px] leading-snug text-slate-500">
+                        <div>
+                            <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                {t('תצוגה', 'Display')}
+                            </p>
+                            <Select value={oilAndGasDisplayMode} onValueChange={(value) => setOilAndGasDisplayMode(value as OilAndGasDisplayMode)}>
+                                <SelectTrigger className="h-9 w-full rounded-xl border-black/10 bg-white/80 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/80">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                    <SelectItem value="combined">{t('משולב', 'Combined')}</SelectItem>
+                                    <SelectItem value="vessels_only">{t('כלי שיט בלבד', 'Vessels only')}</SelectItem>
+                                    <SelectItem value="on_ground_only">{t('קרקע בלבד', 'On-ground only')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            {hideCountryBordersForVesselsOnly && (
+                                <p className="mt-1.5 text-[9px] leading-snug text-slate-500 dark:text-slate-500">
                                     {t(
-                                        'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS.',
-                                        'Chevron points along heading (north up). Fill color follows AIS ship-type category.'
+                                        'גבולות מדינות מוסתרים במצב זה לתצוגה ימית נקייה. חזרו למשולב או קרקע כדי להציג שוב.',
+                                        'Country borders stay hidden in this mode for a cleaner sea view. Switch to Combined or On-ground to show them again.'
                                     )}
-                                </p>
-                                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                                    {MARITIME_LEGEND_KEYS.map((key) => (
-                                        <span
-                                            key={key}
-                                            className="inline-flex items-center gap-0.5 text-[8px] text-slate-400"
-                                        >
-                                            <span
-                                                className="h-2 w-2 shrink-0 rounded-[1px] border border-white/25"
-                                                style={{ backgroundColor: VESSEL_CATEGORY_COLORS[key] }}
-                                                aria-hidden
-                                            />
-                                            <span>{t(VESSEL_LEGEND_T[key][0], VESSEL_LEGEND_T[key][1])}</span>
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-1.5">
-                                <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-500">
-                                    {maritimeScope === 'oil_tankers'
-                                        ? t('מכליות בלבד', 'Tankers only')
-                                        : t('כל כלי השיט', 'All vessels')}
-                                </Badge>
-                                <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
-                                    {Number(maritimeCaptureWindow)}s
-                                </Badge>
-                                <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
-                                    {t('מכסה', 'Cap')} {Number(maritimeMaxVessels)}
-                                </Badge>
-                                {maritimeFeed?.cap_applied && (
-                                    <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
-                                        {t('לא הכל נטען', 'Cap applied')}
-                                    </Badge>
-                                )}
-                                {maritimeFeed?.cached && (
-                                    <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
-                                        {t('מטמון', 'Cached')}
-                                    </Badge>
-                                )}
-                            </div>
-
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                    <p className="truncate text-[9px] font-black uppercase tracking-widest text-slate-500">
-                                        {maritimeFeed?.source || t('ממתין לטעינה', 'Waiting to load')}
-                                    </p>
-                                    <p className="text-[9px] text-slate-500">
-                                        {maritimeFeed?.geography_mode === 'viewport_bbox'
-                                            ? t('מבוסס על גבולות המפה הנוכחיים', 'Using the current map bounds')
-                                            : maritimeFeed?.geography_mode === 'sampled_viewport_regions'
-                                                ? t('תצוגה רחבה מדי ולכן מתבצע דגימה אזורית בתוך המבט', 'View is too wide, so the watch samples regions inside it')
-                                                : t('ללא bbox זמין מוחלות גאוגרפיות ברירת מחדל', 'Default watch regions apply when no viewport bbox is available')}
-                                    </p>
-                                </div>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => void refetchMaritime()}
-                                    disabled={isMaritimeFetching}
-                                    className="h-8 rounded-2xl border border-black/10 px-3 text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-cyan-500 dark:border-white/10"
-                                >
-                                    <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isMaritimeFetching ? 'animate-spin' : ''}`} />
-                                    {t('רענון', 'Refresh')}
-                                </Button>
-                            </div>
-
-                            {maritimeFeed?.geography_note && (
-                                <p className="text-[9px] leading-snug text-slate-500">
-                                    {maritimeFeed.geography_note}
-                                </p>
-                            )}
-                            {maritimeFeed?.total_available != null && (
-                                <p className="text-[9px] leading-snug text-slate-500">
-                                    {t(
-                                        `זמינים ${maritimeFeed.total_available}, הוחזרו ${maritimeFeed.returned_count ?? maritimeVessels.length}.`,
-                                        `${maritimeFeed.total_available} available, ${maritimeFeed.returned_count ?? maritimeVessels.length} returned.`
-                                    )}
-                                </p>
-                            )}
-                            {maritimeFeed?.cap_applied && (
-                                <p className="text-[9px] leading-snug text-slate-500">
-                                    {t(
-                                        'המכסה מגבילה את התוצאה לביצועים. הגדל מכסה או הזז/קרב מפה כדי לראות יותר.',
-                                        'Cap limits this result for performance. Increase cap or narrow the viewport to see more.'
-                                    )}
-                                </p>
-                            )}
-                            {maritimeVessels.length > MARITIME_RENDER_SOFT_CAP && (
-                                <p className="text-[9px] leading-snug text-slate-500">
-                                    {t(
-                                        `התצוגה מוגבלת ל-${MARITIME_RENDER_SOFT_CAP} סמנים למניעת עומס.`,
-                                        `Rendering is limited to ${MARITIME_RENDER_SOFT_CAP} markers to keep the map smooth.`
-                                    )}
-                                </p>
-                            )}
-                            {maritimeLimitationText && (
-                                <p className="text-[9px] leading-snug text-slate-500">
-                                    {maritimeLimitationText}
-                                </p>
-                            )}
-                            {maritimeError && (
-                                <p className="text-[9px] leading-snug text-red-500">
-                                    {maritimeError instanceof Error ? maritimeError.message : t('שגיאת טעינה לא ידועה', 'Unknown vessel loading error')}
                                 </p>
                             )}
                         </div>
-                    )}
+
+                        {isMaritimeLayerEnabled && (
+                            <>
+                                <div className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        {isMaritimeFetching && (
+                                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-cyan-500" aria-hidden />
+                                        )}
+                                        <span className="truncate text-[9px] font-semibold text-slate-600 dark:text-slate-300">
+                                            {maritimeHeadlineStatus}
+                                        </span>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => void refetchMaritime()}
+                                        disabled={isMaritimeFetching}
+                                        className="h-7 shrink-0 rounded-lg px-2 text-[8px] font-black uppercase tracking-widest text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+                                    >
+                                        <RefreshCw className={`mr-1 h-3 w-3 ${isMaritimeFetching ? 'animate-spin' : ''}`} />
+                                        {t('רענון', 'Refresh')}
+                                    </Button>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setMaritimeAdvancedOpen((o) => !o)}
+                                    className="flex w-full items-center justify-between rounded-xl border border-black/10 px-2.5 py-2 text-left text-[9px] font-black uppercase tracking-widest text-slate-500 transition-colors hover:bg-black/[0.03] dark:border-white/10 dark:hover:bg-white/[0.04]"
+                                >
+                                    {t('מתקדם', 'Advanced')}
+                                    {maritimeAdvancedOpen ? (
+                                        <ChevronUp className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                    ) : (
+                                        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                                    )}
+                                </button>
+
+                                {maritimeAdvancedOpen && (
+                                    <div className="space-y-2.5 border-t border-black/5 pt-2.5 dark:border-white/5">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                            <div>
+                                                <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                    {t('היקף', 'Scope')}
+                                                </p>
+                                                <Select value={maritimeScope} onValueChange={(value) => setMaritimeScope(value as MaritimeVesselScope)}>
+                                                    <SelectTrigger className="h-8 w-full rounded-lg border-black/10 bg-white/70 text-[9px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                                        <SelectItem value="oil_tankers">{t('מכליות נפט', 'Oil tankers')}</SelectItem>
+                                                        <SelectItem value="all_vessels">{t('כל כלי השיט', 'All vessels')}</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div>
+                                                <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                    {t('מכסה', 'Cap')}
+                                                </p>
+                                                <Select value={maritimeMaxVessels} onValueChange={setMaritimeMaxVessels}>
+                                                    <SelectTrigger className="h-8 w-full rounded-lg border-black/10 bg-white/70 text-[9px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                                        {MARITIME_MAX_VESSEL_OPTIONS.map((value) => (
+                                                            <SelectItem key={value} value={value}>
+                                                                {value} {t('כלי שיט', 'vessels')}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div>
+                                                <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                    {t('חלון לכידה', 'Capture')}
+                                                </p>
+                                                <Select value={maritimeCaptureWindow} onValueChange={setMaritimeCaptureWindow}>
+                                                    <SelectTrigger className="h-8 w-full rounded-lg border-black/10 bg-white/70 text-[9px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                                        {MARITIME_CAPTURE_WINDOW_OPTIONS.map((value) => (
+                                                            <SelectItem key={value} value={value}>
+                                                                {value}s
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-xl border border-black/5 bg-black/[0.03] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
+                                            <p className="mb-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                {t('מקרא סימני כלי שיט', 'Vessel markers')}
+                                            </p>
+                                            <p className="mb-1 text-[9px] leading-snug text-slate-500">
+                                                {t(
+                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS.',
+                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category.'
+                                                )}
+                                            </p>
+                                            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                                {MARITIME_LEGEND_KEYS.map((key) => (
+                                                    <span key={key} className="inline-flex items-center gap-0.5 text-[8px] text-slate-400">
+                                                        <span
+                                                            className="h-2 w-2 shrink-0 rounded-[1px] border border-white/25"
+                                                            style={{ backgroundColor: VESSEL_CATEGORY_COLORS[key] }}
+                                                            aria-hidden
+                                                        />
+                                                        <span>{t(VESSEL_LEGEND_T[key][0], VESSEL_LEGEND_T[key][1])}</span>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-500">
+                                                {maritimeScope === 'oil_tankers'
+                                                    ? t('מכליות בלבד', 'Tankers only')
+                                                    : t('כל כלי השיט', 'All vessels')}
+                                            </Badge>
+                                            <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                                {Number(maritimeCaptureWindow)}s
+                                            </Badge>
+                                            <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                                {t('מכסה', 'Cap')} {Number(maritimeMaxVessels)}
+                                            </Badge>
+                                            {maritimeFeed?.cap_applied && (
+                                                <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
+                                                    {t('לא הכל נטען', 'Cap applied')}
+                                                </Badge>
+                                            )}
+                                            {maritimeFeed?.cached && (
+                                                <Badge className="border-none bg-amber-500/10 text-[8px] font-black uppercase text-amber-500">
+                                                    {t('מטמון', 'Cached')}
+                                                </Badge>
+                                            )}
+                                        </div>
+
+                                        <div className="min-w-0">
+                                            <p className="truncate text-[9px] font-black uppercase tracking-widest text-slate-500">
+                                                {maritimeFeed?.source || t('ממתין לטעינה', 'Waiting to load')}
+                                            </p>
+                                            <p className="text-[9px] text-slate-500">
+                                                {maritimeFeed?.geography_mode === 'viewport_bbox'
+                                                    ? t('מבוסס על גבולות המפה הנוכחיים', 'Using the current map bounds')
+                                                    : maritimeFeed?.geography_mode === 'sampled_viewport_regions'
+                                                        ? t(
+                                                              'תצוגה רחבה מדי ולכן מתבצע דגימה אזורית בתוך המבט',
+                                                              'View is too wide, so the watch samples regions inside it'
+                                                          )
+                                                        : t(
+                                                              'ללא bbox זמין מוחלות גאוגרפיות ברירת מחדל',
+                                                              'Default watch regions apply when no viewport bbox is available'
+                                                          )}
+                                            </p>
+                                        </div>
+
+                                        <p className="text-[9px] leading-snug text-slate-500">{maritimeDetailNote}</p>
+
+                                        {maritimeFeed?.geography_note && (
+                                            <p className="text-[9px] leading-snug text-slate-500">{maritimeFeed.geography_note}</p>
+                                        )}
+                                        {maritimeFeed?.total_available != null && (
+                                            <p className="text-[9px] leading-snug text-slate-500">
+                                                {t(
+                                                    `זמינים ${maritimeFeed.total_available}, הוחזרו ${maritimeFeed.returned_count ?? maritimeVessels.length}.`,
+                                                    `${maritimeFeed.total_available} available, ${maritimeFeed.returned_count ?? maritimeVessels.length} returned.`
+                                                )}
+                                            </p>
+                                        )}
+                                        {maritimeFeed?.cap_applied && (
+                                            <p className="text-[9px] leading-snug text-slate-500">
+                                                {t(
+                                                    'המכסה מגבילה את התוצאה לביצועים. הגדל מכסה או הזז/קרב מפה כדי לראות יותר.',
+                                                    'Cap limits this result for performance. Increase cap or narrow the viewport to see more.'
+                                                )}
+                                            </p>
+                                        )}
+                                        {maritimeVessels.length > MARITIME_RENDER_SOFT_CAP && (
+                                            <p className="text-[9px] leading-snug text-slate-500">
+                                                {t(
+                                                    `התצוגה מוגבלת ל-${MARITIME_RENDER_SOFT_CAP} סמנים למניעת עומס.`,
+                                                    `Rendering is limited to ${MARITIME_RENDER_SOFT_CAP} markers to keep the map smooth.`
+                                                )}
+                                            </p>
+                                        )}
+                                        {maritimeLimitationText && (
+                                            <p className="text-[9px] leading-snug text-slate-500">{maritimeLimitationText}</p>
+                                        )}
+                                        {maritimeError && (
+                                            <p className="text-[9px] leading-snug text-red-500">
+                                                {maritimeError instanceof Error
+                                                    ? maritimeError.message
+                                                    : t('שגיאת טעינה לא ידועה', 'Unknown vessel loading error')}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
             )}
             <MapContainer 
@@ -867,7 +908,7 @@ export default function MapComponent({
                         <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" />
                     </LayersControl.BaseLayer>
 
-                    {filteredGeoJson && (
+                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
                         <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
                                 key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}`}
