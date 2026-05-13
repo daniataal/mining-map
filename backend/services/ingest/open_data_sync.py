@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -1590,6 +1591,7 @@ def _query_source_stats(conn: Any) -> dict[str, dict[str, Any]]:
     return stats
 
 
+@functools.lru_cache(maxsize=1)
 def get_source_registry_index() -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
     for source in OPEN_DATA_SOURCES:

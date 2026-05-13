@@ -1392,12 +1392,14 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
     
     conn.close()
 
+    count_all = len(rows)
     normalized_sector = (sector or "").strip().lower()
     if normalized_sector:
         rows = [
             row for row in rows
             if (row.get("sector") or "mining").strip().lower() == normalized_sector
         ]
+    count_after_sector = len(rows)
 
     # Once live/open or global fallback rows exist for the current sector, hide
     # the old bundled JSON snapshot rows from the primary map feed. Manual /
@@ -1409,6 +1411,8 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             row for row in rows
             if (row.get("record_origin") or "").lower() != "bundled_json"
         ]
+
+    count_after_open_pref = len(rows)
 
     try:
         try:
@@ -1467,6 +1471,14 @@ def read_licenses(sector: Optional[str] = None, prefer_open_data: bool = True):
             "originalLng": row["original_lng"] if "original_lng" in keys else None,
         })
     
+    if not results:
+        print(
+            "[licenses] empty feed "
+            f"sector={normalized_sector or 'all'} prefer_open_data={prefer_open_data} "
+            f"counts db_all={count_all} after_sector={count_after_sector} after_open_pref={count_after_open_pref} "
+            f"has_live_origin_signal={has_preferred_live_rows}"
+        )
+
     return results
 
 
