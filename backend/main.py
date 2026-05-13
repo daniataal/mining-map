@@ -3775,7 +3775,7 @@ def get_africa_open_data_coverage():
 
 
 @app.get("/api/open-data/coverage/world")
-def get_world_open_data_coverage():
+def get_world_open_data_coverage(region: Optional[str] = None):
     ensure_schema_initialized()
     try:
         try:
@@ -3783,10 +3783,10 @@ def get_world_open_data_coverage():
         except ImportError:
             from services.ingest.open_data_sync import get_world_coverage
         try:
-            return get_world_coverage()
+            return get_world_coverage(region=region)
         except Exception as exc:
             if _is_missing_relation_error(exc, "licenses") and ensure_schema_initialized(force=True):
-                return get_world_coverage()
+                return get_world_coverage(region=region)
             raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}

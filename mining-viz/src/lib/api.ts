@@ -580,6 +580,8 @@ const EMPTY_WORLD_COVERAGE: WorldCoverageResponse = {
     mining: EMPTY_COVERAGE_SUMMARY,
     oil_and_gas: EMPTY_COVERAGE_SUMMARY,
   },
+  regional_summary: {},
+  region_filter: null,
   countries: [],
   sources: [],
 };
@@ -597,12 +599,14 @@ function isWorldCoverageResponse(value: unknown): value is WorldCoverageResponse
   );
 }
 
-export const useWorldCoverage = (enabled = true) => {
+export const useWorldCoverage = (enabled = true, region?: string) => {
   return useQuery<WorldCoverageResponse>({
-    queryKey: ['world-coverage'],
+    queryKey: ['world-coverage', region ?? 'all'],
     queryFn: async () => {
       try {
-        const { data } = await apiClient.get<unknown>('/api/open-data/coverage/world');
+        const { data } = await apiClient.get<unknown>('/api/open-data/coverage/world', {
+          params: region ? { region } : undefined,
+        });
         if (isWorldCoverageResponse(data)) return data;
         console.warn('[useWorldCoverage] Invalid coverage payload; falling back to empty coverage.', data);
         return EMPTY_WORLD_COVERAGE;
