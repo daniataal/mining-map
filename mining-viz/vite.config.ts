@@ -16,12 +16,42 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/licenses': 'http://backend:8000',
-      '/api': 'http://backend:8000',
-      '/auth': 'http://backend:8000',
-      '/activity': 'http://backend:8000',
-      '/docs': 'http://backend:8000',
-      '/openapi.json': 'http://backend:8000',
+      '/licenses': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/api': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/auth': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/activity': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/docs': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/openapi.json': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
     },
   },
 });

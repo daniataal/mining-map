@@ -961,6 +961,8 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 
                 CREATE INDEX IF NOT EXISTS idx_licenses_country ON licenses (country);
                 CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
+                CREATE INDEX IF NOT EXISTS idx_licenses_id ON licenses (id);
+                CREATE INDEX IF NOT EXISTS idx_licenses_origin ON licenses (record_origin);
                 """
             )
             # Normalized relationship layer for cross-sector role transparency.
@@ -1159,13 +1161,9 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             )
             print("Default admin created: admin / admin123")
 
-        try:
-            sync_all_license_contacts, _ = _load_entity_contact_services()
-            synced_contacts = sync_all_license_contacts(conn)
-            print(f"Entity contact sync completed for {synced_contacts} records.")
-        except Exception as contact_exc:
-            print(f"Entity contact sync skipped: {contact_exc}")
-
+        # NOTE: sync_all_license_contacts is intentionally NOT called here.
+        # It processes 76k+ records and belongs in the background license-sync-worker,
+        # not in schema initialization which must complete in under a second.
         conn.commit()
         cur.close()
         conn.close()
@@ -1184,9 +1182,10 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
     global _SCHEMA_READY
 
     if _SCHEMA_READY and not force:
-        return True
+        return True  # Fast path: already initialized, no lock needed
 
     with _SCHEMA_INIT_LOCK:
+        # Double-check inside the lock in case another thread just finished
         if _SCHEMA_READY and not force:
             return True
         initialized = init_db(raise_on_error=False)
@@ -1540,7 +1539,7 @@ def read_licenses(
     ``lng`` are excluded in this mode). Partial or invalid bbox params are ignored and the legacy
     full-table read is used instead.
 
-    Optional ``countries``: comma-separated names (e.g. ``Ghana,South%20Africa``). Parsed with the
+    Optional ``countries``: comma-separated names (e.g. ``Ghana,South Africa``). Parsed with the
     same trimming rules as country borders; matched case-insensitively on ``licenses.country``.
     When omitted, all countries are included (subject to sector / bbox / ``prefer_open_data``).
 
@@ -1660,13 +1659,18 @@ def read_licenses(
             )
         return results
 
+    start_time = time.time()
     c = conn.cursor(cursor_factory=RealDictCursor)
     safe_limit = max(1, min(int(limit or 5000), 15000))
     try:
+        print(f"[licenses] Starting fetch for sector={normalized_sector_key} countries={requested_countries}")
+        db_start = time.time()
         rows, cached_geo = _fetch_license_rows_for_api(c, normalized_sector_key, requested_countries, limit=safe_limit)
+        print(f"[licenses] DB Fetch + GeoCache took {time.time() - db_start:.4f}s (Rows: {len(rows)})")
     except Exception as e:
         conn.close()
         if _is_missing_relation_error(e, "licenses") and ensure_schema_initialized(force=True):
+            print("[licenses] Retrying query after schema re-init")
             conn = get_db_connection()
             c = conn.cursor(cursor_factory=RealDictCursor)
             try:
@@ -1681,17 +1685,19 @@ def read_licenses(
     else:
         conn.close()
 
+    process_start = time.time()
     count_all = len(rows)
     count_after_sector = len(rows)
 
     preferred_live_origins = {"open_data", "global_open_fallback"}
+    # Logic updated: We no longer hide bundled data. We show everything and let the 
+    # frontend/clustering handle the density. This ensures the user's 27k records 
+    # are always visible alongside official live data.
     has_preferred_live_rows = any((row.get("record_origin") or "").lower() in preferred_live_origins for row in rows)
-    if prefer_open_data and has_preferred_live_rows:
-        rows = [row for row in rows if (row.get("record_origin") or "").lower() != "bundled_json"]
-
-    count_after_open_pref = len(rows)
+    # rows = [row for row in rows if (row.get("record_origin") or "").lower() != "bundled_json"] <- REMOVED
 
     results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
+    print(f"[licenses] Result building took {time.time() - process_start:.4f}s. Total Request Time: {time.time() - start_time:.4f}s")
 
     if not results:
         print(
