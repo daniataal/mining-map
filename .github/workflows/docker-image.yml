@@ -144,6 +144,7 @@ jobs:
           services:
             backend:
               image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-backend
               restart: always
               env_file:
@@ -168,6 +169,7 @@ jobs:
 
             maritime-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-maritime-worker
               restart: always
               command: ["python", "maritime_worker.py"]
@@ -190,6 +192,7 @@ jobs:
 
             license-sync-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-license-sync-worker
               restart: always
               command: ["python", "license_daily_sync_worker.py"]
@@ -209,6 +212,7 @@ jobs:
 
             frontend:
               image: dannyatalla/mining-frontend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-frontend
               restart: always
               ports:
