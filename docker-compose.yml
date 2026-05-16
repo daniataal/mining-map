@@ -17,6 +17,18 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
       - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -43,6 +55,24 @@ services:
       db:
         condition: service_healthy
 
+  license-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-license-sync-worker
+    restart: always
+    command: ["python", "license_daily_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=${LICENSE_DAILY_SYNC_INTERVAL_SECONDS:-86400}
+      - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=${LICENSE_DAILY_SYNC_BACKOFF_SECONDS:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./mining-viz
@@ -50,13 +80,18 @@ services:
     restart: always
     ports:
       - "5173:5173"
+    # Omit VITE_API_BASE by default so the browser uses the same hostname as the
+    # Vite dev server (api.ts: http://${window.location.hostname}:8000). Set in
+    # .env only when you need a fixed API URL (e.g. VITE_API_BASE=http://host.docker.internal:8000 on Mac).
     environment:
-      - VITE_API_BASE=http://localhost:8000
+      VITE_API_BASE: ${VITE_API_BASE:-}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   db:
-    image: postgis/postgis:15-3.3-alpine
+    build:
+      context: ./db
     container_name: mining-db
     restart: always
     environment:
@@ -75,15 +110,20 @@ services:
     image: caddy:alpine
     container_name: mining-caddy
     restart: unless-stopped
+    # Host :80/:443 are often taken (nginx, AirPlay Receiver, other stacks).
+    # Override in .env: MINING_MAP_CADDY_HTTP=80 MINING_MAP_CADDY_HTTPS=443
     ports:
-      - "80:80"
-      - "443:443"
+      - "${MINING_MAP_CADDY_HTTP:-8080}:80"
+      - "${MINING_MAP_CADDY_HTTPS:-8443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - frontend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:

@@ -1253,9 +1253,15 @@
 .custom-marker.is-selected {
   z-index: 1100 !important;
 }
-.custom-marker.is-selected > div {
-  transform: scale(1.6);
-  transform-origin: center;
-  border-color: #fff !important;
-  box-shadow: 0 0 18px rgba(255, 215, 0, 0.85), 0 0 8px rgba(255, 255, 255, 0.5) !important;
+.vessel-marker.is-selected {
+  z-index: 1100 !important;
+}
+
+/* GeoJSON country borders: Carto dark_all swallows thin cyan strokes; neutral color + weight set in MapComponent. */
+.dark .leaflet-container svg path.map-country-border--dark {
+  filter: drop-shadow(0 0 1px rgba(15, 23, 42, 0.95)) drop-shadow(0 0 2px rgba(226, 232, 240, 0.22));
+}
+
+.leaflet-container svg path.map-country-border--light {
+  filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.9));
 }

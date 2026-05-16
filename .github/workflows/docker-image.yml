@@ -1,23 +1,32 @@
 name: Docker Image CI and Remote Deployment
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      build_number: ${{ steps.version.outputs.build_number }}
+      short_sha: ${{ steps.version.outputs.short_sha }}
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@v3
 
     - name: Log in to Docker Hub
-      uses: docker/login-action@v2
+      uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
@@ -25,7 +34,41 @@ jobs:
     - name: Set Build Version
       id: version
       run: |
-        echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
+        echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Build and Push Backend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          dannyatalla/mining-backend:latest
+          dannyatalla/mining-backend:v${{ github.run_number }}
+          dannyatalla/mining-backend:${{ steps.version.outputs.short_sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and Push Frontend
+      uses: docker/build-push-action@v5
+      with:
+        context: ./mining-viz
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          dannyatalla/mining-frontend:latest
+          dannyatalla/mining-frontend:v${{ github.run_number }}
+          dannyatalla/mining-frontend:${{ steps.version.outputs.short_sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    # if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/changebackend-and-makeitwork!'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
 
     - name: Resolve CSV auto-import inputs
       id: csv_import
@@ -63,16 +106,6 @@ jobs:
         source: ${{ steps.csv_import.outputs.csv_path }}
         target: /tmp/
 
-    - name: Build and Push Backend
-      run: |
-        docker build -t dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }} ./backend
-        docker push dannyatalla/mining-backend:v${{ env.BUILD_NUMBER }}
-
-    - name: Build and Push Frontend (MadSan Global Intelligence)
-      run: |
-        docker build -t dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }} ./mining-viz
-        docker push dannyatalla/mining-frontend:v${{ env.BUILD_NUMBER }}
-
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
       env:
@@ -80,15 +113,16 @@ jobs:
         ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         AUTO_IMPORT_LICENSES_CSV: ${{ steps.csv_import.outputs.enabled }}
         CSV_UPLOADED: ${{ steps.csv_import.outputs.csv_exists }}
+        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+        VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED
+        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN
         script: |
-          VERSION="v${{ env.BUILD_NUMBER }}"
-          
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
           sudo mkdir -p /opt/mining-map/data
@@ -98,6 +132,7 @@ jobs:
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
+            printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_ACCESS_TOKEN"
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -108,11 +143,11 @@ jobs:
           fi
 
           # Create the modern split-service docker-compose.yml
-          # We don't escape the $VERSION here so the actual value is written to the file
           cat <<EOF | sudo tee docker-compose.yml
           services:
             backend:
-              image: dannyatalla/mining-backend:$VERSION
+              image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-backend
               restart: always
               env_file:
@@ -125,12 +160,19 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
+              healthcheck:
+                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)"]
+                interval: 15s
+                timeout: 8s
+                retries: 5
+                start_period: 180s
               depends_on:
                 db:
                   condition: service_healthy
 
             maritime-worker:
-              image: dannyatalla/mining-backend:$VERSION
+              image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-maritime-worker
               restart: always
               command: ["python", "maritime_worker.py"]
@@ -151,19 +193,42 @@ jobs:
                 db:
                   condition: service_healthy
 
+            license-sync-worker:
+              image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
+              container_name: mining-license-sync-worker
+              restart: always
+              command: ["python", "license_daily_sync_worker.py"]
+              env_file:
+                - backend.env
+              environment:
+                - DB_HOST=db
+                - DB_PORT=5432
+                - DB_NAME=mining_db
+                - DB_USER=postgres
+                - DB_PASSWORD=password
+                - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=86400
+                - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=600
+              depends_on:
+                db:
+                  condition: service_healthy
+
             frontend:
-              image: dannyatalla/mining-frontend:$VERSION
+              image: dannyatalla/mining-frontend:$VERSION_TAG
+              platform: linux/arm64
               container_name: mining-frontend
               restart: always
               ports:
                 - "5173:5173"
               environment:
-                - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
+                - VITE_API_BASE=http://${REMOTE_HOST}:8000
               depends_on:
-                - backend
+                backend:
+                  condition: service_healthy
 
             db:
-              image: postgis/postgis:15-3.3-alpine
+              image: dannyatalla/mining-db:latest
+              platform: linux/arm64
               container_name: mining-db
               restart: always
               environment:
@@ -182,46 +247,29 @@ jobs:
             postgres_data:
           EOF
 
-          # Stop and remove the OLD monolithic container if it exists
-          sudo docker rm -f mining-map-app-1 mining-map-auto || true
-
-          # Pull and Restart using the new split architecture
+          # Pull and Restart
           sudo docker compose pull
           sudo docker compose up -d --remove-orphans
 
-          # Wait for backend API to become healthy enough for admin import.
+          # Wait until /licenses returns 200
           BACKEND_READY="false"
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8000/licenses >/dev/null; then
+          for i in $(seq 1 90); do
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 120 \
+              "http://localhost:8000/licenses" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
               BACKEND_READY="true"
               break
             fi
             sleep 2
           done
 
-          if [ "$BACKEND_READY" != "true" ]; then
-            echo "Backend did not become ready in time; skipping CSV auto-import."
-          elif [ "${AUTO_IMPORT_LICENSES_CSV}" != "true" ]; then
-            echo "AUTO_IMPORT_LICENSES_CSV disabled; skipping CSV auto-import."
-          elif [ ! -f /opt/mining-map/data/licenses_export.csv ]; then
-            echo "No fallback CSV found at /opt/mining-map/data/licenses_export.csv; skipping CSV auto-import."
-          elif [ -z "${ADMIN_TOKEN}" ]; then
-            echo "ADMIN_TOKEN is not set; skipping CSV auto-import."
-          else
+          if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \
               -X POST "http://localhost:8000/api/admin/import/extracted-csv?countries=South%20Africa,Ghana&sector=mining" \
               -H "X-Admin-Token: ${ADMIN_TOKEN}" \
               -F "file=@/opt/mining-map/data/licenses_export.csv")
-
-            if [[ "$IMPORT_STATUS" =~ ^2[0-9][0-9]$ ]]; then
-              echo "CSV auto-import completed (HTTP ${IMPORT_STATUS})."
-            else
-              echo "CSV auto-import failed (HTTP ${IMPORT_STATUS}); continuing deploy."
-              if [ -f /tmp/licenses_import_response.json ]; then
-                cat /tmp/licenses_import_response.json
-              fi
-            fi
+            echo "CSV auto-import status: $IMPORT_STATUS"
           fi
           
-          # Deep Clean: Remove ALL unused images to reclaim maximum disk space
+          # Deep Clean
           sudo docker image prune -af

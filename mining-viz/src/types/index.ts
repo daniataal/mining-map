@@ -6,6 +6,8 @@ export interface MiningLicense {
   licenseType: string;
   commodity: string;
   sector?: string;
+  /** Record-specific hero image when provided by ingest or manual entry. */
+  photoUrl?: string | null;
   entityKind?: 'license' | 'storage_terminal' | 'port' | 'logistics_node' | string;
   entitySubtype?:
     | 'tank_farm'
@@ -89,8 +91,44 @@ export interface EntityContact {
   confidenceScore?: number | null;
   rawPayload?: Record<string, unknown> | null;
   extractedFrom?: string | null;
+  /**
+   * Discovery provenance:
+   *   - 'open_data' : pulled from licenses.raw_payload by the entity_contacts sync
+   *   - 'ai'        : AI/web research located it during a DD run
+   *   - 'manual'    : analyst entered it via the admin UI
+   */
+  discoveredBy?: 'open_data' | 'ai' | 'manual' | string | null;
+  /** Set when an analyst manually verifies an AI-discovered phone. */
+  phoneVerifiedAt?: string | null;
   verifiedAt?: string | null;
   lastSeenAt?: string | null;
+}
+
+/**
+ * Public litigation / regulatory event stored in the ``legal_events`` table.
+ * The dossier groups these by ``role`` so analysts can quickly distinguish
+ * cases where the entity was sued vs. cases the entity initiated.
+ */
+export interface LegalEvent {
+  id: string;
+  fingerprint?: string | null;
+  entityKind: string;
+  entityId: string;
+  caseTitle: string;
+  parties?: string | null;
+  role: 'plaintiff' | 'defendant' | 'respondent' | 'petitioner' | 'third_party' | 'subject' | string;
+  court?: string | null;
+  jurisdiction?: string | null;
+  filedDate?: string | null;
+  status?: string | null;
+  summary?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  discoveredBy?: 'ai' | 'court_listener' | 'pacer' | 'kyb_provider' | 'open_sanctions' | 'stub' | 'manual' | string | null;
+  confidenceScore?: number | null;
+  lastSeenAt?: string | null;
+  createdAt?: string | null;
 }
 
 export interface EntityRelationship {
@@ -131,6 +169,17 @@ export interface DdExtractedContact {
   promotedContactId?: string | null;
 }
 
+export interface DdDiscoveredPhone {
+  id?: string;
+  value: string;
+  label?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  confidenceScore?: number | null;
+  discoveredBy?: 'ai' | string | null;
+}
+
 export interface DdReport {
   id: string;
   entityKind: string;
@@ -140,6 +189,10 @@ export interface DdReport {
   model?: string | null;
   extractionProvider?: string | null;
   extractionModel?: string | null;
+  legalProvider?: string | null;
+  legalModel?: string | null;
+  phoneDiscoveryProvider?: string | null;
+  phoneDiscoveryModel?: string | null;
   promptVersion?: string | null;
   analysis?: string | null;
   sourceSummary?: {
@@ -158,7 +211,10 @@ export interface DdReport {
     sourceUrl?: string | null;
     sourceType?: string | null;
     confidenceScore?: number | null;
+    discoveredBy?: string | null;
   }>;
+  legalEvents?: LegalEvent[];
+  discoveredPhones?: DdDiscoveredPhone[];
   createdAt?: string | null;
 }
 
@@ -343,56 +399,18 @@ export interface MaritimeContextResponse {
   limitations: string[];
 }
 
-export interface MaritimeVessel {
-  id: string;
-  mmsi: string;
-  vessel_name: string;
-  lat: number;
-  lng: number;
-  observed_at: string;
-  source_label: string;
-  source_url?: string | null;
-  speed_knots?: number | null;
-  course_over_ground?: number | null;
-  true_heading?: number | null;
-  ship_type_code?: number | null;
-  ship_type_label?: string | null;
-  call_sign?: string | null;
-  imo?: string | null;
-  destination?: string | null;
-  nearest_port?: MaritimePortReference | null;
-}
+export type {
+  MaritimeVessel,
+  MaritimeVesselScope,
+  MaritimeViewportBounds,
+  MaritimeVesselFeedResponse,
+  VesselFilters,
+  VesselDimensions,
+  VesselEta,
+  AisMessageEnvelope,
+} from '../lib/vessels/types';
 
-export type MaritimeVesselScope = 'oil_tankers' | 'all_vessels';
 export type OilAndGasDisplayMode = 'combined' | 'vessels_only' | 'on_ground_only';
-
-export interface MaritimeViewportBounds {
-  south: number;
-  west: number;
-  north: number;
-  east: number;
-}
-
-export interface MaritimeVesselFeedResponse {
-  vessels: MaritimeVessel[];
-  source: string;
-  data_as_of: string;
-  live_positions_enabled: boolean;
-  limitations: string[];
-  scope: MaritimeVesselScope;
-  capture_window_seconds: number;
-  max_vessels: number;
-  offset?: number;
-  total_available?: number;
-  returned_count?: number;
-  cap_applied?: boolean;
-  geography_mode?: 'viewport_bbox' | 'sampled_viewport_regions' | 'default_regions' | string;
-  geography_note?: string | null;
-  requested_bbox?: [number, number, number, number] | null;
-  effective_bbox_count?: number;
-  region_labels?: string[];
-  cached?: boolean;
-}
 
 export interface StorageEvidenceItem {
   id: string;
@@ -531,6 +549,7 @@ export interface AfricaCoverageResponse {
 
 export interface WorldCoverageCountry {
   country: string;
+  macro_region?: string;
   sectors: {
     mining: CountrySectorCoverage;
     oil_and_gas: CountrySectorCoverage;
@@ -559,6 +578,8 @@ export interface SourceCatalogEntry {
 export interface WorldCoverageResponse {
   generated_at: string;
   summary: Record<'mining' | 'oil_and_gas', Record<string, number>>;
+  regional_summary?: Record<string, Record<'mining' | 'oil_and_gas', Record<string, number>>>;
+  region_filter?: string | null;
   countries: WorldCoverageCountry[];
   sources: SourceCatalogEntry[];
 }

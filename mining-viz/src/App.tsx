@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
+import { useState, useMemo, useEffect, useCallback, startTransition, useRef } from 'react';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow, MaritimeViewportBounds } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
@@ -11,16 +11,62 @@ import MapComponent from './components/MapComponent';
 import DossierView from './components/DossierView';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
-import KanbanBoard from './components/KanbanBoard';
+import DueDiligencePanel from './components/DueDiligencePanel';
+import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
 import AuthOverlay from './components/AuthOverlay';
 import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
-import { Search as LucideSearch, Filter as LucideFilter, MapPin as LucideMapPin, LayoutGrid as LucideLayoutGrid, PieChart as LucidePieChart, LogOut as LucideLogOut, Anchor as LucideAnchor, Droplets as LucideDroplets } from 'lucide-react';
+import { RoutePlannerPanel, useRoutePlanner } from './features/route-planner';
+import {
+  Search as LucideSearch,
+  Filter as LucideFilter,
+  MapPin as LucideMapPin,
+  LayoutGrid as LucideLayoutGrid,
+  PieChart as LucidePieChart,
+  LogOut as LucideLogOut,
+  Anchor as LucideAnchor,
+  Droplets as LucideDroplets,
+  Navigation2 as LucideNavigation,
+} from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+const LICENSE_MAP_BBOX_MAX_LAT_SPAN = 85;
+const LICENSE_MAP_BBOX_MAX_LNG_SPAN = 300;
+
+function licenseViewportUsesBbox(bounds: MaritimeViewportBounds): boolean {
+  const latSpan = bounds.north - bounds.south;
+  const lngSpan = bounds.east - bounds.west;
+  if (!Number.isFinite(latSpan) || !Number.isFinite(lngSpan)) return false;
+  if (latSpan <= 0 || lngSpan <= 0) return false;
+  if (latSpan >= LICENSE_MAP_BBOX_MAX_LAT_SPAN || lngSpan >= LICENSE_MAP_BBOX_MAX_LNG_SPAN) return false;
+  return true;
+}
+
+const LICENSE_VIEWPORT_DEBOUNCE_MS = 1200;
+const LICENSE_VIEWPORT_MIN_CHANGE_FRAC = 0.12;
+
+function licenseViewportChangedEnough(
+  prev: MaritimeViewportBounds,
+  next: MaritimeViewportBounds,
+  minFrac: number,
+): boolean {
+  const prevLat = prev.north - prev.south;
+  const prevLng = prev.east - prev.west;
+  const nextLat = next.north - next.south;
+  const nextLng = next.east - next.west;
+  if (![prevLat, prevLng, nextLat, nextLng].every((x) => Number.isFinite(x) && x > 0)) return true;
+  const latDelta = Math.abs(nextLat - prevLat) / Math.max(prevLat, 1e-9);
+  const lngDelta = Math.abs(nextLng - prevLng) / Math.max(prevLng, 1e-9);
+  const centerLatDelta =
+    Math.abs((next.north + next.south) / 2 - (prev.north + prev.south) / 2) / Math.max(prevLat, 1e-9);
+  const centerLngDelta =
+    Math.abs((next.east + next.west) / 2 - (prev.east + prev.west) / 2) / Math.max(prevLng, 1e-9);
+  return Math.max(latDelta, lngDelta, centerLatDelta, centerLngDelta) >= minFrac;
+}
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -77,13 +123,55 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 export default function App() {
   const { t, isRtl } = useI18n();
-  const [viewMode, setViewMode] = useState<'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'admin'>('global');
+  const routePlanner = useRoutePlanner();
+  const ddQueue = useDueDiligenceQueue();
+  const [viewMode, setViewMode] = useState<
+    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'route_planner' | 'admin'
+  >('global');
   const licenseSector =
     viewMode === 'mining'
       ? 'mining'
       : viewMode === 'oil_and_gas'
         ? 'oil_and_gas'
         : undefined;
+  const [licenseViewportDraft, setLicenseViewportDraft] = useState<MaritimeViewportBounds | null>(null);
+  const [licenseViewportDebounced, setLicenseViewportDebounced] = useState<MaritimeViewportBounds | null>(null);
+  const lastCommittedLicenseViewport = useRef<MaritimeViewportBounds | null>(null);
+
+  useEffect(() => {
+    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') {
+      setLicenseViewportDraft(null);
+      setLicenseViewportDebounced(null);
+      lastCommittedLicenseViewport.current = null;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (!licenseViewportDraft) {
+        lastCommittedLicenseViewport.current = null;
+        setLicenseViewportDebounced(null);
+        return;
+      }
+      const prev = lastCommittedLicenseViewport.current;
+      const next = licenseViewportDraft;
+      if (
+        prev &&
+        !licenseViewportChangedEnough(prev, next, LICENSE_VIEWPORT_MIN_CHANGE_FRAC)
+      ) {
+        return;
+      }
+      lastCommittedLicenseViewport.current = next;
+      setLicenseViewportDebounced(next);
+    }, LICENSE_VIEWPORT_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [licenseViewportDraft, viewMode]);
+
+  const licenseBoundsForApi = useMemo(() => {
+    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') return null;
+    if (!licenseViewportDebounced) return null;
+    if (!licenseViewportUsesBbox(licenseViewportDebounced)) return null;
+    return licenseViewportDebounced;
+  }, [licenseViewportDebounced, viewMode]);
+
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -91,8 +179,38 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: rawData = [], isLoading, error: fetchError } = useLicenses(licenseSector);
-  const { data: worldCoverage } = useWorldCoverage(viewMode === 'mining' || viewMode === 'oil_and_gas');
+  const { data: worldCoverage } = useWorldCoverage(true);
+  const licenseFetchCountries = useMemo(
+    () => deriveLicenseFetchCountries(undefined, worldCoverage),
+    [worldCoverage],
+  );
+  const {
+    data: rawData = [],
+    isLoading,
+    isFetching,
+    error: fetchError,
+    stillLoadingCountryCount,
+    failedCountryQueryCount,
+  } = useLicenses(undefined, null, licenseFetchCountries);
+  const licensesPartialMapHint = useMemo(() => {
+    if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
+    const n = stillLoadingCountryCount;
+    return t(
+      `עדיין נטענות ${n} קבוצות רישיונות…`,
+      `Still loading ${n} ${n === 1 ? 'license request' : 'license requests'}…`,
+    );
+  }, [stillLoadingCountryCount, rawData.length, t]);
+  const licenseLoadPartialFailuresHint = useMemo(() => {
+    if (failedCountryQueryCount <= 0 || fetchError) return null;
+    if (rawData.length === 0) return null;
+    const n = failedCountryQueryCount;
+    return t(
+      `${n} קבוצות רישיונות לא נטענו — המפה מציגה את הזמין.`,
+      `${n} license ${n === 1 ? 'request' : 'requests'} could not be loaded — the map shows available data.`,
+    );
+  }, [failedCountryQueryCount, fetchError, rawData.length, t]);
+  const licensesMapSecondaryStatus =
+    [licensesPartialMapHint, licenseLoadPartialFailuresHint].filter(Boolean).join(' \u00b7 ') || null;
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
@@ -180,6 +298,14 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations);
+
+  useEffect(() => {
+    if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
+      miningData.setSelectedSector(viewMode);
+    } else {
+      miningData.setSelectedSector(null);
+    }
+  }, [viewMode, miningData.setSelectedSector]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -337,6 +463,10 @@ export default function App() {
     setViewMode('global');
   };
 
+  const switchSectorView = useCallback((mode: 'global' | 'mining' | 'oil_and_gas') => {
+    startTransition(() => setViewMode(mode));
+  }, []);
+
   useEffect(() => {
     const apiBase = API_BASE;
 
@@ -460,7 +590,7 @@ export default function App() {
          </div>
       </div>
 
-      {viewMode !== 'ports' && fetchError && (
+      {viewMode !== 'ports' && viewMode !== 'route_planner' && fetchError && (
         <div
           className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
           role="alert"
@@ -514,7 +644,13 @@ export default function App() {
             loading={
               viewMode === 'ports'
                 ? isPortsLoading
-                : Boolean(isLoading || (viewMode === 'oil_and_gas' && isStorageLoading))
+                : Boolean(
+                    isLoading ||
+                      (isFetching &&
+                        !isLoading &&
+                        (viewMode === 'mining' || viewMode === 'oil_and_gas')) ||
+                      (viewMode === 'oil_and_gas' && isStorageLoading),
+                  )
             }
             onLogout={handleLogout}
             userAnnotations={userAnnotations}
@@ -536,6 +672,9 @@ export default function App() {
                 ? miningData.infrastructureStats
                 : undefined
             }
+            isInDdQueue={ddQueue.isInQueue}
+            onAddToDueDiligence={ddQueue.addToQueue}
+            onRemoveFromDueDiligence={ddQueue.removeFromQueue}
           />
         </aside>
 
@@ -543,7 +682,14 @@ export default function App() {
         <main className="flex-1 relative z-0 h-full overflow-hidden">
           {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
           {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
-          {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'due_diligence' || viewMode === 'raw_evidence') && (
+          {(viewMode === 'global' ||
+            viewMode === 'mining' ||
+            viewMode === 'oil_and_gas' ||
+            viewMode === 'suppliers' ||
+            viewMode === 'ports' ||
+            viewMode === 'due_diligence' ||
+            viewMode === 'raw_evidence' ||
+            viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
@@ -557,7 +703,7 @@ export default function App() {
                       onChange={(e) => miningData.setFilter(e.target.value)}
                     />
                   </div>
-                  {sectorCoverageSummary && (
+                  {sectorCoverageSummary && viewMode !== 'route_planner' && (
                     <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
                       {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
                     </div>
@@ -579,19 +725,19 @@ export default function App() {
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
                   <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
-                      onClick={() => setViewMode('global')}
+                      onClick={() => switchSectorView('global')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("עולמי", "Global")}
                     </button>
                     <button
-                      onClick={() => setViewMode('mining')}
+                      onClick={() => switchSectorView('mining')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("כרייה", "Mining")}
                     </button>
                     <button
-                      onClick={() => setViewMode('oil_and_gas')}
+                      onClick={() => switchSectorView('oil_and_gas')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
@@ -610,10 +756,22 @@ export default function App() {
                       {t("נמלים", "Ports")}
                     </button>
                     <button
+                      onClick={() => setViewMode('route_planner')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'route_planner' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    >
+                      <LucideNavigation className="w-3.5 h-3.5" aria-hidden />
+                      {t('מסלול', 'Route')}
+                    </button>
+                    <button
                       onClick={() => setViewMode('due_diligence')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'due_diligence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
                       {t("בדיקת נאותות", "Due Diligence")}
+                      {ddQueue.queue.length > 0 && (
+                        <span className="ml-1.5 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-slate-950/20 dark:bg-white/20 text-[9px] font-black px-1">
+                          {ddQueue.queue.length}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => setViewMode('raw_evidence')}
@@ -636,13 +794,36 @@ export default function App() {
           )}
 
           <div className="w-full h-full z-0">
-            {(viewMode === 'global' || viewMode === 'mining' || viewMode === 'suppliers' || viewMode === 'ports' || viewMode === 'oil_and_gas') && (
+            {(viewMode === 'global' ||
+              viewMode === 'mining' ||
+              viewMode === 'suppliers' ||
+              viewMode === 'ports' ||
+              viewMode === 'oil_and_gas' ||
+              viewMode === 'route_planner') && (
               <MapComponent
-                processedData={miningData.processedData}
+                processedData={viewMode === 'route_planner' ? [] : miningData.processedData}
+                allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
                 userAnnotations={userAnnotations}
                 selectedItem={selectedItem}
                 mapFlyTrigger={mapFlyTrigger}
                 viewModeKey={viewMode}
+                worldCoverage={worldCoverage}
+                licensesFetchPending={
+                  viewMode !== 'route_planner' &&
+                  (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                  isLoading &&
+                  !fetchError
+                }
+                licensesRefetching={
+                  viewMode !== 'route_planner' &&
+                  (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                  isFetching &&
+                  !isLoading &&
+                  !fetchError
+                }
+                licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
+                trackLicenseViewport={false}
+                onLicenseViewportChange={setLicenseViewportDraft}
                 setSelectedItem={handleSelectItem}
                 handleOpenDossier={handleOpenDossier}
                 mapCenter={mapCenter}
@@ -650,23 +831,40 @@ export default function App() {
                 deleteLicense={deleteLicense}
                 selectedMaritimeVessel={selectedMaritimeVessel}
                 onSelectMaritimeVessel={setSelectedMaritimeVessel}
+                routePlannerOverlay={routePlanner.overlay}
+                routePlannerPickRole={routePlanner.pickRole}
+                onRoutePlannerMapPick={routePlanner.handleMapPick}
+                isInDdQueue={ddQueue.isInQueue}
+                onAddToDueDiligence={ddQueue.addToQueue}
+                onRemoveFromDueDiligence={ddQueue.removeFromQueue}
               />
             )}
+            {viewMode === 'route_planner' && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
+                <div className="pointer-events-auto">
+                  <RoutePlannerPanel rp={routePlanner} />
+                </div>
+              </div>
+            )}
             {viewMode === 'oil_and_gas' && selectedMaritimeVessel && !isDossierOpen && (
-              <div className="absolute top-20 right-4 z-[1100]">
+              <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
             )}
             {viewMode === 'due_diligence' && (
-              <div className="pt-20 sm:pt-24 px-2 sm:px-6 h-full bg-white dark:bg-slate-950">
-                <KanbanBoard
-                  processedData={miningData.processedData}
-                  userAnnotations={userAnnotations}
-                  updateAnnotation={updateAnnotation}
-                  onCardClick={handleOpenDossier}
-                  isMobile={isMobile}
-                />
-              </div>
+              <DueDiligencePanel
+                allLicenses={allLicenses}
+                queue={ddQueue.queue}
+                queueIds={ddQueue.queueIds}
+                notesById={ddQueue.notesById}
+                userAnnotations={userAnnotations}
+                updateAnnotation={updateAnnotation}
+                updateNote={ddQueue.updateNote}
+                onRemoveFromQueue={ddQueue.removeFromQueue}
+                onCardClick={handleOpenDossier}
+                onOpenMap={() => setViewMode('global')}
+                isMobile={isMobile}
+              />
             )}
             {viewMode === 'raw_evidence' && (
               <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
@@ -736,6 +934,13 @@ export default function App() {
               ? () => deleteLicense(dossierItem.id)
               : undefined
           }
+          isInDdQueue={dossierItem ? ddQueue.isInQueue(dossierItem.id) : false}
+          onAddToDueDiligence={
+            dossierItem ? () => ddQueue.addToQueue(dossierItem.id) : undefined
+          }
+          onRemoveFromDueDiligence={
+            dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
+          }
         />
 
         <BulkImportLicensesModal
@@ -773,27 +978,34 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
-      <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-around z-50 shrink-0">
+      <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-start gap-1 overflow-x-auto z-50 shrink-0 px-1">
         <button
-          onClick={() => setViewMode('global')}
+          onClick={() => switchSectorView('global')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
         </button>
         <button
-          onClick={() => setViewMode('mining')}
+          onClick={() => switchSectorView('mining')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("כרייה", "Mining")}</span>
         </button>
         <button
-          onClick={() => setViewMode('oil_and_gas')}
+          onClick={() => switchSectorView('oil_and_gas')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucideDroplets className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט וגז", "Oil & Gas")}</span>
+        </button>
+        <button
+          onClick={() => setViewMode('route_planner')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors shrink-0 ${viewMode === 'route_planner' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <LucideNavigation className="w-5 h-5" />
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("מסלול", "Route")}</span>
         </button>
         <button
           onClick={() => setViewMode('due_diligence')}

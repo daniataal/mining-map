@@ -352,6 +352,12 @@ def upsert_entity_contact_candidates(conn: Any, candidates: list[dict[str, Any]]
 
     with conn.cursor() as cur:
         for candidate in candidates:
+            # `discovered_by` distinguishes provenance: 'open_data' for licenses
+            # raw_payload sync, 'ai' for AI-discovered, 'manual' for analyst entry.
+            # Default keeps the legacy sync path on 'open_data' without breaking
+            # rows that pre-date the column.
+            discovered_by = candidate.get("discovered_by") or "open_data"
+            phone_verified_at = candidate.get("phone_verified_at")
             cur.execute(
                 """
                 INSERT INTO entity_contacts (
@@ -371,10 +377,12 @@ def upsert_entity_contact_candidates(conn: Any, candidates: list[dict[str, Any]]
                     raw_payload,
                     extracted_from,
                     verified_at,
+                    discovered_by,
+                    phone_verified_at,
                     last_seen_at
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (fingerprint) DO UPDATE SET
                     label = EXCLUDED.label,
@@ -387,6 +395,8 @@ def upsert_entity_contact_candidates(conn: Any, candidates: list[dict[str, Any]]
                     raw_payload = EXCLUDED.raw_payload,
                     extracted_from = EXCLUDED.extracted_from,
                     verified_at = COALESCE(EXCLUDED.verified_at, entity_contacts.verified_at),
+                    discovered_by = EXCLUDED.discovered_by,
+                    phone_verified_at = COALESCE(EXCLUDED.phone_verified_at, entity_contacts.phone_verified_at),
                     last_seen_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -406,6 +416,8 @@ def upsert_entity_contact_candidates(conn: Any, candidates: list[dict[str, Any]]
                     Json(candidate["raw_payload"]),
                     candidate["extracted_from"],
                     candidate["verified_at"],
+                    discovered_by,
+                    phone_verified_at,
                 ),
             )
     return len(candidates)
@@ -416,7 +428,12 @@ def sync_license_contacts_for_row(conn: Any, row: dict[str, Any]) -> int:
     if not entity_id:
         return 0
 
+    # We only wipe open-data managed rows. AI-discovered ('ai_discovered')
+    # and analyst-entered ('manual') rows are preserved so a re-sync of the
+    # open registry does not silently drop research the analyst has built up.
     candidates = build_license_contact_candidates(row)
+    for candidate in candidates:
+        candidate.setdefault("discovered_by", "open_data")
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -424,6 +441,7 @@ def sync_license_contacts_for_row(conn: Any, row: dict[str, Any]) -> int:
             WHERE entity_kind = 'license'
               AND entity_id = %s
               AND source_type IN ('official_open_data', 'source_backed_record')
+              AND COALESCE(discovered_by, 'open_data') = 'open_data'
             """,
             (entity_id,),
         )

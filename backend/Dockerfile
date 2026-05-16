@@ -1,21 +1,13 @@
-FROM python:3.11-slim
-
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies for Postgres
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+ARG BASE_IMAGE=ghcr.io/daniataal/mining-map-base:latest
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy large static data first to leverage Docker layer caching
+# This 45MB layer will only be rebuilt if files in backend/data change.
+COPY data/ ./data/
 
-# Copy backend code
+# Copy the rest of the backend code
 COPY . .
 
 # Expose backend port

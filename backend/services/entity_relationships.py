@@ -445,28 +445,76 @@ def sync_license_relationships_for_row(conn: Any, row: dict[str, Any]) -> int:
     with conn.cursor() as cur:
         for candidate in candidates:
             cur.execute(
-                UPSERT_SQL,
-                (
-                    candidate["fingerprint"],
-                    candidate["source_entity_kind"],
-                    candidate["source_entity_ref"],
-                    candidate["target_entity_kind"],
-                    candidate["target_entity_ref"],
-                    candidate["target_name"],
-                    candidate["relationship_type"],
-                    candidate["relationship_label"],
-                    candidate["relationship_type"],
-                    candidate["ownership_pct"],
-                    candidate["effective_date"],
-                    candidate["source_name"],
-                    candidate["source_url"],
-                    candidate["source_type"],
-                    candidate["confidence_score"],
-                    Json(candidate["raw_payload"]),
-                    candidate["extracted_from"],
-                    candidate["verified_at"],
-                ),
+            """
+            INSERT INTO entity_relationships (
+                fingerprint,
+                source_entity_kind,
+                source_entity_ref,
+                target_entity_kind,
+                target_entity_ref,
+                target_name,
+                relationship_type,
+                relationship_label,
+                rel_type,
+                ownership_pct,
+                effective_date,
+                source_name,
+                source_url,
+                source_type,
+                confidence_score,
+                raw_payload,
+                extracted_from,
+                verified_at,
+                discovered_by,
+                last_seen_at
             )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT (fingerprint) DO UPDATE SET
+                source_entity_kind = EXCLUDED.source_entity_kind,
+                source_entity_ref = EXCLUDED.source_entity_ref,
+                target_entity_kind = EXCLUDED.target_entity_kind,
+                target_entity_ref = EXCLUDED.target_entity_ref,
+                target_name = EXCLUDED.target_name,
+                relationship_type = EXCLUDED.relationship_type,
+                relationship_label = EXCLUDED.relationship_label,
+                rel_type = EXCLUDED.rel_type,
+                ownership_pct = EXCLUDED.ownership_pct,
+                effective_date = EXCLUDED.effective_date,
+                source_name = EXCLUDED.source_name,
+                source_url = EXCLUDED.source_url,
+                source_type = EXCLUDED.source_type,
+                confidence_score = EXCLUDED.confidence_score,
+                raw_payload = EXCLUDED.raw_payload,
+                extracted_from = EXCLUDED.extracted_from,
+                verified_at = COALESCE(EXCLUDED.verified_at, entity_relationships.verified_at),
+                discovered_by = EXCLUDED.discovered_by,
+                last_seen_at = CURRENT_TIMESTAMP;
+            """,
+            (
+                candidate["fingerprint"],
+                candidate["source_entity_kind"],
+                candidate["source_entity_ref"],
+                candidate["target_entity_kind"],
+                candidate["target_entity_ref"],
+                candidate["target_name"],
+                candidate["relationship_type"],
+                candidate["relationship_label"],
+                candidate["relationship_type"],
+                candidate["ownership_pct"],
+                candidate["effective_date"],
+                candidate["source_name"],
+                candidate["source_url"],
+                candidate["source_type"],
+                candidate["confidence_score"],
+                Json(candidate["raw_payload"]),
+                candidate["extracted_from"],
+                candidate["verified_at"],
+                candidate.get("discovered_by", "open_data"),
+            ),
+        )
 
         source_type_placeholders = ", ".join(["%s"] * len(AUTO_MANAGED_SOURCE_TYPES))
         params: list[Any] = ["license", entity_id, *AUTO_MANAGED_SOURCE_TYPES]

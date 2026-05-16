@@ -1,4 +1,5 @@
 from backend.services.dd.orchestrator import (
+    build_ai_discovered_phone_candidates,
     build_promotable_contact_candidates,
     normalize_extracted_contacts,
     should_auto_promote_contact,
@@ -106,3 +107,67 @@ def test_build_promotable_contact_candidates_returns_source_backed_phone_only():
     assert candidates[0]["normalized_value"] == "233300000001"
     assert candidates[0]["raw_payload"]["dd_report_id"] == "dd-report-1"
     assert candidates[0]["raw_payload"]["contact"]["value"] == "+233 30 000 0001"
+
+
+def test_build_ai_discovered_phone_candidates_marks_provenance_and_caps_confidence():
+    candidates = build_ai_discovered_phone_candidates(
+        entity_kind="license",
+        entity_id="license-xyz",
+        discovered_phones=[
+            {
+                "value": "+233 30 222 3344",
+                "label": "Head office",
+                "contact_role": "office",
+                "source_name": "Company website",
+                "source_url": "https://acmemining.example/contact",
+                "evidence_snippet": "Call our head office: +233 30 222 3344",
+                "confidence": 0.95,
+            },
+            {
+                # Not a valid phone (too short) — should be dropped.
+                "value": "1234",
+                "source_name": "Bad src",
+            },
+        ],
+        report_id="report-42",
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["source_type"] == "ai_discovered"
+    assert candidate["discovered_by"] == "ai"
+    # AI-discovered candidates are capped at 0.7 so they never out-rank
+    # source-backed contacts in the dossier list ordering.
+    assert candidate["confidence_score"] <= 0.7
+    assert candidate["raw_payload"]["dd_report_id"] == "report-42"
+    assert candidate["raw_payload"]["promotion_guardrails"]["requires_human_verification"] is True
+    assert candidate["normalized_value"] == "233302223344"
+    assert candidate["extracted_from"] == "ai.discover_phone"
+
+
+def test_build_ai_discovered_phone_candidates_is_idempotent_per_source_url():
+    first = build_ai_discovered_phone_candidates(
+        entity_kind="license",
+        entity_id="license-xyz",
+        discovered_phones=[
+            {
+                "value": "+233 30 222 3344",
+                "source_url": "https://acmemining.example/contact",
+                "confidence": 0.9,
+            }
+        ],
+        report_id="report-a",
+    )
+    second = build_ai_discovered_phone_candidates(
+        entity_kind="license",
+        entity_id="license-xyz",
+        discovered_phones=[
+            {
+                "value": "+233 30 222 3344",
+                "source_url": "https://acmemining.example/contact",
+                "confidence": 0.5,
+            }
+        ],
+        report_id="report-b",
+    )
+    assert first[0]["fingerprint"] == second[0]["fingerprint"]
