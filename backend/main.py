@@ -1148,8 +1148,12 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             # the legacy source-backed sync behaviour.
             cur.execute("ALTER TABLE entity_contacts ADD COLUMN IF NOT EXISTS discovered_by VARCHAR(50) DEFAULT 'open_data';")
             cur.execute("ALTER TABLE entity_contacts ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP;")
+            cur.execute("ALTER TABLE legal_events ADD COLUMN IF NOT EXISTS discovered_by VARCHAR(50) DEFAULT 'ai';")
+            cur.execute("ALTER TABLE entity_relationships ADD COLUMN IF NOT EXISTS discovered_by VARCHAR(50) DEFAULT 'open_data';")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_entity ON entity_contacts(entity_kind, entity_id);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_discovered_by ON entity_contacts(discovered_by);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_legal_events_discovered_by ON legal_events(discovered_by);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_discovered_by ON entity_relationships(discovered_by);")
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
