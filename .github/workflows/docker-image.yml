@@ -221,6 +221,7 @@ jobs:
 
             db:
               image: postgis/postgis:15-3.4
+              platform: linux/arm64
               container_name: mining-db
               restart: always
               environment:
