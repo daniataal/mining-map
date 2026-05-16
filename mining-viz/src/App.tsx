@@ -181,8 +181,8 @@ export default function App() {
   // Data Fetching
   const { data: worldCoverage } = useWorldCoverage(true);
   const licenseFetchCountries = useMemo(
-    () => deriveLicenseFetchCountries(licenseSector, worldCoverage),
-    [licenseSector, worldCoverage],
+    () => deriveLicenseFetchCountries(undefined, worldCoverage),
+    [worldCoverage],
   );
   const {
     data: rawData = [],
@@ -191,7 +191,7 @@ export default function App() {
     error: fetchError,
     stillLoadingCountryCount,
     failedCountryQueryCount,
-  } = useLicenses(licenseSector, null, licenseFetchCountries);
+  } = useLicenses(undefined, null, licenseFetchCountries);
   const licensesPartialMapHint = useMemo(() => {
     if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
     const n = stillLoadingCountryCount;
@@ -298,6 +298,14 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations);
+
+  useEffect(() => {
+    if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
+      miningData.setSelectedSector(viewMode);
+    } else {
+      miningData.setSelectedSector(null);
+    }
+  }, [viewMode, miningData.setSelectedSector]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);

@@ -44,6 +44,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const [selectedEntitySubtype, setSelectedEntitySubtype] = useState<string[]>([]);
   const [selectedSourceLabel, setSelectedSourceLabel] = useState<string[]>([]);
   const [selectedConfidenceBucket, setSelectedConfidenceBucket] = useState<string[]>([]);
+  const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [portLinkedOnly, setPortLinkedOnly] = useState(false);
   const activeFilterCount =
     selectedCommodity.length +
@@ -63,11 +64,19 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setSelectedEntitySubtype([]);
     setSelectedSourceLabel([]);
     setSelectedConfidenceBucket([]);
+    setSelectedSector(null);
     setPortLinkedOnly(false);
   };
 
   const processedData = useMemo(() => {
     let data: MiningLicense[] = rawData;
+    
+    if (selectedSector) {
+      data = data.filter((item) => {
+        const itemSector = (item.sector || 'mining').toLowerCase();
+        return itemSector === selectedSector.toLowerCase();
+      });
+    }
 
     if (selectedCountry.length > 0) {
       data = data.filter((item) => {
@@ -290,6 +299,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setSelectedSourceLabel,
     selectedConfidenceBucket,
     setSelectedConfidenceBucket,
+    selectedSector,
+    setSelectedSector,
     portLinkedOnly,
     setPortLinkedOnly,
     activeFilterCount,

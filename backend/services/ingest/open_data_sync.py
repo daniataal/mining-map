@@ -1210,7 +1210,7 @@ def _fetch_json(url: str, retries: int = 3, pause_seconds: float = 1.0) -> dict[
     for attempt in range(retries):
         req = Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
         try:
-            with urlopen(req, timeout=30) as response:
+            with urlopen(req, timeout=60) as response:
                 return json.load(response)
         except (HTTPError, URLError, TimeoutError, ValueError) as exc:
             last_error = exc
