@@ -1,0 +1,101 @@
+{
+  "_version": "1.0.0",
+  "_comment": "Due-diligence rules config. Edit this file to change risk classifications without touching Python code. See backend/services/due_diligence.py for extension guide.",
+
+  "sanctioned_countries": [
+    "Iran", "North Korea", "Syria", "Cuba", "Venezuela",
+    "Belarus", "Myanmar", "Sudan", "Zimbabwe", "Libya"
+  ],
+
+  "high_risk_countries": [
+    "Afghanistan", "Yemen", "South Sudan", "Central African Republic",
+    "Somalia", "Mali", "Burkina Faso", "Haiti", "Nicaragua",
+    "Ethiopia", "Democratic Republic of Congo", "Guinea-Bissau",
+    "Equatorial Guinea", "Chad", "Eritrea"
+  ],
+
+  "embargoed_corridors": [
+    {
+      "id": "emb-001",
+      "supplier_country": "Russia",
+      "buyer_country": "*",
+      "products": ["oil", "gas", "petroleum"],
+      "reason": "EU/US sectoral sanctions on Russian energy exports (post-2022)"
+    },
+    {
+      "id": "emb-002",
+      "supplier_country": "*",
+      "buyer_country": "North Korea",
+      "products": ["*"],
+      "reason": "UNSC comprehensive embargo on DPRK trade"
+    },
+    {
+      "id": "emb-003",
+      "supplier_country": "Iran",
+      "buyer_country": "*",
+      "products": ["oil", "gas", "petroleum", "mining"],
+      "reason": "OFAC and EU comprehensive sanctions on Iranian energy and mineral exports"
+    },
+    {
+      "id": "emb-004",
+      "supplier_country": "*",
+      "buyer_country": "Syria",
+      "products": ["oil", "gas", "petroleum"],
+      "reason": "EU/US sectoral sanctions on Syrian petroleum trade"
+    },
+    {
+      "id": "emb-005",
+      "supplier_country": "Myanmar",
+      "buyer_country": "*",
+      "products": ["mining"],
+      "reason": "US/EU targeted sanctions on Myanmar junta-linked mining revenue"
+    }
+  ],
+
+  "commodity_rules": {
+    "mining": {
+      "conflict_minerals": [
+        "coltan", "tantalum", "tin", "tungsten", "gold", "cassiterite",
+        "wolframite", "cobalt", "diamonds"
+      ],
+      "conflict_mineral_high_risk_countries": [
+        "Democratic Republic of Congo", "Central African Republic",
+        "South Sudan", "Rwanda", "Uganda", "Burundi"
+      ],
+      "certifications_advisory": ["ICGLR", "EITI", "OECD-DDG"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "Granted"],
+      "note": "Conflict minerals from high-risk regions trigger enhanced provenance check"
+    },
+    "oil": {
+      "certifications_advisory": ["API", "IADC"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "offshore_extra_check": true,
+      "note": "Offshore fields require additional environmental and sovereign risk assessment"
+    },
+    "gas": {
+      "certifications_advisory": ["GIIGNL", "IADC"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "pipeline_check": true,
+      "note": "Cross-border pipeline gas triggers transit-country corridor checks"
+    },
+    "petroleum": {
+      "certifications_advisory": ["API"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "note": "Treated as oil for compliance purposes"
+    }
+  },
+
+  "kyc_thresholds": {
+    "low_usd": 50000,
+    "medium_usd": 500000,
+    "high_usd": 5000000,
+    "enhanced_kyc_above_usd": 1000000
+  },
+
+  "scoring": {
+    "fail_deduction": 35,
+    "warn_deduction": 10,
+    "approve_threshold": 80,
+    "block_threshold": 50
+  }
+}

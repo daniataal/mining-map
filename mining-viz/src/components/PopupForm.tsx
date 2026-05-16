@@ -1,7 +1,9 @@
 import { useI18n } from '../lib/i18n';
+import { getLicenseHeroImageUrl } from '../lib/licenseHeroImage';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2 } from 'lucide-react';
 
 interface PopupFormProps {
@@ -11,6 +13,9 @@ interface PopupFormProps {
   onDelete: () => void;
   onOpenDossier?: () => void;
   isOpen: boolean;
+  isInDdQueue?: boolean;
+  onAddToDueDiligence?: () => void;
+  onRemoveFromDueDiligence?: () => void;
 }
 
 export default function PopupForm({
@@ -18,6 +23,9 @@ export default function PopupForm({
   annotation,
   onDelete,
   onOpenDossier,
+  isInDdQueue = false,
+  onAddToDueDiligence,
+  onRemoveFromDueDiligence,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -26,12 +34,7 @@ export default function PopupForm({
     const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
     const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
     
-    // Tactical Asset Selection (Portable)
-    const heroImage = isGold 
-      ? "/assets/commodities/gold.png"
-      : isDiamond 
-      ? "/assets/commodities/diamond.png"
-      : "/assets/commodities/satellite.png";
+    const heroImage = getLicenseHeroImageUrl(item);
 
     return (
         <div className="flex flex-col w-[320px] bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
@@ -109,6 +112,16 @@ export default function PopupForm({
                      {t("פרטי נכס", "Open Dossier")}
                    </Button>
                 </div>
+
+                {onAddToDueDiligence && onRemoveFromDueDiligence && (
+                  <div className="mt-2">
+                    <AddToDueDiligenceButton
+                      isInQueue={isInDdQueue}
+                      onAdd={onAddToDueDiligence}
+                      onRemove={onRemoveFromDueDiligence}
+                    />
+                  </div>
+                )}
 
                 {!isManagedInfrastructureEntity && (
                   <Button

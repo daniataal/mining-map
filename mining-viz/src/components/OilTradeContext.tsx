@@ -59,9 +59,16 @@ interface OilIntelResponse {
   country_codes: { iso2?: string; m49?: string };
   trade_flows: {
     source?: string;
+    source_key?: string;
     year?: number;
     hs_code?: string;
     flows?: TradeFlow[];
+    key_required?: boolean;
+    supplementary?: Array<{
+      source?: string;
+      source_key?: string;
+      flows?: TradeFlow[];
+    }>;
   };
   economy: {
     source?: string;
@@ -74,6 +81,19 @@ interface OilIntelResponse {
   };
   deep_links: { label: string; url: string; description: string; icon: string }[];
   comtrade_available: boolean;
+  /** True when any free source (public preview, StatsCan, seed, etc.) returned flow data. */
+  trade_data_available?: boolean;
+  /** Human-readable source label, e.g. "UN Comtrade (public preview)". */
+  trade_source?: string;
+  /** Machine-readable source key — used to drive UI badges. */
+  trade_source_key?: string;
+  free_sources?: {
+    comtrade_public_preview?: boolean;
+    statistics_canada?: boolean;
+    world_bank?: boolean;
+    eia_international?: boolean;
+    comtrade_keyed?: boolean;
+  };
   data_as_of: string;
   limitations: string[];
 }
@@ -198,8 +218,8 @@ export default function OilTradeContext({ country, category = 'crude' }: OilTrad
             </p>
             <p className="text-xs text-slate-500 leading-relaxed">
               {t(
-                'טען נתוני יצוא/יבוא ומאקרו כלכלי לפי מדינה ממקורות פתוחים (UN Comtrade · World Bank).',
-                `Load country-level export/import flows and macro-economic data for ${country} (UN Comtrade · World Bank).`
+                'טען נתוני יצוא/יבוא ומאקרו כלכלי לפי מדינה ממקורות פתוחים — UN Comtrade Public Preview, Statistics Canada, EIA, World Bank — ללא צורך במפתח בתשלום.',
+                `Load country-level export/import flows and macro data for ${country} from free open sources — UN Comtrade public preview, Statistics Canada, EIA, World Bank. No paid API key required.`
               )}
             </p>
           </div>
@@ -226,7 +246,7 @@ export default function OilTradeContext({ country, category = 'crude' }: OilTrad
           {t('טוען...', 'Fetching petroleum data...')}
         </span>
         <span className="text-[9px] text-slate-600 uppercase">
-          UN Comtrade · World Bank · HS {category === 'gas' ? '2711' : category === 'refined' ? '2710' : '2709'}
+          UN Comtrade (preview) · StatsCan · EIA · World Bank · HS {category === 'gas' ? '2711' : category === 'refined' ? '2710' : '2709'}
         </span>
       </div>
     );
@@ -285,18 +305,43 @@ export default function OilTradeContext({ country, category = 'crude' }: OilTrad
         </Button>
       </div>
 
-      {/* Comtrade availability banner */}
-      {!data.comtrade_available && (
+      {/* Data-source banner — emerald when a free source served data,
+          amber only when literally no source returned rows. */}
+      {data.trade_data_available ? (
+        <div className="flex items-start gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
+          <IconInfo className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-0.5">
+              {t('נתונים זמינים ממקור פתוח', 'Data live from free open source')}
+            </p>
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              {t(
+                'נטען ממקור פתוח ללא מפתח חיוב.',
+                `Source: ${data.trade_source || 'UN Comtrade (public preview)'} — no paid API key required.`
+              )}
+              {!data.comtrade_available && (
+                <span className="text-slate-500">
+                  {' '}
+                  {t(
+                    'מפתח COMTRADE_API_KEY אינו חובה — נשמר כשדרוג לקצב גבוה יותר.',
+                    'COMTRADE_API_KEY is optional — set it later for higher-quota keyed requests.'
+                  )}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      ) : (
         <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
           <IconInfo className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div>
             <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-0.5">
-              {t('מפתח Comtrade לא מוגדר', 'Comtrade key not configured')}
+              {t('לא נמצאו נתוני סחר', 'No trade rows returned')}
             </p>
             <p className="text-[10px] text-slate-400 leading-relaxed">
               {t(
-                'הגדר COMTRADE_API_KEY בשרת לקבלת נתוני יצוא/יבוא.',
-                'Set COMTRADE_API_KEY on the backend to enable export/import flow data (HS 2709/2710/2711).'
+                'כל המקורות הציבוריים החזירו ריק עבור מדינה/קוד HS זה. השתמש בקישורים למטה לבדיקה ידנית.',
+                'All free upstream sources (UN Comtrade public preview, Statistics Canada, EIA) returned no rows for this country / HS code. Use the verification links below to inspect manually.'
               )}
             </p>
           </div>
@@ -346,8 +391,21 @@ export default function OilTradeContext({ country, category = 'crude' }: OilTrad
           </div>
 
           <p className="mt-4 text-[8px] text-slate-600 uppercase tracking-widest">
-            Source: UN Comtrade · HS {data.hs_code} · Year {data.trade_flows.year} · Country-level only
+            Source: {data.trade_source || data.trade_flows.source || 'UN Comtrade (public preview)'}
+            {data.hs_code ? ` · HS ${data.hs_code}` : ''}
+            {data.trade_flows.year ? ` · Year ${data.trade_flows.year}` : ''}
+            {' · Country-level only'}
           </p>
+          {data.trade_flows.supplementary && data.trade_flows.supplementary.length > 0 && (
+            <p className="mt-1 text-[8px] text-slate-700 uppercase tracking-widest">
+              {t('מקורות משלימים', 'Augmented by')}:
+              {' '}
+              {data.trade_flows.supplementary
+                .map(s => s.source)
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          )}
         </Card>
       )}
 
@@ -440,7 +498,36 @@ function EconCard({ label, value, year, color }: { label: string; value: string;
 
 function OilDeepLinks({ country, t }: { country: string; t: (he: string, en: string) => string }) {
   const enc = encodeURIComponent(country);
+  const isCanada = country.toLowerCase().includes('canada');
   const links = [
+    {
+      label: 'UN Comtrade (Free)',
+      url: `https://comtradeplus.un.org/TradeFlow?Frequency=A&Flows=X%2CM&CommodityCodes=2709%2C2710%2C2711&Partners=0&Reporters=${enc}&period=2023&AggregateBy=none&BreakdownMode=plus`,
+      description: t(
+        'נתוני יצוא/יבוא — מקור חופשי ללא מפתח (HS 2709/2710/2711)',
+        `Free Comtrade trade-flows browser — HS 2709/2710/2711 for ${country}`,
+      ),
+    },
+    ...(isCanada
+      ? [
+          {
+            label: 'Statistics Canada CIMT',
+            url: 'https://www150.statcan.gc.ca/n1/en/type/data?text=international+merchandise+trade',
+            description: t(
+              'נתוני סחר רשמיים של קנדה — HS-8/HS-10 פתוח לציבור',
+              'Official Canadian International Merchandise Trade (CIMT) — HS-8/10, free, no key',
+            ),
+          },
+          {
+            label: 'Canada Energy Regulator',
+            url: 'https://www.cer-rec.gc.ca/en/data-analysis/energy-commodities/index.html',
+            description: t(
+              'יצוא נפט וגז של קנדה — נתונים פתוחים מהרגולטור',
+              'CER open data — Canadian crude oil, refined products and natural gas exports',
+            ),
+          },
+        ]
+      : []),
     {
       label: 'IEA',
       url: `https://www.iea.org/countries/${enc.toLowerCase()}`,
@@ -449,7 +536,10 @@ function OilDeepLinks({ country, t }: { country: string; t: (he: string, en: str
     {
       label: 'EIA International',
       url: `https://www.eia.gov/international/data/country/${enc}`,
-      description: 'U.S. EIA international energy statistics',
+      description: t(
+        'נתוני אנרגיה בינלאומיים — EIA (חופשי, מפתח חינמי)',
+        'U.S. EIA international energy statistics (free key, 5000 req/h)',
+      ),
     },
     {
       label: 'OPEC',
@@ -457,19 +547,9 @@ function OilDeepLinks({ country, t }: { country: string; t: (he: string, en: str
       description: 'OPEC production & reserves data',
     },
     {
-      label: 'UN Comtrade HS 2709',
-      url: `https://comtradeplus.un.org/TradeFlow?Frequency=A&Flows=X&CommodityCodes=2709&Partners=0&Reporters=${enc}&period=2023&AggregateBy=none&BreakdownMode=plus`,
-      description: `Crude petroleum exports — ${country}`,
-    },
-    {
-      label: 'UN Comtrade HS 2710',
-      url: `https://comtradeplus.un.org/TradeFlow?Frequency=A&Flows=X&CommodityCodes=2710&Partners=0&Reporters=${enc}&period=2023&AggregateBy=none&BreakdownMode=plus`,
-      description: `Refined petroleum exports — ${country}`,
-    },
-    {
       label: 'World Bank Energy',
       url: `https://data.worldbank.org/country/${enc}?view=chart`,
-      description: 'World Bank energy & GDP indicators',
+      description: 'World Bank energy & GDP indicators (free, no key)',
     },
   ];
 

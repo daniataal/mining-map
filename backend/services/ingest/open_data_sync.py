@@ -1792,6 +1792,7 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
         official_stats = _query_record_origin_stats(conn, "open_data")
         global_fallback_stats = _query_record_origin_stats(conn, "global_open_fallback")
         user_import_stats = _query_record_origin_stats(conn, "user_import_csv")
+        bundled_stats = _query_record_origin_stats(conn, "bundled_json")
         syncable = _build_syncable_source_coverage()
         countries_seen = {country for _, country in AFRICAN_COUNTRIES}
         countries_seen.update(WORLD_COVERAGE_ATTENTION_COUNTRIES)
@@ -1799,6 +1800,7 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
         countries_seen.update(country for country, _sector in official_stats.keys())
         countries_seen.update(country for country, _sector in global_fallback_stats.keys())
         countries_seen.update(country for country, _sector in user_import_stats.keys())
+        countries_seen.update(country for country, _sector in bundled_stats.keys())
 
         countries: list[dict[str, Any]] = []
         summary: dict[str, dict[str, int]] = {
@@ -1868,6 +1870,18 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
                     base["fallback_record_count"] = imported["record_count"]
                     base["fallback_last_synced_at"] = imported["last_synced_at"]
                     base["fallback_sources"] = imported["source_names"]
+                    summary_bucket["fallback_imported"] = summary_bucket.get("fallback_imported", 0) + 1
+
+                bundled = bundled_stats.get((country, sector))
+                if bundled:
+                    base["fallback_record_count"] = (base.get("fallback_record_count") or 0) + bundled[
+                        "record_count"
+                    ]
+                    if not base.get("fallback_last_synced_at"):
+                        base["fallback_last_synced_at"] = bundled["last_synced_at"]
+                    base["fallback_sources"] = list(
+                        dict.fromkeys([*(base.get("fallback_sources") or []), *(bundled["source_names"] or [])])
+                    )
                     summary_bucket["fallback_imported"] = summary_bucket.get("fallback_imported", 0) + 1
 
                 summary_bucket[base["status"]] = summary_bucket.get(base["status"], 0) + 1

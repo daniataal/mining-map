@@ -1,11 +1,15 @@
-import { MaritimeVessel } from '../types';
+import { useMemo, useState } from 'react';
+import type { MaritimeVessel } from '../lib/vessels/types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import { useI18n } from '../lib/i18n';
+import { buildVesselFieldGroups } from './vessels/fieldDisplay';
 import {
   Anchor as IconAnchor,
+  ChevronDown,
+  ChevronUp,
   Ship as IconShip,
   X as IconX,
 } from 'lucide-react';
@@ -15,97 +19,106 @@ interface OilMaritimePanelProps {
   onClose: () => void;
 }
 
-function fmtValue(value?: string | number | null, fallback = 'N/A'): string {
-  if (value == null || value === '') return fallback;
-  return String(value);
+function FieldGrid({ rows }: { rows: { key: string; label: string; value: string }[] }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {rows.map((row) => (
+        <div
+          key={row.key}
+          className="rounded-xl border border-black/5 dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.03] px-3 py-2.5 min-w-0"
+        >
+          <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-0.5 truncate">{row.label}</p>
+          <p className="text-[11px] font-semibold text-slate-900 dark:text-white break-words">{row.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function VesselBadges({ vessel }: { vessel: MaritimeVessel }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      <Badge className="bg-slate-950/10 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-none text-[8px] font-black uppercase">
+        MMSI {vessel.mmsi}
+      </Badge>
+      {vessel.imo && (
+        <Badge className="bg-slate-950/10 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-none text-[8px] font-black uppercase">
+          IMO {vessel.imo}
+        </Badge>
+      )}
+      <Badge className="bg-cyan-500/10 text-cyan-400 border-none text-[8px] font-black uppercase">
+        {vessel.ship_type_label || 'Vessel'}
+      </Badge>
+      {vessel.speed_knots != null && (
+        <Badge className="bg-slate-950/10 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-none text-[8px] font-black uppercase">
+          {vessel.speed_knots} kn
+        </Badge>
+      )}
+    </div>
+  );
 }
 
 export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelProps) {
   const { t } = useI18n();
+  const [rawOpen, setRawOpen] = useState(false);
+  const groups = useMemo(() => buildVesselFieldGroups(vessel), [vessel]);
+  const hasRawAis =
+    Object.keys(vessel.ais_messages ?? {}).length > 0 || Object.keys(vessel.ais_metadata ?? {}).length > 0;
 
   return (
-    <Card className="w-[380px] max-h-[calc(100vh-120px)] overflow-hidden bg-white/95 dark:bg-slate-950/95 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
+    <Card className="w-[min(92vw,720px)] max-h-[calc(100vh-100px)] overflow-hidden bg-white/95 dark:bg-slate-950/95 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
       <div className="flex items-start justify-between gap-3 p-5 border-b border-black/5 dark:border-white/5">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-9 h-9 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
-              <IconShip className="w-4 h-4 text-cyan-400" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
-                {t('מעקב ימי', 'Maritime Watch')}
-              </p>
-              <h3 className="text-sm font-black uppercase tracking-tight text-slate-900 dark:text-white truncate">
-                {vessel.vessel_name}
-              </h3>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            <Badge className="bg-slate-950/10 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-none text-[8px] font-black uppercase">
-              MMSI {vessel.mmsi}
-            </Badge>
-            {vessel.imo && (
-              <Badge className="bg-slate-950/10 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-none text-[8px] font-black uppercase">
-                IMO {vessel.imo}
-              </Badge>
-            )}
-            <Badge className="bg-cyan-500/10 text-cyan-400 border-none text-[8px] font-black uppercase">
-              {vessel.ship_type_label || 'Vessel'}
-            </Badge>
-          </div>
+        <div className="min-w-0 flex-1">
+          <PanelHeader vessel={vessel} t={t} />
+          <VesselBadges vessel={vessel} />
         </div>
-
         <Button
           onClick={onClose}
           variant="ghost"
-          className="h-9 w-9 p-0 rounded-full text-slate-400 hover:text-slate-900 dark:hover:text-white"
+          className="h-9 w-9 p-0 rounded-full text-slate-400 hover:text-slate-900 dark:hover:text-white shrink-0"
         >
           <IconX className="w-4 h-4" />
         </Button>
       </div>
 
-      <div className="p-5 space-y-4 overflow-y-auto max-h-[calc(100vh-220px)]">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
-            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Observed</p>
-            <p className="text-[10px] font-bold text-slate-900 dark:text-white">
-              {new Date(vessel.observed_at).toLocaleString()}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
-            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Speed</p>
-            <p className="text-[10px] font-bold text-slate-900 dark:text-white">
-              {fmtValue(vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null)}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4 col-span-2">
-            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Coordinates</p>
-            <p className="text-[10px] font-bold text-slate-900 dark:text-white">
-              {vessel.lat.toFixed(4)}, {vessel.lng.toFixed(4)}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4 col-span-2">
-            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Destination</p>
-            <p className="text-[10px] font-bold text-slate-900 dark:text-white">
-              {fmtValue(vessel.destination, t('לא דווח', 'Not reported in current watch'))}
-            </p>
-          </div>
-        </div>
+      <div className="p-5 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
+        {groups.map((group) => (
+          <section key={group.title} className="space-y-2">
+            <h4 className="text-[9px] font-black uppercase tracking-widest text-cyan-500">{group.title}</h4>
+            <FieldGrid rows={group.rows} />
+          </section>
+        ))}
 
         {vessel.nearest_port && (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <IconAnchor className="w-4 h-4 text-emerald-400" />
-              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                {t('עוגן נמל קרוב', 'Nearest port context')}
-              </p>
-            </div>
+            <PortHeader t={t} />
             <p className="text-sm font-bold text-slate-900 dark:text-white">{vessel.nearest_port.name}</p>
             <p className="text-[10px] text-slate-500">
               {[vessel.nearest_port.unlocode, vessel.nearest_port.country_iso2].filter(Boolean).join(' · ')}
             </p>
           </div>
+        )}
+
+        {hasRawAis && (
+          <section className="rounded-2xl border border-black/5 dark:border-white/5 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setRawOpen((o) => !o)}
+              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+            >
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                {t('מטען AIS גולמי (כל סוגי ההודעות)', 'Raw AIS payloads (all message types)')}
+              </span>
+              {rawOpen ? <ChevronUp className="h-4 w-4 opacity-60" /> : <ChevronDown className="h-4 w-4 opacity-60" />}
+            </button>
+            {rawOpen && (
+              <div className="max-h-64 overflow-auto border-t border-black/5 px-4 py-3 dark:border-white/5">
+                <pre className="text-[10px] leading-relaxed text-slate-600 dark:text-slate-400 whitespace-pre-wrap break-all font-mono">
+                  {JSON.stringify({ metadata: vessel.ais_metadata, messages: vessel.ais_messages }, null, 2)}
+                </pre>
+              </div>
+            )}
+          </section>
         )}
 
         <MaritimeContextPanel
@@ -121,5 +134,34 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
         />
       </div>
     </Card>
+  );
+}
+
+function PanelHeader({ vessel, t }: { vessel: MaritimeVessel; t: (he: string, en: string) => string }) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <div className="w-9 h-9 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
+        <IconShip className="w-4 h-4 text-cyan-400" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
+          {t('מעקב ימי', 'Maritime Watch')}
+        </p>
+        <h3 className="text-base font-black uppercase tracking-tight text-slate-900 dark:text-white truncate">
+          {vessel.vessel_name}
+        </h3>
+      </div>
+    </div>
+  );
+}
+
+function PortHeader({ t }: { t: (he: string, en: string) => string }) {
+  return (
+    <div className="flex items-center gap-2 mb-1">
+      <IconAnchor className="w-4 h-4 text-emerald-400" />
+      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+        {t('עוגן נמל קרוב', 'Nearest port context')}
+      </p>
+    </div>
   );
 }

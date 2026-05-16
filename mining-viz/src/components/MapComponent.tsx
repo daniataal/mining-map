@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { MapContainer, TileLayer, useMap, LayersControl, useMapEvents, Marker, Popup, GeoJSON, ZoomControl, Tooltip } from 'react-leaflet';
+import {
+    MapContainer,
+    TileLayer,
+    useMap,
+    LayersControl,
+    useMapEvents,
+    Marker,
+    Popup,
+    GeoJSON,
+    ZoomControl,
+    Tooltip,
+    Polyline,
+    CircleMarker,
+    FeatureGroup,
+} from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -9,13 +23,24 @@ import 'leaflet/dist/leaflet.css';
 import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
+import {
+  applyVesselFilters,
+  DEFAULT_VESSEL_FILTERS,
+  VESSEL_SHIP_TYPE_OPTIONS,
+  type VesselFilters,
+} from '../lib/vessels';
+import MaritimeLayerSync from './vessels/MaritimeLayerSync';
+import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
+import MapZoomTracker from './petroleum/MapZoomTracker';
 import { useI18n } from '../lib/i18n';
+import type { RouteMapOverlay } from '../features/route-planner/types';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Input } from './ui/input';
 
 // Fix for default marker icon in React Leaflet
 // @ts-ignore
@@ -202,6 +227,13 @@ const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
 const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
 const MARITIME_MAX_VESSEL_OPTIONS = ['100', '300', '600', '1000'];
+
+/** Matches marker rendering: borders only for countries with at least one plottable license. */
+function licenseHasMapCoordinates(item: MiningLicense): boolean {
+    const lat = item.lat;
+    const lng = item.lng;
+    return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+}
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
 const MARITIME_RENDER_SOFT_CAP = 1200;
 
@@ -263,6 +295,12 @@ interface MapComponentProps {
   onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
+  routePlannerOverlay?: RouteMapOverlay | null;
+  routePlannerPickRole?: 'supplier' | 'buyer' | null;
+  onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+  isInDdQueue?: (id: string) => boolean;
+  onAddToDueDiligence?: (id: string) => void;
+  onRemoveFromDueDiligence?: (id: string) => void;
 }
 
 const MapEffect = ({
@@ -290,8 +328,40 @@ const MapEffect = ({
     return null;
 };
 
-const MapClickHandler = ({ onMapClick }: { onMapClick: () => void }) => {
-    useMapEvents({ click: () => onMapClick() });
+const MapClickHandler = ({
+    onMapClick,
+    routePlannerPickRole,
+    onRoutePlannerMapPick,
+}: {
+    onMapClick: () => void;
+    routePlannerPickRole?: 'supplier' | 'buyer' | null;
+    onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+}) => {
+    useMapEvents({
+        click(e) {
+            if (routePlannerPickRole && onRoutePlannerMapPick) {
+                onRoutePlannerMapPick(e.latlng.lat, e.latlng.lng, routePlannerPickRole);
+                return;
+            }
+            onMapClick();
+        },
+    });
+    return null;
+};
+
+const RoutePlannerBoundsEffect = ({
+    overlay,
+}: {
+    overlay?: RouteMapOverlay | null;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        const wps = overlay?.waypoints;
+        if (!wps?.length) return;
+        const bounds = L.latLngBounds(wps.map((w) => [w.lat, w.lng]));
+        if (!bounds.isValid()) return;
+        map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: 8 });
+    }, [map, overlay]);
     return null;
 };
 
@@ -397,11 +467,18 @@ export default function MapComponent({
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
   worldCoverage,
+  routePlannerOverlay = null,
+  routePlannerPickRole = null,
+  onRoutePlannerMapPick,
+  isInDdQueue,
+  onAddToDueDiligence,
+  onRemoveFromDueDiligence,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
@@ -411,7 +488,13 @@ export default function MapComponent({
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
+    const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
+    const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
+    const handleMaritimeLayerActiveChange = useCallback((active: boolean) => {
+        setIsMaritimeLayerEnabled(active);
+    }, []);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -441,9 +524,14 @@ export default function MapComponent({
         scope: maritimeScope,
         bbox: maritimeViewport,
     });
-    const maritimeVessels = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
+    const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
+    const maritimeVessels = useMemo(
+        () => applyVesselFilters(maritimeVesselsRaw, vesselFilters),
+        [maritimeVesselsRaw, vesselFilters],
+    );
     const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
-    const onGroundVisible = !isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only';
+    const onGroundVisible =
+      (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
     const vesselsVisible = isOilAndGasView && oilAndGasDisplayMode !== 'on_ground_only';
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
@@ -472,8 +560,8 @@ export default function MapComponent({
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
     const maritimeIdleHint = t(
-        'כבוי כברירת מחדל — הפעל כדי לטעון לפי גבולות המפה הנוכחיים.',
-        'Off by default — enable to load vessels for the current map bounds.'
+        'הפעל את שכבת «כלי שיט (AIS)» בבקרת השכבות (למטה מימין) כדי לטעון כלי שיט לפי גבולות המפה.',
+        'Turn on the «Vessels (AIS)» overlay in the layer control (bottom-right) to load vessels for the current map bounds.'
     );
     const maritimeHeadlineStatus = !isMaritimeLayerEnabled
         ? ''
@@ -562,9 +650,12 @@ export default function MapComponent({
     const borderCountries = useMemo(() => {
     // Use allLicenses (full unfiltered set for current sector) so borders reflect
     // every country with data in this tab — regardless of active search/filters.
+    // Only countries with at least one mappable coordinate get an outline (rows with
+    // country set but no lat/lng would otherwise show borders with zero markers).
     const ordered: string[] = [];
     const seenKey = new Set<string>();
     for (const d of allLicenses) {
+        if (!licenseHasMapCoordinates(d)) continue;
         const raw = d.country?.trim();
         if (!raw) continue;
         const dedupeKey = raw.toLowerCase();
@@ -581,7 +672,6 @@ export default function MapComponent({
         enabled: borderCountries.length > 0,
         staleTime: 1000 * 60 * 60 * 24,
         gcTime: 1000 * 60 * 60 * 24 * 7,
-        placeholderData: (previousData) => previousData,
     });
 
     /** High-contrast strokes on dark Carto tiles; cyan at 50% opacity + weight 1 was nearly invisible. */
@@ -644,7 +734,9 @@ export default function MapComponent({
                     {licensesSecondaryStatus}
                 </div>
             )}
-            {((onGroundVisible ? processedData.length : 0) === 0) && ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
+            {!isRoutePlannerView &&
+              ((onGroundVisible ? processedData.length : 0) === 0) &&
+              ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
@@ -652,7 +744,7 @@ export default function MapComponent({
                 </div>
             )}
             {isOilAndGasView && (
-                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,320px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
+                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10">
@@ -685,8 +777,8 @@ export default function MapComponent({
                                 <Ship className="mr-2 h-4 w-4" />
                             )}
                             {isMaritimeLayerEnabled
-                                ? t('כבה כלי שיט', 'Turn off vessels')
-                                : t('טען כלי שיט', 'Load vessels')}
+                                ? t('כבה שכבת כלי שיט', 'Turn off vessel layer')
+                                : t('הפעל שכבת כלי שיט', 'Enable vessel layer')}
                         </Button>
 
                         {!isMaritimeLayerEnabled && (
@@ -807,6 +899,90 @@ export default function MapComponent({
                                             </div>
                                         </div>
 
+                                        <div className="space-y-2 rounded-xl border border-cyan-500/15 bg-cyan-500/5 px-2.5 py-2.5">
+                                            <p className="text-[8px] font-black uppercase tracking-widest text-cyan-600 dark:text-cyan-400">
+                                                {t('מסנני תצוגה (מקומיים)', 'Display filters (client-side)')}
+                                            </p>
+                                            <Input
+                                                value={vesselFilters.search}
+                                                onChange={(e) => setVesselFilters((f) => ({ ...f, search: e.target.value }))}
+                                                placeholder={t('חיפוש שם, MMSI, IMO…', 'Search name, MMSI, IMO…')}
+                                                className="h-8 rounded-lg border-black/10 bg-white/80 text-[10px] dark:border-white/10 dark:bg-slate-950/80"
+                                            />
+                                            <div className="flex flex-wrap gap-1">
+                                                {VESSEL_SHIP_TYPE_OPTIONS.map((typeLabel) => {
+                                                    const active = vesselFilters.shipTypes.includes(typeLabel);
+                                                    return (
+                                                        <button
+                                                            key={typeLabel}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setVesselFilters((f) => ({
+                                                                    ...f,
+                                                                    shipTypes: active
+                                                                        ? f.shipTypes.filter((x) => x !== typeLabel)
+                                                                        : [...f.shipTypes, typeLabel],
+                                                                }))
+                                                            }
+                                                            className={`rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-widest border ${
+                                                                active
+                                                                    ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-600 dark:text-cyan-300'
+                                                                    : 'border-black/10 bg-white/50 text-slate-500 dark:border-white/10 dark:bg-slate-900/50'
+                                                            }`}
+                                                        >
+                                                            {typeLabel}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                        {t('מהירות מינ׳ (kn)', 'Min speed (kn)')}
+                                                    </p>
+                                                    <Input
+                                                        type="number"
+                                                        min={0}
+                                                        step={0.1}
+                                                        value={vesselFilters.minSpeedKnots ?? ''}
+                                                        onChange={(e) =>
+                                                            setVesselFilters((f) => ({
+                                                                ...f,
+                                                                minSpeedKnots: e.target.value === '' ? null : Number(e.target.value),
+                                                            }))
+                                                        }
+                                                        className="h-8 rounded-lg border-black/10 bg-white/80 text-[10px] dark:border-white/10 dark:bg-slate-950/80"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                                        {t('מהירות מקס׳ (kn)', 'Max speed (kn)')}
+                                                    </p>
+                                                    <Input
+                                                        type="number"
+                                                        min={0}
+                                                        step={0.1}
+                                                        value={vesselFilters.maxSpeedKnots ?? ''}
+                                                        onChange={(e) =>
+                                                            setVesselFilters((f) => ({
+                                                                ...f,
+                                                                maxSpeedKnots: e.target.value === '' ? null : Number(e.target.value),
+                                                            }))
+                                                        }
+                                                        className="h-8 rounded-lg border-black/10 bg-white/80 text-[10px] dark:border-white/10 dark:bg-slate-950/80"
+                                                    />
+                                                </div>
+                                            </div>
+                                            {maritimeVesselsRaw.length > maritimeVessels.length && (
+                                                <p className="text-[9px] text-slate-500">
+                                                    {t(
+                                                        `מוצגים ${maritimeVessels.length} מתוך ${maritimeVesselsRaw.length} לאחר סינון.`,
+                                                        `Showing ${maritimeVessels.length} of ${maritimeVesselsRaw.length} after filters.`
+                                                    )}
+                                                </p>
+                                            )}
+                                        </div>
+
                                         <div className="rounded-xl border border-black/5 bg-black/[0.03] px-2 py-1.5 dark:border-white/10 dark:bg-white/[0.04]">
                                             <p className="mb-0.5 text-[8px] font-black uppercase tracking-widest text-slate-500">
                                                 {t('מקרא סימני כלי שיט', 'Vessel markers')}
@@ -922,18 +1098,25 @@ export default function MapComponent({
             )}
             <MapContainer 
               center={mapCenter} 
-              zoom={viewModeKey === 'ports' ? 3 : 7} 
+              zoom={viewModeKey === 'ports' ? 3 : viewModeKey === 'route_planner' ? 4 : 7} 
               className="w-full h-full"
               zoomControl={false}
               // @ts-ignore
               ref={mapRef}
             >
                 <ZoomControl position="bottomleft" />
-                <MapClickHandler onMapClick={() => {
-                    setSelectedItem(null);
-                    onSelectMaritimeVessel(null);
-                }} />
+                <MapClickHandler
+                    routePlannerPickRole={isRoutePlannerView ? routePlannerPickRole ?? undefined : undefined}
+                    onRoutePlannerMapPick={isRoutePlannerView ? onRoutePlannerMapPick : undefined}
+                    onMapClick={() => {
+                      setSelectedItem(null);
+                      onSelectMaritimeVessel(null);
+                    }}
+                />
                 <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
+                {isOilAndGasView && onGroundVisible && (
+                    <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
+                )}
                 {onLicenseViewportChange && (
                   <ViewportBoundsTracker
                     active={trackLicenseViewport}
@@ -941,7 +1124,10 @@ export default function MapComponent({
                   />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
-                <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
+                {!isRoutePlannerView && (
+                    <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
+                )}
+                <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -981,7 +1167,50 @@ export default function MapComponent({
                             />
                         </LayersControl.Overlay>
                     )}
+                    {isOilAndGasView && onGroundVisible && (
+                        <PetroleumMapLayers
+                            bbox={maritimeViewport}
+                            mapZoom={petroleumMapZoom}
+                            enabled={isOilAndGasView && onGroundVisible}
+                        />
+                    )}
+                    {isOilAndGasView && vesselsVisible && (
+                        <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
+                            <FeatureGroup>
+                                {maritimeVisibleVessels.map((vessel) => (
+                                    <Marker
+                                        key={vessel.id}
+                                        position={[vessel.lat, vessel.lng]}
+                                        icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id)}
+                                        eventHandlers={{
+                                            click: (e) => {
+                                                L.DomEvent.stopPropagation(e);
+                                                setSelectedItem(null);
+                                                onSelectMaritimeVessel(vessel);
+                                            },
+                                        }}
+                                    >
+                                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
+                                                    {vessel.vessel_name}
+                                                </span>
+                                                <p className="text-[9px] text-slate-400">
+                                                    {[vessel.ship_type_label, vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null, vessel.nearest_port?.name]
+                                                        .filter(Boolean)
+                                                        .join(' · ')}
+                                                </p>
+                                            </div>
+                                        </Tooltip>
+                                    </Marker>
+                                ))}
+                            </FeatureGroup>
+                        </LayersControl.Overlay>
+                    )}
                 </LayersControl>
+                {isOilAndGasView && (
+                    <MaritimeLayerSync layerName={vesselLayerLabel} onLayerActiveChange={handleMaritimeLayerActiveChange} />
+                )}
 
                 {/* spiderLegPolylineOptions interactive:false prevents spider-leg polylines from
                     eating clicks meant for the spiderfied markers beneath them.
@@ -1054,6 +1283,17 @@ export default function MapComponent({
                                       onDelete={() => deleteLicense(item.id)}
                                       onOpenDossier={() => handleOpenDossier(item)}
                                       isOpen={selectedItem?.id === item.id}
+                                      isInDdQueue={isInDdQueue?.(item.id) ?? false}
+                                      onAddToDueDiligence={
+                                        onAddToDueDiligence
+                                          ? () => onAddToDueDiligence(item.id)
+                                          : undefined
+                                      }
+                                      onRemoveFromDueDiligence={
+                                        onRemoveFromDueDiligence
+                                          ? () => onRemoveFromDueDiligence(item.id)
+                                          : undefined
+                                      }
                                     />
                                 </Popup>
                             </Marker>
@@ -1061,59 +1301,49 @@ export default function MapComponent({
                     })}
                 </MarkerClusterGroup>
                 )}
-                {isMaritimeLayerEnabled && vesselsVisible && (
-                <MarkerClusterGroup
-                    showCoverageOnHover={false}
-                    spiderLegPolylineOptions={{ weight: 1.5, color: '#22d3ee', opacity: 0.45, interactive: false }}
-                >
-                {maritimeVisibleVessels.map((vessel) => (
-                    <Marker
-                        key={vessel.id}
-                        position={[vessel.lat, vessel.lng]}
-                        icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id)}
-                        eventHandlers={{
-                            click: (e) => {
-                                L.DomEvent.stopPropagation(e);
-                                setSelectedItem(null);
-                                onSelectMaritimeVessel(vessel);
-                            },
-                        }}
-                    >
-                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
-                                    {vessel.vessel_name}
-                                </span>
-                                <p className="text-[9px] text-slate-400">
-                                    {[vessel.ship_type_label, vessel.nearest_port?.name].filter(Boolean).join(' · ')}
-                                </p>
-                                <p className="text-[8px] text-slate-500">
-                                    {(() => {
-                                        const th = vessel.true_heading;
-                                        const usesHdg =
-                                            th != null &&
-                                            Number.isFinite(th) &&
-                                            th !== 511 &&
-                                            th >= 0 &&
-                                            th < 360;
-                                        const cog = vessel.course_over_ground;
-                                        const usesCog = cog != null && Number.isFinite(cog);
-                                        if (usesHdg) {
-                                            const deg = Math.round(th as number);
-                                            return t(`כיוון: ${deg}° (HDG)`, `Heading: ${deg}° (HDG)`);
-                                        }
-                                        if (usesCog) {
-                                            const deg = Math.round(getVesselHeadingDegrees(vessel));
-                                            return t(`כיוון: ${deg}° (COG)`, `Heading: ${deg}° (COG)`);
-                                        }
-                                        return t('כיוון לא דווח', 'No heading reported');
-                                    })()}
-                                </p>
-                            </div>
-                        </Tooltip>
-                    </Marker>
-                ))}
-                </MarkerClusterGroup>
+                {isRoutePlannerView && routePlannerOverlay && (
+                  <>
+                    {routePlannerOverlay.legs.map((leg, idx) =>
+                      Array.isArray(leg.path) && leg.path.length > 1 ? (
+                        <Polyline
+                          key={`rp-leg-${idx}`}
+                          positions={leg.path}
+                          pathOptions={{
+                            weight: idx === 0 ? 4 : 5,
+                            color: idx === 0 ? '#f59e0b' : '#fcd34d',
+                            opacity: 0.9,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                            ...(idx === 1 ? ({ dashArray: '10 14' as const }) : {}),
+                          }}
+                        />
+                      ) : null,
+                    )}
+                    {routePlannerOverlay.waypoints.map((wp, i) => {
+                      let fill = '#22c55e';
+                      if (wp.role === 'transit') fill = '#38bdf8';
+                      if (wp.role === 'destination') fill = '#f43f5e';
+                      const r =
+                        wp.role === 'destination' ? 14 : wp.role === 'origin' ? 13 : 10;
+                      return (
+                        <CircleMarker
+                          key={`rp-wp-${i}-${wp.role}`}
+                          center={[wp.lat, wp.lng]}
+                          radius={r}
+                          pathOptions={{
+                            fillColor: fill,
+                            color: 'rgba(255,255,255,0.9)',
+                            weight: 2,
+                            fillOpacity: 0.9,
+                          }}
+                        >
+                          <Tooltip direction="top" offset={[0, -12]} opacity={1}>
+                            <span className="text-[11px] font-bold text-slate-900">{t(wp.label[0], wp.label[1])}</span>
+                          </Tooltip>
+                        </CircleMarker>
+                      );
+                    })}
+                  </>
                 )}
             </MapContainer>
         </div>
