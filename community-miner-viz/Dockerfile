@@ -1,4 +1,5 @@
-FROM node:20-slim
+ARG BASE_IMAGE=dannyatalla/mining-map-base:latest
+FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
