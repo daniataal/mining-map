@@ -90,7 +90,8 @@ services:
         condition: service_healthy
 
   db:
-    image: postgis/postgis:15-3.3-alpine
+    build:
+      context: ./db
     container_name: mining-db
     restart: always
     environment:

@@ -59,6 +59,16 @@ jobs:
           dannyatalla/mining-frontend:latest
           dannyatalla/mining-frontend:v${{ github.run_number }}
           dannyatalla/mining-frontend:${{ steps.version.outputs.short_sha }}
+    - name: Build and Push Database
+      uses: docker/build-push-action@v5
+      with:
+        context: ./db
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          dannyatalla/mining-db:latest
+          dannyatalla/mining-db:v${{ github.run_number }}
+          dannyatalla/mining-db:${{ steps.version.outputs.short_sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -224,7 +234,7 @@ jobs:
                   condition: service_healthy
 
             db:
-              image: postgis/postgis:15-3.4
+              image: dannyatalla/mining-db:$VERSION_TAG
               platform: linux/arm64
               container_name: mining-db
               restart: always
