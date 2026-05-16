@@ -23,8 +23,8 @@ WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 REQUEST_TIMEOUT_SECONDS = 12
 UNLOCODE_CACHE_TTL_SECONDS = 60 * 60 * 24
 AIS_CACHE_TTL_SECONDS = 60
-AIS_DEFAULT_MAX_VESSELS = 300
-AIS_MAX_VESSELS = 2000
+AIS_DEFAULT_MAX_VESSELS = 1000
+AIS_MAX_VESSELS = 5000
 AIS_DEFAULT_CAPTURE_WINDOW_SECONDS = 10
 AIS_MIN_CAPTURE_WINDOW_SECONDS = 4
 AIS_MAX_CAPTURE_WINDOW_SECONDS = 18
@@ -148,10 +148,8 @@ def _normalize_vessel_scope(scope: str) -> str:
 
 
 def _ship_matches_scope(ship_type_label: str, vessel_scope: str) -> bool:
-    normalized_scope = _normalize_vessel_scope(vessel_scope)
-    if normalized_scope == "all_vessels":
-        return True
-    return ship_type_label == "Tanker"
+    # We now fetch all vessels and filter on the client side for better UX.
+    return True
 
 
 def _parse_datetime(value: Any) -> Optional[datetime]:

@@ -45,9 +45,9 @@ async function fetchMaritimeVesselFeed(options: Required<Pick<MaritimeVesselQuer
 
 export function useMaritimeVessels({
   enabled = true,
-  maxVessels = 60,
+  maxVessels = 5000,
   captureWindowSeconds = 10,
-  scope = 'oil_tankers',
+  scope = 'all_vessels',
   offset = 0,
   bbox = null,
 }: MaritimeVesselQueryOptions = {}) {

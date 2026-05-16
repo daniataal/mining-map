@@ -61,9 +61,9 @@ def run_once() -> int:
     try:
         ensure_maritime_tables(conn)
         feed = collect_live_maritime_vessel_feed(
-            max_vessels=_int_env("MARITIME_WORKER_MAX_VESSELS", 800),
+            max_vessels=_int_env("MARITIME_WORKER_MAX_VESSELS", 5000),
             capture_window_seconds=_int_env("MARITIME_WORKER_CAPTURE_WINDOW_SECONDS", 10),
-            vessel_scope=os.getenv("MARITIME_WORKER_SCOPE", "all_vessels"),
+            vessel_scope="all_vessels",
         )
         snapshot_count = persist_maritime_vessel_feed(conn, feed)
         status, error, mark_success = _status_from_feed(feed)
