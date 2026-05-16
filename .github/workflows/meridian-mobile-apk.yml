@@ -2,16 +2,16 @@ name: "Meridian Mobile — Build Release APK"
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "meridian-mobile/**"
-      - ".github/workflows/meridian-mobile-apk.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "meridian-mobile/**"
-      - ".github/workflows/meridian-mobile-apk.yml"
+#  push:
+#    branches: [main]
+#    paths:
+#      - "meridian-mobile/**"
+#      - ".github/workflows/meridian-mobile-apk.yml"
+#  pull_request:
+#    branches: [main]
+#    paths:
+#      - "meridian-mobile/**"
+#      - ".github/workflows/meridian-mobile-apk.yml"
 
 jobs:
   build-release-apk:
