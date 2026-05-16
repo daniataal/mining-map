@@ -25,7 +25,20 @@ try:
 except ImportError:
     from license_bbox import licenses_bbox_tuple_if_valid
 
+try:
+    from backend.api.routing import router as routing_router, is_route_planner_enabled
+except ImportError:
+    from api.routing import router as routing_router, is_route_planner_enabled
+
 app = FastAPI()
+
+# Routing platform (supplier -> buyer product routing). The router itself
+# stays mounted for contract discovery; individual handlers raise 503 unless
+# ROUTE_PLANNER_ENABLED is truthy. See backend/schemas/routing.py for the
+# shared domain model and backend/api/routing.py for the endpoints.
+app.include_router(routing_router)
+if is_route_planner_enabled():
+    print("[routing] ROUTE_PLANNER_ENABLED=1 - /api/routing/* endpoints are live (stubs).")
 
 logger = logging.getLogger(__name__)
 
@@ -69,15 +82,47 @@ def _load_entity_contact_helpers():
 def _load_dd_services():
     try:
         from backend.services.dd.orchestrator import (
+            build_ai_discovered_phone_candidates,
             build_promotable_contact_candidates,
             generate_dd_report,
         )
     except ImportError:
         from services.dd.orchestrator import (
+            build_ai_discovered_phone_candidates,
             build_promotable_contact_candidates,
             generate_dd_report,
         )
-    return generate_dd_report, build_promotable_contact_candidates
+    return (
+        generate_dd_report,
+        build_promotable_contact_candidates,
+        build_ai_discovered_phone_candidates,
+    )
+
+
+def _load_legal_intel_services():
+    try:
+        from backend.services.legal_intel import (
+            collect_legal_events,
+            list_legal_events,
+            normalize_legal_events,
+            serialize_legal_event,
+            upsert_legal_events,
+        )
+    except ImportError:
+        from services.legal_intel import (
+            collect_legal_events,
+            list_legal_events,
+            normalize_legal_events,
+            serialize_legal_event,
+            upsert_legal_events,
+        )
+    return (
+        collect_legal_events,
+        normalize_legal_events,
+        upsert_legal_events,
+        list_legal_events,
+        serialize_legal_event,
+    )
 
 
 def _serialize_entity_contact(row: dict) -> dict:
@@ -95,6 +140,8 @@ def _serialize_entity_contact(row: dict) -> dict:
         "confidenceScore": row.get("confidence_score"),
         "rawPayload": row.get("raw_payload"),
         "extractedFrom": row.get("extracted_from"),
+        "discoveredBy": row.get("discovered_by"),
+        "phoneVerifiedAt": row.get("phone_verified_at"),
         "verifiedAt": row.get("verified_at"),
         "lastSeenAt": row.get("last_seen_at"),
     }
@@ -151,6 +198,12 @@ def _serialize_dd_report(row: dict) -> dict:
     promoted_contacts = row.get("promoted_contacts")
     if not isinstance(promoted_contacts, list):
         promoted_contacts = []
+    legal_events = row.get("legal_events")
+    if not isinstance(legal_events, list):
+        legal_events = []
+    discovered_phones = row.get("discovered_phones")
+    if not isinstance(discovered_phones, list):
+        discovered_phones = []
 
     return {
         "id": row.get("id"),
@@ -161,6 +214,10 @@ def _serialize_dd_report(row: dict) -> dict:
         "model": row.get("model"),
         "extractionProvider": row.get("extraction_provider"),
         "extractionModel": row.get("extraction_model"),
+        "legalProvider": row.get("legal_provider"),
+        "legalModel": row.get("legal_model"),
+        "phoneDiscoveryProvider": row.get("phone_discovery_provider"),
+        "phoneDiscoveryModel": row.get("phone_discovery_model"),
         "promptVersion": row.get("prompt_version"),
         "analysis": row.get("analysis_text"),
         "sourceSummary": {
@@ -176,6 +233,8 @@ def _serialize_dd_report(row: dict) -> dict:
             if isinstance(contact, dict)
         ],
         "promotedContacts": promoted_contacts,
+        "legalEvents": legal_events,
+        "discoveredPhones": discovered_phones,
         "createdAt": row.get("created_at"),
     }
 
@@ -823,6 +882,10 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 model TEXT,
                 extraction_provider TEXT,
                 extraction_model TEXT,
+                legal_provider TEXT,
+                legal_model TEXT,
+                phone_discovery_provider TEXT,
+                phone_discovery_model TEXT,
                 prompt_version TEXT,
                 query TEXT,
                 analysis_text TEXT,
@@ -830,11 +893,27 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 source_snapshot JSONB,
                 extracted_contacts JSONB,
                 promoted_contacts JSONB,
+                legal_events JSONB,
+                discovered_phones JSONB,
                 analysis_raw_response JSONB,
                 extraction_raw_response JSONB,
+                legal_raw_response JSONB,
+                phone_discovery_raw_response JSONB,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        # Additive migration for existing deployments.
+        try:
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS legal_provider TEXT;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS legal_model TEXT;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS phone_discovery_provider TEXT;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS phone_discovery_model TEXT;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS legal_events JSONB;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS discovered_phones JSONB;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS legal_raw_response JSONB;")
+            cur.execute("ALTER TABLE dd_reports ADD COLUMN IF NOT EXISTS phone_discovery_raw_response JSONB;")
+        except Exception as dd_migrate_exc:
+            print(f"dd_reports migration step skipped: {dd_migrate_exc}")
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_dd_reports_entity_created
             ON dd_reports (entity_kind, entity_id, created_at DESC);
@@ -843,6 +922,12 @@ def init_db(*, raise_on_error: bool = False) -> bool:
         # General, source-backed contact store. This is separate from private
         # CRM notes so the dossier can surface reviewable public business
         # numbers/emails/sites without guessing or mixing in internal notes.
+        #
+        # `discovered_by` distinguishes ingestion paths:
+        #   - 'open_data'      : auto-extracted from licenses.raw_payload (entity_contacts service)
+        #   - 'ai'             : AI/web research located the number during a DD run
+        #   - 'manual'         : analyst entered it via the admin UI
+        # `phone_verified_at` is set whenever an analyst manually confirms the number.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS entity_contacts (
                 id VARCHAR(255) PRIMARY KEY,
@@ -860,11 +945,54 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 confidence_score FLOAT DEFAULT 0.0,
                 raw_payload JSONB,
                 extracted_from TEXT,
+                discovered_by VARCHAR(50) DEFAULT 'open_data',
+                phone_verified_at TIMESTAMP,
                 verified_at TIMESTAMP,
                 last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+        """)
+
+        # Legal / litigation events linked to an entity (license, company, vessel, etc.).
+        # Each row is one case with the entity's role recorded explicitly so the
+        # dossier can split "sued by" vs "sued others" vs "regulatory action".
+        # Discovery path is tracked so we can audit AI vs official-registry vs
+        # paid-KYB-provider provenance.
+        #   discovered_by in ('ai','court_listener','pacer','kyb_provider','open_sanctions','manual')
+        #   source_type   mirrors entity_contacts conventions
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS legal_events (
+                id VARCHAR(255) PRIMARY KEY,
+                fingerprint TEXT UNIQUE NOT NULL,
+                entity_kind VARCHAR(50) NOT NULL DEFAULT 'license',
+                entity_id VARCHAR(255) NOT NULL,
+                case_title TEXT,
+                parties TEXT,
+                role VARCHAR(50),
+                court TEXT,
+                jurisdiction TEXT,
+                filed_date DATE,
+                status VARCHAR(80),
+                summary TEXT,
+                source_name TEXT,
+                source_url TEXT,
+                source_type VARCHAR(80),
+                discovered_by VARCHAR(50) DEFAULT 'ai',
+                confidence_score FLOAT DEFAULT 0.0,
+                raw_payload JSONB,
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_legal_events_entity
+            ON legal_events (entity_kind, entity_id, filed_date DESC);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_legal_events_role
+            ON legal_events (entity_kind, entity_id, role);
         """)
 
         # Trade Records
@@ -1014,6 +1142,14 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);")
+            # AI-DD enhancement: contact provenance (open_data / ai / manual) and
+            # the timestamp a human verified an AI-discovered phone number. These
+            # are additive — existing rows fall back to 'open_data' which matches
+            # the legacy source-backed sync behaviour.
+            cur.execute("ALTER TABLE entity_contacts ADD COLUMN IF NOT EXISTS discovered_by VARCHAR(50) DEFAULT 'open_data';")
+            cur.execute("ALTER TABLE entity_contacts ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP;")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_entity ON entity_contacts(entity_kind, entity_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_discovered_by ON entity_contacts(discovered_by);")
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -1501,6 +1637,41 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 
+def _license_api_columns_sql() -> str:
+    # We explicitly omit 'raw_payload' because it can be multiple megabytes per row and crashes the API response time
+    return (
+        "id, company, license_type, commodity, status, date_issued, country, region, "
+        "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
+        "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
+        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+    )
+
+
+def _license_rows_select_sql(
+    *,
+    columns: str,
+    sector_sql: str,
+    country_sql: str,
+    country_filters: list[str],
+    per_country_cap: bool,
+) -> str:
+    """Build SELECT for license rows; multi-country requests cap rows per country."""
+    if per_country_cap:
+        return f"""
+            SELECT {columns} FROM (
+                SELECT {columns}, ROW_NUMBER() OVER (PARTITION BY country ORDER BY id) AS rn
+                FROM licenses
+                WHERE ({sector_sql}) AND ({country_sql})
+            ) ranked
+            WHERE ranked.rn <= %s
+        """
+    return f"""
+        SELECT {columns} FROM licenses
+        WHERE ({sector_sql}) AND ({country_sql})
+        LIMIT %s
+    """
+
+
 def _fetch_license_rows_for_api(
     c,
     normalized_sector: str | None,
@@ -1509,24 +1680,19 @@ def _fetch_license_rows_for_api(
 ) -> tuple[list, dict[str, dict]]:
     """Load license rows with optional sector and optional country filters (matches client query semantics)."""
     sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector)
-    country_sql, country_params = _licenses_countries_sql_fragment(list(country_filters or []))
-    
-    # We explicitly omit 'raw_payload' because it can be multiple megabytes per row and crashes the API response time
-    columns = (
-        "id, company, license_type, commodity, status, date_issued, country, region, "
-        "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
-        "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
-        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+    requested = [part for part in (country_filters or []) if part]
+    country_sql, country_params = _licenses_countries_sql_fragment(requested)
+    columns = _license_api_columns_sql()
+    safe_limit = max(1, min(int(limit or 5000), 15000))
+    per_country_cap = len(requested) > 1
+    list_sql = _license_rows_select_sql(
+        columns=columns,
+        sector_sql=sector_sql,
+        country_sql=country_sql,
+        country_filters=requested,
+        per_country_cap=per_country_cap,
     )
-    
-    c.execute(
-        f"""
-        SELECT {columns} FROM licenses
-        WHERE ({sector_sql}) AND ({country_sql})
-        LIMIT %s
-        """,
-        tuple(sector_params + country_params + [limit]),
-    )
+    c.execute(list_sql, tuple(sector_params + country_params + [safe_limit]))
     rows = c.fetchall()
     return rows, _load_cached_geo_fallbacks(c, rows)
 
@@ -1609,23 +1775,34 @@ def read_licenses(
         open_clause = ""
         if prefer_open_data and has_preferred_live_rows:
             open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
-        columns = (
-            "id, company, license_type, commodity, status, date_issued, country, region, "
-            "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
-            "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
-            "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
-        )
-        list_sql = f"""
-            SELECT {columns} FROM licenses
-            WHERE {sector_sql}
-              AND ({country_sql})
-              AND lat IS NOT NULL AND lng IS NOT NULL
-              AND lat BETWEEN %s AND %s
-              AND lng BETWEEN %s AND %s
-              {open_clause}
-            ORDER BY id
-            LIMIT %s
-        """
+        columns = _license_api_columns_sql()
+        per_country_cap = len(requested_countries) > 1
+        if per_country_cap:
+            list_sql = f"""
+                SELECT {columns} FROM (
+                    SELECT {columns}, ROW_NUMBER() OVER (PARTITION BY country ORDER BY id) AS rn
+                    FROM licenses
+                    WHERE {sector_sql}
+                      AND ({country_sql})
+                      AND lat IS NOT NULL AND lng IS NOT NULL
+                      AND lat BETWEEN %s AND %s
+                      AND lng BETWEEN %s AND %s
+                      {open_clause}
+                ) ranked
+                WHERE ranked.rn <= %s
+            """
+        else:
+            list_sql = f"""
+                SELECT {columns} FROM licenses
+                WHERE {sector_sql}
+                  AND ({country_sql})
+                  AND lat IS NOT NULL AND lng IS NOT NULL
+                  AND lat BETWEEN %s AND %s
+                  AND lng BETWEEN %s AND %s
+                  {open_clause}
+                ORDER BY id
+                LIMIT %s
+            """
         list_params: list[Any] = [*sector_params, *country_params, min_la, max_la, min_lo, max_lo, safe_limit]
         c.execute(list_sql, tuple(list_params))
         rows = c.fetchall()
@@ -1788,11 +1965,17 @@ def read_latest_dd_report(entity_id: str, entity_kind: str = "license"):
                 model,
                 extraction_provider,
                 extraction_model,
+                legal_provider,
+                legal_model,
+                phone_discovery_provider,
+                phone_discovery_model,
                 prompt_version,
                 analysis_text,
                 source_snapshot,
                 extracted_contacts,
                 promoted_contacts,
+                legal_events,
+                discovered_phones,
                 created_at
             FROM dd_reports
             WHERE entity_id = %s
@@ -1805,6 +1988,63 @@ def read_latest_dd_report(entity_id: str, entity_kind: str = "license"):
         row = c.fetchone()
         return _serialize_dd_report(row) if row else None
     except Exception as e:
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/legal-events")
+def read_legal_events(entity_id: str, entity_kind: str = "license", refresh: bool = False):
+    """Return persisted litigation/regulatory events for an entity.
+
+    Setting ``refresh=1`` triggers the live-adapter + stub collector and
+    upserts the latest results into ``legal_events`` before reading.
+    The AI extraction path is *not* re-run here (that happens in
+    ``/api/ai/analyze``) so this endpoint stays cheap and idempotent.
+    """
+    conn = get_db_connection()
+    try:
+        (
+            collect_legal_events,
+            _normalize_legal_events,
+            upsert_legal_events,
+            list_legal_events,
+            serialize_legal_event,
+        ) = _load_legal_intel_services()
+
+        if refresh:
+            entity_payload: dict[str, Any] = {}
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT id, company, country, region, commodity, sector FROM licenses WHERE id = %s",
+                        (entity_id,),
+                    )
+                    entity_row = cur.fetchone()
+                if entity_row:
+                    entity_payload = dict(entity_row)
+            except Exception as load_exc:
+                logger.warning("legal-events refresh could not load license %s: %s", entity_id, load_exc)
+                conn.rollback()
+
+            if entity_payload.get("company"):
+                events = collect_legal_events(
+                    entity_kind=entity_kind,
+                    entity_id=str(entity_id),
+                    entity=entity_payload,
+                )
+                if events:
+                    try:
+                        upsert_legal_events(conn, events)
+                        conn.commit()
+                    except Exception as persist_exc:
+                        logger.warning("legal-events upsert failed for %s: %s", entity_id, persist_exc)
+                        conn.rollback()
+
+        rows = list_legal_events(conn, entity_kind=entity_kind, entity_id=str(entity_id))
+        return [serialize_legal_event(row) for row in rows]
+    except Exception as e:
+        conn.rollback()
         return Response(str(e), status_code=500)
     finally:
         conn.close()
@@ -2649,8 +2889,19 @@ def analyze_with_ai(request: AIRequest):
     For dossier runs we persist the rendered analysis plus any structured,
     source-backed contact extraction for future reuse.
     """
-    generate_dd_report, build_promotable_contact_candidates = _load_dd_services()
+    (
+        generate_dd_report,
+        build_promotable_contact_candidates,
+        build_ai_discovered_phone_candidates,
+    ) = _load_dd_services()
     _, upsert_entity_contact_candidates = _load_entity_contact_helpers()
+    (
+        _collect_legal_events,
+        normalize_legal_events,
+        upsert_legal_events,
+        _list_legal_events,
+        serialize_legal_event,
+    ) = _load_legal_intel_services()
 
     context = request.context or {}
     entity_kind = (context.get("entity_kind") or context.get("entityKind") or "license").strip().lower()
@@ -2661,12 +2912,15 @@ def analyze_with_ai(request: AIRequest):
     try:
         source_snapshot = None
         source_summary = {}
+        entity_brief: dict[str, Any] = {}
         if should_persist:
             conn = get_db_connection()
             if entity_kind == "license":
                 source_snapshot = _load_license_dd_snapshot(conn, entity_id)
             if isinstance(source_snapshot, dict):
                 source_summary = source_snapshot.get("source") if isinstance(source_snapshot.get("source"), dict) else {}
+                if isinstance(source_snapshot.get("entity"), dict):
+                    entity_brief = source_snapshot["entity"]
 
         report = generate_dd_report(request.query, source_snapshot)
         if report.get("status") != "success" or not report.get("analysis"):
@@ -2691,8 +2945,56 @@ def analyze_with_ai(request: AIRequest):
                 default_source_url=source_summary.get("source_record_url") or source_summary.get("source_url"),
                 report_id=report_id,
             )
+            for candidate in promoted_candidates:
+                candidate.setdefault("discovered_by", "open_data")
             if promoted_candidates:
                 upsert_entity_contact_candidates(conn, promoted_candidates)
+
+            # AI-discovered phones. These are persisted to entity_contacts with
+            # source_type='ai_discovered' / discovered_by='ai' so the dossier can
+            # show them distinctly from source-backed contacts and analysts can
+            # promote them with a verification timestamp later.
+            ai_phone_candidates = build_ai_discovered_phone_candidates(
+                entity_kind=entity_kind,
+                entity_id=entity_id,
+                discovered_phones=report.get("discovered_phones", []),
+                report_id=report_id,
+            )
+            if ai_phone_candidates:
+                upsert_entity_contact_candidates(conn, ai_phone_candidates)
+
+            ai_phone_payload = [
+                {
+                    "id": candidate.get("id"),
+                    "value": candidate.get("value"),
+                    "label": candidate.get("label"),
+                    "sourceName": candidate.get("source_name"),
+                    "sourceUrl": candidate.get("source_url"),
+                    "sourceType": candidate.get("source_type"),
+                    "confidenceScore": candidate.get("confidence_score"),
+                    "discoveredBy": candidate.get("discovered_by"),
+                }
+                for candidate in ai_phone_candidates
+            ]
+
+            # Legal events: normalise the AI-extracted events first so we can
+            # persist them under stable fingerprints, then re-render for the
+            # response payload using the serialiser.
+            normalised_legal = normalize_legal_events(
+                entity_kind=entity_kind,
+                entity_id=str(entity_id),
+                events=report.get("legal_events", []),
+                default_source_name="AI-extracted",
+                default_discovered_by="ai",
+                default_source_type="ai_extracted",
+            )
+            if normalised_legal:
+                try:
+                    upsert_legal_events(conn, normalised_legal)
+                except Exception as legal_persist_exc:
+                    logger.warning("Failed to upsert AI-extracted legal events: %s", legal_persist_exc)
+                    conn.rollback()
+            legal_events_payload = [serialize_legal_event(event) for event in normalised_legal]
 
             annotated_contacts = _annotate_dd_contacts(
                 report.get("extracted_contacts", []),
@@ -2709,6 +3011,7 @@ def analyze_with_ai(request: AIRequest):
                     "sourceUrl": candidate.get("source_url"),
                     "sourceType": candidate.get("source_type"),
                     "confidenceScore": candidate.get("confidence_score"),
+                    "discoveredBy": candidate.get("discovered_by"),
                 }
                 for candidate in promoted_candidates
             ]
@@ -2726,6 +3029,10 @@ def analyze_with_ai(request: AIRequest):
                         model,
                         extraction_provider,
                         extraction_model,
+                        legal_provider,
+                        legal_model,
+                        phone_discovery_provider,
+                        phone_discovery_model,
                         prompt_version,
                         query,
                         analysis_text,
@@ -2733,12 +3040,16 @@ def analyze_with_ai(request: AIRequest):
                         source_snapshot,
                         extracted_contacts,
                         promoted_contacts,
+                        legal_events,
+                        discovered_phones,
                         analysis_raw_response,
                         extraction_raw_response,
+                        legal_raw_response,
+                        phone_discovery_raw_response,
                         created_at
                     )
                     VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -2750,6 +3061,10 @@ def analyze_with_ai(request: AIRequest):
                         report.get("model"),
                         report.get("extraction_provider"),
                         report.get("extraction_model"),
+                        report.get("legal_provider"),
+                        report.get("legal_model"),
+                        report.get("phone_discovery_provider"),
+                        report.get("phone_discovery_model"),
                         report.get("prompt_version"),
                         request.query,
                         report.get("analysis"),
@@ -2757,8 +3072,12 @@ def analyze_with_ai(request: AIRequest):
                         _psycopg_json(source_snapshot) if source_snapshot is not None else None,
                         _psycopg_json(annotated_contacts),
                         _psycopg_json(promoted_contacts_payload),
+                        _psycopg_json(legal_events_payload),
+                        _psycopg_json(ai_phone_payload),
                         _psycopg_json(report.get("analysis_raw_response")) if report.get("analysis_raw_response") is not None else None,
                         _psycopg_json(report.get("extraction_raw_response")) if report.get("extraction_raw_response") is not None else None,
+                        _psycopg_json(report.get("legal_raw_response")) if report.get("legal_raw_response") is not None else None,
+                        _psycopg_json(report.get("phone_discovery_raw_response")) if report.get("phone_discovery_raw_response") is not None else None,
                         created_at,
                     ),
                 )
@@ -2774,11 +3093,17 @@ def analyze_with_ai(request: AIRequest):
                     "model": report.get("model"),
                     "extraction_provider": report.get("extraction_provider"),
                     "extraction_model": report.get("extraction_model"),
+                    "legal_provider": report.get("legal_provider"),
+                    "legal_model": report.get("legal_model"),
+                    "phone_discovery_provider": report.get("phone_discovery_provider"),
+                    "phone_discovery_model": report.get("phone_discovery_model"),
                     "prompt_version": report.get("prompt_version"),
                     "analysis_text": report.get("analysis"),
                     "source_snapshot": source_snapshot,
                     "extracted_contacts": annotated_contacts,
                     "promoted_contacts": promoted_contacts_payload,
+                    "legal_events": legal_events_payload,
+                    "discovered_phones": ai_phone_payload,
                     "created_at": created_at,
                 }
             )
@@ -3344,6 +3669,25 @@ _COMMODITY_HS: dict[str, str] = {
     "tantalum": "2615",
     "coltan": "2615",
     "uranium": "2612",
+    # ── Petroleum chapter 27 (chapter HS 2709–2711) ──────────────────────
+    # The OilTradeContext panel posts commodity strings like
+    # "crude oil" / "petroleum products" / "natural gas" — map them so
+    # the public preview Comtrade endpoint resolves correctly.
+    "crude oil":           "2709",
+    "crude petroleum":     "2709",
+    "petroleum":           "2709",
+    "oil":                 "2709",
+    "petroleum products":  "2710",
+    "refined petroleum":   "2710",
+    "refined products":    "2710",
+    "gasoline":            "2710",
+    "diesel":              "2710",
+    "fuel oil":            "2710",
+    "natural gas":         "2711",
+    "lng":                 "2711",
+    "lpg":                 "2711",
+    "petroleum gas":       "2711",
+    "petroleum gases":     "2711",
 }
 
 # Country display name (lower) → {iso2, m49}
@@ -3398,6 +3742,50 @@ _COUNTRY_CODES: dict[str, dict] = {
     "lesotho":                      {"iso2": "LS", "m49": "426"},
     "eswatini":                     {"iso2": "SZ", "m49": "748"},
     "swaziland":                    {"iso2": "SZ", "m49": "748"},
+    # ── Petroleum-producing reporters (oil & gas dossier panel) ──────────
+    "canada":                       {"iso2": "CA", "m49": "124"},
+    "united states":                {"iso2": "US", "m49": "842"},
+    "united states of america":     {"iso2": "US", "m49": "842"},
+    "usa":                          {"iso2": "US", "m49": "842"},
+    "saudi arabia":                 {"iso2": "SA", "m49": "682"},
+    "russia":                       {"iso2": "RU", "m49": "643"},
+    "russian federation":           {"iso2": "RU", "m49": "643"},
+    "united arab emirates":         {"iso2": "AE", "m49": "784"},
+    "uae":                          {"iso2": "AE", "m49": "784"},
+    "iraq":                         {"iso2": "IQ", "m49": "368"},
+    "iran":                         {"iso2": "IR", "m49": "364"},
+    "kuwait":                       {"iso2": "KW", "m49": "414"},
+    "qatar":                        {"iso2": "QA", "m49": "634"},
+    "oman":                         {"iso2": "OM", "m49": "512"},
+    "norway":                       {"iso2": "NO", "m49": "578"},
+    "kazakhstan":                   {"iso2": "KZ", "m49": "398"},
+    "azerbaijan":                   {"iso2": "AZ", "m49": "031"},
+    "mexico":                       {"iso2": "MX", "m49": "484"},
+    "venezuela":                    {"iso2": "VE", "m49": "862"},
+    "brazil":                       {"iso2": "BR", "m49": "076"},
+    "argentina":                    {"iso2": "AR", "m49": "032"},
+    "australia":                    {"iso2": "AU", "m49": "036"},
+    "indonesia":                    {"iso2": "ID", "m49": "360"},
+    "malaysia":                     {"iso2": "MY", "m49": "458"},
+    "india":                        {"iso2": "IN", "m49": "356"},
+    "china":                        {"iso2": "CN", "m49": "156"},
+    "south korea":                  {"iso2": "KR", "m49": "410"},
+    "korea":                        {"iso2": "KR", "m49": "410"},
+    "singapore":                    {"iso2": "SG", "m49": "702"},
+    "japan":                        {"iso2": "JP", "m49": "392"},
+    "netherlands":                  {"iso2": "NL", "m49": "528"},
+    "belgium":                      {"iso2": "BE", "m49": "056"},
+    "united kingdom":               {"iso2": "GB", "m49": "826"},
+    "germany":                      {"iso2": "DE", "m49": "276"},
+    "france":                       {"iso2": "FR", "m49": "250"},
+    "italy":                        {"iso2": "IT", "m49": "380"},
+    "spain":                        {"iso2": "ES", "m49": "724"},
+    "turkey":                       {"iso2": "TR", "m49": "792"},
+    "türkiye":                      {"iso2": "TR", "m49": "792"},
+    "trinidad and tobago":          {"iso2": "TT", "m49": "780"},
+    "colombia":                     {"iso2": "CO", "m49": "170"},
+    "ecuador":                      {"iso2": "EC", "m49": "218"},
+    "south sudan":                  {"iso2": "SS", "m49": "728"},
 }
 
 
@@ -3423,39 +3811,22 @@ def _resolve_hs(commodity: str) -> Optional[str]:
     return None
 
 
-def _fetch_comtrade(m49: str, hs_code: str, year: int = 2023) -> dict:
-    """Fetch Comtrade trade flows. Returns {} if key absent or error."""
-    api_key = os.getenv("COMTRADE_API_KEY", "")
-    if not api_key:
-        return {}
+def _fetch_comtrade(m49: str, hs_code: str, year: int = 2023, iso2: str = "") -> dict:
+    """
+    Resolve trade flows through the free / fallback chain implemented in
+    ``services.petroleum_trade``.  The function name is kept for backwards
+    compatibility but it no longer requires ``COMTRADE_API_KEY`` — the
+    public Comtrade preview endpoint plus Statistics Canada / EIA cover
+    every petroleum reporter we care about for the Oil dossier panel.
+    """
     try:
-        url = (
-            "https://comtradeapi.un.org/data/v1/get/C/A/HS"
-            f"?reporterCode={m49}&cmdCode={hs_code}"
-            f"&period={year}&flowCode=X,M"
-            f"&subscription-key={api_key}&limit=10"
-        )
-        r = _requests.get(url, timeout=8)
-        if r.status_code == 200:
-            rows = r.json().get("data", [])
-            flows = []
-            for row in rows:
-                flows.append({
-                    "flow": "Export" if row.get("flowCode") == "X" else "Import",
-                    "trade_value_usd": row.get("primaryValue"),
-                    "net_weight_kg": row.get("netWgt"),
-                    "qty": row.get("qty"),
-                    "qty_unit": row.get("qtyUnitAbbr"),
-                    "partner": row.get("partnerDesc"),
-                    "year": row.get("period"),
-                })
-            return {"source": "UN Comtrade", "year": year, "hs_code": hs_code, "flows": flows}
-        # Try one year back on 404/empty
-        if r.status_code in (404, 200) and year > 2020:
-            return _fetch_comtrade(m49, hs_code, year - 1)
-        return {}
-    except Exception as e:
-        print(f"[comtrade] error: {e}")
+        try:
+            from backend.services.petroleum_trade import fetch_petroleum_trade
+        except ImportError:
+            from services.petroleum_trade import fetch_petroleum_trade
+        return fetch_petroleum_trade(m49, iso2, hs_code, year=year)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[comtrade-fallback] error: {exc}")
         return {}
 
 
@@ -3553,6 +3924,43 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     ]
 
     has_comtrade_key = bool(os.getenv("COMTRADE_API_KEY", ""))
+    has_eia_key = bool(os.getenv("EIA_API_KEY", ""))
+    trade_source_key = (trade_data or {}).get("source_key", "")
+    trade_source_label = (trade_data or {}).get("source", "")
+
+    # The panel previously gated its "data available" hint on the paid
+    # Comtrade key.  We now honour any successful free upstream so the
+    # banner only shows when literally no source returned rows.
+    free_trade_data_available = bool((trade_data or {}).get("flows"))
+
+    limitations = [
+        "Trade data is country-level, not company-specific — company-level customs data requires paid government sources.",
+        "UN Comtrade data typically lags 12–24 months from the current date.",
+        "World Bank indicators lag approximately 12 months.",
+    ]
+    if trade_source_key in {"comtrade_public", "mixed"}:
+        limitations.append(
+            "Primary source: UN Comtrade public preview (free, no key, "
+            "fair-use rate limit, max 500 rows/request)."
+        )
+    if trade_source_key in {"statcan_canada", "mixed"}:
+        limitations.append(
+            "Statistics Canada CIMT rows are HS-2 chapter aggregates "
+            "(chapter 27) converted from CAD at a conservative spot rate."
+        )
+    if trade_source_key in {"eia", "mixed"}:
+        limitations.append(
+            "EIA volumes are reported in physical units (e.g. Mb/d), not USD value."
+        )
+    if trade_source_key == "seed":
+        limitations.append(
+            "Live upstreams unreachable — returned 2022 curated seed totals "
+            "(UN Comtrade aggregate tables, BP Statistical Review 2023)."
+        )
+    limitations.append(
+        "Verify all figures with the local customs authority and mining registry before deal execution."
+    )
+
     return {
         "company": company,
         "country": country,
@@ -3563,13 +3971,18 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
         "economy": econ_data,
         "deep_links": deep_links,
         "comtrade_available": has_comtrade_key,
+        "trade_data_available": free_trade_data_available,
+        "trade_source": trade_source_label,
+        "trade_source_key": trade_source_key,
+        "free_sources": {
+            "comtrade_public_preview": True,
+            "statistics_canada": True,
+            "world_bank": True,
+            "eia_international": has_eia_key,
+            "comtrade_keyed": has_comtrade_key,
+        },
         "data_as_of": "2023 (most recent Comtrade/World Bank release)",
-        "limitations": [
-            "Trade data is country-level, not company-specific — company-level customs data requires paid government sources.",
-            "UN Comtrade data typically lags 12–24 months from the current date.",
-            "World Bank indicators lag approximately 12 months.",
-            "Verify all figures with the local customs authority and mining registry before deal execution.",
-        ],
+        "limitations": limitations,
     }
 
 
@@ -3720,6 +4133,58 @@ def get_storage_terminal_detail(terminal_id: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Storage terminal detail failed: {exc}")
+
+
+@app.get("/api/petroleum/layers")
+def get_petroleum_layers_catalog():
+    """Catalog of oil & gas infrastructure map layers (oilmap-compatible sources)."""
+    try:
+        try:
+            from backend.services.petroleum_infrastructure import get_petroleum_layer_catalog
+        except ImportError:
+            from services.petroleum_infrastructure import get_petroleum_layer_catalog
+        return get_petroleum_layer_catalog()
+    except Exception as exc:
+        return {
+            "layers": [],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "source_labels": [],
+            "limitations": [f"Petroleum layer catalog failed: {exc}"],
+            "env": {},
+        }
+
+
+@app.get("/api/petroleum/layers/{layer_id}")
+def get_petroleum_layer(
+    layer_id: str,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    zoom: Optional[int] = None,
+):
+    """GeoJSON for a petroleum infrastructure layer in the requested viewport."""
+    try:
+        try:
+            from backend.services.petroleum_infrastructure import get_petroleum_layer_geojson
+        except ImportError:
+            from services.petroleum_infrastructure import get_petroleum_layer_geojson
+
+        bbox = None
+        if south is not None and west is not None and north is not None and east is not None:
+            bbox = (south, west, north, east)
+        return get_petroleum_layer_geojson(layer_id, bbox=bbox, zoom=zoom)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown petroleum layer: {layer_id}")
+    except Exception as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": layer_id,
+            "feature_count": 0,
+            "data_as_of": datetime.utcnow().isoformat(),
+            "limitations": [f"Petroleum layer fetch failed: {exc}"],
+        }
 
 
 @app.get("/api/logistics/ports")
@@ -4387,6 +4852,101 @@ class ShipmentUpdate(BaseModel):
     status: Optional[str] = None
     eta: Optional[str] = None
     notes: Optional[str] = None
+
+
+class RoutePointPayload(BaseModel):
+    name: str
+    lat: float
+    lng: float
+    kind: Optional[str] = "transit"
+    metadata: Optional[dict[str, Any]] = None
+
+
+class LogisticsRoutePlanRequest(BaseModel):
+    product: str
+    quantity_tons: float
+    origin: RoutePointPayload
+    destination: RoutePointPayload
+    transit_points: Optional[list[RoutePointPayload]] = None
+    preferred_methods: Optional[list[str]] = None
+    pipeline_layer_enabled: bool = False
+
+
+@app.post("/api/logistics/route-plan")
+def plan_logistics_route(payload: LogisticsRoutePlanRequest):
+    try:
+        try:
+            from backend.services.route_planner import plan_route
+        except ImportError:
+            from services.route_planner import plan_route
+
+        request_payload = payload.model_dump()
+        transit = request_payload.get("transit_points") or []
+        request_payload["transit_points"] = [item for item in transit if isinstance(item, dict)]
+        return plan_route(request_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Route planning failed: {exc}")
+
+
+class DDRequestPayload(BaseModel):
+    """HTTP request body for POST /api/routing/due-diligence."""
+
+    supplier_country: str
+    buyer_country: str
+    product_type: str
+    commodity: Optional[str] = None
+    license_ids: Optional[list[str]] = None
+    quantity_tons: Optional[float] = None
+    estimated_value_usd: Optional[float] = None
+    supplier_entity_name: Optional[str] = None
+    buyer_entity_name: Optional[str] = None
+
+
+@app.post("/api/routing/due-diligence")
+def routing_due_diligence(payload: DDRequestPayload):
+    """Evaluate compliance checks for a proposed supplier→buyer trade route.
+
+    Returns a DueDiligenceReport with per-dimension verdicts (pass/warn/fail),
+    an overall score (0–100), a list of blockers, and a recommendation
+    ("approve" | "escalate" | "block").
+
+    Dimensions checked:
+      - sanctions: OFAC/EU/UNSC country lists
+      - corridor: embargoed supplier→buyer+product pairs
+      - license: validity of declared license IDs (or coverage query)
+      - kyc: entity name completeness + transaction value tier
+      - commodity: conflict-mineral screen + product-type advisories
+
+    The route planner should call this before finalising a route; if
+    recommendation == "block" the route must not be approved.
+    """
+    try:
+        try:
+            from backend.services.due_diligence import evaluate_due_diligence
+            from backend.schemas.due_diligence import DDRequest
+        except ImportError:
+            from services.due_diligence import evaluate_due_diligence  # type: ignore[no-redef]
+            from schemas.due_diligence import DDRequest  # type: ignore[no-redef]
+
+        req = DDRequest(**payload.model_dump())
+
+        conn = None
+        try:
+            conn = get_db_connection()
+        except Exception:
+            pass  # DB unavailable — license checks degrade gracefully to WARN
+
+        report = evaluate_due_diligence(req, db_conn=conn)
+        status_code = 200
+        if report.recommendation == "block":
+            status_code = 200  # Return 200 so the client sees the full report; UI decides on display
+        return JSONResponse(content=report.model_dump(), status_code=status_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Due diligence evaluation failed: {exc}")
 
 
 @app.get("/api/logistics/shipments")

@@ -7,3 +7,4 @@ pyjwt
 requests
 passlib
 websockets
+mapbox-vector-tile

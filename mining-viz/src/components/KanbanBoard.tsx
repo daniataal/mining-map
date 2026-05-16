@@ -5,7 +5,7 @@ import { Badge } from './ui/badge';
 import { Card, CardContent } from './ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { ScrollArea } from './ui/scroll-area';
-import { ChevronRight, ChevronLeft } from 'lucide-react';
+import { ChevronRight, ChevronLeft, X } from 'lucide-react';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 
 interface KanbanBoardProps {
@@ -14,6 +14,10 @@ interface KanbanBoardProps {
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onCardClick: (item: MiningLicense) => void;
   isMobile?: boolean;
+  queueIds?: Set<string>;
+  notesById?: Record<string, string>;
+  onNoteChange?: (id: string, note: string) => void;
+  onRemoveFromQueue?: (id: string) => void;
 }
 
 const STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
@@ -43,6 +47,10 @@ export default function KanbanBoard({
   updateAnnotation,
   onCardClick,
   isMobile,
+  queueIds,
+  notesById = {},
+  onNoteChange,
+  onRemoveFromQueue,
 }: KanbanBoardProps) {
   const { t } = useI18n();
   const [activeStage, setActiveStage] = useState<Stage>('New');
@@ -105,11 +113,26 @@ export default function KanbanBoard({
                 onClick={() => onCardClick(item)}
               >
                 <CardContent className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
                   <h4
-                    className={`text-sm font-bold group-hover:text-amber-500 transition-colors ${isGold ? 'text-amber-500 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200'}`}
+                    className={`text-sm font-bold group-hover:text-amber-500 transition-colors flex-1 min-w-0 truncate ${isGold ? 'text-amber-500 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200'}`}
                   >
                     {item.company}
                   </h4>
+                  {onRemoveFromQueue && queueIds?.has(item.id) && (
+                    <button
+                      type="button"
+                      title={t('הסר מתור', 'Remove from queue')}
+                      className="shrink-0 p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveFromQueue(item.id);
+                      }}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  </div>
                   <div className="flex flex-wrap gap-1">
                     <Badge variant="outline" className="text-[9px] border-slate-700 text-slate-500 font-medium">
                       {annotation.commodity || item.commodity}
@@ -132,6 +155,16 @@ export default function KanbanBoard({
                       </Badge>
                     )}
                   </div>
+                  {onNoteChange && queueIds?.has(item.id) && (
+                    <textarea
+                      value={notesById[item.id] || ''}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => onNoteChange(item.id, e.target.value)}
+                      placeholder={t('הערות בדיקה…', 'DD notes…')}
+                      rows={2}
+                      className="w-full text-[10px] rounded-lg border border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02] px-2 py-1.5 text-slate-600 dark:text-slate-300 placeholder:text-slate-400 resize-none"
+                    />
+                  )}
                   {/* Stage control row */}
                   <div className="flex items-center justify-between pt-1 border-t border-black/5 dark:border-white/5">
                     <button
