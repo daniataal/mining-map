@@ -1713,7 +1713,7 @@ def read_licenses(
         print(
             "[licenses] empty feed "
             f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
-            f"counts db_all={count_all} after_sector={count_after_sector} after_open_pref={count_after_open_pref} "
+            f"counts db_all={count_all} after_sector={count_after_sector} "
             f"has_live_origin_signal={has_preferred_live_rows} bbox_sql=0"
         )
 
