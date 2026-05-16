@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/daniataal/mining-map-base:latest
+ARG BASE_IMAGE=dannyatalla/mining-map-base:latest
 FROM ${BASE_IMAGE}
 
 # Set working directory
