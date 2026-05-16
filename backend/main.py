@@ -191,6 +191,16 @@ def _safe_json_load(value: Any) -> Any:
     return None
 
 
+def _psycopg_json(obj: Any) -> Json:
+    """Helper to wrap objects for JSONB columns, handling datetime serialization."""
+    return Json(
+        obj,
+        dumps=lambda x: json.dumps(
+            x, default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o)
+        ),
+    )
+
+
 def _normalize_promoted_lookup_key(contact_type: str, value: Any, source_url: Any) -> tuple[str, str, str]:
     normalized_type = (contact_type or "").strip().lower()
     raw_value = str(value or "").strip()
@@ -2743,12 +2753,12 @@ def analyze_with_ai(request: AIRequest):
                         report.get("prompt_version"),
                         request.query,
                         report.get("analysis"),
-                        Json(context),
-                        Json(source_snapshot) if source_snapshot is not None else None,
-                        Json(annotated_contacts),
-                        Json(promoted_contacts_payload),
-                        Json(report.get("analysis_raw_response")) if report.get("analysis_raw_response") is not None else None,
-                        Json(report.get("extraction_raw_response")) if report.get("extraction_raw_response") is not None else None,
+                        _psycopg_json(context),
+                        _psycopg_json(source_snapshot) if source_snapshot is not None else None,
+                        _psycopg_json(annotated_contacts),
+                        _psycopg_json(promoted_contacts_payload),
+                        _psycopg_json(report.get("analysis_raw_response")) if report.get("analysis_raw_response") is not None else None,
+                        _psycopg_json(report.get("extraction_raw_response")) if report.get("extraction_raw_response") is not None else None,
                         created_at,
                     ),
                 )

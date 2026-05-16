@@ -107,13 +107,14 @@ jobs:
         ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         AUTO_IMPORT_LICENSES_CSV: ${{ steps.csv_import.outputs.enabled }}
         CSV_UPLOADED: ${{ steps.csv_import.outputs.csv_exists }}
+        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
         VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,VERSION_TAG
+        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -208,7 +209,7 @@ jobs:
               ports:
                 - "5173:5173"
               environment:
-                - VITE_API_BASE=http://${{ secrets.REMOTE_HOST }}:8000
+                - VITE_API_BASE=http://${REMOTE_HOST}:8000
               depends_on:
                 backend:
                   condition: service_healthy
