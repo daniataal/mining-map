@@ -1,36 +1,8 @@
-FROM ubuntu:22.04
-
-# Prevent interactive prompts
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Update and install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    python3 \
-    python3-pip \
-    python-is-python3 \
-    dos2unix \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 20.x
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+ARG BASE_IMAGE=ghcr.io/daniataal/mining-map-base:latest
+FROM ${BASE_IMAGE}
 
 # Set working directory
 WORKDIR /app
-
-# Install Python dependencies first for better caching
-RUN pip3 install --no-cache-dir \
-    fastapi \
-    uvicorn \
-    python-multipart \
-    psycopg2-binary \
-    bcrypt \
-    pyjwt \
-    requests \
-    passlib
 
 # Copy dependency files first
 COPY mining-viz/package*.json ./mining-viz/

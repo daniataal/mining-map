@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, type ComponentType } from 'react';
 import { useI18n } from '../lib/i18n';
 import {
   MiningLicense,
@@ -6,6 +6,7 @@ import {
   EntityContact,
   EntityRelationship,
   DdReport,
+  LegalEvent,
   LeadValue,
   OilHsCategory,
   MarketTickerRow,
@@ -29,12 +30,15 @@ import {
   Share2 as LucideShare2,
   Pencil as LucidePencil,
   Check as LucideCheck,
+  Scale as LucideScale,
+  Gavel as LucideGavel,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
 import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
+import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
 import EntityRelationshipPanel from './EntityRelationshipPanel';
@@ -43,10 +47,33 @@ import {
   getEntityContacts,
   getEntityRelationships,
   getLatestDdReport,
+  getLegalEvents,
   useStorageTerminalDetails,
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
 import { getCommodityMarketSnapshot } from '../lib/commodityMarket';
+import {
+  getLicenseHeroImageUrl,
+  getLicenseVolumeUnit,
+  isOilAndGasLicense,
+} from '../lib/licenseHeroImage';
+
+/** Client-side cap so hung requests release the UI (server may use longer LLM timeouts). */
+const AI_ANALYZE_CLIENT_TIMEOUT_MS = 180_000;
+
+function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    const m = (payload as { message?: unknown }).message;
+    if (typeof m === 'string' && m.trim()) return m.trim();
+  }
+  if (status === 503) {
+    return 'Intelligence providers are busy or unreachable. Try again in a moment.';
+  }
+  if (status === 502) {
+    return 'The intelligence service could not complete this request. Please try again.';
+  }
+  return 'Intelligence request failed.';
+}
 
 interface DossierViewProps {
   isOpen: boolean;
@@ -56,6 +83,9 @@ interface DossierViewProps {
   marketPrices: MarketTickerRow[];
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDeleteLicense?: () => void;
+  isInDdQueue?: boolean;
+  onAddToDueDiligence?: () => void;
+  onRemoveFromDueDiligence?: () => void;
 }
 
 const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
@@ -103,6 +133,9 @@ export default function DossierView({
   marketPrices,
   updateAnnotation,
   onDeleteLicense,
+  isInDdQueue = false,
+  onAddToDueDiligence,
+  onRemoveFromDueDiligence,
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
@@ -113,9 +146,15 @@ export default function DossierView({
   const [entityContacts, setEntityContacts] = useState<EntityContact[]>([]);
   const [entityRelationships, setEntityRelationships] = useState<EntityRelationship[]>([]);
   const [latestDdReport, setLatestDdReport] = useState<DdReport | null>(null);
+  const [legalEvents, setLegalEvents] = useState<LegalEvent[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
   const [isLoadingDdReport, setIsLoadingDdReport] = useState(false);
+  const [isLoadingLegalEvents, setIsLoadingLegalEvents] = useState(false);
+  const [legalEventsError, setLegalEventsError] = useState<string | null>(null);
+  const [aiAnalysisError, setAiAnalysisError] = useState<string | null>(null);
+  const [aiSlowNetworkHint, setAiSlowNetworkHint] = useState(false);
+  const aiRunInFlightRef = useRef(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
@@ -157,7 +196,9 @@ export default function DossierView({
   // Current pipeline stage
   const currentStage = annotation.stage || 'New';
   const lifecycleStep = STAGE_TO_LIFECYCLE[currentStage] ?? 0;
-  const isOilAndGas = (item?.sector || '').toLowerCase() === 'oil_and_gas';
+  const isOilAndGas = isOilAndGasLicense(item?.sector, commodityListLabel);
+  const volumeUnit = getLicenseVolumeUnit(item?.sector, commodityListLabel);
+  const heroImageUrl = item ? getLicenseHeroImageUrl(item) : '/assets/commodities/mining.png';
   const isStorageTerminal = item?.entityKind === 'storage_terminal';
   const isPortLogistics = item?.entityKind === 'port' || item?.entityKind === 'logistics_node';
   const oilCategory = inferOilCategory(effectiveCommodityRaw);
@@ -169,12 +210,19 @@ export default function DossierView({
 
   const runAiAnalysis = async () => {
     if (!item) return;
+    if (aiRunInFlightRef.current) return;
+    aiRunInFlightRef.current = true;
+    setAiAnalysisError(null);
+    setAiSlowNetworkHint(false);
     setAiAnalysis('');
     setIsAnalyzing(true);
+    const controller = new AbortController();
+    const clientTimeout = window.setTimeout(() => controller.abort(), AI_ANALYZE_CLIENT_TIMEOUT_MS);
     try {
       const token = localStorage.getItem('mining_token');
       const res = await fetch(`${API_BASE}/api/ai/analyze`, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -189,19 +237,56 @@ Output requirements:
           context: { type: 'DOSSIER', item_id: item.id, entity_kind: item.entityKind || 'license' },
         }),
       });
-      const data = await res.json();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = (await res.json()) as Record<string, unknown>;
+      } catch {
+        data = null;
+      }
+      if (!res.ok) {
+        setAiAnalysis('');
+        setAiAnalysisError(formatAiAnalyzeFailureMessage(res.status, data));
+        return;
+      }
       if (data?.ddReport && typeof data.ddReport === 'object') {
-        setLatestDdReport(data.ddReport as DdReport);
+        const ddReport = data.ddReport as DdReport;
+        setLatestDdReport(ddReport);
+        if (Array.isArray(ddReport.legalEvents)) {
+          setLegalEvents(ddReport.legalEvents);
+        }
       }
       setAiAnalysis(
-        data.analysis || data.response || 'No tactical data available for this site.'
+        (typeof data?.analysis === 'string' && data.analysis) ||
+          (typeof data?.response === 'string' && data.response) ||
+          'No tactical data available for this site.'
       );
-    } catch (_) {
-      setAiAnalysis('Intelligence link failed. Manual verification recommended.');
+    } catch (err: unknown) {
+      setAiAnalysis('');
+      const name = err && typeof err === 'object' && 'name' in err ? String((err as { name?: string }).name) : '';
+      if (name === 'AbortError') {
+        setAiAnalysisError(
+          'This scan is taking a long time and was stopped on this device. The network or upstream AI may be slow — try again in a minute.'
+        );
+      } else {
+        setAiAnalysisError('Intelligence link failed. Manual verification recommended.');
+      }
     } finally {
+      window.clearTimeout(clientTimeout);
+      aiRunInFlightRef.current = false;
       setIsAnalyzing(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAnalyzing) {
+      setAiSlowNetworkHint(false);
+      return;
+    }
+    const t = window.setTimeout(() => setAiSlowNetworkHint(true), 8000);
+    return () => {
+      window.clearTimeout(t);
+    };
+  }, [isAnalyzing]);
 
   useEffect(() => {
     if (isOpen && item) {
@@ -224,6 +309,7 @@ Output requirements:
     if (!isOpen || !item) {
       setLatestDdReport(null);
       setAiAnalysis('');
+      setAiAnalysisError(null);
       setIsLoadingDdReport(false);
       return () => {
         isCancelled = true;
@@ -237,6 +323,7 @@ Output requirements:
         setLatestDdReport(report);
         if (report?.analysis?.trim()) {
           setAiAnalysis(report.analysis);
+          setAiAnalysisError(null);
           return;
         }
         void runAiAnalysis();
@@ -332,6 +419,46 @@ Output requirements:
     };
   }, [isOpen, item?.id]);
 
+  // Load persisted legal/litigation events when the dossier opens. The AI
+  // extraction path runs inside /api/ai/analyze, so this read is cheap and
+  // safe to repeat — the backend just returns whatever is in legal_events.
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item) {
+      setLegalEvents([]);
+      setLegalEventsError(null);
+      setIsLoadingLegalEvents(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingLegalEvents(true);
+    setLegalEventsError(null);
+
+    getLegalEvents(item.id, item.entityKind || 'license')
+      .then((events) => {
+        if (!isCancelled) {
+          setLegalEvents(events);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setLegalEvents([]);
+          setLegalEventsError('Unable to load legal history right now.');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingLegalEvents(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id]);
+
   useEffect(() => {
     if (commodityLabels.length === 0) {
       setSelectedCommodity('');
@@ -373,13 +500,38 @@ Output requirements:
   const publicBusinessContacts = entityContacts.filter(
     (contact) => (contact.contactScope || 'public_business') === 'public_business'
   );
-  const publicPhoneContact = publicBusinessContacts.find((contact) => contact.contactType === 'phone');
+  const sourceBackedPhoneContact = publicBusinessContacts.find(
+    (contact) => contact.contactType === 'phone' && (contact.discoveredBy || 'open_data') !== 'ai'
+  );
+  const aiDiscoveredPhoneContacts = publicBusinessContacts.filter(
+    (contact) => contact.contactType === 'phone' && contact.discoveredBy === 'ai'
+  );
+  const publicPhoneContact = sourceBackedPhoneContact || aiDiscoveredPhoneContacts[0];
   const publicWebsiteContact = publicBusinessContacts.find((contact) => contact.contactType === 'website');
   const ddExtractedContacts = latestDdReport?.extractedContacts || [];
+  const ddDiscoveredPhones = latestDdReport?.discoveredPhones || [];
   const ddAutoPromotedPhones = ddExtractedContacts.filter(
     (contact) => contact.contactType === 'phone' && contact.autoPromoted
   );
   const ddLastRunLabel = formatDdTimestamp(latestDdReport?.createdAt);
+
+  // Litigation split. We never assume an "either/or" — "subject" is the
+  // safe bucket for any case the AI/adapter could not unambiguously classify.
+  const legalEventsAsDefendant = legalEvents.filter((event) =>
+    ['defendant', 'respondent'].includes((event.role || '').toLowerCase()),
+  );
+  const legalEventsAsPlaintiff = legalEvents.filter((event) =>
+    ['plaintiff', 'petitioner', 'claimant', 'complainant', 'applicant'].includes(
+      (event.role || '').toLowerCase(),
+    ),
+  );
+  const legalEventsOther = legalEvents.filter(
+    (event) => !legalEventsAsDefendant.includes(event) && !legalEventsAsPlaintiff.includes(event),
+  );
+  const legalStubOnly =
+    legalEvents.length > 0 &&
+    legalEvents.every((event) => (event.sourceType || '').toLowerCase() === 'stub_fixture');
+
   const privateLeadName = annotation.contactPerson || item.contactPerson || t('לא ידוע', 'Not identified');
   const privateLeadPhone = annotation.phoneNumber || item.phoneNumber || '—';
   const sourceKindLabel = formatSourceKindLabel(terminalDetails.sourceKind);
@@ -453,6 +605,16 @@ Output requirements:
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+              {onAddToDueDiligence && onRemoveFromDueDiligence && (
+                <div className="hidden sm:block w-52">
+                  <AddToDueDiligenceButton
+                    compact
+                    isInQueue={isInDdQueue}
+                    onAdd={onAddToDueDiligence}
+                    onRemove={onRemoveFromDueDiligence}
+                  />
+                </div>
+              )}
               <Button
                 variant="outline"
                 className="h-10 border-black/10 dark:border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-black/5 dark:hover:bg-white/5 px-3 sm:px-6 text-slate-600 dark:text-slate-300"
@@ -471,6 +633,15 @@ Output requirements:
           </header>
 
           <main className="max-w-[1400px] mx-auto p-4 sm:p-6 md:p-10 pb-16 sm:pb-32">
+            {onAddToDueDiligence && onRemoveFromDueDiligence && (
+              <div className="sm:hidden mb-6">
+                <AddToDueDiligenceButton
+                  isInQueue={isInDdQueue}
+                  onAdd={onAddToDueDiligence}
+                  onRemove={onRemoveFromDueDiligence}
+                />
+              </div>
+            )}
             {/* Deal Lifecycle Strip — driven by annotation.stage */}
             <div className="mb-6 md:mb-10 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -982,26 +1153,188 @@ Output requirements:
                   <div className="min-h-[150px] w-full max-h-[min(70vh,640px)] overflow-y-auto pr-1">
                     {isAnalyzing || isLoadingDdReport ? (
                       <div className="flex min-h-[150px] flex-col items-center justify-center gap-3">
-                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">
+                        <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse text-center px-2">
                           {isAnalyzing ? 'Analyzing Intelligence...' : 'Loading saved DD...'}
                         </span>
+                        {isAnalyzing && aiSlowNetworkHint && (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 text-center max-w-xs leading-relaxed">
+                            Still working — slow networks or busy AI hosts can take over a minute.
+                          </span>
+                        )}
                       </div>
                     ) : aiAnalysis.trim() ? (
                       <AiIntelligenceReport content={aiAnalysis} />
                     ) : (
-                      <p className="text-sm text-slate-400 leading-relaxed py-4">
-                        {t('אין ניתוח עדיין. לחץ להרצה.', 'No analysis yet. Use the button below to run a scan.')}
-                      </p>
+                      <div className="space-y-2 py-4">
+                        <p className="text-sm text-slate-400 leading-relaxed">
+                          {t('אין ניתוח עדיין. לחץ להרצה.', 'No analysis yet. Use the button below to run a scan.')}
+                        </p>
+                        {aiAnalysisError && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">{aiAnalysisError}</p>
+                        )}
+                      </div>
                     )}
                   </div>
                   <Button
                     onClick={runAiAnalysis}
-                    disabled={isAnalyzing}
+                    disabled={isAnalyzing || isLoadingDdReport}
                     className="mt-6 w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px]"
                   >
                     {isAnalyzing ? 'Analyzing...' : 'Re-Run Intelligence Scan'}
                   </Button>
+                </div>
+
+                {/* ── Litigation history ── */}
+                <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-5">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <LucideScale className="w-4 h-4 text-amber-500" /> Litigation &amp; Regulatory History
+                    </h4>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isLoadingLegalEvents && (
+                        <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
+                          Loading
+                        </Badge>
+                      )}
+                      {!isLoadingLegalEvents && legalEvents.length > 0 && (
+                        <Badge className="bg-amber-500/15 text-amber-500 border-none text-[9px] font-black uppercase">
+                          {legalEvents.length} events
+                        </Badge>
+                      )}
+                      {legalStubOnly && (
+                        <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
+                          Stub feed
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Public lawsuits, regulatory actions, and arbitration matters tied to this entity.
+                    Configure <code className="font-mono">COURTLISTENER_API_KEY</code>,{' '}
+                    <code className="font-mono">PACER_API_TOKEN</code>, or a KYB provider key to replace the stub
+                    feed with live data. AI-extracted events appear alongside adapter-sourced rows and are
+                    re-fingerprinted so re-running DD does not duplicate cases.
+                  </p>
+
+                  {legalEventsError && (
+                    <p className="text-[10px] text-red-500 font-bold">{legalEventsError}</p>
+                  )}
+
+                  <LegalEventSection
+                    title="Litigation — as defendant"
+                    description="Cases where this entity (or a closely-related party) was sued, prosecuted, or named as respondent."
+                    icon={LucideGavel}
+                    accentClass="text-red-400"
+                    badgeClass="bg-red-500/10 text-red-400"
+                    events={legalEventsAsDefendant}
+                  />
+                  <LegalEventSection
+                    title="Litigation — as plaintiff"
+                    description="Cases this entity has initiated against counterparties, contractors, or regulators."
+                    icon={LucideScale}
+                    accentClass="text-emerald-400"
+                    badgeClass="bg-emerald-500/10 text-emerald-400"
+                    events={legalEventsAsPlaintiff}
+                  />
+                  {legalEventsOther.length > 0 && (
+                    <LegalEventSection
+                      title="Other legal events"
+                      description="Cases where the AI/adapter could not unambiguously assign a plaintiff/defendant role yet."
+                      icon={LucideScale}
+                      accentClass="text-slate-400"
+                      badgeClass="bg-slate-500/10 text-slate-400"
+                      events={legalEventsOther}
+                    />
+                  )}
+
+                  {!isLoadingLegalEvents && legalEvents.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4">
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        No legal history on record. Running a fresh DD scan will trigger the AI legal extractor
+                        and the configured litigation adapters.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── AI-discovered public phones ── */}
+                <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                      <LucidePhone className="w-4 h-4 text-emerald-500" /> Phones discovered by AI
+                    </h4>
+                    {(ddDiscoveredPhones.length > 0 || aiDiscoveredPhoneContacts.length > 0) && (
+                      <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
+                        {Math.max(ddDiscoveredPhones.length, aiDiscoveredPhoneContacts.length)} on file
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    These numbers were located by the AI during a DD run and persisted to{' '}
+                    <code className="font-mono">entity_contacts</code> with{' '}
+                    <code className="font-mono">discovered_by='ai'</code> and confidence capped at 0.7.
+                    They show up everywhere a public business phone is rendered — including the dossier card
+                    and the map popup — but stay clearly distinguishable from source-backed numbers so an
+                    analyst can verify them before promoting.
+                  </p>
+
+                  {aiDiscoveredPhoneContacts.length === 0 && ddDiscoveredPhones.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-4">
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        No AI-discovered phones yet. Re-run the DD scan above and the AI will attempt to locate
+                        public business numbers (head office, switchboard, reception) for this entity.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {aiDiscoveredPhoneContacts.map((contact) => (
+                        <div
+                          key={contact.id}
+                          className="rounded-2xl border border-emerald-500/20 bg-white/60 dark:bg-slate-950/60 p-4"
+                        >
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <Badge className="bg-emerald-500/15 text-emerald-500 border-none text-[9px] font-black uppercase">
+                              AI-discovered
+                            </Badge>
+                            <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[9px] font-black uppercase">
+                              In contacts DB
+                            </Badge>
+                            {contact.phoneVerifiedAt && (
+                              <Badge className="bg-amber-500/15 text-amber-500 border-none text-[9px] font-black uppercase">
+                                Verified
+                              </Badge>
+                            )}
+                            {contact.confidenceScore != null && (
+                              <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
+                                {Math.round((contact.confidenceScore || 0) * 100)}% confidence
+                              </Badge>
+                            )}
+                          </div>
+                          <a
+                            href={`tel:${contact.value}`}
+                            className="block text-sm font-black text-slate-900 dark:text-white break-all hover:text-emerald-500 transition-colors"
+                          >
+                            {contact.value}
+                          </a>
+                          {contact.label && (
+                            <p className="mt-1 text-[10px] text-slate-500">{contact.label}</p>
+                          )}
+                          {contact.sourceUrl && (
+                            <a
+                              href={contact.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-2 inline-block text-[10px] font-black uppercase tracking-widest text-cyan-500 hover:text-cyan-400"
+                            >
+                              View source
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1057,13 +1390,7 @@ Output requirements:
                     <div className="absolute inset-0 z-10 pointer-events-none opacity-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]" />
                     <div className="h-[200px] sm:h-[400px] w-full relative">
                       <img
-                        src={
-                          commoditySearchLabel.toLowerCase().includes('gold')
-                            ? '/assets/commodities/gold.png'
-                            : commoditySearchLabel.toLowerCase().includes('diamond')
-                            ? '/assets/commodities/diamond.png'
-                            : '/assets/commodities/satellite.png'
-                        }
+                        src={heroImageUrl}
                         className="w-full h-full object-cover grayscale-[20%] hover:grayscale-0 transition-all duration-1000"
                         alt="Commodity Visual"
                       />
@@ -1144,7 +1471,7 @@ Output requirements:
                       )}
                       <SpecItem
                         label={t('נפח מוערך', 'Estimated Volume')}
-                        value={`${annotation.quantity ?? item.capacity ?? 0} KG`}
+                        value={`${annotation.quantity ?? item.capacity ?? 0} ${volumeUnit}`}
                       />
                       <SpecItem
                         label={t('שווי מוערך', 'Estimated Valuation')}
@@ -1158,7 +1485,11 @@ Output requirements:
                       />
                       {publicPhoneContact && (
                         <SpecItem
-                          label={t('טלפון ציבורי', 'Public Phone')}
+                          label={
+                            publicPhoneContact.discoveredBy === 'ai'
+                              ? t('טלפון (גילוי AI)', 'Public Phone (AI-found)')
+                              : t('טלפון ציבורי', 'Public Phone')
+                          }
                           value={publicPhoneContact.value}
                         />
                       )}
@@ -1238,27 +1569,44 @@ Output requirements:
                     </h4>
                     <div className="space-y-6">
                       <div className="bg-white/60 dark:bg-slate-950/60 backdrop-blur-md rounded-2xl p-5 border border-indigo-500/20 min-h-[120px] w-full max-h-[min(55vh,520px)] overflow-y-auto">
-                        {isAnalyzing ? (
+                        {isAnalyzing || isLoadingDdReport ? (
                           <div className="flex min-h-[120px] flex-col items-center justify-center gap-3">
-                            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                            <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse">
-                              {t('מנתח...', 'Analyzing Intelligence...')}
+                            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-[10px] font-black text-indigo-400 uppercase animate-pulse text-center px-2">
+                              {isAnalyzing
+                                ? t('מנתח...', 'Analyzing Intelligence...')
+                                : t('טוען DD...', 'Loading saved DD...')}
                             </span>
+                            {isAnalyzing && aiSlowNetworkHint && (
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 text-center max-w-xs leading-relaxed">
+                                {t(
+                                  'רשת איטית — עדיין מעבד',
+                                  'Still working — slow networks or busy AI can take over a minute.'
+                                )}
+                              </span>
+                            )}
                           </div>
                         ) : aiAnalysis.trim() ? (
                           <AiIntelligenceReport content={aiAnalysis} className="text-left" />
                         ) : (
-                          <p className="text-xs text-slate-500 leading-relaxed py-2">
-                            {t(
-                              'הרץ סריקה לקבלת סיכום',
-                              'Run a scan to see a readable briefing here.'
+                          <div className="space-y-2 py-2">
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              {t(
+                                'הרץ סריקה לקבלת סיכום',
+                                'Run a scan to see a readable briefing here.'
+                              )}
+                            </p>
+                            {aiAnalysisError && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                                {aiAnalysisError}
+                              </p>
                             )}
-                          </p>
+                          </div>
                         )}
                       </div>
                       <Button
                         onClick={runAiAnalysis}
-                        disabled={isAnalyzing}
+                        disabled={isAnalyzing || isLoadingDdReport}
                         className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-widest text-[10px] shadow-2xl"
                       >
                         {isAnalyzing
@@ -1917,6 +2265,126 @@ function ReadRow({
         {label}
       </span>
       <span className="text-xs font-bold text-slate-600 dark:text-slate-300 text-right">{value}</span>
+    </div>
+  );
+}
+
+function LegalEventSection({
+  title,
+  description,
+  icon: Icon,
+  accentClass,
+  badgeClass,
+  events,
+}: {
+  title: string;
+  description: string;
+  icon: ComponentType<{ className?: string }>;
+  accentClass: string;
+  badgeClass: string;
+  events: LegalEvent[];
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h5 className={`text-[10px] font-black uppercase tracking-widest ${accentClass} flex items-center gap-2`}>
+          <Icon className="w-3.5 h-3.5" /> {title}
+        </h5>
+        <Badge className={`${badgeClass} border-none text-[9px] font-black uppercase`}>
+          {events.length}
+        </Badge>
+      </div>
+      <p className="text-[10px] text-slate-500 leading-relaxed">{description}</p>
+      {events.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 p-3">
+          <p className="text-[10px] text-slate-500 leading-relaxed">
+            No cases on record in this category yet.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {events.map((event) => (
+            <LegalEventCard key={event.id} event={event} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegalEventCard({ event }: { event: LegalEvent }) {
+  const filedDateLabel = (() => {
+    if (!event.filedDate) return null;
+    const parsed = new Date(event.filedDate);
+    if (Number.isNaN(parsed.getTime())) return event.filedDate;
+    return parsed.toLocaleDateString();
+  })();
+
+  const statusBadgeClass =
+    {
+      open: 'bg-amber-500/15 text-amber-500',
+      pending: 'bg-amber-500/15 text-amber-500',
+      filed: 'bg-amber-500/15 text-amber-500',
+      active: 'bg-amber-500/15 text-amber-500',
+      settled: 'bg-emerald-500/15 text-emerald-500',
+      dismissed: 'bg-slate-500/15 text-slate-400',
+      closed: 'bg-slate-500/15 text-slate-400',
+      concluded: 'bg-slate-500/15 text-slate-400',
+      withdrawn: 'bg-slate-500/15 text-slate-400',
+      appeal: 'bg-orange-500/15 text-orange-500',
+      judgment: 'bg-violet-500/15 text-violet-400',
+      judgement: 'bg-violet-500/15 text-violet-400',
+    }[(event.status || 'unknown').toLowerCase()] || 'bg-slate-500/15 text-slate-400';
+
+  return (
+    <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-white/60 dark:bg-slate-950/60 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <Badge className={`border-none text-[9px] font-black uppercase ${statusBadgeClass}`}>
+              {(event.status || 'unknown').toUpperCase()}
+            </Badge>
+            {event.discoveredBy && (
+              <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
+                {event.discoveredBy.replaceAll('_', ' ')}
+              </Badge>
+            )}
+            {event.confidenceScore != null && (
+              <Badge className="bg-indigo-500/10 text-indigo-400 border-none text-[9px] font-black uppercase">
+                {Math.round((event.confidenceScore || 0) * 100)}%
+              </Badge>
+            )}
+            {(event.sourceType || '').toLowerCase() === 'stub_fixture' && (
+              <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black uppercase">
+                Stub — awaiting live feed
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm font-black text-slate-900 dark:text-white">{event.caseTitle}</p>
+          {event.parties && (
+            <p className="mt-1 text-[10px] text-slate-500">Parties: {event.parties}</p>
+          )}
+          <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-slate-500">
+            {event.court && <span>Court: <span className="text-slate-700 dark:text-slate-200">{event.court}</span></span>}
+            {event.jurisdiction && <span>Jurisdiction: <span className="text-slate-700 dark:text-slate-200">{event.jurisdiction}</span></span>}
+            {filedDateLabel && <span>Filed: <span className="text-slate-700 dark:text-slate-200">{filedDateLabel}</span></span>}
+            {event.sourceName && <span>Source: <span className="text-slate-700 dark:text-slate-200">{event.sourceName}</span></span>}
+          </div>
+          {event.summary && (
+            <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">{event.summary}</p>
+          )}
+        </div>
+        {event.sourceUrl && (
+          <a
+            href={event.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] font-black uppercase tracking-widest text-cyan-500 hover:text-cyan-400 shrink-0"
+          >
+            View source
+          </a>
+        )}
+      </div>
     </div>
   );
 }

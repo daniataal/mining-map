@@ -9,6 +9,7 @@ from backend.services.ingest.open_data_sync import (
     AFRICA_COVERAGE_OVERRIDES,
     arcgis_geometry_centroid,
     get_source_registry_index,
+    infer_world_macro_region,
     normalize_feature,
 )
 from backend.services.ingest.csv_fallback_import import normalize_csv_row
@@ -87,6 +88,16 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(coverage[("New Zealand", "oil_and_gas")]["status"], "official_syncable")
         self.assertEqual(coverage[("Canada", "mining")]["status"], "official_syncable")
         self.assertEqual(coverage[("Canada", "oil_and_gas")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Norway", "oil_and_gas")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Finland", "mining")]["status"], "official_syncable")
+        self.assertEqual(coverage[("Australia", "mining")]["status"], "official_syncable")
+
+    def test_infer_world_macro_region_buckets(self):
+        self.assertEqual(infer_world_macro_region("Norway"), "europe")
+        self.assertEqual(infer_world_macro_region("Saudi Arabia"), "middle_east")
+        self.assertEqual(infer_world_macro_region("Japan"), "asia_pacific")
+        self.assertEqual(infer_world_macro_region("Kenya"), "africa")
+        self.assertEqual(infer_world_macro_region("Global"), "other")
 
     def test_overrides_mark_restricted_and_portal_only_countries(self):
         self.assertEqual(

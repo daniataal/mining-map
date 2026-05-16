@@ -23,8 +23,8 @@ WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 REQUEST_TIMEOUT_SECONDS = 12
 UNLOCODE_CACHE_TTL_SECONDS = 60 * 60 * 24
 AIS_CACHE_TTL_SECONDS = 60
-AIS_DEFAULT_MAX_VESSELS = 300
-AIS_MAX_VESSELS = 2000
+AIS_DEFAULT_MAX_VESSELS = 1000
+AIS_MAX_VESSELS = 5000
 AIS_DEFAULT_CAPTURE_WINDOW_SECONDS = 10
 AIS_MIN_CAPTURE_WINDOW_SECONDS = 4
 AIS_MAX_CAPTURE_WINDOW_SECONDS = 18
@@ -148,10 +148,8 @@ def _normalize_vessel_scope(scope: str) -> str:
 
 
 def _ship_matches_scope(ship_type_label: str, vessel_scope: str) -> bool:
-    normalized_scope = _normalize_vessel_scope(vessel_scope)
-    if normalized_scope == "all_vessels":
-        return True
-    return ship_type_label == "Tanker"
+    # We now fetch all vessels and filter on the client side for better UX.
+    return True
 
 
 def _parse_datetime(value: Any) -> Optional[datetime]:
@@ -965,47 +963,28 @@ def build_counterparty_proxies(
 
 
 def _parse_ais_message(raw_message: dict[str, Any]) -> tuple[Optional[str], dict[str, Any]]:
-    message_type = _clean_text(raw_message.get("MessageType"))
+    """Legacy helper — prefer vessel_ais.merge_ais_stream_message for full payloads."""
+    try:
+        from backend.services.vessel_ais import merge_ais_stream_message, new_vessel_accumulator
+    except ImportError:
+        from services.vessel_ais import merge_ais_stream_message, new_vessel_accumulator
+
     metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
     body_holder = raw_message.get("Message") or {}
+    body: dict[str, Any] = {}
     if isinstance(body_holder, dict):
+        message_type = _clean_text(raw_message.get("MessageType"))
         body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
-    else:
-        body = {}
+        if not isinstance(body, dict):
+            body = {}
 
-    mmsi = str(
-        metadata.get("MMSI")
-        or body.get("UserID")
-        or body.get("MMSI")
-        or ""
-    ).strip()
+    mmsi = str(metadata.get("MMSI") or body.get("UserID") or body.get("MMSI") or "").strip()
     if not mmsi:
         return None, {}
 
-    ship_name = _clean_text(metadata.get("ShipName") or body.get("Name"))
-    lat = metadata.get("latitude")
-    if lat is None:
-        lat = metadata.get("Latitude", body.get("Latitude"))
-    lng = metadata.get("longitude")
-    if lng is None:
-        lng = metadata.get("Longitude", body.get("Longitude"))
-
-    parsed = {
-        "mmsi": mmsi,
-        "vessel_name": ship_name or f"MMSI {mmsi}",
-        "lat": float(lat) if lat not in (None, "") else None,
-        "lng": float(lng) if lng not in (None, "") else None,
-        "observed_at": _clean_text(metadata.get("time_utc")) or _now_iso(),
-        "speed_knots": body.get("Sog"),
-        "course_over_ground": body.get("Cog"),
-        "true_heading": body.get("TrueHeading"),
-        "call_sign": _clean_text(body.get("CallSign")) or None,
-        "imo": _clean_text(body.get("ImoNumber") or body.get("IMO") or body.get("Imo")) or None,
-        "destination": _clean_text(body.get("Destination")) or None,
-        "raw_type": body.get("Type") or body.get("TypeAndCargo") or body.get("ShipType"),
-        "message_type": message_type,
-    }
-    return mmsi, parsed
+    accumulator = new_vessel_accumulator(mmsi)
+    merge_ais_stream_message(accumulator, raw_message)
+    return mmsi, accumulator
 
 
 async def _collect_ais_snapshot(
@@ -1034,6 +1013,11 @@ async def _collect_ais_snapshot(
             max_vessels=normalized_max_vessels,
             plan=plan,
         )
+
+    try:
+        from backend.services.vessel_ais import merge_ais_stream_message, new_vessel_accumulator
+    except ImportError:
+        from services.vessel_ais import merge_ais_stream_message, new_vessel_accumulator
 
     try:
         import websockets  # type: ignore
@@ -1080,11 +1064,27 @@ async def _collect_ais_snapshot(
                     continue
 
                 raw_message = json.loads(message_json)
-                mmsi, parsed = _parse_ais_message(raw_message)
+                metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
+                body_holder = raw_message.get("Message") or {}
+                body: dict[str, Any] = {}
+                if isinstance(body_holder, dict):
+                    message_type = _clean_text(raw_message.get("MessageType"))
+                    body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
+                    if not isinstance(body, dict):
+                        body = {}
+                mmsi = str(
+                    (metadata.get("MMSI") if isinstance(metadata, dict) else None)
+                    or body.get("UserID")
+                    or body.get("MMSI")
+                    or ""
+                ).strip()
                 if not mmsi:
                     continue
-                current = vessels.setdefault(mmsi, {"mmsi": mmsi})
-                current.update({key: value for key, value in parsed.items() if value not in (None, "", [])})
+                current = vessels.get(mmsi)
+                if current is None:
+                    current = new_vessel_accumulator(mmsi)
+                    vessels[mmsi] = current
+                merge_ais_stream_message(current, raw_message)
                 if len(vessels) >= raw_target_count:
                     break
     except Exception as exc:
@@ -1097,38 +1097,24 @@ async def _collect_ais_snapshot(
             plan=plan,
         )
 
+    try:
+        from backend.services.vessel_ais import finalize_vessel_record
+    except ImportError:
+        from services.vessel_ais import finalize_vessel_record
+
     results = []
-    for vessel in vessels.values():
-        ship_type_code, ship_type_label = classify_ais_ship_type(vessel.get("raw_type"))
-        if not _ship_matches_scope(ship_type_label, normalized_scope):
-            continue
-        if vessel.get("lat") is None or vessel.get("lng") is None:
-            continue
-        matched_port = match_destination_to_port(vessel.get("destination") or "")
-        if matched_port is None:
-            nearest = find_nearest_ports(lat=vessel["lat"], lng=vessel["lng"], limit=1)
-            matched_port = nearest[0] if nearest else None
-        results.append(
-            {
-                "id": f"ais:{vessel['mmsi']}",
-                "mmsi": vessel["mmsi"],
-                "vessel_name": vessel.get("vessel_name") or f"MMSI {vessel['mmsi']}",
-                "lat": vessel["lat"],
-                "lng": vessel["lng"],
-                "observed_at": vessel.get("observed_at") or _now_iso(),
-                "source_label": "AISStream",
-                "source_url": "https://aisstream.io/documentation",
-                "speed_knots": vessel.get("speed_knots"),
-                "course_over_ground": vessel.get("course_over_ground"),
-                "true_heading": vessel.get("true_heading"),
-                "ship_type_code": ship_type_code,
-                "ship_type_label": ship_type_label,
-                "call_sign": vessel.get("call_sign"),
-                "imo": vessel.get("imo"),
-                "destination": vessel.get("destination"),
-                "nearest_port": matched_port,
-            }
+    for accumulator in vessels.values():
+        record = finalize_vessel_record(
+            accumulator,
+            classify_ship_type=classify_ais_ship_type,
+            match_destination_to_port=match_destination_to_port,
+            find_nearest_ports=find_nearest_ports,
         )
+        if record is None:
+            continue
+        if not _ship_matches_scope(record.get("ship_type_label") or "", normalized_scope):
+            continue
+        results.append(record)
 
     results.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
     source_label = {

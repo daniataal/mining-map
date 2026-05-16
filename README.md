@@ -56,6 +56,19 @@ Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. Aft
 
 Production compose now keeps Postgres on the internal Docker network only (no host `5432` publish). Backend and worker still connect through `DB_HOST=db` / `DB_PORT=5432`, so app behavior is unchanged. If your VM previously exposed `5432`, immediately block it at firewall/security-group level and rotate the DB password.
 
+### Open data: regions, sources, verification
+
+Live licence/tenure rows are ingested from configured ArcGIS/FeatureServer endpoints on backend startup and via `POST /api/admin/open-data/sync` (admin token). **Official** layers use `record_origin=open_data` and `sourceKind=official_registry` in `GET /licenses`. **Fallback** site/field visibility (not concession registries) uses `record_origin=global_open_fallback`.
+
+- **Coverage dashboard**: `GET /api/open-data/coverage/world` — optional `region` query (`middle_east`, `europe`, `asia` / `asia_pacific`, `africa`, `americas`, `other`, or `all`). Response includes `regional_summary` (full world) and per-country `macro_region`.
+- **Re-sync selected sources** (requires DB + `psycopg2`; example inside the `backend` container or venv with deps):
+
+```bash
+python3 -c "from backend.services.ingest.open_data_sync import sync_open_data_sources; print(sync_open_data_sources(source_ids=['norway_npd_production_licences_current','finland_tukes_active_mining_areas','australia_queensland_mineral_tenement','usgs_mrds_global']))"
+```
+
+- **Endpoint smoke checks** (no DB): confirm ArcGIS layers return counts, e.g. Norway NPD layer ~1809 features, Finland Tukes active mining areas ~30, Queensland mineral tenement ~5309.
+
 ### Deploy-time fallback CSV auto-import
 
 The GitHub Actions deploy workflow now supports automatic fallback CSV import for

@@ -204,6 +204,8 @@ function classifyCommodity(label: string): string {
     normalized.includes('crude') ||
     normalized.includes('petroleum') ||
     normalized.includes('hydrocarbon') ||
+    normalized.includes('oil & gas') ||
+    normalized.includes('oil and gas') ||
     normalized.includes('oil')
   ) {
     return 'crude_oil';

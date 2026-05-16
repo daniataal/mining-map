@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
+import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -46,6 +47,9 @@ interface SidebarProps {
     highConfidence: number;
     topCountries: Array<{ country: string; count: number }>;
   };
+  isInDdQueue?: (id: string) => boolean;
+  onAddToDueDiligence?: (id: string) => void;
+  onRemoveFromDueDiligence?: (id: string) => void;
 }
 
 export default function Sidebar({
@@ -66,6 +70,9 @@ export default function Sidebar({
   setIsPinned,
   isCollapsed,
   infrastructureStats,
+  isInDdQueue,
+  onAddToDueDiligence,
+  onRemoveFromDueDiligence,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -285,6 +292,16 @@ export default function Sidebar({
                         </Badge>
                       )}
                     </div>
+                    {isInDdQueue && onAddToDueDiligence && onRemoveFromDueDiligence && (
+                      <div className={`mt-3 ${isSelected ? '' : 'opacity-80 group-hover:opacity-100'} transition-opacity`}>
+                        <AddToDueDiligenceButton
+                          compact
+                          isInQueue={isInDdQueue(item.id)}
+                          onAdd={() => onAddToDueDiligence(item.id)}
+                          onRemove={() => onRemoveFromDueDiligence(item.id)}
+                        />
+                      </div>
+                    )}
                   </motion.div>
                 );
               })}

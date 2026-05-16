@@ -3,7 +3,10 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+import time
+import uuid
+from datetime import date, datetime, time as dt_time
+from decimal import Decimal
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -123,6 +126,39 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _env_int_bounded(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        v = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, v))
+
+
+def _ai_http_timeout_seconds() -> float:
+    """Per-attempt socket timeout for outbound LLM HTTP calls (Groq, OpenRouter, Pollinations)."""
+    return float(_env_int_bounded("AI_HTTP_TIMEOUT_SECONDS", 90, minimum=5, maximum=600))
+
+
+def _ai_http_extra_retries() -> int:
+    """Retries after the first failed attempt (timeouts, connection errors, retryable HTTP status)."""
+    return _env_int_bounded("AI_HTTP_MAX_RETRIES", 2, minimum=0, maximum=6)
+
+
+def _retry_backoff_seconds(attempt_idx: int) -> float:
+    return min(30.0, 0.75 * (2 ** attempt_idx))
+
+
+def _is_retryable_http_status(code: int) -> bool:
+    return code in (408, 429, 502, 503, 504)
+
+
+def _pollinations_fallback_enabled() -> bool:
+    return (os.getenv("DISABLE_POLLINATIONS_FALLBACK") or "").strip().lower() not in ("1", "true", "yes", "on")
+
+
 def _provider_specs() -> list[dict[str, Any]]:
     return [
         {
@@ -159,17 +195,51 @@ def _request_chat_completion(
             {"role": "user", "content": user_prompt},
         ],
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=20)
-    if response.status_code != 200:
-        raise RuntimeError(f"{provider_name} returned {response.status_code}: {response.text[:500]}")
-    data = response.json()
-    content = data["choices"][0]["message"]["content"]
-    return {
-        "provider": provider_name,
-        "model": model,
-        "content": content,
-        "raw_response": data,
-    }
+    timeout = _ai_http_timeout_seconds()
+    attempts = 1 + _ai_http_extra_retries()
+    last_exc: Optional[BaseException] = None
+
+    for attempt in range(attempts):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            if response.status_code == 200:
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                return {
+                    "provider": provider_name,
+                    "model": model,
+                    "content": content,
+                    "raw_response": data,
+                }
+            if _is_retryable_http_status(response.status_code) and attempt < attempts - 1:
+                logger.warning(
+                    "%s model %s HTTP %s; retrying (%s/%s)",
+                    provider_name,
+                    model,
+                    response.status_code,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise RuntimeError(f"{provider_name} returned {response.status_code}: {response.text[:500]}")
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                logger.warning(
+                    "%s model %s transient network error: %s; retrying (%s/%s)",
+                    provider_name,
+                    model,
+                    exc,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"{provider_name} request failed after {attempts} attempts")
 
 
 def _run_provider_cascade(system_prompt: str, user_prompt: str) -> Optional[dict[str, Any]]:
@@ -198,15 +268,42 @@ def _pollinations_analysis(system_prompt: str, user_prompt: str) -> Optional[dic
     import requests
 
     url = f"https://text.pollinations.ai/{requests.utils.quote(system_prompt + ' ' + user_prompt)}"
-    response = requests.get(url, timeout=20)
-    if response.status_code != 200:
-        raise RuntimeError(f"Pollinations returned {response.status_code}")
-    return {
-        "provider": "Pollinations (Fallback)",
-        "model": "text-proxy",
-        "content": response.text,
-        "raw_response": {"text": response.text},
-    }
+    timeout = _ai_http_timeout_seconds()
+    attempts = 1 + _ai_http_extra_retries()
+    last_exc: Optional[BaseException] = None
+
+    for attempt in range(attempts):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 200:
+                return {
+                    "provider": "Pollinations (Fallback)",
+                    "model": "text-proxy",
+                    "content": response.text,
+                    "raw_response": {"text": response.text},
+                }
+            if _is_retryable_http_status(response.status_code) and attempt < attempts - 1:
+                logger.warning(
+                    "Pollinations HTTP %s; retrying (%s/%s)",
+                    response.status_code,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise RuntimeError(f"Pollinations returned {response.status_code}")
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                logger.warning(
+                    "Pollinations transient error: %s; retrying (%s/%s)", exc, attempt + 2, attempts
+                )
+                time.sleep(_retry_backoff_seconds(attempt))
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Pollinations request failed")
 
 
 def generate_markdown_analysis(query: str) -> dict[str, Any]:
@@ -230,6 +327,21 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "raw_response": provider_result["raw_response"],
         }
 
+    if not _pollinations_fallback_enabled():
+        logger.info("Pollinations fallback skipped (DISABLE_POLLINATIONS_FALLBACK is set)")
+        return {
+            "status": "error",
+            "provider": None,
+            "model": None,
+            "analysis": None,
+            "raw_response": None,
+            "error_code": "AI_ALL_PROVIDERS_FAILED",
+            "message": (
+                "No configured AI API returned a result and the Pollinations fallback is disabled. "
+                "Set GROQ_API_KEY or OPENROUTER_API_KEY, or unset DISABLE_POLLINATIONS_FALLBACK."
+            ),
+        }
+
     try:
         fallback = _pollinations_analysis(system_prompt, query)
         return {
@@ -247,12 +359,38 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "model": None,
             "analysis": None,
             "raw_response": None,
-            "message": "All intelligence providers are offline.",
+            "error_code": "AI_ALL_PROVIDERS_FAILED",
+            "message": (
+                "All intelligence providers are offline or timed out. "
+                "For faster, more reliable analysis, set GROQ_API_KEY or OPENROUTER_API_KEY."
+            ),
         }
 
 
+def _json_default_for_snapshot(obj: Any) -> Any:
+    """Values that appear in DB-backed dicts but are not JSON-native."""
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, dt_time):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    if isinstance(obj, (bytes, bytearray)):
+        return bytes(obj).decode("utf-8", errors="replace")
+    if isinstance(obj, set):
+        return list(obj)
+    raise TypeError(f"Object of type {type(obj).__name__!r} is not JSON serializable")
+
+
 def _source_snapshot_prompt(source_snapshot: dict[str, Any], max_chars: int = 16000) -> str:
-    serialized = json.dumps(source_snapshot, ensure_ascii=True, sort_keys=True)
+    _dumps_kw: dict[str, Any] = {
+        "ensure_ascii": True,
+        "sort_keys": True,
+        "default": _json_default_for_snapshot,
+    }
+    serialized = json.dumps(source_snapshot, **_dumps_kw)
     if len(serialized) <= max_chars:
         return serialized
 
@@ -260,10 +398,10 @@ def _source_snapshot_prompt(source_snapshot: dict[str, Any], max_chars: int = 16
     raw_payload = compact.pop("raw_payload", None)
     compact["raw_payload_truncated"] = raw_payload is not None
     if raw_payload is not None:
-        raw_payload_json = json.dumps(raw_payload, ensure_ascii=True, sort_keys=True)
+        raw_payload_json = json.dumps(raw_payload, **_dumps_kw)
         compact["raw_payload_excerpt"] = raw_payload_json[:8000]
 
-    serialized = json.dumps(compact, ensure_ascii=True, sort_keys=True)
+    serialized = json.dumps(compact, **_dumps_kw)
     return serialized[:max_chars]
 
 
@@ -355,9 +493,229 @@ def extract_source_backed_contacts(source_snapshot: Optional[dict[str, Any]]) ->
     }
 
 
+def _entity_brief_from_snapshot(source_snapshot: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Pull a minimal company description out of the dossier snapshot for LLM prompts."""
+    if not isinstance(source_snapshot, dict):
+        return {}
+    entity = source_snapshot.get("entity") if isinstance(source_snapshot.get("entity"), dict) else {}
+    source = source_snapshot.get("source") if isinstance(source_snapshot.get("source"), dict) else {}
+    return {
+        "company": entity.get("company"),
+        "country": entity.get("country"),
+        "region": entity.get("region"),
+        "sector": entity.get("sector"),
+        "commodity": entity.get("commodity"),
+        "license_type": entity.get("license_type"),
+        "status": entity.get("status"),
+        "source_name": source.get("source_name"),
+        "source_url": source.get("source_record_url") or source.get("source_url"),
+        "entity_id": entity.get("id"),
+    }
+
+
+def extract_legal_events_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
+    """Ask the LLM cascade for litigation history involving the entity.
+
+    The model is asked to return JSON only. Anything that cannot be parsed
+    is treated as "no signal" rather than raising — the caller falls back
+    to the live adapter / stub pipeline in ``services/legal_intel.py``.
+    """
+
+    company = (entity_brief.get("company") or "").strip()
+    if not company:
+        return {"status": "skipped", "provider": None, "model": None, "events": [], "raw_response": None}
+
+    country = entity_brief.get("country") or "unspecified jurisdiction"
+    sector = entity_brief.get("sector") or "mining/oil"
+
+    system_prompt = (
+        "You are a legal-intelligence analyst. Given a company brief, list ANY public litigation, "
+        "regulatory enforcement, arbitration, or major contract dispute you have evidence for. "
+        "Do not invent cases. If you only have weak signals, lower the confidence value. "
+        "Reply with JSON only in this exact shape: "
+        '{"events":[{"case_title":"...","parties":["...","..."],"role":"plaintiff|defendant|respondent|petitioner|third_party|subject",'
+        '"court":"...","jurisdiction":"...","filed_date":"YYYY-MM-DD","status":"open|pending|settled|dismissed|appeal|closed|unknown",'
+        '"summary":"one or two sentences","source_name":"...","source_url":"https://...","confidence":0.0}]}. '
+        "Use 'role' to record the entity's role in the case. If unknown, use 'subject'. "
+        "If you have no evidence at all, return {\"events\":[]}."
+    )
+    user_prompt = (
+        f"Company: {company}\nJurisdiction context: {country}\nSector: {sector}\n"
+        "Return JSON only. Do not include private individuals' identities."
+    )
+
+    provider_result = _run_provider_cascade(system_prompt, user_prompt)
+    if provider_result is None:
+        return {"status": "skipped", "provider": None, "model": None, "events": [], "raw_response": None}
+
+    parsed = _extract_json_object(provider_result["content"]) or {}
+    raw_events = parsed.get("events") if isinstance(parsed.get("events"), list) else []
+    return {
+        "status": "success",
+        "provider": provider_result["provider"],
+        "model": provider_result["model"],
+        "events": raw_events,
+        "raw_response": provider_result["raw_response"],
+    }
+
+
+def discover_phone_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
+    """Ask the LLM cascade for a public business phone for the company.
+
+    This is intentionally separate from ``extract_source_backed_contacts``
+    because here the AI is *searching* (not extracting from a provided
+    snapshot). The output is stored with ``source_type='ai_discovered'``
+    and ``discovered_by='ai'`` so the UI can clearly distinguish it from
+    open-data-backed numbers.
+    """
+
+    company = (entity_brief.get("company") or "").strip()
+    if not company:
+        return {"status": "skipped", "provider": None, "model": None, "phones": [], "raw_response": None}
+
+    country = entity_brief.get("country") or "unspecified country"
+    sector = entity_brief.get("sector") or "mining/oil"
+
+    system_prompt = (
+        "You are an OSINT analyst. Find public business contact numbers (head office, switchboard, "
+        "reception, customer service) for the company. Do NOT return personal mobile numbers, "
+        "WhatsApp numbers, or numbers you only have weak signal for. "
+        "Reply with JSON only in this exact shape: "
+        '{"phones":[{"value":"+CCC ... ...","label":"head office|switchboard|...","contact_role":"office|switchboard|reception|site",'
+        '"source_name":"...","source_url":"https://...","evidence_snippet":"...","confidence":0.0}]}. '
+        "Return {\"phones\":[]} when you do not have a defensible answer."
+    )
+    user_prompt = (
+        f"Company: {company}\nCountry: {country}\nSector: {sector}\n"
+        "Return JSON only with public business phone numbers and citations."
+    )
+
+    provider_result = _run_provider_cascade(system_prompt, user_prompt)
+    if provider_result is None:
+        return {"status": "skipped", "provider": None, "model": None, "phones": [], "raw_response": None}
+
+    parsed = _extract_json_object(provider_result["content"]) or {}
+    raw_phones = parsed.get("phones") if isinstance(parsed.get("phones"), list) else []
+    normalized: list[dict[str, Any]] = []
+    for phone in raw_phones:
+        if not isinstance(phone, dict):
+            continue
+        value = str(phone.get("value") or "").strip()
+        if not _is_valid_phone_value(value):
+            continue
+        normalized.append(
+            {
+                "contact_type": "phone",
+                "value": value,
+                "label": (phone.get("label") or "Public business phone").strip(),
+                "contact_scope": "public_business",
+                "contact_role": (phone.get("contact_role") or "office").strip().lower(),
+                "source_name": (phone.get("source_name") or "AI-discovered").strip(),
+                "source_url": (phone.get("source_url") or "").strip() or None,
+                "evidence_snippet": (phone.get("evidence_snippet") or "").strip() or None,
+                "confidence": _coerce_float(phone.get("confidence")) or 0.6,
+                "source_basis": "ai_discovered",
+                "extracted_from": "ai.discover_phone",
+            }
+        )
+
+    return {
+        "status": "success",
+        "provider": provider_result["provider"],
+        "model": provider_result["model"],
+        "phones": normalized,
+        "raw_response": provider_result["raw_response"],
+    }
+
+
+def build_ai_discovered_phone_candidates(
+    *,
+    entity_kind: str,
+    entity_id: str,
+    discovered_phones: list[dict[str, Any]],
+    report_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Produce ``entity_contacts`` rows for AI-discovered phones.
+
+    These rows live in the same DB table as the source-backed contacts but
+    are flagged with ``source_type='ai_discovered'`` and capped at 0.7
+    confidence so the UI can render a clear "AI-discovered (requires
+    verification)" badge. The fingerprint deliberately keys on
+    (entity, phone, source_url, ai_discovered) so re-running DD on the
+    same entity updates the row instead of duplicating it.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    for phone in discovered_phones:
+        value = str(phone.get("value") or "").strip()
+        if not _is_valid_phone_value(value):
+            continue
+        normalized_value = _normalized_phone_value(value)
+        source_url = (phone.get("source_url") or None)
+        source_name = phone.get("source_name") or "AI-discovered"
+        confidence = min((_coerce_float(phone.get("confidence")) or 0.6), 0.7)
+        fingerprint_raw = "|".join(
+            [
+                entity_kind,
+                entity_id,
+                "phone",
+                normalized_value,
+                "ai_discovered",
+                (source_url or "").lower(),
+            ]
+        )
+        fingerprint = hashlib.sha1(fingerprint_raw.encode("utf-8")).hexdigest()
+        candidates.append(
+            {
+                "id": fingerprint,
+                "fingerprint": fingerprint,
+                "entity_kind": entity_kind,
+                "entity_id": entity_id,
+                "contact_type": "phone",
+                "contact_scope": "public_business",
+                "label": phone.get("label") or "AI-discovered phone",
+                "value": value,
+                "normalized_value": normalized_value,
+                "source_name": source_name,
+                "source_url": source_url,
+                "source_type": "ai_discovered",
+                "confidence_score": confidence,
+                "raw_payload": {
+                    "dd_report_id": report_id,
+                    "phone": phone,
+                    "promotion_guardrails": {
+                        "required_scope": "public_business",
+                        "max_confidence": 0.7,
+                        "requires_human_verification": True,
+                    },
+                },
+                "extracted_from": phone.get("extracted_from") or "ai.discover_phone",
+                "verified_at": None,
+                "discovered_by": "ai",
+            }
+        )
+    return candidates
+
+
 def generate_dd_report(query: str, source_snapshot: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     analysis_result = generate_markdown_analysis(query)
     extraction_result = extract_source_backed_contacts(source_snapshot)
+
+    entity_brief = _entity_brief_from_snapshot(source_snapshot)
+    legal_result = extract_legal_events_via_ai(entity_brief) if entity_brief.get("company") else {
+        "status": "skipped",
+        "provider": None,
+        "model": None,
+        "events": [],
+        "raw_response": None,
+    }
+    phone_discovery_result = discover_phone_via_ai(entity_brief) if entity_brief.get("company") else {
+        "status": "skipped",
+        "provider": None,
+        "model": None,
+        "phones": [],
+        "raw_response": None,
+    }
 
     return {
         "status": analysis_result.get("status", "error"),
@@ -369,9 +727,20 @@ def generate_dd_report(query: str, source_snapshot: Optional[dict[str, Any]] = N
         "extraction_provider": extraction_result.get("provider"),
         "extraction_model": extraction_result.get("model"),
         "extraction_raw_response": extraction_result.get("raw_response"),
+        "legal_events": legal_result.get("events", []),
+        "legal_provider": legal_result.get("provider"),
+        "legal_model": legal_result.get("model"),
+        "legal_raw_response": legal_result.get("raw_response"),
+        "legal_status": legal_result.get("status", "skipped"),
+        "discovered_phones": phone_discovery_result.get("phones", []),
+        "phone_discovery_provider": phone_discovery_result.get("provider"),
+        "phone_discovery_model": phone_discovery_result.get("model"),
+        "phone_discovery_raw_response": phone_discovery_result.get("raw_response"),
+        "phone_discovery_status": phone_discovery_result.get("status", "skipped"),
         "prompt_version": DD_PROMPT_VERSION,
         "source_snapshot": source_snapshot,
         "message": analysis_result.get("message"),
+        "error_code": analysis_result.get("error_code"),
     }
 
 
