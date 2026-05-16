@@ -114,13 +114,14 @@ jobs:
         AUTO_IMPORT_LICENSES_CSV: ${{ steps.csv_import.outputs.enabled }}
         CSV_UPLOADED: ${{ steps.csv_import.outputs.csv_exists }}
         REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+        MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
         VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG
+        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -131,6 +132,7 @@ jobs:
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
+            printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_ACCESS_TOKEN"
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
