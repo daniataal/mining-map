@@ -1,7 +1,7 @@
-FROM postgres:15-alpine
+FROM postgres:15
 
 # Install PostGIS extension
-RUN apk add --no-cache postgis
-
-# Optional: Add any custom initialization scripts here
-# COPY ./init.sql /docker-entrypoint-initdb.d/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-15-postgis-3 \
+    postgresql-15-postgis-3-scripts \
+    && rm -rf /var/lib/apt/lists/*
