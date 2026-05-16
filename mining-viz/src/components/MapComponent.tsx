@@ -483,8 +483,7 @@ export default function MapComponent({
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
     const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
-    const [maritimeScope, setMaritimeScope] = useState<MaritimeVesselScope>('oil_tankers');
-    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('300');
+    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
@@ -518,10 +517,10 @@ export default function MapComponent({
         error: maritimeError,
         refetch: refetchMaritime,
     } = useMaritimeVessels({
-        enabled: isOilAndGasView && isMaritimeLayerEnabled,
+        enabled: isOilAndGasView, // Load in background even if layer is off
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
-        scope: maritimeScope,
+        scope: 'all_vessels',
         bbox: maritimeViewport,
     });
     const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
@@ -848,21 +847,7 @@ export default function MapComponent({
 
                                 {maritimeAdvancedOpen && (
                                     <div className="space-y-2.5 border-t border-black/5 pt-2.5 dark:border-white/5">
-                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                                            <div>
-                                                <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
-                                                    {t('היקף', 'Scope')}
-                                                </p>
-                                                <Select value={maritimeScope} onValueChange={(value) => setMaritimeScope(value as MaritimeVesselScope)}>
-                                                    <SelectTrigger className="h-8 w-full rounded-lg border-black/10 bg-white/70 text-[9px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/70">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
-                                                        <SelectItem value="oil_tankers">{t('מכליות נפט', 'Oil tankers')}</SelectItem>
-                                                        <SelectItem value="all_vessels">{t('כל כלי השיט', 'All vessels')}</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                                             <div>
                                                 <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
                                                     {t('מכסה', 'Cap')}
@@ -1009,9 +994,7 @@ export default function MapComponent({
 
                                         <div className="flex flex-wrap items-center gap-1.5">
                                             <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-500">
-                                                {maritimeScope === 'oil_tankers'
-                                                    ? t('מכליות בלבד', 'Tankers only')
-                                                    : t('כל כלי השיט', 'All vessels')}
+                                                {t('כל כלי השיט', 'All vessels')}
                                             </Badge>
                                             <Badge className="border-none bg-slate-950/10 text-[8px] font-black uppercase text-slate-600 dark:bg-white/10 dark:text-slate-300">
                                                 {Number(maritimeCaptureWindow)}s
