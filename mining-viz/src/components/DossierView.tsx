@@ -36,6 +36,10 @@ import {
   Upload as LucideUploadCloud,
   AlertTriangle as LucideAlertTriangle,
   CheckCircle2 as LucideCheckCircle2,
+  Ship as LucideShip,
+  Radio as LucideRadio,
+  Compass as LucideCompass,
+  Clock as LucideClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -78,6 +82,18 @@ function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string
     return 'The intelligence service could not complete this request. Please try again.';
   }
   return 'Intelligence request failed.';
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
 }
 
 interface DossierViewProps {
@@ -243,6 +259,31 @@ SECTION 18. LOCAL CONTENT COMPLIANCE
     return getEsgZoneIntersection(item.lat, item.lng);
   }, [item]);
   const isEsgRisk = esgZone !== null;
+
+  const [radarSweeping, setRadarSweeping] = useState(true);
+  const [dispatchedVessels, setDispatchedVessels] = useState<string[]>([]);
+
+  const mockAISVessels = useMemo(() => {
+    if (!item) return [];
+    const fleet = [
+      { name: 'Golden Horizon', type: 'Bulk Carrier', flag: 'Panama', speed: '12.4 kn', baseOffsetLat: 0.15, baseOffsetLng: -0.12 },
+      { name: 'Sea Sovereign', type: 'Crude Oil Tanker', flag: 'Marshall Islands', speed: '14.1 kn', baseOffsetLat: -0.08, baseOffsetLng: 0.22 },
+      { name: 'Star Orion', type: 'LNG Carrier', flag: 'Singapore', speed: '16.8 kn', baseOffsetLat: 0.28, baseOffsetLng: 0.05 },
+      { name: 'Atlantic Pioneer', type: 'General Cargo', flag: 'Liberia', speed: '10.2 kn', baseOffsetLat: -0.32, baseOffsetLng: -0.25 }
+    ];
+
+    return fleet.map(v => {
+      const vLat = (item.lat || 0) + v.baseOffsetLat;
+      const vLng = (item.lng || 0) + v.baseOffsetLng;
+      const distance = calculateDistanceKm(item.lat || 0, item.lng || 0, vLat, vLng);
+      return {
+        ...v,
+        lat: vLat,
+        lng: vLng,
+        distance
+      };
+    }).sort((a, b) => a.distance - b.distance);
+  }, [item]);
 
   const defaultLogs = useMemo(() => {
     if (!item) return [];
@@ -832,7 +873,7 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes'].map(tab => {
+              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'operations': 'Operations',
@@ -841,10 +882,13 @@ Output requirements:
                   'satellite': 'Satellite',
                   'owners': 'Ownership',
                   'counterparties': 'Counterparties',
+                  'vessel-alerts': 'Vessel Alerts',
                   'intelligence': 'AI Due Diligence',
                   'raw-evidence': 'Raw Evidence',
                   'document-ai': 'Document AI',
-                  'human-notes': 'Human Notes'
+                  'human-notes': 'Human Notes',
+                  'execution': 'Execution Checklist',
+                  'logs': 'Audit Logs'
                 };
                 return (
                 <button
@@ -1012,6 +1056,182 @@ Output requirements:
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* VESSEL ALERTS TAB (PILLAR C) */}
+            {activeTab === 'vessel-alerts' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Radar Sweep & Congestion Index HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Radar sweep indicator */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] shadow-lg">
+                    {radarSweeping && (
+                      <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none animate-pulse" />
+                    )}
+                    <div className="relative w-24 h-24 rounded-full border border-cyan-500/20 flex items-center justify-center overflow-hidden">
+                      {/* Sweep sweep line */}
+                      {radarSweeping && (
+                        <div className="absolute inset-0 origin-center bg-gradient-to-tr from-cyan-500/10 to-transparent rounded-full animate-[spin_4s_linear_infinite]" />
+                      )}
+                      <div className="w-16 h-16 rounded-full border border-cyan-500/30 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full border border-cyan-500/40 flex items-center justify-center">
+                          <LucideRadio className="w-4 h-4 text-cyan-400 animate-pulse" />
+                        </div>
+                      </div>
+                      <div className="absolute bottom-2 w-2 h-2 bg-red-500 rounded-full animate-ping" style={{ left: '30%', top: '25%' }} />
+                      <div className="absolute bottom-2 w-2 h-2 bg-yellow-500 rounded-full animate-ping" style={{ right: '25%', bottom: '30%' }} />
+                    </div>
+                    
+                    <div className="text-center mt-4">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        {t('מכ״ם הגנה פעיל', 'Active Radar Sweep')}
+                      </h4>
+                      <Button
+                        onClick={() => setRadarSweeping(!radarSweeping)}
+                        variant="ghost"
+                        className="h-6 mt-1 px-3 text-[9px] text-cyan-400 hover:text-cyan-300 font-bold uppercase tracking-wider bg-cyan-500/10 hover:bg-cyan-500/20 rounded-full"
+                      >
+                        {radarSweeping ? t('כבה סריקה', 'PAUSE RADAR') : t('הפעל סריקה', 'START RADAR')}
+                      </Button>
+                    </div>
+                  </Card>
+
+                  {/* Congestion Index HUD */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 flex flex-col justify-between md:col-span-2 shadow-lg relative overflow-hidden">
+                    <div className="absolute -top-12 -right-12 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <Badge className="bg-amber-500 text-slate-950 border-none font-black text-[9px] px-2.5 h-5 mb-3">
+                        {t('מדד צפיפות ימית', 'AIS LOGISTICS TRAFFIC SATURATION')}
+                      </Badge>
+                      <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight">
+                        {t('עומס בנמל: בינוני-גבוה', 'Port Congestion: MEDIUM-HIGH')}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-md">
+                        {t(
+                          'זמן ההמתנה הממוצע לפריקה במעגני הקונססיה עומד כעת על 3.4 ימים עקב תנאי מזג אוויר ופעילות מוגברת.',
+                          'The average unloading delay at the nearest marine concession locator terminals is currently 3.4 days due to localized bulk carrier queues.'
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-6">
+                      <div className="flex-1">
+                        <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1">
+                          <span>{t('עומס', 'Saturation')}</span>
+                          <span className="text-amber-500 font-black">74%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 rounded-full" style={{ width: '74%' }} />
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">{t('זמן פריקה', 'Avg Queue Time')}</p>
+                        <p className="text-xl font-black text-slate-900 dark:text-white">~78 hrs</p>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Spatial Proximity Signals */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                        {t('אותות קרבה ימיים פעילים', 'Active AIS Proximity Signals')}
+                      </h4>
+                      <p className="text-[9px] text-slate-400">
+                        {t('חישוב מרחק גיאוגרפי ישיר (האברסין) ממיקום הרישיון', 'Direct Haversine geographical distance from concession bounds')}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
+                      {mockAISVessels.length} {t('כלי שיט בטווח', 'Active Vessels')}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {mockAISVessels.map((vessel) => {
+                      const isDispatched = dispatchedVessels.includes(vessel.name);
+                      const isHighRisk = vessel.distance < 120;
+                      
+                      return (
+                        <Card
+                          key={vessel.name}
+                          className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[220px] shadow-sm hover:shadow-md
+                            ${isHighRisk 
+                              ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/30' 
+                              : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 hover:border-black/10 dark:hover:border-white/10'}`}
+                        >
+                          {isHighRisk && (
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-lg pointer-events-none" />
+                          )}
+                          
+                          <div>
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
+                                  ${isHighRisk ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                  <LucideShip className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate max-w-[140px] uppercase">
+                                    {vessel.name}
+                                  </h4>
+                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                                    {vessel.type} • {vessel.flag}
+                                  </p>
+                                </div>
+                              </div>
+                              <Badge className={`font-black text-[9px] px-2 h-5 border-none shrink-0
+                                ${isHighRisk ? 'bg-red-500 text-white animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                {vessel.distance.toFixed(1)} km
+                              </Badge>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-black/5 dark:border-white/5">
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <LucideCompass className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{t('מהירות: ', 'Speed: ') + vessel.speed}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <LucideClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{t('זמן הגעה: ', 'ETA: ') + (isHighRisk ? 'Immediate' : '1.2 days')}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">
+                              {isHighRisk ? t('חריגת גבול אקטיבית', 'CRITICAL BOUNDARY INTRUSION') : t('גישה שגרתית', 'ROUTINE TRANSIT')}
+                            </span>
+                            <Button
+                              onClick={() => {
+                                if (isDispatched) return;
+                                const newLog = {
+                                  action: 'VESSEL_PROXIMITY_ALARM',
+                                  details: `Logistics alert dispatched: Vessel '${vessel.name}' (${vessel.type}, Flag: ${vessel.flag}) flagged idling near concession buffer range at ${vessel.distance.toFixed(1)}km distance. Speed: ${vessel.speed}.`,
+                                  username: 'AIS Watcher',
+                                  timestamp: new Date().toISOString()
+                                };
+                                setActivityLogs(prev => [newLog, ...prev]);
+                                setDispatchedVessels(prev => [...prev, vessel.name]);
+                              }}
+                              disabled={isDispatched}
+                              className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                ${isDispatched 
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                  : isHighRisk
+                                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md shadow-red-500/20'
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                            >
+                              {isDispatched ? t('שוגר בהצלחה', 'ALERTED ✔') : t('שגר התרעה', 'DISPATCH WARNING')}
+                            </Button>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 
