@@ -182,6 +182,9 @@ export default function DossierView({
   const [govSearchQuery, setGovSearchQuery] = useState('');
   const [govFilterCategory, setGovFilterCategory] = useState('all');
   const [auditedContracts, setAuditedContracts] = useState<string[]>([]);
+  const [supplySearchQuery, setSupplySearchQuery] = useState('');
+  const [supplyFilterType, setSupplyFilterType] = useState('all');
+  const [verifiedSuppliers, setVerifiedSuppliers] = useState<string[]>([]);
 
   const [documentText, setDocumentText] = useState('');
   const [scannedContract, setScannedContract] = useState<any>(null);
@@ -374,6 +377,156 @@ export default function DossierView({
       return matchesSearch && matchesCategory;
     });
   }, [mockGovContracts, govSearchQuery, govFilterCategory]);
+
+  const mockSupplyChain = useMemo(() => {
+    if (!item) return [];
+    const baseCommodity = commodityListLabel;
+    
+    const suppliers = [
+      {
+        id: 'SUP-SANDVIK-01',
+        name: 'Sandvik Mining & Rock Solutions',
+        role: 'supplier',
+        product: 'Heavy Extraction Drills & Underground Loaders',
+        country: 'Sweden',
+        volume: '42 Units / year',
+        agreement: 'Valid through Dec 2028',
+        compliance: 'ESG-9 Compliant',
+        duns: '55-667-8899'
+      },
+      {
+        id: 'SUP-CATERPILLAR-02',
+        name: 'Caterpillar Global Mining',
+        role: 'supplier',
+        product: 'Ultra-class Haul Trucks & Excavation Rigs',
+        country: 'United States',
+        volume: '18 Heavy Excavators',
+        agreement: 'Valid through Jun 2029',
+        compliance: 'Verified Ethical Sourcing',
+        duns: '00-112-2233'
+      },
+      {
+        id: 'SUP-ORICA-03',
+        name: 'Orica Mining Services',
+        role: 'supplier',
+        product: 'Commercial Explosives & Precision Blasting Systems',
+        country: 'Australia',
+        volume: '4,200 Tons / annum',
+        agreement: 'Valid through Apr 2027',
+        compliance: 'EPA Certified',
+        duns: '99-887-7766'
+      },
+      {
+        id: 'SUP-SCHLUMBERGER-04',
+        name: 'SLB (Schlumberger Ltd)',
+        role: 'supplier',
+        product: 'Reservoir Telemetry & Drilling Fluid Systems',
+        country: 'France',
+        volume: '8 Active Wells',
+        agreement: 'Valid through Feb 2030',
+        compliance: 'High-Tech Environmentally Audited',
+        duns: '22-334-4455'
+      },
+      {
+        id: 'SUP-BAKER-05',
+        name: 'Baker Hughes Logistics',
+        role: 'supplier',
+        product: 'Turbomachinery & Gas Processing Infrastructure',
+        country: 'United States',
+        volume: '4 Compression Stations',
+        agreement: 'Valid through Oct 2029',
+        compliance: 'Verified Carbon Reduction Program',
+        duns: '11-223-3344'
+      }
+    ];
+
+    const consumers = [
+      {
+        id: 'CON-VALCAMBI-01',
+        name: 'Valcambi SA Precious Metals Smelter',
+        role: 'consumer',
+        product: 'High-Purity Bullion Smelting & Refining',
+        country: 'Switzerland',
+        volume: '450,000 Oz / year',
+        agreement: 'Valid through Jan 2031',
+        compliance: 'LBMA Certified Sourcing',
+        duns: '44-556-6677'
+      },
+      {
+        id: 'CON-RAND-02',
+        name: 'Rand Refinery Ltd',
+        role: 'consumer',
+        product: 'Precious Metals Refining & Coinage Minting',
+        country: 'South Africa',
+        volume: '280,000 Oz / year',
+        agreement: 'Valid through Aug 2029',
+        compliance: 'LBMA & Responsible Gold Certified',
+        duns: '33-445-5566'
+      },
+      {
+        id: 'CON-TESLA-03',
+        name: 'Tesla Gigafactory Batteries',
+        role: 'consumer',
+        product: 'EV Cathode Sourcing & Manganese Raw Inputs',
+        country: 'United States',
+        volume: '15,000 Tons Manganese / yr',
+        agreement: 'Valid through May 2030',
+        compliance: 'Direct Responsible Mineral Sourcing',
+        duns: '09-876-5432'
+      },
+      {
+        id: 'CON-BP-TRADING-04',
+        name: 'BP Oil Trading & Logistics',
+        role: 'consumer',
+        product: 'Wholesale Fossil Fuel Distribution & Marine Fueling',
+        country: 'United Kingdom',
+        volume: '18.5M Barrels / year',
+        agreement: 'Valid through Mar 2031',
+        compliance: 'Maritime Environmental Registry Verified',
+        duns: '77-889-9900'
+      },
+      {
+        id: 'CON-MITSUBISHI-05',
+        name: 'Mitsubishi Heavy Industries',
+        role: 'consumer',
+        product: 'Industrial Turbines & Silver/Manganese Components',
+        country: 'Japan',
+        volume: '1,200 Tons / year',
+        agreement: 'Valid through Nov 2028',
+        compliance: 'Ethical Sourcing Gold Standard',
+        duns: '88-990-0011'
+      }
+    ];
+
+    const isOilSector = baseCommodity.toLowerCase().includes('oil') || baseCommodity.toLowerCase().includes('gas') || baseCommodity.toLowerCase().includes('diesel');
+    
+    const activeSuppliers = isOilSector
+      ? suppliers.filter(s => s.id !== 'SUP-ORICA-03' && s.id !== 'SUP-SANDVIK-01')
+      : suppliers.filter(s => s.id !== 'SUP-SCHLUMBERGER-04' && s.id !== 'SUP-BAKER-05');
+      
+    const activeConsumers = isOilSector
+      ? consumers.filter(c => c.id === 'CON-BP-TRADING-04' || c.id === 'CON-MITSUBISHI-05')
+      : consumers.filter(c => c.id !== 'CON-BP-TRADING-04');
+
+    return [...activeSuppliers, ...activeConsumers];
+  }, [item, commodityListLabel]);
+
+  const filteredSupplyChain = useMemo(() => {
+    return mockSupplyChain.filter(node => {
+      const matchesSearch = 
+        node.name.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.product.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.country.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.id.toLowerCase().includes(supplySearchQuery.toLowerCase());
+      
+      const matchesType = 
+        supplyFilterType === 'all' || 
+        node.role === supplyFilterType;
+
+      return matchesSearch && matchesType;
+    });
+  }, [mockSupplyChain, supplySearchQuery, supplyFilterType]);
+
   const commoditySummaryLabel =
     commodityLabels.length === 0
       ? 'Unknown'
@@ -981,12 +1134,13 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'gov-tenders', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
                   'gov-tenders': 'Gov Spending & Tenders',
+                  'supply-chain': 'Global Supply Chain',
                   'news': 'News',
                   'satellite': 'Satellite',
                   'owners': 'Ownership',
@@ -1564,6 +1718,227 @@ Output requirements:
                                     : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
                               >
                                 {isAudited ? t('בוצע אימות ממשלתי', 'AUDIT OK ✔') : t('בצע אימות חוזה', 'VERIFY AWARD')}
+                              </Button>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* GLOBAL SUPPLY CHAIN & VALUE FLOW TAB */}
+            {activeTab === 'supply-chain' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Supply Chain Telemetry HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Upstream & Downstream Flow Overview */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between min-h-[200px] relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                        {t('סקירת שרשרת ערך', 'GLOBAL LOGISTICS OVERVIEW')}
+                      </span>
+                      <h4 className="text-md font-black text-slate-900 dark:text-white uppercase truncate">
+                        {item.company}
+                      </h4>
+                      <div className="space-y-1 mt-3">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>{t('ספקים מאושרים', 'Verified Suppliers')}:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">3 Upstream</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>{t('צרכני קצה', 'Downstream Buyers')}:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">2 Global Outlets</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                      <span className="text-[9px] font-black text-purple-500 dark:text-purple-400 uppercase tracking-wider bg-purple-500/10 px-2 py-0.5 rounded-full">
+                        {t('שרשרת אספקה מאובטחת', 'SECURED PIPELINE')}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">ESG-9 VERIFIED</span>
+                    </div>
+                  </Card>
+
+                  {/* Supply Telemetry Metrics */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between md:col-span-2 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('זמן אספקה ממוצע', 'AVG LEAD TIME')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          12.4 Days
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">SUPPLIER DISPATCH</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('נפח שינוע שנתי', 'ANNUAL TRANSIT')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          450k Oz
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">COMMODITY VALUE</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('ציון תאימות ESG', 'COMPLIANCE RATING')}
+                        </span>
+                        <p className="text-sm font-black text-slate-900 dark:text-white truncate uppercase text-emerald-500">
+                          98.4% PASSED
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">SOCIALLY RESPONSIBLE</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+                      <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1.5">
+                        <span>{t('פריסת ספקי שרשרת ערך לפי מדינות', 'Supply Chain Geographical Share')}</span>
+                        <span className="text-purple-500 font-black">Sweden & USA: 72%</span>
+                      </div>
+                      <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full flex overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: '40%' }} title="Sweden" />
+                        <div className="h-full bg-amber-500" style={{ width: '32%' }} title="United States" />
+                        <div className="h-full bg-emerald-500" style={{ width: '15%' }} title="Switzerland" />
+                        <div className="h-full bg-purple-500" style={{ width: '13%' }} title="Others" />
+                      </div>
+                      <div className="flex gap-3 mt-2 text-[8px] text-slate-400 font-bold uppercase">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> Sweden</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> United States</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Switzerland</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Others</span>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Filter and Search Controls */}
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: 'all', label: 'All Channels' },
+                      { id: 'supplier', label: 'Upstream Suppliers' },
+                      { id: 'consumer', label: 'Downstream Consumers' }
+                    ].map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSupplyFilterType(cat.id)}
+                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
+                          ${supplyFilterType === cat.id 
+                            ? 'bg-purple-500 text-white border border-purple-500 shadow-md shadow-purple-500/10' 
+                            : 'bg-black/5 dark:bg-white/5 text-slate-500 border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="w-full md:w-64 relative">
+                    <Input
+                      type="text"
+                      placeholder="Search Suppliers, Smelters..."
+                      value={supplySearchQuery}
+                      onChange={(e) => setSupplySearchQuery(e.target.value)}
+                      className="h-9 pl-4 pr-8 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {/* Counterparties List */}
+                <div className="space-y-4">
+                  {filteredSupplyChain.length === 0 ? (
+                    <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                      {t('לא נמצאו ספקים או צרכנים מאושרים', 'No verified supply chain counterparties found.')}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {filteredSupplyChain.map((node) => {
+                        const isVerified = verifiedSuppliers.includes(node.id);
+                        
+                        let roleColor = 'bg-blue-500/10 text-blue-500 border border-blue-500/20';
+                        if (node.role === 'consumer') {
+                          roleColor = 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20';
+                        }
+
+                        return (
+                          <Card
+                            key={node.id}
+                            className="p-6 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 border-none font-bold text-[8px] font-mono tracking-wide px-2 h-5">
+                                    {node.id}
+                                  </Badge>
+                                  <Badge className={`font-black text-[8px] px-2 h-5 ${roleColor}`}>
+                                    {node.role.toUpperCase()}
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                    {node.country}
+                                  </span>
+                                </div>
+                                
+                                <h4 className="text-md font-black text-slate-900 dark:text-white uppercase leading-snug">
+                                  {node.name}
+                                </h4>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                                  Material Category: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{node.product}</span>
+                                </p>
+                              </div>
+
+                              <div className="text-left md:text-right shrink-0 flex flex-col justify-between min-h-[80px]">
+                                <div>
+                                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block mb-0.5">
+                                    {t('נפח הספקה / צריכה שנתי', 'ANNUAL TRANSIT VOLUME')}
+                                  </span>
+                                  <p className="text-lg font-black text-slate-950 dark:text-white tracking-tight">
+                                    {node.volume}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-2 md:justify-end">
+                                  <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Compliance:
+                                  </span>
+                                  <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500">
+                                    {node.compliance}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-4 text-[9px] text-slate-400 font-semibold uppercase">
+                                <span>DUNS: <span className="text-slate-600 dark:text-slate-300 font-mono">{node.duns}</span></span>
+                                <span>Agreement: <span className="text-slate-600 dark:text-slate-300">{node.agreement}</span></span>
+                              </div>
+                              
+                              <Button
+                                onClick={() => {
+                                  if (isVerified) return;
+                                  const newLog = {
+                                    action: 'SUPPLY_CHAIN_VERIFIED',
+                                    details: `Supply chain trace verified for counterparties company '${node.name}' (Role: ${node.role.toUpperCase()}, Country: ${node.country}). ESG sourcing validated. DUNS Reference: ${node.duns}.`,
+                                    username: 'Compliance Watcher',
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  setActivityLogs(prev => [newLog, ...prev]);
+                                  setVerifiedSuppliers(prev => [...prev, node.id]);
+                                }}
+                                disabled={isVerified}
+                                className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                  ${isVerified 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                              >
+                                {isVerified ? t('אימות שרשרת ערך', 'VERIFIED ✔') : t('בצע אימות תאימות', 'VERIFY SOURCING')}
                               </Button>
                             </div>
                           </Card>
