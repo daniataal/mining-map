@@ -1,12 +1,12 @@
-import { Loader2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { Loader2, Sliders } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/select';
 import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
 
@@ -31,6 +31,14 @@ function DdTone(status: DueDiligenceStatus) {
   }
 }
 
+interface LocationPreset {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  group: 'suppliers' | 'buyers' | 'ports' | 'licenses';
+}
+
 function CoordBlock({
   title,
   sub,
@@ -43,6 +51,9 @@ function CoordBlock({
   onLabel,
   onPick,
   disabled,
+  presets,
+  showAdvancedCoords,
+  onSelectPreset,
 }: {
   title: string;
   sub: string;
@@ -55,10 +66,20 @@ function CoordBlock({
   onLabel: (value: string) => void;
   onPick: () => void;
   disabled?: boolean;
+  presets: LocationPreset[];
+  showAdvancedCoords: boolean;
+  onSelectPreset: (preset: LocationPreset) => void;
 }) {
   const { t } = useI18n();
+
+  // Find active preset if coordinates match closely
+  const selectedPresetId = useMemo(() => {
+    const matched = presets.find(p => Math.abs(p.lat - lat) < 1e-4 && Math.abs(p.lng - lng) < 1e-4);
+    return matched ? matched.id : 'custom';
+  }, [presets, lat, lng]);
+
   return (
-    <div className={`rounded-2xl border p-4 ${pickActive ? 'border-amber-500/55 bg-amber-500/[0.07]' : 'border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03]'}`}>
+    <div className={`rounded-2xl border p-4 transition-all duration-300 ${pickActive ? 'border-amber-500/55 bg-amber-500/[0.07] shadow-md shadow-amber-500/5' : 'border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03]'}`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">{title}</p>
@@ -75,45 +96,131 @@ function CoordBlock({
           {pickActive ? t('ממתין למפה…', 'Map pick…') : t('מהמפה', 'From map')}
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-2 mb-2">
-        <div>
-          <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lat</p>
-          <Input
-            type="number"
-            step="any"
-            className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
-            value={Number.isFinite(lat) ? lat : 0}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              onLat(n);
-            }}
-          />
-        </div>
-        <div>
-          <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lng</p>
-          <Input
-            type="number"
-            step="any"
-            className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
-            value={Number.isFinite(lng) ? lng : 0}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              onLng(n);
-            }}
-          />
-        </div>
+
+      {/* Preset Selector Dropdown */}
+      <div className="mb-3">
+        <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+          {t('בחר ישות או נמל', 'Select entity or port')}
+        </p>
+        <Select
+          value={selectedPresetId}
+          onValueChange={(val) => {
+            if (val === 'custom') return;
+            const chosen = presets.find(p => p.id === val);
+            if (chosen) {
+              onSelectPreset(chosen);
+            }
+          }}
+        >
+          <SelectTrigger className="h-9 rounded-xl border-black/10 dark:border-white/10 bg-white/80 dark:bg-slate-950/80 text-xs font-semibold">
+            <SelectValue placeholder={t('בחר מיקום מוכן...', 'Select a preset location...')} />
+          </SelectTrigger>
+          <SelectContent className="max-h-[300px]">
+            <SelectItem value="custom">{t('מיקום מותאם אישית / חופשי', 'Custom / Free Picked Location')}</SelectItem>
+            
+            {presets.some(p => p.group === 'suppliers') && (
+              <SelectGroup>
+                <SelectLabel className="text-[9px] font-black text-amber-500 uppercase tracking-wider px-2 py-1">
+                  {t('ספקים גלובליים', 'Global Upstream Suppliers')}
+                </SelectLabel>
+                {presets.filter(p => p.group === 'suppliers').map(p => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+
+            {presets.some(p => p.group === 'buyers') && (
+              <SelectGroup>
+                <SelectLabel className="text-[9px] font-black text-emerald-500 uppercase tracking-wider px-2 py-1">
+                  {t('צרכנים ומזקקות', 'Downstream Refineries & Buyers')}
+                </SelectLabel>
+                {presets.filter(p => p.group === 'buyers').map(p => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+
+            {presets.some(p => p.group === 'ports') && (
+              <SelectGroup>
+                <SelectLabel className="text-[9px] font-black text-blue-500 uppercase tracking-wider px-2 py-1">
+                  {t('נמלי סחר ימיים', 'Global Trade Seaports')}
+                </SelectLabel>
+                {presets.filter(p => p.group === 'ports').map(p => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+
+            {presets.some(p => p.group === 'licenses') && (
+              <SelectGroup>
+                <SelectLabel className="text-[9px] font-black text-purple-500 uppercase tracking-wider px-2 py-1">
+                  {t('הזיכיונות והנכסים שלך', 'Your Active Concessions & Assets')}
+                </SelectLabel>
+                {presets.filter(p => p.group === 'licenses').map(p => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            )}
+          </SelectContent>
+        </Select>
       </div>
-      <Input
-        type="text"
-        placeholder={`${sub} (${title})`}
-        value={label}
-        className="h-9 rounded-xl text-xs bg-white/70 dark:bg-slate-950/70 border-black/10 dark:border-white/10"
-        onChange={(e) => onLabel(e.target.value)}
-      />
-      <p className="mt-2 text-[9px] text-slate-500">
-        {(lat ?? 0).toFixed(4)}, {(lng ?? 0).toFixed(4)}
+
+      <div className="mb-2">
+        <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+          {t('שם מיקום / תווית', 'Location Label')}
+        </p>
+        <Input
+          type="text"
+          placeholder={`${sub} (${title})`}
+          value={label}
+          className="h-9 rounded-xl text-xs bg-white/70 dark:bg-slate-950/70 border-black/10 dark:border-white/10 font-bold"
+          onChange={(e) => onLabel(e.target.value)}
+        />
+      </div>
+
+      {showAdvancedCoords && (
+        <div className="grid grid-cols-2 gap-2 mb-2 pt-2 border-t border-black/5 dark:border-white/5 animate-in fade-in duration-200">
+          <div>
+            <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lat</p>
+            <Input
+              type="number"
+              step="any"
+              className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
+              value={Number.isFinite(lat) ? lat : 0}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n)) return;
+                onLat(n);
+              }}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lng</p>
+            <Input
+              type="number"
+              step="any"
+              className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
+              value={Number.isFinite(lng) ? lng : 0}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (!Number.isFinite(n)) return;
+                onLng(n);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <p className="mt-2 text-[9px] text-slate-400 font-bold">
+        📍 {(lat ?? 0).toFixed(4)}, {(lng ?? 0).toFixed(4)}
       </p>
     </div>
   );
@@ -121,9 +228,10 @@ function CoordBlock({
 
 interface RoutePlannerPanelProps {
   rp: RoutePlannerHook;
+  allLicenses?: any[];
 }
 
-export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
+export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanelProps) {
   const { t } = useI18n();
   const {
     supplier,
@@ -144,10 +252,53 @@ export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
     sourceLabel,
   } = rp;
 
+  const [showAdvancedCoords, setShowAdvancedCoords] = useState(false);
+
   const totalUsd = useMemo(() => {
     const lines = result?.breakdown ?? [];
     return lines.reduce((acc, row) => acc + row.amountUsd, 0);
   }, [result?.breakdown]);
+
+  // Combined Presets
+  const presets = useMemo(() => {
+    const list: LocationPreset[] = [
+      // Suppliers
+      { id: 'pres-sandvik', name: 'Sandvik Mining & Rock Solutions (Sweden)', lat: 60.6749, lng: 17.1413, group: 'suppliers' },
+      { id: 'pres-cat', name: 'Caterpillar Global Mining (United States)', lat: 40.7589, lng: -89.5890, group: 'suppliers' },
+      { id: 'pres-orica', name: 'Orica Mining Services (Australia)', lat: -33.8688, lng: 151.2093, group: 'suppliers' },
+      { id: 'pres-slb', name: 'SLB (Schlumberger Ltd) (France)', lat: 48.8566, lng: 2.3522, group: 'suppliers' },
+      { id: 'pres-baker', name: 'Baker Hughes Logistics (United States)', lat: 29.7604, lng: -95.3698, group: 'suppliers' },
+      
+      // Buyers
+      { id: 'pres-valcambi', name: 'Valcambi SA Smelter (Switzerland)', lat: 46.0244, lng: 8.9506, group: 'buyers' },
+      { id: 'pres-rand', name: 'Rand Refinery (South Africa)', lat: -26.2485, lng: 28.1633, group: 'buyers' },
+      { id: 'pres-tesla', name: 'Tesla Gigafactory Batteries (United States)', lat: 39.5392, lng: -119.2318, group: 'buyers' },
+      { id: 'pres-bp', name: 'BP Oil Trading (United Kingdom)', lat: 51.5074, lng: -0.1278, group: 'buyers' },
+      { id: 'pres-mitsubishi', name: 'Mitsubishi Heavy Industries (Japan)', lat: 35.6762, lng: 139.6503, group: 'buyers' },
+      
+      // Ports
+      { id: 'pres-port-durban', name: 'Port of Durban (South Africa) [SEAPORT]', lat: -29.8667, lng: 31.0500, group: 'ports' },
+      { id: 'pres-port-rotterdam', name: 'Port of Rotterdam (Netherlands) [SEAPORT]', lat: 51.9244, lng: 4.4777, group: 'ports' },
+      { id: 'pres-port-houston', name: 'Port of Houston (United States) [SEAPORT]', lat: 29.7355, lng: -95.2750, group: 'ports' },
+      { id: 'pres-port-shanghai', name: 'Port of Shanghai (China) [SEAPORT]', lat: 31.2304, lng: 121.4737, group: 'ports' },
+      { id: 'pres-port-singapore', name: 'Port of Singapore (Singapore) [SEAPORT]', lat: 1.3521, lng: 103.8198, group: 'ports' },
+      { id: 'pres-port-antwerp', name: 'Port of Antwerp (Belgium) [SEAPORT]', lat: 51.2194, lng: 4.4025, group: 'ports' },
+    ];
+
+    if (allLicenses) {
+      allLicenses.forEach((item) => {
+        list.push({
+          id: `pres-lic-${item.id}`,
+          name: `${item.company} (${item.licenseType || 'Concession'} - #${item.id})`,
+          lat: item.lat,
+          lng: item.lng,
+          group: 'licenses'
+        });
+      });
+    }
+
+    return list;
+  }, [allLicenses]);
 
   return (
     <Card className="w-[min(96vw,1080px)] max-h-[min(88vh,820px)] overflow-hidden bg-white/95 dark:bg-slate-950/95 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
@@ -161,12 +312,24 @@ export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
           </h3>
           <p className="text-[10px] text-slate-500 mt-2 max-w-2xl leading-relaxed">
             {t(
-              'משתמש ב־POST /api/route-planner כשמוגדר צד שרת. אחרת נטענת הצגת Mock עקבית לוויר ופריסכאוט.',
-              'Uses POST /api/route-planner when the backend exposes it; otherwise renders a deterministic mock for layout and prototyping.',
+              'בחרו את נקודת המוצא (הספק) ואת נמל היעד או מזקקת הקצה. ניתן להשתמש ברשימת המיקומים המוכנים מראש, לבחור מהמפה או להזין קואורדינטות מתקדמות.',
+              'Choose your supplier origin and buyer refinery or seaport. Use presets, pick from map, or reveal advanced coordinates.',
             )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Button
+            type="button"
+            variant={showAdvancedCoords ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowAdvancedCoords(!showAdvancedCoords)}
+            className={`h-8 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
+              ${showAdvancedCoords ? 'bg-amber-500 text-slate-950' : ''}`}
+          >
+            <Sliders className="w-3 h-3 mr-1" />
+            {t('הצג קואורדינטות', 'Coordinates')}
+          </Button>
+
           {pickRole ? (
             <Badge className="border-none bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[9px] font-black uppercase">
               {pickRole === 'supplier' ? t('מצב קליק: ספק', 'Pick on map: supplier') : t('מצב קליק: קונה', 'Pick on map: buyer')}
@@ -231,6 +394,9 @@ export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
                 onLabel={(label) => setSupplier((s) => ({ ...s, label }))}
                 onPick={() => beginPick('supplier')}
                 disabled={loading}
+                presets={presets}
+                showAdvancedCoords={showAdvancedCoords}
+                onSelectPreset={(p) => setSupplier({ lat: p.lat, lng: p.lng, label: p.name })}
               />
               <CoordBlock
                 title={t('קונה / יעד', 'Buyer / destination')}
@@ -244,6 +410,9 @@ export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
                 onLabel={(label) => setBuyer((b) => ({ ...b, label }))}
                 onPick={() => beginPick('buyer')}
                 disabled={loading}
+                presets={presets}
+                showAdvancedCoords={showAdvancedCoords}
+                onSelectPreset={(p) => setBuyer({ lat: p.lat, lng: p.lng, label: p.name })}
               />
             </div>
 
