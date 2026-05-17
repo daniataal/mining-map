@@ -339,6 +339,10 @@ export function mockResponseForPayload(
       'Simulation mode: live route or due-diligence services were unavailable.',
       'Costs are deterministic planning estimates, not executable carrier quotes.',
     ],
+    routeAssumptions: [
+      'Simulation approximates inland pickup to an export port, trunk movement, and final delivery.',
+      'Use a live route run before using this for deal execution.',
+    ],
     dueDiligenceRecommendation: 'escalate',
     blockers: [],
     warnings: [

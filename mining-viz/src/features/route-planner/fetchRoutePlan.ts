@@ -25,6 +25,7 @@ interface BackendRouteLeg {
   to?: BackendRoutePoint;
   method?: BackendMethod | string;
   distance_km?: number;
+  path?: [number, number][];
 }
 
 interface BackendRouteResponse {
@@ -44,6 +45,7 @@ interface BackendRouteResponse {
       components?: Array<{ component?: string; amount_usd?: number; formula?: string }>;
     }>;
   };
+  limitations?: string[];
 }
 
 interface DdApiResponse {
@@ -79,16 +81,35 @@ function productKind(productType: string): string {
   return productType;
 }
 
-function estimateCargoValueUsd(productType: string, quantityTons: number): number {
+function estimateCargoValue(productType: string, quantityTons: number): { valueUsd: number; note: string } {
   const normalized = productType.toLowerCase();
-  const perTon = normalized.includes('gold')
-    ? 2_800_000
-    : normalized.includes('cobalt') || normalized.includes('lithium')
-      ? 35_000
-      : normalized.includes('petroleum') || normalized.includes('oil')
-        ? 900
-        : 400;
-  return Math.max(0, Math.round(quantityTons * perTon));
+  const model = normalized.includes('gold_dore') || normalized.includes('bullion')
+    ? {
+        perTon: 132_000_000,
+        note: 'Assumes 90% payable gold doré/bullion equivalent. Replace with assay, fineness, payable terms, and live fixing before execution.',
+      }
+    : normalized.includes('gold')
+      ? {
+          perTon: 2_800_000,
+          note: 'Assumes high-grade gold concentrate at roughly 2% payable gold. Real value depends on assay, moisture, penalties, treatment charges, and payability.',
+        }
+      : normalized.includes('cobalt')
+        ? { perTon: 35_000, note: 'Screening value for cobalt-bearing product; replace with assay and payable cobalt content.' }
+        : normalized.includes('lithium')
+          ? { perTon: 22_000, note: 'Screening value for lithium product; replace with product grade and index basis.' }
+          : normalized.includes('copper')
+            ? { perTon: 9_000, note: 'Uses rough copper metal benchmark basis; concentrate needs grade/payability/TC-RC terms.' }
+            : normalized.includes('petroleum') || normalized.includes('oil')
+              ? { perTon: 900, note: 'Uses rough refined/petroleum product per-ton screening basis; replace with Platts/Argus quote.' }
+              : { perTon: 400, note: 'Generic bulk commodity screening value; replace with contract price.' };
+  return {
+    valueUsd: Math.max(0, Math.round(quantityTons * model.perTon)),
+    note: model.note,
+  };
+}
+
+function estimateCargoValueUsd(productType: string, quantityTons: number): number {
+  return estimateCargoValue(productType, quantityTons).valueUsd;
 }
 
 function pointOrNull(point: BackendRoutePoint | undefined): { lat: number; lng: number; name: string } | null {
@@ -108,9 +129,21 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
       const from = pointOrNull(leg.from);
       const to = pointOrNull(leg.to);
       if (!from || !to) return null;
-      return { path: [[from.lat, from.lng], [to.lat, to.lng]] as [number, number][] };
+      const backendPath = Array.isArray(leg.path)
+        ? leg.path.filter((point): point is [number, number] =>
+            Array.isArray(point) &&
+            point.length === 2 &&
+            Number.isFinite(point[0]) &&
+            Number.isFinite(point[1]),
+          )
+        : [];
+      return {
+        path: backendPath.length > 1 ? backendPath : ([[from.lat, from.lng], [to.lat, to.lng]] as [number, number][]),
+        method: leg.method,
+        label: `${titleCase(leg.method || 'transport')}: ${from.name} → ${to.name}`,
+      };
     })
-    .filter((leg): leg is { path: [number, number][] } => Boolean(leg));
+    .filter((leg): leg is { path: [number, number][]; method?: string; label?: string } => Boolean(leg));
 
   const waypoints: RouteMapOverlay['waypoints'] = [];
   const origin = pointOrNull(data.route?.origin ?? legs[0]?.from);
@@ -155,14 +188,15 @@ function titleCase(value: string): string {
 
 function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
   const legCosts = data.cost_breakdown?.leg_costs ?? [];
+  const routeLegs = data.route?.legs ?? [];
   const lines = legCosts.map((leg, index) => ({
     id: leg.leg_id || `leg-${index + 1}`,
     labelHe: `מקטע ${index + 1}: ${titleCase(leg.method || 'transport')}`,
     labelEn: `Leg ${index + 1}: ${titleCase(leg.method || 'transport')}`,
     amountUsd: Math.round(Number(leg.total_cost_usd) || 0),
     note: [
-      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} ק"מ`,
-      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} km estimated distance`,
+      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} ק"מ · ${routeLegs[index]?.from?.name || 'Origin'} ← ${routeLegs[index]?.to?.name || 'Destination'}`,
+      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} km · ${routeLegs[index]?.from?.name || 'Origin'} → ${routeLegs[index]?.to?.name || 'Destination'}`,
     ] as [string, string],
   }));
   if (lines.length > 0) return lines;
@@ -310,6 +344,9 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
 
   const dd = await fetchDueDiligence(payload);
   const ddSummary = dueDiligenceFromBackend(dd);
+  const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
+  const freightTotal = costBreakdownFromBackend(route).reduce((sum, item) => sum + item.amountUsd, 0);
+  const routeLimitations = Array.isArray(route.limitations) ? route.limitations : [];
   return {
     source: 'live',
     map: routeMapFromBackend(route),
@@ -318,7 +355,15 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
     dueDiligenceRecommendation: ddSummary.recommendation,
     blockers: ddSummary.blockers,
     warnings: ddSummary.warnings,
-    limitations: ddSummary.limitations,
+    limitations: [...ddSummary.limitations, ...routeLimitations],
+    routeAssumptions: [
+      'Route is staged as inland transport to export gateway, trunk leg, then final delivery from import gateway.',
+      'Gateway selection is nearest-hub screening logic, not a carrier booking.',
+      cargoValue.note,
+    ],
+    cargoValueUsd: cargoValue.valueUsd,
+    cargoValueNote: cargoValue.note,
+    freightToValuePct: cargoValue.valueUsd > 0 ? (freightTotal / cargoValue.valueUsd) * 100 : undefined,
   };
 }
 
@@ -337,6 +382,8 @@ export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<
   );
   return {
     ...simulation,
+    cargoValueUsd: estimateCargoValue(payload.productType, payload.quantityTons).valueUsd,
+    cargoValueNote: estimateCargoValue(payload.productType, payload.quantityTons).note,
     limitations: [
       'Live routing or due-diligence endpoint unavailable; showing simulation only.',
       ...simulation.limitations,

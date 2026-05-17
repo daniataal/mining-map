@@ -33,9 +33,41 @@ class RoutePlannerTests(unittest.TestCase):
             }
         )
         legs = result["route"]["legs"]
-        self.assertEqual(len(legs), 2)
+        self.assertEqual(len(legs), 1)
         self.assertTrue(all(leg["method"] == "pipeline" for leg in legs))
         self.assertGreater(result["cost_breakdown"]["total_cost_usd"], 0)
+
+    def test_plan_route_stages_inland_port_sea_port_delivery(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "PrimeRose Resources Zambia",
+                    "lat": -12.57,
+                    "lng": 31.31,
+                    "kind": "origin",
+                    "metadata": {"country": "Zambia"},
+                },
+                "destination": {
+                    "name": "Rotterdam, Netherlands",
+                    "lat": 51.924,
+                    "lng": 4.477,
+                    "kind": "destination",
+                    "metadata": {"country": "Netherlands"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        self.assertGreaterEqual(len(legs), 2)
+        self.assertEqual(legs[0]["method"], "road")
+        self.assertTrue(any(leg["method"] == "sea" for leg in legs))
+        sea_leg = next(leg for leg in legs if leg["method"] == "sea")
+        self.assertGreater(len(sea_leg["path"]), 2)
+        self.assertIn("port", sea_leg["from"]["kind"])
+        self.assertIn("limitations", result)
 
 
 if __name__ == "__main__":

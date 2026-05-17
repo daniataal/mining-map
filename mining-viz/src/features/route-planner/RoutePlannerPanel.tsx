@@ -110,6 +110,10 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   const totalUsd = useMemo(() =>
     (result?.breakdown ?? []).reduce((s, r) => s + r.amountUsd, 0),
     [result?.breakdown]);
+  const freightPctLabel =
+    typeof result?.freightToValuePct === 'number' && Number.isFinite(result.freightToValuePct)
+      ? `${result.freightToValuePct < 0.01 ? '<0.01' : result.freightToValuePct.toFixed(2)}%`
+      : null;
 
   const supplierPresetId = useMemo(() => {
     const m = licensePresets.find(p => Math.abs(p.lat - supplier.lat) < 1e-4 && Math.abs(p.lng - supplier.lng) < 1e-4);
@@ -143,21 +147,21 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0 && quantityTons > 0;
 
   return (
-    <Card className="w-[min(96vw,960px)] max-h-[min(92vh,840px)] overflow-hidden bg-white/97 dark:bg-slate-950/97 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl flex flex-col">
+    <Card className="h-full w-full overflow-hidden rounded-2xl border border-black/10 bg-white/97 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/97 flex flex-col">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-black/5 dark:border-white/10 shrink-0">
-        <div className="flex items-center justify-between gap-4">
-          <div>
+      <div className="px-4 py-4 border-b border-black/5 dark:border-white/10 shrink-0">
+        <div className="flex flex-col gap-3">
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-1">
               {t('מתכנן מסלול', 'Route Intelligence')}
             </p>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+            <h3 className="text-base font-bold leading-snug text-slate-900 dark:text-white">
               {supplier.label
                 ? `${supplier.label} → ${buyer.label || t('בחר יעד', 'Select destination')}`
                 : t('בנה מסלול מהספק לקונה', 'Build a supplier → buyer trade route')}
             </h3>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {pickRole && (
               <Badge className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-none text-[9px] font-black uppercase animate-pulse">
                 {pickRole === 'supplier' ? t('לחץ על המפה: ספק', 'Click map: supplier') : t('לחץ על המפה: יעד', 'Click map: destination')}
@@ -188,7 +192,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
 
       <div className="flex-1 overflow-y-auto">
         {step === 'setup' ? (
-          <div className="p-6 space-y-6">
+          <div className="p-4 space-y-4">
             {pickRole && (
               <div className="rounded-2xl border border-cyan-500/35 bg-cyan-500/[0.08] px-4 py-3 text-[11px] text-cyan-900 dark:text-cyan-100 font-semibold">
                 📍 {t('לחצו על כל נקודה במפה להגדרת המיקום. הבחירה נסגרת אחרי קליק.', 'Tap anywhere on the map to place this point. Closes after one click.')}
@@ -198,9 +202,9 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4">
               {/* Supplier block */}
-              <div className={`rounded-2xl border p-5 transition-all ${pickRole === 'supplier' ? 'border-amber-500/60 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
+              <div className={`rounded-2xl border p-4 transition-all ${pickRole === 'supplier' ? 'border-amber-500/60 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">📦 {t('ספק / מוצא', 'Supplier / origin')}</p>
@@ -251,7 +255,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               </div>
 
               {/* Buyer / destination block */}
-              <div className={`rounded-2xl border p-5 transition-all ${pickRole === 'buyer' ? 'border-blue-500/60 bg-blue-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
+              <div className={`rounded-2xl border p-4 transition-all ${pickRole === 'buyer' ? 'border-blue-500/60 bg-blue-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">🎯 {t('קונה / יעד', 'Buyer / destination')}</p>
@@ -297,7 +301,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
             </div>
 
             {/* Product + Shipping */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('סוג מוצר', 'Product / commodity')}</p>
                 <Select value={productType} onValueChange={setProductType}>
@@ -335,7 +339,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-2xl border border-black/10 dark:border-white/10 p-5">
+            <div className="grid grid-cols-1 gap-4 rounded-2xl border border-black/10 p-4 dark:border-white/10 sm:grid-cols-2">
               <div>
                 <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('כמות', 'Quantity')}</p>
                 <Input
@@ -377,12 +381,28 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
           </div>
         ) : (
           /* Results Tab */
-          <div className="p-6 space-y-6">
+          <div className="p-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{t('סיכום מסלול', 'Route summary')}</p>
                 <p className="text-2xl font-black text-amber-500">{fmtUsd(totalUsd)}</p>
                 <p className="text-xs text-slate-500">{t(`עלות כוללת משוערת (${quantityTons.toLocaleString()} טונה)`, `Estimated total cost (${quantityTons.toLocaleString()} MT)`)}</p>
+                {result?.cargoValueUsd != null && (
+                  <div className="mt-3 rounded-2xl border border-black/10 bg-black/[0.02] px-3 py-2 text-[11px] dark:border-white/10 dark:bg-white/[0.03]">
+                    <p className="font-black uppercase tracking-widest text-slate-500">{t('שווי מטען משוער', 'Estimated cargo value')}</p>
+                    <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">
+                      {fmtUsd(result.cargoValueUsd)}
+                      {freightPctLabel && (
+                        <span className="ml-2 text-[10px] font-bold text-slate-500">
+                          {t(`${freightPctLabel} הובלה/שווי`, `${freightPctLabel} freight/value`)}
+                        </span>
+                      )}
+                    </p>
+                    {result.cargoValueNote && (
+                      <p className="mt-1 leading-snug text-slate-500">{result.cargoValueNote}</p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex flex-col items-end gap-2">
                 {result && (
@@ -439,6 +459,17 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                     <FindingList title={t('מגבלות', 'Limitations')} items={result.limitations} empty={t('אין מגבלות', 'No limitations')} />
                   </div>
                 )}
+              </div>
+            )}
+
+            {result?.routeAssumptions && result.routeAssumptions.length > 0 && (
+              <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.07] px-4 py-3 text-[11px] font-semibold text-cyan-950 dark:text-cyan-100">
+                <p className="mb-2 text-[9px] font-black uppercase tracking-widest opacity-75">{t('הנחות מסלול', 'Route assumptions')}</p>
+                <ul className="space-y-1.5">
+                  {result.routeAssumptions.slice(0, 4).map((item, index) => (
+                    <li key={`${item}-${index}`} className="leading-snug">{item}</li>
+                  ))}
+                </ul>
               </div>
             )}
 

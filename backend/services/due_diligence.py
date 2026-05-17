@@ -670,6 +670,7 @@ def _score_and_recommend(
     score = 100.0
     blockers: list[str] = []
     has_fail = False
+    requires_escalation = False
 
     for check in checks:
         if check.verdict == "fail":
@@ -678,12 +679,14 @@ def _score_and_recommend(
             has_fail = True
         elif check.verdict == "warn":
             score -= warn_deduction
+            if check.check_id == "kyc.high_value":
+                requires_escalation = True
 
     score = max(0.0, min(100.0, score))
 
     if has_fail or score < block_threshold:
         recommendation = "block"
-    elif score < approve_threshold:
+    elif requires_escalation or score < approve_threshold:
         recommendation = "escalate"
     else:
         recommendation = "approve"

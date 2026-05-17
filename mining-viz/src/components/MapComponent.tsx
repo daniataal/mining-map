@@ -1444,22 +1444,40 @@ export default function MapComponent({
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (
                   <>
-                    {routePlannerOverlay.legs.map((leg, idx) =>
-                      Array.isArray(leg.path) && leg.path.length > 1 ? (
+                    {routePlannerOverlay.legs.map((leg, idx) => {
+                      const method = (leg.method || '').toLowerCase();
+                      const color =
+                        method === 'sea' ? '#38bdf8' :
+                        method === 'air' ? '#a78bfa' :
+                        method === 'rail' ? '#22c55e' :
+                        method === 'pipeline' ? '#f97316' :
+                        '#f59e0b';
+                      const dashArray =
+                        method === 'sea' ? '14 12' :
+                        method === 'air' ? '4 12' :
+                        method === 'rail' ? '10 8' :
+                        undefined;
+                      return Array.isArray(leg.path) && leg.path.length > 1 ? (
                         <Polyline
                           key={`rp-leg-${idx}`}
                           positions={leg.path}
                           pathOptions={{
-                            weight: idx === 0 ? 4 : 5,
-                            color: idx === 0 ? '#f59e0b' : '#fcd34d',
+                            weight: method === 'sea' ? 4 : 5,
+                            color,
                             opacity: 0.9,
                             lineCap: 'round',
                             lineJoin: 'round',
-                            ...(idx === 1 ? ({ dashArray: '10 14' as const }) : {}),
+                            ...(dashArray ? ({ dashArray } as const) : {}),
                           }}
-                        />
-                      ) : null,
-                    )}
+                        >
+                          {leg.label && (
+                            <Tooltip direction="top" opacity={1}>
+                              <span className="text-[11px] font-bold text-slate-900">{leg.label}</span>
+                            </Tooltip>
+                          )}
+                        </Polyline>
+                      ) : null;
+                    })}
                     {routePlannerOverlay.waypoints.map((wp, i) => {
                       let fill = '#22c55e';
                       if (wp.role === 'transit') fill = '#38bdf8';
