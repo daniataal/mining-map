@@ -68,6 +68,19 @@ class OpecGulfSyncTests(unittest.TestCase):
             any("Curated OPEC/Persian Gulf reference row" in str(param) for param in params)
         )
 
+    def test_resolve_entity_subtype_marks_refineries(self):
+        entity = sync.GulfOilEntity(
+            "Test Refinery",
+            "Testland",
+            "Coast",
+            1.0,
+            2.0,
+            "Refined Products",
+            "Refinery Complex",
+            "Active",
+        )
+        self.assertEqual(sync._resolve_entity_subtype(entity), "refinery")
+
 
 if __name__ == "__main__":
     unittest.main()

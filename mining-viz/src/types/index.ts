@@ -10,6 +10,8 @@ export interface MiningLicense {
   photoUrl?: string | null;
   entityKind?: 'license' | 'storage_terminal' | 'port' | 'logistics_node' | string;
   entitySubtype?:
+    | 'refinery'
+    | 'refinery_complex'
     | 'tank_farm'
     | 'storage_terminal'
     | 'port'
@@ -129,6 +131,59 @@ export interface LegalEvent {
   confidenceScore?: number | null;
   lastSeenAt?: string | null;
   createdAt?: string | null;
+}
+
+/** U.S. federal award row from USAspending.gov (Gov Spending & Tenders tab). */
+export interface GovProcurementAward {
+  id: string;
+  title: string;
+  agency: string;
+  value: number;
+  commodity: string;
+  category: 'precious' | 'fuels' | 'strategic' | 'other' | string;
+  uei?: string | null;
+  duns?: string | null;
+  status: string;
+  period: string;
+  recipient?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  naics?: string | null;
+  psc?: string | null;
+  awardType?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+}
+
+export interface GovProcurementRecipientProfile {
+  name?: string | null;
+  uei?: string | null;
+  duns?: string | null;
+  recipientId?: string | null;
+}
+
+export interface GovProcurementResponse {
+  source: string;
+  sourceUrl: string;
+  scope: string;
+  limitations: string[];
+  warnings: string[];
+  queriedAt?: string | null;
+  queryCompany?: string | null;
+  recipientProfile?: GovProcurementRecipientProfile | null;
+  summary: {
+    totalAwardedUsd: number;
+    activeContractCount: number;
+    awardCount: number;
+    topFundingAgency?: string | null;
+    portfolioByCategoryPct: {
+      precious: number;
+      fuels: number;
+      strategic: number;
+      other: number;
+    };
+  };
+  awards: GovProcurementAward[];
 }
 
 export interface EntityRelationship {

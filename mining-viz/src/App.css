@@ -720,6 +720,61 @@
   color: #fff;
 }
 
+/* Petroleum infrastructure popups (oilmap GeoJSON layers) */
+.leaflet-popup.petroleum-leaflet-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+}
+
+.leaflet-popup.petroleum-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 14px 12px 14px 16px;
+  min-width: 320px;
+}
+
+.leaflet-popup.petroleum-leaflet-popup a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #94a3b8;
+}
+
+.leaflet-popup.petroleum-leaflet-popup a.leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}
+
+.petroleum-map-popup-mount {
+  width: 100%;
+}
+
+/* ESG protected-area popups (conservation buffer circles) */
+.leaflet-popup.esg-leaflet-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+}
+
+.leaflet-popup.esg-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 14px 12px 14px 16px;
+  min-width: 320px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.leaflet-popup.esg-leaflet-popup a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #94a3b8;
+}
+
+.leaflet-popup.esg-leaflet-popup a.leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}
+
+.esg-map-popup {
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Dossier Panel Styles */
 .dossier-panel {
   position: fixed;
@@ -1255,6 +1310,14 @@
 }
 .vessel-marker.is-selected {
   z-index: 1100 !important;
+}
+.refinery-marker {
+  background: transparent !important;
+  border: none !important;
+}
+.refinery-marker-pin.is-selected {
+  transform: scale(1.12);
+  z-index: 1100;
 }
 
 /* GeoJSON country borders: Carto dark_all swallows thin cyan strokes; neutral color + weight set in MapComponent. */

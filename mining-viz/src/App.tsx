@@ -13,6 +13,9 @@ import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
+import { DEFAULT_VESSEL_FILTERS, type VesselFilters } from './lib/vessels';
+
+const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 import { useRoutePlanner } from './features/route-planner';
 import {
   Search as LucideSearch,
@@ -176,7 +179,8 @@ export default function App() {
   }, [licenseViewportDraft, viewMode]);
 
   const licenseBoundsForApi = useMemo(() => {
-    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') return null;
+    if (viewMode === 'oil_and_gas') return null;
+    if (viewMode !== 'mining') return null;
     if (!licenseViewportDebounced) return null;
     if (!licenseViewportUsesBbox(licenseViewportDebounced)) return null;
     return licenseViewportDebounced;
@@ -203,13 +207,14 @@ export default function App() {
     failedCountryQueryCount,
   } = useLicenses(licenseSector, licenseBoundsForApi, licenseFetchCountries);
   const licensesPartialMapHint = useMemo(() => {
+    if (viewMode === 'oil_and_gas') return null;
     if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
     const n = stillLoadingCountryCount;
     return t(
       `עדיין נטענות ${n} קבוצות רישיונות…`,
       `Still loading ${n} ${n === 1 ? 'license request' : 'license requests'}…`,
     );
-  }, [stillLoadingCountryCount, rawData.length, t]);
+  }, [stillLoadingCountryCount, rawData.length, t, viewMode]);
   const licenseLoadPartialFailuresHint = useMemo(() => {
     if (failedCountryQueryCount <= 0 || fetchError) return null;
     if (rawData.length === 0) return null;
@@ -248,6 +253,11 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
+  const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
+  const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
+  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('1000');
+  const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+  const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -561,12 +571,20 @@ export default function App() {
 
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const maritimeMapViewActive = MARITIME_MAP_VIEWS.has(viewMode);
 
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas') {
-      setSelectedMaritimeVessel(null);
+    if (viewMode === 'oil_and_gas') {
+      setPrioritizePetroleumVessels(true);
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!maritimeMapViewActive) {
+      setIsMaritimeLayerEnabled(false);
+      setSelectedMaritimeVessel(null);
+    }
+  }, [maritimeMapViewActive]);
 
   return (
     <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
@@ -842,6 +860,17 @@ export default function App() {
                   deleteLicense={deleteLicense}
                   selectedMaritimeVessel={selectedMaritimeVessel}
                   onSelectMaritimeVessel={setSelectedMaritimeVessel}
+                  maritimeMapViewActive={maritimeMapViewActive}
+                  isMaritimeLayerEnabled={isMaritimeLayerEnabled}
+                  onMaritimeLayerEnabledChange={setIsMaritimeLayerEnabled}
+                  vesselFilters={vesselFilters}
+                  onVesselFiltersChange={setVesselFilters}
+                  maritimeMaxVessels={maritimeMaxVessels}
+                  onMaritimeMaxVesselsChange={setMaritimeMaxVessels}
+                  maritimeCaptureWindow={maritimeCaptureWindow}
+                  onMaritimeCaptureWindowChange={setMaritimeCaptureWindow}
+                  prioritizePetroleumVessels={prioritizePetroleumVessels}
+                  onPrioritizePetroleumVesselsChange={setPrioritizePetroleumVessels}
                   routePlannerOverlay={routePlanner.overlay}
                   routePlannerPickRole={routePlanner.pickRole}
                   onRoutePlannerMapPick={routePlanner.handleMapPick}
@@ -860,7 +889,7 @@ export default function App() {
                 </div>
               </div>
             )}
-            {viewMode === 'oil_and_gas' && selectedMaritimeVessel && !isDossierOpen && (
+            {maritimeMapViewActive && selectedMaritimeVessel && !isDossierOpen && (
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
@@ -941,6 +970,19 @@ export default function App() {
           licenseTypes={miningData.licenseTypes}
           entitySubtypes={miningData.entitySubtypes}
           sourceLabels={miningData.sourceLabels}
+          maritimeSection={
+            maritimeMapViewActive
+              ? {
+                  layerEnabled: isMaritimeLayerEnabled,
+                  onLayerEnabledChange: setIsMaritimeLayerEnabled,
+                  vesselFilters,
+                  onVesselFiltersChange: setVesselFilters,
+                  prioritizePetroleum: prioritizePetroleumVessels,
+                  onPrioritizePetroleumChange: setPrioritizePetroleumVessels,
+                  showPetroleumPriority: viewMode === 'oil_and_gas',
+                }
+              : undefined
+          }
         />
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}

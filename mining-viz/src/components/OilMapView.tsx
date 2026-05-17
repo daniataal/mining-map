@@ -15,12 +15,11 @@ import { useState, useMemo } from 'react';
 import { useTheme } from 'next-themes';
 import {
   MapContainer,
-  TileLayer,
   CircleMarker,
   Tooltip,
-  LayersControl,
   ZoomControl,
 } from 'react-leaflet';
+import MapBasemapLayers from './map/MapBasemapLayers';
 import 'leaflet/dist/leaflet.css';
 import { useOilSummary } from '../lib/api';
 import { useI18n } from '../lib/i18n';
@@ -214,17 +213,7 @@ export default function OilMapView({ onBack }: OilMapViewProps) {
       >
         <ZoomControl position="bottomleft" />
 
-        <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
-          <LayersControl.BaseLayer checked={isDark} name={t('כהה', 'Dark')}>
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" attribution="© OpenStreetMap © CARTO" />
-          </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer checked={!isDark} name={t('בהיר', 'Light')}>
-            <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" attribution="© OpenStreetMap © CARTO" />
-          </LayersControl.BaseLayer>
-          <LayersControl.BaseLayer name={t('לוויין', 'Satellite')}>
-            <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
-          </LayersControl.BaseLayer>
-        </LayersControl>
+        <MapBasemapLayers isDark={isDark} include={['dark', 'light', 'satellite']} />
 
         {filteredFlows.map(flow => {
           const meta = HS_CATEGORY_META[flow.category] || HS_CATEGORY_META.other;

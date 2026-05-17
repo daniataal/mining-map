@@ -29,20 +29,26 @@ export default function PopupForm({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   isEsgRisk = false,
-  esgZoneName,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
     const isGold = commodity.includes('gold');
-    const isDiamond = commodity.includes('diamond');
+    const isOilGas =
+      (item.sector || '').toLowerCase().includes('oil') ||
+      /oil|gas|petroleum|lng|lpg|crude|refiner|diesel/.test(commodity);
     const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
     const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
-    
+    const entityAccent = getEntityAccent(item.entityKind);
+    const capacityLabel =
+      item.capacityText ||
+      (typeof item.capacity === 'number' && item.capacity > 0 ? String(item.capacity) : null);
+    const locationLine = [item.country, item.region].filter(Boolean).join(' · ');
     const heroImage = getLicenseHeroImageUrl(item);
 
     return (
-        <div className="flex flex-col w-[320px] bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
-            {/* 1. Visual Commodity Identification */}
+        <div
+          className={`flex flex-col ${isOilGas ? 'w-[360px]' : 'w-[320px]'} bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]`}
+        >
             <div className="relative h-44 w-full overflow-hidden group">
                 <img 
                   src={heroImage} 
@@ -50,7 +56,7 @@ export default function PopupForm({
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 dark:from-slate-950 via-transparent to-transparent opacity-80" />
-                <div className="absolute top-3 left-3 flex gap-2 flex-wrap max-w-[260px]">
+                <div className="absolute top-3 left-3 right-10 flex gap-2 flex-wrap max-w-[calc(100%-2.5rem)]">
                    <Badge className="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-black/10 dark:border-white/10 text-[9px] font-black uppercase px-2 h-5 text-slate-900 dark:text-white">
                      {item.lat?.toFixed(4)}, {item.lng?.toFixed(4)}
                    </Badge>
@@ -94,24 +100,60 @@ export default function PopupForm({
                 </div>
             </div>
 
-            {/* 2. Identification Details */}
             <div className="p-4 pt-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <h3 className="font-black text-sm tracking-tight leading-tight text-slate-900 dark:text-white uppercase italic truncate">
+                <div className="flex items-start justify-between gap-3 pr-6">
+                  <div className="flex-1 min-w-0">
+                    {(item.entityKind || item.entitySubtype || isOilGas) && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {item.entityKind && item.entityKind !== 'license' && (
+                          <Badge className={`text-[8px] font-bold uppercase border ${entityAccent.badge}`}>
+                            {formatEntityKind(item.entityKind)}
+                          </Badge>
+                        )}
+                        {item.entitySubtype && (
+                          <Badge className="text-[8px] font-bold uppercase border border-white/10 bg-white/5 text-slate-300">
+                            {item.entitySubtype.replaceAll('_', ' ')}
+                          </Badge>
+                        )}
+                        {isOilGas && (
+                          <Badge className="text-[8px] font-bold uppercase border border-orange-500/30 bg-orange-500/15 text-orange-300">
+                            {t('נפט וגז', 'Oil & Gas')}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                    <h3
+                      className={`font-bold text-sm tracking-tight leading-snug text-slate-900 dark:text-white break-words ${
+                        isOilGas ? 'normal-case' : 'uppercase italic line-clamp-2'
+                      }`}
+                    >
                       {item.company}
                     </h3>
-                    <div className="flex items-center mt-1">
-                      <LucideMapPin className="w-2.5 h-2.5 mr-1 text-slate-500" />
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">{item.region}</p>
+                    <div className="flex items-start gap-1 mt-1">
+                      <LucideMapPin className="w-2.5 h-2.5 mt-0.5 shrink-0 text-slate-500" />
+                      <p className="text-[10px] font-medium text-slate-500 leading-snug break-words">
+                        {locationLine || item.region || '—'}
+                      </p>
                     </div>
+                    {item.operatorName && item.operatorName !== item.company && (
+                      <p className="mt-1 text-[10px] text-slate-400 break-words">
+                        {t('מפעיל', 'Operator')}: {item.operatorName}
+                      </p>
+                    )}
                   </div>
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${isGold ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
+                  <div
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                      isOilGas
+                        ? 'bg-orange-500/10 border-orange-500/20 text-orange-400'
+                        : isGold
+                          ? 'bg-amber-500/10 border-amber-500/20 text-amber-500'
+                          : 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                    }`}
+                  >
                     <LucideMapPin className="w-4 h-4" />
                   </div>
                 </div>
 
-                {/* 3. Direct Action Protocol */}
                 <div className="grid grid-cols-2 gap-2 mt-5">
                    <Button 
                      size="sm" 
@@ -154,30 +196,48 @@ export default function PopupForm({
                   </Button>
                 )}
 
-                {/* 4. Technical Specs (Flexible) */}
                 <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
                     <div className="p-3 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס", "Status")}</span>
-                       <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-tight leading-tight">{item.status || 'Active'}</span>
+                       <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 leading-tight break-words">{item.status || 'Active'}</span>
                     </div>
                     <div className="p-3 border-l border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("טלפון", "Phone")}</span>
-                       <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-tight leading-tight">{item.phoneNumber || annotation.phoneNumber || '---'}</span>
+                       <span className="text-[10px] font-bold text-emerald-500 leading-tight break-words">{item.phoneNumber || annotation.phoneNumber || '---'}</span>
                     </div>
-                    <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                    {isOilGas && item.country && (
+                      <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('מדינה', 'Country')}</span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">{item.country}</span>
+                      </div>
+                    )}
+                    {isOilGas && capacityLabel && (
+                      <div className={`p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center ${item.country ? 'border-l' : ''}`}>
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('קיבולת', 'Capacity')}</span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">{capacityLabel}</span>
+                      </div>
+                    )}
+                    <div className={`p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center ${isOilGas && (item.country || capacityLabel) ? '' : 'col-span-2'}`}>
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סחורה וסוג", "Commodity & Type")}</span>
-                       <span className="text-[10px] font-bold text-slate-900 dark:text-white uppercase tracking-tight leading-tight break-words">
-                         <span className="text-amber-500">{item.commodity}</span> • {item.licenseType || 'ML'}
+                       <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words text-center">
+                         <span className={isOilGas ? 'text-orange-400' : 'text-amber-500'}>{item.commodity}</span>
+                         {' · '}{item.licenseType || 'ML'}
                        </span>
                     </div>
+                    {isOilGas && item.sector && (
+                      <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('סקטור', 'Sector')}</span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">{item.sector}</span>
+                      </div>
+                    )}
                     {isManagedInfrastructureEntity && (
                       <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
                         <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">
                           {t("מזהה והקשר", "Locator & Context")}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-900 dark:text-white uppercase tracking-tight leading-tight break-words">
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">
                           {item.locode || '—'}
-                          {item.nearbyPort?.name ? ` • ${item.nearbyPort.name}` : item.operatorName ? ` • ${item.operatorName}` : ''}
+                          {item.nearbyPort?.name ? ` · ${item.nearbyPort.name}` : item.operatorName ? ` · ${item.operatorName}` : ''}
                         </span>
                       </div>
                     )}
@@ -185,11 +245,27 @@ export default function PopupForm({
 
                 <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
                   ID: #{item.id.slice(0, 8)}
-                  {item.lastSyncedAt ? ` • ${t("סונכרן", "Synced")} ${new Date(item.lastSyncedAt).toLocaleDateString()}` : ''}
+                  {item.lastSyncedAt ? ` · ${t("סונכרן", "Synced")} ${new Date(item.lastSyncedAt).toLocaleDateString()}` : ''}
                 </p>
             </div>
         </div>
     );
+}
+
+function formatEntityKind(kind: string): string {
+  return kind.replaceAll('_', ' ');
+}
+
+function getEntityAccent(entityKind?: string | null): { badge: string } {
+  switch ((entityKind || '').toLowerCase()) {
+    case 'storage_terminal':
+    case 'logistics_node':
+      return { badge: 'bg-orange-500/15 text-orange-300 border-orange-500/30' };
+    case 'port':
+      return { badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' };
+    default:
+      return { badge: 'bg-slate-500/15 text-slate-300 border-slate-500/30' };
+  }
 }
 
 function formatSourceKindLabel(sourceKind?: string | null): string | null {

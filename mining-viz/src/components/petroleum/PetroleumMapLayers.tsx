@@ -10,14 +10,16 @@ import {
   usePetroleumLayerGeoJson,
 } from '../../lib/petroleumLayers';
 import { useI18n } from '../../lib/i18n';
+import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
+import { createRefineryMapIcon } from './refineryMapIcon';
 
 const LAYER_STYLE: Record<PetroleumLayerId, PathOptions> = {
-  exploration: { color: '#f59e0b', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 0.22 },
-  production: { color: '#10b981', weight: 1.5, fillColor: '#10b981', fillOpacity: 0.2 },
-  bid_rounds: { color: '#a855f7', weight: 1.5, fillColor: '#a855f7', fillOpacity: 0.18 },
-  refineries: { color: '#fb923c', weight: 1, fillColor: '#fb923c', fillOpacity: 0.85 },
-  oil_pipelines: { color: '#1e293b', weight: 2.2, opacity: 0.85 },
-  gas_pipelines: { color: '#0ea5e9', weight: 2, opacity: 0.8 },
+  exploration: { color: '#f59e0b', weight: 1.8, fillColor: '#fbbf24', fillOpacity: 0.28 },
+  production: { color: '#059669', weight: 1.8, fillColor: '#34d399', fillOpacity: 0.24 },
+  bid_rounds: { color: '#9333ea', weight: 1.6, fillColor: '#c084fc', fillOpacity: 0.22, dashArray: '4 3' },
+  refineries: { color: '#ea580c', weight: 1, fillColor: '#fb923c', fillOpacity: 0.9 },
+  oil_pipelines: { color: '#0f172a', weight: 3, opacity: 0.88, lineCap: 'round', lineJoin: 'round' },
+  gas_pipelines: { color: '#0284c7', weight: 2.6, opacity: 0.82, dashArray: '6 4', lineCap: 'round' },
 };
 
 const LAYER_LABELS: Record<PetroleumLayerId, [string, string]> = {
@@ -28,28 +30,6 @@ const LAYER_LABELS: Record<PetroleumLayerId, [string, string]> = {
   oil_pipelines: ['צינורות נפט', 'Oil pipelines'],
   gas_pipelines: ['צינורות גז', 'Gas pipelines'],
 };
-
-function featurePopupHtml(properties: Record<string, unknown>): string {
-  const rows: string[] = [];
-  const pick = (key: string, label: string) => {
-    const value = properties[key];
-    if (value == null || value === '') return;
-    rows.push(`<dt>${label}</dt><dd>${String(value)}</dd>`);
-  };
-  pick('Name', 'Name');
-  pick('title', 'Title');
-  pick('Company', 'Company');
-  pick('Country', 'Country');
-  pick('Type', 'Type');
-  pick('STATUS', 'Status');
-  pick('NAME', 'Name');
-  pick('description', 'Description');
-  pick('link', 'Link');
-  pick('Source', 'Source');
-  pick('SOURCE', 'Source');
-  if (!rows.length) return '<p class="text-[9px] text-slate-400">No attributes</p>';
-  return `<dl class="text-[9px] leading-snug">${rows.join('')}</dl>`;
-}
 
 interface PetroleumLayerOverlayProps {
   layerId: PetroleumLayerId;
@@ -63,6 +43,7 @@ function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: Petro
   const { data } = usePetroleumLayerGeoJson(layerId, bbox, enabled, mapZoom);
   const style = LAYER_STYLE[layerId];
   const geojson = useMemo(() => data ?? { type: 'FeatureCollection' as const, features: [] }, [data]);
+  const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
 
   return (
     <LayersControl.Overlay checked={DEFAULT_PETROLEUM_LAYER_VISIBILITY[layerId]} name={label}>
@@ -71,15 +52,18 @@ function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: Petro
           key={`${layerId}:${data?.feature_count ?? 0}:${data?.zoom ?? mapZoom}`}
           data={geojson}
           style={style}
-          pointToLayer={(_feature, latlng) =>
-            L.circleMarker(latlng, {
-              radius: layerId === 'refineries' ? 5 : 4,
+          pointToLayer={(feature, latlng) => {
+            if (layerId === 'refineries') {
+              return L.marker(latlng, { icon: refineryIcon });
+            }
+            return L.circleMarker(latlng, {
+              radius: 4,
               ...style,
-            })
-          }
+            });
+          }}
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
-            layer.bindPopup(featurePopupHtml(props), { maxWidth: 280 });
+            bindPetroleumFeaturePopup(layer, layerId, props, feature.geometry ?? null);
           }}
         />
       </LayerGroup>

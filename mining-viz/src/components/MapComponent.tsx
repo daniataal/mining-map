@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import {
     MapContainer,
-    TileLayer,
     useMap,
     LayersControl,
     useMapEvents,
@@ -26,18 +25,28 @@ import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, 
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
-  DEFAULT_VESSEL_FILTERS,
+  sortVesselsForDisplay,
   VESSEL_SHIP_TYPE_OPTIONS,
   type VesselFilters,
 } from '../lib/vessels';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
+import { createRefineryMapIcon } from './petroleum/refineryMapIcon';
+import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
+import { isRefineryEntity } from '../lib/oilEntityKinds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
+import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
+import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
+import {
+  ESG_CONSERVATION_ZONES,
+  getEsgZoneIntersection,
+} from '../lib/esgConservationZones';
+
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -58,61 +67,7 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-export const ESG_CONSERVATION_ZONES = [
-  {
-    name: "Upper Guinean Rainforest Buffer",
-    center: [5.556, -0.196] as [number, number],
-    radius: 35000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Strict ecological protection zone. Critical wildlife habitat buffer. High water pollution threat index."
-  },
-  {
-    name: "Kruger National Park Protected Area",
-    center: [-23.988, 31.554] as [number, number],
-    radius: 45000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "National park sanctuary reserve. Mining operations strictly prohibited within buffer bounds."
-  },
-  {
-    name: "East African Rift Valley Ecological Zone",
-    center: [-1.292, 36.821] as [number, number],
-    radius: 50000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Volcanic active conservation area. Ground subsidence risk and protected flora/fauna."
-  },
-  {
-    name: "Nile Delta Protection Buffer",
-    center: [30.044, 31.235] as [number, number],
-    radius: 60000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Sensitive delta agricultural zone. Soil salinity warning and chemical runoff prevention area."
-  }
-];
-
-export function getEsgZoneIntersection(lat?: number | null, lng?: number | null) {
-  if (lat == null || lng == null) return null;
-  for (const zone of ESG_CONSERVATION_ZONES) {
-    const [zLat, zLng] = zone.center;
-    const R = 6371e3;
-    const phi1 = (lat * Math.PI) / 180;
-    const phi2 = (zLat * Math.PI) / 180;
-    const deltaPhi = ((zLat - lat) * Math.PI) / 180;
-    const deltaLambda = ((zLng - lng) * Math.PI) / 180;
-    const a =
-      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-      Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c;
-    if (distance <= zone.radius) {
-      return zone;
-    }
-  }
-  return null;
-}
+export { ESG_CONSERVATION_ZONES, getEsgZoneIntersection };
 
 /** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
 type VesselCategoryKey =
@@ -290,7 +245,7 @@ const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
 // points.
 const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
-const MARITIME_MAX_VESSEL_OPTIONS = ['100', '300', '600', '1000'];
+const MARITIME_MAX_VESSEL_OPTIONS = ['300', '600', '1000', '2000', '5000'];
 
 /** Matches marker rendering: borders only for countries with at least one plottable license. */
 function licenseHasMapCoordinates(item: MiningLicense): boolean {
@@ -299,7 +254,7 @@ function licenseHasMapCoordinates(item: MiningLicense): boolean {
     return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 }
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
-const MARITIME_RENDER_SOFT_CAP = 600;
+const MARITIME_RENDER_SOFT_CAP = 1500;
 
 const getMarkerColor = (
   commodity?: string,
@@ -314,6 +269,7 @@ const getMarkerColor = (
 
     if (entitySubtype === 'tank_farm') return '#f97316';
     if (entitySubtype === 'storage_terminal') return '#06b6d4';
+    if (entitySubtype === 'refinery') return '#fb923c';
 
     if (sector) {
       const s = sector.toLowerCase();
@@ -359,6 +315,17 @@ interface MapComponentProps {
   onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
+  maritimeMapViewActive?: boolean;
+  isMaritimeLayerEnabled?: boolean;
+  onMaritimeLayerEnabledChange?: (enabled: boolean) => void;
+  vesselFilters?: VesselFilters;
+  onVesselFiltersChange?: (filters: VesselFilters) => void;
+  maritimeMaxVessels?: string;
+  onMaritimeMaxVesselsChange?: (value: string) => void;
+  maritimeCaptureWindow?: string;
+  onMaritimeCaptureWindowChange?: (value: string) => void;
+  prioritizePetroleumVessels?: boolean;
+  onPrioritizePetroleumVesselsChange?: (enabled: boolean) => void;
   routePlannerOverlay?: RouteMapOverlay | null;
   routePlannerPickRole?: 'supplier' | 'buyer' | null;
   onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
@@ -429,45 +396,6 @@ const RoutePlannerBoundsEffect = ({
     return null;
 };
 
-const DataBoundsEffect = ({
-    data,
-    selectedItem,
-    viewModeKey,
-}: {
-    data: Array<MiningLicense & { _displayLat?: number | null; _displayLng?: number | null }>;
-    selectedItem: MiningLicense | null;
-    viewModeKey: string;
-}) => {
-    const map = useMap();
-    const lastSignatureRef = useRef<string>('');
-
-    useEffect(() => {
-        if (selectedItem) return;
-        const coords = data
-            .filter((item) => item._displayLat != null && item._displayLng != null)
-            .map((item) => [item._displayLat as number, item._displayLng as number] as [number, number]);
-        if (coords.length === 0) return;
-
-        const first = coords[0];
-        const last = coords[coords.length - 1];
-        const signature = `${viewModeKey}:${coords.length}:${first[0].toFixed(3)}:${first[1].toFixed(3)}:${last[0].toFixed(3)}:${last[1].toFixed(3)}`;
-        if (lastSignatureRef.current === signature) return;
-        lastSignatureRef.current = signature;
-
-        if (coords.length === 1) {
-            map.setView(coords[0], Math.max(map.getZoom(), 6), { animate: true });
-            return;
-        }
-
-        map.fitBounds(L.latLngBounds(coords).pad(0.18), {
-            animate: true,
-            maxZoom: 6,
-        });
-    }, [data, map, selectedItem, viewModeKey]);
-
-    return null;
-};
-
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
@@ -530,6 +458,17 @@ export default function MapComponent({
   onLicenseViewportChange,
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
+  maritimeMapViewActive = false,
+  isMaritimeLayerEnabled: isMaritimeLayerEnabledProp = false,
+  onMaritimeLayerEnabledChange,
+  vesselFilters: vesselFiltersProp,
+  onVesselFiltersChange,
+  maritimeMaxVessels: maritimeMaxVesselsProp = '1000',
+  onMaritimeMaxVesselsChange,
+  maritimeCaptureWindow: maritimeCaptureWindowProp = '10',
+  onMaritimeCaptureWindowChange,
+  prioritizePetroleumVessels = false,
+  onPrioritizePetroleumVesselsChange,
   worldCoverage,
   routePlannerOverlay = null,
   routePlannerPickRole = null,
@@ -542,6 +481,7 @@ export default function MapComponent({
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
@@ -553,18 +493,27 @@ export default function MapComponent({
         return window.innerWidth < 768 || /Mobi|Android|iPhone/i.test(navigator.userAgent);
     }, []);
 
-    const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
-    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('600');
-    const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+    const isMaritimeLayerEnabled = isMaritimeLayerEnabledProp;
+    const setIsMaritimeLayerEnabled = onMaritimeLayerEnabledChange ?? (() => {});
+    const maritimeMaxVessels = maritimeMaxVesselsProp;
+    const setMaritimeMaxVessels = onMaritimeMaxVesselsChange ?? (() => {});
+    const maritimeCaptureWindow = maritimeCaptureWindowProp;
+    const setMaritimeCaptureWindow = onMaritimeCaptureWindowChange ?? (() => {});
+    const vesselFilters = vesselFiltersProp ?? { search: '', shipTypes: [], minSpeedKnots: null, maxSpeedKnots: null, navigationalStatuses: [] };
+    const setVesselFilters = onVesselFiltersChange ?? (() => {});
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
-    const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
-    const handleMaritimeLayerActiveChange = useCallback((active: boolean) => {
-        setIsMaritimeLayerEnabled(active);
-    }, []);
+    const handleMaritimeLayerActiveChange = useCallback(
+        (active: boolean) => {
+            setIsMaritimeLayerEnabled(active);
+        },
+        [setIsMaritimeLayerEnabled],
+    );
+    const vesselApiScope =
+        prioritizePetroleumVessels && isOilAndGasView ? ('oil_tankers' as const) : ('all_vessels' as const);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -622,31 +571,29 @@ export default function MapComponent({
         error: maritimeError,
         refetch: refetchMaritime,
     } = useMaritimeVessels({
-        enabled: isOilAndGasView, // Load in background even if layer is off
+        enabled: isMaritimeMapView,
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
-        scope: 'all_vessels',
+        scope: vesselApiScope,
         bbox: maritimeViewport,
     });
     const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
-    const maritimeVessels = useMemo(
-        () => applyVesselFilters(maritimeVesselsRaw, vesselFilters),
-        [maritimeVesselsRaw, vesselFilters],
-    );
+    const maritimeVessels = useMemo(() => {
+        const filtered = applyVesselFilters(maritimeVesselsRaw, vesselFilters);
+        return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
+    }, [maritimeVesselsRaw, vesselFilters, prioritizePetroleumVessels, isOilAndGasView]);
     const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
-    const vesselsVisible = isOilAndGasView && oilAndGasDisplayMode !== 'on_ground_only';
+    const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
     useEffect(() => {
-        if (isOilAndGasView) return;
-        setIsMaritimeLayerEnabled(false);
+        if (isMaritimeMapView) return;
         setOilAndGasDisplayMode('combined');
         setMaritimeViewport(null);
         setMaritimeAdvancedOpen(false);
-        onSelectMaritimeVessel(null);
-    }, [isOilAndGasView, onSelectMaritimeVessel]);
+    }, [isMaritimeMapView]);
 
     useEffect(() => {
         if (!isMaritimeLayerEnabled) setMaritimeAdvancedOpen(false);
@@ -664,8 +611,8 @@ export default function MapComponent({
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
     const maritimeIdleHint = t(
-        'הפעל את שכבת «כלי שיט (AIS)» בבקרת השכבות (למטה מימין) כדי לטעון כלי שיט לפי גבולות המפה.',
-        'Turn on the «Vessels (AIS)» overlay in the layer control (bottom-right) to load vessels for the current map bounds.'
+        'הפעל את שכבת «כלי שיט (AIS)» במסננים (אייקון שכבות) או בבקרת השכבות למטה מימין.',
+        'Enable «Vessels (AIS)» in the filter panel (layers icon) or the layer control (bottom-right).'
     );
     const maritimeHeadlineStatus = !isMaritimeLayerEnabled
         ? ''
@@ -684,7 +631,7 @@ export default function MapComponent({
     const maritimeDetailNote = !isMaritimeLayerEnabled
         ? t(
               'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
-              'Vessels stay off by default in Oil & Gas. Turn the layer on to load only the visible map area.'
+              'Vessels stay off until you enable the layer. Data loads for the visible map area only.'
           )
         : isMaritimeLoading && !maritimeFeed
             ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
@@ -814,12 +761,16 @@ export default function MapComponent({
             const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
             const isEsgRisk = esgZone !== null;
             const esgZoneName = esgZone?.name;
+            const refineryPin = isRefineryEntity(item);
+            const markerIcon = refineryPin
+              ? createRefineryMapIcon(selectedItem?.id === item.id)
+              : createCustomIcon(color, false, isEsgRisk);
 
             return (
                 <Marker
                     key={getLicenseRenderKey(item, index)}
                     position={[item._displayLat, item._displayLng]}
-                    icon={createCustomIcon(color, false, isEsgRisk)}
+                    icon={markerIcon}
                     ref={(el) => {
                         if (!el) return;
                         markerRefs.current[item.id] = el;
@@ -850,7 +801,7 @@ export default function MapComponent({
                             )}
                         </div>
                     </Tooltip>
-                    <Popup className="custom-popup" minWidth={300}>
+                    <Popup className="custom-popup" minWidth={360} maxWidth={380}>
                         <PopupForm 
                           item={item}
                           annotation={annotation}
@@ -933,7 +884,7 @@ export default function MapComponent({
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
             )}
-            {isOilAndGasView && (
+            {isMaritimeMapView && (
                 <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
@@ -1287,7 +1238,7 @@ export default function MapComponent({
                       onSelectMaritimeVessel(null);
                     }}
                 />
-                <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker active={isMaritimeMapView} onBoundsChange={setMaritimeViewport} />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1312,9 +1263,6 @@ export default function MapComponent({
                   />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
-                {!isRoutePlannerView && (
-                    <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
-                )}
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1330,21 +1278,7 @@ export default function MapComponent({
                     </div>
                 )}
                 
-                {/* key forces remount when theme changes so `checked` re-applies */}
-                <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
-                    <LayersControl.BaseLayer checked={isDark} name={t("כהה", "Dark")}>
-                        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer checked={!isDark} name={t("בהיר", "Light")}>
-                        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer name={t("לוויין", "Satellite")}>
-                        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer name={t("טופוגרפי", "Topographic")}>
-                        <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" />
-                    </LayersControl.BaseLayer>
-
+                <MapBasemapLayers isDark={isDark}>
                     <LayersControl.Overlay checked name={t("אזורי שימור סביבתיים (ESG)", "ESG Protected Zones")}>
                         <FeatureGroup>
                             {ESG_CONSERVATION_ZONES.map((zone, idx) => (
@@ -1359,17 +1293,20 @@ export default function MapComponent({
                                         weight: 2.2,
                                         dashArray: "6, 6"
                                     }}
+                                    eventHandlers={{
+                                        click: (e) => {
+                                            L.DomEvent.stopPropagation(e);
+                                        },
+                                    }}
                                 >
-                                    <Tooltip direction="top" opacity={0.95}>
-                                        <div className="p-3 max-w-[240px] font-sans">
-                                          <p className="text-xs font-black uppercase text-emerald-500 tracking-wider mb-1">
-                                            {zone.name}
-                                          </p>
-                                          <p className="text-[10px] text-slate-300 leading-normal">
-                                            {zone.description}
-                                          </p>
-                                        </div>
-                                    </Tooltip>
+                                    <Popup
+                                        className="esg-leaflet-popup"
+                                        minWidth={320}
+                                        maxWidth={380}
+                                        autoPanPadding={[16, 16]}
+                                    >
+                                        <EsgProtectedZonePopup zone={zone} />
+                                    </Popup>
                                 </Circle>
                             ))}
                         </FeatureGroup>
@@ -1387,12 +1324,12 @@ export default function MapComponent({
                     )}
                     {isOilAndGasView && onGroundVisible && (
                         <PetroleumMapLayers
-                            bbox={maritimeViewport}
+                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
                             mapZoom={petroleumMapZoom}
                             enabled={isOilAndGasView && onGroundVisible}
                         />
                     )}
-                    {isOilAndGasView && vesselsVisible && (
+                    {vesselsVisible && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
                             <FeatureGroup>
                                 {maritimeVisibleVessels.map((vessel) => (
@@ -1425,8 +1362,8 @@ export default function MapComponent({
                             </FeatureGroup>
                         </LayersControl.Overlay>
                     )}
-                </LayersControl>
-                {isOilAndGasView && (
+                </MapBasemapLayers>
+                {isMaritimeMapView && (
                     <MaritimeLayerSync layerName={vesselLayerLabel} onLayerActiveChange={handleMaritimeLayerActiveChange} />
                 )}
 

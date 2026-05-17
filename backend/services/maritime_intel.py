@@ -147,9 +147,43 @@ def _normalize_vessel_scope(scope: str) -> str:
     return "all_vessels" if _clean_text(scope).lower() == "all_vessels" else "oil_tankers"
 
 
+def petroleum_vessel_priority(ship_type_code: Any, ship_type_label: Any) -> int:
+    """Higher score = more relevant for oil/gas maritime workflows (sort key, not a hard filter)."""
+    try:
+        code = int(ship_type_code)
+    except (TypeError, ValueError):
+        code = None
+    if code is not None and 80 <= code <= 89:
+        return 100
+    label = _normalize_token(ship_type_label)
+    if not label:
+        return 0
+    if any(term in label for term in ("tanker", "crude", "chemical", "lng", "lpg", "petroleum", "oil", "gas")):
+        return 80
+    if "cargo" in label:
+        return 20
+    return 0
+
+
 def _ship_matches_scope(ship_type_label: str, vessel_scope: str) -> bool:
-    # We now fetch all vessels and filter on the client side for better UX.
+    # Scope no longer excludes vessel types; petroleum focus is applied via sort priority.
     return True
+
+
+def _vessel_scope_order_sql(vessel_scope: str) -> str:
+    normalized = _normalize_vessel_scope(vessel_scope)
+    if normalized == "all_vessels":
+        return "last_seen_at DESC, observed_at DESC NULLS LAST"
+    return """
+        CASE
+            WHEN ship_type_code BETWEEN 80 AND 89 THEN 0
+            WHEN lower(coalesce(ship_type_label, '')) LIKE '%tanker%' THEN 1
+            WHEN lower(coalesce(ship_type_label, '')) ~ '(crude|chemical|lng|lpg|petroleum|oil|gas)' THEN 2
+            ELSE 9
+        END,
+        last_seen_at DESC,
+        observed_at DESC NULLS LAST
+    """
 
 
 def _parse_datetime(value: Any) -> Optional[datetime]:
@@ -362,7 +396,7 @@ def _build_stored_feed_response(
         limitations.append(str(plan["geography_note"]))
     if normalized_scope == "oil_tankers":
         limitations.append(
-            "Scope is limited to tanker-class AIS snapshots persisted by the maritime worker."
+            "Oil-focused scope prioritizes tankers and petroleum-relevant AIS types; other vessels remain visible when within the cap."
         )
     else:
         limitations.append(
@@ -1116,7 +1150,16 @@ async def _collect_ais_snapshot(
             continue
         results.append(record)
 
-    results.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
+    if normalized_scope == "oil_tankers":
+        results.sort(
+            key=lambda item: (
+                -petroleum_vessel_priority(item.get("ship_type_code"), item.get("ship_type_label")),
+                str(item.get("observed_at") or ""),
+            ),
+            reverse=True,
+        )
+    else:
+        results.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
     source_label = {
         "viewport_bbox": "AISStream viewport watch",
         "sampled_viewport_regions": "AISStream sampled viewport watch",
@@ -1128,7 +1171,7 @@ async def _collect_ais_snapshot(
         limitations.append(str(plan["geography_note"]))
     if normalized_scope == "oil_tankers":
         limitations.append(
-            "Scope is limited to tanker-class AIS messages for an oil-focused watch. Switch to all vessels to widen coverage."
+            "Oil-focused scope ranks tankers and petroleum-relevant vessels first; widen max_vessels or switch to all_vessels for neutral ordering."
         )
     else:
         limitations.append(
@@ -1194,9 +1237,6 @@ def get_maritime_vessel_feed(
         ensure_maritime_tables(conn)
         where = ["last_seen_at >= NOW() - (%s * INTERVAL '1 second')"]
         params: list[Any] = [MARITIME_SNAPSHOT_RETENTION_SECONDS]
-        if normalized_scope != "all_vessels":
-            where.append("ship_type_label = %s")
-            params.append("Tanker")
         if normalized_bbox is not None:
             south, west, north, east = normalized_bbox
             where.append("lat BETWEEN %s AND %s")
@@ -1236,7 +1276,7 @@ def get_maritime_vessel_feed(
                     last_seen_at
                 FROM maritime_vessel_snapshots
                 WHERE {" AND ".join(where)}
-                ORDER BY last_seen_at DESC, observed_at DESC NULLS LAST
+                ORDER BY {_vessel_scope_order_sql(normalized_scope)}
                 LIMIT %s
                 OFFSET %s
                 """,
