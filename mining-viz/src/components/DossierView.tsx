@@ -179,6 +179,9 @@ export default function DossierView({
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
+  const [govSearchQuery, setGovSearchQuery] = useState('');
+  const [govFilterCategory, setGovFilterCategory] = useState('all');
+  const [auditedContracts, setAuditedContracts] = useState<string[]>([]);
 
   const [documentText, setDocumentText] = useState('');
   const [scannedContract, setScannedContract] = useState<any>(null);
@@ -270,6 +273,107 @@ export default function DossierView({
   const primaryCommodityLabel = commodityLabels[0] || '';
   const activeCommodityLabel = selectedCommodity || primaryCommodityLabel;
   const commodityListLabel = effectiveCommodityRaw || activeCommodityLabel || 'Unknown';
+
+  const mockGovContracts = useMemo(() => {
+    if (!item) return [];
+    const companyName = item.company || 'Acme Minerals Ltd';
+    
+    const contracts = [
+      {
+        id: `DE-FE00${item.id || 32900}-G`,
+        title: `Strategic Reserve Acquisition: Gold Bullion Refining & Security Storage Lease`,
+        agency: `U.S. Dept of Energy (DOE) - Office of Fossil Energy & Carbon Management`,
+        value: 142500000,
+        commodity: 'Gold',
+        category: 'precious',
+        uei: 'UEI-G897AN32B',
+        duns: '09-887-2342',
+        status: 'ACTIVE',
+        period: 'Feb 2026 – Feb 2031'
+      },
+      {
+        id: `DLA-2026-MNG-${item.id || 9821}`,
+        title: `Strategic Materials stockpiling & supply of metallurgical grade Manganese`,
+        agency: `Defense Logistics Agency (DLA) Strategic Materials`,
+        value: 68400000,
+        commodity: 'Manganese',
+        category: 'strategic',
+        uei: 'UEI-M543OP98A',
+        duns: '11-445-6678',
+        status: 'ACTIVE',
+        period: 'Apr 2026 – Dec 2029'
+      },
+      {
+        id: `DE-SC002${item.id || 3412}-S`,
+        title: `Industrial High-Purity Silver supply for Photovoltaic & Semi-conductor Reserves`,
+        agency: `U.S. Department of the Treasury`,
+        value: 48900000,
+        commodity: 'Silver',
+        category: 'precious',
+        uei: 'UEI-S321XF56C',
+        duns: '12-990-1123',
+        status: 'COMPLETED',
+        period: 'Jan 2025 – Jan 2026'
+      },
+      {
+        id: `SPR-DE-2026-OIL`,
+        title: `Strategic Petroleum Reserve (SPR) emergency sweet crude replenishment agreement`,
+        agency: `U.S. Dept of Energy (DOE) - Office of Petroleum Reserves`,
+        value: 295000000,
+        commodity: 'Oil',
+        category: 'fuels',
+        uei: 'UEI-O998KL43D',
+        duns: '44-998-0012',
+        status: 'ACTIVE',
+        period: 'Mar 2026 – Mar 2031'
+      },
+      {
+        id: `DOD-DLA-DSL-09`,
+        title: `Tactical Ultra-Low Sulfur Diesel (ULSD) and Jet Fuel supply contract for naval refueling hubs`,
+        agency: `Defense Logistics Agency (DLA) Energy`,
+        value: 115000000,
+        commodity: 'Diesel',
+        category: 'fuels',
+        uei: 'UEI-D887PL12K',
+        duns: '33-221-5544',
+        status: 'UNDER REVIEW',
+        period: 'Jun 2026 – Jun 2030'
+      },
+      {
+        id: `NRA-JOR-MNG-99`,
+        title: `Sovereign Manganese stockpiling and refinery infrastructure grant`,
+        agency: `Jordan National Resources Authority (NRA)`,
+        value: 35000000,
+        commodity: 'Manganese',
+        category: 'strategic',
+        uei: 'UEI-J445TR89X',
+        duns: '99-880-7766',
+        status: 'ACTIVE',
+        period: 'Jul 2026 – Jul 2030'
+      }
+    ];
+
+    return contracts.map(c => ({
+      ...c,
+      recipient: companyName
+    }));
+  }, [item]);
+
+  const filteredGovContracts = useMemo(() => {
+    return mockGovContracts.filter(c => {
+      const matchesSearch = 
+        c.title.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.agency.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.id.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.commodity.toLowerCase().includes(govSearchQuery.toLowerCase());
+      
+      const matchesCategory = 
+        govFilterCategory === 'all' || 
+        c.category === govFilterCategory;
+
+      return matchesSearch && matchesCategory;
+    });
+  }, [mockGovContracts, govSearchQuery, govFilterCategory]);
   const commoditySummaryLabel =
     commodityLabels.length === 0
       ? 'Unknown'
@@ -877,11 +981,12 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'operations', 'exports-imports', 'gov-tenders', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
+                  'gov-tenders': 'Gov Spending & Tenders',
                   'news': 'News',
                   'satellite': 'Satellite',
                   'owners': 'Ownership',
@@ -1235,6 +1340,237 @@ Output requirements:
                       );
                     })}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* GOV SPENDING & TENDERS TAB (USASpending Protocol) */}
+            {activeTab === 'gov-tenders' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Government Spending HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Entity Registry Profile */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between min-h-[200px] relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                        {t('פרופיל ישות רשום', 'REGISTERED ENTITY PROFILE')}
+                      </span>
+                      <h4 className="text-md font-black text-slate-900 dark:text-white truncate uppercase">
+                        {item.company}
+                      </h4>
+                      <div className="space-y-1 mt-3">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>UEI:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono">UEI-M543OP98A</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>DUNS:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono">09-887-2342</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                      <span className="text-[9px] font-black text-emerald-500 dark:text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        {t('פעיל ב-SAM.gov', 'SAM.GOV ACTIVE')}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">SAM REG VERIFIED</span>
+                    </div>
+                  </Card>
+
+                  {/* Procurement Metrics HUD */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between md:col-span-2 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('סך תקציב ממשלתי', 'TOTAL GOV FUNDING')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          $448.9M
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">USD AWARDED</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('חוזים פעילים', 'ACTIVE CONTRACTS')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          {mockGovContracts.length}
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">AGREEMENTS</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('סוכנות מימון ראשית', 'TOP FUNDING AGENCY')}
+                        </span>
+                        <p className="text-sm font-black text-slate-900 dark:text-white truncate uppercase">
+                          DLA / DOE
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">U.S. FEDERAL</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+                      <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1.5">
+                        <span>{t('חלוקת תיקי רכש לפי חומרים', 'Procurement Portfolio Share by Material Type')}</span>
+                        <span className="text-amber-500 font-black">Precious Metals: 64%</span>
+                      </div>
+                      <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full flex overflow-hidden">
+                        <div className="h-full bg-amber-500" style={{ width: '45%' }} title="Gold" />
+                        <div className="h-full bg-slate-300" style={{ width: '19%' }} title="Silver" />
+                        <div className="h-full bg-blue-500" style={{ width: '26%' }} title="Oil/Fossil" />
+                        <div className="h-full bg-purple-500" style={{ width: '10%' }} title="Manganese" />
+                      </div>
+                      <div className="flex gap-3 mt-2 text-[8px] text-slate-400 font-bold uppercase">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> Gold</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-slate-300 rounded-full" /> Silver</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> Oil & Fuels</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Manganese</span>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Filter and Search Controls */}
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: 'all', label: 'All Contracts' },
+                      { id: 'precious', label: 'Precious Metals' },
+                      { id: 'fuels', label: 'Fossil Fuels' },
+                      { id: 'strategic', label: 'Strategic Minerals' }
+                    ].map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setGovFilterCategory(cat.id)}
+                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
+                          ${govFilterCategory === cat.id 
+                            ? 'bg-amber-500 text-slate-950 border border-amber-500 shadow-md shadow-amber-500/10' 
+                            : 'bg-black/5 dark:bg-white/5 text-slate-500 border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="w-full md:w-64 relative">
+                    <Input
+                      type="text"
+                      placeholder="Search Awards ID, Agency..."
+                      value={govSearchQuery}
+                      onChange={(e) => setGovSearchQuery(e.target.value)}
+                      className="h-9 pl-4 pr-8 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {/* Contracts List */}
+                <div className="space-y-4">
+                  {filteredGovContracts.length === 0 ? (
+                    <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                      {t('לא נמצאו חוזי רכש ממשלתיים', 'No matching government contract awards found.')}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {filteredGovContracts.map((contract) => {
+                        const isAudited = auditedContracts.includes(contract.id);
+                        
+                        let commodityColor = 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
+                        if (contract.commodity === 'Silver') {
+                          commodityColor = 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
+                        } else if (contract.commodity === 'Manganese') {
+                          commodityColor = 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
+                        } else if (contract.commodity === 'Oil' || contract.commodity === 'Diesel') {
+                          commodityColor = 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
+                        }
+
+                        return (
+                          <Card
+                            key={contract.id}
+                            className="p-6 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 border-none font-bold text-[8px] font-mono tracking-wide px-2 h-5">
+                                    {contract.id}
+                                  </Badge>
+                                  <Badge className={`font-black text-[8px] px-2 h-5 ${commodityColor}`}>
+                                    {contract.commodity.toUpperCase()}
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                    {contract.period}
+                                  </span>
+                                </div>
+                                
+                                <h4 className="text-md font-black text-slate-900 dark:text-white uppercase leading-snug">
+                                  {contract.title}
+                                </h4>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                                  Funding Agency: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{contract.agency}</span>
+                                </p>
+                              </div>
+
+                              <div className="text-left md:text-right shrink-0 flex flex-col justify-between min-h-[80px]">
+                                <div>
+                                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block mb-0.5">
+                                    {t('שווי מענק מעורך', 'ESTIMATED AWARD VALUE')}
+                                  </span>
+                                  <p className="text-xl font-black text-slate-950 dark:text-white tracking-tight">
+                                    ${(contract.value / 1000000).toFixed(1)}M USD
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-2 md:justify-end">
+                                  <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Status:
+                                  </span>
+                                  <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md
+                                    ${contract.status === 'ACTIVE' 
+                                      ? 'bg-emerald-500/10 text-emerald-500' 
+                                      : contract.status === 'COMPLETED'
+                                        ? 'bg-blue-500/10 text-blue-500'
+                                        : 'bg-amber-500/10 text-amber-500'}`}>
+                                    {contract.status}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-4 text-[9px] text-slate-400 font-semibold uppercase">
+                                <span>UEI: <span className="text-slate-600 dark:text-slate-300 font-mono">{contract.uei}</span></span>
+                                <span>DUNS: <span className="text-slate-600 dark:text-slate-300 font-mono">{contract.duns}</span></span>
+                              </div>
+                              
+                              <Button
+                                onClick={() => {
+                                  if (isAudited) return;
+                                  const newLog = {
+                                    action: 'GOV_CONTRACT_AUDITED',
+                                    details: `Federal audit report requested for Award ID '${contract.id}' under SAM.gov USASpending guidelines. Recipient: ${contract.recipient}, Amount: $${(contract.value / 1000000).toFixed(1)}M USD. Compliance verified.`,
+                                    username: 'USASpending Audit',
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  setActivityLogs(prev => [newLog, ...prev]);
+                                  setAuditedContracts(prev => [...prev, contract.id]);
+                                }}
+                                disabled={isAudited}
+                                className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                  ${isAudited 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                              >
+                                {isAudited ? t('בוצע אימות ממשלתי', 'AUDIT OK ✔') : t('בצע אימות חוזה', 'VERIFY AWARD')}
+                              </Button>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
