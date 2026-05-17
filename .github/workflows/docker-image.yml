@@ -78,16 +78,14 @@ jobs:
           AUTO_IMPORT="true"
         fi
 
-        CSV_PATH=""
-        if [ -f "licenses_export.csv" ]; then
-          CSV_PATH="licenses_export.csv"
-        elif [ -f "mining-viz/licenses_export.csv" ]; then
-          CSV_PATH="mining-viz/licenses_export.csv"
+        # If it only exists in the subfolder, copy it to the root so scp-action uploads it directly to /tmp/licenses_export.csv
+        if [ ! -f "licenses_export.csv" ] && [ -f "mining-viz/licenses_export.csv" ]; then
+          cp mining-viz/licenses_export.csv licenses_export.csv
         fi
 
-        if [ -n "$CSV_PATH" ]; then
+        if [ -f "licenses_export.csv" ]; then
           echo "csv_exists=true" >> "$GITHUB_OUTPUT"
-          echo "csv_path=$CSV_PATH" >> "$GITHUB_OUTPUT"
+          echo "csv_path=licenses_export.csv" >> "$GITHUB_OUTPUT"
         else
           echo "csv_exists=false" >> "$GITHUB_OUTPUT"
           echo "csv_path=" >> "$GITHUB_OUTPUT"
@@ -136,10 +134,16 @@ jobs:
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
-          if [ "$CSV_UPLOADED" = "true" ] && [ -f /tmp/licenses_export.csv ]; then
-            sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
-            sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
-            echo "Fallback CSV prepared at /opt/mining-map/data/licenses_export.csv"
+          if [ "$CSV_UPLOADED" = "true" ]; then
+            if [ -f /tmp/licenses_export.csv ]; then
+              sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
+              sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
+              echo "Fallback CSV prepared at /opt/mining-map/data/licenses_export.csv"
+            elif [ -f /tmp/mining-viz/licenses_export.csv ]; then
+              sudo mv /tmp/mining-viz/licenses_export.csv /opt/mining-map/data/licenses_export.csv
+              sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
+              echo "Fallback CSV (from mining-viz) prepared at /opt/mining-map/data/licenses_export.csv"
+            fi
           fi
 
           # Create the modern split-service docker-compose.yml
