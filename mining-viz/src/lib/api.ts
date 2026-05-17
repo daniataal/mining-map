@@ -1,8 +1,7 @@
 import axios, { isCancel } from 'axios';
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo } from 'react';
 import {
   useQuery,
-  useQueries,
   useMutation,
   useQueryClient,
   type QueryFunctionContext,
@@ -28,6 +27,20 @@ import {
   PortLogisticsDetails,
   PortLogisticsResponse,
 } from '../types';
+import {
+  isLicenseBundleCacheFresh,
+  licenseBundleModeFromSector,
+  readLicenseBundleCache,
+  readLicenseBundleCacheSync,
+  writeLicenseBundleCache,
+  type LicenseBundleMode,
+} from './licenseBundleCache';
+
+export {
+  clearLicenseBundleCaches,
+  LICENSE_BUNDLE_TTL_MS,
+  type LicenseBundleMode,
+} from './licenseBundleCache';
 
 /** Same base URL for fetch() and axios. 
  *  Empty string means 'same origin', which works because we use Vite proxy in dev 
@@ -172,16 +185,13 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-/** Viewport for GET /licenses bbox params (south/west/north/east). */
+/** Viewport for GET /licenses bbox params (south/west/north/east). Kept for API typing; map loads ignore bbox. */
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
-/**
- * Mining map: one country per request so per-country SQL caps are not shared.
- * Oil & gas: single bulk preload (sector only) — filters run client-side.
- */
-const LICENSE_COUNTRY_BATCH_SIZE = 1;
-const OIL_GAS_BULK_PRELOAD = true;
+/** One GET /licenses per view mode; filters (country, commodity, etc.) run client-side only. */
+const LICENSE_BULK_LIMIT = 15_000;
+const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
 /** USGS global fallback — excluded from map country fetches (dominates shared SQL limits). */
 const LICENSE_MAP_EXCLUDED_COUNTRIES = new Set(['Global']);
 /** Always requested for map loads when coverage metadata is available. */
@@ -339,184 +349,92 @@ export type UseLicensesResult = {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  /** Sub-queries not yet fetched (batched country groups, not individual ISO rows). */
+  /** Always 0 or 1 — one bundle request per view mode (no per-country fan-out). */
   stillLoadingCountryCount: number;
   failedCountryQueryCount: number;
+  bundleMode: LicenseBundleMode;
 };
 
-export const useLicenses = (
-  sector?: 'mining' | 'oil_and_gas',
-  viewportBounds?: LicenseViewportBounds | null,
-  countries?: string[],
-): UseLicensesResult => {
-  const bulkOilPreload = sector === 'oil_and_gas' && OIL_GAS_BULK_PRELOAD;
+async function fetchLicenseBundleFromApi(
+  sector: 'mining' | 'oil_and_gas' | undefined,
+  signal?: AbortSignal,
+): Promise<MiningLicense[]> {
+  const { data } = await apiClient.get<unknown>('/licenses', {
+    signal,
+    timeout: LICENSE_GET_TIMEOUT_MS,
+    params: {
+      prefer_open_data: true,
+      limit: LICENSE_BULK_LIMIT,
+      ...(sector ? { sector } : {}),
+    },
+  });
+  if (Array.isArray(data)) return data as MiningLicense[];
+  if (data && typeof data === 'object' && 'error' in data) {
+    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+    throw new Error(msg);
+  }
+  console.warn('[useLicenses] Expected array from /licenses, got:', data);
+  return [];
+}
 
-  const bboxKey =
-    !bulkOilPreload &&
-    viewportBounds &&
-    Number.isFinite(viewportBounds.south) &&
-    Number.isFinite(viewportBounds.west) &&
-    Number.isFinite(viewportBounds.north) &&
-    Number.isFinite(viewportBounds.east)
-      ? `${viewportBounds.south.toFixed(4)},${viewportBounds.west.toFixed(4)},${viewportBounds.north.toFixed(4)},${viewportBounds.east.toFixed(4)}`
-      : 'full';
+export const useLicenses = (sector?: 'mining' | 'oil_and_gas'): UseLicensesResult => {
+  const bundleMode = licenseBundleModeFromSector(sector);
+  const syncCached = useMemo(() => readLicenseBundleCacheSync(bundleMode), [bundleMode]);
 
-  const sortedCountries = useMemo(
-    () =>
-      bulkOilPreload
-        ? []
-        : Array.from(
-            new Set(
-              (countries?.length ? countries : FALLBACK_LICENSE_FETCH_COUNTRIES)
-                .map((c) => c.trim())
-                .filter((c) => c && !LICENSE_MAP_EXCLUDED_COUNTRIES.has(c)),
-            ),
-          ).sort((a, b) => a.localeCompare(b)),
-    [countries, bulkOilPreload],
-  );
-
-  const countryBatches = useMemo(() => {
-    if (bulkOilPreload) return [[] as string[]];
-    const batches: string[][] = [];
-    for (let i = 0; i < sortedCountries.length; i += LICENSE_COUNTRY_BATCH_SIZE) {
-      batches.push(sortedCountries.slice(i, i + LICENSE_COUNTRY_BATCH_SIZE));
-    }
-    return batches;
-  }, [sortedCountries, bulkOilPreload]);
-
-  const licenseQueries = useMemo(
-    () =>
-      countryBatches.map((batch) => ({
-        queryKey: [
-          'licenses',
-          sector ?? 'all',
-          bulkOilPreload ? 'bulk' : bboxKey,
-          batch.length ? batch.join('|') : '__all__',
-        ] as const,
-        staleTime: bulkOilPreload ? 60 * 60_000 : 300_000,
-        retry: 1,
-        refetchOnWindowFocus: false,
-        placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
-        queryFn: async ({ signal }: QueryFunctionContext) => {
-          const countriesParam = batch.length ? batch.join(',') : undefined;
-          const countrySet = new Set(batch.map((b) => b.trim().toLowerCase()));
-          try {
-            const useBbox = Boolean(viewportBounds) && !bulkOilPreload;
-            const { data } = await apiClient.get<unknown>('/licenses', {
-              signal,
-              timeout: LICENSE_GET_TIMEOUT_MS,
-              params: {
-                prefer_open_data: true,
-                limit: 15000,
-                ...(countriesParam ? { countries: countriesParam } : {}),
-                ...(sector ? { sector } : {}),
-                ...(useBbox && viewportBounds
-                  ? {
-                      min_lat: viewportBounds.south,
-                      max_lat: viewportBounds.north,
-                      min_lng: viewportBounds.west,
-                      max_lng: viewportBounds.east,
-                    }
-                  : {}),
-              },
-            });
-            if (Array.isArray(data)) return data as MiningLicense[];
-            if (data && typeof data === 'object' && 'error' in data) {
-              const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-              throw new Error(msg);
-            }
-            console.warn('[useLicenses] Expected array from /licenses, got:', data);
-            return [];
-          } catch (error) {
-            if (isLicensesRequestAborted(error)) {
-              throw error;
-            }
-            if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
-              console.warn(
-                '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
-                error,
-              );
-              const fallbackData = await loadBundledLicenseFallback();
-              const base = sector
-                ? fallbackData.filter((item) => item.sector === sector)
-                : fallbackData;
-              return base.filter((item) => countrySet.has((item.country ?? '').trim().toLowerCase()));
-            }
-            throw error;
-          }
-        },
-      })),
-    [countryBatches, sector, bboxKey, viewportBounds, bulkOilPreload],
-  );
-
-  const results = useQueries({ queries: licenseQueries });
-
-  const mergedData = useMemo(() => {
-    const byId = new Map<string, MiningLicense>();
-    for (const q of results) {
-      const arr = q.data;
-      if (!Array.isArray(arr)) continue;
-      for (const lic of arr) {
-        if (lic?.id) byId.set(lic.id, lic);
+  const query = useQuery({
+    queryKey: ['licenses', 'bundle', bundleMode] as const,
+    staleTime: LICENSE_BUNDLE_STALE_MS,
+    gcTime: 2 * LICENSE_BUNDLE_STALE_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
+    initialData: syncCached?.licenses,
+    initialDataUpdatedAt: syncCached?.fetchedAt,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      const cached = await readLicenseBundleCache(bundleMode);
+      if (cached && isLicenseBundleCacheFresh(cached)) {
+        return cached.licenses;
       }
-    }
-    return Array.from(byId.values());
-  }, [results]);
 
-  /** Bbox changes should not wipe the map: keep last good rows until new data arrives. */
-  const cacheEpoch = `${sector ?? 'all'}::${sortedCountries.join('|')}`;
-  const cacheEpochRef = useRef(cacheEpoch);
-  const lastStableLicenses = useRef<MiningLicense[]>([]);
+      try {
+        const fresh = await fetchLicenseBundleFromApi(sector, signal);
+        await writeLicenseBundleCache(bundleMode, fresh);
+        return fresh;
+      } catch (error) {
+        if (isLicensesRequestAborted(error)) {
+          throw error;
+        }
+        if (cached?.licenses.length) {
+          return cached.licenses;
+        }
+        if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
+          console.warn(
+            '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
+            error,
+          );
+          const fallbackData = await loadBundledLicenseFallback();
+          const base = sector
+            ? fallbackData.filter((item) => item.sector === sector)
+            : fallbackData;
+          await writeLicenseBundleCache(bundleMode, base);
+          return base;
+        }
+        throw error;
+      }
+    },
+  });
 
-  useEffect(() => {
-    if (cacheEpochRef.current !== cacheEpoch) {
-      cacheEpochRef.current = cacheEpoch;
-      lastStableLicenses.current = [];
-    }
-  }, [cacheEpoch]);
-
-  useEffect(() => {
-    if (mergedData.length > 0) {
-      lastStableLicenses.current = mergedData;
-    }
-  }, [mergedData]);
-
-  const displayData =
-    mergedData.length > 0 ? mergedData : lastStableLicenses.current;
-
-  const isLoading = useMemo(() => {
-    if (!results.length) return false;
-    if (displayData.length > 0) return false;
-    return !results.every((r) => r.isFetched);
-  }, [displayData.length, results]);
-
-  const isFetching = useMemo(() => results.some((r) => r.isFetching), [results]);
-
-  const error = useMemo((): Error | null => {
-    if (displayData.length > 0) return null;
-    if (!results.length) return null;
-    const settled = results.filter((r) => !r.isPending);
-    if (settled.length < results.length) return null;
-    const failed = settled.filter((r) => r.error);
-    if (failed.length !== settled.length) return null;
-    const first = failed[0]?.error;
-    return first instanceof Error ? first : new Error(String(first ?? 'Licenses request failed'));
-  }, [displayData.length, results]);
-
-  const stillLoadingCountryCount = useMemo(
-    () => results.filter((r) => !r.isFetched).length,
-    [results],
-  );
-
-  const failedCountryQueryCount = useMemo(() => results.filter((r) => r.isError).length, [results]);
+  const stillLoadingCountryCount = query.isLoading && !query.data?.length ? 1 : 0;
+  const failedCountryQueryCount = query.isError && !query.data?.length ? 1 : 0;
 
   return {
-    data: displayData,
-    isLoading,
-    isFetching,
-    error,
+    data: query.data ?? [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error instanceof Error ? query.error : query.error ? new Error(String(query.error)) : null,
     stillLoadingCountryCount,
     failedCountryQueryCount,
+    bundleMode,
   };
 };
 
