@@ -16,6 +16,7 @@ import {
     CircleMarker,
     FeatureGroup,
     Circle,
+    LayerGroup,
 } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
@@ -26,6 +27,7 @@ import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, 
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
+  filterVesselsByViewport,
   sortVesselsForDisplay,
   VESSEL_SHIP_TYPE_OPTIONS,
   type VesselFilters,
@@ -213,22 +215,17 @@ const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean
     });
 };
 
-const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
+const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean, mapZoom = 6) => {
     const heading = getVesselHeadingDegrees(vessel);
     const color = getVesselMarkerColor(vessel);
-    const dim = isSelected ? 26 : 20;
+    const baseDim = mapZoom <= 4 ? 20 : mapZoom <= 6 ? 17 : 14;
+    const dim = isSelected ? baseDim + 6 : baseDim;
     const half = dim / 2;
-    const scale = isSelected ? 1.12 : 1;
-    const glow =
-        isSelected
-            ? 'drop-shadow(0 0 8px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(34,211,238,0.35))'
-            : 'drop-shadow(0 0 5px rgba(0,0,0,0.75))';
-    const svgSize = Math.round(dim * 0.85);
-    const stroke = 'rgba(255,255,255,0.92)';
-    const inner = `<div class="vessel-marker-inner" style="width:${dim}px;height:${dim}px;display:flex;align-items:center;justify-content:center;transform:rotate(${heading}deg) scale(${scale});filter:${glow};">
-<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" style="display:block" aria-hidden="true">
-<path d="M12 2.5 L21.5 20.5 L12 15.2 L2.5 20.5 Z" fill="${color}" stroke="${stroke}" stroke-width="1.15" stroke-linejoin="round"/>
-</svg></div>`;
+    const border = isSelected ? '1.5px solid rgba(255,255,255,0.95)' : '1px solid rgba(255,255,255,0.75)';
+    const shadow = isSelected
+        ? '0 0 10px rgba(34,211,238,0.45)'
+        : '0 0 4px rgba(0,0,0,0.65)';
+    const inner = `<div class="vessel-marker-inner" style="width:${dim}px;height:${dim}px;background:${color};border:${border};box-shadow:${shadow};clip-path:polygon(50% 0%,100% 100%,50% 82%,0% 100%);transform:rotate(${heading}deg);"></div>`;
     return new L.DivIcon({
         className: `vessel-marker${isSelected ? ' is-selected' : ''}`,
         html: inner,
@@ -246,7 +243,7 @@ const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
 // points.
 const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
-const MARITIME_MAX_VESSEL_OPTIONS = ['300', '600', '1000', '2000', '5000'];
+const MARITIME_MAX_VESSEL_OPTIONS = ['1000', '2000', '5000', '10000', '15000'];
 
 /** Matches marker rendering: borders only for countries with at least one plottable license. */
 function licenseHasMapCoordinates(item: MiningLicense): boolean {
@@ -254,8 +251,7 @@ function licenseHasMapCoordinates(item: MiningLicense): boolean {
     const lng = item.lng;
     return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 }
-const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
-const MARITIME_RENDER_SOFT_CAP = 1500;
+const MARITIME_CAPTURE_WINDOW_OPTIONS = ['10', '15', '25', '30'];
 
 const getMarkerColor = (
   commodity?: string,
@@ -506,6 +502,7 @@ export default function MapComponent({
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
+    const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
@@ -578,14 +575,22 @@ export default function MapComponent({
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
-        bbox: maritimeViewport,
     });
-    const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
+    const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
+    const maritimeSnapshotTotal =
+        maritimeFeed?.snapshot_vessel_count ?? maritimeFeed?.total_available ?? maritimeSnapshotVessels.length;
+    const maritimeSparseSnapshot = isMaritimeLayerEnabled && maritimeSnapshotTotal < 100;
+    const maritimeVesselsInViewport = useMemo(
+        () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
+        [maritimeSnapshotVessels, maritimeViewport],
+    );
     const maritimeVessels = useMemo(() => {
-        const filtered = applyVesselFilters(maritimeVesselsRaw, vesselFiltersApplied);
+        const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
         return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
-    }, [maritimeVesselsRaw, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
-    const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
+    }, [maritimeVesselsInViewport, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
+    const maritimeServedFromCache = Boolean(
+        maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
+    );
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
     const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
@@ -629,17 +634,23 @@ export default function MapComponent({
             : maritimeError
                 ? t('טעינה נכשלה', 'Load failed')
                 : !maritimeFeed?.live_positions_enabled
-                    ? t('AIS חי לא זמין', 'Live AIS unavailable')
+                    ? t(
+                          `${maritimeSnapshotTotal.toLocaleString()} כלי שיט (AIS לא חי)`,
+                          `${maritimeSnapshotTotal.toLocaleString()} vessels (live AIS unavailable)`
+                      )
                     : maritimeVessels.length === 0
-                        ? t('אין כלי שיט בתצוגה', 'No vessels in view')
+                        ? t(
+                              `0 בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
+                              `0 in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
+                          )
                         : t(
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בפיקוח`,
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels on watch`
+                              `${maritimeVessels.length.toLocaleString()} בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
+                              `${maritimeVessels.length.toLocaleString()} in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
                           );
     const maritimeDetailNote = !isMaritimeLayerEnabled
         ? t(
-              'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
-              'Vessels stay off until you enable the layer. Data loads for the visible map area only.'
+              'כלי השיט כבויים כברירת מחדל. הפעל כדי להציג מיקומי AIS — הנתונים נטענים ברקע מראש.',
+              'Vessels stay off until you enable the layer. AIS data is prefetched in the background for instant display.'
           )
         : isMaritimeLoading && !maritimeFeed
             ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
@@ -661,6 +672,12 @@ export default function MapComponent({
                           );
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
+    const maritimeSparseWarning = maritimeSparseSnapshot
+        ? t(
+              'מעט כלי שיט במאגר. הפעל docker compose up -d maritime-worker והגדר AISSTREAM_API_KEY בקובץ .env.',
+              'Sparse vessel feed. Run docker compose up -d maritime-worker and set AISSTREAM_API_KEY in .env.'
+          )
+        : null;
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
@@ -849,6 +866,38 @@ export default function MapComponent({
         onRemoveFromDueDiligence,
         onGroundVisible
     ]);
+
+    const renderedVesselMarkers = useMemo(
+        () =>
+            maritimeVessels.map((vessel) => (
+                <Marker
+                    key={vessel.id}
+                    position={[vessel.lat, vessel.lng]}
+                    icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id, maritimeMapZoom)}
+                    eventHandlers={{
+                        click: (e) => {
+                            L.DomEvent.stopPropagation(e);
+                            setSelectedItem(null);
+                            onSelectMaritimeVessel(vessel);
+                        },
+                    }}
+                >
+                    <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                        <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                            <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
+                                {vessel.vessel_name}
+                            </span>
+                            <p className="text-[9px] text-slate-400">
+                                {[vessel.ship_type_label, vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null, vessel.nearest_port?.name]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                            </p>
+                        </div>
+                    </Tooltip>
+                </Marker>
+            )),
+        [maritimeVessels, maritimeMapZoom, onSelectMaritimeVessel, selectedMaritimeVessel?.id, setSelectedItem],
+    );
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
@@ -1108,11 +1157,11 @@ export default function MapComponent({
                                                     />
                                                 </div>
                                             </div>
-                                            {maritimeVesselsRaw.length > maritimeVessels.length && (
+                                            {maritimeVesselsInViewport.length > maritimeVessels.length && (
                                                 <p className="text-[9px] text-slate-500">
                                                     {t(
-                                                        `מוצגים ${maritimeVessels.length} מתוך ${maritimeVesselsRaw.length} לאחר סינון.`,
-                                                        `Showing ${maritimeVessels.length} of ${maritimeVesselsRaw.length} after filters.`
+                                                        `מוצגים ${maritimeVessels.length} מתוך ${maritimeVesselsInViewport.length} לאחר סינון.`,
+                                                        `Showing ${maritimeVessels.length} of ${maritimeVesselsInViewport.length} after filters.`
                                                     )}
                                                 </p>
                                             )}
@@ -1124,8 +1173,8 @@ export default function MapComponent({
                                             </p>
                                             <p className="mb-1 text-[9px] leading-snug text-slate-500">
                                                 {t(
-                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS.',
-                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category.'
+                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. כל כלי שיט בתצוגה הוא סמן נפרד — ללא קיבוץ.',
+                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. Every vessel in view is its own marker—no clustering.'
                                                 )}
                                             </p>
                                             <div className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -1204,14 +1253,6 @@ export default function MapComponent({
                                                 )}
                                             </p>
                                         )}
-                                        {maritimeVessels.length > MARITIME_RENDER_SOFT_CAP && (
-                                            <p className="text-[9px] leading-snug text-slate-500">
-                                                {t(
-                                                    `התצוגה מוגבלת ל-${MARITIME_RENDER_SOFT_CAP} סמנים למניעת עומס.`,
-                                                    `Rendering is limited to ${MARITIME_RENDER_SOFT_CAP} markers to keep the map smooth.`
-                                                )}
-                                            </p>
-                                        )}
                                         {maritimeLimitationText && (
                                             <p className="text-[9px] leading-snug text-slate-500">{maritimeLimitationText}</p>
                                         )}
@@ -1234,6 +1275,7 @@ export default function MapComponent({
               zoom={viewModeKey === 'ports' ? 3 : viewModeKey === 'route_planner' ? 4 : 7} 
               className="w-full h-full"
               zoomControl={false}
+              preferCanvas
               // @ts-ignore
               ref={mapRef}
             >
@@ -1263,6 +1305,9 @@ export default function MapComponent({
                 )}
                 {isOilAndGasView && onGroundVisible && (
                     <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
+                )}
+                {isMaritimeMapView && isMaritimeLayerEnabled && (
+                    <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
@@ -1331,44 +1376,9 @@ export default function MapComponent({
                             enabled={isOilAndGasView && onGroundVisible}
                         />
                     )}
-                    {vesselsVisible && (
+                    {vesselsVisible && isMaritimeLayerEnabled && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
-                            <MarkerClusterGroup
-                                chunkedLoading
-                                maxClusterRadius={55}
-                                disableClusteringAtZoom={12}
-                                showCoverageOnHover={false}
-                                spiderfyOnMaxZoom
-                                spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
-                            >
-                                {maritimeVisibleVessels.map((vessel) => (
-                                    <Marker
-                                        key={vessel.id}
-                                        position={[vessel.lat, vessel.lng]}
-                                        icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id)}
-                                        eventHandlers={{
-                                            click: (e) => {
-                                                L.DomEvent.stopPropagation(e);
-                                                setSelectedItem(null);
-                                                onSelectMaritimeVessel(vessel);
-                                            },
-                                        }}
-                                    >
-                                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
-                                                    {vessel.vessel_name}
-                                                </span>
-                                                <p className="text-[9px] text-slate-400">
-                                                    {[vessel.ship_type_label, vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null, vessel.nearest_port?.name]
-                                                        .filter(Boolean)
-                                                        .join(' · ')}
-                                                </p>
-                                            </div>
-                                        </Tooltip>
-                                    </Marker>
-                                ))}
-                            </MarkerClusterGroup>
+                            <LayerGroup>{renderedVesselMarkers}</LayerGroup>
                         </LayersControl.Overlay>
                     )}
                 </MapBasemapLayers>

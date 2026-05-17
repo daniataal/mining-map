@@ -156,6 +156,12 @@ export default function FilterPanel({
               )}
               {maritimeSection.layerEnabled && (
                 <>
+                  <p className="text-[9px] leading-snug text-slate-500 dark:text-slate-400">
+                    {t(
+                      'כל כלי שיט בתצוגה מוצג כסמן בודד (ללא קיבוץ).',
+                      'Every vessel in view is shown as its own marker (no clustering).'
+                    )}
+                  </p>
                   <input
                     type="search"
                     value={maritimeSection.vesselFilters.search}

@@ -82,6 +82,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
     pickRole, beginPick, cancelPick,
     result, loading, error, computeRoute,
     hasResult,
+    routeOptions, selectedPlanId, activePlan, selectRoutePlan,
   } = rp;
 
   const [step, setStep] = useState<'setup' | 'results'>('setup');
@@ -107,9 +108,11 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
       }));
   }, [allLicenses]);
 
-  const totalUsd = useMemo(() =>
-    (result?.breakdown ?? []).reduce((s, r) => s + r.amountUsd, 0),
-    [result?.breakdown]);
+  const displayBreakdown = activePlan?.breakdown ?? result?.breakdown ?? [];
+  const totalUsd = useMemo(
+    () => displayBreakdown.reduce((s, r) => s + r.amountUsd, 0),
+    [displayBreakdown],
+  );
   const freightPctLabel =
     typeof result?.freightToValuePct === 'number' && Number.isFinite(result.freightToValuePct)
       ? `${result.freightToValuePct < 0.01 ? '<0.01' : result.freightToValuePct.toFixed(2)}%`
@@ -462,6 +465,60 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               </div>
             )}
 
+            {result?.landlockedHint && (
+              <div className="rounded-2xl border border-violet-500/25 bg-violet-500/10 px-4 py-3 text-[11px] font-semibold text-violet-950 dark:text-violet-100">
+                <p className="mb-1 text-[9px] font-black uppercase tracking-widest opacity-75">
+                  {t('מוצא יבשתי / ללא ים', 'Inland / landlocked origin')}
+                </p>
+                <p className="leading-snug">{result.landlockedHint}</p>
+              </div>
+            )}
+
+            {routeOptions.length > 1 && (
+              <div className="rounded-2xl border border-black/10 dark:border-white/10 p-3 space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                  {t('השוואת מסלולים', 'Compare route plans')}
+                </p>
+                <div className="flex flex-col gap-2">
+                  {routeOptions.map((plan) => {
+                    const selected = plan.id === selectedPlanId;
+                    return (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => selectRoutePlan(plan.id)}
+                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                          selected
+                            ? 'border-amber-500/60 bg-amber-500/[0.08]'
+                            : 'border-black/10 dark:border-white/10 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-bold text-slate-900 dark:text-white truncate">
+                            {plan.isRecommended
+                              ? t('מומלץ', 'Recommended')
+                              : t(plan.labelHe ?? `חלופה: ${plan.labelEn}`, plan.labelEn ?? plan.label)}
+                          </p>
+                          {!plan.isRecommended && (
+                            <p className="text-[9px] text-slate-500 truncate">{plan.labelEn ?? plan.label}</p>
+                          )}
+                        </div>
+                        <span className="text-xs font-black text-amber-600 dark:text-amber-400 tabular-nums shrink-0">
+                          {fmtUsd(plan.totalCostUsd)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[9px] text-slate-500 leading-snug">
+                  {t(
+                    'כל אפשרות היא מסלול רציף אחד (יבשה + ים או יבשה + אוויר). המפה מציגה את הבחירה הנוכחית בלבד.',
+                    'Each option is one sequential corridor (ground/rail + sea or ground + air). The map shows only the selected plan.',
+                  )}
+                </p>
+              </div>
+            )}
+
             {result?.routeAssumptions && result.routeAssumptions.length > 0 && (
               <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.07] px-4 py-3 text-[11px] font-semibold text-cyan-950 dark:text-cyan-100">
                 <p className="mb-2 text-[9px] font-black uppercase tracking-widest opacity-75">{t('הנחות מסלול', 'Route assumptions')}</p>
@@ -480,7 +537,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                   <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">💰 {t('פירוק עלות', 'Cost Breakdown')}</h4>
                 </div>
                 <div className="divide-y divide-black/5 dark:divide-white/10">
-                  {(result?.breakdown ?? []).map((line) => (
+                  {displayBreakdown.map((line) => (
                     <div key={line.id} className="px-5 py-3 flex gap-4 items-start justify-between hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors">
                       <div className="min-w-0">
                         <p className="font-bold text-sm text-slate-900 dark:text-white">{t(line.labelHe, line.labelEn)}</p>

@@ -18,11 +18,23 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Optional
 
 try:
-    from backend.services.routing_geometry import ResolvedGeometry, resolve_leg_geometry
+    from backend.services.routing_geometry import (
+        INLAND_PORT_THRESHOLD_KM,
+        ResolvedGeometry,
+        inland_origin_heuristic,
+        normalize_country_key,
+        resolve_leg_geometry,
+    )
     from backend.services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from backend.services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 except ImportError:
-    from services.routing_geometry import ResolvedGeometry, resolve_leg_geometry  # type: ignore[no-redef]
+    from services.routing_geometry import (  # type: ignore[no-redef]
+        INLAND_PORT_THRESHOLD_KM,
+        ResolvedGeometry,
+        inland_origin_heuristic,
+        normalize_country_key,
+        resolve_leg_geometry,
+    )
     from services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 
@@ -96,6 +108,10 @@ MARITIME_HUBS: tuple[TransportHub, ...] = (
     TransportHub("Port of Houston", 29.735, -95.275, "United States", "port"),
     TransportHub("Port of Los Angeles", 33.729, -118.269, "United States", "port"),
     TransportHub("Port of Santos", -23.960, -46.333, "Brazil", "port"),
+)
+
+COASTAL_COUNTRIES: frozenset[str] = frozenset(
+    normalize_country_key(hub.country) for hub in MARITIME_HUBS
 )
 
 RAIL_HUBS: tuple[TransportHub, ...] = (
@@ -191,6 +207,55 @@ def _path_distance_km(path: list[tuple[float, float]]) -> float:
 
 def _nearest_hub(point: RoutePoint, hubs: tuple[TransportHub, ...]) -> TransportHub:
     return min(hubs, key=lambda hub: _haversine_km(point.lat, point.lng, hub.lat, hub.lng))
+
+
+def _nearest_port_distance_km(point: RoutePoint) -> float:
+    hub = _nearest_hub(point, MARITIME_HUBS)
+    return _haversine_km(point.lat, point.lng, hub.lat, hub.lng)
+
+
+def _nearest_maritime_hubs(point: RoutePoint, limit: int = 3) -> list[TransportHub]:
+    ranked = sorted(
+        MARITIME_HUBS,
+        key=lambda hub: _haversine_km(point.lat, point.lng, hub.lat, hub.lng),
+    )
+    selected: list[TransportHub] = []
+    seen_names: set[str] = set()
+    for hub in ranked:
+        if hub.name in seen_names:
+            continue
+        seen_names.add(hub.name)
+        selected.append(hub)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _origin_country(origin: RoutePoint) -> str:
+    meta = origin.metadata if isinstance(origin.metadata, dict) else {}
+    return str(meta.get("country") or "").strip()
+
+
+def _origin_needs_alternatives(origin: RoutePoint) -> tuple[bool, str]:
+    nearest_km = _nearest_port_distance_km(origin)
+    return inland_origin_heuristic(
+        origin.lat,
+        origin.lng,
+        nearest_km,
+        origin_country=_origin_country(origin),
+        coastal_countries=COASTAL_COUNTRIES,
+        inland_port_threshold_km=INLAND_PORT_THRESHOLD_KM,
+    )
+
+
+def _port_slug(port_name: str) -> str:
+    slug = port_name.lower()
+    if slug.startswith("port of "):
+        slug = slug[8:]
+    elif slug.startswith("port "):
+        slug = slug[5:]
+    compact = "".join(ch if ch.isalnum() else "_" for ch in slug).strip("_")
+    return (compact[:40] if compact else "port")
 
 
 def _same_place(a: RoutePoint, b: RoutePoint, max_km: float = 35.0) -> bool:
@@ -418,9 +483,11 @@ def _plan_sea_route(
     destination: RoutePoint,
     requested_methods: list[str],
     quantity_tons: float,
+    *,
+    export_hub: Optional[TransportHub] = None,
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
-    export_port = _point_from_hub(_nearest_hub(origin, MARITIME_HUBS))
+    export_port = _point_from_hub(export_hub or _nearest_hub(origin, MARITIME_HUBS))
     import_port = _point_from_hub(_nearest_hub(destination, MARITIME_HUBS))
 
     origin_to_port_km = _haversine_km(origin.lat, origin.lng, export_port.lat, export_port.lng)
@@ -515,33 +582,8 @@ def _plan_direct_inland_route(
     return [leg], []
 
 
-def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
-    origin = _to_point(request_payload["origin"], "origin")
-    destination = _to_point(request_payload["destination"], "destination")
-
-    quantity_tons = float(request_payload.get("quantity_tons") or 1.0)
-    pipeline_layer_enabled = bool(request_payload.get("pipeline_layer_enabled", False))
-    preferred_methods_raw = request_payload.get("preferred_methods")
-    preferred_methods = preferred_methods_raw if isinstance(preferred_methods_raw, list) else None
-    requested_methods = _requested_backend_methods(preferred_methods)
-
-    if "sea" in requested_methods:
-        legs, gateways = _plan_sea_route(origin, destination, requested_methods, quantity_tons)
-        strategy = "staged-inland-port-sea-port-inland"
-    elif "air" in requested_methods:
-        legs, gateways = _plan_air_route(origin, destination, requested_methods, quantity_tons)
-        strategy = "staged-secure-road-air-road"
-    else:
-        legs, gateways = _plan_direct_inland_route(
-            origin,
-            destination,
-            requested_methods,
-            quantity_tons,
-            pipeline_layer_enabled=pipeline_layer_enabled,
-        )
-        strategy = "direct-inland"
-
-    legs_payload = [
+def _legs_to_payload(legs: list[PlannedLeg]) -> list[dict[str, Any]]:
+    return [
         {
             "leg_id": leg.leg_id,
             "from": asdict(leg.from_point),
@@ -558,12 +600,26 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
         for leg in legs
     ]
 
+
+def _build_route_plan_entry(
+    *,
+    alternative_id: str,
+    label: str,
+    is_recommended: bool,
+    legs: list[PlannedLeg],
+    gateways: list[RoutePoint],
+    strategy: str,
+    origin: RoutePoint,
+    destination: RoutePoint,
+    quantity_tons: float,
+) -> dict[str, Any]:
+    legs_payload = _legs_to_payload(legs)
     cost_breakdown = estimate_route_cost(legs_payload, cargo_tons=quantity_tons)
     return {
-        "product": request_payload.get("product"),
-        "quantity_tons": quantity_tons,
-        "supported_methods": list(SUPPORTED_SHIPPING_METHODS),
-        "pipeline_layer_enabled": pipeline_layer_enabled,
+        "id": alternative_id,
+        "alternative_id": alternative_id,
+        "label": label,
+        "is_recommended": is_recommended,
         "route": {
             "origin": asdict(origin),
             "transit_points": [asdict(item) for item in gateways],
@@ -578,12 +634,193 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
             },
         },
         "cost_breakdown": route_cost_to_dict(cost_breakdown),
-        "limitations": [
-            "Gateway catalog is static and open-first; validate nominated port/airport acceptance, storage, and documentation.",
-            "Road geometry uses OSRM when reachable; failures fall back to straight-line segments without failing the request.",
-            "Sea geometry uses searoute when SEAROUTE_ENABLED and the package is installed; otherwise offshore corridor waypoints.",
-            "Rail is hub-to-hub screening only — not a track-level network graph.",
-            "Air trunk is great-circle; airport drayage uses OSRM when available.",
-            "Freight cost is a screening estimate; obtain broker/carrier quotes before committing.",
-        ],
     }
+
+
+def _preferred_trunk_rank(requested_methods: list[str], alternative_id: str) -> int:
+    if alternative_id.startswith("sea"):
+        return requested_methods.index("sea") if "sea" in requested_methods else 99
+    if alternative_id.startswith("air"):
+        return requested_methods.index("air") if "air" in requested_methods else 99
+    return 50
+
+
+def _pick_recommended_plan(
+    plans: list[dict[str, Any]],
+    requested_methods: list[str],
+) -> dict[str, Any]:
+    if not plans:
+        raise ValueError("No route plans generated")
+    if len(plans) == 1:
+        return plans[0]
+
+    def sort_key(plan: dict[str, Any]) -> tuple[float, int, str]:
+        total = float(plan.get("cost_breakdown", {}).get("total_cost_usd") or 0)
+        pref = _preferred_trunk_rank(requested_methods, str(plan.get("id") or ""))
+        return (total, pref, str(plan.get("id") or ""))
+
+    return min(plans, key=sort_key)
+
+
+def _generate_route_plans(
+    origin: RoutePoint,
+    destination: RoutePoint,
+    requested_methods: list[str],
+    quantity_tons: float,
+    *,
+    pipeline_layer_enabled: bool,
+    offer_alternatives: bool,
+) -> list[dict[str, Any]]:
+    plans: list[dict[str, Any]] = []
+
+    if offer_alternatives and "sea" in requested_methods:
+        export_hubs = _nearest_maritime_hubs(origin, limit=3 if offer_alternatives else 1)
+        for idx, hub in enumerate(export_hubs[:2]):
+            legs, gateways = _plan_sea_route(
+                origin,
+                destination,
+                requested_methods,
+                quantity_tons,
+                export_hub=hub,
+            )
+            alt_id = f"sea_{_port_slug(hub.name)}"
+            label = f"Via {hub.name} (sea)" if idx > 0 else f"Recommended: via {hub.name} (sea)"
+            plans.append(
+                _build_route_plan_entry(
+                    alternative_id=alt_id,
+                    label=label,
+                    is_recommended=False,
+                    legs=legs,
+                    gateways=gateways,
+                    strategy="staged-inland-port-sea-port-inland",
+                    origin=origin,
+                    destination=destination,
+                    quantity_tons=quantity_tons,
+                )
+            )
+
+    if offer_alternatives and "air" in requested_methods:
+        legs, gateways = _plan_air_route(origin, destination, requested_methods, quantity_tons)
+        plans.append(
+            _build_route_plan_entry(
+                alternative_id="air",
+                label="Via air freight",
+                is_recommended=False,
+                legs=legs,
+                gateways=gateways,
+                strategy="staged-secure-road-air-road",
+                origin=origin,
+                destination=destination,
+                quantity_tons=quantity_tons,
+            )
+        )
+
+    if not plans:
+        if "sea" in requested_methods:
+            legs, gateways = _plan_sea_route(origin, destination, requested_methods, quantity_tons)
+            strategy = "staged-inland-port-sea-port-inland"
+        elif "air" in requested_methods:
+            legs, gateways = _plan_air_route(origin, destination, requested_methods, quantity_tons)
+            strategy = "staged-secure-road-air-road"
+        else:
+            legs, gateways = _plan_direct_inland_route(
+                origin,
+                destination,
+                requested_methods,
+                quantity_tons,
+                pipeline_layer_enabled=pipeline_layer_enabled,
+            )
+            strategy = "direct-inland"
+        hub = _nearest_hub(origin, MARITIME_HUBS) if strategy.startswith("staged-inland-port") else None
+        alt_id = "sea_primary" if "sea" in requested_methods else ("air" if "air" in requested_methods else "inland")
+        label = (
+            f"Via {hub.name} (sea)" if hub else ("Via air freight" if alt_id == "air" else "Direct inland route")
+        )
+        plans.append(
+            _build_route_plan_entry(
+                alternative_id=alt_id,
+                label=label,
+                is_recommended=True,
+                legs=legs,
+                gateways=gateways,
+                strategy=strategy,
+                origin=origin,
+                destination=destination,
+                quantity_tons=quantity_tons,
+            )
+        )
+
+    return plans
+
+
+def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
+    origin = _to_point(request_payload["origin"], "origin")
+    destination = _to_point(request_payload["destination"], "destination")
+
+    quantity_tons = float(request_payload.get("quantity_tons") or 1.0)
+    pipeline_layer_enabled = bool(request_payload.get("pipeline_layer_enabled", False))
+    preferred_methods_raw = request_payload.get("preferred_methods")
+    preferred_methods = preferred_methods_raw if isinstance(preferred_methods_raw, list) else None
+    requested_methods = _requested_backend_methods(preferred_methods)
+
+    needs_alternatives, inland_reason = _origin_needs_alternatives(origin)
+    multi_trunk = "sea" in requested_methods and "air" in requested_methods
+    offer_alternatives = needs_alternatives or multi_trunk
+
+    candidate_plans = _generate_route_plans(
+        origin,
+        destination,
+        requested_methods,
+        quantity_tons,
+        pipeline_layer_enabled=pipeline_layer_enabled,
+        offer_alternatives=offer_alternatives,
+    )
+    recommended = _pick_recommended_plan(candidate_plans, requested_methods)
+    recommended_id = str(recommended["id"])
+    recommended["label"] = "Recommended"
+    recommended["is_recommended"] = True
+
+    alternatives = [
+        {**plan, "is_recommended": False}
+        for plan in candidate_plans
+        if str(plan.get("id")) != recommended_id
+    ]
+
+    base_limitations = [
+        "Gateway catalog is static and open-first; validate nominated port/airport acceptance, storage, and documentation.",
+        "Road geometry uses OSRM when reachable; failures fall back to straight-line segments without failing the request.",
+        "Sea geometry uses searoute when SEAROUTE_ENABLED and the package is installed; otherwise offshore corridor waypoints.",
+        "Rail is hub-to-hub screening only — not a track-level network graph.",
+        "Air trunk is great-circle; airport drayage uses OSRM when available.",
+        "Freight cost is a screening estimate; obtain broker/carrier quotes before committing.",
+    ]
+    if offer_alternatives and len(candidate_plans) > 1:
+        base_limitations.append(
+            "Multiple full-route alternatives are returned (sea vs air or export ports); each is a separate sequential plan — not merged on one map path."
+        )
+
+    landlocked_hint: Optional[str] = None
+    if needs_alternatives:
+        landlocked_hint = (
+            "Origin is inland or landlocked: compare export-port and trunk-mode alternatives separately. "
+            "Nominate port slots, border clearance, and carrier quotes before execution."
+        )
+
+    response: dict[str, Any] = {
+        "product": request_payload.get("product"),
+        "quantity_tons": quantity_tons,
+        "supported_methods": list(SUPPORTED_SHIPPING_METHODS),
+        "pipeline_layer_enabled": pipeline_layer_enabled,
+        "recommended": recommended,
+        "alternatives": alternatives,
+        "route": recommended["route"],
+        "cost_breakdown": recommended["cost_breakdown"],
+        "routing_context": {
+            "inland_origin": needs_alternatives,
+            "inland_reason": inland_reason or None,
+            "landlocked_hint": landlocked_hint,
+            "alternatives_offered": offer_alternatives and len(alternatives) > 0,
+        },
+        "limitations": base_limitations,
+    }
+    return response

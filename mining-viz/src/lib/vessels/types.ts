@@ -120,6 +120,9 @@ export interface MaritimeVesselFeedResponse {
   effective_bbox_count?: number;
   region_labels?: string[];
   cached?: boolean;
+  memory_cached?: boolean;
+  memory_cache_age_seconds?: number | null;
+  snapshot_vessel_count?: number;
   stale?: boolean;
   snapshot_age_seconds?: number | null;
   stale_after_seconds?: number;

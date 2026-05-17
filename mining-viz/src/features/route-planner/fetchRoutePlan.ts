@@ -5,6 +5,7 @@ import type {
   DueDiligenceRecommendation,
   DueDiligenceStatus,
   RouteMapOverlay,
+  RoutePlanOption,
   RoutePlannerApiResponse,
   RoutePlannerFormPayload,
 } from './types';
@@ -28,11 +29,31 @@ interface BackendRouteLeg {
   path?: [number, number][];
 }
 
+interface BackendRoutePlanSlice {
+  id?: string;
+  alternative_id?: string;
+  label?: string;
+  is_recommended?: boolean;
+  route?: {
+    origin?: BackendRoutePoint;
+    destination?: BackendRoutePoint;
+    legs?: BackendRouteLeg[];
+  };
+  cost_breakdown?: BackendRouteResponse['cost_breakdown'];
+}
+
 interface BackendRouteResponse {
   route?: {
     origin?: BackendRoutePoint;
     destination?: BackendRoutePoint;
     legs?: BackendRouteLeg[];
+  };
+  recommended?: BackendRoutePlanSlice;
+  alternatives?: BackendRoutePlanSlice[];
+  routing_context?: {
+    inland_origin?: boolean;
+    landlocked_hint?: string;
+    alternatives_offered?: boolean;
   };
   cost_breakdown?: {
     total_cost_usd?: number;
@@ -186,9 +207,11 @@ function titleCase(value: string): string {
     .join(' ');
 }
 
-function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
-  const legCosts = data.cost_breakdown?.leg_costs ?? [];
-  const routeLegs = data.route?.legs ?? [];
+function costBreakdownFromBackendSlice(
+  costBreakdown: BackendRouteResponse['cost_breakdown'],
+  routeLegs: BackendRouteLeg[],
+): CostLineItem[] {
+  const legCosts = costBreakdown?.leg_costs ?? [];
   const lines = legCosts.map((leg, index) => ({
     id: leg.leg_id || `leg-${index + 1}`,
     labelHe: `מקטע ${index + 1}: ${titleCase(leg.method || 'transport')}`,
@@ -200,7 +223,7 @@ function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
     ] as [string, string],
   }));
   if (lines.length > 0) return lines;
-  const total = Number(data.cost_breakdown?.total_cost_usd) || 0;
+  const total = Number(costBreakdown?.total_cost_usd) || 0;
   return [
     {
       id: 'route_total',
@@ -210,6 +233,58 @@ function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
       note: ['מחושב משירות המסלול', 'Calculated by the route service'],
     },
   ];
+}
+
+function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
+  return costBreakdownFromBackendSlice(data.cost_breakdown, data.route?.legs ?? []);
+}
+
+function planOptionFromBackendSlice(slice: BackendRoutePlanSlice): RoutePlanOption | null {
+  const legs = slice.route?.legs ?? [];
+  if (!legs.length) return null;
+  const id = String(slice.id || slice.alternative_id || 'plan');
+  const breakdown = costBreakdownFromBackendSlice(slice.cost_breakdown, legs);
+  const totalCostUsd = breakdown.reduce((sum, line) => sum + line.amountUsd, 0);
+  const labelEn = slice.label || id;
+  return {
+    id,
+    label: labelEn,
+    labelEn,
+    labelHe: slice.label?.includes('Recommended') ? 'מומלץ' : `חלופה: ${labelEn}`,
+    isRecommended: Boolean(slice.is_recommended),
+    map: routeMapFromBackend({ route: slice.route }),
+    breakdown,
+    totalCostUsd,
+  };
+}
+
+function routePlanOptionsFromBackend(data: BackendRouteResponse): {
+  recommended: RoutePlanOption;
+  alternatives: RoutePlanOption[];
+} {
+  const recommendedSlice = data.recommended ?? {
+    id: 'recommended',
+    label: 'Recommended',
+    is_recommended: true,
+    route: data.route,
+    cost_breakdown: data.cost_breakdown,
+  };
+  const recommended =
+    planOptionFromBackendSlice(recommendedSlice) ??
+    planOptionFromBackendSlice({
+      id: 'recommended',
+      label: 'Recommended',
+      is_recommended: true,
+      route: data.route,
+      cost_breakdown: data.cost_breakdown,
+    });
+  if (!recommended) {
+    throw new Error('Route plan missing legs');
+  }
+  const alternatives = (data.alternatives ?? [])
+    .map((slice) => planOptionFromBackendSlice(slice))
+    .filter((opt): opt is RoutePlanOption => Boolean(opt));
+  return { recommended, alternatives };
 }
 
 function ddStatus(verdict: string | undefined): DueDiligenceStatus {
@@ -345,12 +420,17 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
   const dd = await fetchDueDiligence(payload);
   const ddSummary = dueDiligenceFromBackend(dd);
   const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
-  const freightTotal = costBreakdownFromBackend(route).reduce((sum, item) => sum + item.amountUsd, 0);
+  const { recommended, alternatives } = routePlanOptionsFromBackend(route);
+  const freightTotal = recommended.totalCostUsd;
   const routeLimitations = Array.isArray(route.limitations) ? route.limitations : [];
+  const landlockedHint = route.routing_context?.landlocked_hint;
   return {
     source: 'live',
-    map: routeMapFromBackend(route),
-    breakdown: costBreakdownFromBackend(route),
+    map: recommended.map,
+    breakdown: recommended.breakdown,
+    recommendedPlanId: recommended.id,
+    routeAlternatives: alternatives,
+    landlockedHint: landlockedHint || undefined,
     dueDiligence: ddSummary.checks,
     dueDiligenceRecommendation: ddSummary.recommendation,
     blockers: ddSummary.blockers,
@@ -359,6 +439,9 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
     routeAssumptions: [
       'Route is staged as inland transport to export gateway, trunk leg, then final delivery from import gateway.',
       'Gateway selection is nearest-hub screening logic, not a carrier booking.',
+      alternatives.length > 0
+        ? 'Compare route alternatives below (sea vs air or export ports); each is one sequential corridor.'
+        : 'Single recommended corridor returned.',
       cargoValue.note,
     ],
     cargoValueUsd: cargoValue.valueUsd,

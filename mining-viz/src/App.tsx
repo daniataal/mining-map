@@ -13,7 +13,7 @@ import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
-import { DEFAULT_VESSEL_FILTERS, type VesselFilters } from './lib/vessels';
+import { DEFAULT_VESSEL_FILTERS, prefetchMaritimeVesselSnapshot, type VesselFilters } from './lib/vessels';
 
 const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 import { useRoutePlanner } from './features/route-planner';
@@ -160,7 +160,7 @@ export default function App() {
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
   const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
   const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
-  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('1000');
+  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
   const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
@@ -490,6 +490,16 @@ export default function App() {
       setSelectedMaritimeVessel(null);
     }
   }, [maritimeMapViewActive]);
+
+  useEffect(() => {
+    if (!username || !maritimeMapViewActive) return;
+    const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
+    void prefetchMaritimeVesselSnapshot(queryClient, {
+      maxVessels: Number(maritimeMaxVessels) || 5000,
+      captureWindowSeconds: Number(maritimeCaptureWindow) || 10,
+      scope,
+    });
+  }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
   return (
     <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>

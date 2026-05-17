@@ -6,12 +6,17 @@ import unittest
 from datetime import date, timedelta
 
 from backend.services.gov_procurement_intel import (
+    aggregate_companies_from_awards,
+    build_commodity_feed_search_payload,
     build_procurement_summary,
     build_usaspending_search_payload,
+    collect_commodity_feed,
     collect_gov_procurement,
+    fetch_commodity_feed_awards,
     fetch_usaspending_awards,
     infer_commodity_and_category,
     normalize_usaspending_row,
+    serialize_commodity_feed_response,
     serialize_gov_procurement_response,
 )
 
@@ -34,6 +39,11 @@ class InferCommodityTests(unittest.TestCase):
             description="Metallurgical grade manganese stockpiling"
         )
         self.assertEqual(commodity, "Manganese")
+        self.assertEqual(category, "strategic")
+
+    def test_sulphur_keyword(self):
+        commodity, category = infer_commodity_and_category(description="Elemental sulphur supply")
+        self.assertEqual(commodity, "Sulphur")
         self.assertEqual(category, "strategic")
 
 
@@ -140,6 +150,112 @@ class CollectTests(unittest.TestCase):
         serialized = serialize_gov_procurement_response(payload)
         self.assertEqual(serialized["source"], "USAspending.gov")
         self.assertEqual(serialized["awards"], [])
+
+
+class CommodityFeedTests(unittest.TestCase):
+    def test_feed_payload_uses_naics_and_keywords(self):
+        profile = {
+            "id": "gold",
+            "naics_require": ["212221"],
+            "keywords": ["gold ore"],
+            "psc_codes": [],
+        }
+        payload = build_commodity_feed_search_payload(profile, limit=20)
+        self.assertEqual(payload["filters"]["naics_codes"], {"require": ["212221"]})
+        self.assertEqual(payload["filters"]["keywords"], ["gold ore"])
+        self.assertNotIn("recipient_search_text", payload["filters"])
+        self.assertEqual(payload["limit"], 20)
+
+    def test_fetch_feed_mock(self):
+        def fake_post(url, payload, *, timeout):
+            keywords = payload["filters"].get("keywords") or []
+            if "gold ore" in keywords:
+                return {
+                    "results": [
+                        {
+                            "Award ID": "G-1",
+                            "Recipient Name": "ACME Mining LLC",
+                            "Description": "Gold ore supply",
+                            "Award Amount": 2_000_000,
+                            "Awarding Agency": "DOE",
+                            "NAICS": "212221",
+                            "generated_internal_id": "CONT_G1",
+                        }
+                    ]
+                }
+            return {"results": []}
+
+        awards, warnings = fetch_commodity_feed_awards(
+            profiles=[
+                {
+                    "id": "gold",
+                    "label": "Gold",
+                    "category": "precious",
+                    "naics_require": ["212221"],
+                    "keywords": ["gold ore"],
+                    "psc_codes": [],
+                }
+            ],
+            http_post=fake_post,
+        )
+        self.assertEqual(len(awards), 1)
+        self.assertEqual(awards[0]["commodity"], "Gold")
+        self.assertEqual(warnings, [])
+
+    def test_aggregate_companies(self):
+        awards = [
+            {
+                "recipient": "ACME Mining LLC",
+                "uei": "UEI1",
+                "value_usd": 100,
+                "commodity": "Gold",
+                "category": "precious",
+                "status": "ACTIVE",
+                "agency": "DOE",
+                "award_id": "A1",
+                "title": "Gold contract",
+            },
+            {
+                "recipient": "ACME Mining LLC",
+                "uei": "UEI1",
+                "value_usd": 50,
+                "commodity": "Gold",
+                "category": "precious",
+                "status": "COMPLETED",
+                "agency": "DLA",
+                "award_id": "A2",
+                "title": "Gold follow-on",
+            },
+        ]
+        companies = aggregate_companies_from_awards(awards)
+        self.assertEqual(len(companies), 1)
+        self.assertEqual(companies[0]["total_awarded_usd"], 150.0)
+        self.assertEqual(companies[0]["award_count"], 2)
+        self.assertEqual(companies[0]["active_award_count"], 1)
+
+    def test_collect_commodity_feed_live_mock(self):
+        def fake_post(url, payload, *, timeout):
+            return {
+                "results": [
+                    {
+                        "Award ID": "G-2",
+                        "Recipient Name": "Beta Mining",
+                        "Description": "Gold ore",
+                        "Award Amount": 100,
+                        "Awarding Agency": "DOE",
+                        "NAICS": "212221",
+                    }
+                ]
+            }
+
+        payload = collect_commodity_feed(
+            commodity="gold",
+            http_post=fake_post,
+        )
+        self.assertEqual(len(payload["companies"]), 1)
+        self.assertEqual(payload["companies"][0]["name"], "Beta Mining")
+        serialized = serialize_commodity_feed_response(payload)
+        self.assertEqual(serialized["companies"][0]["name"], "Beta Mining")
 
 
 if __name__ == "__main__":

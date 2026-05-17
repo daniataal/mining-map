@@ -139,6 +139,38 @@ def _load_gov_procurement_services():
     return collect_gov_procurement, serialize_gov_procurement_response
 
 
+def _load_gov_procurement_feed_services():
+    try:
+        from backend.services.gov_procurement_intel import serialize_commodity_feed_response
+    except ImportError:
+        from services.gov_procurement_intel import serialize_commodity_feed_response
+    return serialize_commodity_feed_response
+
+
+def _load_gov_procurement_store():
+    try:
+        from backend.services.gov_procurement_store import (
+            collect_commodity_feed_from_db,
+            collect_gov_procurement_from_db,
+            ensure_gov_procurement_tables,
+        )
+    except ImportError:
+        from services.gov_procurement_store import (
+            collect_commodity_feed_from_db,
+            collect_gov_procurement_from_db,
+            ensure_gov_procurement_tables,
+        )
+    return collect_commodity_feed_from_db, collect_gov_procurement_from_db, ensure_gov_procurement_tables
+
+
+def _load_gov_procurement_sync():
+    try:
+        from backend.services.ingest.gov_procurement_sync import sync_gov_procurement_data
+    except ImportError:
+        from services.ingest.gov_procurement_sync import sync_gov_procurement_data
+    return sync_gov_procurement_data
+
+
 def _serialize_entity_contact(row: dict) -> dict:
     return {
         "id": row.get("id"),
@@ -1397,6 +1429,19 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("RELEASE SAVEPOINT maritime_schema")
             print(f"Maritime snapshot table init skipped: {maritime_exc}")
 
+        try:
+            cur.execute("SAVEPOINT gov_procurement_schema")
+            try:
+                from backend.services.gov_procurement_store import ensure_gov_procurement_tables
+            except ImportError:
+                from services.gov_procurement_store import ensure_gov_procurement_tables
+            ensure_gov_procurement_tables(conn)
+            cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
+        except Exception as gov_proc_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT gov_procurement_schema")
+            cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
+            print(f"Gov procurement table init skipped: {gov_proc_exc}")
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -1440,6 +1485,32 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
             _SCHEMA_READY = True
             return True
         return False
+
+
+def _gov_procurement_sync_on_startup_enabled() -> bool:
+    flag = (os.getenv("GOV_PROCUREMENT_SYNC_ON_STARTUP") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
+def _sync_gov_procurement_reference() -> None:
+    if not _gov_procurement_sync_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[GovProcurement] Skipping sync until schema is ready.")
+        return
+    try:
+        sync_gov_procurement_data = _load_gov_procurement_sync()
+        conn = get_db_connection()
+        try:
+            summary = sync_gov_procurement_data(conn)
+            print(
+                f"[GovProcurement] Sync complete — status={summary.get('status')}, "
+                f"records={summary.get('records_upserted', 0)}"
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[GovProcurement] Sync skipped or failed: {exc}")
 
 
 def _sync_opec_gulf_reference() -> None:
@@ -1579,6 +1650,7 @@ def startup_schema_bootstrap():
             print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
             return
         _sync_opec_gulf_reference()
+        _sync_gov_procurement_reference()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
@@ -2222,16 +2294,104 @@ def read_legal_events(entity_id: str, entity_kind: str = "license", refresh: boo
         conn.close()
 
 
-@app.get("/entities/{entity_id:path}/gov-procurement")
-def read_gov_procurement(entity_id: str, entity_kind: str = "license"):
-    """Return U.S. federal award matches from USAspending.gov for the licensee company.
+@app.get("/gov-procurement/companies")
+def read_gov_procurement_companies(
+    commodity: Optional[str] = None,
+    refresh: bool = False,
+    match_licenses: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    limit: int = 100,
+):
+    """Browse U.S. federal contractors with commodity-tagged awards (database-backed)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
+    try:
+        serialize_commodity_feed_response = _load_gov_procurement_feed_services()
+        collect_commodity_feed_from_db, _, ensure_gov_procurement_tables = _load_gov_procurement_store()
+        conn = get_db_connection()
+        try:
+            ensure_gov_procurement_tables(conn)
+            conn.commit()
+            if refresh:
+                sync_gov_procurement_data = _load_gov_procurement_sync()
+                sync_gov_procurement_data(conn)
+            effective_page_size = max(1, min(int(page_size or limit), 500))
+            payload = collect_commodity_feed_from_db(
+                conn,
+                commodity=commodity,
+                page=max(1, int(page)),
+                page_size=effective_page_size,
+            )
+        finally:
+            conn.close()
+        serialized = serialize_commodity_feed_response(payload)
+        companies = serialized.get("companies") or []
 
-    Searches by company name (recipient_search_text). No API key is required.
-    Non-U.S. entities often return zero rows; the response documents scope and limits.
-    """
+        if match_licenses and companies:
+            conn = get_db_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    for company in companies:
+                        name = (company.get("name") or "").strip()
+                        if not name or len(name) < 3:
+                            company["matchedLicenseIds"] = []
+                            continue
+                        pattern = f"%{name[:80]}%"
+                        cur.execute(
+                            """
+                            SELECT id FROM licenses
+                            WHERE company ILIKE %s
+                            ORDER BY id
+                            LIMIT 10
+                            """,
+                            (pattern,),
+                        )
+                        company["matchedLicenseIds"] = [
+                            str(row["id"]) for row in cur.fetchall() if row.get("id")
+                        ]
+            finally:
+                conn.close()
+
+        serialized["companies"] = companies
+        return serialized
+    except Exception as e:
+        logger.exception("gov-procurement companies feed failed: %s", e)
+        return Response(str(e), status_code=500)
+
+
+@app.post("/api/admin/gov-procurement/sync")
+def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
+    try:
+        sync_gov_procurement_data = _load_gov_procurement_sync()
+        conn = get_db_connection()
+        try:
+            summary = sync_gov_procurement_data(conn)
+        finally:
+            conn.close()
+        return {"status": summary.get("status", "ok"), **summary}
+    except Exception as exc:
+        logger.exception("gov-procurement admin sync failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/entities/{entity_id:path}/gov-procurement")
+def read_gov_procurement(entity_id: str, entity_kind: str = "license", live: bool = False):
+    """Return U.S. federal awards for the licensee — database first, optional live USAspending."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
     conn = get_db_connection()
     try:
         collect_gov_procurement, serialize_gov_procurement_response = _load_gov_procurement_services()
+        collect_gov_procurement_from_db, _, ensure_gov_procurement_tables = _load_gov_procurement_store()
+        ensure_gov_procurement_tables(conn)
+        conn.commit()
+
         company_name = ""
         country = ""
         if (entity_kind or "").strip().lower() == "license":
@@ -2250,7 +2410,20 @@ def read_gov_procurement(entity_id: str, entity_kind: str = "license"):
                 collect_gov_procurement(company_name="", country=country)
             )
 
+        if not live:
+            db_payload = collect_gov_procurement_from_db(
+                conn, company_name=company_name, country=country or None
+            )
+            return serialize_gov_procurement_response(db_payload)
+
         payload = collect_gov_procurement(company_name=company_name, country=country or None)
+        payload["data_origin"] = "live"
+        if live and payload.get("awards"):
+            try:
+                from backend.services.ingest.gov_procurement_sync import sync_entity_awards_to_db
+            except ImportError:
+                from services.ingest.gov_procurement_sync import sync_entity_awards_to_db
+            sync_entity_awards_to_db(conn, company_name)
         return serialize_gov_procurement_response(payload)
     except Exception as e:
         logger.exception("gov-procurement failed for %s: %s", entity_id, e)
@@ -4262,9 +4435,27 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     }
 
 
+@app.get("/api/maritime/stats")
+def get_maritime_stats_endpoint():
+    """Debug counts for persisted AIS snapshots and worker ingest health."""
+    try:
+        try:
+            from backend.services.maritime_intel import get_maritime_stats
+        except ImportError:
+            from services.maritime_intel import get_maritime_stats
+        return get_maritime_stats()
+    except Exception as exc:
+        return {
+            "stored_vessel_count": 0,
+            "snapshot_vessel_count": 0,
+            "aisstream_configured": False,
+            "worker": {"status": "error", "last_error": str(exc)},
+        }
+
+
 @app.get("/api/maritime/vessels")
 def get_maritime_vessels(
-    max_vessels: int = 1000,
+    max_vessels: int = 15000,
     capture_window_seconds: int = 10,
     scope: str = "all_vessels",
     offset: int = 0,

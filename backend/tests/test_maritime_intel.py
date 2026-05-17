@@ -10,6 +10,7 @@ from backend.services.maritime_intel import (
     build_counterparty_proxies,
     classify_ais_ship_type,
     classify_evidence_type,
+    filter_maritime_rows_by_bbox,
     haversine_km,
     match_destination_to_port,
     parse_unlocode_coordinates,
@@ -93,6 +94,16 @@ class MaritimeIntelTests(unittest.TestCase):
 
     def test_match_destination_to_port_handles_empty(self):
         self.assertIsNone(match_destination_to_port(""))
+
+    def test_filter_maritime_rows_by_bbox(self):
+        rows = [
+            {"mmsi": "1", "lat": 10.0, "lng": 20.0},
+            {"mmsi": "2", "lat": 50.0, "lng": 60.0},
+        ]
+        filtered = filter_maritime_rows_by_bbox(rows, (5.0, 15.0, 15.0, 25.0))
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["mmsi"], "1")
+        self.assertEqual(len(filter_maritime_rows_by_bbox(rows, None)), 2)
 
     def test_stored_feed_response_marks_fresh_worker_snapshots_live(self):
         now = datetime.now(timezone.utc)
