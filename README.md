@@ -60,7 +60,16 @@ Useful `.env` overrides for denser maps:
 - `MARITIME_WORKER_WATCH_MODE=all_regions` (default) — subscribes to every curated box including West/South/East Africa
 - `MARITIME_WORKER_WATCH_MODE=global` — single world bounding box (heaviest)
 - `MARITIME_WORKER_MAX_VESSELS=15000` and `MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25`
+- `MARITIME_ALWAYS_ON_REGION_IDS=persian_gulf,arabian_gulf,malacca,east_mediterranean` — high-traffic boxes stay subscribed in rotating mode
 - `MARITIME_AIS_SEED_FILE=/path/to/vessels.json` — optional cold-start JSON (`{"vessels": [...]}`)
+
+Persian Gulf empty map check:
+
+```bash
+curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
+```
+
+If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
 
 ### Remote PostGIS Recovery
 
