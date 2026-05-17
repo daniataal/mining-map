@@ -4436,14 +4436,22 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
 
 
 @app.get("/api/maritime/stats")
-def get_maritime_stats_endpoint():
+def get_maritime_stats_endpoint(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
     """Debug counts for persisted AIS snapshots and worker ingest health."""
     try:
         try:
             from backend.services.maritime_intel import get_maritime_stats
         except ImportError:
             from services.maritime_intel import get_maritime_stats
-        return get_maritime_stats()
+        bbox = None
+        if all(value is not None for value in (south, west, north, east)):
+            bbox = (float(south), float(west), float(north), float(east))
+        return get_maritime_stats(bbox=bbox)
     except Exception as exc:
         return {
             "stored_vessel_count": 0,

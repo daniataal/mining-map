@@ -7,7 +7,7 @@ from typing import Any
 
 try:
     from backend.services.maritime_intel import (
-        collect_live_maritime_vessel_feed,
+        collect_worker_maritime_vessel_feed,
         ensure_maritime_database_exists,
         ensure_maritime_tables,
         invalidate_maritime_memory_cache,
@@ -17,7 +17,7 @@ try:
     )
 except ImportError:
     from services.maritime_intel import (
-        collect_live_maritime_vessel_feed,
+        collect_worker_maritime_vessel_feed,
         ensure_maritime_database_exists,
         ensure_maritime_tables,
         invalidate_maritime_memory_cache,
@@ -80,7 +80,7 @@ def run_once() -> int:
     try:
         ensure_maritime_tables(conn)
         vessel_scope = _str_env("MARITIME_WORKER_SCOPE", "all_vessels")
-        feed = collect_live_maritime_vessel_feed(
+        feed = collect_worker_maritime_vessel_feed(
             max_vessels=_int_env("MARITIME_WORKER_MAX_VESSELS", 15000),
             capture_window_seconds=_int_env("MARITIME_WORKER_CAPTURE_WINDOW_SECONDS", 25),
             vessel_scope=vessel_scope,

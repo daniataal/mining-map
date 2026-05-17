@@ -193,8 +193,9 @@ jobs:
                 - DB_USER=postgres
                 - DB_PASSWORD=password
                 - MARITIME_WORKER_INTERVAL_SECONDS=60
-                - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=10
-                - MARITIME_WORKER_MAX_VESSELS=120
+                - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25
+                - MARITIME_WORKER_MAX_VESSELS=15000
+                - MARITIME_WORKER_WATCH_MODE=all_regions
                 - MARITIME_WORKER_SCOPE=all_vessels
                 - MARITIME_SNAPSHOT_TTL_SECONDS=300
                 - REDIS_HOST=redis
