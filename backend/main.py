@@ -523,11 +523,14 @@ def _build_license_api_results(
                 "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
                 "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
                 "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
-                "sourceKind": provenance.get("source_kind"),
+                "sourceKind": (row["source_kind"] if "source_kind" in keys and row["source_kind"] else None) or provenance.get("source_kind"),
                 "sourceAccess": provenance.get("source_access"),
                 "coverageState": provenance.get("coverage_state"),
                 "provenanceNote": provenance.get("provenance_note"),
-                "entityKind": "license",
+                "entityKind": row["entity_kind"] if "entity_kind" in keys and row["entity_kind"] else "license",
+                "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
+                "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
+                "confidenceNote": row["confidence_note"] if "confidence_note" in keys else None,
                 "geoSource": display_geo_source if "geo_source" in keys else None,
                 "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
                 "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
@@ -1149,6 +1152,12 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_updated_at TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS raw_payload TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_kind TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS external_id TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS entity_kind TEXT DEFAULT 'license';")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS entity_subtype TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS confidence_score FLOAT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS confidence_note TEXT;")
             # Speed up viewport queries (GET /licenses with bbox); partial index skips null coords.
             cur.execute(
                 """
@@ -1160,6 +1169,7 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
                 CREATE INDEX IF NOT EXISTS idx_licenses_id ON licenses (id);
                 CREATE INDEX IF NOT EXISTS idx_licenses_origin ON licenses (record_origin);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);
                 """
             )
             # Normalized relationship layer for cross-sector role transparency.
@@ -1754,6 +1764,7 @@ def _license_api_columns_sql() -> str:
         "id, company, license_type, commodity, status, date_issued, country, region, "
         "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
         "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
+        "source_kind, entity_kind, entity_subtype, confidence_score, confidence_note, "
         "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
     )
 

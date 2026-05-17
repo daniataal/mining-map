@@ -83,6 +83,14 @@ export default function PopupForm({
                        {sourceKindLabel}
                      </Badge>
                    )}
+                   {typeof item.confidenceScore === 'number' && (
+                     <Badge
+                       title={item.confidenceNote || 'Source confidence score'}
+                       className="bg-emerald-500/90 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5"
+                     >
+                       {t('אמון', 'TRUST')} {(item.confidenceScore * 100).toFixed(0)}%
+                     </Badge>
+                   )}
                 </div>
             </div>
 

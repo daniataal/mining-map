@@ -1,10 +1,11 @@
-import { Loader2, Navigation, Crosshair, MapPin, ChevronRight } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Loader2, Navigation, Crosshair, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
+import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/select';
 import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
@@ -19,11 +20,32 @@ function DdBadge({ status }: { status: DueDiligenceStatus }) {
   return <span className="text-red-500 font-black text-[9px] uppercase">✗ Fail</span>;
 }
 
+function FindingList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div className="rounded-2xl bg-white/60 p-3 dark:bg-slate-950/40">
+      <p className="mb-2 text-[9px] font-black uppercase tracking-widest opacity-70">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-[10px] opacity-75">{empty}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.slice(0, 4).map((item, index) => (
+            <li key={`${item}-${index}`} className="leading-snug">{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 interface LocationPreset {
   id: string;
   name: string;
   lat: number;
   lng: number;
+  country?: string;
+  licenseId?: string;
+  commodity?: string;
+  sector?: string;
   group: 'licenses' | 'suppliers' | 'buyers' | 'ports';
 }
 
@@ -33,20 +55,20 @@ interface RoutePlannerPanelProps {
 }
 
 const WORLD_PORTS: LocationPreset[] = [
-  { id: 'p-rotterdam', name: 'Rotterdam, Netherlands 🇳🇱', lat: 51.924, lng: 4.477, group: 'ports' },
-  { id: 'p-antwerp', name: 'Antwerp, Belgium 🇧🇪', lat: 51.219, lng: 4.402, group: 'ports' },
-  { id: 'p-hamburg', name: 'Hamburg, Germany 🇩🇪', lat: 53.545, lng: 9.970, group: 'ports' },
-  { id: 'p-shanghai', name: 'Shanghai, China 🇨🇳', lat: 31.230, lng: 121.473, group: 'ports' },
-  { id: 'p-singapore', name: 'Singapore 🇸🇬', lat: 1.352, lng: 103.819, group: 'ports' },
-  { id: 'p-houston', name: 'Houston, USA 🇺🇸', lat: 29.735, lng: -95.275, group: 'ports' },
-  { id: 'p-dubai', name: 'Jebel Ali, UAE 🇦🇪', lat: 24.996, lng: 55.060, group: 'ports' },
-  { id: 'p-mumbai', name: 'Mumbai (JNPT), India 🇮🇳', lat: 18.944, lng: 72.954, group: 'ports' },
-  { id: 'p-busan', name: 'Busan, South Korea 🇰🇷', lat: 35.115, lng: 129.071, group: 'ports' },
-  { id: 'p-losangeles', name: 'Los Angeles, USA 🇺🇸', lat: 33.729, lng: -118.269, group: 'ports' },
-  { id: 'p-valcambi', name: 'Valcambi Refinery, Switzerland 🇨🇭', lat: 46.024, lng: 8.951, group: 'buyers' },
-  { id: 'p-rand', name: 'Rand Refinery, South Africa 🇿🇦', lat: -26.248, lng: 28.163, group: 'buyers' },
-  { id: 'p-tesla', name: 'Tesla Gigafactory Nevada, USA 🇺🇸', lat: 39.539, lng: -119.231, group: 'buyers' },
-  { id: 'p-bp', name: 'BP Trading Hub, London 🇬🇧', lat: 51.507, lng: -0.127, group: 'buyers' },
+  { id: 'p-rotterdam', name: 'Rotterdam, Netherlands', lat: 51.924, lng: 4.477, country: 'Netherlands', group: 'ports' },
+  { id: 'p-antwerp', name: 'Antwerp, Belgium', lat: 51.219, lng: 4.402, country: 'Belgium', group: 'ports' },
+  { id: 'p-hamburg', name: 'Hamburg, Germany', lat: 53.545, lng: 9.970, country: 'Germany', group: 'ports' },
+  { id: 'p-shanghai', name: 'Shanghai, China', lat: 31.230, lng: 121.473, country: 'China', group: 'ports' },
+  { id: 'p-singapore', name: 'Singapore', lat: 1.352, lng: 103.819, country: 'Singapore', group: 'ports' },
+  { id: 'p-houston', name: 'Houston, USA', lat: 29.735, lng: -95.275, country: 'United States', group: 'ports' },
+  { id: 'p-dubai', name: 'Jebel Ali, UAE', lat: 24.996, lng: 55.060, country: 'United Arab Emirates', group: 'ports' },
+  { id: 'p-mumbai', name: 'Mumbai (JNPT), India', lat: 18.944, lng: 72.954, country: 'India', group: 'ports' },
+  { id: 'p-busan', name: 'Busan, South Korea', lat: 35.115, lng: 129.071, country: 'South Korea', group: 'ports' },
+  { id: 'p-losangeles', name: 'Los Angeles, USA', lat: 33.729, lng: -118.269, country: 'United States', group: 'ports' },
+  { id: 'p-valcambi', name: 'Valcambi Refinery, Switzerland', lat: 46.024, lng: 8.951, country: 'Switzerland', group: 'buyers' },
+  { id: 'p-rand', name: 'Rand Refinery, South Africa', lat: -26.248, lng: 28.163, country: 'South Africa', group: 'buyers' },
+  { id: 'p-tesla', name: 'Tesla Gigafactory Nevada, USA', lat: 39.539, lng: -119.231, country: 'United States', group: 'buyers' },
+  { id: 'p-bp', name: 'BP Trading Hub, London', lat: 51.507, lng: -0.127, country: 'United Kingdom', group: 'buyers' },
 ];
 
 export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanelProps) {
@@ -54,6 +76,8 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   const {
     supplier, setSupplier, buyer, setBuyer,
     productType, setProductType,
+    quantityTons, setQuantityTons,
+    incoterm, setIncoterm,
     shippingMethods, toggleShippingMethod,
     pickRole, beginPick, cancelPick,
     result, loading, error, computeRoute,
@@ -63,7 +87,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   const [step, setStep] = useState<'setup' | 'results'>('setup');
 
   // Auto-jump to results when we have them
-  useMemo(() => { if (hasResult) setStep('results'); }, [hasResult]);
+  useEffect(() => { if (hasResult) setStep('results'); }, [hasResult]);
 
   const licensePresets: LocationPreset[] = useMemo(() => {
     if (!allLicenses?.length) return [];
@@ -75,6 +99,10 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
         name: `${l.company || 'Unknown'} — ${l.region || l.country || ''}`,
         lat: l.lat,
         lng: l.lng,
+        country: l.country,
+        licenseId: l.id,
+        commodity: l.commodity,
+        sector: l.sector,
         group: 'licenses' as const,
       }));
   }, [allLicenses]);
@@ -94,13 +122,25 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   }, [buyer.lat, buyer.lng]);
 
   const selectedProduct = PRODUCT_OPTIONS.find(p => p.value === productType);
+  const recommendation = result?.dueDiligenceRecommendation ?? 'escalate';
+  const canProceed = result?.source === 'live' && recommendation === 'approve' && result.blockers.length === 0;
+  const sourceTone =
+    result?.source === 'live'
+      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+      : 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
+  const recommendationTone =
+    recommendation === 'approve'
+      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+      : recommendation === 'block'
+        ? 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20'
+        : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20';
 
   async function handleCompute() {
     await computeRoute();
     setStep('results');
   }
 
-  const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0;
+  const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0 && quantityTons > 0;
 
   return (
     <Card className="w-[min(96vw,960px)] max-h-[min(92vh,840px)] overflow-hidden bg-white/97 dark:bg-slate-950/97 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl flex flex-col">
@@ -178,7 +218,15 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                 <Select value={supplierPresetId} onValueChange={(val) => {
                   if (val === 'custom') return;
                   const found = licensePresets.find(p => p.id === val);
-                  if (found) setSupplier({ lat: found.lat, lng: found.lng, label: found.name });
+                  if (found) setSupplier({
+                    lat: found.lat,
+                    lng: found.lng,
+                    label: found.name,
+                    country: found.country,
+                    licenseId: found.licenseId,
+                    commodity: found.commodity,
+                    sector: found.sector,
+                  });
                 }}>
                   <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
                     <SelectValue placeholder={t('בחר נכס ממפת ה-AI שלך...', 'Choose an asset from your AI map...')} />
@@ -221,7 +269,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                 <Select value={buyerPresetId} onValueChange={(val) => {
                   if (val === 'custom') return;
                   const found = WORLD_PORTS.find(p => p.id === val);
-                  if (found) setBuyer({ lat: found.lat, lng: found.lng, label: found.name });
+                  if (found) setBuyer({ lat: found.lat, lng: found.lng, label: found.name, country: found.country });
                 }}>
                   <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
                     <SelectValue placeholder={t('בחר נמל, מזקקה, או לקוח...', 'Select port, refinery, or buyer...')} />
@@ -287,6 +335,34 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-2xl border border-black/10 dark:border-white/10 p-5">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('כמות', 'Quantity')}</p>
+                <Input
+                  type="number"
+                  min={0}
+                  value={quantityTons}
+                  onChange={(e) => setQuantityTons(Number(e.target.value))}
+                  className="h-10 rounded-xl border-black/10 dark:border-white/10 font-semibold"
+                />
+                <p className="mt-2 text-[9px] text-slate-500">{t('בטונות מטריות', 'Metric tonnes')}</p>
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('אינקוטרם', 'Incoterm')}</p>
+                <Select value={incoterm} onValueChange={setIncoterm}>
+                  <SelectTrigger className="h-10 rounded-xl border-black/10 dark:border-white/10 font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['EXW', 'FCA', 'FOB', 'CFR', 'CIF', 'DAP', 'DDP'].map((term) => (
+                      <SelectItem key={term} value={term} className="text-xs">{term}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-2 text-[9px] text-slate-500">{t('משפיע על נקודות אחריות ועלויות', 'Used for responsibility and cost context')}</p>
+              </div>
+            </div>
+
             <Button
               className="w-full h-12 rounded-xl text-[11px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20"
               onClick={handleCompute}
@@ -306,9 +382,14 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{t('סיכום מסלול', 'Route summary')}</p>
                 <p className="text-2xl font-black text-amber-500">{fmtUsd(totalUsd)}</p>
-                <p className="text-xs text-slate-500">{t('עלות כוללת משוערת (1,000 טונה)', 'Estimated total cost (1,000 MT)')}</p>
+                <p className="text-xs text-slate-500">{t(`עלות כוללת משוערת (${quantityTons.toLocaleString()} טונה)`, `Estimated total cost (${quantityTons.toLocaleString()} MT)`)}</p>
               </div>
               <div className="flex flex-col items-end gap-2">
+                {result && (
+                  <Badge className={`${sourceTone} border-none text-[9px] font-black uppercase`}>
+                    {result.source === 'live' ? t('חי', 'Live') : t('סימולציה', 'Simulation')}
+                  </Badge>
+                )}
                 <Badge className="bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-none text-[9px] font-black uppercase">
                   {supplier.label ? supplier.label.slice(0, 30) : 'Supplier'} → {buyer.label ? buyer.label.slice(0, 25) : 'Destination'}
                 </Badge>
@@ -317,6 +398,49 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                 </Badge>
               </div>
             </div>
+
+            {result?.source === 'simulation' && (
+              <div className="flex gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-amber-900 dark:text-amber-100">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest">{t('סימולציה בלבד', 'Simulation only')}</p>
+                  <p className="mt-1 text-[11px] font-semibold leading-relaxed">
+                    {t(
+                      'המסלול או בדיקת הנאותות החיה לא זמינים כרגע. אין להשתמש בתוצאה לביצוע עסקה בלי הרצה חיה.',
+                      'Live routing or due diligence is unavailable. Do not use this result to execute a deal until a live run succeeds.'
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {result && (
+              <div className={`rounded-3xl border px-5 py-4 ${recommendationTone}`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    {recommendation === 'approve' ? <CheckCircle2 className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-widest">{t('המלצת ביצוע', 'Execution recommendation')}</p>
+                      <p className="text-lg font-black uppercase">{recommendation}</p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={!canProceed}
+                    className="h-10 rounded-xl bg-emerald-500 px-5 text-[10px] font-black uppercase tracking-widest text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  >
+                    {t('אפשר להמשיך', 'Proceed')}
+                  </Button>
+                </div>
+                {(result.blockers.length > 0 || result.warnings.length > 0 || result.limitations.length > 0) && (
+                  <div className="mt-4 grid grid-cols-1 gap-3 text-[11px] font-semibold lg:grid-cols-3">
+                    <FindingList title={t('חסמים', 'Blockers')} items={result.blockers} empty={t('אין חסמים', 'No blockers')} />
+                    <FindingList title={t('אזהרות', 'Warnings')} items={result.warnings} empty={t('אין אזהרות', 'No warnings')} />
+                    <FindingList title={t('מגבלות', 'Limitations')} items={result.limitations} empty={t('אין מגבלות', 'No limitations')} />
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Cost breakdown */}

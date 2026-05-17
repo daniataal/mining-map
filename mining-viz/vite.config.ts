@@ -54,4 +54,17 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          map: ['leaflet', 'react-leaflet', 'react-leaflet-cluster'],
+          markdown: ['react-markdown', 'remark-gfm'],
+          motion: ['framer-motion'],
+          query: ['@tanstack/react-query', 'axios'],
+        },
+      },
+    },
+  },
 });
