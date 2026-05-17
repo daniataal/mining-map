@@ -842,7 +842,7 @@ export default function App() {
             {viewMode === 'route_planner' && (
               <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
                 <div className="pointer-events-auto">
-                  <RoutePlannerPanel rp={routePlanner} />
+                  <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
                 </div>
               </div>
             )}
@@ -941,6 +941,15 @@ export default function App() {
           onRemoveFromDueDiligence={
             dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
           }
+          onPlanRoute={(licenseItem) => {
+            routePlanner.prefillSupplier(
+              licenseItem.lat ?? 0,
+              licenseItem.lng ?? 0,
+              `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
+            );
+            setIsDossierOpen(false);
+            setViewMode('route_planner');
+          }}
         />
 
         <BulkImportLicensesModal

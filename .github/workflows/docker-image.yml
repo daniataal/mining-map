@@ -78,16 +78,14 @@ jobs:
           AUTO_IMPORT="true"
         fi
 
-        CSV_PATH=""
-        if [ -f "licenses_export.csv" ]; then
-          CSV_PATH="licenses_export.csv"
-        elif [ -f "mining-viz/licenses_export.csv" ]; then
-          CSV_PATH="mining-viz/licenses_export.csv"
+        # If it only exists in the subfolder, copy it to the root so scp-action uploads it directly to /tmp/licenses_export.csv
+        if [ ! -f "licenses_export.csv" ] && [ -f "mining-viz/licenses_export.csv" ]; then
+          cp mining-viz/licenses_export.csv licenses_export.csv
         fi
 
-        if [ -n "$CSV_PATH" ]; then
+        if [ -f "licenses_export.csv" ]; then
           echo "csv_exists=true" >> "$GITHUB_OUTPUT"
-          echo "csv_path=$CSV_PATH" >> "$GITHUB_OUTPUT"
+          echo "csv_path=licenses_export.csv" >> "$GITHUB_OUTPUT"
         else
           echo "csv_exists=false" >> "$GITHUB_OUTPUT"
           echo "csv_path=" >> "$GITHUB_OUTPUT"
@@ -95,7 +93,7 @@ jobs:
 
         echo "enabled=$AUTO_IMPORT" >> "$GITHUB_OUTPUT"
 
-    - name: Upload fallback CSV to remote VM
+    - name: Upload official registry CSV to remote VM
       if: steps.csv_import.outputs.enabled == 'true' && steps.csv_import.outputs.csv_exists == 'true'
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -136,10 +134,16 @@ jobs:
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
-          if [ "$CSV_UPLOADED" = "true" ] && [ -f /tmp/licenses_export.csv ]; then
-            sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
-            sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
-            echo "Fallback CSV prepared at /opt/mining-map/data/licenses_export.csv"
+          if [ "$CSV_UPLOADED" = "true" ]; then
+            if [ -f /tmp/licenses_export.csv ]; then
+              sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
+              sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
+              echo "Official registry CSV prepared at /opt/mining-map/data/licenses_export.csv"
+            elif [ -f /tmp/mining-viz/licenses_export.csv ]; then
+              sudo mv /tmp/mining-viz/licenses_export.csv /opt/mining-map/data/licenses_export.csv
+              sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
+              echo "Official registry CSV (from mining-viz) prepared at /opt/mining-map/data/licenses_export.csv"
+            fi
           fi
 
           # Create the modern split-service docker-compose.yml
@@ -160,6 +164,8 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               healthcheck:
                 test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)"]
                 interval: 15s
@@ -169,6 +175,8 @@ jobs:
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
 
             maritime-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
@@ -189,9 +197,13 @@ jobs:
                 - MARITIME_WORKER_MAX_VESSELS=120
                 - MARITIME_WORKER_SCOPE=all_vessels
                 - MARITIME_SNAPSHOT_TTL_SECONDS=300
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
 
             license-sync-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
@@ -209,9 +221,21 @@ jobs:
                 - DB_PASSWORD=password
                 - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=86400
                 - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=600
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
+
+            redis:
+              image: redis:alpine
+              platform: linux/arm64
+              container_name: mining-redis
+              restart: always
+              ports:
+                - "6379:6379"
 
             frontend:
               image: dannyatalla/mining-frontend:$VERSION_TAG
