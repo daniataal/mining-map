@@ -1453,6 +1453,29 @@ def _bootstrap_open_data():
             finally:
                 conn.close()
 
+        # Automatic Geocoding Backfill for newly imported / legacy rows
+        try:
+            try:
+                from backend.geocode_licenses import backfill as geocode_backfill
+            except ImportError:
+                from geocode_licenses import backfill as geocode_backfill
+
+            print("[OpenData] Starting automatic geocoding backfill for records...")
+            # Run geocoding backfill in non-dry-run mode for up to 5000 candidates.
+            geo_stats = geocode_backfill(dry_run=False, limit=5000)
+            print(
+                f"[OpenData] Auto-geocoding finished. Candidates: {geo_stats.candidates}, "
+                f"Updated: {geo_stats.updated}, Cache Hits: {geo_stats.cache_hits}"
+            )
+            if geo_stats.updated > 0:
+                print("[OpenData] Geocoding changes written, invalidating licenses Redis cache...")
+                try:
+                    cache.delete_pattern("licenses:*")
+                except Exception as cache_exc:
+                    print(f"[OpenData] Cache invalidation skipped: {cache_exc}")
+        except Exception as ge_exc:
+            print(f"[OpenData] Automatic geocoding skipped or failed: {ge_exc}")
+
         try:
             from ingest_oil_trades import ingest as ingest_oil_trades
             oil_summary = ingest_oil_trades(seed_only=True)
