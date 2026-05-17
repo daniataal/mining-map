@@ -184,6 +184,47 @@ export interface GovProcurementResponse {
     };
   };
   awards: GovProcurementAward[];
+  dataOrigin?: 'database' | 'live' | string | null;
+  lastSyncedAt?: string | null;
+}
+
+/** Federal contractor aggregated from USAspending commodity browse feed. */
+export interface GovProcurementCompany {
+  companyKey?: string | null;
+  name: string;
+  uei?: string | null;
+  duns?: string | null;
+  recipientId?: string | null;
+  totalAwardedUsd: number;
+  awardCount: number;
+  activeAwardCount: number;
+  commodities: string[];
+  categories: string[];
+  topAgency?: string | null;
+  topAward?: {
+    id?: string | null;
+    title?: string | null;
+    value?: number | null;
+    commodity?: string | null;
+    agency?: string | null;
+    sourceUrl?: string | null;
+  } | null;
+  matchedLicenseIds?: string[];
+}
+
+export interface GovProcurementCompaniesResponse {
+  source: string;
+  sourceUrl: string;
+  scope: string;
+  limitations: string[];
+  warnings: string[];
+  cached?: boolean;
+  dataOrigin?: 'database' | 'live' | string | null;
+  cachedAt?: string | null;
+  queriedAt?: string | null;
+  pagination?: { page: number; pageSize: number; total: number } | null;
+  commodityProfiles: { id: string; label: string; category: string }[];
+  companies: GovProcurementCompany[];
 }
 
 export interface EntityRelationship {

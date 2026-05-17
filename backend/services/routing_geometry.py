@@ -354,3 +354,88 @@ def resolve_leg_geometry(
             import_hub=import_hub,
         )
     return straight_line_geometry(a_lat, a_lng, b_lat, b_lng, method=method)
+
+
+# Countries with no direct sea access (screening list; not exhaustive).
+LANDLOCKED_COUNTRIES: frozenset[str] = frozenset(
+    {
+        "afghanistan",
+        "armenia",
+        "austria",
+        "azerbaijan",
+        "belarus",
+        "bhutan",
+        "bolivia",
+        "botswana",
+        "burkina faso",
+        "burundi",
+        "central african republic",
+        "chad",
+        "czech republic",
+        "czechia",
+        "ethiopia",
+        "hungary",
+        "kazakhstan",
+        "kyrgyzstan",
+        "laos",
+        "lesotho",
+        "liechtenstein",
+        "luxembourg",
+        "macedonia",
+        "north macedonia",
+        "malawi",
+        "mali",
+        "moldova",
+        "mongolia",
+        "nepal",
+        "niger",
+        "paraguay",
+        "rwanda",
+        "serbia",
+        "slovakia",
+        "south sudan",
+        "switzerland",
+        "tajikistan",
+        "turkmenistan",
+        "uganda",
+        "uzbekistan",
+        "vatican",
+        "zambia",
+        "zimbabwe",
+        "eswatini",
+        "swaziland",
+    }
+)
+
+# Default distance from origin to nearest export port before treating as inland.
+INLAND_PORT_THRESHOLD_KM = 450.0
+
+
+def normalize_country_key(country: str) -> str:
+    return " ".join(country.strip().lower().split())
+
+
+def is_landlocked_country(country: str) -> bool:
+    if not country:
+        return False
+    return normalize_country_key(country) in LANDLOCKED_COUNTRIES
+
+
+def inland_origin_heuristic(
+    origin_lat: float,
+    origin_lng: float,
+    nearest_port_km: float,
+    *,
+    origin_country: str = "",
+    coastal_countries: frozenset[str] | frozenset = frozenset(),
+    inland_port_threshold_km: float = INLAND_PORT_THRESHOLD_KM,
+) -> tuple[bool, str]:
+    """Return (needs_alternatives, reason_code) for inland / landlocked screening."""
+    country_key = normalize_country_key(origin_country)
+    if country_key and is_landlocked_country(origin_country):
+        return True, "landlocked_country"
+    if nearest_port_km > inland_port_threshold_km:
+        return True, "far_from_port"
+    if country_key and coastal_countries and country_key not in coastal_countries:
+        return True, "no_coastline_in_catalog"
+    return False, ""

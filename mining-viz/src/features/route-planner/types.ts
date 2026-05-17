@@ -40,6 +40,18 @@ export interface RouteMapOverlay {
   waypoints: RouteWaypoint[];
 }
 
+/** One full sequential route plan (recommended or alternative). */
+export interface RoutePlanOption {
+  id: string;
+  label: string;
+  labelHe?: string;
+  labelEn?: string;
+  isRecommended: boolean;
+  map: RouteMapOverlay;
+  breakdown: CostLineItem[];
+  totalCostUsd: number;
+}
+
 export interface RoutePlannerApiResponse {
   source: RoutePlannerSource;
   map: RouteMapOverlay;
@@ -53,6 +65,12 @@ export interface RoutePlannerApiResponse {
   dueDiligenceRecommendation: DueDiligenceRecommendation;
   blockers: string[];
   warnings: string[];
+  /** Recommended plan id (matches selected alternative when set). */
+  recommendedPlanId?: string;
+  /** Additional full-route options (sea vs air, second export port, etc.). */
+  routeAlternatives?: RoutePlanOption[];
+  /** Shown for inland / landlocked origins when the API offers multiple export paths. */
+  landlockedHint?: string;
 }
 
 export interface RoutePlannerFormPayload {

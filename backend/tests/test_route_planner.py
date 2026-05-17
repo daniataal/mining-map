@@ -146,6 +146,46 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertGreater(len(air_leg["path"]), 10)
         self.assertEqual(air_leg["geometry_source"], "great_circle")
 
+    def test_landlocked_origin_returns_alternatives_with_distinct_trunks(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "PrimeRose Resources Zambia",
+                    "lat": -12.57,
+                    "lng": 31.31,
+                    "kind": "origin",
+                    "metadata": {"country": "Zambia"},
+                },
+                "destination": {
+                    "name": "Rotterdam, Netherlands",
+                    "lat": 51.924,
+                    "lng": 4.477,
+                    "kind": "destination",
+                    "metadata": {"country": "Netherlands"},
+                },
+                "preferred_methods": ["sea", "air", "road"],
+            }
+        )
+
+        self.assertTrue(result["routing_context"]["inland_origin"])
+        self.assertIn("recommended", result)
+        self.assertGreaterEqual(len(result["alternatives"]), 1)
+        self.assertEqual(result["route"]["legs"], result["recommended"]["route"]["legs"])
+
+        all_plans = [result["recommended"], *result["alternatives"]]
+        trunk_methods = set()
+        for plan in all_plans:
+            legs = plan["route"]["legs"]
+            trunk = next((leg["method"] for leg in legs if leg["method"] in {"sea", "air"}), None)
+            self.assertIsNotNone(trunk)
+            trunk_methods.add(trunk)
+            trunk_legs = [leg for leg in legs if leg["method"] in {"sea", "air"}]
+            self.assertEqual(len(trunk_legs), 1, "Each plan must have exactly one trunk leg")
+        self.assertIn("sea", trunk_methods)
+        self.assertIn("air", trunk_methods)
+
 
 if __name__ == "__main__":
     unittest.main()

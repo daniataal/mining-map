@@ -8,6 +8,7 @@ import {
   DdReport,
   LegalEvent,
   GovProcurementResponse,
+  GovProcurementCompaniesResponse,
   LeadValue,
   OilHsCategory,
   MarketTickerRow,
@@ -60,6 +61,7 @@ import {
   getLatestDdReport,
   getLegalEvents,
   getGovProcurement,
+  getGovProcurementCompanies,
   useStorageTerminalDetails,
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
@@ -190,6 +192,11 @@ export default function DossierView({
   const [govProcurement, setGovProcurement] = useState<GovProcurementResponse | null>(null);
   const [isLoadingGovProcurement, setIsLoadingGovProcurement] = useState(false);
   const [govProcurementError, setGovProcurementError] = useState<string | null>(null);
+  const [govCompaniesFeed, setGovCompaniesFeed] = useState<GovProcurementCompaniesResponse | null>(null);
+  const [isLoadingGovCompaniesFeed, setIsLoadingGovCompaniesFeed] = useState(false);
+  const [govCompaniesFeedError, setGovCompaniesFeedError] = useState<string | null>(null);
+  const [govFeedCommodity, setGovFeedCommodity] = useState('all');
+  const [govFeedSearchQuery, setGovFeedSearchQuery] = useState('');
   const [supplySearchQuery, setSupplySearchQuery] = useState('');
   const [supplyFilterType, setSupplyFilterType] = useState('all');
   const [verifiedSuppliers, setVerifiedSuppliers] = useState<string[]>([]);
@@ -888,6 +895,57 @@ Output requirements:
   }, [isOpen, item?.id, item?.entityKind, activeTab]);
 
   useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || activeTab !== 'gov-tenders') {
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingGovCompaniesFeed(true);
+    setGovCompaniesFeedError(null);
+
+    getGovProcurementCompanies({
+      commodity: govFeedCommodity === 'all' ? undefined : govFeedCommodity,
+      matchLicenses: true,
+      limit: 80,
+    })
+      .then((payload) => {
+        if (!isCancelled) {
+          setGovCompaniesFeed(payload);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setGovCompaniesFeed(null);
+          setGovCompaniesFeedError('Unable to load federal contractor browse feed.');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLoadingGovCompaniesFeed(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, activeTab, govFeedCommodity]);
+
+  const filteredGovFeedCompanies = useMemo(() => {
+    const rows = govCompaniesFeed?.companies ?? [];
+    const q = govFeedSearchQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.uei || '').toLowerCase().includes(q) ||
+        c.commodities.some((commodity) => commodity.toLowerCase().includes(q)) ||
+        (c.topAgency || '').toLowerCase().includes(q),
+    );
+  }, [govCompaniesFeed?.companies, govFeedSearchQuery]);
+
+  useEffect(() => {
     if (commodityLabels.length === 0) {
       setSelectedCommodity('');
       return;
@@ -1520,6 +1578,9 @@ Output requirements:
                 <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed">
                   <p className="font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 mb-1">
                     {t('מקור נתונים', 'Data source')}: {govProcurement?.source || 'USAspending.gov'}
+                    {govProcurement?.dataOrigin
+                      ? ` (${govProcurement.dataOrigin === 'database' ? t('מסד נתונים', 'database') : t('חי', 'live')})`
+                      : ''}
                   </p>
                   <p>
                     {t(
@@ -1537,6 +1598,149 @@ Output requirements:
                       {govProcurement.sourceUrl}
                     </a>
                   )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                        {t('קבלנים פדרליים לפי סחורה', 'Federal contractors by commodity')}
+                      </h3>
+                      <p className="text-[10px] text-slate-500 font-semibold mt-1 max-w-xl">
+                        {t(
+                          'חברות עם חוזים פדרליים (זהב, נפט, גז וכו׳) מ-USAspending.',
+                          'Companies with U.S. federal contracts in oil, gas, gold, copper, and related commodities.'
+                        )}
+                        {govCompaniesFeed?.cached && govCompaniesFeed.cachedAt && (
+                          <span className="block text-amber-600 dark:text-amber-400 mt-1">
+                            {t('מטמון', 'Cached')}: {new Date(govCompaniesFeed.cachedAt).toLocaleString()}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { id: 'all', label: 'All' },
+                        { id: 'gold', label: 'Gold' },
+                        { id: 'silver', label: 'Silver' },
+                        { id: 'copper', label: 'Copper' },
+                        { id: 'oil', label: 'Oil' },
+                        { id: 'diesel', label: 'Diesel' },
+                        { id: 'gas', label: 'Gas' },
+                        { id: 'manganese', label: 'Mn' },
+                        { id: 'sulphur', label: 'Sulphur' },
+                      ].map((chip) => (
+                        <button
+                          key={chip.id}
+                          type="button"
+                          onClick={() => setGovFeedCommodity(chip.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all
+                            ${govFeedCommodity === chip.id
+                              ? 'bg-amber-500 text-slate-950'
+                              : 'bg-black/5 dark:bg-white/5 text-slate-500'}`}
+                        >
+                          {chip.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="w-full md:max-w-xs">
+                    <Input
+                      type="text"
+                      placeholder={t('חיפוש קבלן…', 'Search contractors…')}
+                      value={govFeedSearchQuery}
+                      onChange={(e) => setGovFeedSearchQuery(e.target.value)}
+                      className="h-9 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
+                    />
+                  </div>
+
+                  {govCompaniesFeedError && (
+                    <p className="text-[10px] font-bold text-red-500">{govCompaniesFeedError}</p>
+                  )}
+
+                  {isLoadingGovCompaniesFeed ? (
+                    <p className="text-xs font-bold text-slate-500 py-4 text-center">
+                      {t('טוען קבלנים פדרליים…', 'Loading federal contractor feed…')}
+                    </p>
+                  ) : filteredGovFeedCompanies.length === 0 ? (
+                    <p className="text-[10px] text-slate-500 py-6 text-center bg-black/5 dark:bg-white/5 rounded-2xl">
+                      {t(
+                        'אין קבלנים במסד הנתונים. הרץ scripts/sync_gov_procurement.py.',
+                        'No contractors in database yet. Run scripts/sync_gov_procurement.py or GET /gov-procurement/companies?refresh=true.'
+                      )}
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2 max-h-[280px] overflow-y-auto pr-1">
+                      {filteredGovFeedCompanies.map((company) => {
+                        const matchesThisLicense =
+                          item?.id &&
+                          (company.matchedLicenseIds || []).includes(String(item.id));
+                        const nameMatchesEntity =
+                          item?.company &&
+                          company.name.toLowerCase().includes(item.company.toLowerCase().slice(0, 12));
+                        return (
+                          <Card
+                            key={company.companyKey || company.name}
+                            className={`p-4 rounded-2xl border text-left transition-all
+                              ${matchesThisLicense || nameMatchesEntity
+                                ? 'border-amber-500/40 bg-amber-500/5'
+                                : 'border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5'}`}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-black uppercase text-slate-900 dark:text-white">
+                                  {company.name}
+                                </p>
+                                <p className="text-[9px] text-slate-500 font-mono mt-0.5">
+                                  UEI: {company.uei || '—'}
+                                </p>
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {company.commodities.slice(0, 4).map((commodity) => (
+                                    <Badge
+                                      key={commodity}
+                                      className="text-[7px] font-black bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                    >
+                                      {commodity}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="text-sm font-black text-slate-900 dark:text-white">
+                                  {formatGovUsd(company.totalAwardedUsd)}
+                                </p>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold">
+                                  {company.awardCount} awards · {company.activeAwardCount} active
+                                </p>
+                                {(matchesThisLicense || nameMatchesEntity) && (
+                                  <span className="text-[8px] font-black text-amber-600 uppercase mt-1 block">
+                                    {t('התאמה לרישיון', 'License match')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {company.topAward?.sourceUrl && (
+                              <a
+                                href={company.topAward.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[9px] font-bold text-amber-600 hover:underline mt-2 inline-block"
+                              >
+                                {t('חוזה מוביל ב-USAspending', 'Top award on USAspending')}
+                              </a>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-black/10 dark:border-white/10 pt-2">
+                  <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                    {t('חוזים לחברת הרישיון', 'Awards for this licensee')}
+                  </h3>
                 </div>
 
                 {(govProcurementError || (govProcurement?.warnings?.length ?? 0) > 0) && (

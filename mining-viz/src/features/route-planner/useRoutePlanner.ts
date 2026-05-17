@@ -1,5 +1,5 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
-import type { RoutePlannerApiResponse } from './types';
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
 import { fetchRoutePlan } from './fetchRoutePlan';
 
 export type RoutePickRole = 'supplier' | 'buyer';
@@ -73,6 +73,11 @@ export interface RoutePlannerHook {
   handleMapPick: (lat: number, lng: number, role: RoutePickRole) => void;
   overlay: RouteMapOverlay | null;
   result: RoutePlannerApiResponse | null;
+  /** All route options: recommended first, then alternatives. */
+  routeOptions: RoutePlanOption[];
+  selectedPlanId: string | null;
+  activePlan: RoutePlanOption | null;
+  selectRoutePlan: (planId: string) => void;
   loading: boolean;
   error: string | null;
   computeRoute: () => Promise<void>;
@@ -91,6 +96,7 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [shippingMethods, setShippingMethods] = useState<string[]>(() => ['sea_fcl', 'truck_inland']);
   const [pickRole, setPickRole] = useState<RoutePickRole | null>(null);
   const [result, setResult] = useState<RoutePlannerApiResponse | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,6 +108,7 @@ export function useRoutePlanner(): RoutePlannerHook {
     setSupplier({ lat, lng, label, ...meta });
     // Reset previous result so the user knows they need to compute with the new supplier
     setResult(null);
+    setSelectedPlanId(null);
     setError(null);
   }, []);
 
@@ -141,6 +148,7 @@ export function useRoutePlanner(): RoutePlannerHook {
         incoterm,
       });
       setResult(res);
+      setSelectedPlanId(res.recommendedPlanId ?? null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
     } finally {
@@ -148,7 +156,36 @@ export function useRoutePlanner(): RoutePlannerHook {
     }
   }, [supplier, buyer, productType, shippingMethods, quantityTons, incoterm]);
 
-  const overlay = result?.map ?? null;
+  const routeOptions = useMemo((): RoutePlanOption[] => {
+    if (!result) return [];
+    const recommended: RoutePlanOption = {
+      id: result.recommendedPlanId ?? 'recommended',
+      label: 'Recommended',
+      labelHe: 'מומלץ',
+      labelEn: 'Recommended',
+      isRecommended: true,
+      map: result.map,
+      breakdown: result.breakdown,
+      totalCostUsd: result.breakdown.reduce((s, r) => s + r.amountUsd, 0),
+    };
+    const alts = result.routeAlternatives ?? [];
+    return [recommended, ...alts.filter((a) => a.id !== recommended.id)];
+  }, [result]);
+
+  const activePlan = useMemo(() => {
+    if (!routeOptions.length) return null;
+    if (selectedPlanId) {
+      const match = routeOptions.find((p) => p.id === selectedPlanId);
+      if (match) return match;
+    }
+    return routeOptions[0];
+  }, [routeOptions, selectedPlanId]);
+
+  const selectRoutePlan = useCallback((planId: string) => {
+    setSelectedPlanId(planId);
+  }, []);
+
+  const overlay = activePlan?.map ?? null;
   const sourceLabel = result ? result.source : null;
 
   return {
@@ -170,6 +207,10 @@ export function useRoutePlanner(): RoutePlannerHook {
     handleMapPick,
     overlay,
     result,
+    routeOptions,
+    selectedPlanId: activePlan?.id ?? null,
+    activePlan,
+    selectRoutePlan,
     loading,
     error,
     computeRoute,

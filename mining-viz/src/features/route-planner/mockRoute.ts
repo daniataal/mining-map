@@ -1,4 +1,4 @@
-import type { RouteLeg, RoutePlannerApiResponse, CostLineItem, DueDiligenceCheck } from './types';
+import type { RouteLeg, RoutePlanOption, RoutePlannerApiResponse, CostLineItem, DueDiligenceCheck } from './types';
 
 function interpolateLeg(
   a: [number, number],
@@ -397,6 +397,24 @@ export function getMockRouteResponse(): RoutePlannerApiResponse {
   return mockResponseForPayload(supplier, buyer, 'gold_concentrate', ['sea_fcl', 'truck_inland']);
 }
 
+function isInlandOrigin(supplier: { lat: number; lng: number }): boolean {
+  const port = nearestExportPort(supplier);
+  return distanceKm(supplier, port) > 450;
+}
+
+function secondExportPort(supplier: { lat: number; lng: number }, primary: { name: string; lat: number; lng: number }) {
+  const ports = [
+    { name: 'Port of Dar es Salaam (Tanzania)', lat: -6.816, lng: 39.289, exportFeeUsd: 3400 },
+    { name: 'Port of Durban (South Africa)', lat: -29.866, lng: 31.050, exportFeeUsd: 4800 },
+    { name: 'Port of Beira (Mozambique)', lat: -19.828, lng: 34.839, exportFeeUsd: 3100 },
+    { name: 'Port of Mombasa (Kenya)', lat: -4.066, lng: 39.660, exportFeeUsd: 3600 },
+  ];
+  const ranked = ports
+    .filter((p) => p.name !== primary.name)
+    .sort((a, b) => distanceKm(supplier, a) - distanceKm(supplier, b));
+  return ranked[0] ?? primary;
+}
+
 /** Recomputes geometry from user picks with full dynamic cost breakdown */
 export function mockResponseForPayload(
   supplier: { lat: number; lng: number; label?: string },
@@ -417,10 +435,57 @@ export function mockResponseForPayload(
     exportPort.exportFeeUsd,
   );
 
+  const totalCostUsd = breakdown.reduce((s, line) => s + line.amountUsd, 0);
+  const inland = isInlandOrigin(supplier);
+  const hasSea = shippingMethods.includes('sea_fcl') || shippingMethods.includes('sea_lcl');
+  const hasAir = shippingMethods.includes('air');
+
+  const routeAlternatives: RoutePlanOption[] = [];
+  if (inland && hasSea) {
+    const altPort = secondExportPort(supplier, exportPort);
+    const altMap = buildDemoMap(supplier, altPort, buyer, shippingMethods);
+    const altBreakdown = buildBreakdown(
+      distanceKm(supplier, altPort),
+      distanceKm(altPort, buyer),
+      productType,
+      shippingMethods,
+      altPort.exportFeeUsd,
+    );
+    routeAlternatives.push({
+      id: `sea_${altPort.name.toLowerCase().replace(/\W+/g, '_').slice(0, 24)}`,
+      label: `Alternative: export via ${altPort.name}`,
+      labelHe: `חלופה: ייצוא דרך ${altPort.name}`,
+      labelEn: `Alternative: export via ${altPort.name}`,
+      isRecommended: false,
+      map: altMap,
+      breakdown: altBreakdown,
+      totalCostUsd: altBreakdown.reduce((s, line) => s + line.amountUsd, 0),
+    });
+  }
+  if (inland && hasAir && hasSea) {
+    const airMap = buildDemoMap(supplier, exportPort, buyer, ['air', ...shippingMethods.filter((m) => m !== 'sea_fcl' && m !== 'sea_lcl')]);
+    const airBreakdown = buildBreakdown(supplierToPortKm, portToBuyerKm, productType, ['air', 'truck_inland'], exportPort.exportFeeUsd);
+    routeAlternatives.push({
+      id: 'air',
+      label: 'Alternative: via air freight',
+      labelHe: 'חלופה: מטען אווירי',
+      labelEn: 'Alternative: via air freight',
+      isRecommended: false,
+      map: airMap,
+      breakdown: airBreakdown,
+      totalCostUsd: airBreakdown.reduce((s, line) => s + line.amountUsd, 0),
+    });
+  }
+
   return {
     source: 'simulation',
     map,
     breakdown,
+    recommendedPlanId: 'recommended',
+    routeAlternatives,
+    landlockedHint: inland
+      ? 'Origin is inland or landlocked: compare export-port and trunk-mode alternatives separately before execution.'
+      : undefined,
     dueDiligence: buildDueDiligence(productType, supplier.label ?? ''),
     limitations: [
       'Simulation mode: live route or due-diligence services were unavailable.',
@@ -428,6 +493,9 @@ export function mockResponseForPayload(
     ],
     routeAssumptions: [
       'Simulation approximates inland pickup to an export port, trunk movement, and final delivery.',
+      routeAlternatives.length > 0
+        ? 'Multiple sequential alternatives are available for comparison (sea vs air or second export port).'
+        : 'Single sequential corridor in simulation.',
       'Use a live route run before using this for deal execution.',
     ],
     dueDiligenceRecommendation: 'escalate',
@@ -435,5 +503,6 @@ export function mockResponseForPayload(
     warnings: [
       'Simulation results require live due-diligence verification before proceeding.',
     ],
+    cargoValueUsd: undefined,
   };
 }

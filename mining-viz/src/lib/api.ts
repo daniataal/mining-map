@@ -21,6 +21,7 @@ import {
   DdReport,
   LegalEvent,
   GovProcurementResponse,
+  GovProcurementCompaniesResponse,
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
@@ -493,15 +494,19 @@ export async function getLegalEvents(
   return Array.isArray(data) ? data : [];
 }
 
-/** U.S. federal awards for a licensee from USAspending.gov (no API key). */
+/** U.S. federal awards for a licensee (database-backed; optional live USAspending). */
 export async function getGovProcurement(
   entityId: string,
   entityKind = 'license',
+  options: { live?: boolean } = {},
 ): Promise<GovProcurementResponse> {
   const { data } = await apiClient.get<GovProcurementResponse>(
     `/entities/${encodeURIComponent(entityId)}/gov-procurement`,
     {
-      params: { entity_kind: entityKind },
+      params: {
+        entity_kind: entityKind,
+        ...(options.live ? { live: true } : {}),
+      },
     },
   );
   if (!data || typeof data !== 'object') {
@@ -518,6 +523,44 @@ export async function getGovProcurement(
         portfolioByCategoryPct: { precious: 0, fuels: 0, strategic: 0, other: 0 },
       },
       awards: [],
+    };
+  }
+  return data;
+}
+
+/** Browse U.S. federal contractors with commodity-tagged awards (database-backed). */
+export async function getGovProcurementCompanies(
+  options: {
+    commodity?: string;
+    refresh?: boolean;
+    matchLicenses?: boolean;
+    page?: number;
+    pageSize?: number;
+    limit?: number;
+  } = {},
+): Promise<GovProcurementCompaniesResponse> {
+  const { data } = await apiClient.get<GovProcurementCompaniesResponse>(
+    '/gov-procurement/companies',
+    {
+      params: {
+        ...(options.commodity ? { commodity: options.commodity } : {}),
+        ...(options.refresh ? { refresh: true } : {}),
+        ...(options.matchLicenses ? { match_licenses: true } : {}),
+        ...(options.page ? { page: options.page } : {}),
+        ...(options.pageSize ? { page_size: options.pageSize } : {}),
+        ...(options.limit ? { limit: options.limit } : {}),
+      },
+    },
+  );
+  if (!data || typeof data !== 'object') {
+    return {
+      source: 'USAspending.gov',
+      sourceUrl: 'https://www.usaspending.gov',
+      scope: 'U.S. federal contracts by commodity',
+      limitations: [],
+      warnings: ['Unexpected response from gov-procurement companies endpoint.'],
+      commodityProfiles: [],
+      companies: [],
     };
   }
   return data;
@@ -771,8 +814,12 @@ export interface MaritimeContextQuery {
   destination?: string;
 }
 
-export { useMaritimeVessels } from './vessels/useVessels';
-export type { MaritimeVesselQueryOptions } from './vessels/useVessels';
+export {
+  useMaritimeVessels,
+  prefetchMaritimeVesselSnapshot,
+  fetchMaritimeVesselSnapshot,
+} from './vessels/useVessels';
+export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
 
 export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
   const hasUsefulQuery =
