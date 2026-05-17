@@ -70,7 +70,7 @@ export function prefetchMaritimeVesselSnapshot(
 
 export function useMaritimeVessels({
   enabled = true,
-  maxVessels = 5000,
+  maxVessels = 15000,
   captureWindowSeconds = 10,
   scope = 'all_vessels',
 }: MaritimeVesselQueryOptions = {}) {

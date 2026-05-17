@@ -1311,11 +1311,23 @@
 .vessel-marker.is-selected {
   z-index: 1100 !important;
 }
-.refinery-marker {
+.refinery-marker,
+.oil-field-marker {
   background: transparent !important;
   border: none !important;
 }
-.refinery-marker-pin.is-selected {
+.refinery-marker-pin,
+.oil-field-marker-pin {
+  line-height: 0;
+}
+.refinery-marker-pin svg,
+.oil-field-marker-pin svg {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.refinery-marker-pin.is-selected,
+.oil-field-marker-pin.is-selected {
   transform: scale(1.12);
   z-index: 1100;
 }

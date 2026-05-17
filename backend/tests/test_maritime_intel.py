@@ -1,8 +1,12 @@
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from backend.services.maritime_intel import (
     _build_ais_subscription_plan,
+    _regions_for_worker_watch_mode,
+    AISSTREAM_WATCH_REGIONS,
     _build_stored_feed_response,
     _parse_datetime,
     _normalize_requested_bbox,
@@ -51,6 +55,28 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(plan["geography_mode"], "sampled_viewport_regions")
         self.assertGreaterEqual(len(plan["boxes"]), 1)
         self.assertGreaterEqual(len(plan["region_labels"]), 1)
+
+    def test_build_ais_subscription_plan_worker_all_regions(self):
+        with mock.patch.dict(os.environ, {"MARITIME_WORKER_WATCH_MODE": "all_regions"}, clear=False):
+            plan = _build_ais_subscription_plan(None, worker_ingest=True)
+        self.assertEqual(plan["geography_mode"], "all_regions")
+        self.assertEqual(len(plan["boxes"]), len(AISSTREAM_WATCH_REGIONS))
+        labels = " ".join(plan["region_labels"])
+        self.assertIn("West Africa", labels)
+        self.assertIn("South and East Africa", labels)
+
+    def test_build_ais_subscription_plan_worker_global(self):
+        with mock.patch.dict(os.environ, {"MARITIME_WORKER_WATCH_MODE": "global"}, clear=False):
+            plan = _build_ais_subscription_plan(None, worker_ingest=True)
+        self.assertEqual(plan["geography_mode"], "global")
+        self.assertEqual(len(plan["boxes"]), 1)
+
+    def test_regions_for_worker_watch_mode_includes_africa_boxes(self):
+        regions = _regions_for_worker_watch_mode("all_regions")
+        region_ids = {region["id"] for region in regions}
+        self.assertIn("west_africa", region_ids)
+        self.assertIn("south_africa_indian", region_ids)
+        self.assertIn("east_africa_arabian_sea", region_ids)
 
     def test_ship_scope_does_not_exclude_non_tankers(self):
         self.assertTrue(_ship_matches_scope("Tanker", "oil_tankers"))

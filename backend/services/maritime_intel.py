@@ -557,7 +557,7 @@ def _build_stored_feed_response(
 
 
 def _resolve_worker_watch_mode() -> str:
-    mode = MARITIME_WORKER_WATCH_MODE
+    mode = os.getenv("MARITIME_WORKER_WATCH_MODE", MARITIME_WORKER_WATCH_MODE).strip().lower()
     if mode in {"global", "all_regions", "default_regions", "rotating"}:
         return mode
     return "all_regions"

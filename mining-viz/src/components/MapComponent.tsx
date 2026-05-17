@@ -34,9 +34,9 @@ import {
 } from '../lib/vessels';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
-import { createRefineryMapIcon } from './petroleum/refineryMapIcon';
+import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
-import { isRefineryEntity } from '../lib/oilEntityKinds';
+import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
@@ -456,9 +456,9 @@ export default function MapComponent({
   onMaritimeLayerEnabledChange,
   vesselFilters: vesselFiltersProp,
   onVesselFiltersChange,
-  maritimeMaxVessels: maritimeMaxVesselsProp = '1000',
+  maritimeMaxVessels: maritimeMaxVesselsProp = '15000',
   onMaritimeMaxVesselsChange,
-  maritimeCaptureWindow: maritimeCaptureWindowProp = '10',
+  maritimeCaptureWindow: maritimeCaptureWindowProp = '25',
   onMaritimeCaptureWindowChange,
   prioritizePetroleumVessels = false,
   onPrioritizePetroleumVesselsChange,
@@ -786,10 +786,14 @@ export default function MapComponent({
             const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
             const isEsgRisk = esgZone !== null;
             const esgZoneName = esgZone?.name;
+            const selected = selectedItem?.id === item.id;
             const refineryPin = isRefineryEntity(item);
+            const oilFieldPin = !refineryPin && isOilFieldEntity(item);
             const markerIcon = refineryPin
-              ? createRefineryMapIcon(selectedItem?.id === item.id)
-              : createCustomIcon(color, false, isEsgRisk);
+              ? createRefineryMapIcon(selected)
+              : oilFieldPin
+                ? createOilFieldMapIcon(selected)
+                : createCustomIcon(color, false, isEsgRisk);
 
             return (
                 <Marker
@@ -1030,6 +1034,12 @@ export default function MapComponent({
                                         {t('רענון', 'Refresh')}
                                     </Button>
                                 </div>
+
+                                {maritimeSparseWarning && (
+                                    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-800 dark:text-amber-200">
+                                        {maritimeSparseWarning}
+                                    </p>
+                                )}
 
                                 <button
                                     type="button"
