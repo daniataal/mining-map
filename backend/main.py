@@ -559,6 +559,65 @@ DB_MAINTENANCE_NAME = os.getenv("DB_MAINTENANCE_NAME", "postgres")
 _SCHEMA_INIT_LOCK = threading.Lock()
 _SCHEMA_READY = False
 
+# Redis configuration & cache manager
+REDIS_HOST = os.getenv("REDIS_HOST", "").strip()
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_ENABLED = bool(REDIS_HOST)
+
+try:
+    import redis
+except ImportError:
+    redis = None
+
+class RedisCache:
+    def __init__(self):
+        self._client = None
+
+    def get_client(self):
+        if not REDIS_ENABLED or redis is None:
+            return None
+        if self._client is None:
+            try:
+                self._client = redis.Redis(
+                    host=REDIS_HOST,
+                    port=REDIS_PORT,
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                )
+            except Exception as exc:
+                print(f"[Redis] Initialization failed: {exc}")
+                self._client = None
+        return self._client
+
+    def get(self, key: str) -> Optional[str]:
+        client = self.get_client()
+        if client:
+            try:
+                return client.get(key)
+            except Exception as exc:
+                print(f"[Redis] GET failed for {key}: {exc}")
+        return None
+
+    def set(self, key: str, value: str, ex_seconds: int = 3600):
+        client = self.get_client()
+        if client:
+            try:
+                client.set(key, value, ex=ex_seconds)
+            except Exception as exc:
+                print(f"[Redis] SET failed for {key}: {exc}")
+
+    def delete_pattern(self, pattern: str):
+        client = self.get_client()
+        if client:
+            try:
+                keys = client.keys(pattern)
+                if keys:
+                    client.delete(*keys)
+            except Exception as exc:
+                print(f"[Redis] DELETE pattern failed for {pattern}: {exc}")
+
+cache = RedisCache()
+
 def _target_db_connect():
     if DATABASE_URL:
         return psycopg2.connect(DATABASE_URL, connect_timeout=5)
@@ -1729,6 +1788,22 @@ def read_licenses(
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing license schema")
 
+    cache_key = f"licenses:sector:{sector}:prefer_open_data:{prefer_open_data}:bbox:{min_lat}_{max_lat}_{min_lng}_{max_lng}:limit:{limit}:countries:{countries}"
+    cached_val = cache.get(cache_key)
+    if cached_val:
+        try:
+            return json.loads(cached_val)
+        except Exception:
+            pass
+
+    def _cache_and_return(res):
+        if isinstance(res, list) or (isinstance(res, dict) and "error" not in res):
+            try:
+                cache.set(cache_key, json.dumps(res), ex_seconds=1800)
+            except Exception as exc:
+                print(f"[Redis] Failed to cache response: {exc}")
+        return res
+
     try:
         try:
             from backend.services.ingest.open_data_sync import (
@@ -1837,7 +1912,7 @@ def read_licenses(
                         f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
                         f"has_live_origin_signal={has_preferred_live_rows}"
                     )
-                return results
+                return _cache_and_return(results)
             print(f"[licenses] bbox query failed: {e}")
             return _schema_unavailable_response("reading licenses")
         conn.close()
@@ -1848,7 +1923,7 @@ def read_licenses(
                 f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
                 f"has_live_origin_signal={has_preferred_live_rows}"
             )
-        return results
+        return _cache_and_return(results)
 
     start_time = time.time()
     c = conn.cursor(cursor_factory=RealDictCursor)
@@ -1898,7 +1973,7 @@ def read_licenses(
             f"has_live_origin_signal={has_preferred_live_rows} bbox_sql=0"
         )
 
-    return results
+    return _cache_and_return(results)
 
 
 @app.get("/entities/{entity_id:path}/contacts")
@@ -4487,6 +4562,11 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
                 summary["bundled_fallback_inserted"] = seed_bundled_json_fallback(conn)
             finally:
                 conn.close()
+        
+        # Invalidate Redis cache if any new records were written
+        if summary.get("records_written", 0) > 0 or summary.get("bundled_fallback_inserted", 0) > 0:
+            cache.delete_pattern("licenses:*")
+            
         return {"status": "success", **summary}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
@@ -4556,6 +4636,11 @@ async def admin_import_extracted_csv(
             source_name=source_name or None,
             sector=sector,
         )
+        
+        # Invalidate Redis cache on new CSV data insertion/update
+        if result.get("inserted_or_updated", 0) > 0:
+            cache.delete_pattern("licenses:*")
+            
         return {"status": "success", **result}
     except UnicodeDecodeError:
         return {"status": "error", "message": "CSV must be UTF-8 encoded."}
