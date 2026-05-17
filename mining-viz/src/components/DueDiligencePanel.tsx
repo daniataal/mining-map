@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
 import {
   Filter as LucideFilter,
   MapPin as LucideMapPin,
@@ -51,6 +52,7 @@ export default function DueDiligencePanel({
   const { t } = useI18n();
   const [listMode, setListMode] = useState<DdListMode>('queue');
   const [filters, setFilters] = useState<DdFilterState>(EMPTY_DD_FILTERS);
+  const debouncedSearch = useDebouncedValue(filters.search);
   const [filtersOpen, setFiltersOpen] = useState(true);
 
   const licenseById = useMemo(
@@ -72,9 +74,14 @@ export default function DueDiligencePanel({
     [allLicenses, listMode, queueItems, userAnnotations],
   );
 
+  const filtersApplied = useMemo(
+    () => ({ ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch],
+  );
+
   const filteredItems = useMemo(
-    () => applyDdFilters(baseItems, filters, userAnnotations, queueIds),
-    [baseItems, filters, queueIds, userAnnotations],
+    () => applyDdFilters(baseItems, filtersApplied, userAnnotations, queueIds),
+    [baseItems, filtersApplied, queueIds, userAnnotations],
   );
 
   const activeFilterCount =

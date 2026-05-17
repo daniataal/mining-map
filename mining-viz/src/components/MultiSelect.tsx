@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
@@ -17,6 +18,7 @@ interface MultiSelectProps {
 export default function MultiSelect({ options, selected, onChange, placeholder, searchable = false }: MultiSelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebouncedValue(searchTerm);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -37,8 +39,8 @@ export default function MultiSelect({ options, selected, onChange, placeholder, 
         }
     };
 
-    const filteredOptions = searchable && searchTerm
-        ? options.filter(opt => opt.toLowerCase().includes(searchTerm.toLowerCase()))
+    const filteredOptions = searchable && debouncedSearchTerm
+        ? options.filter(opt => opt.toLowerCase().includes(debouncedSearchTerm.toLowerCase()))
         : options;
 
     return (
