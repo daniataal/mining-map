@@ -160,8 +160,8 @@ export default function App() {
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
   const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
   const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
-  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
-  const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('15000');
+  const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('25');
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
@@ -495,8 +495,8 @@ export default function App() {
     if (!username || !maritimeMapViewActive) return;
     const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
     void prefetchMaritimeVesselSnapshot(queryClient, {
-      maxVessels: Number(maritimeMaxVessels) || 5000,
-      captureWindowSeconds: Number(maritimeCaptureWindow) || 10,
+      maxVessels: Number(maritimeMaxVessels) || 15000,
+      captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
     });
   }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
