@@ -203,6 +203,20 @@ def filter_maritime_rows_by_bbox(
     return [row for row in rows if _row_in_bbox(row, normalized_bbox)]
 
 
+def count_maritime_rows_in_bbox(
+    rows: list[dict[str, Any]],
+    bbox: tuple[float, float, float, float],
+) -> int:
+    return len(filter_maritime_rows_by_bbox(rows, bbox))
+
+
+def _north_sea_reference_bbox() -> tuple[float, float, float, float]:
+    region = _region_by_id("north_sea")
+    if region is not None:
+        return region["bbox"]
+    return (50.0, -5.0, 62.0, 12.0)
+
+
 def _sort_maritime_rows(rows: list[dict[str, Any]], vessel_scope: str) -> list[dict[str, Any]]:
     normalized_scope = _normalize_vessel_scope(vessel_scope)
     if normalized_scope == "oil_tankers":
@@ -1621,6 +1635,19 @@ def collect_worker_maritime_vessel_feed(
     if supplement_note not in merged_limitations:
         merged_limitations.append(supplement_note)
     merged["limitations"] = merged_limitations
+    gulf_count = count_maritime_rows_in_bbox(merged.get("vessels") or [], PERSIAN_GULF_CORE_BBOX)
+    if gulf_count == 0:
+        north_sea_count = count_maritime_rows_in_bbox(
+            main_feed.get("vessels") or [],
+            _north_sea_reference_bbox(),
+        )
+        if north_sea_count > 0:
+            merged_limitations.append(
+                "AISStream returned no vessels in the Persian Gulf / Strait of Hormuz box during this cycle. "
+                "This is a known upstream coverage gap (see aisstream/aisstream#17); other regions may still update."
+            )
+            merged["limitations"] = merged_limitations
+    merged["persian_gulf_vessel_count"] = gulf_count
     return merged
 
 
@@ -1665,6 +1692,8 @@ def get_maritime_stats(
             "stored_vessel_count": 0,
             "snapshot_vessel_count": 0,
             "persian_gulf_vessel_count": 0,
+            "north_sea_vessel_count": 0,
+            "aisstream_persian_gulf_coverage_gap": False,
             "bbox_vessel_count": 0,
             "requested_bbox": list(normalized_bbox) if normalized_bbox else None,
             "memory_cache_loaded": False,
@@ -1710,6 +1739,24 @@ def get_maritime_stats(
                 ),
             )
             persian_gulf_count = int((cur.fetchone() or {}).get("count") or 0)
+            north_south, north_west, north_north, north_east = _north_sea_reference_bbox()
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM maritime_vessel_snapshots
+                WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
+                  AND lat BETWEEN %s AND %s
+                  AND lng BETWEEN %s AND %s
+                """,
+                (
+                    MARITIME_SNAPSHOT_RETENTION_SECONDS,
+                    north_south,
+                    north_north,
+                    north_west,
+                    north_east,
+                ),
+            )
+            north_sea_count = int((cur.fetchone() or {}).get("count") or 0)
             bbox_count = 0
             if normalized_bbox is not None:
                 south, west, north, east = normalized_bbox
@@ -1755,6 +1802,12 @@ def get_maritime_stats(
             "stored_vessel_count": stored_count,
             "snapshot_vessel_count": len(cached_rows),
             "persian_gulf_vessel_count": persian_gulf_count,
+            "north_sea_vessel_count": north_sea_count,
+            "aisstream_persian_gulf_coverage_gap": bool(
+                persian_gulf_count == 0
+                and north_sea_count >= 25
+                and (status.get("status") or "") == "ok"
+            ),
             "bbox_vessel_count": bbox_count,
             "requested_bbox": list(normalized_bbox) if normalized_bbox else None,
             "memory_cache_loaded": bool(cached_rows),
