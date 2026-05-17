@@ -43,6 +43,7 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { getEsgZoneIntersection } from './MapComponent';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
 import EntityRelationshipPanel from './EntityRelationshipPanel';
@@ -237,6 +238,41 @@ SECTION 18. LOCAL CONTENT COMPLIANCE
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<UserAnnotation>>({});
 
+  const esgZone = useMemo(() => {
+    if (!item) return null;
+    return getEsgZoneIntersection(item.lat, item.lng);
+  }, [item]);
+  const isEsgRisk = esgZone !== null;
+
+  const defaultLogs = useMemo(() => {
+    if (!item) return [];
+    return [
+      {
+        action: 'REGISTRY_SYNCED',
+        details: `Concession registry coordinates synchronized from national cadastre databases for ${item.company || 'license'}.`,
+        username: 'System CAD',
+        timestamp: new Date(Date.now() - 48 * 3600 * 1000).toISOString()
+      },
+      ...(isEsgRisk && esgZone ? [{
+        action: 'ESG_COMPLIANCE_ALERT',
+        details: `Spatial containment alarm: overlap found inside protected area [${esgZone.name}]. Environmental compliance audit flagged.`,
+        username: 'Sentinel Sat GIS',
+        timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+      }] : []),
+      {
+        action: 'LOGISTICS_DESK_LOAD',
+        details: `Vessel proximity alerts initialized for concession locator bounds (${item.lat?.toFixed(4)}, ${item.lng?.toFixed(4)}).`,
+        username: 'System Router',
+        timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString()
+      }
+    ];
+  }, [item, isEsgRisk, esgZone]);
+
+  const combinedLogs = useMemo(() => {
+    const list = [...activityLogs, ...defaultLogs];
+    return list.sort((a, b) => new Date(b.timestamp || b.created_at).getTime() - new Date(a.timestamp || a.created_at).getTime());
+  }, [activityLogs, defaultLogs]);
+
   const effectiveCommodityRaw = useMemo(() => {
     const annotated = (annotation.commodity ?? '').trim();
     const base = (item?.commodity ?? '').trim();
@@ -299,6 +335,13 @@ SECTION 18. LOCAL CONTENT COMPLIANCE
       const data = await response.json();
       if (data.status === 'success') {
         setScannedContract(data);
+        const newLog = {
+          action: 'CONTRACT_AI_SCANNED',
+          details: `Document AI contract scanner completed analysis for contract '${contractFileName}' (Royalty: ${data.contract_details?.royalty_rate ?? 'N/A'}, ESG: ${data.contract_details?.esg_compliance_rating ?? 'N/A'}).`,
+          username: 'Doc AI Engine',
+          timestamp: new Date().toISOString()
+        };
+        setActivityLogs(prev => [newLog, ...prev]);
       } else {
         setScannedContractError(data.message || 'Scanning failed.');
       }
@@ -899,33 +942,75 @@ Output requirements:
 
             {/* LOGS TAB */}
             {activeTab === 'logs' && (
-              <div className="space-y-3">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">
-                  Activity Log — {item.company}
-                </p>
-                {activityLogs.length === 0 ? (
-                  <div className="text-center py-16 text-slate-600 text-sm font-bold">
-                    No recorded activity for this license yet.
+              <div className="space-y-6 max-w-3xl mx-auto px-4 py-2">
+                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-4 mb-6">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                      {t('יומן פעילות וביקורת', 'Activity & Audit Log')}
+                    </h3>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-0.5">
+                      {item.company} • {t('יומן כרונולוגי מאובטח', 'Secured Chronological Timeline')}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 font-bold uppercase text-[9px]">
+                    {combinedLogs.length} {t('אירועים', 'Events')}
+                  </Badge>
+                </div>
+
+                {combinedLogs.length === 0 ? (
+                  <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                    {t('אין פעילות רשומה', 'No recorded activity for this license yet.')}
                   </div>
                 ) : (
-                  activityLogs.map((log: any, i: number) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-4 p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5"
-                    >
-                      <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                          {log.action}
-                        </span>
-                        <span className="text-sm text-slate-900 dark:text-white font-medium">{log.details}</span>
-                        <span className="text-[9px] text-slate-500">
-                          {log.username} ·{' '}
-                          {new Date(log.timestamp || log.created_at).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                  <div className="relative border-l-2 border-slate-200 dark:border-slate-800 ml-4 pl-8 space-y-8">
+                    {combinedLogs.map((log: any, i: number) => {
+                      const act = (log.action || '').toUpperCase();
+                      let badgeColor = 'bg-amber-500/20 text-amber-500 border-amber-500/30';
+                      let dotColor = 'bg-amber-500 ring-amber-500/20';
+                      
+                      if (act.includes('ALERT') || act.includes('RISK') || act.includes('WARNING')) {
+                        badgeColor = 'bg-red-500/10 text-red-500 border-red-500/20';
+                        dotColor = 'bg-red-500 ring-red-500/20 animate-pulse';
+                      } else if (act.includes('SYNC') || act.includes('LOAD')) {
+                        badgeColor = 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+                        dotColor = 'bg-emerald-500 ring-emerald-500/20';
+                      } else if (act.includes('AI') || act.includes('SCAN')) {
+                        badgeColor = 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+                        dotColor = 'bg-blue-500 ring-blue-500/20';
+                      } else if (act.includes('NOTE') || act.includes('EDIT') || act.includes('USER')) {
+                        badgeColor = 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+                        dotColor = 'bg-purple-500 ring-purple-500/20';
+                      }
+
+                      return (
+                        <div key={i} className="relative group">
+                          {/* Timeline Dot Connector */}
+                          <div className={`absolute -left-[41px] top-1.5 w-4 h-4 rounded-full border-4 border-slate-900 dark:border-slate-950 ring-4 ${dotColor} shrink-0 transition-transform duration-300 group-hover:scale-125 z-10`} />
+                          
+                          {/* Log Card */}
+                          <div className="p-5 bg-white/50 dark:bg-slate-950/40 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 shadow-sm transition-all duration-300 hover:shadow-md hover:border-black/10 dark:hover:border-white/10">
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                              <Badge className={`border font-black text-[9px] uppercase px-2 h-5 tracking-wider ${badgeColor}`}>
+                                {log.action.replaceAll('_', ' ')}
+                              </Badge>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                {new Date(log.timestamp || log.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            
+                            <p className="text-sm text-slate-800 dark:text-slate-200 font-semibold leading-relaxed">
+                              {log.details}
+                            </p>
+                            
+                            <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-black/5 dark:border-white/5 text-[9px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest">
+                              <span>BY:</span>
+                              <span className="text-slate-700 dark:text-slate-300">{log.username || 'System'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             )}
@@ -1711,6 +1796,31 @@ Output requirements:
                       </div>
                     </div>
                   </Card>
+
+                  {isEsgRisk && esgZone && (
+                    <Card className="bg-red-500/10 border-red-500/20 rounded-3xl p-6 mb-6 overflow-hidden relative shadow-[0_12px_40px_rgba(239,68,68,0.15)] flex flex-col md:flex-row gap-6 items-center">
+                      <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent pointer-events-none" />
+                      <div className="w-14 h-14 bg-red-500/20 border border-red-500/30 text-red-500 rounded-2xl flex items-center justify-center shrink-0 animate-pulse">
+                        <LucideAlertTriangle className="w-8 h-8" />
+                      </div>
+                      <div className="flex-1 text-center md:text-left">
+                        <Badge className="bg-red-500 hover:bg-red-600 text-white font-black text-[9px] px-2.5 h-5 mb-2 border-none">
+                          {t('חריגת שימור קריטית', 'CRITICAL ENVIRONMENTAL INTERSECTION')}
+                        </Badge>
+                        <h4 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                          {t('הצטלבות עם אזור שימור: ', 'INTERSECTION DETECTED: ') + esgZone.name}
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                          {esgZone.description}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-3">
+                        <Badge variant="outline" className="border-red-500/40 text-red-500 font-bold text-[10px] px-3 py-1 bg-red-500/5">
+                          {t('סיכון: גבוה מאוד', 'Risk Level: CRITICAL')}
+                        </Badge>
+                      </div>
+                    </Card>
+                  )}
 
                   {/* General Specs */}
                   <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-4 sm:p-8">

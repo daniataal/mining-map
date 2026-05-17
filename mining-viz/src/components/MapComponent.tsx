@@ -15,6 +15,7 @@ import {
     Polyline,
     CircleMarker,
     FeatureGroup,
+    Circle,
 } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
@@ -56,6 +57,62 @@ let DefaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
+
+export const ESG_CONSERVATION_ZONES = [
+  {
+    name: "Upper Guinean Rainforest Buffer",
+    center: [5.556, -0.196] as [number, number],
+    radius: 35000,
+    color: "#10b981",
+    fillColor: "#059669",
+    description: "Strict ecological protection zone. Critical wildlife habitat buffer. High water pollution threat index."
+  },
+  {
+    name: "Kruger National Park Protected Area",
+    center: [-23.988, 31.554] as [number, number],
+    radius: 45000,
+    color: "#10b981",
+    fillColor: "#059669",
+    description: "National park sanctuary reserve. Mining operations strictly prohibited within buffer bounds."
+  },
+  {
+    name: "East African Rift Valley Ecological Zone",
+    center: [-1.292, 36.821] as [number, number],
+    radius: 50000,
+    color: "#10b981",
+    fillColor: "#059669",
+    description: "Volcanic active conservation area. Ground subsidence risk and protected flora/fauna."
+  },
+  {
+    name: "Nile Delta Protection Buffer",
+    center: [30.044, 31.235] as [number, number],
+    radius: 60000,
+    color: "#10b981",
+    fillColor: "#059669",
+    description: "Sensitive delta agricultural zone. Soil salinity warning and chemical runoff prevention area."
+  }
+];
+
+export function getEsgZoneIntersection(lat?: number | null, lng?: number | null) {
+  if (lat == null || lng == null) return null;
+  for (const zone of ESG_CONSERVATION_ZONES) {
+    const [zLat, zLng] = zone.center;
+    const R = 6371e3;
+    const phi1 = (lat * Math.PI) / 180;
+    const phi2 = (zLat * Math.PI) / 180;
+    const deltaPhi = ((zLat - lat) * Math.PI) / 180;
+    const deltaLambda = ((zLng - lng) * Math.PI) / 180;
+    const a =
+      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+      Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    if (distance <= zone.radius) {
+      return zone;
+    }
+  }
+  return null;
+}
 
 /** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
 type VesselCategoryKey =
@@ -168,13 +225,18 @@ const VESSEL_LEGEND_T: Record<VesselCategoryKey, [string, string]> = {
     other: ['אחר/לא ידוע', 'Other'],
 };
 
-const createCustomIcon = (color: string, isHovered: boolean) => {
+const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean) => {
     const isGold = color === '#FFD700';
     const size = isHovered ? 24 : (isGold ? 14 : 10);
-    const border = isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)');
+    let border = isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)');
 
     let boxShadow;
-    if (isGold) {
+    if (isEsgRisk) {
+        boxShadow = isHovered
+            ? '0 0 25px #ef4444, 0 0 12px #ef4444'
+            : '0 0 15px #ef4444, 0 0 8px #ef4444';
+        border = isHovered ? '2.5px solid #ef4444' : '1.5px solid rgba(239, 68, 68, 0.9)';
+    } else if (isGold) {
         boxShadow = isHovered
             ? '0 0 20px rgba(255, 215, 0, 0.8), 0 0 10px rgba(255, 215, 0, 0.6)'
             : '0 0 12px rgba(255, 215, 0, 0.6), 0 0 6px rgba(255, 215, 0, 0.4)';
@@ -184,9 +246,11 @@ const createCustomIcon = (color: string, isHovered: boolean) => {
             : `0 0 8px ${color}`;
     }
 
+    const customClass = isEsgRisk ? 'animate-ping-red' : '';
+
     return new L.DivIcon({
         className: 'custom-marker',
-        html: `<div style="background-color: ${color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.3s ease; pointer-events: auto; cursor: pointer;"></div>`,
+        html: `<div class="${customClass}" style="background-color: ${isEsgRisk ? '#ef4444' : color}; width: ${size}px; height: ${size}px; border-radius: 50%; border: ${border}; box-shadow: ${boxShadow}; transition: all 0.3s ease; pointer-events: auto; cursor: pointer;"></div>`,
         iconSize: isHovered ? [24, 24] : [size, size],
         iconAnchor: isHovered ? [12, 12] : [size / 2, size / 2],
         popupAnchor: [0, -10]
@@ -1195,6 +1259,36 @@ export default function MapComponent({
                         <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" />
                     </LayersControl.BaseLayer>
 
+                    <LayersControl.Overlay checked name={t("אזורי שימור סביבתיים (ESG)", "ESG Protected Zones")}>
+                        <FeatureGroup>
+                            {ESG_CONSERVATION_ZONES.map((zone, idx) => (
+                                <Circle
+                                    key={idx}
+                                    center={zone.center}
+                                    radius={zone.radius}
+                                    pathOptions={{
+                                        color: zone.color,
+                                        fillColor: zone.fillColor,
+                                        fillOpacity: 0.15,
+                                        weight: 2.2,
+                                        dashArray: "6, 6"
+                                    }}
+                                >
+                                    <Tooltip direction="top" opacity={0.95}>
+                                        <div className="p-3 max-w-[240px] font-sans">
+                                          <p className="text-xs font-black uppercase text-emerald-500 tracking-wider mb-1">
+                                            {zone.name}
+                                          </p>
+                                          <p className="text-[10px] text-slate-300 leading-normal">
+                                            {zone.description}
+                                          </p>
+                                        </div>
+                                    </Tooltip>
+                                </Circle>
+                            ))}
+                        </FeatureGroup>
+                    </LayersControl.Overlay>
+
                     {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
                         <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
@@ -1263,12 +1357,15 @@ export default function MapComponent({
                         if (item._displayLat == null || item._displayLng == null) return null;
                         const annotation = userAnnotations[item.id] || {};
                         const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
+                        const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
+                        const isEsgRisk = esgZone !== null;
+                        const esgZoneName = esgZone?.name;
 
                         return (
                             <Marker
                                 key={getLicenseRenderKey(item, index)}
                                 position={[item._displayLat, item._displayLng]}
-                                icon={createCustomIcon(color, false)}
+                                icon={createCustomIcon(color, false, isEsgRisk)}
                                 ref={(el) => {
                                     if (!el) return;
                                     markerRefs.current[item.id] = el;
@@ -1332,6 +1429,8 @@ export default function MapComponent({
                                           ? () => onRemoveFromDueDiligence(item.id)
                                           : undefined
                                       }
+                                      isEsgRisk={isEsgRisk}
+                                      esgZoneName={esgZoneName}
                                     />
                                 </Popup>
                             </Marker>
