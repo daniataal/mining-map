@@ -482,6 +482,13 @@ export default function MapComponent({
     const mapRef = useRef<L.Map | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
+    const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
+
+    const isMobileDevice = useMemo(() => {
+        if (typeof window === 'undefined') return false;
+        return window.innerWidth < 768 || /Mobi|Android|iPhone/i.test(navigator.userAgent);
+    }, []);
+
     const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
     const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
@@ -498,7 +505,41 @@ export default function MapComponent({
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
     const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+
+    const mobileFilteredData = useMemo(() => {
+        if (!isMobileDevice || !currentVisibleViewport) {
+            return { data: displayData, capped: false };
+        }
+        const filtered = displayData.filter((item) => {
+            if (item.lat == null || item.lng == null) return false;
+            if (selectedItem && item.id === selectedItem.id) return true;
+            return (
+                item.lat >= currentVisibleViewport.south &&
+                item.lat <= currentVisibleViewport.north &&
+                item.lng >= currentVisibleViewport.west &&
+                item.lng <= currentVisibleViewport.east
+            );
+        });
+
+        const MOBILE_RENDER_LIMIT = 800;
+        if (filtered.length > MOBILE_RENDER_LIMIT) {
+            const capped = filtered.slice(0, MOBILE_RENDER_LIMIT);
+            if (selectedItem) {
+                const selected = filtered.find((item) => item.id === selectedItem.id);
+                if (selected && !capped.some((item) => item.id === selected.id)) {
+                    capped[capped.length - 1] = selected;
+                }
+            }
+            return { data: capped, capped: true };
+        }
+        return { data: filtered, capped: false };
+    }, [displayData, selectedItem, isMobileDevice, currentVisibleViewport]);
+
     const mapDisplayData = useMemo(() => {
+        if (isMobileDevice) {
+            return mobileFilteredData.data;
+        }
+
         if (viewModeKey !== 'ports' || displayData.length <= PORTS_MAP_RENDER_LIMIT) {
             return displayData;
         }
@@ -509,7 +550,7 @@ export default function MapComponent({
             return capped;
         }
         return [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
-    }, [displayData, selectedItem, viewModeKey]);
+    }, [displayData, selectedItem, viewModeKey, isMobileDevice, mobileFilteredData]);
     const {
         data: maritimeFeed,
         isLoading: isMaritimeLoading,
@@ -1097,6 +1138,20 @@ export default function MapComponent({
                     }}
                 />
                 <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
+                {isMobileDevice && mobileFilteredData.capped && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
+                            {t('ביצועי מובייל אופטימליים', 'Mobile performance optimized')}
+                        </p>
+                        <p className="text-[10px] text-slate-400 text-center text-xs">
+                            {t(
+                                'מוצגות רק 800 הקונססיות הקרובות ביותר. עשה זום-אין לצפייה בשאר.',
+                                'Showing nearest 800 concessions only. Zoom in to view others.'
+                            )}
+                        </p>
+                    </div>
+                )}
                 {isOilAndGasView && onGroundVisible && (
                     <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
                 )}
