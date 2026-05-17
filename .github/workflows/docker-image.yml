@@ -93,7 +93,7 @@ jobs:
 
         echo "enabled=$AUTO_IMPORT" >> "$GITHUB_OUTPUT"
 
-    - name: Upload fallback CSV to remote VM
+    - name: Upload official registry CSV to remote VM
       if: steps.csv_import.outputs.enabled == 'true' && steps.csv_import.outputs.csv_exists == 'true'
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -138,11 +138,11 @@ jobs:
             if [ -f /tmp/licenses_export.csv ]; then
               sudo mv /tmp/licenses_export.csv /opt/mining-map/data/licenses_export.csv
               sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
-              echo "Fallback CSV prepared at /opt/mining-map/data/licenses_export.csv"
+              echo "Official registry CSV prepared at /opt/mining-map/data/licenses_export.csv"
             elif [ -f /tmp/mining-viz/licenses_export.csv ]; then
               sudo mv /tmp/mining-viz/licenses_export.csv /opt/mining-map/data/licenses_export.csv
               sudo chmod 664 /opt/mining-map/data/licenses_export.csv || true
-              echo "Fallback CSV (from mining-viz) prepared at /opt/mining-map/data/licenses_export.csv"
+              echo "Official registry CSV (from mining-viz) prepared at /opt/mining-map/data/licenses_export.csv"
             fi
           fi
 

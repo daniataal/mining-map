@@ -1670,6 +1670,17 @@ def describe_license_source_record(
     reg = registry if registry is not None else get_source_registry_index()
     if source_id and source_id in reg:
         return dict(reg[source_id])
+    if source_id and source_id.startswith("user_csv:"):
+        return {
+            "source_kind": "official_registry",
+            "source_access": "open_machine_readable",
+            "coverage_state": "official_syncable",
+            "provenance_note": "Official Registry CSV Import.",
+            "coverage_scope": "country",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": None,
+            "note": None,
+        }
     normalized_origin = (record_origin or "").strip().lower()
     if normalized_origin == "user_import_csv":
         return {
@@ -1847,6 +1858,12 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
                 if official:
                     base["record_count"] = official["record_count"]
                     base["last_synced_at"] = official["last_synced_at"]
+                    if base["status"] in ("unavailable", "official_portal_only", "official_api_restricted"):
+                        base["status"] = "official_syncable"
+                        base["note"] = f"Official {sector.replace('_', ' ')} registry data successfully imported."
+                    for sid in official.get("source_ids", []):
+                        if sid and sid not in base["source_ids"]:
+                            base["source_ids"].append(sid)
 
                 summary_bucket = summary[sector]
 
