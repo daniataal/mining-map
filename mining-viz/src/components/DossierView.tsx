@@ -180,75 +180,13 @@ export default function DossierView({
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
 
-  // Document AI state
-  const defaultContractTemplate = useMemo(() => {
-    if (!item) return '';
-    const company = item.company || 'Acme Minerals Ltd';
-    const country = item.country || 'Ghana';
-    const id = item.id || 'GH-2026-001';
-    const commodity = commodityListLabel;
-    
-    if (isOilAndGas) {
-      return `PETROLEUM PRODUCTION SHARING AGREEMENT (PSA)
-BETWEEN THE REPUBLIQUE OF ${country.toUpperCase()}
-AND ${company.toUpperCase()} OIL & GAS CORP.
-
-Ref Reference: PPSA-${id}-2026-X
-Dated: January 18, 2026
-
-WHEREAS the Contractor has requested rights for oil exploration and refining.
-ARTICLE 14: FISCAL TERMS & ROYALTIES
-14.1 The Contractor shall pay to the State a Royalty of 12.5% (twelve point five percent) of all Crude Oil produced and saved from the Contract Area.
-14.2 The remaining profit oil shall be shared: 60% to the State and 40% to the Contractor.
-
-ARTICLE 22: ENVIRONMENTAL COMPLIANCE AND PROTECTION
-22.1 The Contractor shall comply with international petroleum industry standards.
-22.2 WARNING: The exploratory block intersects high water-table zones. Special EPA secondary permits are required. Waste discharge in near-river zones is strictly prohibited. Failure to obtain EPA clearance will trigger immediate operational suspension.
-
-ARTICLE 33: EXPENDITURE AND WORK COMMITMENT
-33.1 The Contractor's minimum work commitment during the initial phase is $18,500,000 USD, including high-resolution 3D seismic acquisition.
-
-ARTICLE 45: LOCAL LABOR AND CONTENT
-45.1 Contractor agrees that a minimum of 45% (forty-five percent) of all technical and management personnel shall be citizens of ${country}. 
-45.2 A mandatory training contribution of $150,000 USD per annum shall be paid directly to the Ministry of Petroleum Resources.`;
-    } else {
-      return `CONCESSION LEASE & MINING CONCESSION CONTRACT
-MINISTRY OF LANDS AND NATURAL RESOURCES OF ${country.toUpperCase()}
-GRANTED TO ${company.toUpperCase()} MINING GROUP
-
-Reference Identification: MLC-${id}-GOLD
-Valid From: February 10, 2026
-
-TERMS AND DISCLOSURES:
-SECTION 4. ROYALTIES AND TAXATION
-4.1 The Lessee shall pay to the government of ${country} a Gross Revenue Royalty of 5.5% (five point five percent) on all ${commodity} sold or shipped.
-4.2 State retains a 10% free-carried interest in all operations.
-
-SECTION 9. ESG & ENVIRONMENTAL ADHERENCE
-9.1 Lessee shall construct a secure tailings storage facility.
-9.2 CAUTION: Operational boundaries must respect the local wildlife conservation buffer. Heavy machinery operations are prohibited within 500 meters of protected water sources. Runoff controls must pass quarterly inspector audits to maintain active license status.
-
-SECTION 12. ANNUAL CAPITAL COMMITMENT
-12.1 The Lessee is obligated to perform a minimum annual work program of $2,500,000 USD in active exploration, geological mapping, and drilling.
-
-SECTION 18. LOCAL CONTENT COMPLIANCE
-18.1 Lessee guarantees that at least 60% of all goods and professional services shall be procured from registered national subcontractors.
-18.2 Citizens of ${country} must constitute at least 80% of the active manual labor force.`;
-    }
-  }, [item, isOilAndGas, commodityListLabel]);
-
   const [documentText, setDocumentText] = useState('');
   const [scannedContract, setScannedContract] = useState<any>(null);
   const [isScanningContract, setIsScanningContract] = useState(false);
   const [contractFileName, setContractFileName] = useState('licensing_agreement_2026.pdf');
   const [scannedContractError, setScannedContractError] = useState<string | null>(null);
 
-  // Sync documentText with template if empty
-  useEffect(() => {
-    if (!documentText && defaultContractTemplate) {
-      setDocumentText(defaultContractTemplate);
-    }
-  }, [defaultContractTemplate, documentText]);
+
 
   // CRM edit state
   const [isEditing, setIsEditing] = useState(false);
@@ -357,7 +295,73 @@ SECTION 18. LOCAL CONTENT COMPLIANCE
     useStorageTerminalDetails(
       isStorageTerminal ? item?.id : undefined,
       Boolean(isOpen && isStorageTerminal && item?.id)
-    );  const scanContractWithAi = async () => {
+    );
+
+  // Document AI state
+  const defaultContractTemplate = useMemo(() => {
+    if (!item) return '';
+    const company = item.company || 'Acme Minerals Ltd';
+    const country = item.country || 'Ghana';
+    const id = item.id || 'GH-2026-001';
+    const commodity = commodityListLabel;
+    
+    if (isOilAndGas) {
+      return `PETROLEUM PRODUCTION SHARING AGREEMENT (PSA)
+BETWEEN THE REPUBLIQUE OF ${country.toUpperCase()}
+AND ${company.toUpperCase()} OIL & GAS CORP.
+
+Ref Reference: PPSA-${id}-2026-X
+Dated: January 18, 2026
+
+WHEREAS the Contractor has requested rights for oil exploration and refining.
+ARTICLE 14: FISCAL TERMS & ROYALTIES
+14.1 The Contractor shall pay to the State a Royalty of 12.5% (twelve point five percent) of all Crude Oil produced and saved from the Contract Area.
+14.2 The remaining profit oil shall be shared: 60% to the State and 40% to the Contractor.
+
+ARTICLE 22: ENVIRONMENTAL COMPLIANCE AND PROTECTION
+22.1 The Contractor shall comply with international petroleum industry standards.
+22.2 WARNING: The exploratory block intersects high water-table zones. Special EPA secondary permits are required. Waste discharge in near-river zones is strictly prohibited. Failure to obtain EPA clearance will trigger immediate operational suspension.
+
+ARTICLE 33: EXPENDITURE AND WORK COMMITMENT
+33.1 The Contractor's minimum work commitment during the initial phase is $18,500,000 USD, including high-resolution 3D seismic acquisition.
+
+ARTICLE 45: LOCAL LABOR AND CONTENT
+45.1 Contractor agrees that a minimum of 45% (forty-five percent) of all technical and management personnel shall be citizens of ${country}. 
+45.2 A mandatory training contribution of $150,000 USD per annum shall be paid directly to the Ministry of Petroleum Resources.`;
+    } else {
+      return `CONCESSION LEASE & MINING CONCESSION CONTRACT
+MINISTRY OF LANDS AND NATURAL RESOURCES OF ${country.toUpperCase()}
+GRANTED TO ${company.toUpperCase()} MINING GROUP
+
+Reference Identification: MLC-${id}-GOLD
+Valid From: February 10, 2026
+
+TERMS AND DISCLOSURES:
+SECTION 4. ROYALTIES AND TAXATION
+4.1 The Lessee shall pay to the government of ${country} a Gross Revenue Royalty of 5.5% (five point five percent) on all ${commodity} sold or shipped.
+4.2 State retains a 10% free-carried interest in all operations.
+
+SECTION 9. ESG & ENVIRONMENTAL ADHERENCE
+9.1 Lessee shall construct a secure tailings storage facility.
+9.2 CAUTION: Operational boundaries must respect the local wildlife conservation buffer. Heavy machinery operations are prohibited within 500 meters of protected water sources. Runoff controls must pass quarterly inspector audits to maintain active license status.
+
+SECTION 12. ANNUAL CAPITAL COMMITMENT
+12.1 The Lessee is obligated to perform a minimum annual work program of $2,500,000 USD in active exploration, geological mapping, and drilling.
+
+SECTION 18. LOCAL CONTENT COMPLIANCE
+18.1 Lessee guarantees that at least 60% of all goods and professional services shall be procured from registered national subcontractors.
+18.2 Citizens of ${country} must constitute at least 80% of the active manual labor force.`;
+    }
+  }, [item, isOilAndGas, commodityListLabel]);
+
+  // Sync documentText with template if empty
+  useEffect(() => {
+    if (!documentText && defaultContractTemplate) {
+      setDocumentText(defaultContractTemplate);
+    }
+  }, [defaultContractTemplate, documentText]);
+
+  const scanContractWithAi = async () => {
     if (!item) return;
     setIsScanningContract(true);
     setScannedContractError(null);
