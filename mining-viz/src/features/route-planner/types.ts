@@ -10,6 +10,8 @@ export interface RouteWaypoint {
 
 export interface RouteLeg {
   path: [number, number][];
+  method?: 'sea' | 'road' | 'rail' | 'air' | 'pipeline' | string;
+  label?: string;
 }
 
 export interface CostLineItem {
@@ -44,6 +46,10 @@ export interface RoutePlannerApiResponse {
   breakdown: CostLineItem[];
   dueDiligence: DueDiligenceCheck[];
   limitations: string[];
+  routeAssumptions?: string[];
+  cargoValueUsd?: number;
+  cargoValueNote?: string;
+  freightToValuePct?: number;
   dueDiligenceRecommendation: DueDiligenceRecommendation;
   blockers: string[];
   warnings: string[];

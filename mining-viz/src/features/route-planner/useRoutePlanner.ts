@@ -32,6 +32,7 @@ export const SHIPPING_OPTIONS: {
 
 export const PRODUCT_OPTIONS: { value: string; labelHe: string; labelEn: string; icon: string }[] = [
   { value: 'gold_concentrate', labelHe: 'ריכוז זהב', labelEn: 'Gold concentrate', icon: '🥇' },
+  { value: 'gold_dore', labelHe: 'דוריי / מטילי זהב', labelEn: 'Gold doré / bullion', icon: '🟡' },
   { value: 'cobalt', labelHe: 'קובלט', labelEn: 'Cobalt', icon: '🔋' },
   { value: 'lithium', labelHe: 'ליתיום', labelEn: 'Lithium', icon: '⚡' },
   { value: 'bauxite', labelHe: 'בוקסיט', labelEn: 'Bauxite', icon: '🪨' },
@@ -44,7 +45,7 @@ export const PRODUCT_OPTIONS: { value: string; labelHe: string; labelEn: string;
 ];
 
 export interface RouteMapOverlay {
-  legs: { path: [number, number][] }[];
+  legs: { path: [number, number][]; method?: string; label?: string }[];
   waypoints: Array<{
     lat: number;
     lng: number;

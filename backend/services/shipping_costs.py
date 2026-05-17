@@ -28,7 +28,10 @@ METHOD_RATE_USD_PER_TON_KM: dict[str, float] = {
     "air": _env_float("SHIPPING_RATE_AIR_USD_PER_TON_KM", 0.45),
 }
 
-PORT_FEE_USD_PER_SEA_LEG = _env_float("SHIPPING_PORT_FEE_USD", 2500.0)
+PORT_FEE_USD_PER_SEA_LEG = _env_float("SHIPPING_PORT_FEE_USD", 15000.0)
+SEA_TERMINAL_HANDLING_USD_PER_TON = _env_float("SHIPPING_SEA_TERMINAL_HANDLING_USD_PER_TON", 18.0)
+AIR_SECURITY_HANDLING_USD_PER_TON = _env_float("SHIPPING_AIR_SECURITY_HANDLING_USD_PER_TON", 220.0)
+ROAD_BORDER_DOC_FEE_USD = _env_float("SHIPPING_ROAD_BORDER_DOC_FEE_USD", 850.0)
 INSURANCE_RATE = _env_float("SHIPPING_INSURANCE_RATE", 0.01)
 PIPELINE_CONNECTION_FEE_USD = _env_float("SHIPPING_PIPELINE_CONNECTION_FEE_USD", 750.0)
 
@@ -85,13 +88,40 @@ def estimate_leg_cost(leg: dict[str, Any], cargo_tons: float) -> LegCostBreakdow
     ]
 
     if method == "sea":
-        sea_port_fee = float(leg.get("port_fee_usd", PORT_FEE_USD_PER_SEA_LEG))
+        sea_port_fee = float(
+            leg.get(
+                "port_fee_usd",
+                PORT_FEE_USD_PER_SEA_LEG + cargo_tons * SEA_TERMINAL_HANDLING_USD_PER_TON,
+            )
+        )
         extras += sea_port_fee
         components.append(
             CostComponent(
-                component="port_fee_stub",
+                component="port_terminal_handling",
                 amount_usd=sea_port_fee,
-                formula="flat sea leg fee (stub)",
+                formula=(
+                    f"{PORT_FEE_USD_PER_SEA_LEG:.2f} fixed port/docs + "
+                    f"{cargo_tons:.2f}t * {SEA_TERMINAL_HANDLING_USD_PER_TON:.2f} terminal handling"
+                ),
+            )
+        )
+    elif method == "air":
+        handling_fee = float(leg.get("air_security_handling_usd", cargo_tons * AIR_SECURITY_HANDLING_USD_PER_TON))
+        extras += handling_fee
+        components.append(
+            CostComponent(
+                component="air_security_handling",
+                amount_usd=handling_fee,
+                formula=f"{cargo_tons:.2f}t * {AIR_SECURITY_HANDLING_USD_PER_TON:.2f} air security/handling",
+            )
+        )
+    elif method == "road" and distance_km >= 250:
+        extras += ROAD_BORDER_DOC_FEE_USD
+        components.append(
+            CostComponent(
+                component="road_docs_permits",
+                amount_usd=ROAD_BORDER_DOC_FEE_USD,
+                formula="long-haul road permit/docs allowance",
             )
         )
     elif method == "pipeline":
@@ -149,8 +179,10 @@ def estimate_route_cost(legs: list[dict[str, Any]], cargo_tons: float) -> RouteC
         method_subtotals_usd=method_subtotals,
         leg_costs=leg_costs,
         stubs={
-            "port_fee": "Included for sea legs via SHIPPING_PORT_FEE_USD.",
-            "insurance": "Applied to each leg via SHIPPING_INSURANCE_RATE.",
+            "port_fee": "Sea legs include fixed port/docs plus per-ton terminal handling.",
+            "air_security": "Air legs include a per-ton security/handling allowance.",
+            "road_docs": "Long road legs include a permits/docs allowance.",
+            "insurance": "Applied to freight and handling cost via SHIPPING_INSURANCE_RATE.",
         },
         total_cost_usd=total_cost,
     )

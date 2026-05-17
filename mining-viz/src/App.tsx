@@ -852,8 +852,8 @@ export default function App() {
               </Suspense>
             )}
             {viewMode === 'route_planner' && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
-                <div className="pointer-events-auto">
+              <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
+                <div className="pointer-events-auto w-full sm:w-[min(560px,calc(100vw-6rem))]">
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
                     <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
                   </Suspense>
