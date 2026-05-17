@@ -32,6 +32,10 @@ import {
   Check as LucideCheck,
   Scale as LucideScale,
   Gavel as LucideGavel,
+  FileText as LucideFileText,
+  Upload as LucideUploadCloud,
+  AlertTriangle as LucideAlertTriangle,
+  CheckCircle2 as LucideCheckCircle2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -159,6 +163,76 @@ export default function DossierView({
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
 
+  // Document AI state
+  const defaultContractTemplate = useMemo(() => {
+    if (!item) return '';
+    const company = item.company || 'Acme Minerals Ltd';
+    const country = item.country || 'Ghana';
+    const id = item.id || 'GH-2026-001';
+    const commodity = commodityListLabel;
+    
+    if (isOilAndGas) {
+      return `PETROLEUM PRODUCTION SHARING AGREEMENT (PSA)
+BETWEEN THE REPUBLIQUE OF ${country.toUpperCase()}
+AND ${company.toUpperCase()} OIL & GAS CORP.
+
+Ref Reference: PPSA-${id}-2026-X
+Dated: January 18, 2026
+
+WHEREAS the Contractor has requested rights for oil exploration and refining.
+ARTICLE 14: FISCAL TERMS & ROYALTIES
+14.1 The Contractor shall pay to the State a Royalty of 12.5% (twelve point five percent) of all Crude Oil produced and saved from the Contract Area.
+14.2 The remaining profit oil shall be shared: 60% to the State and 40% to the Contractor.
+
+ARTICLE 22: ENVIRONMENTAL COMPLIANCE AND PROTECTION
+22.1 The Contractor shall comply with international petroleum industry standards.
+22.2 WARNING: The exploratory block intersects high water-table zones. Special EPA secondary permits are required. Waste discharge in near-river zones is strictly prohibited. Failure to obtain EPA clearance will trigger immediate operational suspension.
+
+ARTICLE 33: EXPENDITURE AND WORK COMMITMENT
+33.1 The Contractor's minimum work commitment during the initial phase is $18,500,000 USD, including high-resolution 3D seismic acquisition.
+
+ARTICLE 45: LOCAL LABOR AND CONTENT
+45.1 Contractor agrees that a minimum of 45% (forty-five percent) of all technical and management personnel shall be citizens of ${country}. 
+45.2 A mandatory training contribution of $150,000 USD per annum shall be paid directly to the Ministry of Petroleum Resources.`;
+    } else {
+      return `CONCESSION LEASE & MINING CONCESSION CONTRACT
+MINISTRY OF LANDS AND NATURAL RESOURCES OF ${country.toUpperCase()}
+GRANTED TO ${company.toUpperCase()} MINING GROUP
+
+Reference Identification: MLC-${id}-GOLD
+Valid From: February 10, 2026
+
+TERMS AND DISCLOSURES:
+SECTION 4. ROYALTIES AND TAXATION
+4.1 The Lessee shall pay to the government of ${country} a Gross Revenue Royalty of 5.5% (five point five percent) on all ${commodity} sold or shipped.
+4.2 State retains a 10% free-carried interest in all operations.
+
+SECTION 9. ESG & ENVIRONMENTAL ADHERENCE
+9.1 Lessee shall construct a secure tailings storage facility.
+9.2 CAUTION: Operational boundaries must respect the local wildlife conservation buffer. Heavy machinery operations are prohibited within 500 meters of protected water sources. Runoff controls must pass quarterly inspector audits to maintain active license status.
+
+SECTION 12. ANNUAL CAPITAL COMMITMENT
+12.1 The Lessee is obligated to perform a minimum annual work program of $2,500,000 USD in active exploration, geological mapping, and drilling.
+
+SECTION 18. LOCAL CONTENT COMPLIANCE
+18.1 Lessee guarantees that at least 60% of all goods and professional services shall be procured from registered national subcontractors.
+18.2 Citizens of ${country} must constitute at least 80% of the active manual labor force.`;
+    }
+  }, [item, isOilAndGas, commodityListLabel]);
+
+  const [documentText, setDocumentText] = useState('');
+  const [scannedContract, setScannedContract] = useState<any>(null);
+  const [isScanningContract, setIsScanningContract] = useState(false);
+  const [contractFileName, setContractFileName] = useState('licensing_agreement_2026.pdf');
+  const [scannedContractError, setScannedContractError] = useState<string | null>(null);
+
+  // Sync documentText with template if empty
+  useEffect(() => {
+    if (!documentText && defaultContractTemplate) {
+      setDocumentText(defaultContractTemplate);
+    }
+  }, [defaultContractTemplate, documentText]);
+
   // CRM edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<UserAnnotation>>({});
@@ -206,7 +280,34 @@ export default function DossierView({
     useStorageTerminalDetails(
       isStorageTerminal ? item?.id : undefined,
       Boolean(isOpen && isStorageTerminal && item?.id)
-    );
+    );  const scanContractWithAi = async () => {
+    if (!item) return;
+    setIsScanningContract(true);
+    setScannedContractError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/ai/analyze-document`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: documentText,
+          license_id: item.id,
+          filename: contractFileName,
+        }),
+      });
+      const data = await response.json();
+      if (data.status === 'success') {
+        setScannedContract(data);
+      } else {
+        setScannedContractError(data.message || 'Scanning failed.');
+      }
+    } catch (err: any) {
+      setScannedContractError(err.message || 'Error communicating with server.');
+    } finally {
+      setIsScanningContract(false);
+    }
+  };
 
   const runAiAnalysis = async () => {
     if (!item) return;
@@ -688,7 +789,7 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'intelligence', 'raw-evidence', 'human-notes'].map(tab => {
+              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'operations': 'Operations',
@@ -699,6 +800,7 @@ Output requirements:
                   'counterparties': 'Counterparties',
                   'intelligence': 'AI Due Diligence',
                   'raw-evidence': 'Raw Evidence',
+                  'document-ai': 'Document AI',
                   'human-notes': 'Human Notes'
                 };
                 return (
@@ -1377,6 +1479,203 @@ Output requirements:
                     <LucideShare2 className="w-4 h-4 text-slate-400 dark:text-slate-500 group-hover:text-slate-900 dark:group-hover:text-white transition-colors shrink-0 ml-4" />
                   </a>
                 ))}
+              </div>
+            )}
+
+            {/* DOCUMENT AI TAB */}
+            {activeTab === 'document-ai' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl">
+                {/* Left side: Document Editor Simulation */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                      Contract Document Simulator
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-full px-3 py-1 font-mono">
+                        {contractFileName}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="relative border border-black/10 dark:border-white/10 rounded-3xl bg-slate-900/40 dark:bg-slate-950/40 p-6 shadow-inner font-mono text-xs leading-relaxed text-slate-300 h-[500px] overflow-y-auto no-scrollbar">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 opacity-60" />
+                    
+                    <textarea
+                      value={documentText}
+                      onChange={(e) => setDocumentText(e.target.value)}
+                      className="w-full h-full bg-transparent border-none outline-none focus:ring-0 text-xs text-slate-300 dark:text-slate-200 resize-none font-mono font-medium leading-6 no-scrollbar"
+                      placeholder="Paste your mining license contract or petroleum agreement text dump here..."
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <Button
+                      onClick={scanContractWithAi}
+                      disabled={isScanningContract || !documentText.trim()}
+                      className="flex-1 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black uppercase tracking-widest text-[10px] h-12 rounded-2xl shadow-xl transition-all relative overflow-hidden group border-none"
+                    >
+                      {isScanningContract ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                          Parsing Clauses...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-2">
+                          <LucideBrain className="w-4 h-4 text-slate-950" />
+                          Scan Contract with Document AI
+                        </span>
+                      )}
+                    </Button>
+                    
+                    <Button
+                      onClick={() => {
+                        setDocumentText(defaultContractTemplate);
+                        setScannedContract(null);
+                        setScannedContractError(null);
+                      }}
+                      disabled={isScanningContract}
+                      className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-slate-400 dark:text-slate-300 hover:bg-black/10 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white font-black uppercase tracking-widest text-[10px] h-12 px-6 rounded-2xl transition-colors shrink-0"
+                    >
+                      Reset Draft
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Right side: Intelligence Hub HUD */}
+                <div className="lg:col-span-5 space-y-6">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    AI Legal Intelligence Hub
+                  </p>
+
+                  {scannedContractError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-2xl flex items-start gap-3">
+                      <LucideAlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Extraction failed</p>
+                        <p className="opacity-80 mt-0.5">{scannedContractError}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!scannedContract && !isScanningContract && !scannedContractError && (
+                    <div className="flex flex-col items-center justify-center text-center p-12 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl h-[450px]">
+                      <div className="p-4 bg-slate-900/10 dark:bg-white/5 rounded-full mb-4">
+                        <LucideUploadCloud className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
+                        Ready for Contract Scanning
+                      </h4>
+                      <p className="text-xs text-slate-500 max-w-[280px]">
+                        Paste or edit the contract text on the left, then click the AI scanner to perform instant compliance extraction.
+                      </p>
+                    </div>
+                  )}
+
+                  {isScanningContract && (
+                    <div className="flex flex-col items-center justify-center text-center p-12 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl h-[450px] relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-b from-amber-500/5 to-transparent animate-pulse" />
+                      <div className="w-16 h-16 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin mb-6" />
+                      <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest mb-1">
+                        Executing OCR & Legal Scan
+                      </h4>
+                      <p className="text-xs text-slate-400 max-w-[280px]">
+                        Analyzing royalty percentages, spatial wildlife restrictions, and financial spending obligations...
+                      </p>
+                    </div>
+                  )}
+
+                  {scannedContract && !isScanningContract && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-6"
+                    >
+                      <div className="flex items-center justify-between pb-4 border-b border-black/5 dark:border-white/5">
+                        <div className="flex items-center gap-2">
+                          <LucideShieldCheck className="w-5 h-5 text-emerald-500 animate-bounce" />
+                          <span className="text-sm font-black uppercase text-slate-900 dark:text-white tracking-wider">
+                            Legal Extraction Verified
+                          </span>
+                        </div>
+                        <Badge className="bg-amber-500/10 text-amber-500 border-none text-[8px] font-black uppercase px-2 py-0.5">
+                          {scannedContract.provider || 'AI Extraction'}
+                        </Badge>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Contract Reference ID
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 select-all font-mono">
+                            {scannedContract.license_id_reference || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                              Fiscal Royalty Rate
+                            </p>
+                            <p className="text-xs font-black text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                              {scannedContract.royalty_rate || 'N/A'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                              ESG Rating / Status
+                            </p>
+                            <div className="flex items-center gap-2 bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  scannedContract.environmental_rating === 'A'
+                                    ? 'bg-emerald-500'
+                                    : scannedContract.environmental_rating === 'B'
+                                      ? 'bg-yellow-500'
+                                      : scannedContract.environmental_rating === 'C'
+                                        ? 'bg-orange-500'
+                                        : 'bg-red-500 animate-ping'
+                                }`}
+                              />
+                              <span className="text-xs font-black text-slate-900 dark:text-white">
+                                {scannedContract.environmental_rating || 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            ESG Rationale
+                          </p>
+                          <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 font-medium">
+                            {scannedContract.environmental_rationale || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Annual Expenditure Target
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 font-mono">
+                            {scannedContract.annual_work_commitment || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Local Content Guarantees
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                            {scannedContract.local_content_requirement || 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
               </div>
             )}
 
