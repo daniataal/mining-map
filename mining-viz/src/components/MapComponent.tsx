@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import {
@@ -496,6 +497,11 @@ export default function MapComponent({
     const maritimeCaptureWindow = maritimeCaptureWindowProp;
     const setMaritimeCaptureWindow = onMaritimeCaptureWindowChange ?? (() => {});
     const vesselFilters = vesselFiltersProp ?? { search: '', shipTypes: [], minSpeedKnots: null, maxSpeedKnots: null, navigationalStatuses: [] };
+    const debouncedVesselSearch = useDebouncedValue(vesselFilters.search);
+    const vesselFiltersApplied = useMemo(
+        () => ({ ...vesselFilters, search: debouncedVesselSearch }),
+        [vesselFilters, debouncedVesselSearch],
+    );
     const setVesselFilters = onVesselFiltersChange ?? (() => {});
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
@@ -576,9 +582,9 @@ export default function MapComponent({
     });
     const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
     const maritimeVessels = useMemo(() => {
-        const filtered = applyVesselFilters(maritimeVesselsRaw, vesselFilters);
+        const filtered = applyVesselFilters(maritimeVesselsRaw, vesselFiltersApplied);
         return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
-    }, [maritimeVesselsRaw, vesselFilters, prioritizePetroleumVessels, isOilAndGasView]);
+    }, [maritimeVesselsRaw, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
     const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;

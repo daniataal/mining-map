@@ -32,9 +32,10 @@ function buildSeaCorridorPath(
   to: { lat: number; lng: number },
 ): [number, number][] {
   const hub = corridorHubFor(from, to);
+  // Denser polyline so simulation fallback resembles live searoute/corridor geometry.
   return concatPaths(
-    interpolateLeg([from.lat, from.lng], [hub.lat, hub.lng], 8),
-    interpolateLeg([hub.lat, hub.lng], [to.lat, to.lng], 10),
+    interpolateLeg([from.lat, from.lng], [hub.lat, hub.lng], 16),
+    interpolateLeg([hub.lat, hub.lng], [to.lat, to.lng], 20),
   );
 }
 

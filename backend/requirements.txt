@@ -9,4 +9,5 @@ passlib
 websockets
 mapbox-vector-tile
 redis
+searoute>=1.4.0
 

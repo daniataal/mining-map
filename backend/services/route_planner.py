@@ -1,22 +1,28 @@
 """Staged multi-modal route planning with shipping cost estimates.
 
 This is still an open-data first planning engine, not a contracted freight
-quote. The important v1 behavior is that international movements are modeled
-as realistic handoffs: inland pickup -> export gateway -> trunk route ->
-import gateway -> final delivery. Sea legs include corridor waypoints so the
-map does not draw impossible straight lines over land.
+quote. International movements are modeled as realistic handoffs: inland
+pickup -> export gateway -> trunk route -> import gateway -> final delivery.
+
+Geometry sources (env-configurable, all degrade gracefully):
+  - road: OSRM driving network (``OSRM_BASE_URL``)
+  - sea: searoute marine network when ``SEAROUTE_ENABLED``; else offshore corridors
+  - air: great-circle trunk; road access via OSRM when possible
+  - rail: simplified hub-to-hub great-circle segments (not a track database)
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 try:
+    from backend.services.routing_geometry import ResolvedGeometry, resolve_leg_geometry
     from backend.services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from backend.services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 except ImportError:
+    from services.routing_geometry import ResolvedGeometry, resolve_leg_geometry  # type: ignore[no-redef]
     from services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 
@@ -60,9 +66,11 @@ class PlannedLeg:
     to_point: RoutePoint
     method: str
     distance_km: float
+    duration_hours: float
     method_score: float
     notes: list[str] = field(default_factory=list)
     path: list[tuple[float, float]] = field(default_factory=list)
+    geometry_source: str = "straight_line"
     cost_overrides: dict[str, Any] = field(default_factory=dict)
 
 
@@ -88,6 +96,19 @@ MARITIME_HUBS: tuple[TransportHub, ...] = (
     TransportHub("Port of Houston", 29.735, -95.275, "United States", "port"),
     TransportHub("Port of Los Angeles", 33.729, -118.269, "United States", "port"),
     TransportHub("Port of Santos", -23.960, -46.333, "Brazil", "port"),
+)
+
+RAIL_HUBS: tuple[TransportHub, ...] = (
+    TransportHub("Tunduma Rail Border", -9.298, 32.769, "Tanzania", "rail_hub"),
+    TransportHub("Ndola Rail Terminal", -12.968, 28.636, "Zambia", "rail_hub"),
+    TransportHub("Lobito Rail Terminal", -12.364, 13.536, "Angola", "rail_hub"),
+    TransportHub("Beira Rail Terminal", -19.823, 34.838, "Mozambique", "rail_hub"),
+    TransportHub("Durban Rail Terminal", -29.868, 31.050, "South Africa", "rail_hub"),
+    TransportHub("Mombasa Rail Terminal", -4.043, 39.668, "Kenya", "rail_hub"),
+    TransportHub("Dar es Salaam Rail Terminal", -6.823, 39.289, "Tanzania", "rail_hub"),
+    TransportHub("Rotterdam Rail Terminal", 51.924, 4.477, "Netherlands", "rail_hub"),
+    TransportHub("Antwerp Rail Terminal", 51.219, 4.402, "Belgium", "rail_hub"),
+    TransportHub("Hamburg Rail Terminal", 53.545, 9.970, "Germany", "rail_hub"),
 )
 
 AIR_HUBS: tuple[TransportHub, ...] = (
@@ -263,16 +284,51 @@ def _inland_method(requested_methods: list[str], distance_km: float) -> str:
 def _leg_note(method: str, stage: str) -> str:
     if method == "sea":
         return (
-            f"{stage}. Sea trunk leg uses static corridor waypoints and AIS-ready ports; "
+            f"{stage}. Sea trunk uses searoute or offshore corridor waypoints; "
             "attach vessel/booking data before execution."
         )
     if method == "air":
-        return f"{stage}. Air leg is for high-value/low-volume cargo and requires airline/security quote validation."
+        return f"{stage}. Air trunk is great-circle; airport access uses OSRM when available."
     if method == "rail":
-        return f"{stage}. Rail selected as lower-cost inland bridge where a corridor exists; validate rail slot availability."
+        return (
+            f"{stage}. Rail is hub-to-hub screening only; validate gauge, slots, and border clearance."
+        )
     if method == "pipeline":
         return f"{stage}. Pipeline requires confirmed connection rights and product compatibility."
-    return f"{stage}. Trucking/drayage estimate; validate road permits, border documents, and secure transport."
+    return f"{stage}. Trucking/drayage via OSRM when available; validate permits and secure transport."
+
+
+def _distance_multiplier(method: str, geometry_source: str) -> float:
+    if geometry_source in {"osrm", "searoute"}:
+        return 1.0
+    if method == "sea" and geometry_source == "corridor_fallback":
+        return METHOD_DISTANCE_MULTIPLIERS["sea"]
+    if method in METHOD_DISTANCE_MULTIPLIERS:
+        return METHOD_DISTANCE_MULTIPLIERS[method]
+    return 1.0
+
+
+def _geometry_for_leg(
+    from_point: RoutePoint,
+    to_point: RoutePoint,
+    method: str,
+    *,
+    corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
+) -> ResolvedGeometry:
+    rail_hubs: Optional[tuple[tuple[float, float], tuple[float, float]]] = None
+    if method == "rail":
+        export_hub = _nearest_hub(from_point, RAIL_HUBS)
+        import_hub = _nearest_hub(to_point, RAIL_HUBS)
+        rail_hubs = ((export_hub.lat, export_hub.lng), (import_hub.lat, import_hub.lng))
+    return resolve_leg_geometry(
+        from_point.lat,
+        from_point.lng,
+        to_point.lat,
+        to_point.lng,
+        method,
+        corridor_fallback=corridor_fallback,
+        rail_hubs=rail_hubs,
+    )
 
 
 def _make_leg(
@@ -283,21 +339,26 @@ def _make_leg(
     quantity_tons: float,
     *,
     stage: str,
-    path: Optional[list[tuple[float, float]]] = None,
+    geometry: Optional[ResolvedGeometry] = None,
     cost_overrides: Optional[dict[str, Any]] = None,
 ) -> PlannedLeg:
-    route_path = path or [(from_point.lat, from_point.lng), (to_point.lat, to_point.lng)]
-    raw_distance = _path_distance_km(route_path)
+    resolved = geometry or _geometry_for_leg(from_point, to_point, method)
+    route_path = list(resolved.path)
+    raw_distance = resolved.distance_km if resolved.distance_km > 0 else _path_distance_km(route_path)
     if raw_distance <= 0:
         raw_distance = 0.001
-    effective_distance = raw_distance * METHOD_DISTANCE_MULTIPLIERS[method]
+    multiplier = _distance_multiplier(method, resolved.source)
+    effective_distance = raw_distance * multiplier
+    duration_hours = resolved.duration_hours
+    if duration_hours <= 0:
+        duration_hours = raw_distance / 50.0
     score = effective_distance
     if method == "air":
         score *= 3.0
     if quantity_tons >= 300 and method in {"rail", "sea", "pipeline"}:
         score *= 0.9
 
-    notes = [_leg_note(method, stage)]
+    notes = [_leg_note(method, stage), *resolved.notes]
     if method == "sea":
         notes.append(f"AIS status references available: {len(NAVIGATIONAL_STATUS_LABELS)}")
 
@@ -307,9 +368,11 @@ def _make_leg(
         to_point=to_point,
         method=method,
         distance_km=effective_distance,
+        duration_hours=duration_hours,
         method_score=score,
         notes=notes,
         path=route_path,
+        geometry_source=resolved.source,
         cost_overrides=cost_overrides or {},
     )
 
@@ -322,11 +385,20 @@ def _append_if_not_same(
     quantity_tons: float,
     *,
     stage: str,
-    path: Optional[list[tuple[float, float]]] = None,
+    geometry: Optional[ResolvedGeometry] = None,
+    corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
     cost_overrides: Optional[dict[str, Any]] = None,
 ) -> None:
     if _same_place(from_point, to_point):
         return
+    resolved = geometry
+    if resolved is None:
+        resolved = _geometry_for_leg(
+            from_point,
+            to_point,
+            method,
+            corridor_fallback=corridor_fallback,
+        )
     legs.append(
         _make_leg(
             len(legs),
@@ -335,7 +407,7 @@ def _append_if_not_same(
             method,
             quantity_tons,
             stage=stage,
-            path=path,
+            geometry=resolved,
             cost_overrides=cost_overrides,
         )
     )
@@ -368,7 +440,7 @@ def _plan_sea_route(
         "sea",
         quantity_tons,
         stage="2. Ocean trunk route between nominated ports",
-        path=_sea_path(export_port, import_port),
+        corridor_fallback=lambda: _sea_path(export_port, import_port),
     )
     _append_if_not_same(
         legs,
@@ -476,7 +548,9 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
             "to": asdict(leg.to_point),
             "method": leg.method,
             "distance_km": round(leg.distance_km, 3),
+            "duration_hours": round(leg.duration_hours, 3),
             "method_score": round(leg.method_score, 3),
+            "geometry_source": leg.geometry_source,
             "notes": leg.notes,
             "path": [[round(lat, 5), round(lng, 5)] for lat, lng in leg.path],
             **leg.cost_overrides,
@@ -506,7 +580,10 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
         "cost_breakdown": route_cost_to_dict(cost_breakdown),
         "limitations": [
             "Gateway catalog is static and open-first; validate nominated port/airport acceptance, storage, and documentation.",
-            "Sea corridors are waypoint approximations, not final vessel routing or berth-to-berth navigation.",
+            "Road geometry uses OSRM when reachable; failures fall back to straight-line segments without failing the request.",
+            "Sea geometry uses searoute when SEAROUTE_ENABLED and the package is installed; otherwise offshore corridor waypoints.",
+            "Rail is hub-to-hub screening only — not a track-level network graph.",
+            "Air trunk is great-circle; airport drayage uses OSRM when available.",
             "Freight cost is a screening estimate; obtain broker/carrier quotes before committing.",
         ],
     }

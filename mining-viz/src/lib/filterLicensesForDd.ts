@@ -1,8 +1,8 @@
 import {
-  commodityMatchesQuery,
   getLicenseCommodityLabels,
   licenseMatchesSelectedCommodities,
 } from './commodities';
+import { buildLicenseSearchIndex, licenseHaystackMatches } from './licenseSearchIndex';
 import { MiningLicense, UserAnnotation } from '../types';
 
 export type DdListMode = 'queue' | 'browse';
@@ -102,18 +102,15 @@ export function applyDdFilters(
 
   if (filters.search.trim()) {
     const lower = filters.search.trim().toLowerCase();
+    const searchIndex = buildLicenseSearchIndex(data, userAnnotations);
     data = data.filter((item) => {
+      if (licenseHaystackMatches(searchIndex, item.id, lower)) return true;
       const annotation = userAnnotations[item.id] || {};
-      const note = annotation.notes || annotation.comment || '';
-      const commodity = annotation.commodity || item.commodity || '';
+      const note = (annotation.notes || annotation.comment || '').toLowerCase();
       return (
-        item.company?.toLowerCase().includes(lower) ||
-        item.country?.toLowerCase().includes(lower) ||
         item.region?.toLowerCase().includes(lower) ||
-        item.licenseType?.toLowerCase().includes(lower) ||
         item.id.toLowerCase().includes(lower) ||
-        commodityMatchesQuery(commodity, lower) ||
-        note.toLowerCase().includes(lower)
+        note.includes(lower)
       );
     });
   }
