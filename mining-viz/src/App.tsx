@@ -842,7 +842,7 @@ export default function App() {
             {viewMode === 'route_planner' && (
               <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
                 <div className="pointer-events-auto">
-                  <RoutePlannerPanel rp={routePlanner} />
+                  <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
                 </div>
               </div>
             )}
