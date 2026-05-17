@@ -164,6 +164,8 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               healthcheck:
                 test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)"]
                 interval: 15s
@@ -173,6 +175,8 @@ jobs:
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
 
             maritime-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
@@ -193,9 +197,13 @@ jobs:
                 - MARITIME_WORKER_MAX_VESSELS=120
                 - MARITIME_WORKER_SCOPE=all_vessels
                 - MARITIME_SNAPSHOT_TTL_SECONDS=300
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
 
             license-sync-worker:
               image: dannyatalla/mining-backend:$VERSION_TAG
@@ -213,9 +221,21 @@ jobs:
                 - DB_PASSWORD=password
                 - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=86400
                 - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=600
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
               depends_on:
                 db:
                   condition: service_healthy
+                redis:
+                  condition: service_started
+
+            redis:
+              image: redis:alpine
+              platform: linux/arm64
+              container_name: mining-redis
+              restart: always
+              ports:
+                - "6379:6379"
 
             frontend:
               image: dannyatalla/mining-frontend:$VERSION_TAG
