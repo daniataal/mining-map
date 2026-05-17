@@ -178,6 +178,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     selectedEntitySubtype,
     selectedSourceLabel,
     selectedConfidenceBucket,
+    selectedSector,
     portLinkedOnly,
   ]);
 

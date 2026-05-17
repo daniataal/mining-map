@@ -52,6 +52,23 @@ interface SidebarProps {
   onRemoveFromDueDiligence?: (id: string) => void;
 }
 
+function sourceTrustLabel(item: MiningLicense): string {
+  const source = (item.sourceKind || item.recordOrigin || '').toLowerCase();
+  if (source === 'official_registry' || item.recordOrigin === 'open_data') return 'Official';
+  if (source === 'global_open_fallback' || item.recordOrigin === 'global_open_fallback') return 'Fallback';
+  if (source === 'user_import_csv' || item.recordOrigin === 'user_import_csv') return 'User CSV';
+  if (source === 'bundled_json' || item.recordOrigin === 'bundled_json') return 'Bundled';
+  return item.sourceName ? 'Sourced' : 'Unverified';
+}
+
+function sourceTrustClass(item: MiningLicense): string {
+  const label = sourceTrustLabel(item);
+  if (label === 'Official') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+  if (label === 'Fallback' || label === 'Bundled') return 'bg-violet-500/10 text-violet-600 dark:text-violet-300';
+  if (label === 'User CSV') return 'bg-amber-500/10 text-amber-600 dark:text-amber-400';
+  return 'bg-slate-500/10 text-slate-500 dark:text-slate-400';
+}
+
 export default function Sidebar({
   processedData,
   loading,
@@ -276,6 +293,15 @@ export default function Sidebar({
                        <span className="truncate">{item.region}</span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge className={`${sourceTrustClass(item)} border-none text-[8px] font-black uppercase`}>
+                        {sourceTrustLabel(item)}
+                        {typeof item.confidenceScore === 'number' ? ` ${(item.confidenceScore * 100).toFixed(0)}%` : ''}
+                      </Badge>
+                      {item.coverageState && (
+                        <Badge className="bg-slate-900/5 dark:bg-white/5 text-slate-500 dark:text-slate-300 border-none text-[8px] font-black uppercase">
+                          {item.coverageState.replaceAll('_', ' ')}
+                        </Badge>
+                      )}
                       {item.entitySubtype && (
                         <Badge className="bg-cyan-500/10 text-cyan-500 border-none text-[8px] font-black uppercase">
                           {item.entitySubtype.replaceAll('_', ' ')}

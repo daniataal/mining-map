@@ -21,6 +21,8 @@ export interface CostLineItem {
 }
 
 export type DueDiligenceStatus = 'pass' | 'warn' | 'fail';
+export type RoutePlannerSource = 'live' | 'simulation';
+export type DueDiligenceRecommendation = 'approve' | 'escalate' | 'block';
 
 export interface DueDiligenceCheck {
   id: string;
@@ -37,15 +39,29 @@ export interface RouteMapOverlay {
 }
 
 export interface RoutePlannerApiResponse {
-  source: 'live' | 'mock';
+  source: RoutePlannerSource;
   map: RouteMapOverlay;
   breakdown: CostLineItem[];
   dueDiligence: DueDiligenceCheck[];
+  limitations: string[];
+  dueDiligenceRecommendation: DueDiligenceRecommendation;
+  blockers: string[];
+  warnings: string[];
 }
 
 export interface RoutePlannerFormPayload {
-  supplier: { lat: number; lng: number; label: string };
-  buyer: { lat: number; lng: number; label: string };
+  supplier: {
+    lat: number;
+    lng: number;
+    label: string;
+    country?: string;
+    licenseId?: string;
+    commodity?: string;
+    sector?: string;
+  };
+  buyer: { lat: number; lng: number; label: string; country?: string };
   productType: string;
   shippingMethods: string[];
+  quantityTons: number;
+  incoterm: string;
 }

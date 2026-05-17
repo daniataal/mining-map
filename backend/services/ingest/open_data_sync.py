@@ -1704,6 +1704,17 @@ def describe_license_source_record(
             "jurisdiction_label": None,
             "note": None,
         }
+    if normalized_origin == "global_open_fallback" or source_id == "opec_gulf_reference":
+        return {
+            "source_kind": "global_open_fallback",
+            "source_access": "open_reference_dataset",
+            "coverage_state": "global_fallback_only",
+            "provenance_note": "Open reference fallback. Use for screening context; verify against official registry before execution.",
+            "coverage_scope": "global_reference",
+            "jurisdiction_scope": "global_reference",
+            "jurisdiction_label": None,
+            "note": None,
+        }
     return {
         "source_kind": "unknown",
         "source_access": "unknown",

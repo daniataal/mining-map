@@ -4,6 +4,8 @@ export type {
   RouteWaypoint,
   DueDiligenceStatus,
   CostLineItem,
+  RoutePlannerSource,
+  DueDiligenceRecommendation,
 } from './types';
 export { fetchRoutePlan } from './fetchRoutePlan';
 export { default as RoutePlannerPanel } from './RoutePlannerPanel';

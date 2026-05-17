@@ -27,7 +27,6 @@ import {
   PortLogisticsDetails,
   PortLogisticsResponse,
 } from '../types';
-import bundledLicenses from '../data/licenses.json';
 
 /** Same base URL for fetch() and axios. 
  *  Empty string means 'same origin', which works because we use Vite proxy in dev 
@@ -60,13 +59,29 @@ export const apiClient = axios.create({
   },
 });
 
-const LICENSES_FALLBACK_DATA = (bundledLicenses as MiningLicense[]).map((item) => ({
-  ...item,
-  sector: item.sector || 'mining',
-  recordOrigin: item.recordOrigin || 'bundled_json',
-  sourceId: item.sourceId || 'bundled_json',
-  sourceName: item.sourceName || 'Bundled JSON fallback',
-}));
+let licensesFallbackDataPromise: Promise<MiningLicense[]> | null = null;
+
+async function loadBundledLicenseFallback(): Promise<MiningLicense[]> {
+  if (!licensesFallbackDataPromise) {
+    licensesFallbackDataPromise = import('../data/licenses.json').then(({ default: bundledLicenses }) =>
+      (bundledLicenses as MiningLicense[]).map((item) => ({
+        ...item,
+        sector: item.sector || 'mining',
+        recordOrigin: item.recordOrigin || 'bundled_json',
+        sourceId: item.sourceId || 'bundled_json',
+        sourceName: item.sourceName || 'Bundled JSON fallback',
+        sourceKind: item.sourceKind || 'bundled_json',
+        sourceAccess: item.sourceAccess || 'local_fallback',
+        coverageState: item.coverageState || 'fallback_only',
+        confidenceScore: item.confidenceScore ?? 0.35,
+        confidenceNote:
+          item.confidenceNote ||
+          'Bundled local fallback loaded after the live licenses API failed; verify against official source before deal execution.',
+      })),
+    );
+  }
+  return licensesFallbackDataPromise;
+}
 export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
 
 function canUseBundledLicenseFallback(): boolean {
@@ -368,9 +383,10 @@ export const useLicenses = (
                 '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
                 error,
               );
+              const fallbackData = await loadBundledLicenseFallback();
               const base = sector
-                ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector)
-                : LICENSES_FALLBACK_DATA;
+                ? fallbackData.filter((item) => item.sector === sector)
+                : fallbackData;
               return base.filter((item) => countrySet.has((item.country ?? '').trim().toLowerCase()));
             }
             throw error;

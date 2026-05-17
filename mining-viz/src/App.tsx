@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, startTransition, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, startTransition, useRef, lazy, Suspense } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
@@ -7,17 +7,13 @@ import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow, Maritim
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
-import MapComponent from './components/MapComponent';
-import DossierView from './components/DossierView';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
-import DueDiligencePanel from './components/DueDiligencePanel';
 import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
 import AuthOverlay from './components/AuthOverlay';
-import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
-import { RoutePlannerPanel, useRoutePlanner } from './features/route-planner';
+import { useRoutePlanner } from './features/route-planner';
 import {
   Search as LucideSearch,
   Filter as LucideFilter,
@@ -33,6 +29,12 @@ import ThemeToggle from './components/ThemeToggle';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+
+const MapComponent = lazy(() => import('./components/MapComponent'));
+const DossierView = lazy(() => import('./components/DossierView'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const DueDiligencePanel = lazy(() => import('./components/DueDiligencePanel'));
+const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
 
 const LICENSE_MAP_BBOX_MAX_LAT_SPAN = 85;
 const LICENSE_MAP_BBOX_MAX_LNG_SPAN = 300;
@@ -121,6 +123,14 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
   );
 }
 
+function LazySurfaceFallback({ label = 'Loading intelligence surface...' }: { label?: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-white/70 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:bg-slate-950/70 dark:text-slate-400">
+      {label}
+    </div>
+  );
+}
+
 export default function App() {
   const { t, isRtl } = useI18n();
   const routePlanner = useRoutePlanner();
@@ -181,8 +191,8 @@ export default function App() {
   // Data Fetching
   const { data: worldCoverage } = useWorldCoverage(true);
   const licenseFetchCountries = useMemo(
-    () => deriveLicenseFetchCountries(undefined, worldCoverage),
-    [worldCoverage],
+    () => deriveLicenseFetchCountries(licenseSector, worldCoverage),
+    [licenseSector, worldCoverage],
   );
   const {
     data: rawData = [],
@@ -191,7 +201,7 @@ export default function App() {
     error: fetchError,
     stillLoadingCountryCount,
     failedCountryQueryCount,
-  } = useLicenses(undefined, null, licenseFetchCountries);
+  } = useLicenses(licenseSector, licenseBoundsForApi, licenseFetchCountries);
   const licensesPartialMapHint = useMemo(() => {
     if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
     const n = stillLoadingCountryCount;
@@ -800,49 +810,53 @@ export default function App() {
               viewMode === 'ports' ||
               viewMode === 'oil_and_gas' ||
               viewMode === 'route_planner') && (
-              <MapComponent
-                processedData={viewMode === 'route_planner' ? [] : miningData.processedData}
-                allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
-                userAnnotations={userAnnotations}
-                selectedItem={selectedItem}
-                mapFlyTrigger={mapFlyTrigger}
-                viewModeKey={viewMode}
-                worldCoverage={worldCoverage}
-                licensesFetchPending={
-                  viewMode !== 'route_planner' &&
-                  (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                  isLoading &&
-                  !fetchError
-                }
-                licensesRefetching={
-                  viewMode !== 'route_planner' &&
-                  (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                  isFetching &&
-                  !isLoading &&
-                  !fetchError
-                }
-                licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
-                trackLicenseViewport={false}
-                onLicenseViewportChange={setLicenseViewportDraft}
-                setSelectedItem={handleSelectItem}
-                handleOpenDossier={handleOpenDossier}
-                mapCenter={mapCenter}
-                updateAnnotation={updateAnnotation}
-                deleteLicense={deleteLicense}
-                selectedMaritimeVessel={selectedMaritimeVessel}
-                onSelectMaritimeVessel={setSelectedMaritimeVessel}
-                routePlannerOverlay={routePlanner.overlay}
-                routePlannerPickRole={routePlanner.pickRole}
-                onRoutePlannerMapPick={routePlanner.handleMapPick}
-                isInDdQueue={ddQueue.isInQueue}
-                onAddToDueDiligence={ddQueue.addToQueue}
-                onRemoveFromDueDiligence={ddQueue.removeFromQueue}
-              />
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
+                <MapComponent
+                  processedData={viewMode === 'route_planner' ? [] : miningData.processedData}
+                  allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
+                  userAnnotations={userAnnotations}
+                  selectedItem={selectedItem}
+                  mapFlyTrigger={mapFlyTrigger}
+                  viewModeKey={viewMode}
+                  worldCoverage={worldCoverage}
+                  licensesFetchPending={
+                    viewMode !== 'route_planner' &&
+                    (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                    isLoading &&
+                    !fetchError
+                  }
+                  licensesRefetching={
+                    viewMode !== 'route_planner' &&
+                    (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                    isFetching &&
+                    !isLoading &&
+                    !fetchError
+                  }
+                  licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
+                  trackLicenseViewport={viewMode === 'mining' || viewMode === 'oil_and_gas'}
+                  onLicenseViewportChange={setLicenseViewportDraft}
+                  setSelectedItem={handleSelectItem}
+                  handleOpenDossier={handleOpenDossier}
+                  mapCenter={mapCenter}
+                  updateAnnotation={updateAnnotation}
+                  deleteLicense={deleteLicense}
+                  selectedMaritimeVessel={selectedMaritimeVessel}
+                  onSelectMaritimeVessel={setSelectedMaritimeVessel}
+                  routePlannerOverlay={routePlanner.overlay}
+                  routePlannerPickRole={routePlanner.pickRole}
+                  onRoutePlannerMapPick={routePlanner.handleMapPick}
+                  isInDdQueue={ddQueue.isInQueue}
+                  onAddToDueDiligence={ddQueue.addToQueue}
+                  onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+                />
+              </Suspense>
             )}
             {viewMode === 'route_planner' && (
               <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
                 <div className="pointer-events-auto">
-                  <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
+                  <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
+                    <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
+                  </Suspense>
                 </div>
               </div>
             )}
@@ -852,19 +866,21 @@ export default function App() {
               </div>
             )}
             {viewMode === 'due_diligence' && (
-              <DueDiligencePanel
-                allLicenses={allLicenses}
-                queue={ddQueue.queue}
-                queueIds={ddQueue.queueIds}
-                notesById={ddQueue.notesById}
-                userAnnotations={userAnnotations}
-                updateAnnotation={updateAnnotation}
-                updateNote={ddQueue.updateNote}
-                onRemoveFromQueue={ddQueue.removeFromQueue}
-                onCardClick={handleOpenDossier}
-                onOpenMap={() => setViewMode('global')}
-                isMobile={isMobile}
-              />
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען בדיקת נאותות...', 'Loading due diligence...')} />}>
+                <DueDiligencePanel
+                  allLicenses={allLicenses}
+                  queue={ddQueue.queue}
+                  queueIds={ddQueue.queueIds}
+                  notesById={ddQueue.notesById}
+                  userAnnotations={userAnnotations}
+                  updateAnnotation={updateAnnotation}
+                  updateNote={ddQueue.updateNote}
+                  onRemoveFromQueue={ddQueue.removeFromQueue}
+                  onCardClick={handleOpenDossier}
+                  onOpenMap={() => setViewMode('global')}
+                  isMobile={isMobile}
+                />
+              </Suspense>
             )}
             {viewMode === 'raw_evidence' && (
               <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
@@ -876,25 +892,31 @@ export default function App() {
             )}
             {viewMode === 'admin' && (
               <div className="h-full bg-white dark:bg-slate-950">
-                <AdminPanel 
-                  isOpen={true} 
-                  onClose={() => setViewMode('global')} 
-                  token={token || undefined} 
-                  isFullPage={true}
-                  currentUserId={userId}
-                />
+                <Suspense fallback={<LazySurfaceFallback label={t('טוען ניהול...', 'Loading admin...')} />}>
+                  <AdminPanel
+                    isOpen={true}
+                    onClose={() => setViewMode('global')}
+                    token={token || undefined}
+                    isFullPage={true}
+                    currentUserId={userId}
+                  />
+                </Suspense>
               </div>
             )}
           </div>
         </main>
 
         {/* PANEL 3: Right Tactical Filter Hub */}
-        <AdminPanel 
-          isOpen={isAdminPanelOpen} 
-          onClose={() => setIsAdminPanelOpen(false)} 
-          token={token || undefined} 
-          currentUserId={userId}
-        />
+        {isAdminPanelOpen && (
+          <Suspense fallback={null}>
+            <AdminPanel
+              isOpen={isAdminPanelOpen}
+              onClose={() => setIsAdminPanelOpen(false)}
+              token={token || undefined}
+              currentUserId={userId}
+            />
+          </Suspense>
+        )}
         <FilterPanel 
           isOpen={isFilterOpen}
           onClose={() => setIsFilterOpen(false)}
@@ -922,35 +944,45 @@ export default function App() {
         />
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
-        <DossierView 
-          isOpen={isDossierOpen} 
-          onClose={() => setIsDossierOpen(false)} 
-          item={dossierItem} 
-          marketPrices={marketPrices}
-          annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
-          updateAnnotation={updateAnnotation}
-          onDeleteLicense={
-            dossierItem && dossierItem.entityKind !== 'storage_terminal'
-              ? () => deleteLicense(dossierItem.id)
-              : undefined
-          }
-          isInDdQueue={dossierItem ? ddQueue.isInQueue(dossierItem.id) : false}
-          onAddToDueDiligence={
-            dossierItem ? () => ddQueue.addToQueue(dossierItem.id) : undefined
-          }
-          onRemoveFromDueDiligence={
-            dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
-          }
-          onPlanRoute={(licenseItem) => {
-            routePlanner.prefillSupplier(
-              licenseItem.lat ?? 0,
-              licenseItem.lng ?? 0,
-              `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
-            );
-            setIsDossierOpen(false);
-            setViewMode('route_planner');
-          }}
-        />
+        {isDossierOpen && (
+          <Suspense fallback={null}>
+            <DossierView
+              isOpen={isDossierOpen}
+              onClose={() => setIsDossierOpen(false)}
+              item={dossierItem}
+              marketPrices={marketPrices}
+              annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
+              updateAnnotation={updateAnnotation}
+              onDeleteLicense={
+                dossierItem && dossierItem.entityKind !== 'storage_terminal'
+                  ? () => deleteLicense(dossierItem.id)
+                  : undefined
+              }
+              isInDdQueue={dossierItem ? ddQueue.isInQueue(dossierItem.id) : false}
+              onAddToDueDiligence={
+                dossierItem ? () => ddQueue.addToQueue(dossierItem.id) : undefined
+              }
+              onRemoveFromDueDiligence={
+                dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
+              }
+              onPlanRoute={(licenseItem) => {
+                routePlanner.prefillSupplier(
+                  licenseItem.lat ?? 0,
+                  licenseItem.lng ?? 0,
+                  `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
+                  {
+                    country: licenseItem.country,
+                    licenseId: licenseItem.id,
+                    commodity: licenseItem.commodity,
+                    sector: licenseItem.sector,
+                  },
+                );
+                setIsDossierOpen(false);
+                setViewMode('route_planner');
+              }}
+            />
+          </Suspense>
+        )}
 
         <BulkImportLicensesModal
           isOpen={isBulkImportOpen}

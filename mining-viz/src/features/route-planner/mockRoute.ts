@@ -331,9 +331,18 @@ export function mockResponseForPayload(
   ];
 
   return {
-    source: 'mock',
+    source: 'simulation',
     map,
     breakdown,
     dueDiligence: buildDueDiligence(productType, supplier.label ?? ''),
+    limitations: [
+      'Simulation mode: live route or due-diligence services were unavailable.',
+      'Costs are deterministic planning estimates, not executable carrier quotes.',
+    ],
+    dueDiligenceRecommendation: 'escalate',
+    blockers: [],
+    warnings: [
+      'Simulation results require live due-diligence verification before proceeding.',
+    ],
   };
 }

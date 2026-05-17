@@ -1,9 +1,17 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import type { RoutePlannerApiResponse } from './types';
 import { fetchRoutePlan } from './fetchRoutePlan';
-import { getMockRouteResponse } from './mockRoute';
 
 export type RoutePickRole = 'supplier' | 'buyer';
+export interface RoutePartyLocation {
+  lat: number;
+  lng: number;
+  label: string;
+  country?: string;
+  licenseId?: string;
+  commodity?: string;
+  sector?: string;
+}
 
 export const SHIPPING_METHOD_IDS = ['sea_fcl', 'sea_lcl', 'rail', 'truck_inland', 'air'] as const;
 export type ShippingMethodId = (typeof SHIPPING_METHOD_IDS)[number];
@@ -46,12 +54,16 @@ export interface RouteMapOverlay {
 }
 
 export interface RoutePlannerHook {
-  supplier: { lat: number; lng: number; label: string };
-  setSupplier: Dispatch<SetStateAction<{ lat: number; lng: number; label: string }>>;
-  buyer: { lat: number; lng: number; label: string };
-  setBuyer: Dispatch<SetStateAction<{ lat: number; lng: number; label: string }>>;
+  supplier: RoutePartyLocation;
+  setSupplier: Dispatch<SetStateAction<RoutePartyLocation>>;
+  buyer: RoutePartyLocation;
+  setBuyer: Dispatch<SetStateAction<RoutePartyLocation>>;
   productType: string;
   setProductType: (value: string) => void;
+  quantityTons: number;
+  setQuantityTons: (value: number) => void;
+  incoterm: string;
+  setIncoterm: (value: string) => void;
   shippingMethods: string[];
   toggleShippingMethod: (id: string, checked: boolean) => void;
   pickRole: RoutePickRole | null;
@@ -63,24 +75,30 @@ export interface RoutePlannerHook {
   loading: boolean;
   error: string | null;
   computeRoute: () => Promise<void>;
-  sourceLabel: 'live' | 'mock' | null;
+  sourceLabel: 'live' | 'simulation' | null;
   /** Pre-fill supplier from a license/asset — call before switching to route_planner view */
-  prefillSupplier: (lat: number, lng: number, label: string) => void;
+  prefillSupplier: (lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => void;
   hasResult: boolean;
 }
 
 export function useRoutePlanner(): RoutePlannerHook {
-  const [supplier, setSupplier] = useState({ lat: 5.548, lng: -0.192, label: '' });
-  const [buyer, setBuyer] = useState({ lat: 51.924, lng: 4.478, label: '' });
+  const [supplier, setSupplier] = useState<RoutePartyLocation>({ lat: 5.548, lng: -0.192, label: '' });
+  const [buyer, setBuyer] = useState<RoutePartyLocation>({ lat: 51.924, lng: 4.478, label: '' });
   const [productType, setProductType] = useState('gold_concentrate');
+  const [quantityTons, setQuantityTonsState] = useState(1000);
+  const [incoterm, setIncoterm] = useState('FOB');
   const [shippingMethods, setShippingMethods] = useState<string[]>(() => ['sea_fcl', 'truck_inland']);
   const [pickRole, setPickRole] = useState<RoutePickRole | null>(null);
   const [result, setResult] = useState<RoutePlannerApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const prefillSupplier = useCallback((lat: number, lng: number, label: string) => {
-    setSupplier({ lat, lng, label });
+  const setQuantityTons = useCallback((value: number) => {
+    setQuantityTonsState(Number.isFinite(value) ? Math.max(0, value) : 0);
+  }, []);
+
+  const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
+    setSupplier({ lat, lng, label, ...meta });
     // Reset previous result so the user knows they need to compute with the new supplier
     setResult(null);
     setError(null);
@@ -104,7 +122,7 @@ export function useRoutePlanner(): RoutePlannerHook {
       lat: Math.round(lat * 1e5) / 1e5,
       lng: Math.round(lng * 1e5) / 1e5,
     };
-    if (role === 'supplier') setSupplier((s) => ({ ...s, ...snap }));
+    if (role === 'supplier') setSupplier((s) => ({ ...s, ...snap, licenseId: undefined }));
     else setBuyer((b) => ({ ...b, ...snap }));
     setPickRole(null);
   }, []);
@@ -118,6 +136,8 @@ export function useRoutePlanner(): RoutePlannerHook {
         buyer,
         productType,
         shippingMethods,
+        quantityTons,
+        incoterm,
       });
       setResult(res);
     } catch (e: unknown) {
@@ -125,7 +145,7 @@ export function useRoutePlanner(): RoutePlannerHook {
     } finally {
       setLoading(false);
     }
-  }, [supplier, buyer, productType, shippingMethods]);
+  }, [supplier, buyer, productType, shippingMethods, quantityTons, incoterm]);
 
   const overlay = result?.map ?? null;
   const sourceLabel = result ? result.source : null;
@@ -137,6 +157,10 @@ export function useRoutePlanner(): RoutePlannerHook {
     setBuyer,
     productType,
     setProductType,
+    quantityTons,
+    setQuantityTons,
+    incoterm,
+    setIncoterm,
     shippingMethods,
     toggleShippingMethod,
     pickRole,

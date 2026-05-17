@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -336,15 +337,17 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                     INSERT INTO licenses (
                         id, company, country, region, lat, lng,
                         commodity, license_type, status,
-                        sector, source_kind, source_name,
+                        sector, record_origin, source_kind, source_id, source_name,
                         external_id, source_record_url,
-                        last_synced_at, entity_kind, entity_subtype
+                        last_synced_at, entity_kind, entity_subtype,
+                        confidence_score, confidence_note
                     ) VALUES (
-                        gen_random_uuid(), %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
                         %s, %s, %s,
-                        %s, %s, %s,
+                        %s, %s, %s, %s, %s,
                         %s, %s,
-                        NOW(), %s, %s
+                        NOW(), %s, %s,
+                        %s, %s
                     )
                     ON CONFLICT (external_id) DO UPDATE SET
                         company          = EXCLUDED.company,
@@ -355,18 +358,27 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         commodity        = EXCLUDED.commodity,
                         license_type     = EXCLUDED.license_type,
                         status           = EXCLUDED.status,
+                        record_origin    = EXCLUDED.record_origin,
+                        source_kind      = EXCLUDED.source_kind,
+                        source_id        = EXCLUDED.source_id,
                         source_name      = EXCLUDED.source_name,
                         last_synced_at   = NOW(),
-                        entity_subtype   = EXCLUDED.entity_subtype
+                        entity_subtype   = EXCLUDED.entity_subtype,
+                        confidence_score = EXCLUDED.confidence_score,
+                        confidence_note  = EXCLUDED.confidence_note
                     """,
                     (
+                        str(uuid.uuid4()),
                         entity.company, entity.country, entity.region,
                         entity.lat, entity.lng,
                         commodity, entity.license_type, entity.status,
-                        "oil_and_gas", "global_open_fallback",
+                        "oil_and_gas", "global_open_fallback", "global_open_fallback",
+                        "opec_gulf_reference",
                         "OPEC / Persian Gulf Reference Data",
                         external_id, entity.source_url,
                         "license", entity.entity_subtype,
+                        0.72,
+                        "Curated OPEC/Persian Gulf reference row; verify against official registry before execution.",
                     ),
                 )
                 written += 1

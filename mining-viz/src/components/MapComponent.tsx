@@ -299,7 +299,7 @@ function licenseHasMapCoordinates(item: MiningLicense): boolean {
     return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
 }
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
-const MARITIME_RENDER_SOFT_CAP = 1200;
+const MARITIME_RENDER_SOFT_CAP = 600;
 
 const getMarkerColor = (
   commodity?: string,
@@ -554,7 +554,7 @@ export default function MapComponent({
     }, []);
 
     const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
-    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
+    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('600');
     const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
