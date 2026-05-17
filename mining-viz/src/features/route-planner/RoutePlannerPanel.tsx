@@ -1,343 +1,372 @@
-import { Loader2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { Loader2, Navigation, Crosshair, MapPin, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
-import { Input } from '../../components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/select';
 import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
 
 function fmtUsd(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(value);
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
 }
 
-function DdTone(status: DueDiligenceStatus) {
-  switch (status) {
-    case 'pass':
-      return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35';
-    case 'warn':
-      return 'bg-amber-500/15 text-amber-900 dark:text-amber-200 border border-amber-500/35';
-    case 'fail':
-      return 'bg-red-500/15 text-red-800 dark:text-red-200 border border-red-500/35';
-    default:
-      return 'bg-slate-500/10 text-slate-600 border border-slate-500/25';
-  }
+function DdBadge({ status }: { status: DueDiligenceStatus }) {
+  if (status === 'pass') return <span className="text-emerald-500 font-black text-[9px] uppercase">✓ Pass</span>;
+  if (status === 'warn') return <span className="text-amber-500 font-black text-[9px] uppercase">⚠ Warn</span>;
+  return <span className="text-red-500 font-black text-[9px] uppercase">✗ Fail</span>;
 }
 
-function CoordBlock({
-  title,
-  sub,
-  lat,
-  lng,
-  pickActive,
-  onLat,
-  onLng,
-  label,
-  onLabel,
-  onPick,
-  disabled,
-}: {
-  title: string;
-  sub: string;
+interface LocationPreset {
+  id: string;
+  name: string;
   lat: number;
   lng: number;
-  pickActive: boolean;
-  onLat: (v: number) => void;
-  onLng: (v: number) => void;
-  label: string;
-  onLabel: (value: string) => void;
-  onPick: () => void;
-  disabled?: boolean;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className={`rounded-2xl border p-4 ${pickActive ? 'border-amber-500/55 bg-amber-500/[0.07]' : 'border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03]'}`}>
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">{title}</p>
-          <p className="text-[10px] text-slate-500 mt-1">{sub}</p>
-        </div>
-        <Button
-          type="button"
-          variant={pickActive ? 'default' : 'outline'}
-          size="sm"
-          className="h-8 rounded-xl text-[8px] font-black uppercase tracking-widest shrink-0"
-          onClick={onPick}
-          disabled={disabled}
-        >
-          {pickActive ? t('ממתין למפה…', 'Map pick…') : t('מהמפה', 'From map')}
-        </Button>
-      </div>
-      <div className="grid grid-cols-2 gap-2 mb-2">
-        <div>
-          <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lat</p>
-          <Input
-            type="number"
-            step="any"
-            className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
-            value={Number.isFinite(lat) ? lat : 0}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              onLat(n);
-            }}
-          />
-        </div>
-        <div>
-          <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">Lng</p>
-          <Input
-            type="number"
-            step="any"
-            className="h-9 rounded-xl text-xs font-semibold bg-white/80 dark:bg-slate-950/80 border-black/10 dark:border-white/10"
-            value={Number.isFinite(lng) ? lng : 0}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (!Number.isFinite(n)) return;
-              onLng(n);
-            }}
-          />
-        </div>
-      </div>
-      <Input
-        type="text"
-        placeholder={`${sub} (${title})`}
-        value={label}
-        className="h-9 rounded-xl text-xs bg-white/70 dark:bg-slate-950/70 border-black/10 dark:border-white/10"
-        onChange={(e) => onLabel(e.target.value)}
-      />
-      <p className="mt-2 text-[9px] text-slate-500">
-        {(lat ?? 0).toFixed(4)}, {(lng ?? 0).toFixed(4)}
-      </p>
-    </div>
-  );
+  group: 'licenses' | 'suppliers' | 'buyers' | 'ports';
 }
 
 interface RoutePlannerPanelProps {
   rp: RoutePlannerHook;
+  allLicenses?: any[];
 }
 
-export default function RoutePlannerPanel({ rp }: RoutePlannerPanelProps) {
+const WORLD_PORTS: LocationPreset[] = [
+  { id: 'p-rotterdam', name: 'Rotterdam, Netherlands 🇳🇱', lat: 51.924, lng: 4.477, group: 'ports' },
+  { id: 'p-antwerp', name: 'Antwerp, Belgium 🇧🇪', lat: 51.219, lng: 4.402, group: 'ports' },
+  { id: 'p-hamburg', name: 'Hamburg, Germany 🇩🇪', lat: 53.545, lng: 9.970, group: 'ports' },
+  { id: 'p-shanghai', name: 'Shanghai, China 🇨🇳', lat: 31.230, lng: 121.473, group: 'ports' },
+  { id: 'p-singapore', name: 'Singapore 🇸🇬', lat: 1.352, lng: 103.819, group: 'ports' },
+  { id: 'p-houston', name: 'Houston, USA 🇺🇸', lat: 29.735, lng: -95.275, group: 'ports' },
+  { id: 'p-dubai', name: 'Jebel Ali, UAE 🇦🇪', lat: 24.996, lng: 55.060, group: 'ports' },
+  { id: 'p-mumbai', name: 'Mumbai (JNPT), India 🇮🇳', lat: 18.944, lng: 72.954, group: 'ports' },
+  { id: 'p-busan', name: 'Busan, South Korea 🇰🇷', lat: 35.115, lng: 129.071, group: 'ports' },
+  { id: 'p-losangeles', name: 'Los Angeles, USA 🇺🇸', lat: 33.729, lng: -118.269, group: 'ports' },
+  { id: 'p-valcambi', name: 'Valcambi Refinery, Switzerland 🇨🇭', lat: 46.024, lng: 8.951, group: 'buyers' },
+  { id: 'p-rand', name: 'Rand Refinery, South Africa 🇿🇦', lat: -26.248, lng: 28.163, group: 'buyers' },
+  { id: 'p-tesla', name: 'Tesla Gigafactory Nevada, USA 🇺🇸', lat: 39.539, lng: -119.231, group: 'buyers' },
+  { id: 'p-bp', name: 'BP Trading Hub, London 🇬🇧', lat: 51.507, lng: -0.127, group: 'buyers' },
+];
+
+export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanelProps) {
   const { t } = useI18n();
   const {
-    supplier,
-    setSupplier,
-    buyer,
-    setBuyer,
-    productType,
-    setProductType,
-    shippingMethods,
-    toggleShippingMethod,
-    pickRole,
-    beginPick,
-    cancelPick,
-    result,
-    loading,
-    error,
-    computeRoute,
-    sourceLabel,
+    supplier, setSupplier, buyer, setBuyer,
+    productType, setProductType,
+    shippingMethods, toggleShippingMethod,
+    pickRole, beginPick, cancelPick,
+    result, loading, error, computeRoute,
+    hasResult,
   } = rp;
 
-  const totalUsd = useMemo(() => {
-    const lines = result?.breakdown ?? [];
-    return lines.reduce((acc, row) => acc + row.amountUsd, 0);
-  }, [result?.breakdown]);
+  const [step, setStep] = useState<'setup' | 'results'>('setup');
+
+  // Auto-jump to results when we have them
+  useMemo(() => { if (hasResult) setStep('results'); }, [hasResult]);
+
+  const licensePresets: LocationPreset[] = useMemo(() => {
+    if (!allLicenses?.length) return [];
+    return allLicenses
+      .filter(l => l.lat != null && l.lng != null)
+      .slice(0, 150)
+      .map(l => ({
+        id: `lic-${l.id}`,
+        name: `${l.company || 'Unknown'} — ${l.region || l.country || ''}`,
+        lat: l.lat,
+        lng: l.lng,
+        group: 'licenses' as const,
+      }));
+  }, [allLicenses]);
+
+  const totalUsd = useMemo(() =>
+    (result?.breakdown ?? []).reduce((s, r) => s + r.amountUsd, 0),
+    [result?.breakdown]);
+
+  const supplierPresetId = useMemo(() => {
+    const m = licensePresets.find(p => Math.abs(p.lat - supplier.lat) < 1e-4 && Math.abs(p.lng - supplier.lng) < 1e-4);
+    return m ? m.id : 'custom';
+  }, [licensePresets, supplier.lat, supplier.lng]);
+
+  const buyerPresetId = useMemo(() => {
+    const m = WORLD_PORTS.find(p => Math.abs(p.lat - buyer.lat) < 1e-4 && Math.abs(p.lng - buyer.lng) < 1e-4);
+    return m ? m.id : 'custom';
+  }, [buyer.lat, buyer.lng]);
+
+  const selectedProduct = PRODUCT_OPTIONS.find(p => p.value === productType);
+
+  async function handleCompute() {
+    await computeRoute();
+    setStep('results');
+  }
+
+  const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0;
 
   return (
-    <Card className="w-[min(96vw,1080px)] max-h-[min(88vh,820px)] overflow-hidden bg-white/95 dark:bg-slate-950/95 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
-      <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-5 border-b border-black/5 dark:border-white/10">
-        <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">
-            {t('מתכנן מסלול', 'Route planner')}
-          </p>
-          <h3 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-            {t('ספק → קונה: עלות, שיטות הובלה, נאותות', 'Supplier → buyer costs, modalities, diligence')}
-          </h3>
-          <p className="text-[10px] text-slate-500 mt-2 max-w-2xl leading-relaxed">
-            {t(
-              'משתמש ב־POST /api/route-planner כשמוגדר צד שרת. אחרת נטענת הצגת Mock עקבית לוויר ופריסכאוט.',
-              'Uses POST /api/route-planner when the backend exposes it; otherwise renders a deterministic mock for layout and prototyping.',
+    <Card className="w-[min(96vw,960px)] max-h-[min(92vh,840px)] overflow-hidden bg-white/97 dark:bg-slate-950/97 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl flex flex-col">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-black/5 dark:border-white/10 shrink-0">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-amber-500 mb-1">
+              {t('מתכנן מסלול', 'Route Intelligence')}
+            </p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              {supplier.label
+                ? `${supplier.label} → ${buyer.label || t('בחר יעד', 'Select destination')}`
+                : t('בנה מסלול מהספק לקונה', 'Build a supplier → buyer trade route')}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {pickRole && (
+              <Badge className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-none text-[9px] font-black uppercase animate-pulse">
+                {pickRole === 'supplier' ? t('לחץ על המפה: ספק', 'Click map: supplier') : t('לחץ על המפה: יעד', 'Click map: destination')}
+              </Badge>
             )}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {pickRole ? (
-            <Badge className="border-none bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[9px] font-black uppercase">
-              {pickRole === 'supplier' ? t('מצב קליק: ספק', 'Pick on map: supplier') : t('מצב קליק: קונה', 'Pick on map: buyer')}
-            </Badge>
-          ) : null}
-          {sourceLabel && (
-            <Badge
-              className={
-                sourceLabel === 'live'
-                  ? 'border-none bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 text-[9px] font-black uppercase'
-                  : 'border-none bg-slate-500/15 text-slate-700 dark:text-slate-400 text-[9px] font-black uppercase'
-              }
-            >
-              {sourceLabel === 'live' ? t('מקור חי', 'Live API') : t('mock', 'Mock')}
-            </Badge>
-          )}
-          {pickRole ? (
-            <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl text-[9px]" onClick={cancelPick}>
-              {t('בטל בחירת מפה', 'Cancel map pick')}
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            className="h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-400 text-slate-950"
-            onClick={() => void computeRoute()}
-            disabled={loading || shippingMethods.length === 0}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
-                {t('מחשב…', 'Planning…')}
-              </>
-            ) : (
-              t('חשב מסלול', 'Plan route')
+            {pickRole && (
+              <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl text-[9px]" onClick={cancelPick}>
+                {t('בטל', 'Cancel')}
+              </Button>
             )}
-          </Button>
+            <div className="flex rounded-xl border border-black/10 dark:border-white/10 overflow-hidden">
+              <button
+                className={`px-4 py-2 text-[9px] font-black uppercase tracking-widest transition-colors ${step === 'setup' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                onClick={() => setStep('setup')}
+              >
+                {t('הגדרה', '1 Setup')}
+              </button>
+              <button
+                className={`px-4 py-2 text-[9px] font-black uppercase tracking-widest transition-colors ${step === 'results' ? 'bg-amber-500 text-slate-950' : 'text-slate-500 hover:bg-black/5 dark:hover:bg-white/5'} ${!hasResult ? 'opacity-40 cursor-not-allowed' : ''}`}
+                onClick={() => hasResult && setStep('results')}
+              >
+                {t('תוצאות', '2 Results')}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="p-6 overflow-y-auto max-h-[calc(88vh-120px)] space-y-6">
-        {pickRole && (
-          <div className="rounded-2xl border border-cyan-500/35 bg-cyan-500/[0.08] px-4 py-3 text-[11px] text-cyan-900 dark:text-cyan-100 font-semibold">
-            {t('לחצו במפה כדי למקם נקודה. נסגר אוטומטית אחרי קליק אחד.', 'Click anywhere on the map to place this point — we close picking after one tap.')}
-          </div>
-        )}
-        {error && (
-          <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
-        )}
-
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <CoordBlock
-                title={t('ספק / מוצא', 'Supplier / origin')}
-                sub={t('קואורדינטות או מפה', 'Coordinates or map click')}
-                lat={supplier.lat}
-                lng={supplier.lng}
-                label={supplier.label}
-                pickActive={pickRole === 'supplier'}
-                onLat={(lat) => setSupplier((s) => ({ ...s, lat }))}
-                onLng={(lng) => setSupplier((s) => ({ ...s, lng }))}
-                onLabel={(label) => setSupplier((s) => ({ ...s, label }))}
-                onPick={() => beginPick('supplier')}
-                disabled={loading}
-              />
-              <CoordBlock
-                title={t('קונה / יעד', 'Buyer / destination')}
-                sub={t('קואורדינטות או מפה', 'Coordinates or map click')}
-                lat={buyer.lat}
-                lng={buyer.lng}
-                label={buyer.label}
-                pickActive={pickRole === 'buyer'}
-                onLat={(lat) => setBuyer((b) => ({ ...b, lat }))}
-                onLng={(lng) => setBuyer((b) => ({ ...b, lng }))}
-                onLabel={(label) => setBuyer((b) => ({ ...b, label }))}
-                onPick={() => beginPick('buyer')}
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <p className="mb-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                {t('סוג מוצר', 'Product')}
-              </p>
-              <Select value={productType} onValueChange={setProductType}>
-                <SelectTrigger className="h-10 rounded-xl border-black/10 dark:border-white/10 bg-white/80 dark:bg-slate-950/80 font-semibold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRODUCT_OPTIONS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {t(p.labelHe, p.labelEn)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <p className="mb-3 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                {t('שיטות הובלה — בחירה מרובה', 'Shipping methods — multi')}
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {SHIPPING_OPTIONS.map((opt) => {
-                  const checked = shippingMethods.includes(opt.id);
-                  return (
-                    <label
-                      key={opt.id}
-                      className={`flex items-center gap-3 rounded-xl border px-3 py-2 cursor-pointer hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors ${checked ? 'border-amber-500/55 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        disabled={loading}
-                        onCheckedChange={(v) => toggleShippingMethod(opt.id, Boolean(v))}
-                      />
-                      <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-                        {t(opt.labelHe, opt.labelEn)}
-                      </span>
-                    </label>
-                  );
-                })}
+      <div className="flex-1 overflow-y-auto">
+        {step === 'setup' ? (
+          <div className="p-6 space-y-6">
+            {pickRole && (
+              <div className="rounded-2xl border border-cyan-500/35 bg-cyan-500/[0.08] px-4 py-3 text-[11px] text-cyan-900 dark:text-cyan-100 font-semibold">
+                📍 {t('לחצו על כל נקודה במפה להגדרת המיקום. הבחירה נסגרת אחרי קליק.', 'Tap anywhere on the map to place this point. Closes after one click.')}
               </div>
-            </div>
-          </div>
+            )}
+            {error && (
+              <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
+            )}
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03] overflow-hidden">
-              <div className="px-5 py-3 border-b border-black/5 dark:border-white/10 flex items-center justify-between">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  {t('פירוק עלות (USD)', 'Cost breakdown (USD)')}
-                </h4>
-                <span className="text-xs font-black text-amber-500">{fmtUsd(totalUsd)}</span>
-              </div>
-              <div className="divide-y divide-black/5 dark:divide-white/10">
-                {(result?.breakdown ?? []).map((line) => (
-                  <div key={line.id} className="px-5 py-3 flex gap-4 items-start justify-between">
-                    <div className="min-w-0">
-                      <p className="font-bold text-sm text-slate-900 dark:text-white">{t(line.labelHe, line.labelEn)}</p>
-                      {line.note && <p className="text-[10px] text-slate-500 mt-1 leading-snug">{t(line.note[0], line.note[1])}</p>}
-                    </div>
-                    <span className="text-xs font-black text-slate-700 dark:text-slate-300 shrink-0">{fmtUsd(line.amountUsd)}</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Supplier block */}
+              <div className={`rounded-2xl border p-5 transition-all ${pickRole === 'supplier' ? 'border-amber-500/60 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">📦 {t('ספק / מוצא', 'Supplier / origin')}</p>
+                    {supplier.label && <p className="text-sm font-bold text-slate-900 dark:text-white mt-1 truncate max-w-[200px]">{supplier.label}</p>}
+                    {!supplier.label && <p className="text-xs text-slate-400 mt-1">{t('לא נבחר', 'Not selected')}</p>}
                   </div>
-                ))}
+                  <Button type="button" size="sm" variant={pickRole === 'supplier' ? 'default' : 'outline'}
+                    className="h-8 rounded-xl text-[8px] font-black uppercase"
+                    onClick={() => beginPick('supplier')}>
+                    <Crosshair className="w-3 h-3 mr-1" />
+                    {t('מהמפה', 'From map')}
+                  </Button>
+                </div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('בחר מהנכסים שלך', 'Select from your assets')}</p>
+                <Select value={supplierPresetId} onValueChange={(val) => {
+                  if (val === 'custom') return;
+                  const found = licensePresets.find(p => p.id === val);
+                  if (found) setSupplier({ lat: found.lat, lng: found.lng, label: found.name });
+                }}>
+                  <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
+                    <SelectValue placeholder={t('בחר נכס ממפת ה-AI שלך...', 'Choose an asset from your AI map...')} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    <SelectItem value="custom">{t('מיקום חופשי / מהמפה', 'Free pick / from map')}</SelectItem>
+                    {licensePresets.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-[9px] font-black text-purple-500 uppercase tracking-wider">
+                          🏭 {t('הנכסים והזיכיונות שלך', 'Your Concessions & Assets')}
+                        </SelectLabel>
+                        {licensePresets.map(p => (
+                          <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="mt-2 text-[9px] text-slate-400 font-bold">
+                  📍 {supplier.lat.toFixed(4)}, {supplier.lng.toFixed(4)}
+                </p>
+              </div>
+
+              {/* Buyer / destination block */}
+              <div className={`rounded-2xl border p-5 transition-all ${pickRole === 'buyer' ? 'border-blue-500/60 bg-blue-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">🎯 {t('קונה / יעד', 'Buyer / destination')}</p>
+                    {buyer.label && <p className="text-sm font-bold text-slate-900 dark:text-white mt-1 truncate max-w-[200px]">{buyer.label}</p>}
+                    {!buyer.label && <p className="text-xs text-slate-400 mt-1">{t('לא נבחר', 'Not selected')}</p>}
+                  </div>
+                  <Button type="button" size="sm" variant={pickRole === 'buyer' ? 'default' : 'outline'}
+                    className="h-8 rounded-xl text-[8px] font-black uppercase"
+                    onClick={() => beginPick('buyer')}>
+                    <Crosshair className="w-3 h-3 mr-1" />
+                    {t('מהמפה', 'From map')}
+                  </Button>
+                </div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('בחר קונה או נמל', 'Select buyer or destination port')}</p>
+                <Select value={buyerPresetId} onValueChange={(val) => {
+                  if (val === 'custom') return;
+                  const found = WORLD_PORTS.find(p => p.id === val);
+                  if (found) setBuyer({ lat: found.lat, lng: found.lng, label: found.name });
+                }}>
+                  <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
+                    <SelectValue placeholder={t('בחר נמל, מזקקה, או לקוח...', 'Select port, refinery, or buyer...')} />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    <SelectItem value="custom">{t('מיקום חופשי / מהמפה', 'Free pick / from map')}</SelectItem>
+                    <SelectGroup>
+                      <SelectLabel className="text-[9px] font-black text-blue-500 uppercase tracking-wider">🌊 {t('נמלים גלובליים', 'Global Trade Ports')}</SelectLabel>
+                      {WORLD_PORTS.filter(p => p.group === 'ports').map(p => (
+                        <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel className="text-[9px] font-black text-emerald-500 uppercase tracking-wider">🏭 {t('קונים ומזקקות', 'Refineries & Buyers')}</SelectLabel>
+                      {WORLD_PORTS.filter(p => p.group === 'buyers').map(p => (
+                        <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <p className="mt-2 text-[9px] text-slate-400 font-bold">
+                  📍 {buyer.lat.toFixed(4)}, {buyer.lng.toFixed(4)}
+                </p>
               </div>
             </div>
 
-            <div className="rounded-3xl border border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03] p-5">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">
-                {t('סטטוס נאותות', 'Due diligence')}
-              </h4>
-              <div className="space-y-3">
-                {(result?.dueDiligence ?? []).map((chk) => (
-                  <div
-                    key={chk.id}
-                    className={`flex flex-wrap gap-3 items-start justify-between rounded-2xl px-4 py-3 ${DdTone(chk.status)}`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <Badge className="border-none bg-white/55 dark:bg-black/35 text-[8px] font-black uppercase">
-                          {chk.status === 'pass' ? t('תקין', 'Pass') : chk.status === 'warn' ? t('אזהרה', 'Warn') : t('חריג', 'Fail')}
-                        </Badge>
-                        <p className="text-sm font-bold">{t(chk.labelHe, chk.labelEn)}</p>
+            {/* Product + Shipping */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('סוג מוצר', 'Product / commodity')}</p>
+                <Select value={productType} onValueChange={setProductType}>
+                  <SelectTrigger className="h-10 rounded-xl border-black/10 dark:border-white/10 font-semibold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRODUCT_OPTIONS.map(p => (
+                      <SelectItem key={p.value} value={p.value} className="text-xs">
+                        {p.icon} {t(p.labelHe, p.labelEn)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedProduct && (
+                  <p className="mt-2 text-[10px] text-amber-500 font-bold">{selectedProduct.icon} {t(selectedProduct.labelHe, selectedProduct.labelEn)}</p>
+                )}
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('שיטות הובלה', 'Shipping methods')}</p>
+                <div className="space-y-2">
+                  {SHIPPING_OPTIONS.map(opt => {
+                    const checked = shippingMethods.includes(opt.id);
+                    return (
+                      <label key={opt.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2 cursor-pointer transition-colors ${checked ? 'border-amber-500/55 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]'}`}>
+                        <Checkbox checked={checked} onCheckedChange={(v) => toggleShippingMethod(opt.id, Boolean(v))} />
+                        <div className="min-w-0">
+                          <span className="text-[11px] font-bold text-slate-900 dark:text-white">{opt.icon} {t(opt.labelHe, opt.labelEn)}</span>
+                          <p className="text-[9px] text-slate-500 leading-tight">{opt.descEn}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <Button
+              className="w-full h-12 rounded-xl text-[11px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20"
+              onClick={handleCompute}
+              disabled={loading || !isReady}
+            >
+              {loading ? (
+                <><Loader2 className="inline h-4 w-4 animate-spin mr-2" />{t('מחשב מסלול ועלויות...', 'Calculating route & costs...')}</>
+              ) : (
+                <><Navigation className="inline h-4 w-4 mr-2" />{t('חשב מסלול מלא', 'Calculate Full Route & Costs')}<ChevronRight className="inline h-4 w-4 ml-2" /></>
+              )}
+            </Button>
+          </div>
+        ) : (
+          /* Results Tab */
+          <div className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{t('סיכום מסלול', 'Route summary')}</p>
+                <p className="text-2xl font-black text-amber-500">{fmtUsd(totalUsd)}</p>
+                <p className="text-xs text-slate-500">{t('עלות כוללת משוערת (1,000 טונה)', 'Estimated total cost (1,000 MT)')}</p>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <Badge className="bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-none text-[9px] font-black uppercase">
+                  {supplier.label ? supplier.label.slice(0, 30) : 'Supplier'} → {buyer.label ? buyer.label.slice(0, 25) : 'Destination'}
+                </Badge>
+                <Badge className="bg-blue-500/15 text-blue-800 dark:text-blue-300 border-none text-[9px] font-black">
+                  {selectedProduct?.icon} {selectedProduct ? t(selectedProduct.labelHe, selectedProduct.labelEn) : productType}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Cost breakdown */}
+              <div className="rounded-3xl border border-black/10 dark:border-white/10 overflow-hidden">
+                <div className="px-5 py-3 border-b border-black/5 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">💰 {t('פירוק עלות', 'Cost Breakdown')}</h4>
+                </div>
+                <div className="divide-y divide-black/5 dark:divide-white/10">
+                  {(result?.breakdown ?? []).map((line) => (
+                    <div key={line.id} className="px-5 py-3 flex gap-4 items-start justify-between hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-slate-900 dark:text-white">{t(line.labelHe, line.labelEn)}</p>
+                        {line.note && <p className="text-[9px] text-slate-500 mt-0.5 leading-snug">{t(line.note[0], line.note[1])}</p>}
                       </div>
-                      {chk.detail && <p className="text-[10px] leading-snug opacity-90">{t(chk.detail[0], chk.detail[1])}</p>}
+                      <span className="text-sm font-black text-slate-700 dark:text-slate-200 shrink-0 tabular-nums">{fmtUsd(line.amountUsd)}</span>
                     </div>
+                  ))}
+                  <div className="px-5 py-3 flex items-center justify-between bg-amber-500/[0.06]">
+                    <span className="text-[11px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">{t('סה"כ', 'Total')}</span>
+                    <span className="text-base font-black text-amber-500">{fmtUsd(totalUsd)}</span>
                   </div>
-                ))}
+                </div>
+              </div>
+
+              {/* Due diligence */}
+              <div className="rounded-3xl border border-black/10 dark:border-white/10 overflow-hidden">
+                <div className="px-5 py-3 border-b border-black/5 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02]">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">🛡 {t('בדיקת נאותות', 'Due Diligence')}</h4>
+                </div>
+                <div className="divide-y divide-black/5 dark:divide-white/10">
+                  {(result?.dueDiligence ?? []).map((chk) => (
+                    <div key={chk.id} className="px-5 py-3 flex gap-3 items-start">
+                      <DdBadge status={chk.status} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white">{t(chk.labelHe, chk.labelEn)}</p>
+                        {chk.detail && <p className="text-[9px] text-slate-500 mt-0.5 leading-snug">{t(chk.detail[0], chk.detail[1])}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
+
+            <Button variant="outline" className="w-full h-10 rounded-xl text-[10px] font-black uppercase border-black/10 dark:border-white/10"
+              onClick={() => setStep('setup')}>
+              <MapPin className="w-3.5 h-3.5 mr-2" />
+              {t('שנה פרמטרים', 'Modify Parameters')}
+            </Button>
           </div>
-        </section>
+        )}
       </div>
     </Card>
   );

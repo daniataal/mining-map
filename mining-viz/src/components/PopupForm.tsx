@@ -4,7 +4,7 @@ import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
-import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2 } from 'lucide-react';
+import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2, AlertTriangle as LucideAlertTriangle } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;
@@ -16,6 +16,8 @@ interface PopupFormProps {
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
+  isEsgRisk?: boolean;
+  esgZoneName?: string;
 }
 
 export default function PopupForm({
@@ -26,6 +28,8 @@ export default function PopupForm({
   isInDdQueue = false,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  isEsgRisk = false,
+  esgZoneName,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -56,6 +60,12 @@ export default function PopupForm({
                        className="bg-amber-500/90 text-slate-950 border-none text-[9px] font-black uppercase px-2 h-5"
                      >
                        {t("מיקום משוער", "≈ APPROX LOCATION")}
+                     </Badge>
+                   )}
+                   {isEsgRisk && (
+                     <Badge className="bg-red-500 hover:bg-red-600 text-white animate-pulse border-none text-[8px] font-black uppercase px-2 h-5 flex items-center gap-1 shadow-lg shadow-red-500/20">
+                       <LucideAlertTriangle className="w-3 h-3 text-white" />
+                       {t("סיכון סביבתי", "ESG RISK ZONE")}
                      </Badge>
                    )}
                    {(item.phoneNumber || annotation.phoneNumber) && (

@@ -172,11 +172,32 @@ const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Ghana',
   'South Africa',
   'Kenya',
-  'United Arab Emirates',
-  'Saudi Arabia',
   'Zambia',
   'Nigeria',
   'Tanzania',
+  'Angola',
+  'Zimbabwe',
+  'Mozambique',
+  'Namibia',
+  'Democratic Republic of the Congo',
+  'Algeria',
+  'Egypt',
+  'Ethiopia',
+  'Gabon',
+  'Guinea',
+  'Liberia',
+  'Madagascar',
+  'Mali',
+  'Mauritania',
+  'Morocco',
+  'Senegal',
+  'Sierra Leone',
+  'Sudan',
+  'Uganda',
+  'Congo',
+  'Botswana',
+  'United Arab Emirates',
+  'Saudi Arabia',
   'Australia',
   'Canada',
   'Peru',
@@ -187,7 +208,7 @@ const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
 ];
 
 /** Max distinct countries returned by deriveLicenseFetchCountries (all passed in one request). */
-const MAX_LICENSE_FETCH_COUNTRIES = 50;
+const MAX_LICENSE_FETCH_COUNTRIES = 80;
 
 
 function countrySectorHasRows(c: WorldCoverageCountry, s: 'mining' | 'oil_and_gas'): boolean {

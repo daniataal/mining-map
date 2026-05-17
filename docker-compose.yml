@@ -17,6 +17,8 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
       - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     healthcheck:
       test:
         [
@@ -32,6 +34,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   maritime-worker:
     build:
@@ -51,9 +55,13 @@ services:
       - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-120}
       - MARITIME_WORKER_SCOPE=${MARITIME_WORKER_SCOPE:-all_vessels}
       - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-300}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   license-sync-worker:
     build:
@@ -69,9 +77,20 @@ services:
       - DB_PASSWORD=password
       - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=${LICENSE_DAILY_SYNC_INTERVAL_SECONDS:-86400}
       - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=${LICENSE_DAILY_SYNC_BACKOFF_SECONDS:-600}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:alpine
+    container_name: mining-redis
+    restart: always
+    ports:
+      - "6379:6379"
 
   frontend:
     build:

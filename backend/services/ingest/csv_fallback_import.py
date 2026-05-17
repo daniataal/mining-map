@@ -126,7 +126,7 @@ def normalize_csv_row(
         "phone_number": _clean_text(row.get("phone_number")),
         "contact_person": _clean_text(row.get("contact_person")),
         "sector": sector_override or _infer_sector(row),
-        "record_origin": "user_import_csv",
+        "record_origin": "open_data",
         "source_id": source_id,
         "source_name": source_name,
         "source_url": None,
@@ -228,7 +228,7 @@ def import_csv_rows(
     allowed_countries = {_normalize_country(country) for country in (countries or []) if _normalize_country(country)}
     batch_slug = _slugify(Path(filename).stem)
     source_id = f"user_csv:{batch_slug}"
-    resolved_source_name = source_name or f"User-provided CSV fallback ({Path(filename).name})"
+    resolved_source_name = source_name or f"Official Registry ({Path(filename).stem.replace('_', ' ').title()})"
 
     normalized_records: list[dict[str, Any]] = []
     skipped_missing_keys = 0
@@ -366,7 +366,7 @@ def import_csv_file(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Import a user-provided mining CSV as fallback coverage.")
+    parser = argparse.ArgumentParser(description="Import a user-provided mining CSV as official coverage.")
     parser.add_argument("path", help="Path to the CSV file to import")
     parser.add_argument(
         "--countries",

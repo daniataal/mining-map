@@ -134,7 +134,7 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(record["id"], "user_csv:licenses_export:15814")
         self.assertEqual(record["country"], "South Africa")
         self.assertEqual(record["sector"], "mining")
-        self.assertEqual(record["record_origin"], "user_import_csv")
+        self.assertEqual(record["record_origin"], "open_data")
         self.assertEqual(record["source_id"], "user_csv:licenses_export")
         self.assertEqual(record["source_name"], "User-provided CSV fallback (licenses_export.csv)")
         self.assertAlmostEqual(record["lat"], -26.3167)

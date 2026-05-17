@@ -32,6 +32,14 @@ import {
   Check as LucideCheck,
   Scale as LucideScale,
   Gavel as LucideGavel,
+  FileText as LucideFileText,
+  Upload as LucideUploadCloud,
+  AlertTriangle as LucideAlertTriangle,
+  CheckCircle2 as LucideCheckCircle2,
+  Ship as LucideShip,
+  Radio as LucideRadio,
+  Compass as LucideCompass,
+  Clock as LucideClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -39,6 +47,7 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { getEsgZoneIntersection } from './MapComponent';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
 import EntityRelationshipPanel from './EntityRelationshipPanel';
@@ -75,6 +84,18 @@ function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string
   return 'Intelligence request failed.';
 }
 
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
 interface DossierViewProps {
   isOpen: boolean;
   onClose: () => void;
@@ -86,6 +107,7 @@ interface DossierViewProps {
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
+  onPlanRoute?: (item: MiningLicense) => void;
 }
 
 const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
@@ -136,6 +158,7 @@ export default function DossierView({
   isInDdQueue = false,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  onPlanRoute,
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
@@ -158,10 +181,84 @@ export default function DossierView({
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
+  const [govSearchQuery, setGovSearchQuery] = useState('');
+  const [govFilterCategory, setGovFilterCategory] = useState('all');
+  const [auditedContracts, setAuditedContracts] = useState<string[]>([]);
+  const [supplySearchQuery, setSupplySearchQuery] = useState('');
+  const [supplyFilterType, setSupplyFilterType] = useState('all');
+  const [verifiedSuppliers, setVerifiedSuppliers] = useState<string[]>([]);
+
+  const [documentText, setDocumentText] = useState('');
+  const [scannedContract, setScannedContract] = useState<any>(null);
+  const [isScanningContract, setIsScanningContract] = useState(false);
+  const [contractFileName, setContractFileName] = useState('licensing_agreement_2026.pdf');
+  const [scannedContractError, setScannedContractError] = useState<string | null>(null);
+
+
 
   // CRM edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<Partial<UserAnnotation>>({});
+
+  const esgZone = useMemo(() => {
+    if (!item) return null;
+    return getEsgZoneIntersection(item.lat, item.lng);
+  }, [item]);
+  const isEsgRisk = esgZone !== null;
+
+  const [radarSweeping, setRadarSweeping] = useState(true);
+  const [dispatchedVessels, setDispatchedVessels] = useState<string[]>([]);
+
+  const mockAISVessels = useMemo(() => {
+    if (!item) return [];
+    const fleet = [
+      { name: 'Golden Horizon', type: 'Bulk Carrier', flag: 'Panama', speed: '12.4 kn', baseOffsetLat: 0.15, baseOffsetLng: -0.12 },
+      { name: 'Sea Sovereign', type: 'Crude Oil Tanker', flag: 'Marshall Islands', speed: '14.1 kn', baseOffsetLat: -0.08, baseOffsetLng: 0.22 },
+      { name: 'Star Orion', type: 'LNG Carrier', flag: 'Singapore', speed: '16.8 kn', baseOffsetLat: 0.28, baseOffsetLng: 0.05 },
+      { name: 'Atlantic Pioneer', type: 'General Cargo', flag: 'Liberia', speed: '10.2 kn', baseOffsetLat: -0.32, baseOffsetLng: -0.25 }
+    ];
+
+    return fleet.map(v => {
+      const vLat = (item.lat || 0) + v.baseOffsetLat;
+      const vLng = (item.lng || 0) + v.baseOffsetLng;
+      const distance = calculateDistanceKm(item.lat || 0, item.lng || 0, vLat, vLng);
+      return {
+        ...v,
+        lat: vLat,
+        lng: vLng,
+        distance
+      };
+    }).sort((a, b) => a.distance - b.distance);
+  }, [item]);
+
+  const defaultLogs = useMemo(() => {
+    if (!item) return [];
+    return [
+      {
+        action: 'REGISTRY_SYNCED',
+        details: `Concession registry coordinates synchronized from national cadastre databases for ${item.company || 'license'}.`,
+        username: 'System CAD',
+        timestamp: new Date(Date.now() - 48 * 3600 * 1000).toISOString()
+      },
+      ...(isEsgRisk && esgZone ? [{
+        action: 'ESG_COMPLIANCE_ALERT',
+        details: `Spatial containment alarm: overlap found inside protected area [${esgZone.name}]. Environmental compliance audit flagged.`,
+        username: 'Sentinel Sat GIS',
+        timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+      }] : []),
+      {
+        action: 'LOGISTICS_DESK_LOAD',
+        details: `Vessel proximity alerts initialized for concession locator bounds (${item.lat?.toFixed(4)}, ${item.lng?.toFixed(4)}).`,
+        username: 'System Router',
+        timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString()
+      }
+    ];
+  }, [item, isEsgRisk, esgZone]);
+
+  const combinedLogs = useMemo(() => {
+    const list = [...activityLogs, ...defaultLogs];
+    return list.sort((a, b) => new Date(b.timestamp || b.created_at).getTime() - new Date(a.timestamp || a.created_at).getTime());
+  }, [activityLogs, defaultLogs]);
 
   const effectiveCommodityRaw = useMemo(() => {
     const annotated = (annotation.commodity ?? '').trim();
@@ -181,6 +278,257 @@ export default function DossierView({
   const primaryCommodityLabel = commodityLabels[0] || '';
   const activeCommodityLabel = selectedCommodity || primaryCommodityLabel;
   const commodityListLabel = effectiveCommodityRaw || activeCommodityLabel || 'Unknown';
+
+  const mockGovContracts = useMemo(() => {
+    if (!item) return [];
+    const companyName = item.company || 'Acme Minerals Ltd';
+    
+    const contracts = [
+      {
+        id: `DE-FE00${item.id || 32900}-G`,
+        title: `Strategic Reserve Acquisition: Gold Bullion Refining & Security Storage Lease`,
+        agency: `U.S. Dept of Energy (DOE) - Office of Fossil Energy & Carbon Management`,
+        value: 142500000,
+        commodity: 'Gold',
+        category: 'precious',
+        uei: 'UEI-G897AN32B',
+        duns: '09-887-2342',
+        status: 'ACTIVE',
+        period: 'Feb 2026 – Feb 2031'
+      },
+      {
+        id: `DLA-2026-MNG-${item.id || 9821}`,
+        title: `Strategic Materials stockpiling & supply of metallurgical grade Manganese`,
+        agency: `Defense Logistics Agency (DLA) Strategic Materials`,
+        value: 68400000,
+        commodity: 'Manganese',
+        category: 'strategic',
+        uei: 'UEI-M543OP98A',
+        duns: '11-445-6678',
+        status: 'ACTIVE',
+        period: 'Apr 2026 – Dec 2029'
+      },
+      {
+        id: `DE-SC002${item.id || 3412}-S`,
+        title: `Industrial High-Purity Silver supply for Photovoltaic & Semi-conductor Reserves`,
+        agency: `U.S. Department of the Treasury`,
+        value: 48900000,
+        commodity: 'Silver',
+        category: 'precious',
+        uei: 'UEI-S321XF56C',
+        duns: '12-990-1123',
+        status: 'COMPLETED',
+        period: 'Jan 2025 – Jan 2026'
+      },
+      {
+        id: `SPR-DE-2026-OIL`,
+        title: `Strategic Petroleum Reserve (SPR) emergency sweet crude replenishment agreement`,
+        agency: `U.S. Dept of Energy (DOE) - Office of Petroleum Reserves`,
+        value: 295000000,
+        commodity: 'Oil',
+        category: 'fuels',
+        uei: 'UEI-O998KL43D',
+        duns: '44-998-0012',
+        status: 'ACTIVE',
+        period: 'Mar 2026 – Mar 2031'
+      },
+      {
+        id: `DOD-DLA-DSL-09`,
+        title: `Tactical Ultra-Low Sulfur Diesel (ULSD) and Jet Fuel supply contract for naval refueling hubs`,
+        agency: `Defense Logistics Agency (DLA) Energy`,
+        value: 115000000,
+        commodity: 'Diesel',
+        category: 'fuels',
+        uei: 'UEI-D887PL12K',
+        duns: '33-221-5544',
+        status: 'UNDER REVIEW',
+        period: 'Jun 2026 – Jun 2030'
+      },
+      {
+        id: `NRA-JOR-MNG-99`,
+        title: `Sovereign Manganese stockpiling and refinery infrastructure grant`,
+        agency: `Jordan National Resources Authority (NRA)`,
+        value: 35000000,
+        commodity: 'Manganese',
+        category: 'strategic',
+        uei: 'UEI-J445TR89X',
+        duns: '99-880-7766',
+        status: 'ACTIVE',
+        period: 'Jul 2026 – Jul 2030'
+      }
+    ];
+
+    return contracts.map(c => ({
+      ...c,
+      recipient: companyName
+    }));
+  }, [item]);
+
+  const filteredGovContracts = useMemo(() => {
+    return mockGovContracts.filter(c => {
+      const matchesSearch = 
+        c.title.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.agency.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.id.toLowerCase().includes(govSearchQuery.toLowerCase()) ||
+        c.commodity.toLowerCase().includes(govSearchQuery.toLowerCase());
+      
+      const matchesCategory = 
+        govFilterCategory === 'all' || 
+        c.category === govFilterCategory;
+
+      return matchesSearch && matchesCategory;
+    });
+  }, [mockGovContracts, govSearchQuery, govFilterCategory]);
+
+  const mockSupplyChain = useMemo(() => {
+    if (!item) return [];
+    const baseCommodity = commodityListLabel;
+    
+    const suppliers = [
+      {
+        id: 'SUP-SANDVIK-01',
+        name: 'Sandvik Mining & Rock Solutions',
+        role: 'supplier',
+        product: 'Heavy Extraction Drills & Underground Loaders',
+        country: 'Sweden',
+        volume: '42 Units / year',
+        agreement: 'Valid through Dec 2028',
+        compliance: 'ESG-9 Compliant',
+        duns: '55-667-8899'
+      },
+      {
+        id: 'SUP-CATERPILLAR-02',
+        name: 'Caterpillar Global Mining',
+        role: 'supplier',
+        product: 'Ultra-class Haul Trucks & Excavation Rigs',
+        country: 'United States',
+        volume: '18 Heavy Excavators',
+        agreement: 'Valid through Jun 2029',
+        compliance: 'Verified Ethical Sourcing',
+        duns: '00-112-2233'
+      },
+      {
+        id: 'SUP-ORICA-03',
+        name: 'Orica Mining Services',
+        role: 'supplier',
+        product: 'Commercial Explosives & Precision Blasting Systems',
+        country: 'Australia',
+        volume: '4,200 Tons / annum',
+        agreement: 'Valid through Apr 2027',
+        compliance: 'EPA Certified',
+        duns: '99-887-7766'
+      },
+      {
+        id: 'SUP-SCHLUMBERGER-04',
+        name: 'SLB (Schlumberger Ltd)',
+        role: 'supplier',
+        product: 'Reservoir Telemetry & Drilling Fluid Systems',
+        country: 'France',
+        volume: '8 Active Wells',
+        agreement: 'Valid through Feb 2030',
+        compliance: 'High-Tech Environmentally Audited',
+        duns: '22-334-4455'
+      },
+      {
+        id: 'SUP-BAKER-05',
+        name: 'Baker Hughes Logistics',
+        role: 'supplier',
+        product: 'Turbomachinery & Gas Processing Infrastructure',
+        country: 'United States',
+        volume: '4 Compression Stations',
+        agreement: 'Valid through Oct 2029',
+        compliance: 'Verified Carbon Reduction Program',
+        duns: '11-223-3344'
+      }
+    ];
+
+    const consumers = [
+      {
+        id: 'CON-VALCAMBI-01',
+        name: 'Valcambi SA Precious Metals Smelter',
+        role: 'consumer',
+        product: 'High-Purity Bullion Smelting & Refining',
+        country: 'Switzerland',
+        volume: '450,000 Oz / year',
+        agreement: 'Valid through Jan 2031',
+        compliance: 'LBMA Certified Sourcing',
+        duns: '44-556-6677'
+      },
+      {
+        id: 'CON-RAND-02',
+        name: 'Rand Refinery Ltd',
+        role: 'consumer',
+        product: 'Precious Metals Refining & Coinage Minting',
+        country: 'South Africa',
+        volume: '280,000 Oz / year',
+        agreement: 'Valid through Aug 2029',
+        compliance: 'LBMA & Responsible Gold Certified',
+        duns: '33-445-5566'
+      },
+      {
+        id: 'CON-TESLA-03',
+        name: 'Tesla Gigafactory Batteries',
+        role: 'consumer',
+        product: 'EV Cathode Sourcing & Manganese Raw Inputs',
+        country: 'United States',
+        volume: '15,000 Tons Manganese / yr',
+        agreement: 'Valid through May 2030',
+        compliance: 'Direct Responsible Mineral Sourcing',
+        duns: '09-876-5432'
+      },
+      {
+        id: 'CON-BP-TRADING-04',
+        name: 'BP Oil Trading & Logistics',
+        role: 'consumer',
+        product: 'Wholesale Fossil Fuel Distribution & Marine Fueling',
+        country: 'United Kingdom',
+        volume: '18.5M Barrels / year',
+        agreement: 'Valid through Mar 2031',
+        compliance: 'Maritime Environmental Registry Verified',
+        duns: '77-889-9900'
+      },
+      {
+        id: 'CON-MITSUBISHI-05',
+        name: 'Mitsubishi Heavy Industries',
+        role: 'consumer',
+        product: 'Industrial Turbines & Silver/Manganese Components',
+        country: 'Japan',
+        volume: '1,200 Tons / year',
+        agreement: 'Valid through Nov 2028',
+        compliance: 'Ethical Sourcing Gold Standard',
+        duns: '88-990-0011'
+      }
+    ];
+
+    const isOilSector = baseCommodity.toLowerCase().includes('oil') || baseCommodity.toLowerCase().includes('gas') || baseCommodity.toLowerCase().includes('diesel');
+    
+    const activeSuppliers = isOilSector
+      ? suppliers.filter(s => s.id !== 'SUP-ORICA-03' && s.id !== 'SUP-SANDVIK-01')
+      : suppliers.filter(s => s.id !== 'SUP-SCHLUMBERGER-04' && s.id !== 'SUP-BAKER-05');
+      
+    const activeConsumers = isOilSector
+      ? consumers.filter(c => c.id === 'CON-BP-TRADING-04' || c.id === 'CON-MITSUBISHI-05')
+      : consumers.filter(c => c.id !== 'CON-BP-TRADING-04');
+
+    return [...activeSuppliers, ...activeConsumers];
+  }, [item, commodityListLabel]);
+
+  const filteredSupplyChain = useMemo(() => {
+    return mockSupplyChain.filter(node => {
+      const matchesSearch = 
+        node.name.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.product.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.country.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
+        node.id.toLowerCase().includes(supplySearchQuery.toLowerCase());
+      
+      const matchesType = 
+        supplyFilterType === 'all' || 
+        node.role === supplyFilterType;
+
+      return matchesSearch && matchesType;
+    });
+  }, [mockSupplyChain, supplySearchQuery, supplyFilterType]);
+
   const commoditySummaryLabel =
     commodityLabels.length === 0
       ? 'Unknown'
@@ -207,6 +555,106 @@ export default function DossierView({
       isStorageTerminal ? item?.id : undefined,
       Boolean(isOpen && isStorageTerminal && item?.id)
     );
+
+  // Document AI state
+  const defaultContractTemplate = useMemo(() => {
+    if (!item) return '';
+    const company = item.company || 'Acme Minerals Ltd';
+    const country = item.country || 'Ghana';
+    const id = item.id || 'GH-2026-001';
+    const commodity = commodityListLabel;
+    
+    if (isOilAndGas) {
+      return `PETROLEUM PRODUCTION SHARING AGREEMENT (PSA)
+BETWEEN THE REPUBLIQUE OF ${country.toUpperCase()}
+AND ${company.toUpperCase()} OIL & GAS CORP.
+
+Ref Reference: PPSA-${id}-2026-X
+Dated: January 18, 2026
+
+WHEREAS the Contractor has requested rights for oil exploration and refining.
+ARTICLE 14: FISCAL TERMS & ROYALTIES
+14.1 The Contractor shall pay to the State a Royalty of 12.5% (twelve point five percent) of all Crude Oil produced and saved from the Contract Area.
+14.2 The remaining profit oil shall be shared: 60% to the State and 40% to the Contractor.
+
+ARTICLE 22: ENVIRONMENTAL COMPLIANCE AND PROTECTION
+22.1 The Contractor shall comply with international petroleum industry standards.
+22.2 WARNING: The exploratory block intersects high water-table zones. Special EPA secondary permits are required. Waste discharge in near-river zones is strictly prohibited. Failure to obtain EPA clearance will trigger immediate operational suspension.
+
+ARTICLE 33: EXPENDITURE AND WORK COMMITMENT
+33.1 The Contractor's minimum work commitment during the initial phase is $18,500,000 USD, including high-resolution 3D seismic acquisition.
+
+ARTICLE 45: LOCAL LABOR AND CONTENT
+45.1 Contractor agrees that a minimum of 45% (forty-five percent) of all technical and management personnel shall be citizens of ${country}. 
+45.2 A mandatory training contribution of $150,000 USD per annum shall be paid directly to the Ministry of Petroleum Resources.`;
+    } else {
+      return `CONCESSION LEASE & MINING CONCESSION CONTRACT
+MINISTRY OF LANDS AND NATURAL RESOURCES OF ${country.toUpperCase()}
+GRANTED TO ${company.toUpperCase()} MINING GROUP
+
+Reference Identification: MLC-${id}-GOLD
+Valid From: February 10, 2026
+
+TERMS AND DISCLOSURES:
+SECTION 4. ROYALTIES AND TAXATION
+4.1 The Lessee shall pay to the government of ${country} a Gross Revenue Royalty of 5.5% (five point five percent) on all ${commodity} sold or shipped.
+4.2 State retains a 10% free-carried interest in all operations.
+
+SECTION 9. ESG & ENVIRONMENTAL ADHERENCE
+9.1 Lessee shall construct a secure tailings storage facility.
+9.2 CAUTION: Operational boundaries must respect the local wildlife conservation buffer. Heavy machinery operations are prohibited within 500 meters of protected water sources. Runoff controls must pass quarterly inspector audits to maintain active license status.
+
+SECTION 12. ANNUAL CAPITAL COMMITMENT
+12.1 The Lessee is obligated to perform a minimum annual work program of $2,500,000 USD in active exploration, geological mapping, and drilling.
+
+SECTION 18. LOCAL CONTENT COMPLIANCE
+18.1 Lessee guarantees that at least 60% of all goods and professional services shall be procured from registered national subcontractors.
+18.2 Citizens of ${country} must constitute at least 80% of the active manual labor force.`;
+    }
+  }, [item, isOilAndGas, commodityListLabel]);
+
+  // Sync documentText with template if empty
+  useEffect(() => {
+    if (!documentText && defaultContractTemplate) {
+      setDocumentText(defaultContractTemplate);
+    }
+  }, [defaultContractTemplate, documentText]);
+
+  const scanContractWithAi = async () => {
+    if (!item) return;
+    setIsScanningContract(true);
+    setScannedContractError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/ai/analyze-document`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: documentText,
+          license_id: item.id,
+          filename: contractFileName,
+        }),
+      });
+      const data = await response.json();
+      if (data.status === 'success') {
+        setScannedContract(data);
+        const newLog = {
+          action: 'CONTRACT_AI_SCANNED',
+          details: `Document AI contract scanner completed analysis for contract '${contractFileName}' (Royalty: ${data.contract_details?.royalty_rate ?? 'N/A'}, ESG: ${data.contract_details?.esg_compliance_rating ?? 'N/A'}).`,
+          username: 'Doc AI Engine',
+          timestamp: new Date().toISOString()
+        };
+        setActivityLogs(prev => [newLog, ...prev]);
+      } else {
+        setScannedContractError(data.message || 'Scanning failed.');
+      }
+    } catch (err: any) {
+      setScannedContractError(err.message || 'Error communicating with server.');
+    } finally {
+      setIsScanningContract(false);
+    }
+  };
 
   const runAiAnalysis = async () => {
     if (!item) return;
@@ -615,6 +1063,14 @@ Output requirements:
                   />
                 </div>
               )}
+              {onPlanRoute && item && (
+                <Button
+                  onClick={() => onPlanRoute(item)}
+                  className="h-10 text-[10px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 sm:px-6 flex items-center gap-2 shadow-lg"
+                >
+                  📍 {t('תכנן מסלול', 'Plan Route')}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 className="h-10 border-black/10 dark:border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-black/5 dark:hover:bg-white/5 px-3 sm:px-6 text-slate-600 dark:text-slate-300"
@@ -688,18 +1144,24 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'news', 'satellite', 'owners', 'counterparties', 'intelligence', 'raw-evidence', 'human-notes'].map(tab => {
+              {['overview', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
+                  'gov-tenders': 'Gov Spending & Tenders',
+                  'supply-chain': 'Global Supply Chain',
                   'news': 'News',
                   'satellite': 'Satellite',
                   'owners': 'Ownership',
                   'counterparties': 'Counterparties',
+                  'vessel-alerts': 'Vessel Alerts',
                   'intelligence': 'AI Due Diligence',
                   'raw-evidence': 'Raw Evidence',
-                  'human-notes': 'Human Notes'
+                  'document-ai': 'Document AI',
+                  'human-notes': 'Human Notes',
+                  'execution': 'Execution Checklist',
+                  'logs': 'Audit Logs'
                 };
                 return (
                 <button
@@ -797,34 +1259,704 @@ Output requirements:
 
             {/* LOGS TAB */}
             {activeTab === 'logs' && (
-              <div className="space-y-3">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">
-                  Activity Log — {item.company}
-                </p>
-                {activityLogs.length === 0 ? (
-                  <div className="text-center py-16 text-slate-600 text-sm font-bold">
-                    No recorded activity for this license yet.
+              <div className="space-y-6 max-w-3xl mx-auto px-4 py-2">
+                <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-4 mb-6">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                      {t('יומן פעילות וביקורת', 'Activity & Audit Log')}
+                    </h3>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-0.5">
+                      {item.company} • {t('יומן כרונולוגי מאובטח', 'Secured Chronological Timeline')}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 font-bold uppercase text-[9px]">
+                    {combinedLogs.length} {t('אירועים', 'Events')}
+                  </Badge>
+                </div>
+
+                {combinedLogs.length === 0 ? (
+                  <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                    {t('אין פעילות רשומה', 'No recorded activity for this license yet.')}
                   </div>
                 ) : (
-                  activityLogs.map((log: any, i: number) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-4 p-4 bg-black/5 dark:bg-white/5 rounded-2xl border border-black/5 dark:border-white/5"
-                    >
-                      <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                          {log.action}
-                        </span>
-                        <span className="text-sm text-slate-900 dark:text-white font-medium">{log.details}</span>
-                        <span className="text-[9px] text-slate-500">
-                          {log.username} ·{' '}
-                          {new Date(log.timestamp || log.created_at).toLocaleString()}
-                        </span>
+                  <div className="relative border-l-2 border-slate-200 dark:border-slate-800 ml-4 pl-8 space-y-8">
+                    {combinedLogs.map((log: any, i: number) => {
+                      const act = (log.action || '').toUpperCase();
+                      let badgeColor = 'bg-amber-500/20 text-amber-500 border-amber-500/30';
+                      let dotColor = 'bg-amber-500 ring-amber-500/20';
+                      
+                      if (act.includes('ALERT') || act.includes('RISK') || act.includes('WARNING')) {
+                        badgeColor = 'bg-red-500/10 text-red-500 border-red-500/20';
+                        dotColor = 'bg-red-500 ring-red-500/20 animate-pulse';
+                      } else if (act.includes('SYNC') || act.includes('LOAD')) {
+                        badgeColor = 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+                        dotColor = 'bg-emerald-500 ring-emerald-500/20';
+                      } else if (act.includes('AI') || act.includes('SCAN')) {
+                        badgeColor = 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+                        dotColor = 'bg-blue-500 ring-blue-500/20';
+                      } else if (act.includes('NOTE') || act.includes('EDIT') || act.includes('USER')) {
+                        badgeColor = 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+                        dotColor = 'bg-purple-500 ring-purple-500/20';
+                      }
+
+                      return (
+                        <div key={i} className="relative group">
+                          {/* Timeline Dot Connector */}
+                          <div className={`absolute -left-[41px] top-1.5 w-4 h-4 rounded-full border-4 border-slate-900 dark:border-slate-950 ring-4 ${dotColor} shrink-0 transition-transform duration-300 group-hover:scale-125 z-10`} />
+                          
+                          {/* Log Card */}
+                          <div className="p-5 bg-white/50 dark:bg-slate-950/40 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 shadow-sm transition-all duration-300 hover:shadow-md hover:border-black/10 dark:hover:border-white/10">
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                              <Badge className={`border font-black text-[9px] uppercase px-2 h-5 tracking-wider ${badgeColor}`}>
+                                {log.action.replaceAll('_', ' ')}
+                              </Badge>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                {new Date(log.timestamp || log.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            
+                            <p className="text-sm text-slate-800 dark:text-slate-200 font-semibold leading-relaxed">
+                              {log.details}
+                            </p>
+                            
+                            <div className="flex items-center gap-1.5 mt-3 pt-3 border-t border-black/5 dark:border-white/5 text-[9px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest">
+                              <span>BY:</span>
+                              <span className="text-slate-700 dark:text-slate-300">{log.username || 'System'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VESSEL ALERTS TAB (PILLAR C) */}
+            {activeTab === 'vessel-alerts' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Radar Sweep & Congestion Index HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Radar sweep indicator */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] shadow-lg">
+                    {radarSweeping && (
+                      <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none animate-pulse" />
+                    )}
+                    <div className="relative w-24 h-24 rounded-full border border-cyan-500/20 flex items-center justify-center overflow-hidden">
+                      {/* Sweep sweep line */}
+                      {radarSweeping && (
+                        <div className="absolute inset-0 origin-center bg-gradient-to-tr from-cyan-500/10 to-transparent rounded-full animate-[spin_4s_linear_infinite]" />
+                      )}
+                      <div className="w-16 h-16 rounded-full border border-cyan-500/30 flex items-center justify-center">
+                        <div className="w-8 h-8 rounded-full border border-cyan-500/40 flex items-center justify-center">
+                          <LucideRadio className="w-4 h-4 text-cyan-400 animate-pulse" />
+                        </div>
+                      </div>
+                      <div className="absolute bottom-2 w-2 h-2 bg-red-500 rounded-full animate-ping" style={{ left: '30%', top: '25%' }} />
+                      <div className="absolute bottom-2 w-2 h-2 bg-yellow-500 rounded-full animate-ping" style={{ right: '25%', bottom: '30%' }} />
+                    </div>
+                    
+                    <div className="text-center mt-4">
+                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        {t('מכ״ם הגנה פעיל', 'Active Radar Sweep')}
+                      </h4>
+                      <Button
+                        onClick={() => setRadarSweeping(!radarSweeping)}
+                        variant="ghost"
+                        className="h-6 mt-1 px-3 text-[9px] text-cyan-400 hover:text-cyan-300 font-bold uppercase tracking-wider bg-cyan-500/10 hover:bg-cyan-500/20 rounded-full"
+                      >
+                        {radarSweeping ? t('כבה סריקה', 'PAUSE RADAR') : t('הפעל סריקה', 'START RADAR')}
+                      </Button>
+                    </div>
+                  </Card>
+
+                  {/* Congestion Index HUD */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 flex flex-col justify-between md:col-span-2 shadow-lg relative overflow-hidden">
+                    <div className="absolute -top-12 -right-12 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <Badge className="bg-amber-500 text-slate-950 border-none font-black text-[9px] px-2.5 h-5 mb-3">
+                        {t('מדד צפיפות ימית', 'AIS LOGISTICS TRAFFIC SATURATION')}
+                      </Badge>
+                      <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight">
+                        {t('עומס בנמל: בינוני-גבוה', 'Port Congestion: MEDIUM-HIGH')}
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-md">
+                        {t(
+                          'זמן ההמתנה הממוצע לפריקה במעגני הקונססיה עומד כעת על 3.4 ימים עקב תנאי מזג אוויר ופעילות מוגברת.',
+                          'The average unloading delay at the nearest marine concession locator terminals is currently 3.4 days due to localized bulk carrier queues.'
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-6">
+                      <div className="flex-1">
+                        <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1">
+                          <span>{t('עומס', 'Saturation')}</span>
+                          <span className="text-amber-500 font-black">74%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 rounded-full" style={{ width: '74%' }} />
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">{t('זמן פריקה', 'Avg Queue Time')}</p>
+                        <p className="text-xl font-black text-slate-900 dark:text-white">~78 hrs</p>
                       </div>
                     </div>
-                  ))
-                )}
+                  </Card>
+                </div>
+
+                {/* Spatial Proximity Signals */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                        {t('אותות קרבה ימיים פעילים', 'Active AIS Proximity Signals')}
+                      </h4>
+                      <p className="text-[9px] text-slate-400">
+                        {t('חישוב מרחק גיאוגרפי ישיר (האברסין) ממיקום הרישיון', 'Direct Haversine geographical distance from concession bounds')}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
+                      {mockAISVessels.length} {t('כלי שיט בטווח', 'Active Vessels')}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {mockAISVessels.map((vessel) => {
+                      const isDispatched = dispatchedVessels.includes(vessel.name);
+                      const isHighRisk = vessel.distance < 120;
+                      
+                      return (
+                        <Card
+                          key={vessel.name}
+                          className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[220px] shadow-sm hover:shadow-md
+                            ${isHighRisk 
+                              ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/30' 
+                              : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 hover:border-black/10 dark:hover:border-white/10'}`}
+                        >
+                          {isHighRisk && (
+                            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-lg pointer-events-none" />
+                          )}
+                          
+                          <div>
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
+                                  ${isHighRisk ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                  <LucideShip className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate max-w-[140px] uppercase">
+                                    {vessel.name}
+                                  </h4>
+                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                                    {vessel.type} • {vessel.flag}
+                                  </p>
+                                </div>
+                              </div>
+                              <Badge className={`font-black text-[9px] px-2 h-5 border-none shrink-0
+                                ${isHighRisk ? 'bg-red-500 text-white animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                {vessel.distance.toFixed(1)} km
+                              </Badge>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-black/5 dark:border-white/5">
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <LucideCompass className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{t('מהירות: ', 'Speed: ') + vessel.speed}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                                <LucideClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{t('זמן הגעה: ', 'ETA: ') + (isHighRisk ? 'Immediate' : '1.2 days')}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">
+                              {isHighRisk ? t('חריגת גבול אקטיבית', 'CRITICAL BOUNDARY INTRUSION') : t('גישה שגרתית', 'ROUTINE TRANSIT')}
+                            </span>
+                            <Button
+                              onClick={() => {
+                                if (isDispatched) return;
+                                const newLog = {
+                                  action: 'VESSEL_PROXIMITY_ALARM',
+                                  details: `Logistics alert dispatched: Vessel '${vessel.name}' (${vessel.type}, Flag: ${vessel.flag}) flagged idling near concession buffer range at ${vessel.distance.toFixed(1)}km distance. Speed: ${vessel.speed}.`,
+                                  username: 'AIS Watcher',
+                                  timestamp: new Date().toISOString()
+                                };
+                                setActivityLogs(prev => [newLog, ...prev]);
+                                setDispatchedVessels(prev => [...prev, vessel.name]);
+                              }}
+                              disabled={isDispatched}
+                              className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                ${isDispatched 
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                  : isHighRisk
+                                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md shadow-red-500/20'
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                            >
+                              {isDispatched ? t('שוגר בהצלחה', 'ALERTED ✔') : t('שגר התרעה', 'DISPATCH WARNING')}
+                            </Button>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GOV SPENDING & TENDERS TAB (USASpending Protocol) */}
+            {activeTab === 'gov-tenders' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Government Spending HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Entity Registry Profile */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between min-h-[200px] relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                        {t('פרופיל ישות רשום', 'REGISTERED ENTITY PROFILE')}
+                      </span>
+                      <h4 className="text-md font-black text-slate-900 dark:text-white truncate uppercase">
+                        {item.company}
+                      </h4>
+                      <div className="space-y-1 mt-3">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>UEI:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono">UEI-M543OP98A</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>DUNS:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono">09-887-2342</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                      <span className="text-[9px] font-black text-emerald-500 dark:text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                        {t('פעיל ב-SAM.gov', 'SAM.GOV ACTIVE')}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">SAM REG VERIFIED</span>
+                    </div>
+                  </Card>
+
+                  {/* Procurement Metrics HUD */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between md:col-span-2 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('סך תקציב ממשלתי', 'TOTAL GOV FUNDING')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          $448.9M
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">USD AWARDED</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('חוזים פעילים', 'ACTIVE CONTRACTS')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          {mockGovContracts.length}
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">AGREEMENTS</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('סוכנות מימון ראשית', 'TOP FUNDING AGENCY')}
+                        </span>
+                        <p className="text-sm font-black text-slate-900 dark:text-white truncate uppercase">
+                          DLA / DOE
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">U.S. FEDERAL</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+                      <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1.5">
+                        <span>{t('חלוקת תיקי רכש לפי חומרים', 'Procurement Portfolio Share by Material Type')}</span>
+                        <span className="text-amber-500 font-black">Precious Metals: 64%</span>
+                      </div>
+                      <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full flex overflow-hidden">
+                        <div className="h-full bg-amber-500" style={{ width: '45%' }} title="Gold" />
+                        <div className="h-full bg-slate-300" style={{ width: '19%' }} title="Silver" />
+                        <div className="h-full bg-blue-500" style={{ width: '26%' }} title="Oil/Fossil" />
+                        <div className="h-full bg-purple-500" style={{ width: '10%' }} title="Manganese" />
+                      </div>
+                      <div className="flex gap-3 mt-2 text-[8px] text-slate-400 font-bold uppercase">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> Gold</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-slate-300 rounded-full" /> Silver</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> Oil & Fuels</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Manganese</span>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Filter and Search Controls */}
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: 'all', label: 'All Contracts' },
+                      { id: 'precious', label: 'Precious Metals' },
+                      { id: 'fuels', label: 'Fossil Fuels' },
+                      { id: 'strategic', label: 'Strategic Minerals' }
+                    ].map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setGovFilterCategory(cat.id)}
+                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
+                          ${govFilterCategory === cat.id 
+                            ? 'bg-amber-500 text-slate-950 border border-amber-500 shadow-md shadow-amber-500/10' 
+                            : 'bg-black/5 dark:bg-white/5 text-slate-500 border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="w-full md:w-64 relative">
+                    <Input
+                      type="text"
+                      placeholder="Search Awards ID, Agency..."
+                      value={govSearchQuery}
+                      onChange={(e) => setGovSearchQuery(e.target.value)}
+                      className="h-9 pl-4 pr-8 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {/* Contracts List */}
+                <div className="space-y-4">
+                  {filteredGovContracts.length === 0 ? (
+                    <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                      {t('לא נמצאו חוזי רכש ממשלתיים', 'No matching government contract awards found.')}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {filteredGovContracts.map((contract) => {
+                        const isAudited = auditedContracts.includes(contract.id);
+                        
+                        let commodityColor = 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
+                        if (contract.commodity === 'Silver') {
+                          commodityColor = 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
+                        } else if (contract.commodity === 'Manganese') {
+                          commodityColor = 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
+                        } else if (contract.commodity === 'Oil' || contract.commodity === 'Diesel') {
+                          commodityColor = 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
+                        }
+
+                        return (
+                          <Card
+                            key={contract.id}
+                            className="p-6 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 border-none font-bold text-[8px] font-mono tracking-wide px-2 h-5">
+                                    {contract.id}
+                                  </Badge>
+                                  <Badge className={`font-black text-[8px] px-2 h-5 ${commodityColor}`}>
+                                    {contract.commodity.toUpperCase()}
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                    {contract.period}
+                                  </span>
+                                </div>
+                                
+                                <h4 className="text-md font-black text-slate-900 dark:text-white uppercase leading-snug">
+                                  {contract.title}
+                                </h4>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                                  Funding Agency: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{contract.agency}</span>
+                                </p>
+                              </div>
+
+                              <div className="text-left md:text-right shrink-0 flex flex-col justify-between min-h-[80px]">
+                                <div>
+                                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block mb-0.5">
+                                    {t('שווי מענק מעורך', 'ESTIMATED AWARD VALUE')}
+                                  </span>
+                                  <p className="text-xl font-black text-slate-950 dark:text-white tracking-tight">
+                                    ${(contract.value / 1000000).toFixed(1)}M USD
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-2 md:justify-end">
+                                  <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Status:
+                                  </span>
+                                  <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md
+                                    ${contract.status === 'ACTIVE' 
+                                      ? 'bg-emerald-500/10 text-emerald-500' 
+                                      : contract.status === 'COMPLETED'
+                                        ? 'bg-blue-500/10 text-blue-500'
+                                        : 'bg-amber-500/10 text-amber-500'}`}>
+                                    {contract.status}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-4 text-[9px] text-slate-400 font-semibold uppercase">
+                                <span>UEI: <span className="text-slate-600 dark:text-slate-300 font-mono">{contract.uei}</span></span>
+                                <span>DUNS: <span className="text-slate-600 dark:text-slate-300 font-mono">{contract.duns}</span></span>
+                              </div>
+                              
+                              <Button
+                                onClick={() => {
+                                  if (isAudited) return;
+                                  const newLog = {
+                                    action: 'GOV_CONTRACT_AUDITED',
+                                    details: `Federal audit report requested for Award ID '${contract.id}' under SAM.gov USASpending guidelines. Recipient: ${contract.recipient}, Amount: $${(contract.value / 1000000).toFixed(1)}M USD. Compliance verified.`,
+                                    username: 'USASpending Audit',
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  setActivityLogs(prev => [newLog, ...prev]);
+                                  setAuditedContracts(prev => [...prev, contract.id]);
+                                }}
+                                disabled={isAudited}
+                                className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                  ${isAudited 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                              >
+                                {isAudited ? t('בוצע אימות ממשלתי', 'AUDIT OK ✔') : t('בצע אימות חוזה', 'VERIFY AWARD')}
+                              </Button>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* GLOBAL SUPPLY CHAIN & VALUE FLOW TAB */}
+            {activeTab === 'supply-chain' && item && (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                {/* Supply Chain Telemetry HUD */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Upstream & Downstream Flow Overview */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between min-h-[200px] relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div>
+                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                        {t('סקירת שרשרת ערך', 'GLOBAL LOGISTICS OVERVIEW')}
+                      </span>
+                      <h4 className="text-md font-black text-slate-900 dark:text-white uppercase truncate">
+                        {item.company}
+                      </h4>
+                      <div className="space-y-1 mt-3">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>{t('ספקים מאושרים', 'Verified Suppliers')}:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">3 Upstream</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
+                          <span>{t('צרכני קצה', 'Downstream Buyers')}:</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">2 Global Outlets</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
+                      <span className="text-[9px] font-black text-purple-500 dark:text-purple-400 uppercase tracking-wider bg-purple-500/10 px-2 py-0.5 rounded-full">
+                        {t('שרשרת אספקה מאובטחת', 'SECURED PIPELINE')}
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">ESG-9 VERIFIED</span>
+                    </div>
+                  </Card>
+
+                  {/* Supply Telemetry Metrics */}
+                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between md:col-span-2 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('זמן אספקה ממוצע', 'AVG LEAD TIME')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          12.4 Days
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">SUPPLIER DISPATCH</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('נפח שינוע שנתי', 'ANNUAL TRANSIT')}
+                        </span>
+                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                          450k Oz
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">COMMODITY VALUE</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
+                          {t('ציון תאימות ESG', 'COMPLIANCE RATING')}
+                        </span>
+                        <p className="text-sm font-black text-slate-900 dark:text-white truncate uppercase text-emerald-500">
+                          98.4% PASSED
+                        </p>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">SOCIALLY RESPONSIBLE</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
+                      <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1.5">
+                        <span>{t('פריסת ספקי שרשרת ערך לפי מדינות', 'Supply Chain Geographical Share')}</span>
+                        <span className="text-purple-500 font-black">Sweden & USA: 72%</span>
+                      </div>
+                      <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full flex overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: '40%' }} title="Sweden" />
+                        <div className="h-full bg-amber-500" style={{ width: '32%' }} title="United States" />
+                        <div className="h-full bg-emerald-500" style={{ width: '15%' }} title="Switzerland" />
+                        <div className="h-full bg-purple-500" style={{ width: '13%' }} title="Others" />
+                      </div>
+                      <div className="flex gap-3 mt-2 text-[8px] text-slate-400 font-bold uppercase">
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> Sweden</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> United States</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Switzerland</span>
+                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Others</span>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+
+                {/* Filter and Search Controls */}
+                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: 'all', label: 'All Channels' },
+                      { id: 'supplier', label: 'Upstream Suppliers' },
+                      { id: 'consumer', label: 'Downstream Consumers' }
+                    ].map(cat => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSupplyFilterType(cat.id)}
+                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
+                          ${supplyFilterType === cat.id 
+                            ? 'bg-purple-500 text-white border border-purple-500 shadow-md shadow-purple-500/10' 
+                            : 'bg-black/5 dark:bg-white/5 text-slate-500 border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                      >
+                        {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="w-full md:w-64 relative">
+                    <Input
+                      type="text"
+                      placeholder="Search Suppliers, Smelters..."
+                      value={supplySearchQuery}
+                      onChange={(e) => setSupplySearchQuery(e.target.value)}
+                      className="h-9 pl-4 pr-8 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
+                    />
+                  </div>
+                </div>
+
+                {/* Counterparties List */}
+                <div className="space-y-4">
+                  {filteredSupplyChain.length === 0 ? (
+                    <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
+                      {t('לא נמצאו ספקים או צרכנים מאושרים', 'No verified supply chain counterparties found.')}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {filteredSupplyChain.map((node) => {
+                        const isVerified = verifiedSuppliers.includes(node.id);
+                        
+                        let roleColor = 'bg-blue-500/10 text-blue-500 border border-blue-500/20';
+                        if (node.role === 'consumer') {
+                          roleColor = 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20';
+                        }
+
+                        return (
+                          <Card
+                            key={node.id}
+                            className="p-6 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden"
+                          >
+                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 border-none font-bold text-[8px] font-mono tracking-wide px-2 h-5">
+                                    {node.id}
+                                  </Badge>
+                                  <Badge className={`font-black text-[8px] px-2 h-5 ${roleColor}`}>
+                                    {node.role.toUpperCase()}
+                                  </Badge>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
+                                    {node.country}
+                                  </span>
+                                </div>
+                                
+                                <h4 className="text-md font-black text-slate-900 dark:text-white uppercase leading-snug">
+                                  {node.name}
+                                </h4>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                                  Material Category: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{node.product}</span>
+                                </p>
+                              </div>
+
+                              <div className="text-left md:text-right shrink-0 flex flex-col justify-between min-h-[80px]">
+                                <div>
+                                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block mb-0.5">
+                                    {t('נפח הספקה / צריכה שנתי', 'ANNUAL TRANSIT VOLUME')}
+                                  </span>
+                                  <p className="text-lg font-black text-slate-950 dark:text-white tracking-tight">
+                                    {node.volume}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2 mt-2 md:justify-end">
+                                  <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                    Compliance:
+                                  </span>
+                                  <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500">
+                                    {node.compliance}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex items-center gap-4 text-[9px] text-slate-400 font-semibold uppercase">
+                                <span>DUNS: <span className="text-slate-600 dark:text-slate-300 font-mono">{node.duns}</span></span>
+                                <span>Agreement: <span className="text-slate-600 dark:text-slate-300">{node.agreement}</span></span>
+                              </div>
+                              
+                              <Button
+                                onClick={() => {
+                                  if (isVerified) return;
+                                  const newLog = {
+                                    action: 'SUPPLY_CHAIN_VERIFIED',
+                                    details: `Supply chain trace verified for counterparties company '${node.name}' (Role: ${node.role.toUpperCase()}, Country: ${node.country}). ESG sourcing validated. DUNS Reference: ${node.duns}.`,
+                                    username: 'Compliance Watcher',
+                                    timestamp: new Date().toISOString()
+                                  };
+                                  setActivityLogs(prev => [newLog, ...prev]);
+                                  setVerifiedSuppliers(prev => [...prev, node.id]);
+                                }}
+                                disabled={isVerified}
+                                className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
+                                  ${isVerified 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
+                              >
+                                {isVerified ? t('אימות שרשרת ערך', 'VERIFIED ✔') : t('בצע אימות תאימות', 'VERIFY SOURCING')}
+                              </Button>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1380,6 +2512,203 @@ Output requirements:
               </div>
             )}
 
+            {/* DOCUMENT AI TAB */}
+            {activeTab === 'document-ai' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl">
+                {/* Left side: Document Editor Simulation */}
+                <div className="lg:col-span-7 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                      Contract Document Simulator
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-full px-3 py-1 font-mono">
+                        {contractFileName}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="relative border border-black/10 dark:border-white/10 rounded-3xl bg-slate-900/40 dark:bg-slate-950/40 p-6 shadow-inner font-mono text-xs leading-relaxed text-slate-300 h-[500px] overflow-y-auto no-scrollbar">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 opacity-60" />
+                    
+                    <textarea
+                      value={documentText}
+                      onChange={(e) => setDocumentText(e.target.value)}
+                      className="w-full h-full bg-transparent border-none outline-none focus:ring-0 text-xs text-slate-300 dark:text-slate-200 resize-none font-mono font-medium leading-6 no-scrollbar"
+                      placeholder="Paste your mining license contract or petroleum agreement text dump here..."
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <Button
+                      onClick={scanContractWithAi}
+                      disabled={isScanningContract || !documentText.trim()}
+                      className="flex-1 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black uppercase tracking-widest text-[10px] h-12 rounded-2xl shadow-xl transition-all relative overflow-hidden group border-none"
+                    >
+                      {isScanningContract ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                          Parsing Clauses...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center gap-2">
+                          <LucideBrain className="w-4 h-4 text-slate-950" />
+                          Scan Contract with Document AI
+                        </span>
+                      )}
+                    </Button>
+                    
+                    <Button
+                      onClick={() => {
+                        setDocumentText(defaultContractTemplate);
+                        setScannedContract(null);
+                        setScannedContractError(null);
+                      }}
+                      disabled={isScanningContract}
+                      className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-slate-400 dark:text-slate-300 hover:bg-black/10 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white font-black uppercase tracking-widest text-[10px] h-12 px-6 rounded-2xl transition-colors shrink-0"
+                    >
+                      Reset Draft
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Right side: Intelligence Hub HUD */}
+                <div className="lg:col-span-5 space-y-6">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    AI Legal Intelligence Hub
+                  </p>
+
+                  {scannedContractError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-2xl flex items-start gap-3">
+                      <LucideAlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Extraction failed</p>
+                        <p className="opacity-80 mt-0.5">{scannedContractError}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!scannedContract && !isScanningContract && !scannedContractError && (
+                    <div className="flex flex-col items-center justify-center text-center p-12 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl h-[450px]">
+                      <div className="p-4 bg-slate-900/10 dark:bg-white/5 rounded-full mb-4">
+                        <LucideUploadCloud className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
+                        Ready for Contract Scanning
+                      </h4>
+                      <p className="text-xs text-slate-500 max-w-[280px]">
+                        Paste or edit the contract text on the left, then click the AI scanner to perform instant compliance extraction.
+                      </p>
+                    </div>
+                  )}
+
+                  {isScanningContract && (
+                    <div className="flex flex-col items-center justify-center text-center p-12 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl h-[450px] relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-b from-amber-500/5 to-transparent animate-pulse" />
+                      <div className="w-16 h-16 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin mb-6" />
+                      <h4 className="text-sm font-black text-amber-500 uppercase tracking-widest mb-1">
+                        Executing OCR & Legal Scan
+                      </h4>
+                      <p className="text-xs text-slate-400 max-w-[280px]">
+                        Analyzing royalty percentages, spatial wildlife restrictions, and financial spending obligations...
+                      </p>
+                    </div>
+                  )}
+
+                  {scannedContract && !isScanningContract && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-6"
+                    >
+                      <div className="flex items-center justify-between pb-4 border-b border-black/5 dark:border-white/5">
+                        <div className="flex items-center gap-2">
+                          <LucideShieldCheck className="w-5 h-5 text-emerald-500 animate-bounce" />
+                          <span className="text-sm font-black uppercase text-slate-900 dark:text-white tracking-wider">
+                            Legal Extraction Verified
+                          </span>
+                        </div>
+                        <Badge className="bg-amber-500/10 text-amber-500 border-none text-[8px] font-black uppercase px-2 py-0.5">
+                          {scannedContract.provider || 'AI Extraction'}
+                        </Badge>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Contract Reference ID
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 select-all font-mono">
+                            {scannedContract.license_id_reference || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                              Fiscal Royalty Rate
+                            </p>
+                            <p className="text-xs font-black text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                              {scannedContract.royalty_rate || 'N/A'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                              ESG Rating / Status
+                            </p>
+                            <div className="flex items-center gap-2 bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  scannedContract.environmental_rating === 'A'
+                                    ? 'bg-emerald-500'
+                                    : scannedContract.environmental_rating === 'B'
+                                      ? 'bg-yellow-500'
+                                      : scannedContract.environmental_rating === 'C'
+                                        ? 'bg-orange-500'
+                                        : 'bg-red-500 animate-ping'
+                                }`}
+                              />
+                              <span className="text-xs font-black text-slate-900 dark:text-white">
+                                {scannedContract.environmental_rating || 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            ESG Rationale
+                          </p>
+                          <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 font-medium">
+                            {scannedContract.environmental_rationale || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Annual Expenditure Target
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2 font-mono">
+                            {scannedContract.annual_work_commitment || 'N/A'}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Local Content Guarantees
+                          </p>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white bg-black/10 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-xl px-3 py-2">
+                            {scannedContract.local_content_requirement || 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div className="grid grid-cols-12 gap-4 sm:gap-8">
@@ -1412,6 +2741,31 @@ Output requirements:
                       </div>
                     </div>
                   </Card>
+
+                  {isEsgRisk && esgZone && (
+                    <Card className="bg-red-500/10 border-red-500/20 rounded-3xl p-6 mb-6 overflow-hidden relative shadow-[0_12px_40px_rgba(239,68,68,0.15)] flex flex-col md:flex-row gap-6 items-center">
+                      <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent pointer-events-none" />
+                      <div className="w-14 h-14 bg-red-500/20 border border-red-500/30 text-red-500 rounded-2xl flex items-center justify-center shrink-0 animate-pulse">
+                        <LucideAlertTriangle className="w-8 h-8" />
+                      </div>
+                      <div className="flex-1 text-center md:text-left">
+                        <Badge className="bg-red-500 hover:bg-red-600 text-white font-black text-[9px] px-2.5 h-5 mb-2 border-none">
+                          {t('חריגת שימור קריטית', 'CRITICAL ENVIRONMENTAL INTERSECTION')}
+                        </Badge>
+                        <h4 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                          {t('הצטלבות עם אזור שימור: ', 'INTERSECTION DETECTED: ') + esgZone.name}
+                        </h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                          {esgZone.description}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-3">
+                        <Badge variant="outline" className="border-red-500/40 text-red-500 font-bold text-[10px] px-3 py-1 bg-red-500/5">
+                          {t('סיכון: גבוה מאוד', 'Risk Level: CRITICAL')}
+                        </Badge>
+                      </div>
+                    </Card>
+                  )}
 
                   {/* General Specs */}
                   <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-4 sm:p-8">
