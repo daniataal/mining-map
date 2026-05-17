@@ -805,6 +805,92 @@ export default function MapComponent({
         [isDark]
     );
 
+    const renderedMarkers = useMemo(() => {
+        if (!onGroundVisible) return null;
+        return mapDisplayData.map((item, index) => {
+            if (item._displayLat == null || item._displayLng == null) return null;
+            const annotation = userAnnotations[item.id] || {};
+            const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
+            const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
+            const isEsgRisk = esgZone !== null;
+            const esgZoneName = esgZone?.name;
+
+            return (
+                <Marker
+                    key={getLicenseRenderKey(item, index)}
+                    position={[item._displayLat, item._displayLng]}
+                    icon={createCustomIcon(color, false, isEsgRisk)}
+                    ref={(el) => {
+                        if (!el) return;
+                        markerRefs.current[item.id] = el;
+                        if (selectedItem?.id === item.id) {
+                            const root = el.getElement();
+                            if (root) root.classList.add(SELECTED_CLASS);
+                        }
+                    }}
+                    eventHandlers={{
+                        click: (e) => {
+                            L.DomEvent.stopPropagation(e);
+                            e.target.openPopup();
+                            onSelectMaritimeVessel(null);
+                            setSelectedItem(item);
+                        },
+                    }}
+                >
+                    <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                        <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                            <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
+                            {item.entitySubtype && (
+                              <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
+                                {item.entitySubtype.replaceAll('_', ' ')}
+                              </p>
+                            )}
+                            {item._wasJittered && (
+                              <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
+                            )}
+                        </div>
+                    </Tooltip>
+                    <Popup className="custom-popup" minWidth={300}>
+                        <PopupForm 
+                          item={item}
+                          annotation={annotation}
+                          updateAnnotation={updateAnnotation}
+                          onDelete={() => deleteLicense(item.id)}
+                          onOpenDossier={() => handleOpenDossier(item)}
+                          isOpen={selectedItem?.id === item.id}
+                          isInDdQueue={isInDdQueue?.(item.id) ?? false}
+                          onAddToDueDiligence={
+                            onAddToDueDiligence
+                              ? () => onAddToDueDiligence(item.id)
+                              : undefined
+                          }
+                          onRemoveFromDueDiligence={
+                            onRemoveFromDueDiligence
+                              ? () => onRemoveFromDueDiligence(item.id)
+                              : undefined
+                          }
+                          isEsgRisk={isEsgRisk}
+                          esgZoneName={esgZoneName}
+                        />
+                    </Popup>
+                </Marker>
+            );
+        });
+    }, [
+        mapDisplayData,
+        userAnnotations,
+        selectedItem,
+        onSelectMaritimeVessel,
+        setSelectedItem,
+        updateAnnotation,
+        deleteLicense,
+        handleOpenDossier,
+        isInDdQueue,
+        onAddToDueDiligence,
+        onRemoveFromDueDiligence,
+        onGroundVisible
+    ]);
+
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
             {licensesFetchPending && (
@@ -1353,89 +1439,7 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
-                    {mapDisplayData.map((item, index) => {
-                        if (item._displayLat == null || item._displayLng == null) return null;
-                        const annotation = userAnnotations[item.id] || {};
-                        const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
-                        const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
-                        const isEsgRisk = esgZone !== null;
-                        const esgZoneName = esgZone?.name;
-
-                        return (
-                            <Marker
-                                key={getLicenseRenderKey(item, index)}
-                                position={[item._displayLat, item._displayLng]}
-                                icon={createCustomIcon(color, false, isEsgRisk)}
-                                ref={(el) => {
-                                    if (!el) return;
-                                    markerRefs.current[item.id] = el;
-                                    // Re-apply the selected class after a re-mount (the
-                                    // ref callback fires every time the marker DOM is
-                                    // rebuilt, e.g. after spiderfy/unspiderfy).
-                                    if (selectedItem?.id === item.id) {
-                                        const root = el.getElement();
-                                        if (root) root.classList.add(SELECTED_CLASS);
-                                    }
-                                }}
-                                eventHandlers={{
-                                    click: (e) => {
-                                        // Stop propagation so the map-level click handler
-                                        // (MapClickHandler → setSelectedItem(null)) does not
-                                        // fire in the same event cycle and cancel the selection
-                                        // that we are about to set.
-                                        L.DomEvent.stopPropagation(e);
-                                        // Open the popup *synchronously* while the marker
-                                        // is still in its spiderfied position. Waiting for
-                                        // a state-driven setTimeout (the previous
-                                        // implementation) let leaflet.markercluster
-                                        // un-spiderfy the stack first, which is why
-                                        // collocated/duplicate-coord points appeared to
-                                        // ignore clicks.
-                                        e.target.openPopup();
-                                        onSelectMaritimeVessel(null);
-                                        setSelectedItem(item);
-                                    },
-                                }}
-                            >
-                                <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-                                    <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                                        <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
-                                        {item.entitySubtype && (
-                                          <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
-                                            {item.entitySubtype.replaceAll('_', ' ')}
-                                          </p>
-                                        )}
-                                        {item._wasJittered && (
-                                          <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
-                                        )}
-                                    </div>
-                                </Tooltip>
-                                <Popup className="custom-popup" minWidth={300}>
-                                    <PopupForm 
-                                      item={item}
-                                      annotation={annotation}
-                                      updateAnnotation={updateAnnotation}
-                                      onDelete={() => deleteLicense(item.id)}
-                                      onOpenDossier={() => handleOpenDossier(item)}
-                                      isOpen={selectedItem?.id === item.id}
-                                      isInDdQueue={isInDdQueue?.(item.id) ?? false}
-                                      onAddToDueDiligence={
-                                        onAddToDueDiligence
-                                          ? () => onAddToDueDiligence(item.id)
-                                          : undefined
-                                      }
-                                      onRemoveFromDueDiligence={
-                                        onRemoveFromDueDiligence
-                                          ? () => onRemoveFromDueDiligence(item.id)
-                                          : undefined
-                                      }
-                                      isEsgRisk={isEsgRisk}
-                                      esgZoneName={esgZoneName}
-                                    />
-                                </Popup>
-                            </Marker>
-                        );
-                    })}
+                    {renderedMarkers}
                 </MarkerClusterGroup>
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (
