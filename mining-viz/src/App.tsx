@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useCallback, startTransition, useRef, lazy, Suspense } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
+import { useState, useMemo, useEffect, useCallback, startTransition, lazy, Suspense } from 'react';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow, MaritimeViewportBounds } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
@@ -38,40 +38,6 @@ const DossierView = lazy(() => import('./components/DossierView'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const DueDiligencePanel = lazy(() => import('./components/DueDiligencePanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
-
-const LICENSE_MAP_BBOX_MAX_LAT_SPAN = 85;
-const LICENSE_MAP_BBOX_MAX_LNG_SPAN = 300;
-
-function licenseViewportUsesBbox(bounds: MaritimeViewportBounds): boolean {
-  const latSpan = bounds.north - bounds.south;
-  const lngSpan = bounds.east - bounds.west;
-  if (!Number.isFinite(latSpan) || !Number.isFinite(lngSpan)) return false;
-  if (latSpan <= 0 || lngSpan <= 0) return false;
-  if (latSpan >= LICENSE_MAP_BBOX_MAX_LAT_SPAN || lngSpan >= LICENSE_MAP_BBOX_MAX_LNG_SPAN) return false;
-  return true;
-}
-
-const LICENSE_VIEWPORT_DEBOUNCE_MS = 1200;
-const LICENSE_VIEWPORT_MIN_CHANGE_FRAC = 0.12;
-
-function licenseViewportChangedEnough(
-  prev: MaritimeViewportBounds,
-  next: MaritimeViewportBounds,
-  minFrac: number,
-): boolean {
-  const prevLat = prev.north - prev.south;
-  const prevLng = prev.east - prev.west;
-  const nextLat = next.north - next.south;
-  const nextLng = next.east - next.west;
-  if (![prevLat, prevLng, nextLat, nextLng].every((x) => Number.isFinite(x) && x > 0)) return true;
-  const latDelta = Math.abs(nextLat - prevLat) / Math.max(prevLat, 1e-9);
-  const lngDelta = Math.abs(nextLng - prevLng) / Math.max(prevLng, 1e-9);
-  const centerLatDelta =
-    Math.abs((next.north + next.south) / 2 - (prev.north + prev.south) / 2) / Math.max(prevLat, 1e-9);
-  const centerLngDelta =
-    Math.abs((next.east + next.west) / 2 - (prev.east + prev.west) / 2) / Math.max(prevLng, 1e-9);
-  return Math.max(latDelta, lngDelta, centerLatDelta, centerLngDelta) >= minFrac;
-}
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -147,45 +113,6 @@ export default function App() {
       : viewMode === 'oil_and_gas'
         ? 'oil_and_gas'
         : undefined;
-  const [licenseViewportDraft, setLicenseViewportDraft] = useState<MaritimeViewportBounds | null>(null);
-  const [licenseViewportDebounced, setLicenseViewportDebounced] = useState<MaritimeViewportBounds | null>(null);
-  const lastCommittedLicenseViewport = useRef<MaritimeViewportBounds | null>(null);
-
-  useEffect(() => {
-    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') {
-      setLicenseViewportDraft(null);
-      setLicenseViewportDebounced(null);
-      lastCommittedLicenseViewport.current = null;
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      if (!licenseViewportDraft) {
-        lastCommittedLicenseViewport.current = null;
-        setLicenseViewportDebounced(null);
-        return;
-      }
-      const prev = lastCommittedLicenseViewport.current;
-      const next = licenseViewportDraft;
-      if (
-        prev &&
-        !licenseViewportChangedEnough(prev, next, LICENSE_VIEWPORT_MIN_CHANGE_FRAC)
-      ) {
-        return;
-      }
-      lastCommittedLicenseViewport.current = next;
-      setLicenseViewportDebounced(next);
-    }, LICENSE_VIEWPORT_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [licenseViewportDraft, viewMode]);
-
-  const licenseBoundsForApi = useMemo(() => {
-    if (viewMode === 'oil_and_gas') return null;
-    if (viewMode !== 'mining') return null;
-    if (!licenseViewportDebounced) return null;
-    if (!licenseViewportUsesBbox(licenseViewportDebounced)) return null;
-    return licenseViewportDebounced;
-  }, [licenseViewportDebounced, viewMode]);
-
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -194,38 +121,16 @@ export default function App() {
   
   // Data Fetching
   const { data: worldCoverage } = useWorldCoverage(true);
-  const licenseFetchCountries = useMemo(
-    () => deriveLicenseFetchCountries(licenseSector, worldCoverage),
-    [licenseSector, worldCoverage],
-  );
   const {
     data: rawData = [],
     isLoading,
     isFetching,
     error: fetchError,
-    stillLoadingCountryCount,
-    failedCountryQueryCount,
-  } = useLicenses(licenseSector, licenseBoundsForApi, licenseFetchCountries);
-  const licensesPartialMapHint = useMemo(() => {
-    if (viewMode === 'oil_and_gas') return null;
-    if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
-    const n = stillLoadingCountryCount;
-    return t(
-      `עדיין נטענות ${n} קבוצות רישיונות…`,
-      `Still loading ${n} ${n === 1 ? 'license request' : 'license requests'}…`,
-    );
-  }, [stillLoadingCountryCount, rawData.length, t, viewMode]);
-  const licenseLoadPartialFailuresHint = useMemo(() => {
-    if (failedCountryQueryCount <= 0 || fetchError) return null;
-    if (rawData.length === 0) return null;
-    const n = failedCountryQueryCount;
-    return t(
-      `${n} קבוצות רישיונות לא נטענו — המפה מציגה את הזמין.`,
-      `${n} license ${n === 1 ? 'request' : 'requests'} could not be loaded — the map shows available data.`,
-    );
-  }, [failedCountryQueryCount, fetchError, rawData.length, t]);
-  const licensesMapSecondaryStatus =
-    [licensesPartialMapHint, licenseLoadPartialFailuresHint].filter(Boolean).join(' \u00b7 ') || null;
+  } = useLicenses(licenseSector);
+  const licensesMapSecondaryStatus = useMemo(() => {
+    if (!isFetching || isLoading || rawData.length === 0) return null;
+    return t('מרענן מאגר רישיונות…', 'Refreshing license bundle…');
+  }, [isFetching, isLoading, rawData.length, t]);
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
@@ -851,8 +756,6 @@ export default function App() {
                     !fetchError
                   }
                   licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
-                  trackLicenseViewport={viewMode === 'mining' || viewMode === 'oil_and_gas'}
-                  onLicenseViewportChange={setLicenseViewportDraft}
                   setSelectedItem={handleSelectItem}
                   handleOpenDossier={handleOpenDossier}
                   mapCenter={mapCenter}

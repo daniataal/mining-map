@@ -311,8 +311,6 @@ interface MapComponentProps {
   /** Optional status line while some country feeds are still loading or failed (non-blocking). */
   licensesSecondaryStatus?: string | null;
   /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
-  trackLicenseViewport?: boolean;
-  onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -454,8 +452,6 @@ export default function MapComponent({
   licensesFetchPending = false,
   licensesRefetching = false,
   licensesSecondaryStatus = null,
-  trackLicenseViewport = false,
-  onLicenseViewportChange,
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
   maritimeMapViewActive = false,
@@ -504,6 +500,7 @@ export default function MapComponent({
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
+    const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
     const handleMaritimeLayerActiveChange = useCallback(
@@ -594,6 +591,11 @@ export default function MapComponent({
         setMaritimeViewport(null);
         setMaritimeAdvancedOpen(false);
     }, [isMaritimeMapView]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setPetroleumDetailZoom(petroleumMapZoom), 400);
+        return () => window.clearTimeout(timer);
+    }, [petroleumMapZoom]);
 
     useEffect(() => {
         if (!isMaritimeLayerEnabled) setMaritimeAdvancedOpen(false);
@@ -1256,12 +1258,6 @@ export default function MapComponent({
                 {isOilAndGasView && onGroundVisible && (
                     <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
                 )}
-                {onLicenseViewportChange && (
-                  <ViewportBoundsTracker
-                    active={trackLicenseViewport}
-                    onBoundsChange={onLicenseViewportChange}
-                  />
-                )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
@@ -1325,13 +1321,20 @@ export default function MapComponent({
                     {isOilAndGasView && onGroundVisible && (
                         <PetroleumMapLayers
                             bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
-                            mapZoom={petroleumMapZoom}
+                            mapZoom={petroleumDetailZoom}
                             enabled={isOilAndGasView && onGroundVisible}
                         />
                     )}
                     {vesselsVisible && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
-                            <FeatureGroup>
+                            <MarkerClusterGroup
+                                chunkedLoading
+                                maxClusterRadius={55}
+                                disableClusteringAtZoom={12}
+                                showCoverageOnHover={false}
+                                spiderfyOnMaxZoom
+                                spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
+                            >
                                 {maritimeVisibleVessels.map((vessel) => (
                                     <Marker
                                         key={vessel.id}
@@ -1359,7 +1362,7 @@ export default function MapComponent({
                                         </Tooltip>
                                     </Marker>
                                 ))}
-                            </FeatureGroup>
+                            </MarkerClusterGroup>
                         </LayersControl.Overlay>
                     )}
                 </MapBasemapLayers>
