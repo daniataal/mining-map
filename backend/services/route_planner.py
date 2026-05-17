@@ -582,6 +582,14 @@ def _plan_direct_inland_route(
     return [leg], []
 
 
+def _hub_label_for_point(point: RoutePoint) -> Optional[str]:
+    """Short label for map hub markers (ports, airports, rail terminals)."""
+    kind = (point.kind or "").lower()
+    if kind in {"port", "airport", "rail_hub"}:
+        return point.name
+    return None
+
+
 def _legs_to_payload(legs: list[PlannedLeg]) -> list[dict[str, Any]]:
     return [
         {
@@ -595,6 +603,8 @@ def _legs_to_payload(legs: list[PlannedLeg]) -> list[dict[str, Any]]:
             "geometry_source": leg.geometry_source,
             "notes": leg.notes,
             "path": [[round(lat, 5), round(lng, 5)] for lat, lng in leg.path],
+            "hub_label": _hub_label_for_point(leg.to_point),
+            "map_label": _hub_label_for_point(leg.to_point),
             **leg.cost_overrides,
         }
         for leg in legs

@@ -4,6 +4,7 @@ import type {
   DueDiligenceCheck,
   DueDiligenceRecommendation,
   DueDiligenceStatus,
+  RouteLeg,
   RouteMapOverlay,
   RoutePlanOption,
   RoutePlannerApiResponse,
@@ -27,6 +28,8 @@ interface BackendRouteLeg {
   method?: BackendMethod | string;
   distance_km?: number;
   path?: [number, number][];
+  hub_label?: string;
+  map_label?: string;
 }
 
 interface BackendRoutePlanSlice {
@@ -133,14 +136,35 @@ function estimateCargoValueUsd(productType: string, quantityTons: number): numbe
   return estimateCargoValue(productType, quantityTons).valueUsd;
 }
 
-function pointOrNull(point: BackendRoutePoint | undefined): { lat: number; lng: number; name: string } | null {
+function pointOrNull(point: BackendRoutePoint | undefined): { lat: number; lng: number; name: string; kind?: string } | null {
   if (!point || point.lat == null || point.lng == null) return null;
   if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
   return {
     lat: point.lat,
     lng: point.lng,
     name: point.name || point.kind || 'Route point',
+    kind: point.kind,
   };
+}
+
+function hubLabelFromPoint(point: BackendRoutePoint | undefined, explicit?: string): string | undefined {
+  if (explicit?.trim()) return explicit.trim();
+  if (!point?.name) return undefined;
+  const kind = (point.kind || '').toLowerCase();
+  if (kind === 'port' || kind === 'airport' || kind === 'rail_hub') return point.name;
+  return undefined;
+}
+
+function legDisplayLabel(method: string | undefined, fromName: string, toName: string, hubLabel?: string): string {
+  const m = titleCase(method || 'transport');
+  if (hubLabel) {
+    const kind = (method || '').toLowerCase();
+    if (kind === 'sea') return `Sea leg · ${hubLabel}`;
+    if (kind === 'air') return `Air leg · ${hubLabel}`;
+    if (kind === 'rail') return `Rail · ${hubLabel}`;
+    if (kind === 'road') return `Road to ${hubLabel}`;
+  }
+  return `${m}: ${fromName} → ${toName}`;
 }
 
 function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
@@ -158,13 +182,18 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
             Number.isFinite(point[1]),
           )
         : [];
+      const hubLabel = hubLabelFromPoint(leg.to, leg.hub_label ?? leg.map_label);
       return {
         path: backendPath.length > 1 ? backendPath : ([[from.lat, from.lng], [to.lat, to.lng]] as [number, number][]),
         method: leg.method,
-        label: `${titleCase(leg.method || 'transport')}: ${from.name} → ${to.name}`,
+        fromName: from.name,
+        toName: to.name,
+        toKind: to.kind,
+        hubLabel,
+        label: legDisplayLabel(leg.method, from.name, to.name, hubLabel),
       };
     })
-    .filter((leg): leg is { path: [number, number][]; method?: string; label?: string } => Boolean(leg));
+    .filter((leg): leg is RouteLeg => Boolean(leg));
 
   const waypoints: RouteMapOverlay['waypoints'] = [];
   const origin = pointOrNull(data.route?.origin ?? legs[0]?.from);

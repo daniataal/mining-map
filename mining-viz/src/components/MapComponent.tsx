@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -30,9 +30,13 @@ import {
   filterVesselsByViewport,
   sortVesselsForDisplay,
   VESSEL_SHIP_TYPE_OPTIONS,
+  MARITIME_LEGEND_KEYS,
+  VESSEL_CATEGORY_COLORS,
+  VESSEL_LEGEND_T,
   type VesselFilters,
 } from '../lib/vessels';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
+import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
@@ -41,6 +45,8 @@ import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
+import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
+import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
@@ -71,117 +77,6 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 export { ESG_CONSERVATION_ZONES, getEsgZoneIntersection };
-
-/** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
-type VesselCategoryKey =
-    | 'tanker'
-    | 'cargo'
-    | 'passenger'
-    | 'fishing'
-    | 'tug'
-    | 'service'
-    | 'pleasure'
-    | 'fast'
-    | 'other';
-
-const VESSEL_CATEGORY_COLORS: Record<VesselCategoryKey, string> = {
-    tanker: '#fbbf24',
-    cargo: '#38bdf8',
-    passenger: '#34d399',
-    fishing: '#2dd4bf',
-    tug: '#a78bfa',
-    service: '#94a3b8',
-    pleasure: '#f472b6',
-    fast: '#fb923c',
-    other: '#64748b',
-};
-
-function vesselCategoryFromTypeCode(code: number | null | undefined): VesselCategoryKey | null {
-    if (code == null || !Number.isFinite(code)) return null;
-    const c = Math.floor(code);
-    if (c === 0) return 'other';
-    if (c >= 80 && c <= 89) return 'tanker';
-    if (c >= 70 && c <= 79) return 'cargo';
-    if (c >= 60 && c <= 69) return 'passenger';
-    if (c === 30) return 'fishing';
-    if (c === 31 || c === 32 || c === 52) return 'tug';
-    if ([33, 34, 35, 50, 51, 53, 54, 55, 58, 59].includes(c)) return 'service';
-    if (c === 36 || c === 37) return 'pleasure';
-    if ((c >= 40 && c <= 49) || (c >= 20 && c <= 29)) return 'fast';
-    if (c >= 90 && c <= 99) return 'other';
-    return null;
-}
-
-function vesselCategoryFromLabel(label: string | null | undefined): VesselCategoryKey | null {
-    if (!label) return null;
-    const s = label.toLowerCase();
-    if (s.includes('tank')) return 'tanker';
-    if (s.includes('cargo') || s.includes('container') || s.includes('bulk') || s.includes('carrier')) return 'cargo';
-    if (s.includes('passenger') || s.includes('cruise')) return 'passenger';
-    if (s.includes('fish')) return 'fishing';
-    if (s.includes('tug') || s.includes('tow')) return 'tug';
-    if (
-        s.includes('pilot') ||
-        s.includes('search') ||
-        s.includes('sar') ||
-        s.includes('rescue') ||
-        s.includes('military') ||
-        s.includes('law') ||
-        s.includes('dredg') ||
-        s.includes('port tender') ||
-        s.includes('anti-pollution')
-    )
-        return 'service';
-    if (s.includes('pleasure') || s.includes('sailing') || s.includes('yacht')) return 'pleasure';
-    if (s.includes('high speed') || s.includes('hsc') || s.includes('wig')) return 'fast';
-    return null;
-}
-
-function getVesselMarkerColor(vessel: MaritimeVessel): string {
-    const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
-    if (fromCode) return VESSEL_CATEGORY_COLORS[fromCode];
-    const fromLabel = vesselCategoryFromLabel(vessel.ship_type_label);
-    if (fromLabel) return VESSEL_CATEGORY_COLORS[fromLabel];
-    return VESSEL_CATEGORY_COLORS.other;
-}
-
-/** Prefer true heading; else course over ground; invalid AIS (511) ignored. */
-function getVesselHeadingDegrees(vessel: MaritimeVessel): number {
-    const th = vessel.true_heading;
-    if (th != null && Number.isFinite(th) && th !== 511 && th >= 0 && th < 360) return th;
-    const cog = vessel.course_over_ground;
-    if (cog != null && Number.isFinite(cog)) {
-        let c = cog % 360;
-        if (c < 0) c += 360;
-        if (Math.abs(c - 360) < 1e-6 || c === 360) return 0;
-        return c;
-    }
-    return 0;
-}
-
-const MARITIME_LEGEND_KEYS: VesselCategoryKey[] = [
-    'tanker',
-    'cargo',
-    'passenger',
-    'fishing',
-    'tug',
-    'service',
-    'pleasure',
-    'fast',
-    'other',
-];
-
-const VESSEL_LEGEND_T: Record<VesselCategoryKey, [string, string]> = {
-    tanker: ['מכלית', 'Tanker'],
-    cargo: ['מטען', 'Cargo'],
-    passenger: ['נוסעים', 'Passenger'],
-    fishing: ['דיג', 'Fishing'],
-    tug: ['גוררת', 'Tug'],
-    service: ['שירות', 'Service'],
-    pleasure: ['שייט', 'Pleasure'],
-    fast: ['מהיר', 'Fast'],
-    other: ['אחר/לא ידוע', 'Other'],
-};
 
 const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean) => {
     const isGold = color === '#FFD700';
@@ -215,25 +110,6 @@ const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean
     });
 };
 
-const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean, mapZoom = 6) => {
-    const heading = getVesselHeadingDegrees(vessel);
-    const color = getVesselMarkerColor(vessel);
-    const baseDim = mapZoom <= 4 ? 20 : mapZoom <= 6 ? 17 : 14;
-    const dim = isSelected ? baseDim + 6 : baseDim;
-    const half = dim / 2;
-    const border = isSelected ? '1.5px solid rgba(255,255,255,0.95)' : '1px solid rgba(255,255,255,0.75)';
-    const shadow = isSelected
-        ? '0 0 10px rgba(34,211,238,0.45)'
-        : '0 0 4px rgba(0,0,0,0.65)';
-    const inner = `<div class="vessel-marker-inner" style="width:${dim}px;height:${dim}px;background:${color};border:${border};box-shadow:${shadow};clip-path:polygon(50% 0%,100% 100%,50% 82%,0% 100%);transform:rotate(${heading}deg);"></div>`;
-    return new L.DivIcon({
-        className: `vessel-marker${isSelected ? ' is-selected' : ''}`,
-        html: inner,
-        iconSize: [dim, dim],
-        iconAnchor: [half, half],
-        popupAnchor: [0, -half],
-    });
-};
 
 // Applied to the marker root (.leaflet-marker-icon) when an item is the
 // active selection. We toggle a class instead of calling setIcon() because
@@ -394,12 +270,15 @@ const RoutePlannerBoundsEffect = ({
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
+    debounceMs = 0,
 }: {
     active: boolean;
     onBoundsChange: (bbox: MaritimeViewportBounds | null) => void;
+    debounceMs?: number;
 }) => {
     const map = useMap();
     const lastSignatureRef = useRef<string>('');
+    const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const emitBounds = useCallback(() => {
         if (!active) return;
@@ -417,8 +296,21 @@ const ViewportBoundsTracker = ({
         onBoundsChange(nextBounds);
     }, [active, map, onBoundsChange]);
 
+    const scheduleEmitBounds = useCallback(() => {
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        if (debounceMs <= 0) {
+            emitBounds();
+            return;
+        }
+        debounceTimerRef.current = setTimeout(() => {
+            debounceTimerRef.current = null;
+            emitBounds();
+        }, debounceMs);
+    }, [debounceMs, emitBounds]);
+
     useEffect(() => {
         if (!active) {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
             lastSignatureRef.current = '';
             onBoundsChange(null);
             return;
@@ -426,9 +318,16 @@ const ViewportBoundsTracker = ({
         emitBounds();
     }, [active, emitBounds, onBoundsChange]);
 
+    useEffect(
+        () => () => {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        },
+        [],
+    );
+
     useMapEvents({
-        moveend: emitBounds,
-        zoomend: emitBounds,
+        moveend: scheduleEmitBounds,
+        zoomend: scheduleEmitBounds,
     });
 
     return null;
@@ -871,37 +770,32 @@ export default function MapComponent({
         onGroundVisible
     ]);
 
-    const renderedVesselMarkers = useMemo(
-        () =>
-            maritimeVessels.map((vessel) => (
-                <Marker
-                    key={vessel.id}
-                    position={[vessel.lat, vessel.lng]}
-                    icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id, maritimeMapZoom)}
-                    eventHandlers={{
-                        click: (e) => {
-                            L.DomEvent.stopPropagation(e);
-                            setSelectedItem(null);
-                            onSelectMaritimeVessel(vessel);
-                        },
-                    }}
-                >
-                    <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                        <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                            <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
-                                {vessel.vessel_name}
-                            </span>
-                            <p className="text-[9px] text-slate-400">
-                                {[vessel.ship_type_label, vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null, vessel.nearest_port?.name]
-                                    .filter(Boolean)
-                                    .join(' · ')}
-                            </p>
-                        </div>
-                    </Tooltip>
-                </Marker>
-            )),
-        [maritimeVessels, maritimeMapZoom, onSelectMaritimeVessel, selectedMaritimeVessel?.id, setSelectedItem],
+    const handleMaritimeVesselClick = useCallback(
+        (vessel: MaritimeVessel) => {
+            setSelectedItem(null);
+            onSelectMaritimeVessel(vessel);
+        },
+        [onSelectMaritimeVessel, setSelectedItem],
     );
+
+    const formatMaritimeVesselTooltip = useCallback((vessel: MaritimeVessel) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md';
+        const title = document.createElement('span');
+        title.className = 'text-[10px] font-black uppercase text-cyan-300 tracking-widest';
+        title.textContent = vessel.vessel_name;
+        const meta = document.createElement('p');
+        meta.className = 'text-[9px] text-slate-400';
+        meta.textContent = [
+            vessel.ship_type_label,
+            vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null,
+            vessel.nearest_port?.name,
+        ]
+            .filter(Boolean)
+            .join(' · ');
+        wrap.append(title, meta);
+        return wrap;
+    }, []);
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
@@ -966,7 +860,9 @@ export default function MapComponent({
                     <div className="space-y-3 px-3.5 pb-3.5 pt-3">
                         <Button
                             type="button"
-                            onClick={() => setIsMaritimeLayerEnabled((current) => !current)}
+                            onClick={() => {
+                                startTransition(() => setIsMaritimeLayerEnabled((current) => !current));
+                            }}
                             className={`h-10 w-full rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${
                                 isMaritimeLayerEnabled
                                     ? 'border border-black/10 bg-slate-900 text-white hover:bg-slate-800 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100'
@@ -1298,7 +1194,7 @@ export default function MapComponent({
                       onSelectMaritimeVessel(null);
                     }}
                 />
-                <ViewportBoundsTracker active={isMaritimeMapView} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker active={isMaritimeMapView} debounceMs={50} onBoundsChange={setMaritimeViewport} />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1388,7 +1284,15 @@ export default function MapComponent({
                     )}
                     {vesselsVisible && isMaritimeLayerEnabled && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
-                            <LayerGroup>{renderedVesselMarkers}</LayerGroup>
+                            <LayerGroup>
+                                <CanvasVesselMarkers
+                                    vessels={maritimeVessels}
+                                    mapZoom={maritimeMapZoom}
+                                    selectedId={selectedMaritimeVessel?.id ?? null}
+                                    onVesselClick={handleMaritimeVesselClick}
+                                    formatTooltip={formatMaritimeVesselTooltip}
+                                />
+                            </LayerGroup>
                         </LayersControl.Overlay>
                     )}
                 </MapBasemapLayers>
@@ -1409,68 +1313,12 @@ export default function MapComponent({
                 </MarkerClusterGroup>
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (
-                  <>
-                    {routePlannerOverlay.legs.map((leg, idx) => {
-                      const method = (leg.method || '').toLowerCase();
-                      const color =
-                        method === 'sea' ? '#38bdf8' :
-                        method === 'air' ? '#a78bfa' :
-                        method === 'rail' ? '#22c55e' :
-                        method === 'pipeline' ? '#f97316' :
-                        '#f59e0b';
-                      const dashArray =
-                        method === 'sea' ? '14 12' :
-                        method === 'air' ? '4 12' :
-                        method === 'rail' ? '10 8' :
-                        undefined;
-                      return Array.isArray(leg.path) && leg.path.length > 1 ? (
-                        <Polyline
-                          key={`rp-leg-${idx}`}
-                          positions={leg.path}
-                          pathOptions={{
-                            weight: method === 'sea' ? 4 : 5,
-                            color,
-                            opacity: 0.9,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                            ...(dashArray ? ({ dashArray } as const) : {}),
-                          }}
-                        >
-                          {leg.label && (
-                            <Tooltip direction="top" opacity={1}>
-                              <span className="text-[11px] font-bold text-slate-900">{leg.label}</span>
-                            </Tooltip>
-                          )}
-                        </Polyline>
-                      ) : null;
-                    })}
-                    {routePlannerOverlay.waypoints.map((wp, i) => {
-                      let fill = '#22c55e';
-                      if (wp.role === 'transit') fill = '#38bdf8';
-                      if (wp.role === 'destination') fill = '#f43f5e';
-                      const r =
-                        wp.role === 'destination' ? 14 : wp.role === 'origin' ? 13 : 10;
-                      return (
-                        <CircleMarker
-                          key={`rp-wp-${i}-${wp.role}`}
-                          center={[wp.lat, wp.lng]}
-                          radius={r}
-                          pathOptions={{
-                            fillColor: fill,
-                            color: 'rgba(255,255,255,0.9)',
-                            weight: 2,
-                            fillOpacity: 0.9,
-                          }}
-                        >
-                          <Tooltip direction="top" offset={[0, -12]} opacity={1}>
-                            <span className="text-[11px] font-bold text-slate-900">{t(wp.label[0], wp.label[1])}</span>
-                          </Tooltip>
-                        </CircleMarker>
-                      );
-                    })}
-                  </>
+                  <RoutePlannerMapLayers overlay={routePlannerOverlay} />
                 )}
             </MapContainer>
+            {isRoutePlannerView && routePlannerOverlay && routePlannerOverlay.legs.length > 0 && (
+              <RouteLegend className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,240px)]" />
+            )}
         </div>
     );
 }

@@ -2,6 +2,8 @@ export * from './types';
 export * from './filters';
 export * from './normalize';
 export * from './viewportFilter';
+export * from './vesselMarkerStyle';
+export { CanvasVesselLayer } from './canvasVesselLayer';
 export * from './maritimeSnapshotCache';
 export {
   useMaritimeVessels,

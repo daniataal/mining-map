@@ -9,6 +9,8 @@ import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/select';
 import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
+import RouteLegend from './RouteLegend';
+import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
 
 function fmtUsd(value: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
@@ -109,6 +111,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   }, [allLicenses]);
 
   const displayBreakdown = activePlan?.breakdown ?? result?.breakdown ?? [];
+  const routeLegs = activePlan?.map.legs ?? result?.map.legs ?? [];
   const totalUsd = useMemo(
     () => displayBreakdown.reduce((s, r) => s + r.amountUsd, 0),
     [displayBreakdown],
@@ -516,6 +519,41 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
                     'Each option is one sequential corridor (ground/rail + sea or ground + air). The map shows only the selected plan.',
                   )}
                 </p>
+              </div>
+            )}
+
+            {routeLegs.length > 0 && (
+              <div className="rounded-2xl border border-black/10 dark:border-white/10 overflow-hidden">
+                <div className="px-4 py-3 border-b border-black/5 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.02] flex flex-wrap items-center justify-between gap-3">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {t('מקטעי מסלול', 'Route legs')}
+                  </h4>
+                  <RouteLegend compact className="pointer-events-auto border-0 bg-transparent shadow-none p-0 max-w-none" />
+                </div>
+                <ul className="divide-y divide-black/5 dark:divide-white/10">
+                  {routeLegs.map((leg, index) => {
+                    const style = getRouteMethodStyle(leg.method);
+                    const [methodHe, methodEn] = legMethodLabel(leg.method);
+                    return (
+                      <li key={`leg-${index}-${leg.method}`} className="px-4 py-3 flex gap-3 items-start">
+                        <span className="text-xl shrink-0 leading-none" aria-hidden>{style.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-900 dark:text-white">
+                            {t(methodHe, methodEn)}
+                            {leg.hubLabel && (
+                              <span className="ml-1.5 text-[10px] font-semibold text-slate-500">
+                                · {leg.hubLabel}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                            {leg.label || (leg.fromName && leg.toName ? `${leg.fromName} → ${leg.toName}` : '')}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
 

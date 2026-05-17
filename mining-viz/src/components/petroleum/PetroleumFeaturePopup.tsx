@@ -60,6 +60,38 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ExploringCompaniesSection({
+  label,
+  companies,
+  unknownHint,
+}: {
+  label: string;
+  companies: string[];
+  unknownHint: string;
+}) {
+  return (
+    <div className="mb-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+        {label}
+      </p>
+      {companies.length > 0 ? (
+        <ul className="space-y-1">
+          {companies.map((company) => (
+            <li
+              key={company}
+              className="text-[12px] font-medium text-slate-100 leading-snug break-words"
+            >
+              {company}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12px] text-slate-400 italic">{unknownHint}</p>
+      )}
+    </div>
+  );
+}
+
 export default function PetroleumFeaturePopup({
   layerId,
   properties,
@@ -69,12 +101,17 @@ export default function PetroleumFeaturePopup({
   const model = buildPetroleumFeatureViewModel(properties, layerId);
   const accent = LAYER_ACCENT[layerId];
   const layerLabel = petroleumLayerTypeLabel(layerId);
+  const showExploringSection =
+    layerId === 'exploration' || layerId === 'production' || layerId === 'bid_rounds';
+  const companiesUnknownHint = model.sourceUrl
+    ? t('לא ידוע — ראה מקור', 'Unknown — see source')
+    : t('לא ידוע', 'Unknown');
 
   const detailRows: { label: string; value: string }[] = [];
   if (model.facilityType && model.facilityType !== layerLabel) {
     detailRows.push({ label: t('סוג', 'Type'), value: model.facilityType });
   }
-  if (model.operator) {
+  if (model.operator && !showExploringSection) {
     detailRows.push({ label: t('מפעיל', 'Operator'), value: model.operator });
   }
   if (model.country) {
@@ -95,6 +132,11 @@ export default function PetroleumFeaturePopup({
   for (const row of model.extraRows) {
     detailRows.push(row);
   }
+
+  const sourceLinkLabel =
+    model.sourceLabel && model.sourceUrl && model.sourceLabel !== model.sourceUrl
+      ? model.sourceLabel
+      : t('מקור חיצוני', 'View source');
 
   return (
     <article
@@ -126,6 +168,14 @@ export default function PetroleumFeaturePopup({
         <p className="mb-3 text-[11px] leading-relaxed text-slate-400 break-words">{model.description}</p>
       )}
 
+      {showExploringSection && (
+        <ExploringCompaniesSection
+          label={t('חברות חוקרות', 'Exploring companies')}
+          companies={model.exploringCompanies}
+          unknownHint={companiesUnknownHint}
+        />
+      )}
+
       {detailRows.length > 0 && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
           {detailRows.map((row) => (
@@ -148,10 +198,10 @@ export default function PetroleumFeaturePopup({
             href={model.sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 break-all"
           >
             <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t('מקור חיצוני', 'View source')}
+            {sourceLinkLabel}
           </a>
         )}
         <p className="text-[9px] uppercase tracking-wide text-slate-600">
