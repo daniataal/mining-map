@@ -107,6 +107,7 @@ interface DossierViewProps {
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
+  onPlanRoute?: (item: MiningLicense) => void;
 }
 
 const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
@@ -157,6 +158,7 @@ export default function DossierView({
   isInDdQueue = false,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  onPlanRoute,
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
@@ -1060,6 +1062,14 @@ Output requirements:
                     onRemove={onRemoveFromDueDiligence}
                   />
                 </div>
+              )}
+              {onPlanRoute && item && (
+                <Button
+                  onClick={() => onPlanRoute(item)}
+                  className="h-10 text-[10px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-600 text-slate-950 px-3 sm:px-6 flex items-center gap-2 shadow-lg"
+                >
+                  📍 {t('תכנן מסלול', 'Plan Route')}
+                </Button>
               )}
               <Button
                 variant="outline"

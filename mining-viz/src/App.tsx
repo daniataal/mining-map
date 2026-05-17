@@ -941,6 +941,15 @@ export default function App() {
           onRemoveFromDueDiligence={
             dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
           }
+          onPlanRoute={(licenseItem) => {
+            routePlanner.prefillSupplier(
+              licenseItem.lat ?? 0,
+              licenseItem.lng ?? 0,
+              `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
+            );
+            setIsDossierOpen(false);
+            setViewMode('route_planner');
+          }}
         />
 
         <BulkImportLicensesModal

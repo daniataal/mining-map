@@ -1486,6 +1486,31 @@ def _bootstrap_open_data():
         except Exception as exc:
             print(f"[OpenData] Oil trade seeding skipped: {exc}")
 
+        # ── OPEC / Persian Gulf national oil companies & major fields ─────────
+        try:
+            try:
+                from backend.services.ingest.opec_gulf_sync import sync_opec_gulf_data
+            except ImportError:
+                from services.ingest.opec_gulf_sync import sync_opec_gulf_data
+
+            opec_conn = get_db_connection()
+            try:
+                opec_summary = sync_opec_gulf_data(opec_conn)
+                print(
+                    f"[OPEC] Persian Gulf / OPEC sync complete — "
+                    f"{opec_summary.get('entities_written', 0)} entities upserted, "
+                    f"{opec_summary.get('eia_countries_enriched', 0)} countries enriched with live EIA data."
+                )
+                if opec_summary.get("entities_written", 0) > 0:
+                    try:
+                        cache.delete_pattern("licenses:*")
+                    except Exception:
+                        pass
+            finally:
+                opec_conn.close()
+        except Exception as exc:
+            print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
+
         try:
             try:
                 from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
