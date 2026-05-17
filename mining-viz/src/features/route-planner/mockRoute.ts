@@ -94,17 +94,21 @@ function buildDemoMap(
       {
         path: interpolateLeg([supplier.lat, supplier.lng], [exportPort.lat, exportPort.lng], 10),
         method: inland,
-        label: `Road: supplier → ${exportPort.name}`,
+        label: `Road to port: ${exportPort.name}`,
+        toName: exportPort.name,
+        toKind: 'port',
+        hubLabel: exportPort.name,
       },
       {
         path: buildSeaCorridorPath(exportPort, importCoast),
         method: 'sea',
-        label: `Sea: ${exportPort.name} → import coast`,
+        label: `Sea leg: ${exportPort.name} → import coast`,
+        toKind: 'port',
       },
       {
         path: interpolateLeg([importCoast.lat, importCoast.lng], [buyer.lat, buyer.lng], 8),
         method: inland,
-        label: `Road: import coast → buyer`,
+        label: 'Road: import coast → buyer',
       },
     );
     transitWaypoints.push({

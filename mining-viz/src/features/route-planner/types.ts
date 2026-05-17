@@ -12,6 +12,12 @@ export interface RouteLeg {
   path: [number, number][];
   method?: 'sea' | 'road' | 'rail' | 'air' | 'pipeline' | string;
   label?: string;
+  fromName?: string;
+  toName?: string;
+  /** Hub kind at leg end (port, airport, rail_hub, …) from API. */
+  toKind?: string;
+  /** Short hub name for map labels (export port, airport, rail terminal). */
+  hubLabel?: string;
 }
 
 export interface CostLineItem {
