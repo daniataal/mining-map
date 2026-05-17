@@ -7,6 +7,7 @@ from backend.services.maritime_intel import (
     _build_ais_subscription_plan,
     _regions_for_worker_watch_mode,
     AISSTREAM_WATCH_REGIONS,
+    PERSIAN_GULF_CORE_BBOX,
     _build_stored_feed_response,
     _parse_datetime,
     _normalize_requested_bbox,
@@ -17,6 +18,7 @@ from backend.services.maritime_intel import (
     filter_maritime_rows_by_bbox,
     haversine_km,
     match_destination_to_port,
+    merge_maritime_vessel_feeds,
     parse_unlocode_coordinates,
     petroleum_vessel_priority,
 )
@@ -77,6 +79,45 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertIn("west_africa", region_ids)
         self.assertIn("south_africa_indian", region_ids)
         self.assertIn("east_africa_arabian_sea", region_ids)
+
+    def test_regions_for_worker_watch_mode_always_includes_persian_gulf(self):
+        regions = _regions_for_worker_watch_mode("rotating")
+        region_ids = {region["id"] for region in regions}
+        self.assertIn("persian_gulf", region_ids)
+        self.assertIn("malacca", region_ids)
+
+    def test_persian_gulf_region_covers_user_viewport(self):
+        region = next(item for item in AISSTREAM_WATCH_REGIONS if item["id"] == "persian_gulf")
+        south, west, north, east = region["bbox"]
+        self.assertLessEqual(south, 24.0)
+        self.assertLessEqual(west, 48.0)
+        self.assertGreaterEqual(north, 30.0)
+        self.assertGreaterEqual(east, 58.0)
+        self.assertEqual(PERSIAN_GULF_CORE_BBOX, region["bbox"])
+
+    def test_merge_maritime_vessel_feeds_keeps_freshest_position(self):
+        merged = merge_maritime_vessel_feeds(
+            [
+                {
+                    "vessels": [
+                        {"mmsi": "1", "lat": 25.0, "lng": 52.0, "observed_at": "2026-05-17T10:00:00+00:00"},
+                    ],
+                    "live_positions_enabled": True,
+                },
+                {
+                    "vessels": [
+                        {"mmsi": "1", "lat": 26.0, "lng": 53.0, "observed_at": "2026-05-17T11:00:00+00:00"},
+                        {"mmsi": "2", "lat": 27.0, "lng": 54.0, "observed_at": "2026-05-17T11:00:00+00:00"},
+                    ],
+                    "live_positions_enabled": True,
+                },
+            ],
+            max_vessels=10,
+        )
+        self.assertEqual(merged["returned_count"], 2)
+        by_mmsi = {item["mmsi"]: item for item in merged["vessels"]}
+        self.assertAlmostEqual(by_mmsi["1"]["lat"], 26.0)
+        self.assertAlmostEqual(by_mmsi["2"]["lng"], 54.0)
 
     def test_ship_scope_does_not_exclude_non_tankers(self):
         self.assertTrue(_ship_matches_scope("Tanker", "oil_tankers"))
