@@ -13,6 +13,7 @@ from backend.services.maritime_intel import (
     haversine_km,
     match_destination_to_port,
     parse_unlocode_coordinates,
+    petroleum_vessel_priority,
 )
 
 
@@ -50,10 +51,14 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertGreaterEqual(len(plan["boxes"]), 1)
         self.assertGreaterEqual(len(plan["region_labels"]), 1)
 
-    def test_ship_scope_matches_tankers_only_by_default(self):
+    def test_ship_scope_does_not_exclude_non_tankers(self):
         self.assertTrue(_ship_matches_scope("Tanker", "oil_tankers"))
-        self.assertFalse(_ship_matches_scope("Cargo", "oil_tankers"))
+        self.assertTrue(_ship_matches_scope("Cargo", "oil_tankers"))
         self.assertTrue(_ship_matches_scope("Cargo", "all_vessels"))
+
+    def test_petroleum_vessel_priority_ranks_tankers_highest(self):
+        self.assertGreater(petroleum_vessel_priority(82, "Tanker"), petroleum_vessel_priority(75, "Cargo"))
+        self.assertGreater(petroleum_vessel_priority(None, "LNG Carrier"), petroleum_vessel_priority(30, "Fishing"))
 
     def test_parse_datetime_accepts_trailing_utc_suffix(self):
         parsed = _parse_datetime("2026-05-13 11:42:00 +0000 UTC")

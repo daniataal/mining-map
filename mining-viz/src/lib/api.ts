@@ -21,6 +21,7 @@ import {
   EntityRelationship,
   DdReport,
   LegalEvent,
+  GovProcurementResponse,
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
@@ -175,12 +176,32 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
-/** One country per GET /licenses so the server-side per-country row cap is not shared across a batch. */
+/**
+ * Mining map: one country per request so per-country SQL caps are not shared.
+ * Oil & gas: single bulk preload (sector only) — filters run client-side.
+ */
 const LICENSE_COUNTRY_BATCH_SIZE = 1;
+const OIL_GAS_BULK_PRELOAD = true;
 /** USGS global fallback — excluded from map country fetches (dominates shared SQL limits). */
 const LICENSE_MAP_EXCLUDED_COUNTRIES = new Set(['Global']);
 /** Always requested for map loads when coverage metadata is available. */
 const CSV_PRIORITY_LICENSE_COUNTRIES = ['Ghana', 'South Africa'] as const;
+
+/** OPEC / Persian Gulf — always fetched on the oil & gas map even before world-coverage counts exist. */
+const OPEC_GULF_PRIORITY_LICENSE_COUNTRIES = [
+  'Saudi Arabia',
+  'United Arab Emirates',
+  'Kuwait',
+  'Qatar',
+  'Iran',
+  'Iraq',
+  'Oman',
+  'Bahrain',
+  'Libya',
+  'Algeria',
+  'Nigeria',
+  'Venezuela',
+] as const;
 
 /** Fallback country list used when world-coverage metadata is unavailable. */
 const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
@@ -213,6 +234,12 @@ const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Botswana',
   'United Arab Emirates',
   'Saudi Arabia',
+  'Kuwait',
+  'Qatar',
+  'Iran',
+  'Bahrain',
+  'Libya',
+  'Venezuela',
   'Australia',
   'Canada',
   'Peru',
@@ -258,6 +285,11 @@ export function deriveLicenseFetchCountries(
   sector: 'mining' | 'oil_and_gas' | undefined,
   worldCoverage: WorldCoverageResponse | undefined,
 ): string[] {
+  const priorityCountries =
+    sector === 'oil_and_gas'
+      ? [...OPEC_GULF_PRIORITY_LICENSE_COUNTRIES, ...CSV_PRIORITY_LICENSE_COUNTRIES]
+      : [...CSV_PRIORITY_LICENSE_COUNTRIES];
+
   const rows = worldCoverage?.countries;
   if (rows?.length) {
     const scored: { name: string; w: number }[] = [];
@@ -281,13 +313,23 @@ export function deriveLicenseFetchCountries(
       .map(([name]) => name);
     const merged: string[] = [];
     const seen = new Set<string>();
-    for (const name of [...CSV_PRIORITY_LICENSE_COUNTRIES, ...ranked]) {
+    for (const name of [...priorityCountries, ...ranked]) {
       if (seen.has(name) || LICENSE_MAP_EXCLUDED_COUNTRIES.has(name)) continue;
       seen.add(name);
       merged.push(name);
       if (merged.length >= MAX_LICENSE_FETCH_COUNTRIES) break;
     }
     if (merged.length) return merged;
+  }
+  if (sector === 'oil_and_gas') {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const name of [...priorityCountries, ...FALLBACK_LICENSE_FETCH_COUNTRIES]) {
+      if (seen.has(name) || LICENSE_MAP_EXCLUDED_COUNTRIES.has(name)) continue;
+      seen.add(name);
+      merged.push(name);
+    }
+    return merged;
   }
   return [...FALLBACK_LICENSE_FETCH_COUNTRIES];
 }
@@ -307,7 +349,10 @@ export const useLicenses = (
   viewportBounds?: LicenseViewportBounds | null,
   countries?: string[],
 ): UseLicensesResult => {
+  const bulkOilPreload = sector === 'oil_and_gas' && OIL_GAS_BULK_PRELOAD;
+
   const bboxKey =
+    !bulkOilPreload &&
     viewportBounds &&
     Number.isFinite(viewportBounds.south) &&
     Number.isFinite(viewportBounds.west) &&
@@ -318,44 +363,52 @@ export const useLicenses = (
 
   const sortedCountries = useMemo(
     () =>
-      Array.from(
-        new Set(
-          (countries?.length ? countries : FALLBACK_LICENSE_FETCH_COUNTRIES)
-            .map((c) => c.trim())
-            .filter((c) => c && !LICENSE_MAP_EXCLUDED_COUNTRIES.has(c)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [countries],
+      bulkOilPreload
+        ? []
+        : Array.from(
+            new Set(
+              (countries?.length ? countries : FALLBACK_LICENSE_FETCH_COUNTRIES)
+                .map((c) => c.trim())
+                .filter((c) => c && !LICENSE_MAP_EXCLUDED_COUNTRIES.has(c)),
+            ),
+          ).sort((a, b) => a.localeCompare(b)),
+    [countries, bulkOilPreload],
   );
 
   const countryBatches = useMemo(() => {
+    if (bulkOilPreload) return [[] as string[]];
     const batches: string[][] = [];
     for (let i = 0; i < sortedCountries.length; i += LICENSE_COUNTRY_BATCH_SIZE) {
       batches.push(sortedCountries.slice(i, i + LICENSE_COUNTRY_BATCH_SIZE));
     }
     return batches;
-  }, [sortedCountries]);
+  }, [sortedCountries, bulkOilPreload]);
 
   const licenseQueries = useMemo(
     () =>
       countryBatches.map((batch) => ({
-        queryKey: ['licenses', sector ?? 'all', bboxKey, batch.join('|')] as const,
-        staleTime: 300_000,
+        queryKey: [
+          'licenses',
+          sector ?? 'all',
+          bulkOilPreload ? 'bulk' : bboxKey,
+          batch.length ? batch.join('|') : '__all__',
+        ] as const,
+        staleTime: bulkOilPreload ? 60 * 60_000 : 300_000,
         retry: 1,
         refetchOnWindowFocus: false,
         placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
         queryFn: async ({ signal }: QueryFunctionContext) => {
-          const countriesParam = batch.join(',');
+          const countriesParam = batch.length ? batch.join(',') : undefined;
           const countrySet = new Set(batch.map((b) => b.trim().toLowerCase()));
           try {
-            const useBbox = Boolean(viewportBounds);
+            const useBbox = Boolean(viewportBounds) && !bulkOilPreload;
             const { data } = await apiClient.get<unknown>('/licenses', {
               signal,
               timeout: LICENSE_GET_TIMEOUT_MS,
               params: {
                 prefer_open_data: true,
-                limit: 10000,
-                countries: countriesParam,
+                limit: 15000,
+                ...(countriesParam ? { countries: countriesParam } : {}),
                 ...(sector ? { sector } : {}),
                 ...(useBbox && viewportBounds
                   ? {
@@ -393,7 +446,7 @@ export const useLicenses = (
           }
         },
       })),
-    [countryBatches, sector, bboxKey, viewportBounds],
+    [countryBatches, sector, bboxKey, viewportBounds, bulkOilPreload],
   );
 
   const results = useQueries({ queries: licenseQueries });
@@ -520,6 +573,36 @@ export async function getLegalEvents(
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+/** U.S. federal awards for a licensee from USAspending.gov (no API key). */
+export async function getGovProcurement(
+  entityId: string,
+  entityKind = 'license',
+): Promise<GovProcurementResponse> {
+  const { data } = await apiClient.get<GovProcurementResponse>(
+    `/entities/${encodeURIComponent(entityId)}/gov-procurement`,
+    {
+      params: { entity_kind: entityKind },
+    },
+  );
+  if (!data || typeof data !== 'object') {
+    return {
+      source: 'USAspending.gov',
+      sourceUrl: 'https://www.usaspending.gov',
+      scope: 'U.S. federal awards',
+      limitations: [],
+      warnings: ['Unexpected response from gov-procurement endpoint.'],
+      summary: {
+        totalAwardedUsd: 0,
+        activeContractCount: 0,
+        awardCount: 0,
+        portfolioByCategoryPct: { precious: 0, fuels: 0, strategic: 0, other: 0 },
+      },
+      awards: [],
+    };
+  }
+  return data;
 }
 
 export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {

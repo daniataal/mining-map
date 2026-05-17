@@ -125,6 +125,20 @@ def _load_legal_intel_services():
     )
 
 
+def _load_gov_procurement_services():
+    try:
+        from backend.services.gov_procurement_intel import (
+            collect_gov_procurement,
+            serialize_gov_procurement_response,
+        )
+    except ImportError:
+        from services.gov_procurement_intel import (
+            collect_gov_procurement,
+            serialize_gov_procurement_response,
+        )
+    return collect_gov_procurement, serialize_gov_procurement_response
+
+
 def _serialize_entity_contact(row: dict) -> dict:
     return {
         "id": row.get("id"),
@@ -457,25 +471,39 @@ def _licenses_sector_sql_fragment(normalized_sector: Optional[str]) -> tuple[str
     )
 
 
+_LICENSE_COUNTRY_QUERY_ALIASES: dict[str, tuple[str, ...]] = {
+    "united arab emirates": ("United Arab Emirates", "UAE"),
+    "uae": ("United Arab Emirates", "UAE"),
+}
+
+
 def _licenses_countries_sql_fragment(requested_countries: list[str]) -> tuple[str, list[Any]]:
     """Index-friendly match on ``licenses.country``."""
     if not requested_countries:
         return "TRUE", []
-    
+
     # We use the raw country column to hit the index.
     # We provide both original and lowercase versions to maximize match probability.
-    norms = []
+    norms: list[str] = []
     for c in requested_countries:
-        if not c: continue
+        if not c:
+            continue
         s = str(c).strip()
-        if not s: continue
+        if not s:
+            continue
         norms.append(s)
         if s.lower() != s:
             norms.append(s.lower())
+        for alias in _LICENSE_COUNTRY_QUERY_ALIASES.get(s.lower(), ()):
+            norms.append(alias)
+            if alias.lower() != alias:
+                norms.append(alias.lower())
+
+    norms = list(dict.fromkeys(norms))
 
     if not norms:
         return "TRUE", []
-        
+
     return ("country = ANY(%s) OR LOWER(country) = ANY(%s)", [norms, [n.lower() for n in norms]])
 
 
@@ -1414,6 +1442,36 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
         return False
 
 
+def _sync_opec_gulf_reference() -> None:
+    """Upsert curated OPEC / Persian Gulf rows — runs even when heavy open-data bootstrap is skipped."""
+    if not ensure_schema_initialized():
+        print("[OPEC] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.ingest.opec_gulf_sync import sync_opec_gulf_data
+        except ImportError:
+            from services.ingest.opec_gulf_sync import sync_opec_gulf_data
+
+        opec_conn = get_db_connection()
+        try:
+            opec_summary = sync_opec_gulf_data(opec_conn)
+            print(
+                f"[OPEC] Persian Gulf / OPEC sync complete — "
+                f"{opec_summary.get('entities_written', 0)} entities upserted, "
+                f"{opec_summary.get('eia_countries_enriched', 0)} countries enriched with live EIA data."
+            )
+            if opec_summary.get("entities_written", 0) > 0:
+                try:
+                    cache.delete_pattern("licenses:*")
+                except Exception:
+                    pass
+        finally:
+            opec_conn.close()
+    except Exception as exc:
+        print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
+
+
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
     
@@ -1496,31 +1554,6 @@ def _bootstrap_open_data():
         except Exception as exc:
             print(f"[OpenData] Oil trade seeding skipped: {exc}")
 
-        # ── OPEC / Persian Gulf national oil companies & major fields ─────────
-        try:
-            try:
-                from backend.services.ingest.opec_gulf_sync import sync_opec_gulf_data
-            except ImportError:
-                from services.ingest.opec_gulf_sync import sync_opec_gulf_data
-
-            opec_conn = get_db_connection()
-            try:
-                opec_summary = sync_opec_gulf_data(opec_conn)
-                print(
-                    f"[OPEC] Persian Gulf / OPEC sync complete — "
-                    f"{opec_summary.get('entities_written', 0)} entities upserted, "
-                    f"{opec_summary.get('eia_countries_enriched', 0)} countries enriched with live EIA data."
-                )
-                if opec_summary.get("entities_written", 0) > 0:
-                    try:
-                        cache.delete_pattern("licenses:*")
-                    except Exception:
-                        pass
-            finally:
-                opec_conn.close()
-        except Exception as exc:
-            print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
-
         try:
             try:
                 from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
@@ -1545,6 +1578,7 @@ def startup_schema_bootstrap():
         if not ensure_schema_initialized():
             print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
             return
+        _sync_opec_gulf_reference()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
@@ -2183,6 +2217,43 @@ def read_legal_events(entity_id: str, entity_kind: str = "license", refresh: boo
         return [serialize_legal_event(row) for row in rows]
     except Exception as e:
         conn.rollback()
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/gov-procurement")
+def read_gov_procurement(entity_id: str, entity_kind: str = "license"):
+    """Return U.S. federal award matches from USAspending.gov for the licensee company.
+
+    Searches by company name (recipient_search_text). No API key is required.
+    Non-U.S. entities often return zero rows; the response documents scope and limits.
+    """
+    conn = get_db_connection()
+    try:
+        collect_gov_procurement, serialize_gov_procurement_response = _load_gov_procurement_services()
+        company_name = ""
+        country = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company_name = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+
+        if not company_name:
+            return serialize_gov_procurement_response(
+                collect_gov_procurement(company_name="", country=country)
+            )
+
+        payload = collect_gov_procurement(company_name=company_name, country=country or None)
+        return serialize_gov_procurement_response(payload)
+    except Exception as e:
+        logger.exception("gov-procurement failed for %s: %s", entity_id, e)
         return Response(str(e), status_code=500)
     finally:
         conn.close()
@@ -4193,9 +4264,9 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
 
 @app.get("/api/maritime/vessels")
 def get_maritime_vessels(
-    max_vessels: int = 300,
+    max_vessels: int = 1000,
     capture_window_seconds: int = 10,
-    scope: str = "oil_tankers",
+    scope: str = "all_vessels",
     offset: int = 0,
     south: Optional[float] = None,
     west: Optional[float] = None,

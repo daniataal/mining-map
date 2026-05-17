@@ -1,4 +1,4 @@
-import type { RoutePlannerApiResponse, CostLineItem, DueDiligenceCheck } from './types';
+import type { RouteLeg, RoutePlannerApiResponse, CostLineItem, DueDiligenceCheck } from './types';
 
 function interpolateLeg(
   a: [number, number],
@@ -14,16 +14,114 @@ function interpolateLeg(
   return out;
 }
 
+function concatPaths(...segments: [number, number][][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const segment of segments) {
+    if (!segment.length) continue;
+    if (!out.length) {
+      out.push(...segment);
+      continue;
+    }
+    out.push(...segment.slice(1));
+  }
+  return out;
+}
+
+function buildSeaCorridorPath(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): [number, number][] {
+  const hub = corridorHubFor(from, to);
+  return concatPaths(
+    interpolateLeg([from.lat, from.lng], [hub.lat, hub.lng], 8),
+    interpolateLeg([hub.lat, hub.lng], [to.lat, to.lng], 10),
+  );
+}
+
+function inlandMethod(shippingMethods: string[]): RouteLeg['method'] {
+  return shippingMethods.includes('rail') ? 'rail' : 'road';
+}
+
+/** Staged map overlay aligned with backend route_planner (inland → trunk → inland). */
 function buildDemoMap(
   supplier: { lat: number; lng: number },
-  hub: { lat: number; lng: number },
+  exportPort: { lat: number; lng: number; name: string },
   buyer: { lat: number; lng: number },
+  shippingMethods: string[],
 ) {
+  const hasSea = shippingMethods.includes('sea_fcl') || shippingMethods.includes('sea_lcl');
+  const hasAir = shippingMethods.includes('air');
+  const inland = inlandMethod(shippingMethods);
+  const legs: RouteLeg[] = [];
+  const transitWaypoints: Array<{
+    lat: number;
+    lng: number;
+    role: 'transit';
+    label: [string, string];
+  }> = [];
+
+  if (hasAir && !hasSea) {
+    const exportAirport = corridorHubFor(supplier, exportPort);
+    const importAirport = corridorHubFor(exportPort, buyer);
+    legs.push(
+      {
+        path: interpolateLeg([supplier.lat, supplier.lng], [exportAirport.lat, exportAirport.lng], 8),
+        method: inland,
+        label: `Road: supplier → export airport`,
+      },
+      {
+        path: interpolateLeg([exportAirport.lat, exportAirport.lng], [importAirport.lat, importAirport.lng], 10),
+        method: 'air',
+        label: `Air: export airport → import airport`,
+      },
+      {
+        path: interpolateLeg([importAirport.lat, importAirport.lng], [buyer.lat, buyer.lng], 8),
+        method: inland,
+        label: `Road: import airport → buyer`,
+      },
+    );
+    transitWaypoints.push(
+      { lat: exportAirport.lat, lng: exportAirport.lng, role: 'transit', label: ['נמל תעופה ייצוא', 'Export airport'] },
+      { lat: importAirport.lat, lng: importAirport.lng, role: 'transit', label: ['נמל תעופה יבוא', 'Import airport'] },
+    );
+  } else if (hasSea) {
+    const importCoast = {
+      lat: buyer.lat,
+      lng: Math.max(-180, Math.min(180, buyer.lng + (buyer.lng >= exportPort.lng ? -4 : 4))),
+    };
+    legs.push(
+      {
+        path: interpolateLeg([supplier.lat, supplier.lng], [exportPort.lat, exportPort.lng], 10),
+        method: inland,
+        label: `Road: supplier → ${exportPort.name}`,
+      },
+      {
+        path: buildSeaCorridorPath(exportPort, importCoast),
+        method: 'sea',
+        label: `Sea: ${exportPort.name} → import coast`,
+      },
+      {
+        path: interpolateLeg([importCoast.lat, importCoast.lng], [buyer.lat, buyer.lng], 8),
+        method: inland,
+        label: `Road: import coast → buyer`,
+      },
+    );
+    transitWaypoints.push({
+      lat: exportPort.lat,
+      lng: exportPort.lng,
+      role: 'transit',
+      label: [`נמל ייצוא: ${exportPort.name}`, `Export port: ${exportPort.name}`],
+    });
+  } else {
+    legs.push({
+      path: interpolateLeg([supplier.lat, supplier.lng], [buyer.lat, buyer.lng], 14),
+      method: inland,
+      label: 'Road: direct inland route',
+    });
+  }
+
   return {
-    legs: [
-      { path: interpolateLeg([supplier.lat, supplier.lng], [hub.lat, hub.lng], 10) },
-      { path: interpolateLeg([hub.lat, hub.lng], [buyer.lat, buyer.lng], 12) },
-    ],
+    legs,
     waypoints: [
       {
         lat: supplier.lat,
@@ -31,12 +129,7 @@ function buildDemoMap(
         role: 'origin' as const,
         label: ['ספק (מוצא)', 'Supplier (origin)'] as [string, string],
       },
-      {
-        lat: hub.lat,
-        lng: hub.lng,
-        role: 'transit' as const,
-        label: ['מעבר (נמל ייצוא)', 'Transit (export port)'] as [string, string],
-      },
+      ...transitWaypoints,
       {
         lat: buyer.lat,
         lng: buyer.lng,
@@ -313,8 +406,7 @@ export function mockResponseForPayload(
   const exportPort = nearestExportPort(supplier);
   const supplierToPortKm = distanceKm(supplier, exportPort);
   const portToBuyerKm = distanceKm(exportPort, buyer);
-  const hub = { lat: exportPort.lat, lng: exportPort.lng };
-  const map = buildDemoMap(supplier, hub, buyer);
+  const map = buildDemoMap(supplier, exportPort, buyer, shippingMethods);
 
   const breakdown = buildBreakdown(
     supplierToPortKm,
@@ -323,12 +415,6 @@ export function mockResponseForPayload(
     shippingMethods,
     exportPort.exportFeeUsd,
   );
-
-  // Annotate waypoints with real port name
-  map.waypoints[1].label = [
-    `נמל ייצוא: ${exportPort.name}`,
-    `Export port: ${exportPort.name}`,
-  ];
 
   return {
     source: 'simulation',
