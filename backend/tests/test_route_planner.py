@@ -611,6 +611,23 @@ class RoutePlannerTests(unittest.TestCase):
                 f"Sea midpoint ({lat:.2f}, {lng:.2f}) cuts inland across Africa",
             )
 
+    def test_plan_route_skips_osrm_when_deadline_exhausted(self):
+        import backend.services.routing_geometry as routing_geometry
+
+        past_deadline = __import__("time").monotonic() - 1.0
+        geometry = routing_geometry.fetch_osrm_route(
+            5.548,
+            -0.192,
+            5.64,
+            0.018,
+            deadline=past_deadline,
+        )
+        self.assertEqual(geometry.source, "straight_line_fallback")
+        self.assertTrue(
+            any("deadline" in note.lower() for note in geometry.notes),
+            geometry.notes,
+        )
+
     @patch("backend.services.routing_geometry.requests.get")
     def test_haifa_to_tlv_road_leg_uses_osrm_when_available(self, mock_get: MagicMock):
         response = MagicMock()

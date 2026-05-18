@@ -1,4 +1,5 @@
 import { API_BASE } from '../../lib/api';
+import { mockResponseForPayload } from './mockRoute';
 import type {
   CostLineItem,
   DueDiligenceCheck,
@@ -88,8 +89,13 @@ interface DdApiResponse {
   license_check_performed?: boolean;
 }
 
-const LIVE_ROUTE_TIMEOUT_MS = 12_000;
+/** Client abort for POST /api/logistics/route-plan (Vite proxy allows 120s). */
+export const LIVE_ROUTE_TIMEOUT_MS = 90_000;
+const HEALTH_PREFLIGHT_TIMEOUT_MS = 5_000;
 const ROUTE_PANEL_DD_TIMEOUT_MS = 3_000;
+/** Shown while the route request is in flight (Ghana→Israel can take 30–60s). */
+export const ROUTE_CALCULATING_HINT =
+  'Calculating route (may take up to 60s for long sea corridors)...';
 
 function backendMethod(method: string): BackendMethod {
   const map: Record<string, BackendMethod> = {
@@ -548,10 +554,23 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
   };
 }
 
+export async function checkBackendHealthForRouting(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), HEALTH_PREFLIGHT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/api/health`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
 function describeLiveRouteFailure(error: unknown): string {
   if (error instanceof Error) {
     if (error.name === 'AbortError') {
-      return 'Route API timed out — ensure the backend is running and reachable.';
+      return `Route API timed out after ${Math.round(LIVE_ROUTE_TIMEOUT_MS / 1000)}s — showing simulation estimate. Ensure the backend is running for live OSRM/searoute geometry.`;
     }
     if (error.message.startsWith('HTTP ')) {
       return `Route API returned ${error.message} — check backend logs and /api/logistics/route-plan.`;
@@ -561,7 +580,39 @@ function describeLiveRouteFailure(error: unknown): string {
   return 'Live route API unreachable — start the backend (docker compose up backend) or check VITE_API_BASE.';
 }
 
+function simulationFallback(
+  payload: RoutePlannerFormPayload,
+  liveFailureReason: string,
+): RoutePlannerApiResponse {
+  const simulated = mockResponseForPayload(
+    payload.supplier,
+    payload.buyer,
+    payload.productType,
+    payload.shippingMethods,
+  );
+  return {
+    ...simulated,
+    liveUnavailableReason: liveFailureReason,
+    limitations: [
+      liveFailureReason,
+      ...simulated.limitations,
+    ],
+    warnings: [
+      'Simulation fallback — verify corridor, ports, and costs with a live route before execution.',
+      ...simulated.warnings,
+    ],
+  };
+}
+
 export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse> {
+  const backendUp = await checkBackendHealthForRouting();
+  if (!backendUp) {
+    return simulationFallback(
+      payload,
+      'Backend health check failed — start the API (docker compose up backend) or check VITE_API_BASE.',
+    );
+  }
+
   let liveFailureReason: string | undefined;
   try {
     const live = await fetchLiveRoute(payload);
@@ -570,9 +621,11 @@ export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<
   } catch (error) {
     liveFailureReason = describeLiveRouteFailure(error);
   }
-  throw new Error(
+
+  return simulationFallback(
+    payload,
     liveFailureReason ??
-      'Live routing unavailable — no route was drawn because fallback geometry is not executable.',
+      'Live routing unavailable — showing simulation estimate until the route service responds.',
   );
 }
 

@@ -9,9 +9,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
-import { fetchRoutePlan } from './fetchRoutePlan';
-import { buyerCountryRequiredForHubs } from './locationPresets';
-
+import { fetchRoutePlan, ROUTE_CALCULATING_HINT } from './fetchRoutePlan';
 export type RoutePickRole = 'supplier' | 'buyer';
 export interface RoutePartyLocation {
   lat: number;
@@ -96,6 +94,7 @@ export interface RoutePlannerHook {
   activePlan: RoutePlanOption | null;
   selectRoutePlan: (planId: string) => void;
   loading: boolean;
+  routeCalculatingHint: string;
   error: string | null;
   computeRoute: () => Promise<boolean>;
   sourceLabel: 'live' | 'simulation' | null;
@@ -150,12 +149,6 @@ export function useRoutePlanner(): RoutePlannerHook {
 
   const setShowAirportsOnMapTransition = useCallback((value: boolean) => {
     startTransition(() => setShowAirportsOnMap(value));
-  }, []);
-
-  useEffect(() => {
-    if (buyerCountryRequiredForHubs(buyer.country)) return;
-    setShowPortsOnMap(true);
-    setShowAirportsOnMap(true);
   }, []);
 
   const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
@@ -325,6 +318,7 @@ export function useRoutePlanner(): RoutePlannerHook {
     activePlan,
     selectRoutePlan,
     loading,
+    routeCalculatingHint: ROUTE_CALCULATING_HINT,
     error,
     computeRoute,
     sourceLabel,

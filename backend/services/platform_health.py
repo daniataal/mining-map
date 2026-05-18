@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+try:
+    from backend.services.ai_providers import get_ai_provider_status
+except ImportError:
+    from services.ai_providers import get_ai_provider_status  # type: ignore[no-redef]
+
 
 def build_platform_health(
     *,
@@ -40,6 +45,10 @@ def build_platform_health(
     worker_healthy = worker_status in {"ok", "running", "idle"}
     snapshot_ok = bool(maritime_snapshot.get("available")) and not bool(maritime_snapshot.get("stale"))
 
+    ai_providers = get_ai_provider_status()
+    platform_ok = redis_ok and (worker_healthy or snapshot_ok)
+    status = "ok" if platform_ok and ai_providers.get("ready") else "degraded"
+
     return {
         "api": "ok",
         "redis": {
@@ -47,7 +56,8 @@ def build_platform_health(
             "ok": redis_ok if redis_enabled else None,
             "error": redis_error,
         },
+        "ai_providers": ai_providers,
         "maritime_snapshot": maritime_snapshot,
         "maritime_worker": maritime_worker,
-        "status": "ok" if redis_ok and (worker_healthy or snapshot_ok) else "degraded",
+        "status": status,
     }

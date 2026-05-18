@@ -49,15 +49,11 @@ PUBLIC_PHONE_TOKENS = {
 }
 
 
-def _env_secret(name: str) -> str:
-    value = (os.getenv(name) or "").strip()
-    if not value:
-        return ""
-    # Local template files may contain unresolved placeholders such as
-    # {{Secrets.GROQ_AI_API_KEY}}; treating them as real keys only burns time.
-    if value.startswith("{{") and value.endswith("}}"):
-        return ""
-    return value
+try:
+    from backend.services.ai_providers import _env_secret, _pollinations_fallback_enabled
+except ImportError:
+    from services.ai_providers import _env_secret, _pollinations_fallback_enabled  # type: ignore[no-redef]
+
 
 def run_dd_pack(entity_data, raw_evidence):
     """
@@ -197,10 +193,6 @@ def _attempt_timeout_seconds(per_attempt_timeout: float, deadline: float) -> Opt
 
 def _is_retryable_http_status(code: int) -> bool:
     return code in (408, 429, 502, 503, 504)
-
-
-def _pollinations_fallback_enabled() -> bool:
-    return (os.getenv("DISABLE_POLLINATIONS_FALLBACK") or "").strip().lower() not in ("1", "true", "yes", "on")
 
 
 def _provider_specs() -> list[dict[str, Any]]:
@@ -404,6 +396,10 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
         }
 
     if not _pollinations_fallback_enabled():
+        try:
+            from backend.services.ai_providers import build_ai_unavailable_message
+        except ImportError:
+            from services.ai_providers import build_ai_unavailable_message  # type: ignore[no-redef]
         logger.info("Pollinations fallback skipped (DISABLE_POLLINATIONS_FALLBACK is set)")
         return {
             "status": "error",
@@ -412,10 +408,7 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "analysis": None,
             "raw_response": None,
             "error_code": "AI_ALL_PROVIDERS_FAILED",
-            "message": (
-                "No configured AI API returned a result and the Pollinations fallback is disabled. "
-                "Set GROQ_API_KEY or OPENROUTER_API_KEY, or unset DISABLE_POLLINATIONS_FALLBACK."
-            ),
+            "message": build_ai_unavailable_message(pollinations_disabled=True),
         }
 
     try:
@@ -428,6 +421,10 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "raw_response": fallback["raw_response"],
         }
     except Exception as exc:
+        try:
+            from backend.services.ai_providers import build_ai_unavailable_message
+        except ImportError:
+            from services.ai_providers import build_ai_unavailable_message  # type: ignore[no-redef]
         logger.warning("All intelligence providers failed: %s", exc)
         return {
             "status": "error",
@@ -436,10 +433,7 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
             "analysis": None,
             "raw_response": None,
             "error_code": "AI_ALL_PROVIDERS_FAILED",
-            "message": (
-                "All intelligence providers are offline or timed out. "
-                "For faster, more reliable analysis, set GROQ_API_KEY or OPENROUTER_API_KEY."
-            ),
+            "message": build_ai_unavailable_message(pollinations_disabled=False),
         }
 
 

@@ -33,6 +33,7 @@ import {
   buyerCountryRequiredForHubs,
   canonicalRouteHubCountry,
   filterLicensesForRouteHubs,
+  MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
   resolveRouteHubCountries,
 } from './features/route-planner/locationPresets';
 import {
@@ -278,33 +279,28 @@ export default function App() {
   ]);
   const routeMarkerCountriesKey = routeMarkerCountries.join('\0');
 
-  const routePresetCountries = useMemo(() => {
-    const out: string[] = [];
-    for (const raw of [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry]) {
-      const canon = canonicalRouteHubCountry(raw);
-      if (canon && !out.includes(canon)) out.push(canon);
-    }
-    return out;
-  }, [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry]);
-  const routePresetCountriesKey = routePresetCountries.join('\0');
-
-  /** Corridor-only licenses for dropdowns — avoids scanning ~15k rows (React Profiler: buildAllLocationPresets). */
-  const routePlannerHubLicenses = useMemo(
-    () => filterLicensesForRouteHubs(routePlannerLicensePool, routePresetCountries),
-    [routePlannerLicensePool, routePresetCountriesKey],
-  );
-
+  // Profiler: filterLicensesForRouteHubs + marker build only when toggles on (not on country pick).
   const routePlannerPortMarkers = useMemo(() => {
-    if (!routeMarkerCountries.length) return [];
-    return buildRoutePlannerPortMarkers(routePlannerHubLicenses, portEntities, {
+    if (!routePlanner.showPortsOnMap || !routeMarkerCountries.length) return [];
+    const hubLicenses = filterLicensesForRouteHubs(routePlannerLicensePool, routeMarkerCountries);
+    return buildRoutePlannerPortMarkers(hubLicenses, portEntities, {
       countries: routeMarkerCountries,
+      maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
     });
-  }, [routePlannerHubLicenses, portEntities, routeMarkerCountriesKey]);
+  }, [
+    routePlanner.showPortsOnMap,
+    routePlannerLicensePool,
+    portEntities,
+    routeMarkerCountriesKey,
+  ]);
 
   const routePlannerAirportMarkers = useMemo(() => {
-    if (!routeMarkerCountries.length) return [];
-    return buildRoutePlannerAirportMarkers({ countries: routeMarkerCountries });
-  }, [routeMarkerCountriesKey]);
+    if (!routePlanner.showAirportsOnMap || !routeMarkerCountries.length) return [];
+    return buildRoutePlannerAirportMarkers({
+      countries: routeMarkerCountries,
+      maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
+    });
+  }, [routePlanner.showAirportsOnMap, routeMarkerCountriesKey]);
 
   const handleRoutePlannerMapPick = routePlanner.handleMapPick;
   const handleRoutePlannerHubPick = useCallback(
@@ -1048,7 +1044,7 @@ export default function App() {
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
                     <RoutePlannerPanel
                       rp={routePlanner}
-                      presetLicensePool={routePlannerHubLicenses}
+                      presetLicensePool={routePlannerLicensePool}
                       portEntities={portEntities}
                     />
                   </Suspense>

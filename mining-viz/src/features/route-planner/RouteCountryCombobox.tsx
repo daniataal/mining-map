@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import { useDebouncedValue } from '../../hooks/use-debounced-value';
@@ -12,7 +12,7 @@ interface RouteCountryComboboxProps {
   requireHighlight?: boolean;
 }
 
-export default function RouteCountryCombobox({
+function RouteCountryCombobox({
   value,
   onChange,
   placeholder,
@@ -114,3 +114,5 @@ export default function RouteCountryCombobox({
     </div>
   );
 }
+
+export default memo(RouteCountryCombobox);

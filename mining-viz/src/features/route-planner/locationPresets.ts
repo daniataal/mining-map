@@ -62,10 +62,14 @@ export const AIR_HUB_PRESETS: LocationPreset[] = [
 ];
 
 /** Route-map hub caps — profile with React DevTools "Highlight updates" on MapComponent. */
-export const MAX_HUB_MARKERS_PER_COUNTRY = 80;
+export const MAX_HUB_MARKERS_PER_COUNTRY = 40;
 export const MAX_TOTAL_HUB_MARKERS = 120;
-/** Cap dropdown options per group to keep selects responsive. */
+/** Hard cap while route planner panel is open (ports + airports combined budget). */
+export const MAX_ROUTE_MODE_TOTAL_HUB_MARKERS = 40;
+/** Cap dropdown options per group to keep preset builds responsive. */
 export const MAX_DROPDOWN_PRESETS_PER_GROUP = 40;
+/** Searchable location picker — never render more than this many rows. */
+export const MAX_PRESET_SEARCH_RESULTS = 20;
 
 const ISO2_ROUTE_COUNTRY_OVERRIDES: Record<string, string> = {
   CD: 'Democratic Republic of the Congo',
@@ -422,6 +426,69 @@ export function matchPresetId(
   return m ? m.id : 'custom';
 }
 
+/** Fast typeahead for RoutePresetPicker — avoids mounting hundreds of DOM nodes. */
+export function searchLocationPresets(
+  presets: LocationPreset[],
+  query: string,
+  limit = MAX_PRESET_SEARCH_RESULTS,
+): LocationPreset[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const out: LocationPreset[] = [];
+  for (const p of presets) {
+    if (out.length >= limit) break;
+    const hay = `${p.name} ${p.country ?? ''} ${p.commodity ?? ''}`.toLowerCase();
+    if (hay.includes(q)) out.push(p);
+  }
+  return out;
+}
+
+export function groupPresetsByKind(
+  presets: LocationPreset[],
+  showBuyerGroups: boolean,
+): { key: LocationPreset['group']; labelHe: string; labelEn: string; items: LocationPreset[] }[] {
+  const licenses = presets.filter((p) => p.group === 'licenses');
+  const ports = presets.filter(
+    (p) => p.group === 'ports' || (p.group === 'catalog' && !p.id.startsWith('air-')),
+  );
+  const airports = presets.filter((p) => p.group === 'catalog' && p.id.startsWith('air-'));
+  const buyers = showBuyerGroups ? presets.filter((p) => p.group === 'buyers') : [];
+  const groups: { key: LocationPreset['group']; labelHe: string; labelEn: string; items: LocationPreset[] }[] = [];
+  if (licenses.length) {
+    groups.push({
+      key: 'licenses',
+      labelHe: 'הנכסים והזיכיונות שלך',
+      labelEn: 'Your Concessions & Assets',
+      items: licenses,
+    });
+  }
+  if (ports.length) {
+    groups.push({
+      key: 'ports',
+      labelHe: 'נמלים ומרכזי סחר',
+      labelEn: 'Ports & trade hubs',
+      items: ports,
+    });
+  }
+  if (airports.length) {
+    groups.push({
+      key: 'catalog',
+      labelHe: 'שדות תעופה',
+      labelEn: 'Airports',
+      items: airports,
+    });
+  }
+  if (buyers.length) {
+    groups.push({
+      key: 'buyers',
+      labelHe: 'קונים ומזקקות',
+      labelEn: 'Refineries & Buyers',
+      items: buyers,
+    });
+  }
+  return groups;
+}
+
 export interface RoutePlannerHubMarker {
   id: string;
   name: string;
@@ -456,7 +523,7 @@ function capMarkersByCountry<T extends { country?: string }>(
 export function buildRoutePlannerPortMarkers(
   allLicenses: MiningLicense[],
   portEntities: MiningLicense[] = [],
-  options?: { countries?: readonly string[] },
+  options?: { countries?: readonly string[]; maxTotal?: number },
 ): RoutePlannerHubMarker[] {
   const countries = options?.countries;
   const hasCountryFilter = countries !== undefined;
@@ -499,11 +566,13 @@ export function buildRoutePlannerPortMarkers(
     }
   }
 
-  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, MAX_TOTAL_HUB_MARKERS);
+  const maxTotal = options?.maxTotal ?? MAX_TOTAL_HUB_MARKERS;
+  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, maxTotal);
 }
 
 export function buildRoutePlannerAirportMarkers(options?: {
   countries?: readonly string[];
+  maxTotal?: number;
 }): RoutePlannerHubMarker[] {
   const countries = options?.countries;
   const hasCountryFilter = countries !== undefined;
@@ -520,5 +589,6 @@ export function buildRoutePlannerAirportMarkers(options?: {
     hubType: 'airport' as const,
     source: 'catalog' as const,
   }));
-  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, MAX_TOTAL_HUB_MARKERS);
+  const maxTotal = options?.maxTotal ?? MAX_TOTAL_HUB_MARKERS;
+  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, maxTotal);
 }
