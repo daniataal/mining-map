@@ -6,7 +6,6 @@ import {
 import { FilterResultCache } from '../lib/filterResultCache';
 import { buildLicenseSearchIndex, licenseHaystackMatches } from '../lib/licenseSearchIndex';
 import { MiningLicense, UserAnnotation } from '../types';
-import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from './use-debounced-value';
 
 function normalizeSubtypeLabel(value: string | null | undefined): string {
   const raw = (value || '').trim();
@@ -38,7 +37,7 @@ function confidenceBucketFromScore(score?: number | null): string {
 
 function buildProcessedDataCacheKey(
   rawDataLength: number,
-  debouncedFilter: string,
+  appliedFilter: string,
   sortBy: string,
   selectedCountry: string[],
   selectedCommodity: string[],
@@ -53,7 +52,7 @@ function buildProcessedDataCacheKey(
 ): string {
   return [
     rawDataLength,
-    debouncedFilter,
+    appliedFilter,
     sortBy,
     selectedCountry.join('\u0001'),
     selectedCommodity.join('\u0001'),
@@ -70,10 +69,22 @@ function buildProcessedDataCacheKey(
 
 export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<string, UserAnnotation>) => {
   const [filter, setFilter] = useState('');
-  const debouncedFilter = useDebouncedValue(filter, SEARCH_DEBOUNCE_MS);
+  /** Drives license list + map; updated on Enter / clear, not on every keystroke. */
+  const [appliedFilter, setAppliedFilter] = useState('');
   const setFilterDeferred = useCallback((value: string) => {
-    startTransition(() => setFilter(value));
+    startTransition(() => {
+      setFilter(value);
+      if (!value.trim()) setAppliedFilter('');
+    });
   }, []);
+  const commitSearchFilter = useCallback((value?: string) => {
+    const raw = value ?? filter;
+    const next = raw.trim();
+    startTransition(() => {
+      setFilter(raw);
+      setAppliedFilter(next);
+    });
+  }, [filter]);
   const [sortBy, setSortBy] = useState<keyof MiningLicense>('company');
   const [selectedCountry, setSelectedCountry] = useState<string[]>([]);
   const [selectedCommodity, setSelectedCommodity] = useState<string[]>([]);
@@ -109,6 +120,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const resetFilters = () => {
     startTransition(() => {
       setFilter('');
+      setAppliedFilter('');
       setSelectedCommodity([]);
       setSelectedCountry([]);
       setUserStatusFilter([]);
@@ -129,7 +141,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const processedData = useMemo(() => {
     const cacheKey = buildProcessedDataCacheKey(
       rawData.length,
-      debouncedFilter,
+      appliedFilter,
       sortBy,
       selectedCountry,
       selectedCommodity,
@@ -203,7 +215,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       data = data.filter((item) => Boolean(item.nearbyPort));
     }
 
-    const lower = debouncedFilter.trim().toLowerCase();
+    const lower = appliedFilter.trim().toLowerCase();
     if (lower) {
       data = data.filter((item) => licenseHaystackMatches(searchIndex, item.id, lower));
     }
@@ -227,7 +239,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     return sorted;
   }, [
     rawData,
-    debouncedFilter,
+    appliedFilter,
     sortBy,
     selectedCountry,
     selectedCommodity,
@@ -373,8 +385,9 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     sourceLabels,
     infrastructureStats,
     filter,
-    debouncedFilter,
+    appliedFilter,
     setFilter: setFilterDeferred,
+    commitSearchFilter,
     sortBy,
     setSortBy,
     selectedCountry,
@@ -397,6 +410,6 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setPortLinkedOnly: setPortLinkedOnlyDeferred,
     activeFilterCount,
     resetFilters,
-    isFilterPending: filter !== debouncedFilter,
+    isFilterPending: filter.trim() !== appliedFilter,
   };
 };
