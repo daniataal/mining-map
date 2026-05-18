@@ -6,23 +6,49 @@ import type {
 } from './types';
 import { normalizeMaritimeVessels } from './normalize';
 import {
+  clearMaritimeSnapshotCache,
   readMaritimeSnapshotCache,
   writeMaritimeSnapshotCache,
 } from './maritimeSnapshotCache';
 
 export const MARITIME_VESSEL_SNAPSHOT_QUERY_KEY = 'maritime-vessels-snapshot';
 
+/** @deprecated Prefer MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY; still read for one-time migration. */
+export const MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY = 'mining_include_gulf_demo_vessels';
+
+/** Browser localStorage key for sparse-feed coastal demo (Gulf + Africa) opt-in. */
+export const MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY = 'mining_include_coastal_demo_vessels';
+
+export function readMaritimeIncludeGulfDemoPreference(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY) === '1';
+}
+
+export function readMaritimeIncludeCoastalDemoPreference(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (window.localStorage.getItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY) === '1') {
+    return true;
+  }
+  return readMaritimeIncludeGulfDemoPreference();
+}
+
 export interface MaritimeVesselQueryOptions {
   enabled?: boolean;
   maxVessels?: number;
   captureWindowSeconds?: number;
   scope?: MaritimeVesselScope;
+  /** Passes include_gulf_demo=1 (Hormuz-only forced merge; legacy). */
+  includeGulfDemo?: boolean;
+  /** Passes include_coastal_demo=1 (Gulf + Africa-adjacent demo merge when server allows). */
+  includeCoastalDemo?: boolean;
 }
 
 export interface MaritimeSnapshotFetchOptions {
   maxVessels: number;
   captureWindowSeconds: number;
   scope: MaritimeVesselScope;
+  includeGulfDemo?: boolean;
+  includeCoastalDemo?: boolean;
 }
 
 export function maritimeVesselSnapshotQueryKey(options: MaritimeSnapshotFetchOptions) {
@@ -31,6 +57,8 @@ export function maritimeVesselSnapshotQueryKey(options: MaritimeSnapshotFetchOpt
     options.scope,
     options.maxVessels,
     options.captureWindowSeconds,
+    Boolean(options.includeGulfDemo),
+    Boolean(options.includeCoastalDemo),
   ] as const;
 }
 
@@ -43,6 +71,12 @@ export async function fetchMaritimeVesselSnapshot(
     scope: options.scope,
     offset: '0',
   });
+  if (options.includeGulfDemo) {
+    params.set('include_gulf_demo', 'true');
+  }
+  if (options.includeCoastalDemo) {
+    params.set('include_coastal_demo', 'true');
+  }
 
   const response = await fetch(`${API_BASE}/api/maritime/vessels?${params.toString()}`);
   if (!response.ok) {
@@ -53,6 +87,9 @@ export async function fetchMaritimeVesselSnapshot(
     ...data,
     vessels: normalizeMaritimeVessels(data.vessels ?? []),
   };
+  if (!options.includeGulfDemo && !options.includeCoastalDemo) {
+    clearMaritimeSnapshotCache();
+  }
   writeMaritimeSnapshotCache(normalized);
   return normalized;
 }
@@ -73,11 +110,15 @@ export function useMaritimeVessels({
   maxVessels = 15000,
   captureWindowSeconds = 10,
   scope = 'all_vessels',
+  includeGulfDemo = false,
+  includeCoastalDemo = false,
 }: MaritimeVesselQueryOptions = {}) {
   const snapshotOptions: MaritimeSnapshotFetchOptions = {
     maxVessels,
     captureWindowSeconds,
     scope,
+    includeGulfDemo,
+    includeCoastalDemo,
   };
 
   return useQuery<MaritimeVesselFeedResponse>({

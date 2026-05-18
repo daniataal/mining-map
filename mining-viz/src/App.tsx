@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, startTransition, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, startTransition, lazy, Suspense, type KeyboardEvent } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
@@ -13,9 +13,18 @@ import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
-import { DEFAULT_VESSEL_FILTERS, prefetchMaritimeVesselSnapshot, type VesselFilters } from './lib/vessels';
-
-const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
+import {
+  DEFAULT_VESSEL_FILTERS,
+  prefetchMaritimeVesselSnapshot,
+  readMaritimeIncludeCoastalDemoPreference,
+  type VesselFilters,
+} from './lib/vessels';
+import {
+  matchExactCountryFocusQuery,
+  resolveCountryFocusToken,
+  suggestCountriesForFocus,
+  tryParseCountryColonQuery,
+} from './lib/countryFocusMatch';
 import { useRoutePlanner } from './features/route-planner';
 import {
   Search as LucideSearch,
@@ -27,6 +36,7 @@ import {
   Anchor as LucideAnchor,
   Droplets as LucideDroplets,
   Navigation2 as LucideNavigation,
+  X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
 
@@ -38,6 +48,8 @@ const DossierView = lazy(() => import('./components/DossierView'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const DueDiligencePanel = lazy(() => import('./components/DueDiligencePanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
+
+const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -223,6 +235,82 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations);
+
+  const selectedCountryBeforeFocusRef = useRef<string[]>([]);
+  const selectedCountryLiveRef = useRef<string[]>([]);
+  useEffect(() => {
+    selectedCountryLiveRef.current = miningData.selectedCountry;
+  }, [miningData.selectedCountry]);
+
+  const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
+  const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
+  const [autoFocusCountryOnEnter, setAutoFocusCountryOnEnter] = useState(false);
+
+  const applyCountryFocus = useCallback(
+    (name: string) => {
+      setCountryFocusCountry((cur) => {
+        if (cur == null) {
+          selectedCountryBeforeFocusRef.current = selectedCountryLiveRef.current.slice();
+        }
+        return name;
+      });
+      miningData.setSelectedCountry([name]);
+      miningData.setFilter('');
+      setCountryFocusBoundsTrigger((n) => n + 1);
+    },
+    [miningData],
+  );
+
+  const clearCountryFocus = useCallback(() => {
+    setCountryFocusCountry(null);
+    miningData.setSelectedCountry(selectedCountryBeforeFocusRef.current.slice());
+  }, [miningData]);
+
+  const handleBannerClearFilters = useCallback(() => {
+    setCountryFocusCountry(null);
+    selectedCountryBeforeFocusRef.current = [];
+    miningData.resetFilters();
+  }, [miningData]);
+
+  const countryFocusSuggestions = useMemo(
+    () =>
+      countryFocusCountry || miningData.filter.trim().length < 2
+        ? []
+        : suggestCountriesForFocus(miningData.filter, miningData.countries, 8),
+    [miningData.filter, miningData.countries, countryFocusCountry],
+  );
+
+  const handleIntelligenceSearchKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== 'Enter') return;
+      const raw = miningData.filter;
+      const colon = tryParseCountryColonQuery(raw);
+      if (colon) {
+        const name = resolveCountryFocusToken(colon, miningData.countries);
+        if (name) {
+          e.preventDefault();
+          applyCountryFocus(name);
+        }
+        return;
+      }
+      if (autoFocusCountryOnEnter) {
+        const exact = matchExactCountryFocusQuery(raw, miningData.countries);
+        if (exact) {
+          e.preventDefault();
+          applyCountryFocus(exact);
+        }
+      }
+    },
+    [miningData.filter, miningData.countries, autoFocusCountryOnEnter, applyCountryFocus],
+  );
+
+  useEffect(() => {
+    if (!countryFocusCountry) return;
+    const sel = miningData.selectedCountry;
+    if (sel.length !== 1 || sel[0] !== countryFocusCountry) {
+      setCountryFocusCountry(null);
+    }
+  }, [miningData.selectedCountry, countryFocusCountry]);
 
   useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
@@ -498,6 +586,7 @@ export default function App() {
       maxVessels: Number(maritimeMaxVessels) || 15000,
       captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
+      includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
     });
   }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
@@ -635,17 +724,71 @@ export default function App() {
             viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
-              <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
-                  <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
-                    <LucideSearch className="w-5 h-5 text-slate-400 dark:text-slate-500 mr-3" />
-                    <input 
-                      type="text"
-                      placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
-                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
-                      value={miningData.filter}
-                      onChange={(e) => miningData.setFilter(e.target.value)}
-                    />
+              <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
+                  <div className="relative w-80 shrink-0">
+                    <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl">
+                      <LucideSearch className="w-5 h-5 shrink-0 text-slate-400 dark:text-slate-500 mr-3" />
+                      <input
+                        type="text"
+                        placeholder={t(
+                          'חפש מודיעין… נסה גם country:UAE',
+                          'Search intelligence hub… try country:UAE',
+                        )}
+                        className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full min-w-0 placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
+                        value={miningData.filter}
+                        onChange={(e) => miningData.setFilter(e.target.value)}
+                        onKeyDown={handleIntelligenceSearchKeyDown}
+                        aria-autocomplete="list"
+                        aria-expanded={countryFocusSuggestions.length > 0 && !countryFocusCountry}
+                      />
+                    </div>
+                    {countryFocusSuggestions.length > 0 && !countryFocusCountry && (
+                      <ul
+                        className="absolute left-0 right-0 top-[calc(100%+4px)] z-[1200] max-h-56 overflow-y-auto rounded-xl border border-black/10 bg-white/95 py-1 text-left shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95"
+                        role="listbox"
+                      >
+                        {countryFocusSuggestions.map((name) => (
+                          <li key={name}>
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold text-slate-800 hover:bg-amber-500/15 dark:text-slate-100 dark:hover:bg-amber-500/20"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => applyCountryFocus(name)}
+                            >
+                              <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                                {t('מיקוד', 'Focus')}
+                              </span>
+                              <span>{name}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <label className="mt-1.5 flex cursor-pointer items-center gap-2 px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                        checked={autoFocusCountryOnEnter}
+                        onChange={(e) => setAutoFocusCountryOnEnter(e.target.checked)}
+                      />
+                      {t(
+                        'מיקוד מפה במדינה בלחיצת Enter כשהשם תואם',
+                        'Focus map on country with Enter when the name matches exactly',
+                      )}
+                    </label>
                   </div>
+                  {countryFocusCountry && (
+                    <button
+                      type="button"
+                      onClick={clearCountryFocus}
+                      className="flex h-10 max-w-[min(100%,16rem)] items-center gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/15 px-3 text-[10px] font-black uppercase tracking-widest text-amber-800 shadow-xl backdrop-blur-xl hover:bg-amber-500/25 dark:text-amber-200"
+                    >
+                      <span className="truncate">
+                        {t('מיקוד מדינה', 'Country focus')}: {countryFocusCountry}
+                      </span>
+                      <LucideX className="h-4 w-4 shrink-0" aria-hidden />
+                    </button>
+                  )}
                   {sectorCoverageSummary && viewMode !== 'route_planner' && (
                     <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
                       {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
@@ -656,7 +799,7 @@ export default function App() {
                       {t("מסננים פעילים", "Active filters")}: {miningData.activeFilterCount}
                       <button
                         type="button"
-                        onClick={miningData.resetFilters}
+                        onClick={handleBannerClearFilters}
                         className="rounded-lg border border-amber-500/50 px-2 py-1 text-[8px] font-black uppercase tracking-widest hover:bg-amber-500/20"
                       >
                         {t("נקה", "Clear")}
@@ -790,6 +933,8 @@ export default function App() {
                   isInDdQueue={ddQueue.isInQueue}
                   onAddToDueDiligence={ddQueue.addToQueue}
                   onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+                  countryFocusCountry={countryFocusCountry}
+                  countryFocusBoundsTrigger={countryFocusBoundsTrigger}
                 />
               </Suspense>
             )}
