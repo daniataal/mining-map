@@ -127,6 +127,12 @@ export interface MaritimeVesselFeedResponse {
   snapshot_age_seconds?: number | null;
   stale_after_seconds?: number;
   worker?: Record<string, unknown>;
+  /** True when DB shows vessels in North Sea but none in Persian Gulf while worker is healthy (AISStream upstream gap). */
+  aisstream_persian_gulf_coverage_gap?: boolean;
+  /** True when MARITIME_GULF_DEMO_SEED merged synthetic Hormuz positions into this response. */
+  persian_gulf_demo_synthetic?: boolean;
+  /** Public tracker for AISStream Persian Gulf coverage (for UI banner link). */
+  maritime_aisstream_issue_url?: string | null;
 }
 
 export interface VesselFilters {
