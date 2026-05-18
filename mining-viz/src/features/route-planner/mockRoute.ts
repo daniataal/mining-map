@@ -374,12 +374,35 @@ function buildDemoMap(
   };
 }
 
-/** Import seaport for simulation trunk termination (aligned with buyer region). */
-function resolveImportPort(buyer: { lat: number; lng: number; label?: string }): {
+function countryKey(country?: string): string {
+  return (country ?? '').trim().toLowerCase();
+}
+
+/** Export port from declared supplier country when known (matches backend canonical hubs). */
+function exportPortForCountry(country?: string): { name: string; lat: number; lng: number; exportFeeUsd: number } | null {
+  const key = countryKey(country);
+  if (key.includes('ghana')) {
+    return { name: 'Port of Accra / Tema (Ghana)', lat: 5.618, lng: -0.017, exportFeeUsd: 3200 };
+  }
+  if (key.includes('israel')) {
+    return { name: 'Haifa Port', lat: 32.819, lng: 34.99, exportFeeUsd: 2800 };
+  }
+  return null;
+}
+
+/** Import seaport for simulation trunk termination (aligned with buyer region / country). */
+function resolveImportPort(buyer: { lat: number; lng: number; label?: string; country?: string }): {
   name: string;
   lat: number;
   lng: number;
 } {
+  const key = countryKey(buyer.country);
+  if (key.includes('israel') || isEasternMediterranean(buyer.lat, buyer.lng)) {
+    return { name: 'Haifa Port', lat: 32.819, lng: 34.99 };
+  }
+  if (key.includes('ghana')) {
+    return { name: 'Port of Accra / Tema (Ghana)', lat: 5.618, lng: -0.017 };
+  }
   if (isEasternMediterranean(buyer.lat, buyer.lng)) {
     return { name: 'Haifa Port', lat: 32.819, lng: 34.99 };
   }
@@ -409,13 +432,16 @@ function distanceKm(
   return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
 }
 
-/** Pick the nearest African export port hub */
-function nearestExportPort(supplier: { lat: number; lng: number }): {
+/** Pick export port: declared supplier country first, else nearest catalog port. */
+function nearestExportPort(supplier: { lat: number; lng: number; country?: string }): {
   name: string;
   lat: number;
   lng: number;
   exportFeeUsd: number;
 } {
+  const byCountry = exportPortForCountry(supplier.country);
+  if (byCountry) return byCountry;
+
   const ports = [
     { name: 'Port of Accra / Tema (Ghana)', lat: 5.618, lng: -0.017, exportFeeUsd: 3200 },
     { name: 'Port of Abidjan (Côte d\'Ivoire)', lat: 5.309, lng: -4.017, exportFeeUsd: 3800 },
@@ -655,8 +681,8 @@ function secondExportPort(supplier: { lat: number; lng: number }, primary: { nam
 
 /** Recomputes geometry from user picks with full dynamic cost breakdown */
 export function mockResponseForPayload(
-  supplier: { lat: number; lng: number; label?: string },
-  buyer: { lat: number; lng: number; label?: string },
+  supplier: { lat: number; lng: number; label?: string; country?: string },
+  buyer: { lat: number; lng: number; label?: string; country?: string },
   productType = 'gold_concentrate',
   shippingMethods: string[] = ['sea_fcl', 'truck_inland'],
 ): RoutePlannerApiResponse {

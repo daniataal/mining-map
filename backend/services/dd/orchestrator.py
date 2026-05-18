@@ -138,17 +138,50 @@ def _env_int_bounded(name: str, default: int, *, minimum: int, maximum: int) -> 
 
 
 def _ai_http_timeout_seconds() -> float:
-    """Per-attempt socket timeout for outbound LLM HTTP calls (Groq, OpenRouter, Pollinations)."""
-    return float(_env_int_bounded("AI_HTTP_TIMEOUT_SECONDS", 90, minimum=5, maximum=600))
+    """Per-attempt socket timeout for outbound LLM HTTP calls (Groq, OpenRouter)."""
+    return float(_env_int_bounded("AI_HTTP_TIMEOUT_SECONDS", 18, minimum=5, maximum=120))
+
+
+def _pollinations_http_timeout_seconds() -> float:
+    """Shorter timeout for the optional Pollinations text fallback."""
+    return float(_env_int_bounded("POLLINATIONS_HTTP_TIMEOUT_SECONDS", 12, minimum=5, maximum=60))
 
 
 def _ai_http_extra_retries() -> int:
     """Retries after the first failed attempt (timeouts, connection errors, retryable HTTP status)."""
-    return _env_int_bounded("AI_HTTP_MAX_RETRIES", 2, minimum=0, maximum=6)
+    return _env_int_bounded("AI_HTTP_MAX_RETRIES", 1, minimum=0, maximum=3)
+
+
+def _pollinations_http_extra_retries() -> int:
+    return _env_int_bounded("POLLINATIONS_HTTP_MAX_RETRIES", 0, minimum=0, maximum=2)
+
+
+def _ai_analysis_deadline_seconds() -> float:
+    """Hard cap on total time spent across provider/model attempts for one analysis."""
+    return float(_env_int_bounded("AI_ANALYSIS_DEADLINE_SECONDS", 45, minimum=15, maximum=180))
+
+
+def _ai_enrichment_deadline_seconds() -> float:
+    """Budget for optional post-analysis enrichment (legal events, phone discovery)."""
+    return float(_env_int_bounded("AI_ENRICHMENT_DEADLINE_SECONDS", 20, minimum=5, maximum=60))
 
 
 def _retry_backoff_seconds(attempt_idx: int) -> float:
-    return min(30.0, 0.75 * (2 ** attempt_idx))
+    return min(8.0, 0.5 * (2 ** attempt_idx))
+
+
+def _remaining_deadline_seconds(deadline: float) -> Optional[float]:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    return remaining
+
+
+def _attempt_timeout_seconds(per_attempt_timeout: float, deadline: float) -> Optional[float]:
+    remaining = _remaining_deadline_seconds(deadline)
+    if remaining is None:
+        return None
+    return max(1.0, min(per_attempt_timeout, remaining))
 
 
 def _is_retryable_http_status(code: int) -> bool:
@@ -184,6 +217,7 @@ def _request_chat_completion(
     model: str,
     system_prompt: str,
     user_prompt: str,
+    deadline: Optional[float] = None,
 ) -> Optional[dict[str, Any]]:
     import requests
 
@@ -195,11 +229,18 @@ def _request_chat_completion(
             {"role": "user", "content": user_prompt},
         ],
     }
-    timeout = _ai_http_timeout_seconds()
+    per_attempt_timeout = _ai_http_timeout_seconds()
     attempts = 1 + _ai_http_extra_retries()
     last_exc: Optional[BaseException] = None
 
     for attempt in range(attempts):
+        if deadline is not None:
+            timeout = _attempt_timeout_seconds(per_attempt_timeout, deadline)
+            if timeout is None:
+                logger.warning("%s model %s skipped: analysis deadline exceeded", provider_name, model)
+                return None
+        else:
+            timeout = per_attempt_timeout
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=timeout)
             if response.status_code == 200:
@@ -242,12 +283,23 @@ def _request_chat_completion(
     raise RuntimeError(f"{provider_name} request failed after {attempts} attempts")
 
 
-def _run_provider_cascade(system_prompt: str, user_prompt: str) -> Optional[dict[str, Any]]:
+def _run_provider_cascade(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    deadline: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
     for provider in _provider_specs():
+        if deadline is not None and _remaining_deadline_seconds(deadline) is None:
+            logger.warning("AI provider cascade stopped: deadline exceeded before %s", provider["name"])
+            break
         api_key = provider.get("key")
         if not api_key:
             continue
         for model in provider.get("models", []):
+            if deadline is not None and _remaining_deadline_seconds(deadline) is None:
+                logger.warning("AI provider cascade stopped: deadline exceeded before %s/%s", provider["name"], model)
+                return None
             try:
                 result = _request_chat_completion(
                     provider_name=provider["name"],
@@ -256,6 +308,7 @@ def _run_provider_cascade(system_prompt: str, user_prompt: str) -> Optional[dict
                     model=model,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
+                    deadline=deadline,
                 )
                 if result and result.get("content"):
                     return result
@@ -264,15 +317,26 @@ def _run_provider_cascade(system_prompt: str, user_prompt: str) -> Optional[dict
     return None
 
 
-def _pollinations_analysis(system_prompt: str, user_prompt: str) -> Optional[dict[str, Any]]:
+def _pollinations_analysis(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    deadline: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
     import requests
 
     url = f"https://text.pollinations.ai/{requests.utils.quote(system_prompt + ' ' + user_prompt)}"
-    timeout = _ai_http_timeout_seconds()
-    attempts = 1 + _ai_http_extra_retries()
+    per_attempt_timeout = _pollinations_http_timeout_seconds()
+    attempts = 1 + _pollinations_http_extra_retries()
     last_exc: Optional[BaseException] = None
 
     for attempt in range(attempts):
+        if deadline is not None:
+            timeout = _attempt_timeout_seconds(per_attempt_timeout, deadline)
+            if timeout is None:
+                raise RuntimeError("Pollinations skipped: analysis deadline exceeded")
+        else:
+            timeout = per_attempt_timeout
         try:
             response = requests.get(url, timeout=timeout)
             if response.status_code == 200:
@@ -317,7 +381,8 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
         "sources or regulators. Tone: direct, scannable, objective, plain language."
     )
 
-    provider_result = _run_provider_cascade(system_prompt, query)
+    deadline = time.monotonic() + _ai_analysis_deadline_seconds()
+    provider_result = _run_provider_cascade(system_prompt, query, deadline=deadline)
     if provider_result is not None:
         return {
             "status": "success",
@@ -343,7 +408,7 @@ def generate_markdown_analysis(query: str) -> dict[str, Any]:
         }
 
     try:
-        fallback = _pollinations_analysis(system_prompt, query)
+        fallback = _pollinations_analysis(system_prompt, query, deadline=deadline)
         return {
             "status": "success",
             "provider": fallback["provider"],
@@ -513,7 +578,11 @@ def _entity_brief_from_snapshot(source_snapshot: Optional[dict[str, Any]]) -> di
     }
 
 
-def extract_legal_events_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
+def extract_legal_events_via_ai(
+    entity_brief: dict[str, Any],
+    *,
+    deadline: Optional[float] = None,
+) -> dict[str, Any]:
     """Ask the LLM cascade for litigation history involving the entity.
 
     The model is asked to return JSON only. Anything that cannot be parsed
@@ -544,7 +613,7 @@ def extract_legal_events_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
         "Return JSON only. Do not include private individuals' identities."
     )
 
-    provider_result = _run_provider_cascade(system_prompt, user_prompt)
+    provider_result = _run_provider_cascade(system_prompt, user_prompt, deadline=deadline)
     if provider_result is None:
         return {"status": "skipped", "provider": None, "model": None, "events": [], "raw_response": None}
 
@@ -559,7 +628,11 @@ def extract_legal_events_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def discover_phone_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
+def discover_phone_via_ai(
+    entity_brief: dict[str, Any],
+    *,
+    deadline: Optional[float] = None,
+) -> dict[str, Any]:
     """Ask the LLM cascade for a public business phone for the company.
 
     This is intentionally separate from ``extract_source_backed_contacts``
@@ -590,7 +663,7 @@ def discover_phone_via_ai(entity_brief: dict[str, Any]) -> dict[str, Any]:
         "Return JSON only with public business phone numbers and citations."
     )
 
-    provider_result = _run_provider_cascade(system_prompt, user_prompt)
+    provider_result = _run_provider_cascade(system_prompt, user_prompt, deadline=deadline)
     if provider_result is None:
         return {"status": "skipped", "provider": None, "model": None, "phones": [], "raw_response": None}
 
@@ -702,20 +775,26 @@ def generate_dd_report(query: str, source_snapshot: Optional[dict[str, Any]] = N
     extraction_result = extract_source_backed_contacts(source_snapshot)
 
     entity_brief = _entity_brief_from_snapshot(source_snapshot)
-    legal_result = extract_legal_events_via_ai(entity_brief) if entity_brief.get("company") else {
-        "status": "skipped",
-        "provider": None,
-        "model": None,
-        "events": [],
-        "raw_response": None,
-    }
-    phone_discovery_result = discover_phone_via_ai(entity_brief) if entity_brief.get("company") else {
-        "status": "skipped",
-        "provider": None,
-        "model": None,
-        "phones": [],
-        "raw_response": None,
-    }
+    analysis_ok = analysis_result.get("status") == "success" and bool(analysis_result.get("analysis"))
+    if analysis_ok and entity_brief.get("company"):
+        enrich_deadline = time.monotonic() + _ai_enrichment_deadline_seconds()
+        legal_result = extract_legal_events_via_ai(entity_brief, deadline=enrich_deadline)
+        phone_discovery_result = discover_phone_via_ai(entity_brief, deadline=enrich_deadline)
+    else:
+        legal_result = {
+            "status": "skipped",
+            "provider": None,
+            "model": None,
+            "events": [],
+            "raw_response": None,
+        }
+        phone_discovery_result = {
+            "status": "skipped",
+            "provider": None,
+            "model": None,
+            "phones": [],
+            "raw_response": None,
+        }
 
     return {
         "status": analysis_result.get("status", "error"),

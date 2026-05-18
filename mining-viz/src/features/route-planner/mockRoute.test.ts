@@ -5,6 +5,22 @@ describe('mockResponseForPayload', () => {
   const ghanaSupplier = { lat: 5.548, lng: -0.192, label: 'Accra mine' };
   const tlvBuyer = { lat: 32.011, lng: 34.87, label: 'Ben Gurion Airport (TLV)' };
 
+  it('Ghana → Haifa sea uses Tema export and Haifa import', () => {
+    const res = mockResponseForPayload(
+      { lat: 5.548, lng: -0.192, label: 'Accra', country: 'Ghana' },
+      { lat: 32.819, lng: 34.99, label: 'Haifa Port', country: 'Israel' },
+      'gold_concentrate',
+      ['sea_fcl', 'truck_inland'],
+    );
+    const seaLeg = res.map.legs.find((leg) => leg.method === 'sea');
+    expect(seaLeg?.label).toMatch(/Tema|Accra/i);
+    expect(seaLeg?.label).toMatch(/Haifa/i);
+    const first = seaLeg!.path[0];
+    const last = seaLeg!.path[seaLeg!.path.length - 1];
+    expect(first[0]).toBeLessThan(15);
+    expect(last[0]).toBeGreaterThan(25);
+  });
+
   it('Ghana → TLV sea uses offshore corridor with many sea points', () => {
     const res = mockResponseForPayload(ghanaSupplier, tlvBuyer, 'gold_concentrate', [
       'sea_fcl',

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -119,6 +120,7 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const computeInFlightRef = useRef(false);
 
   const setQuantityTons = useCallback((value: number) => {
     startTransition(() => {
@@ -222,6 +224,8 @@ export function useRoutePlanner(): RoutePlannerHook {
   );
 
   const computeRoute = useCallback(async () => {
+    if (computeInFlightRef.current) return;
+    computeInFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -238,10 +242,14 @@ export function useRoutePlanner(): RoutePlannerHook {
         setSelectedPlanId(res.recommendedPlanId ?? null);
         setShowPortsOnMap(false);
         setShowAirportsOnMap(false);
+        if (res.source === 'simulation' && res.liveUnavailableReason) {
+          setError(res.liveUnavailableReason);
+        }
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
     } finally {
+      computeInFlightRef.current = false;
       setLoading(false);
     }
   }, [supplier, buyer, productType, shippingMethods, quantityTons, incoterm]);

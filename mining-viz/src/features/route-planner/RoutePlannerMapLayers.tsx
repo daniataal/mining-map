@@ -180,6 +180,23 @@ export default function RoutePlannerMapLayers({ overlay }: RoutePlannerMapLayers
           </CircleMarker>
         );
       })}
+
+      {overlay.ends && (
+        <>
+          <Marker
+            position={[overlay.ends.from.lat, overlay.ends.from.lng]}
+            icon={createHubLabelIcon(`FROM · ${overlay.ends.from.label}`, '#22c55e')}
+            interactive={false}
+            zIndexOffset={500}
+          />
+          <Marker
+            position={[overlay.ends.to.lat, overlay.ends.to.lng]}
+            icon={createHubLabelIcon(`TO · ${overlay.ends.to.label}`, '#f43f5e')}
+            interactive={false}
+            zIndexOffset={500}
+          />
+        </>
+      )}
     </>
   );
 }

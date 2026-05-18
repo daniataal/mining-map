@@ -40,10 +40,19 @@ export interface DueDiligenceCheck {
   detail?: [string, string];
 }
 
+export interface RouteMapEnd {
+  lat: number;
+  lng: number;
+  label: string;
+  role: 'supplier' | 'buyer';
+}
+
 /** Leaflet overlay payload (supplier / buyer rendered as origin/destination) */
 export interface RouteMapOverlay {
   legs: RouteLeg[];
   waypoints: RouteWaypoint[];
+  /** Panel supplier → buyer, independent of backend point names. */
+  ends?: { from: RouteMapEnd; to: RouteMapEnd };
 }
 
 /** One full sequential route plan (recommended or alternative). */
@@ -60,6 +69,8 @@ export interface RoutePlanOption {
 
 export interface RoutePlannerApiResponse {
   source: RoutePlannerSource;
+  /** Set when live routing failed and the UI fell back to simulation. */
+  liveUnavailableReason?: string;
   map: RouteMapOverlay;
   breakdown: CostLineItem[];
   dueDiligence: DueDiligenceCheck[];

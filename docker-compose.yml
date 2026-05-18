@@ -30,6 +30,7 @@ services:
       - MARITIME_COASTAL_DEMO_SEED=${MARITIME_COASTAL_DEMO_SEED:-1}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
     healthcheck:
       test:
         [
@@ -81,6 +82,7 @@ services:
       - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +105,7 @@ services:
       - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=${LICENSE_DAILY_SYNC_BACKOFF_SECONDS:-600}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -113,8 +116,21 @@ services:
     image: redis:alpine
     container_name: mining-redis
     restart: always
+    # Internal-only by default — not exposed on the host. Use `docker compose exec redis redis-cli -a "$REDIS_PASSWORD"`.
+    # To attach redis-cli from the host (dev only), set REDIS_PUBLISH_PORT=6379 in .env.
+    expose:
+      - "6379"
     ports:
-      - "6379:6379"
+      - "${REDIS_PUBLISH_PORT:-}:6379"
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-mining_redis_dev}
+      - --rename-command
+      - REPLICAOF
+      - ""
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
 
   frontend:
     build:

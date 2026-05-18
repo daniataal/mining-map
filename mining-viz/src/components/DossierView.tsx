@@ -72,13 +72,16 @@ import {
   isOilAndGasLicense,
 } from '../lib/licenseHeroImage';
 
-/** Client-side cap so hung requests release the UI (server may use longer LLM timeouts). */
-const AI_ANALYZE_CLIENT_TIMEOUT_MS = 180_000;
+/** Client-side cap — slightly above server AI_ANALYSIS_DEADLINE_SECONDS + enrichment budget. */
+const AI_ANALYZE_CLIENT_TIMEOUT_MS = 70_000;
 
 function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string {
-  if (payload && typeof payload === 'object' && 'message' in payload) {
-    const m = (payload as { message?: unknown }).message;
-    if (typeof m === 'string' && m.trim()) return m.trim();
+  if (payload && typeof payload === 'object') {
+    const record = payload as { message?: unknown; error_code?: unknown };
+    if (typeof record.message === 'string' && record.message.trim()) return record.message.trim();
+    if (record.error_code === 'AI_ALL_PROVIDERS_FAILED') {
+      return 'Intelligence providers are busy or rate-limited. Configure GROQ_API_KEY or OPENROUTER_API_KEY, or try again shortly.';
+    }
   }
   if (status === 503) {
     return 'Intelligence providers are busy or unreachable. Try again in a moment.';
@@ -683,7 +686,7 @@ Output requirements:
       setAiSlowNetworkHint(false);
       return;
     }
-    const t = window.setTimeout(() => setAiSlowNetworkHint(true), 8000);
+    const t = window.setTimeout(() => setAiSlowNetworkHint(true), 12_000);
     return () => {
       window.clearTimeout(t);
     };
@@ -1664,12 +1667,26 @@ Output requirements:
                       {t('טוען קבלנים פדרליים…', 'Loading federal contractor feed…')}
                     </p>
                   ) : filteredGovFeedCompanies.length === 0 ? (
-                    <p className="text-[10px] text-slate-500 py-6 text-center bg-black/5 dark:bg-white/5 rounded-2xl">
-                      {t(
-                        'אין קבלנים במסד הנתונים. הרץ scripts/sync_gov_procurement.py.',
-                        'No contractors in database yet. Run scripts/sync_gov_procurement.py or GET /gov-procurement/companies?refresh=true.'
-                      )}
-                    </p>
+                    <div className="text-[10px] text-slate-600 dark:text-slate-300 py-6 px-4 text-center bg-black/5 dark:bg-white/5 rounded-2xl space-y-3">
+                      <p className="font-bold">
+                        {t(
+                          'אין קבלנים במסד הנתונים — יש להריץ סנכרון פעם.',
+                          'No contractors in the database yet — run a one-time sync.',
+                        )}
+                      </p>
+                      <pre className="text-left text-[9px] font-mono bg-slate-950/90 text-emerald-300 rounded-xl p-3 overflow-x-auto">
+{`python scripts/sync_gov_procurement.py
+# or from repo root with stack up:
+curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
+  -H "X-Admin-Token: $ADMIN_API_TOKEN"`}
+                      </pre>
+                      <p className="text-slate-500">
+                        {t(
+                          'או רענון דרך הדפדפן: /gov-procurement/companies?refresh=true',
+                          'Or refresh via browser: /gov-procurement/companies?refresh=true',
+                        )}
+                      </p>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-2 max-h-[280px] overflow-y-auto pr-1">
                       {filteredGovFeedCompanies.map((company) => {

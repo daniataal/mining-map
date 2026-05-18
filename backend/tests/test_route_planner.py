@@ -343,6 +343,70 @@ class RoutePlannerTests(unittest.TestCase):
         )
 
     @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
+    def test_ghana_supplier_haifa_buyer_sea_staged_corridor(self):
+        """Supplier Accra → buyer Haifa: export Tema, sea trunk to Haifa (not reversed)."""
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "Accra mine",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Haifa Port",
+                    "lat": 32.819,
+                    "lng": 34.99,
+                    "kind": "destination",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        sea_leg = next(leg for leg in legs if leg["method"] == "sea")
+        self.assertIn("Tema", sea_leg["from"]["name"])
+        self.assertIn("Haifa", sea_leg["to"]["name"])
+        self.assertGreater(sea_leg["from"]["lat"], 0)
+        self.assertGreater(sea_leg["to"]["lat"], 25)
+        path = sea_leg["path"]
+        self.assertGreater(len(path), 6)
+        self.assertLess(path[0][0], 15)
+        self.assertGreater(path[-1][0], 25)
+
+    def test_ghana_supplier_israel_buyer_stale_coords_use_haifa_import(self):
+        """Buyer country Israel with Ghana coordinates must not terminate sea at Eilat."""
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Accra",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Buyer",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "destination",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        self.assertIn("Haifa", sea_leg["to"]["name"])
+        self.assertNotIn("Eilat", sea_leg["to"]["name"])
+
+    @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
     def test_ghana_to_haifa_sea_corridor_avoids_sahara_shortcut(self):
         """West Africa → Levant must use offshore anchors, not a geodesic over the Sahara."""
         result = plan_route(

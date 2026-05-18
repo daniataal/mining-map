@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, startTransition, useMemo } from 'react';
 import { Marker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { useI18n } from '../../lib/i18n';
@@ -57,7 +57,9 @@ function RoutePlannerAirportMarkers({
             click: (e) => {
               L.DomEvent.stopPropagation(e.originalEvent);
               L.DomEvent.preventDefault(e.originalEvent);
-              if (pickRole) onAirportPick(airport, pickRole);
+              if (pickRole) {
+                startTransition(() => onAirportPick(airport, pickRole));
+              }
             },
           }}
         >

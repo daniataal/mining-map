@@ -255,6 +255,40 @@ def _select_hub(
     return hub, notes
 
 
+# Primary seaport per country when coordinates are far from domestic gateways (stale picks).
+CANONICAL_MARITIME_BY_COUNTRY: dict[str, str] = {
+    "israel": "Haifa Port",
+    "ghana": "Port of Tema",
+    "egypt": "Port Said",
+    "netherlands": "Port of Rotterdam",
+    "belgium": "Port of Antwerp",
+    "germany": "Port of Hamburg",
+    "tanzania": "Dar es Salaam Port",
+    "kenya": "Port of Mombasa",
+    "south africa": "Port of Durban",
+    "nigeria": "Port of Lagos",
+    "cote d'ivoire": "Port of Abidjan",
+    "senegal": "Port of Dakar",
+}
+
+# When the party is farther than this from every domestic port, treat coords as stale.
+STALE_COORDS_DOMESTIC_PORT_KM = 1200.0
+
+
+def _canonical_maritime_hub(
+    domestic: list[TransportHub],
+    country_key: str,
+) -> Optional[TransportHub]:
+    target = CANONICAL_MARITIME_BY_COUNTRY.get(country_key)
+    if not target:
+        return None
+    target_lower = target.lower()
+    for hub in domestic:
+        if hub.name.lower() == target_lower or target_lower in hub.name.lower():
+            return hub
+    return None
+
+
 def _select_country_authoritative_hub(
     point: RoutePoint,
     hubs: tuple[TransportHub, ...],
@@ -277,8 +311,27 @@ def _select_country_authoritative_hub(
     if not domestic:
         return _select_hub(point, hubs, country=resolved_country)
 
-    hub = min(domestic, key=lambda item: _haversine_km(point.lat, point.lng, item.lat, item.lng))
+    nearest_domestic = min(
+        domestic,
+        key=lambda item: _haversine_km(point.lat, point.lng, item.lat, item.lng),
+    )
+    domestic_km = _haversine_km(
+        point.lat,
+        point.lng,
+        nearest_domestic.lat,
+        nearest_domestic.lng,
+    )
     notes: list[str] = []
+    if domestic_km > STALE_COORDS_DOMESTIC_PORT_KM:
+        canonical = _canonical_maritime_hub(domestic, country_key)
+        if canonical is not None:
+            notes.append(
+                f"{role.title()} gateway {canonical.name} selected for {resolved_country} "
+                f"(coordinates are {domestic_km:.0f} km from the nearest domestic port — likely stale)."
+            )
+            return canonical, notes
+
+    hub = nearest_domestic
     global_hub, global_notes = select_nearest_trade_hub(point.lat, point.lng, hubs, country="")
     notes.extend(global_notes)
     if normalize_country_key(global_hub.country) != country_key:
@@ -287,6 +340,19 @@ def _select_country_authoritative_hub(
             f"(nearest in destination country); global nearest hub was {global_hub.name}."
         )
     return hub, notes
+
+
+def _select_maritime_export_hub(
+    origin: RoutePoint,
+    hubs: tuple[TransportHub, ...],
+) -> tuple[TransportHub, list[str]]:
+    """Export seaport: declared origin country wins over foreign nearest-by-coords."""
+    return _select_country_authoritative_hub(
+        origin,
+        hubs,
+        country=_origin_country(origin),
+        role="export",
+    )
 
 
 def _nearest_port_distance_km(point: RoutePoint) -> float:
@@ -653,7 +719,7 @@ def _plan_sea_route(
     legs: list[PlannedLeg] = []
     hub_notes: list[str] = []
     if export_hub is None:
-        export_hub, hub_notes = _select_hub(origin, MARITIME_HUBS, country=_origin_country(origin))
+        export_hub, hub_notes = _select_maritime_export_hub(origin, MARITIME_HUBS)
     import_hub, import_notes = _select_sea_import_hub(
         destination,
         MARITIME_HUBS,
