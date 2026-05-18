@@ -51,6 +51,9 @@ import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
+import RoutePlannerPortMarkers from '../features/route-planner/RoutePlannerPortMarkers';
+import RoutePlannerFlyEffect from '../features/route-planner/RoutePlannerFlyEffect';
+import type { RoutePlannerPortMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
@@ -205,7 +208,18 @@ interface MapComponentProps {
   onPrioritizePetroleumVesselsChange?: (enabled: boolean) => void;
   routePlannerOverlay?: RouteMapOverlay | null;
   routePlannerPickRole?: 'supplier' | 'buyer' | null;
-  onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+  onRoutePlannerMapPick?: (
+    lat: number,
+    lng: number,
+    role: 'supplier' | 'buyer',
+    label?: string,
+    country?: string,
+  ) => void;
+  routePlannerPorts?: RoutePlannerPortMarker[];
+  routePlannerShowPorts?: boolean;
+  onRoutePlannerPortPick?: (port: RoutePlannerPortMarker, role: 'supplier' | 'buyer') => void;
+  routePlannerFlyTrigger?: number;
+  routePlannerFlyTarget?: { lat: number; lng: number } | null;
   isInDdQueue?: (id: string) => boolean;
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
@@ -247,7 +261,13 @@ const MapClickHandler = ({
 }: {
     onMapClick: () => void;
     routePlannerPickRole?: 'supplier' | 'buyer' | null;
-    onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+    onRoutePlannerMapPick?: (
+      lat: number,
+      lng: number,
+      role: 'supplier' | 'buyer',
+      label?: string,
+      country?: string,
+    ) => void;
 }) => {
     useMapEvents({
         click(e) {
@@ -399,6 +419,11 @@ export default function MapComponent({
   routePlannerOverlay = null,
   routePlannerPickRole = null,
   onRoutePlannerMapPick,
+  routePlannerPorts = [],
+  routePlannerShowPorts = true,
+  onRoutePlannerPortPick,
+  routePlannerFlyTrigger = 0,
+  routePlannerFlyTarget = null,
   isInDdQueue,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
@@ -1422,6 +1447,10 @@ export default function MapComponent({
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
+                <RoutePlannerFlyEffect
+                  target={isRoutePlannerView ? routePlannerFlyTarget : null}
+                  trigger={isRoutePlannerView ? routePlannerFlyTrigger : 0}
+                />
                 <CountryFocusBoundsFly
                     active={Boolean(countryFocusCountry?.trim())}
                     geojson={filteredGeoJson ?? null}
@@ -1521,6 +1550,13 @@ export default function MapComponent({
                 >
                     {renderedMarkers}
                 </MarkerClusterGroup>
+                )}
+                {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (
+                  <RoutePlannerPortMarkers
+                    ports={routePlannerPorts}
+                    pickRole={routePlannerPickRole ?? null}
+                    onPortPick={onRoutePlannerPortPick}
+                  />
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (
                   <RoutePlannerMapLayers overlay={routePlannerOverlay} />

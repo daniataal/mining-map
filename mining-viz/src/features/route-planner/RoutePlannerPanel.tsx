@@ -1,16 +1,19 @@
-import { AlertTriangle, CheckCircle2, Loader2, Navigation, Crosshair, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Navigation, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
+import type { MiningLicense } from '../../types';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from '../../components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
 import RouteLegend from './RouteLegend';
 import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
+import { buildAllLocationPresets } from './locationPresets';
+import RoutePlannerLocationBlock from './RoutePlannerLocationBlock';
 
 function fmtUsd(value: number) {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
@@ -39,41 +42,13 @@ function FindingList({ title, items, empty }: { title: string; items: string[]; 
   );
 }
 
-interface LocationPreset {
-  id: string;
-  name: string;
-  lat: number;
-  lng: number;
-  country?: string;
-  licenseId?: string;
-  commodity?: string;
-  sector?: string;
-  group: 'licenses' | 'suppliers' | 'buyers' | 'ports';
-}
-
 interface RoutePlannerPanelProps {
   rp: RoutePlannerHook;
-  allLicenses?: any[];
+  allLicenses?: MiningLicense[];
+  portEntities?: MiningLicense[];
 }
 
-const WORLD_PORTS: LocationPreset[] = [
-  { id: 'p-rotterdam', name: 'Rotterdam, Netherlands', lat: 51.924, lng: 4.477, country: 'Netherlands', group: 'ports' },
-  { id: 'p-antwerp', name: 'Antwerp, Belgium', lat: 51.219, lng: 4.402, country: 'Belgium', group: 'ports' },
-  { id: 'p-hamburg', name: 'Hamburg, Germany', lat: 53.545, lng: 9.970, country: 'Germany', group: 'ports' },
-  { id: 'p-shanghai', name: 'Shanghai, China', lat: 31.230, lng: 121.473, country: 'China', group: 'ports' },
-  { id: 'p-singapore', name: 'Singapore', lat: 1.352, lng: 103.819, country: 'Singapore', group: 'ports' },
-  { id: 'p-houston', name: 'Houston, USA', lat: 29.735, lng: -95.275, country: 'United States', group: 'ports' },
-  { id: 'p-dubai', name: 'Jebel Ali, UAE', lat: 24.996, lng: 55.060, country: 'United Arab Emirates', group: 'ports' },
-  { id: 'p-mumbai', name: 'Mumbai (JNPT), India', lat: 18.944, lng: 72.954, country: 'India', group: 'ports' },
-  { id: 'p-busan', name: 'Busan, South Korea', lat: 35.115, lng: 129.071, country: 'South Korea', group: 'ports' },
-  { id: 'p-losangeles', name: 'Los Angeles, USA', lat: 33.729, lng: -118.269, country: 'United States', group: 'ports' },
-  { id: 'p-valcambi', name: 'Valcambi Refinery, Switzerland', lat: 46.024, lng: 8.951, country: 'Switzerland', group: 'buyers' },
-  { id: 'p-rand', name: 'Rand Refinery, South Africa', lat: -26.248, lng: 28.163, country: 'South Africa', group: 'buyers' },
-  { id: 'p-tesla', name: 'Tesla Gigafactory Nevada, USA', lat: 39.539, lng: -119.231, country: 'United States', group: 'buyers' },
-  { id: 'p-bp', name: 'BP Trading Hub, London', lat: 51.507, lng: -0.127, country: 'United Kingdom', group: 'buyers' },
-];
-
-export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanelProps) {
+export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: RoutePlannerPanelProps) {
   const { t } = useI18n();
   const {
     supplier, setSupplier, buyer, setBuyer,
@@ -82,6 +57,7 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
     incoterm, setIncoterm,
     shippingMethods, toggleShippingMethod,
     pickRole, beginPick, cancelPick,
+    showPortsOnMap, setShowPortsOnMap, flyToLocation,
     result, loading, error, computeRoute,
     hasResult,
     routeOptions, selectedPlanId, activePlan, selectRoutePlan,
@@ -92,23 +68,10 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
   // Auto-jump to results when we have them
   useEffect(() => { if (hasResult) setStep('results'); }, [hasResult]);
 
-  const licensePresets: LocationPreset[] = useMemo(() => {
-    if (!allLicenses?.length) return [];
-    return allLicenses
-      .filter(l => l.lat != null && l.lng != null)
-      .slice(0, 150)
-      .map(l => ({
-        id: `lic-${l.id}`,
-        name: `${l.company || 'Unknown'} — ${l.region || l.country || ''}`,
-        lat: l.lat,
-        lng: l.lng,
-        country: l.country,
-        licenseId: l.id,
-        commodity: l.commodity,
-        sector: l.sector,
-        group: 'licenses' as const,
-      }));
-  }, [allLicenses]);
+  const locationPresets = useMemo(
+    () => buildAllLocationPresets(allLicenses ?? [], portEntities ?? []),
+    [allLicenses, portEntities],
+  );
 
   const displayBreakdown = activePlan?.breakdown ?? result?.breakdown ?? [];
   const routeLegs = activePlan?.map.legs ?? result?.map.legs ?? [];
@@ -120,16 +83,6 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
     typeof result?.freightToValuePct === 'number' && Number.isFinite(result.freightToValuePct)
       ? `${result.freightToValuePct < 0.01 ? '<0.01' : result.freightToValuePct.toFixed(2)}%`
       : null;
-
-  const supplierPresetId = useMemo(() => {
-    const m = licensePresets.find(p => Math.abs(p.lat - supplier.lat) < 1e-4 && Math.abs(p.lng - supplier.lng) < 1e-4);
-    return m ? m.id : 'custom';
-  }, [licensePresets, supplier.lat, supplier.lng]);
-
-  const buyerPresetId = useMemo(() => {
-    const m = WORLD_PORTS.find(p => Math.abs(p.lat - buyer.lat) < 1e-4 && Math.abs(p.lng - buyer.lng) < 1e-4);
-    return m ? m.id : 'custom';
-  }, [buyer.lat, buyer.lng]);
 
   const selectedProduct = PRODUCT_OPTIONS.find(p => p.value === productType);
   const recommendation = result?.dueDiligenceRecommendation ?? 'escalate';
@@ -201,109 +154,51 @@ export default function RoutePlannerPanel({ rp, allLicenses }: RoutePlannerPanel
           <div className="p-4 space-y-4">
             {pickRole && (
               <div className="rounded-2xl border border-cyan-500/35 bg-cyan-500/[0.08] px-4 py-3 text-[11px] text-cyan-900 dark:text-cyan-100 font-semibold">
-                📍 {t('לחצו על כל נקודה במפה להגדרת המיקום. הבחירה נסגרת אחרי קליק.', 'Tap anywhere on the map to place this point. Closes after one click.')}
+                📍 {t('לחצו על המפה או על סמן נמל ⚓. הבחירה נסגרת אחרי קליק.', 'Tap the map or a port anchor ⚓. Closes after one click.')}
               </div>
             )}
             {error && (
               <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
             )}
 
-            <div className="grid grid-cols-1 gap-4">
-              {/* Supplier block */}
-              <div className={`rounded-2xl border p-4 transition-all ${pickRole === 'supplier' ? 'border-amber-500/60 bg-amber-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-500">📦 {t('ספק / מוצא', 'Supplier / origin')}</p>
-                    {supplier.label && <p className="text-sm font-bold text-slate-900 dark:text-white mt-1 truncate max-w-[200px]">{supplier.label}</p>}
-                    {!supplier.label && <p className="text-xs text-slate-400 mt-1">{t('לא נבחר', 'Not selected')}</p>}
-                  </div>
-                  <Button type="button" size="sm" variant={pickRole === 'supplier' ? 'default' : 'outline'}
-                    className="h-8 rounded-xl text-[8px] font-black uppercase"
-                    onClick={() => beginPick('supplier')}>
-                    <Crosshair className="w-3 h-3 mr-1" />
-                    {t('מהמפה', 'From map')}
-                  </Button>
-                </div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('בחר מהנכסים שלך', 'Select from your assets')}</p>
-                <Select value={supplierPresetId} onValueChange={(val) => {
-                  if (val === 'custom') return;
-                  const found = licensePresets.find(p => p.id === val);
-                  if (found) setSupplier({
-                    lat: found.lat,
-                    lng: found.lng,
-                    label: found.name,
-                    country: found.country,
-                    licenseId: found.licenseId,
-                    commodity: found.commodity,
-                    sector: found.sector,
-                  });
-                }}>
-                  <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
-                    <SelectValue placeholder={t('בחר נכס ממפת ה-AI שלך...', 'Choose an asset from your AI map...')} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-64">
-                    <SelectItem value="custom">{t('מיקום חופשי / מהמפה', 'Free pick / from map')}</SelectItem>
-                    {licensePresets.length > 0 && (
-                      <SelectGroup>
-                        <SelectLabel className="text-[9px] font-black text-purple-500 uppercase tracking-wider">
-                          🏭 {t('הנכסים והזיכיונות שלך', 'Your Concessions & Assets')}
-                        </SelectLabel>
-                        {licensePresets.map(p => (
-                          <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
-                        ))}
-                      </SelectGroup>
-                    )}
-                  </SelectContent>
-                </Select>
-                <p className="mt-2 text-[9px] text-slate-400 font-bold">
-                  📍 {supplier.lat.toFixed(4)}, {supplier.lng.toFixed(4)}
+            <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
+              <Checkbox checked={showPortsOnMap} onCheckedChange={(v) => setShowPortsOnMap(Boolean(v))} />
+              <div className="min-w-0">
+                <span className="text-[11px] font-bold text-slate-900 dark:text-white">
+                  {t('הצג נמלים על המפה', 'Show ports on map')}
+                </span>
+                <p className="text-[9px] text-slate-500 leading-tight">
+                  {t('סמני ⚓ לבחירה במצב "מהמפה"', 'Anchor markers for map pick mode')}
                 </p>
               </div>
+            </label>
 
-              {/* Buyer / destination block */}
-              <div className={`rounded-2xl border p-4 transition-all ${pickRole === 'buyer' ? 'border-blue-500/60 bg-blue-500/[0.06]' : 'border-black/10 dark:border-white/10'}`}>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-500">🎯 {t('קונה / יעד', 'Buyer / destination')}</p>
-                    {buyer.label && <p className="text-sm font-bold text-slate-900 dark:text-white mt-1 truncate max-w-[200px]">{buyer.label}</p>}
-                    {!buyer.label && <p className="text-xs text-slate-400 mt-1">{t('לא נבחר', 'Not selected')}</p>}
-                  </div>
-                  <Button type="button" size="sm" variant={pickRole === 'buyer' ? 'default' : 'outline'}
-                    className="h-8 rounded-xl text-[8px] font-black uppercase"
-                    onClick={() => beginPick('buyer')}>
-                    <Crosshair className="w-3 h-3 mr-1" />
-                    {t('מהמפה', 'From map')}
-                  </Button>
-                </div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('בחר קונה או נמל', 'Select buyer or destination port')}</p>
-                <Select value={buyerPresetId} onValueChange={(val) => {
-                  if (val === 'custom') return;
-                  const found = WORLD_PORTS.find(p => p.id === val);
-                  if (found) setBuyer({ lat: found.lat, lng: found.lng, label: found.name, country: found.country });
-                }}>
-                  <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
-                    <SelectValue placeholder={t('בחר נמל, מזקקה, או לקוח...', 'Select port, refinery, or buyer...')} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-64">
-                    <SelectItem value="custom">{t('מיקום חופשי / מהמפה', 'Free pick / from map')}</SelectItem>
-                    <SelectGroup>
-                      <SelectLabel className="text-[9px] font-black text-blue-500 uppercase tracking-wider">🌊 {t('נמלים גלובליים', 'Global Trade Ports')}</SelectLabel>
-                      {WORLD_PORTS.filter(p => p.group === 'ports').map(p => (
-                        <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                    <SelectGroup>
-                      <SelectLabel className="text-[9px] font-black text-emerald-500 uppercase tracking-wider">🏭 {t('קונים ומזקקות', 'Refineries & Buyers')}</SelectLabel>
-                      {WORLD_PORTS.filter(p => p.group === 'buyers').map(p => (
-                        <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <p className="mt-2 text-[9px] text-slate-400 font-bold">
-                  📍 {buyer.lat.toFixed(4)}, {buyer.lng.toFixed(4)}
-                </p>
-              </div>
+            <div className="grid grid-cols-1 gap-4">
+              <RoutePlannerLocationBlock
+                role="supplier"
+                title={`📦 ${t('ספק / מוצא', 'Supplier / origin')}`}
+                titleClass="text-amber-500"
+                accentBorder="border-amber-500/60 bg-amber-500/[0.06]"
+                location={supplier}
+                setLocation={setSupplier}
+                presets={locationPresets}
+                pickRole={pickRole}
+                beginPick={beginPick}
+                onFlyTo={flyToLocation}
+              />
+              <RoutePlannerLocationBlock
+                role="buyer"
+                title={`🎯 ${t('קונה / יעד', 'Buyer / destination')}`}
+                titleClass="text-blue-500"
+                accentBorder="border-blue-500/60 bg-blue-500/[0.06]"
+                location={buyer}
+                setLocation={setBuyer}
+                presets={locationPresets}
+                pickRole={pickRole}
+                beginPick={beginPick}
+                onFlyTo={flyToLocation}
+                showBuyerGroups
+              />
             </div>
 
             {/* Product + Shipping */}
