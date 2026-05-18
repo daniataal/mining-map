@@ -23,7 +23,9 @@ try:
         ResolvedGeometry,
         inland_origin_heuristic,
         normalize_country_key,
+        rank_trade_hubs,
         resolve_leg_geometry,
+        select_nearest_trade_hub,
     )
     from backend.services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from backend.services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
@@ -33,7 +35,9 @@ except ImportError:
         ResolvedGeometry,
         inland_origin_heuristic,
         normalize_country_key,
+        rank_trade_hubs,
         resolve_leg_geometry,
+        select_nearest_trade_hub,
     )
     from services.shipping_costs import estimate_route_cost, route_cost_to_dict
     from services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
@@ -133,7 +137,12 @@ AIR_HUBS: tuple[TransportHub, ...] = (
     TransportHub("Julius Nyerere International Airport", -6.878, 39.202, "Tanzania", "airport"),
     TransportHub("Kotoka International Airport", 5.605, -0.167, "Ghana", "airport"),
     TransportHub("Jomo Kenyatta International Airport", -1.319, 36.928, "Kenya", "airport"),
+    TransportHub("Cairo International Airport", 30.122, 31.406, "Egypt", "airport"),
+    TransportHub("Borg El Arab Airport", 30.918, 29.696, "Egypt", "airport"),
+    TransportHub("Hurghada International Airport", 27.178, 33.799, "Egypt", "airport"),
+    TransportHub("Luxor International Airport", 25.671, 32.706, "Egypt", "airport"),
     TransportHub("Dubai International Airport", 25.253, 55.365, "United Arab Emirates", "airport"),
+    TransportHub("Brussels Airport", 50.901, 4.484, "Belgium", "airport"),
     TransportHub("Amsterdam Schiphol Airport", 52.310, 4.768, "Netherlands", "airport"),
     TransportHub("Frankfurt Airport", 50.037, 8.562, "Germany", "airport"),
     TransportHub("London Heathrow Airport", 51.470, -0.454, "United Kingdom", "airport"),
@@ -209,31 +218,50 @@ def _nearest_hub(point: RoutePoint, hubs: tuple[TransportHub, ...]) -> Transport
     return min(hubs, key=lambda hub: _haversine_km(point.lat, point.lng, hub.lat, hub.lng))
 
 
+def _point_country(point: RoutePoint) -> str:
+    meta = point.metadata if isinstance(point.metadata, dict) else {}
+    return str(meta.get("country") or "").strip()
+
+
+def _origin_country(origin: RoutePoint) -> str:
+    return _point_country(origin)
+
+
+def _destination_country(destination: RoutePoint) -> str:
+    return _point_country(destination)
+
+
+def _select_hub(
+    point: RoutePoint,
+    hubs: tuple[TransportHub, ...],
+    *,
+    country: str = "",
+) -> tuple[TransportHub, list[str]]:
+    resolved_country = country or _point_country(point)
+    hub, notes = select_nearest_trade_hub(
+        point.lat,
+        point.lng,
+        hubs,
+        country=resolved_country,
+    )
+    return hub, notes
+
+
 def _nearest_port_distance_km(point: RoutePoint) -> float:
-    hub = _nearest_hub(point, MARITIME_HUBS)
+    hub, _ = _select_hub(point, MARITIME_HUBS)
     return _haversine_km(point.lat, point.lng, hub.lat, hub.lng)
 
 
 def _nearest_maritime_hubs(point: RoutePoint, limit: int = 3) -> list[TransportHub]:
-    ranked = sorted(
-        MARITIME_HUBS,
-        key=lambda hub: _haversine_km(point.lat, point.lng, hub.lat, hub.lng),
+    return list(
+        rank_trade_hubs(
+            point.lat,
+            point.lng,
+            MARITIME_HUBS,
+            country=_point_country(point),
+            limit=limit,
+        )
     )
-    selected: list[TransportHub] = []
-    seen_names: set[str] = set()
-    for hub in ranked:
-        if hub.name in seen_names:
-            continue
-        seen_names.add(hub.name)
-        selected.append(hub)
-        if len(selected) >= limit:
-            break
-    return selected
-
-
-def _origin_country(origin: RoutePoint) -> str:
-    meta = origin.metadata if isinstance(origin.metadata, dict) else {}
-    return str(meta.get("country") or "").strip()
 
 
 def _origin_needs_alternatives(origin: RoutePoint) -> tuple[bool, str]:
@@ -487,11 +515,20 @@ def _plan_sea_route(
     export_hub: Optional[TransportHub] = None,
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
-    export_port = _point_from_hub(export_hub or _nearest_hub(origin, MARITIME_HUBS))
-    import_port = _point_from_hub(_nearest_hub(destination, MARITIME_HUBS))
+    hub_notes: list[str] = []
+    if export_hub is None:
+        export_hub, hub_notes = _select_hub(origin, MARITIME_HUBS, country=_origin_country(origin))
+    import_hub, import_notes = _select_hub(
+        destination,
+        MARITIME_HUBS,
+        country=_destination_country(destination),
+    )
+    export_port = _point_from_hub(export_hub)
+    import_port = _point_from_hub(import_hub)
 
     origin_to_port_km = _haversine_km(origin.lat, origin.lng, export_port.lat, export_port.lng)
     import_to_dest_km = _haversine_km(import_port.lat, import_port.lng, destination.lat, destination.lng)
+    pickup_notes = list(hub_notes)
     _append_if_not_same(
         legs,
         origin,
@@ -500,6 +537,8 @@ def _plan_sea_route(
         quantity_tons,
         stage="1. Inland pickup to export port",
     )
+    if pickup_notes and legs:
+        legs[0].notes.extend(pickup_notes)
     _append_if_not_same(
         legs,
         export_port,
@@ -517,6 +556,8 @@ def _plan_sea_route(
         quantity_tons,
         stage="3. Final delivery from import port",
     )
+    if import_notes and len(legs) >= 1:
+        legs[-1].notes.extend(import_notes)
     return legs, [export_port, import_port]
 
 
@@ -527,8 +568,14 @@ def _plan_air_route(
     quantity_tons: float,
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
-    export_airport = _point_from_hub(_nearest_hub(origin, AIR_HUBS))
-    import_airport = _point_from_hub(_nearest_hub(destination, AIR_HUBS))
+    export_hub, export_notes = _select_hub(origin, AIR_HUBS, country=_origin_country(origin))
+    import_hub, import_notes = _select_hub(
+        destination,
+        AIR_HUBS,
+        country=_destination_country(destination),
+    )
+    export_airport = _point_from_hub(export_hub)
+    import_airport = _point_from_hub(import_hub)
     origin_to_air_km = _haversine_km(origin.lat, origin.lng, export_airport.lat, export_airport.lng)
     import_to_dest_km = _haversine_km(import_airport.lat, import_airport.lng, destination.lat, destination.lng)
 
@@ -540,6 +587,8 @@ def _plan_air_route(
         quantity_tons,
         stage="1. Secure pickup to export airport",
     )
+    if export_notes and legs:
+        legs[0].notes.extend(export_notes)
     _append_if_not_same(
         legs,
         export_airport,
@@ -548,6 +597,8 @@ def _plan_air_route(
         quantity_tons,
         stage="2. Air cargo trunk route",
     )
+    if import_notes and len(legs) >= 2:
+        legs[1].notes.extend(import_notes)
     _append_if_not_same(
         legs,
         import_airport,
@@ -741,7 +792,11 @@ def _generate_route_plans(
                 pipeline_layer_enabled=pipeline_layer_enabled,
             )
             strategy = "direct-inland"
-        hub = _nearest_hub(origin, MARITIME_HUBS) if strategy.startswith("staged-inland-port") else None
+        hub = (
+            _select_hub(origin, MARITIME_HUBS, country=_origin_country(origin))[0]
+            if strategy.startswith("staged-inland-port")
+            else None
+        )
         alt_id = "sea_primary" if "sea" in requested_methods else ("air" if "air" in requested_methods else "inland")
         label = (
             f"Via {hub.name} (sea)" if hub else ("Via air freight" if alt_id == "air" else "Direct inland route")

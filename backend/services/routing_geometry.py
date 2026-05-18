@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
 import requests
 
@@ -409,6 +409,124 @@ LANDLOCKED_COUNTRIES: frozenset[str] = frozenset(
 
 # Default distance from origin to nearest export port before treating as inland.
 INLAND_PORT_THRESHOLD_KM = 450.0
+
+# Max straight-line inland haul to a foreign trade gateway before preferring domestic.
+MAX_INLAND_HAUL_TO_HUB_KM = 800.0
+
+# Allow a domestic hub to win when it is only slightly farther than the global nearest.
+DOMESTIC_HUB_EXTRA_KM = 200.0
+
+
+class TradeHubLike(Protocol):
+    name: str
+    lat: float
+    lng: float
+    country: str
+
+
+def _hub_distance_km(lat: float, lng: float, hub: TradeHubLike) -> float:
+    return haversine_km(lat, lng, hub.lat, hub.lng)
+
+
+def select_nearest_trade_hub(
+    lat: float,
+    lng: float,
+    hubs: Sequence[TradeHubLike],
+    *,
+    country: str = "",
+    max_inland_haul_km: float = MAX_INLAND_HAUL_TO_HUB_KM,
+    domestic_extra_km: float = DOMESTIC_HUB_EXTRA_KM,
+) -> tuple[TradeHubLike, list[str]]:
+    """Pick a trade gateway with same-country preference when reasonable."""
+    if not hubs:
+        raise ValueError("hubs must not be empty")
+
+    notes: list[str] = []
+    ranked = sorted(hubs, key=lambda hub: _hub_distance_km(lat, lng, hub))
+    nearest = ranked[0]
+    nearest_km = _hub_distance_km(lat, lng, nearest)
+    country_key = normalize_country_key(country)
+
+    if not country_key:
+        if nearest_km > max_inland_haul_km:
+            notes.append(
+                f"Nearest gateway {nearest.name} is {nearest_km:.0f} km away "
+                f"(exceeds {max_inland_haul_km:.0f} km inland-haul guidance)."
+            )
+        return nearest, notes
+
+    domestic = [hub for hub in hubs if normalize_country_key(hub.country) == country_key]
+    if not domestic:
+        if nearest_km > max_inland_haul_km:
+            notes.append(
+                f"No gateway in {country.strip()} catalog; nearest {nearest.name} is "
+                f"{nearest_km:.0f} km away (exceeds {max_inland_haul_km:.0f} km inland-haul guidance)."
+            )
+        return nearest, notes
+
+    nearest_domestic = min(domestic, key=lambda hub: _hub_distance_km(lat, lng, hub))
+    domestic_km = _hub_distance_km(lat, lng, nearest_domestic)
+    if normalize_country_key(nearest.country) == country_key:
+        return nearest, notes
+
+    if domestic_km <= max_inland_haul_km and domestic_km <= nearest_km + domestic_extra_km:
+        notes.append(
+            f"Selected domestic gateway {nearest_domestic.name} ({domestic_km:.0f} km) "
+            f"instead of nearer foreign hub {nearest.name} ({nearest_km:.0f} km)."
+        )
+        return nearest_domestic, notes
+
+    if nearest_km > max_inland_haul_km and domestic_km <= max_inland_haul_km * 1.25:
+        notes.append(
+            f"Foreign hub {nearest.name} ({nearest_km:.0f} km) exceeds inland-haul cap; "
+            f"using domestic {nearest_domestic.name} ({domestic_km:.0f} km)."
+        )
+        return nearest_domestic, notes
+
+    if nearest_km > max_inland_haul_km:
+        notes.append(
+            f"Nearest gateway {nearest.name} is {nearest_km:.0f} km away "
+            f"(exceeds {max_inland_haul_km:.0f} km inland-haul guidance)."
+        )
+    return nearest, notes
+
+
+def rank_trade_hubs(
+    lat: float,
+    lng: float,
+    hubs: Sequence[TradeHubLike],
+    *,
+    country: str = "",
+    limit: int = 3,
+) -> list[TradeHubLike]:
+    """Return up to ``limit`` hubs, prioritizing same-country gateways when known."""
+    if limit <= 0 or not hubs:
+        return []
+
+    country_key = normalize_country_key(country)
+    ranked = sorted(hubs, key=lambda hub: _hub_distance_km(lat, lng, hub))
+    selected: list[TradeHubLike] = []
+    seen_names: set[str] = set()
+
+    if country_key:
+        for hub in ranked:
+            if normalize_country_key(hub.country) != country_key:
+                continue
+            if hub.name in seen_names:
+                continue
+            seen_names.add(hub.name)
+            selected.append(hub)
+            if len(selected) >= limit:
+                return selected
+
+    for hub in ranked:
+        if hub.name in seen_names:
+            continue
+        seen_names.add(hub.name)
+        selected.append(hub)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def normalize_country_key(country: str) -> str:
