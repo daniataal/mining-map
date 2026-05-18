@@ -1,8 +1,12 @@
+import { memo, useMemo } from 'react';
 import { Marker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { useI18n } from '../../lib/i18n';
 import type { RoutePlannerHubMarker } from './locationPresets';
 import type { RoutePickRole } from './useRoutePlanner';
+
+const PORT_ICON_IDLE = createPortMapIcon(false);
+const PORT_ICON_PICK = createPortMapIcon(true);
 
 function createPortMapIcon(active = false): L.DivIcon {
   const size = active ? 30 : 26;
@@ -30,17 +34,20 @@ interface RoutePlannerPortMarkersProps {
   onPortPick: (port: RoutePlannerHubMarker, role: RoutePickRole) => void;
 }
 
-export default function RoutePlannerPortMarkers({ ports, pickRole, onPortPick }: RoutePlannerPortMarkersProps) {
+function RoutePlannerPortMarkers({ ports, pickRole, onPortPick }: RoutePlannerPortMarkersProps) {
   const { t } = useI18n();
+  const icon = pickRole ? PORT_ICON_PICK : PORT_ICON_IDLE;
+  const zIndex = pickRole ? 2500 : 400;
+  const interactive = Boolean(pickRole);
 
-  return (
-    <>
-      {ports.map((port) => (
+  const markers = useMemo(
+    () =>
+      ports.map((port) => (
         <Marker
           key={port.id}
           position={[port.lat, port.lng]}
-          icon={createPortMapIcon(Boolean(pickRole))}
-          zIndexOffset={pickRole ? 2500 : 400}
+          icon={icon}
+          zIndexOffset={zIndex}
           bubblingMouseEvents={!pickRole}
           eventHandlers={{
             click: (e) => {
@@ -55,14 +62,18 @@ export default function RoutePlannerPortMarkers({ ports, pickRole, onPortPick }:
               ⚓ {port.name}
               {port.country ? ` · ${port.country}` : ''}
             </span>
-            {!pickRole && (
+            {!interactive && (
               <p className="text-[9px] text-slate-500 mt-0.5">
                 {t('לחצו "מהמפה" על ספק או יעד ואז בחרו נמל', 'Use From map on supplier or destination, then click a port')}
               </p>
             )}
           </Tooltip>
         </Marker>
-      ))}
-    </>
+      )),
+    [ports, icon, zIndex, pickRole, interactive, onPortPick, t],
   );
+
+  return <>{markers}</>;
 }
+
+export default memo(RoutePlannerPortMarkers);

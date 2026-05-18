@@ -14,6 +14,43 @@ function interpolateLeg(
   return out;
 }
 
+/** Great-circle segment (matches backend routing_geometry.great_circle_geometry). */
+function greatCircleLeg(
+  a: [number, number],
+  b: [number, number],
+  steps = 14,
+): [number, number][] {
+  const [aLat, aLng] = a;
+  const [bLat, bLng] = b;
+  const lat1 = (aLat * Math.PI) / 180;
+  const lng1 = (aLng * Math.PI) / 180;
+  const lat2 = (bLat * Math.PI) / 180;
+  const lng2 = (bLng * Math.PI) / 180;
+  const delta =
+    2 *
+    Math.asin(
+      Math.sqrt(
+        Math.sin((lat2 - lat1) / 2) ** 2 +
+          Math.cos(lat1) * Math.cos(lat2) * Math.sin((lng2 - lng1) / 2) ** 2,
+      ),
+    );
+  if (delta < 1e-9) return [a, b];
+  const out: [number, number][] = [];
+  const n = Math.max(2, steps);
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const aa = Math.sin((1 - f) * delta) / Math.sin(delta);
+    const bb = Math.sin(f * delta) / Math.sin(delta);
+    const x = aa * Math.cos(lat1) * Math.cos(lng1) + bb * Math.cos(lat2) * Math.cos(lng2);
+    const y = aa * Math.cos(lat1) * Math.sin(lng1) + bb * Math.cos(lat2) * Math.sin(lng2);
+    const z = aa * Math.sin(lat1) + bb * Math.sin(lat2);
+    const lat = (Math.atan2(z, Math.sqrt(x * x + y * y)) * 180) / Math.PI;
+    const lng = (Math.atan2(y, x) * 180) / Math.PI;
+    out.push([lat, lng]);
+  }
+  return out;
+}
+
 function concatPaths(...segments: [number, number][][]): [number, number][] {
   const out: [number, number][] = [];
   for (const segment of segments) {
@@ -40,6 +77,48 @@ const SEA_OFFSHORE_ANCHORS: Record<string, { lat: number; lng: number }> = {
   cape: { lat: -35, lng: 18.2 },
   mid_atlantic: { lat: 38, lng: -35 },
 };
+
+/** OSRM driving profile: Haifa Port → Ben Gurion (TLV), coastal Route 2 corridor. */
+const HAIFA_TO_TLV_ROAD: [number, number][] = [
+  [32.81903, 34.98993],
+  [32.81747, 34.99938],
+  [32.81135, 35.00438],
+  [32.79787, 35.02739],
+  [32.78937, 35.03699],
+  [32.7482, 35.07694],
+  [32.72392, 35.0991],
+  [32.72502, 35.10031],
+  [32.70851, 35.10002],
+  [32.67117, 35.10132],
+  [32.65327, 35.09372],
+  [32.6385, 35.06605],
+  [32.60234, 35.04419],
+  [32.57395, 35.04376],
+  [32.54561, 35.03106],
+  [32.52224, 35.02672],
+  [32.48408, 35.0329],
+  [32.44961, 35.03643],
+  [32.3838, 35.01865],
+  [32.30005, 35.01115],
+  [32.14835, 34.96253],
+  [32.07174, 34.93391],
+  [32.06821, 34.90361],
+  [32.02407, 34.90792],
+  [31.99137, 34.90431],
+  [31.98975, 34.89691],
+  [31.98748, 34.89165],
+  [31.99678, 34.87359],
+  [32.00578, 34.86467],
+  [32.00819, 34.86824],
+];
+
+const SIM_AIR_HUBS: Array<{ name: string; lat: number; lng: number; country: string }> = [
+  { name: 'Kotoka International Airport', lat: 5.605, lng: -0.167, country: 'Ghana' },
+  { name: 'Ben Gurion Airport (TLV)', lat: 32.011, lng: 34.87, country: 'Israel' },
+  { name: 'OR Tambo International Airport', lat: -26.133, lng: 28.242, country: 'South Africa' },
+  { name: 'Amsterdam Schiphol Airport', lat: 52.31, lng: 4.768, country: 'Netherlands' },
+  { name: 'Brussels Airport', lat: 50.901, lng: 4.484, country: 'Belgium' },
+];
 
 function isEurope(lat: number, lng: number): boolean {
   return lat >= 35 && lat <= 72 && lng >= -15 && lng <= 45;
@@ -104,9 +183,65 @@ function buildSeaCorridorPath(
   waypoints.push([to.lat, to.lng]);
   const segments: [number, number][][] = [];
   for (let i = 0; i < waypoints.length - 1; i++) {
-    segments.push(interpolateLeg(waypoints[i], waypoints[i + 1], 14));
+    segments.push(greatCircleLeg(waypoints[i], waypoints[i + 1], 14));
   }
   return concatPaths(...segments);
+}
+
+function isAirportDestination(buyer: { lat: number; lng: number; label?: string }): boolean {
+  const label = (buyer.label ?? '').toLowerCase();
+  return label.includes('airport') || label.includes('ben gurion') || label.includes('(tlv)');
+}
+
+function nearPoint(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+  maxKm: number,
+): boolean {
+  return distanceKm(a, b) <= maxKm;
+}
+
+function haifaTlvRoadPath(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): [number, number][] | null {
+  const haifa = { lat: 32.819, lng: 34.99 };
+  const tlv = { lat: 32.011, lng: 34.87 };
+  if (nearPoint(from, haifa, 30) && nearPoint(to, tlv, 30)) return [...HAIFA_TO_TLV_ROAD];
+  if (nearPoint(from, tlv, 30) && nearPoint(to, haifa, 30)) return [...HAIFA_TO_TLV_ROAD].reverse();
+  return null;
+}
+
+function buildRoadPath(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): [number, number][] {
+  const corridor = haifaTlvRoadPath(from, to);
+  if (corridor) return corridor;
+  const dist = distanceKm(from, to);
+  const steps = Math.max(8, Math.min(24, Math.round(dist / 12)));
+  return interpolateLeg([from.lat, from.lng], [to.lat, to.lng], steps);
+}
+
+function nearestAirHub(
+  point: { lat: number; lng: number },
+  country?: string,
+): { name: string; lat: number; lng: number } {
+  const countryKey = country?.trim().toLowerCase();
+  const pool = countryKey
+    ? SIM_AIR_HUBS.filter((h) => h.country.toLowerCase() === countryKey)
+    : SIM_AIR_HUBS;
+  const hubs = pool.length ? pool : SIM_AIR_HUBS;
+  let best = hubs[0];
+  let bestDist = Infinity;
+  for (const hub of hubs) {
+    const d = distanceKm(point, hub);
+    if (d < bestDist) {
+      bestDist = d;
+      best = hub;
+    }
+  }
+  return best;
 }
 
 function inlandMethod(shippingMethods: string[]): RouteLeg['method'] {
@@ -115,9 +250,9 @@ function inlandMethod(shippingMethods: string[]): RouteLeg['method'] {
 
 /** Staged map overlay aligned with backend route_planner (inland → trunk → inland). */
 function buildDemoMap(
-  supplier: { lat: number; lng: number },
+  supplier: { lat: number; lng: number; label?: string },
   exportPort: { lat: number; lng: number; name: string },
-  buyer: { lat: number; lng: number },
+  buyer: { lat: number; lng: number; label?: string },
   shippingMethods: string[],
 ) {
   const hasSea = shippingMethods.includes('sea_fcl') || shippingMethods.includes('sea_lcl');
@@ -132,23 +267,33 @@ function buildDemoMap(
   }> = [];
 
   if (hasAir && !hasSea) {
-    const exportAirport = corridorHubFor(supplier, exportPort);
-    const importAirport = corridorHubFor(exportPort, buyer);
+    const exportAirport = nearestAirHub(supplier);
+    const importAirport = nearestAirHub(buyer);
     legs.push(
       {
-        path: interpolateLeg([supplier.lat, supplier.lng], [exportAirport.lat, exportAirport.lng], 8),
+        path: buildRoadPath(supplier, exportAirport),
         method: inland,
-        label: `Road: supplier → export airport`,
+        label: `Road: supplier → ${exportAirport.name}`,
+        toName: exportAirport.name,
+        toKind: 'airport',
+        hubLabel: exportAirport.name,
       },
       {
-        path: interpolateLeg([exportAirport.lat, exportAirport.lng], [importAirport.lat, importAirport.lng], 10),
+        path: greatCircleLeg(
+          [exportAirport.lat, exportAirport.lng],
+          [importAirport.lat, importAirport.lng],
+          24,
+        ),
         method: 'air',
-        label: `Air: export airport → import airport`,
+        label: `Air: ${exportAirport.name} → ${importAirport.name}`,
+        toName: importAirport.name,
+        toKind: 'airport',
+        hubLabel: importAirport.name,
       },
       {
-        path: interpolateLeg([importAirport.lat, importAirport.lng], [buyer.lat, buyer.lng], 8),
+        path: buildRoadPath(importAirport, buyer),
         method: inland,
-        label: `Road: import airport → buyer`,
+        label: `Road: ${importAirport.name} → buyer`,
       },
     );
     transitWaypoints.push(
@@ -157,9 +302,10 @@ function buildDemoMap(
     );
   } else if (hasSea) {
     const importPort = resolveImportPort(buyer);
+    const needsPortDelivery = distanceKm(importPort, buyer) > 8 || isAirportDestination(buyer);
     legs.push(
       {
-        path: interpolateLeg([supplier.lat, supplier.lng], [exportPort.lat, exportPort.lng], 10),
+        path: buildRoadPath(supplier, exportPort),
         method: inland,
         label: `Road to port: ${exportPort.name}`,
         toName: exportPort.name,
@@ -174,18 +320,32 @@ function buildDemoMap(
         toKind: 'port',
         hubLabel: importPort.name,
       },
-      {
-        path: interpolateLeg([importPort.lat, importPort.lng], [buyer.lat, buyer.lng], 8),
-        method: inland,
-        label: `Road: ${importPort.name} → buyer`,
-      },
     );
+    if (needsPortDelivery) {
+      legs.push({
+        path: buildRoadPath(importPort, buyer),
+        method: 'road',
+        label: isAirportDestination(buyer)
+          ? `Road: ${importPort.name} → ${buyer.label ?? 'airport'}`
+          : `Road: ${importPort.name} → buyer`,
+        toName: buyer.label,
+        toKind: isAirportDestination(buyer) ? 'airport' : 'destination',
+      });
+    }
     transitWaypoints.push({
       lat: exportPort.lat,
       lng: exportPort.lng,
       role: 'transit',
       label: [`נמל ייצוא: ${exportPort.name}`, `Export port: ${exportPort.name}`],
     });
+    if (needsPortDelivery) {
+      transitWaypoints.push({
+        lat: importPort.lat,
+        lng: importPort.lng,
+        role: 'transit',
+        label: [`נמל יבוא: ${importPort.name}`, `Import port: ${importPort.name}`],
+      });
+    }
   } else {
     legs.push({
       path: interpolateLeg([supplier.lat, supplier.lng], [buyer.lat, buyer.lng], 14),
@@ -230,19 +390,6 @@ function resolveImportPort(buyer: { lat: number; lng: number; label?: string }):
     name: 'Import port',
     lat: buyer.lat,
     lng: Math.max(-180, Math.min(180, buyer.lng + (buyer.lng >= 0 ? -4 : 4))),
-  };
-}
-
-/** Midpoint hub for air corridors (great-circle arc). */
-function corridorHubFor(
-  supplier: { lat: number; lng: number },
-  buyer: { lat: number; lng: number },
-) {
-  const mx = (supplier.lat + buyer.lat) / 2;
-  const my = (supplier.lng + buyer.lng) / 2;
-  return {
-    lat: Math.max(-60, Math.min(75, mx + 6)),
-    lng: Math.max(-180, Math.min(180, my - 12)),
   };
 }
 
@@ -485,7 +632,6 @@ function buildDueDiligence(
 export function getMockRouteResponse(): RoutePlannerApiResponse {
   const supplier = { lat: 5.548, lng: -0.192 };
   const buyer = { lat: 51.924, lng: 4.478 };
-  const hub = corridorHubFor(supplier, buyer);
   return mockResponseForPayload(supplier, buyer, 'gold_concentrate', ['sea_fcl', 'truck_inland']);
 }
 
@@ -518,6 +664,13 @@ export function mockResponseForPayload(
   const supplierToPortKm = distanceKm(supplier, exportPort);
   const portToBuyerKm = distanceKm(exportPort, buyer);
   const map = buildDemoMap(supplier, exportPort, buyer, shippingMethods);
+  const hasSea = shippingMethods.includes('sea_fcl') || shippingMethods.includes('sea_lcl');
+  const mixedSeaAirportNotes =
+    hasSea && isAirportDestination(buyer)
+      ? [
+          'Sea mode: trunk to Haifa Port (Israel), then road to Ben Gurion (TLV). For direct air trunk, use air freight only.',
+        ]
+      : [];
 
   const breakdown = buildBreakdown(
     supplierToPortKm,
@@ -529,7 +682,6 @@ export function mockResponseForPayload(
 
   const totalCostUsd = breakdown.reduce((s, line) => s + line.amountUsd, 0);
   const inland = isInlandOrigin(supplier);
-  const hasSea = shippingMethods.includes('sea_fcl') || shippingMethods.includes('sea_lcl');
   const hasAir = shippingMethods.includes('air');
 
   const routeAlternatives: RoutePlanOption[] = [];
@@ -582,6 +734,7 @@ export function mockResponseForPayload(
     limitations: [
       'Simulation mode: live route or due-diligence services were unavailable.',
       'Costs are deterministic planning estimates, not executable carrier quotes.',
+      ...mixedSeaAirportNotes,
     ],
     routeAssumptions: [
       'Simulation approximates inland pickup to an export port, trunk movement, and final delivery.',

@@ -305,14 +305,15 @@ def _sort_maritime_rows(rows: list[dict[str, Any]], vessel_scope: str) -> list[d
     )
 
 
-def _refresh_maritime_memory_cache(conn) -> None:
+def fetch_persisted_maritime_rows(conn) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Load persisted vessel rows and worker ingest status (Postgres source of truth)."""
     from psycopg2.extras import RealDictCursor
 
     ensure_maritime_tables(conn)
     max_rows = max(1, min(int(MARITIME_MEMORY_CACHE_MAX_VESSELS), AIS_MAX_VESSELS * 2))
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            f"""
+            """
             SELECT
                 mmsi,
                 vessel_name,
@@ -343,9 +344,15 @@ def _refresh_maritime_memory_cache(conn) -> None:
         )
         status_row = cur.fetchone()
     conn.commit()
+    status = dict(status_row) if status_row else None
+    return rows, status
+
+
+def _refresh_maritime_memory_cache(conn) -> None:
+    rows, status = fetch_persisted_maritime_rows(conn)
     _maritime_memory_cache["loaded_at"] = time.time()
     _maritime_memory_cache["rows"] = rows
-    _maritime_memory_cache["status"] = dict(status_row) if status_row else None
+    _maritime_memory_cache["status"] = status
 
 
 def invalidate_maritime_memory_cache() -> None:
@@ -1609,6 +1616,218 @@ def _should_merge_persian_gulf_demo_rows(*, include_gulf_demo: bool, demo_env: b
     return bool(demo_env and coverage_gap)
 
 
+def _load_maritime_rows_for_feed(conn=None) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]], str, Optional[float]]:
+    """
+    Resolve vessel rows for API feed: Redis snapshot first, then in-process memory cache, then Postgres.
+    Returns (rows, status, data_source, cache_age_seconds).
+    """
+    try:
+        from backend.services.maritime_snapshot import get_global_maritime_snapshot
+    except ImportError:
+        from services.maritime_snapshot import get_global_maritime_snapshot
+
+    redis_payload = get_global_maritime_snapshot()
+    if redis_payload and isinstance(redis_payload.get("rows"), list) and redis_payload["rows"]:
+        updated_at = redis_payload.get("updated_at")
+        age_seconds = None
+        if updated_at:
+            parsed = _parse_datetime(updated_at)
+            if parsed is not None:
+                age_seconds = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+        status = redis_payload.get("status") if isinstance(redis_payload.get("status"), dict) else None
+        return list(redis_payload["rows"]), status, "redis", age_seconds
+
+    cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
+    if (
+        _maritime_memory_cache.get("rows")
+        and cache_age <= MARITIME_MEMORY_CACHE_TTL_SECONDS
+    ):
+        return (
+            list(_maritime_memory_cache.get("rows") or []),
+            _maritime_memory_cache.get("status"),
+            "memory",
+            cache_age,
+        )
+
+    if conn is None:
+        conn = _db_connect()
+        close_conn = True
+    else:
+        close_conn = False
+    try:
+        _refresh_maritime_memory_cache(conn)
+        cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
+        return (
+            list(_maritime_memory_cache.get("rows") or []),
+            _maritime_memory_cache.get("status"),
+            "postgres",
+            cache_age,
+        )
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def _build_maritime_vessel_feed_from_rows(
+    *,
+    all_rows: list[dict[str, Any]],
+    status: Optional[dict[str, Any]],
+    normalized_scope: str,
+    normalized_max_vessels: int,
+    normalized_window: int,
+    normalized_offset: int,
+    normalized_bbox: Optional[tuple[float, float, float, float]],
+    include_gulf_demo: bool,
+    include_coastal_demo: bool,
+    data_source: str = "postgres",
+    cache_age_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    worker_ok = (status or {}).get("status") == "ok"
+    gulf_c = count_maritime_rows_in_bbox(all_rows, PERSIAN_GULF_CORE_BBOX)
+    north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
+    coverage_gap = bool(gulf_c == 0 and north_c >= 25 and worker_ok)
+
+    env_gulf = _maritime_gulf_demo_env()
+    env_coastal = _maritime_coastal_demo_env()
+    ref_ok = _coastal_demo_reference_ingest_ok(all_rows, worker_ok=worker_ok, north_reference_count=north_c)
+
+    live_counts: dict[str, int] = {"persian_gulf_hormuz": gulf_c}
+    for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
+        live_counts[str(spec["id"])] = count_maritime_rows_in_bbox(all_rows, spec["bbox"])
+
+    decision = maritime_coastal_demo_merge_decision(
+        live_counts=live_counts,
+        reference_ingest_ok=ref_ok,
+        coverage_gap_persian_gulf=coverage_gap,
+        include_coastal_demo=bool(include_coastal_demo),
+        include_gulf_demo=bool(include_gulf_demo),
+        env_coastal=env_coastal,
+        env_gulf_only=bool(env_gulf and not env_coastal),
+        sparse_threshold=MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD,
+    )
+
+    gulf_demo_rows: list[dict[str, Any]] = []
+    africa_demo_rows: list[dict[str, Any]] = []
+    coastal_demo_regions: list[str] = []
+    coastal_demo_synthetic = False
+
+    if decision["merge_gulf"]:
+        gulf_demo_rows = _load_persian_gulf_demo_seed_rows()
+    if gulf_demo_rows:
+        coastal_demo_regions.append("Persian Gulf / Strait of Hormuz")
+        coastal_demo_synthetic = coastal_demo_synthetic or any(
+            "synthetic" in str(r.get("source_label") or "").lower() for r in gulf_demo_rows
+        )
+
+    per_region = _maritime_coastal_demo_per_region_count()
+    africa_ids = set(decision.get("merge_africa_region_ids") or [])
+    for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
+        if str(spec["id"]) not in africa_ids:
+            continue
+        block = build_synthetic_maritime_demo_rows_for_bbox(
+            spec["bbox"],
+            per_region,
+            id_prefix=str(spec["id_prefix"]),
+            vessel_name_prefix=str(spec["vessel_name_prefix"]),
+            source_label=str(spec["source_label"]),
+            source_url=AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+            mmsi_start=int(spec["mmsi_start"]),
+            prng_salt=int(spec.get("prng_salt") or 0),
+        )
+        africa_demo_rows.extend(block)
+        coastal_demo_regions.append(str(spec["label"]))
+        coastal_demo_synthetic = True
+
+    africa_file_rows: list[dict[str, Any]] = []
+    if include_coastal_demo or env_coastal:
+        africa_file_rows = _load_africa_coastal_demo_seed_rows()
+    demo_rows = list(gulf_demo_rows) + list(africa_demo_rows)
+    if africa_file_rows:
+        seen_mmsi = {_clean_text(r.get("mmsi")) for r in demo_rows if _clean_text(r.get("mmsi"))}
+        file_added = 0
+        for row in africa_file_rows:
+            mmsi_key = _clean_text(row.get("mmsi"))
+            if mmsi_key and mmsi_key in seen_mmsi:
+                continue
+            demo_rows.append(row)
+            file_added += 1
+            if mmsi_key:
+                seen_mmsi.add(mmsi_key)
+        if file_added:
+            coastal_demo_regions.append("Africa coast (seed file)")
+
+    augmented_rows = all_rows + demo_rows
+    scoped_rows = filter_maritime_rows_by_bbox(augmented_rows, normalized_bbox)
+    sorted_rows = _sort_maritime_rows(scoped_rows, normalized_scope)
+    total_available = len(sorted_rows)
+    page_rows = sorted_rows[normalized_offset : normalized_offset + normalized_max_vessels]
+    response = _build_stored_feed_response(
+        rows=page_rows,
+        status=dict(status) if status else None,
+        max_vessels=normalized_max_vessels,
+        offset=normalized_offset,
+        total_available=total_available,
+        capture_window_seconds=normalized_window,
+        vessel_scope=normalized_scope,
+        bbox=normalized_bbox,
+    )
+    if data_source == "redis":
+        response["source"] = "AISStream redis snapshot"
+    elif data_source == "memory":
+        response["source"] = "AISStream persisted snapshot (memory cache)"
+    response["snapshot_source"] = data_source
+    response["memory_cached"] = data_source in {"redis", "memory"}
+    if cache_age_seconds is not None:
+        response["memory_cache_age_seconds"] = round(float(cache_age_seconds), 2)
+    response["snapshot_vessel_count"] = len(all_rows)
+    response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
+    response["persian_gulf_demo_synthetic"] = bool(gulf_demo_rows)
+    response["coastal_demo_regions"] = coastal_demo_regions
+    response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
+    if gulf_demo_rows:
+        if include_coastal_demo or include_gulf_demo:
+            pg_mode = "api_opt_in"
+        elif env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
+            pg_mode = "env_coastal_sparse"
+        elif env_gulf and coverage_gap:
+            pg_mode = "env_coverage_gap"
+        else:
+            pg_mode = None
+    else:
+        pg_mode = None
+    response["persian_gulf_demo_mode"] = pg_mode
+    response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
+    if demo_rows:
+        if include_coastal_demo:
+            demo_note = (
+                "Coastal sparse-feed demo: synthetic Gulf and Africa-adjacent positions merged because "
+                "include_coastal_demo=1 was requested; these are not live AIS for those boxes. Other rows may "
+                "still be real persisted AIS snapshot positions."
+            )
+        elif include_gulf_demo:
+            demo_note = (
+                "Persian Gulf Hormuz demo: synthetic positions merged because include_gulf_demo was requested; "
+                "these are not live AIS positions for the Gulf. Other vessels in this response may still be "
+                "real persisted AIS snapshot positions."
+            )
+        elif env_coastal:
+            demo_note = (
+                "Coastal sparse-feed demo: synthetic positions merged while MARITIME_COASTAL_DEMO_SEED is enabled "
+                "for low-coverage Hormuz and/or Africa-adjacent reference boxes; this does not represent restored "
+                "AISStream coverage."
+            )
+        else:
+            demo_note = (
+                "Persian Gulf Hormuz demo: synthetic positions merged while MARITIME_GULF_DEMO_SEED is enabled; "
+                "this does not represent restored AISStream coverage."
+            )
+        lim = list(response.get("limitations") or [])
+        if demo_note not in lim:
+            lim.append(demo_note)
+        response["limitations"] = lim
+    return response
+
+
 def get_maritime_vessel_feed(
     *,
     max_vessels: int = AIS_DEFAULT_MAX_VESSELS,
@@ -1630,12 +1849,12 @@ def get_maritime_vessel_feed(
     plan = _build_ais_subscription_plan(normalized_bbox)
 
     try:
-        conn = _db_connect()
+        all_rows, status, data_source, cache_age = _load_maritime_rows_for_feed()
     except Exception as exc:
         return _build_empty_ais_response(
             source="AISStream persisted snapshot (database unavailable)",
             limitations=[
-                f"Maritime snapshots could not be read from Postgres: {exc}",
+                f"Maritime snapshots could not be read: {exc}",
                 "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
@@ -1646,158 +1865,24 @@ def get_maritime_vessel_feed(
         )
 
     try:
-        cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
-        if cache_age > MARITIME_MEMORY_CACHE_TTL_SECONDS or not _maritime_memory_cache.get("rows"):
-            _refresh_maritime_memory_cache(conn)
-            cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
-
-        all_rows = list(_maritime_memory_cache.get("rows") or [])
-        status = _maritime_memory_cache.get("status")
-
-        worker_ok = (status or {}).get("status") == "ok"
-        gulf_c = count_maritime_rows_in_bbox(all_rows, PERSIAN_GULF_CORE_BBOX)
-        north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
-        coverage_gap = bool(gulf_c == 0 and north_c >= 25 and worker_ok)
-
-        env_gulf = _maritime_gulf_demo_env()
-        env_coastal = _maritime_coastal_demo_env()
-        ref_ok = _coastal_demo_reference_ingest_ok(all_rows, worker_ok=worker_ok, north_reference_count=north_c)
-
-        live_counts: dict[str, int] = {"persian_gulf_hormuz": gulf_c}
-        for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
-            live_counts[str(spec["id"])] = count_maritime_rows_in_bbox(all_rows, spec["bbox"])
-
-        decision = maritime_coastal_demo_merge_decision(
-            live_counts=live_counts,
-            reference_ingest_ok=ref_ok,
-            coverage_gap_persian_gulf=coverage_gap,
-            include_coastal_demo=bool(include_coastal_demo),
-            include_gulf_demo=bool(include_gulf_demo),
-            env_coastal=env_coastal,
-            env_gulf_only=bool(env_gulf and not env_coastal),
-            sparse_threshold=MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD,
+        return _build_maritime_vessel_feed_from_rows(
+            all_rows=all_rows,
+            status=status if isinstance(status, dict) else None,
+            normalized_scope=normalized_scope,
+            normalized_max_vessels=normalized_max_vessels,
+            normalized_window=normalized_window,
+            normalized_offset=normalized_offset,
+            normalized_bbox=normalized_bbox,
+            include_gulf_demo=include_gulf_demo,
+            include_coastal_demo=include_coastal_demo,
+            data_source=data_source,
+            cache_age_seconds=cache_age,
         )
-
-        gulf_demo_rows: list[dict[str, Any]] = []
-        africa_demo_rows: list[dict[str, Any]] = []
-        coastal_demo_regions: list[str] = []
-        coastal_demo_synthetic = False
-
-        if decision["merge_gulf"]:
-            gulf_demo_rows = _load_persian_gulf_demo_seed_rows()
-        if gulf_demo_rows:
-            coastal_demo_regions.append("Persian Gulf / Strait of Hormuz")
-            coastal_demo_synthetic = coastal_demo_synthetic or any(
-                "synthetic" in str(r.get("source_label") or "").lower() for r in gulf_demo_rows
-            )
-
-        per_region = _maritime_coastal_demo_per_region_count()
-        africa_ids = set(decision.get("merge_africa_region_ids") or [])
-        for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
-            if str(spec["id"]) not in africa_ids:
-                continue
-            block = build_synthetic_maritime_demo_rows_for_bbox(
-                spec["bbox"],
-                per_region,
-                id_prefix=str(spec["id_prefix"]),
-                vessel_name_prefix=str(spec["vessel_name_prefix"]),
-                source_label=str(spec["source_label"]),
-                source_url=AISSTREAM_PERSIAN_GULF_ISSUE_URL,
-                mmsi_start=int(spec["mmsi_start"]),
-                prng_salt=int(spec.get("prng_salt") or 0),
-            )
-            africa_demo_rows.extend(block)
-            coastal_demo_regions.append(str(spec["label"]))
-            coastal_demo_synthetic = True
-
-        africa_file_rows: list[dict[str, Any]] = []
-        if include_coastal_demo or env_coastal:
-            africa_file_rows = _load_africa_coastal_demo_seed_rows()
-        demo_rows = list(gulf_demo_rows) + list(africa_demo_rows)
-        if africa_file_rows:
-            seen_mmsi = {_clean_text(r.get("mmsi")) for r in demo_rows if _clean_text(r.get("mmsi"))}
-            file_added = 0
-            for row in africa_file_rows:
-                mmsi_key = _clean_text(row.get("mmsi"))
-                if mmsi_key and mmsi_key in seen_mmsi:
-                    continue
-                demo_rows.append(row)
-                file_added += 1
-                if mmsi_key:
-                    seen_mmsi.add(mmsi_key)
-            if file_added:
-                coastal_demo_regions.append("Africa coast (seed file)")
-
-        augmented_rows = all_rows + demo_rows
-        scoped_rows = filter_maritime_rows_by_bbox(augmented_rows, normalized_bbox)
-        sorted_rows = _sort_maritime_rows(scoped_rows, normalized_scope)
-        total_available = len(sorted_rows)
-        page_rows = sorted_rows[normalized_offset : normalized_offset + normalized_max_vessels]
-        response = _build_stored_feed_response(
-            rows=page_rows,
-            status=dict(status) if status else None,
-            max_vessels=normalized_max_vessels,
-            offset=normalized_offset,
-            total_available=total_available,
-            capture_window_seconds=normalized_window,
-            vessel_scope=normalized_scope,
-            bbox=normalized_bbox,
-        )
-        response["memory_cached"] = True
-        response["memory_cache_age_seconds"] = round(cache_age, 2) if cache_age >= 0 else None
-        response["snapshot_vessel_count"] = len(all_rows)
-        response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
-        response["persian_gulf_demo_synthetic"] = bool(gulf_demo_rows)
-        response["coastal_demo_regions"] = coastal_demo_regions
-        response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
-        if gulf_demo_rows:
-            if include_coastal_demo or include_gulf_demo:
-                pg_mode = "api_opt_in"
-            elif env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
-                pg_mode = "env_coastal_sparse"
-            elif env_gulf and coverage_gap:
-                pg_mode = "env_coverage_gap"
-            else:
-                pg_mode = None
-        else:
-            pg_mode = None
-        response["persian_gulf_demo_mode"] = pg_mode
-        response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
-        if demo_rows:
-            if include_coastal_demo:
-                demo_note = (
-                    "Coastal sparse-feed demo: synthetic Gulf and Africa-adjacent positions merged because "
-                    "include_coastal_demo=1 was requested; these are not live AIS for those boxes. Other rows may "
-                    "still be real persisted AIS snapshot positions."
-                )
-            elif include_gulf_demo:
-                demo_note = (
-                    "Persian Gulf Hormuz demo: synthetic positions merged because include_gulf_demo was requested; "
-                    "these are not live AIS positions for the Gulf. Other vessels in this response may still be "
-                    "real persisted AIS snapshot positions."
-                )
-            elif env_coastal:
-                demo_note = (
-                    "Coastal sparse-feed demo: synthetic positions merged while MARITIME_COASTAL_DEMO_SEED is enabled "
-                    "for low-coverage Hormuz and/or Africa-adjacent reference boxes; this does not represent restored "
-                    "AISStream coverage."
-                )
-            else:
-                demo_note = (
-                    "Persian Gulf Hormuz demo: synthetic positions merged while MARITIME_GULF_DEMO_SEED is enabled; "
-                    "this does not represent restored AISStream coverage."
-                )
-            lim = list(response.get("limitations") or [])
-            if demo_note not in lim:
-                lim.append(demo_note)
-            response["limitations"] = lim
-        return response
     except Exception as exc:
-        conn.rollback()
         return _build_empty_ais_response(
             source="AISStream persisted snapshot (read error)",
             limitations=[
-                f"Maritime snapshots could not be read from Postgres: {exc}",
+                f"Maritime snapshots could not be assembled: {exc}",
                 "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
@@ -1806,8 +1891,6 @@ def get_maritime_vessel_feed(
             plan=plan,
             offset=normalized_offset,
         )
-    finally:
-        conn.close()
 
 
 def collect_live_maritime_vessel_feed(
@@ -2154,6 +2237,10 @@ def get_maritime_stats(
     try:
         conn = _db_connect()
     except Exception as exc:
+        try:
+            from backend.services.maritime_snapshot import get_snapshot_meta
+        except ImportError:
+            from services.maritime_snapshot import get_snapshot_meta
         return {
             "stored_vessel_count": 0,
             "snapshot_vessel_count": 0,
@@ -2165,6 +2252,7 @@ def get_maritime_stats(
             "memory_cache_loaded": False,
             "memory_cache_age_seconds": None,
             "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
+            "redis_snapshot": get_snapshot_meta(),
             "worker": {"status": "database_unavailable", "last_error": str(exc)},
             "limits": {
                 "ais_max_vessels": AIS_MAX_VESSELS,
@@ -2264,6 +2352,11 @@ def get_maritime_stats(
         metadata = status.get("metadata") if isinstance(status.get("metadata"), dict) else {}
         last_success = _parse_datetime(status.get("last_success_at"))
         snapshot_age_seconds = _seconds_since(last_success)
+        try:
+            from backend.services.maritime_snapshot import get_snapshot_meta
+        except ImportError:
+            from services.maritime_snapshot import get_snapshot_meta
+        redis_snapshot = get_snapshot_meta()
         return {
             "stored_vessel_count": stored_count,
             "snapshot_vessel_count": len(cached_rows),
@@ -2281,6 +2374,7 @@ def get_maritime_stats(
             "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
             "stale": snapshot_age_seconds is None or snapshot_age_seconds > MARITIME_SNAPSHOT_TTL_SECONDS,
             "snapshot_age_seconds": snapshot_age_seconds,
+            "redis_snapshot": redis_snapshot,
             "worker": {
                 "status": status.get("status") or "unknown",
                 "source": status.get("source") or "AISStream",

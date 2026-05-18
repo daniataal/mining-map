@@ -62,6 +62,7 @@ export function maritimeVesselSnapshotQueryKey(options: MaritimeSnapshotFetchOpt
   ] as const;
 }
 
+/** Prefetches global vessel feed; backend serves pre-built Redis snapshots when available. */
 export async function fetchMaritimeVesselSnapshot(
   options: MaritimeSnapshotFetchOptions,
 ): Promise<MaritimeVesselFeedResponse> {

@@ -61,8 +61,9 @@ export const AIR_HUB_PRESETS: LocationPreset[] = [
   { id: 'air-tlv', name: 'Ben Gurion Airport (TLV)', lat: 32.011, lng: 34.87, country: 'Israel', group: 'catalog' },
 ];
 
-export const MAX_HUB_MARKERS_PER_COUNTRY = 48;
-export const MAX_TOTAL_HUB_MARKERS = 96;
+/** Route-map hub caps — profile with React DevTools "Highlight updates" on MapComponent. */
+export const MAX_HUB_MARKERS_PER_COUNTRY = 80;
+export const MAX_TOTAL_HUB_MARKERS = 120;
 /** Cap dropdown options per group to keep selects responsive. */
 export const MAX_DROPDOWN_PRESETS_PER_GROUP = 40;
 
@@ -70,6 +71,15 @@ export function canonicalRouteHubCountry(country: string | undefined): string | 
   const raw = country?.trim();
   if (!raw) return null;
   return resolveCountryFocusToken(raw, countriesList) ?? raw;
+}
+
+/** Slice the license pool to route-corridor countries before preset/marker builds (avoids 15k scans). */
+export function filterLicensesForRouteHubs(
+  licenses: readonly MiningLicense[],
+  countries: readonly string[],
+): MiningLicense[] {
+  if (!countries.length) return [];
+  return licenses.filter((item) => countriesMatchRouteHubFilter(item.country, countries));
 }
 
 export function countriesMatchRouteHubFilter(

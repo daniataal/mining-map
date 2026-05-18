@@ -332,6 +332,56 @@ def _same_place(a: RoutePoint, b: RoutePoint, max_km: float = 35.0) -> bool:
     return _haversine_km(a.lat, a.lng, b.lat, b.lng) <= max_km
 
 
+def _facility_connector_required(from_point: RoutePoint, to_point: RoutePoint) -> bool:
+    """Port/airport (or other gateway) to a different facility type always needs a connector leg."""
+    from_kind = (from_point.kind or "").lower()
+    to_kind = (to_point.kind or "").lower()
+    to_name = (to_point.name or "").lower()
+    if from_kind == "port" and (
+        to_kind == "airport" or "airport" in to_name or "ben gurion" in to_name
+    ):
+        return True
+    if from_kind == "airport" and to_kind not in {"airport", "sea_lane"}:
+        return True
+    return False
+
+
+def _connector_leg_needed(from_point: RoutePoint, to_point: RoutePoint, *, max_km: float = 35.0) -> bool:
+    distance_km = _haversine_km(from_point.lat, from_point.lng, to_point.lat, to_point.lng)
+    if _facility_connector_required(from_point, to_point):
+        return distance_km > 1.0
+    return distance_km > max_km
+
+
+def _select_sea_import_hub(
+    destination: RoutePoint,
+    hubs: tuple[TransportHub, ...],
+    *,
+    country: str = "",
+) -> tuple[TransportHub, list[str]]:
+    """Pick import seaport; prefer Haifa for Israel airport deliveries (sea + road to TLV)."""
+    resolved_country = (country or _point_country(destination)).strip()
+    country_key = normalize_country_key(resolved_country)
+    dest_kind = (destination.kind or "").lower()
+    dest_name = (destination.name or "").lower()
+    is_airport_dest = dest_kind == "airport" or "airport" in dest_name or "ben gurion" in dest_name
+
+    if country_key == "israel" and is_airport_dest:
+        haifa = next((hub for hub in hubs if "haifa" in hub.name.lower()), None)
+        if haifa is not None:
+            return haifa, [
+                "Sea trunk terminates at Haifa Port for airport delivery; "
+                "road connector to Ben Gurion (TLV) follows."
+            ]
+
+    return _select_country_authoritative_hub(
+        destination,
+        hubs,
+        country=resolved_country,
+        role="import",
+    )
+
+
 def _is_europe(point: RoutePoint) -> bool:
     return 35.0 <= point.lat <= 72.0 and -15.0 <= point.lng <= 45.0
 
@@ -566,8 +616,9 @@ def _append_if_not_same(
     geometry: Optional[ResolvedGeometry] = None,
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
     cost_overrides: Optional[dict[str, Any]] = None,
+    connector_max_km: float = 35.0,
 ) -> None:
-    if _same_place(from_point, to_point):
+    if not _connector_leg_needed(from_point, to_point, max_km=connector_max_km):
         return
     resolved = geometry
     if resolved is None:
@@ -603,11 +654,10 @@ def _plan_sea_route(
     hub_notes: list[str] = []
     if export_hub is None:
         export_hub, hub_notes = _select_hub(origin, MARITIME_HUBS, country=_origin_country(origin))
-    import_hub, import_notes = _select_country_authoritative_hub(
+    import_hub, import_notes = _select_sea_import_hub(
         destination,
         MARITIME_HUBS,
         country=_destination_country(destination),
-        role="import",
     )
     export_port = _point_from_hub(export_hub)
     import_port = _point_from_hub(import_hub)
@@ -638,9 +688,10 @@ def _plan_sea_route(
         legs,
         import_port,
         destination,
-        _inland_method(requested_methods, import_to_dest_km),
+        "road",
         quantity_tons,
         stage="3. Final delivery from import port",
+        connector_max_km=8.0,
     )
     if import_notes and len(legs) >= 1:
         legs[-1].notes.extend(import_notes)
@@ -958,6 +1009,17 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
             "Nominate port slots, border clearance, and carrier quotes before execution."
         )
 
+    mixed_mode_notes: list[str] = []
+    dest_kind = (destination.kind or "").lower()
+    dest_name = (destination.name or "").lower()
+    if "sea" in requested_methods and (
+        dest_kind == "airport" or "airport" in dest_name or "ben gurion" in dest_name
+    ):
+        mixed_mode_notes.append(
+            "Sea mode terminates at the nearest Israeli seaport (Haifa for TLV airport) with a road "
+            "connector to the airport. For a direct trunk to Ben Gurion, use air freight instead of sea."
+        )
+
     response: dict[str, Any] = {
         "product": request_payload.get("product"),
         "quantity_tons": quantity_tons,
@@ -973,6 +1035,6 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
             "landlocked_hint": landlocked_hint,
             "alternatives_offered": offer_alternatives and len(alternatives) > 0,
         },
-        "limitations": base_limitations,
+        "limitations": [*base_limitations, *mixed_mode_notes],
     }
     return response

@@ -15,6 +15,7 @@ try:
         persist_maritime_vessel_feed,
         update_maritime_ingest_status,
     )
+    from backend.services.maritime_snapshot import publish_maritime_snapshot_from_conn
 except ImportError:
     from services.maritime_intel import (
         collect_worker_maritime_vessel_feed,
@@ -25,6 +26,7 @@ except ImportError:
         persist_maritime_vessel_feed,
         update_maritime_ingest_status,
     )
+    from services.maritime_snapshot import publish_maritime_snapshot_from_conn
 
 
 def _int_env(name: str, default: int) -> int:
@@ -103,7 +105,11 @@ def run_once() -> int:
         )
         conn.commit()
         invalidate_maritime_memory_cache()
-        print(f"[maritime-worker] status={status} upserted={snapshot_count} scope={vessel_scope}")
+        published = publish_maritime_snapshot_from_conn(conn, feed)
+        print(
+            f"[maritime-worker] status={status} upserted={snapshot_count} "
+            f"redis={'ok' if published else 'skip'} scope={vessel_scope}"
+        )
         return snapshot_count
     except Exception as exc:
         conn.rollback()

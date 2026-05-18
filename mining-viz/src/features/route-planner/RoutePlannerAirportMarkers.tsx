@@ -1,8 +1,12 @@
+import { memo, useMemo } from 'react';
 import { Marker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { useI18n } from '../../lib/i18n';
 import type { RoutePlannerHubMarker } from './locationPresets';
 import type { RoutePickRole } from './useRoutePlanner';
+
+const AIRPORT_ICON_IDLE = createAirportMapIcon(false);
+const AIRPORT_ICON_PICK = createAirportMapIcon(true);
 
 function createAirportMapIcon(active = false): L.DivIcon {
   const size = active ? 30 : 26;
@@ -30,21 +34,24 @@ interface RoutePlannerAirportMarkersProps {
   onAirportPick: (airport: RoutePlannerHubMarker, role: RoutePickRole) => void;
 }
 
-export default function RoutePlannerAirportMarkers({
+function RoutePlannerAirportMarkers({
   airports,
   pickRole,
   onAirportPick,
 }: RoutePlannerAirportMarkersProps) {
   const { t } = useI18n();
+  const icon = pickRole ? AIRPORT_ICON_PICK : AIRPORT_ICON_IDLE;
+  const zIndex = pickRole ? 2510 : 410;
+  const interactive = Boolean(pickRole);
 
-  return (
-    <>
-      {airports.map((airport) => (
+  const markers = useMemo(
+    () =>
+      airports.map((airport) => (
         <Marker
           key={airport.id}
           position={[airport.lat, airport.lng]}
-          icon={createAirportMapIcon(Boolean(pickRole))}
-          zIndexOffset={pickRole ? 2510 : 410}
+          icon={icon}
+          zIndexOffset={zIndex}
           bubblingMouseEvents={!pickRole}
           eventHandlers={{
             click: (e) => {
@@ -59,7 +66,7 @@ export default function RoutePlannerAirportMarkers({
               ✈ {airport.name}
               {airport.country ? ` · ${airport.country}` : ''}
             </span>
-            {!pickRole && (
+            {!interactive && (
               <p className="text-[9px] text-slate-500 mt-0.5">
                 {t(
                   'לחצו "מהמפה" על ספק או יעד ואז בחרו שדה תעופה',
@@ -69,7 +76,11 @@ export default function RoutePlannerAirportMarkers({
             )}
           </Tooltip>
         </Marker>
-      ))}
-    </>
+      )),
+    [airports, icon, zIndex, pickRole, interactive, onAirportPick, t],
   );
+
+  return <>{markers}</>;
 }
+
+export default memo(RoutePlannerAirportMarkers);

@@ -5,6 +5,7 @@ import {
   buildAllLocationPresets,
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
+  filterLicensesForRouteHubs,
   countriesMatchRouteHubFilter,
   resolveRolePresetCountries,
   resolveRouteHubCountries,
@@ -74,6 +75,18 @@ describe('resolveRolePresetCountries', () => {
     expect(resolveRolePresetCountries('buyer', 'Zambia', 'Israel')).toEqual(
       expect.arrayContaining(['Zambia', 'Israel']),
     );
+  });
+});
+
+describe('filterLicensesForRouteHubs', () => {
+  it('returns only licenses in filter countries', () => {
+    const licenses = [
+      { id: 'a', country: 'Israel', lat: 1, lng: 2 } as MiningLicense,
+      { id: 'b', country: 'Canada', lat: 3, lng: 4 } as MiningLicense,
+    ];
+    const filtered = filterLicensesForRouteHubs(licenses, ['Israel']);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe('a');
   });
 });
 

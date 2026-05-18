@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Loader2, Navigation, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/use-debounced-value';
 import { useI18n } from '../../lib/i18n';
 import type { MiningLicense } from '../../types';
@@ -31,7 +31,8 @@ function DdBadge({ status }: { status: DueDiligenceStatus }) {
   return <span className="text-red-500 font-black text-[9px] uppercase">✗ Fail</span>;
 }
 
-function FindingList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+// Profile panel keystrokes: React DevTools → Profiler → record while typing quantity/country.
+const FindingList = memo(function FindingList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   return (
     <div className="rounded-2xl bg-white/60 p-3 dark:bg-slate-950/40">
       <p className="mb-2 text-[9px] font-black uppercase tracking-widest opacity-70">{title}</p>
@@ -46,15 +47,16 @@ function FindingList({ title, items, empty }: { title: string; items: string[]; 
       )}
     </div>
   );
-}
+});
 
 interface RoutePlannerPanelProps {
   rp: RoutePlannerHook;
-  allLicenses?: MiningLicense[];
+  /** Hub-filtered license slice — not the full ~15k pool (see App routePlannerHubLicenses). */
+  presetLicensePool?: MiningLicense[];
   portEntities?: MiningLicense[];
 }
 
-export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: RoutePlannerPanelProps) {
+function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePlannerPanelProps) {
   const { t } = useI18n();
   const {
     supplier, setSupplier, buyer, setBuyer,
@@ -86,21 +88,33 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
   const debouncedSupplierCountry = useDebouncedValue(supplier.country);
   const debouncedBuyerCountry = useDebouncedValue(buyer.country);
 
-  const supplierPresetsRaw = useMemo(
-    () =>
-      buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
-        countries: resolveRolePresetCountries('supplier', debouncedSupplierCountry, debouncedBuyerCountry),
-      }),
-    [allLicenses, portEntities, debouncedSupplierCountry, debouncedBuyerCountry],
+  const supplierCountriesKey = useMemo(
+    () => resolveRolePresetCountries('supplier', debouncedSupplierCountry, debouncedBuyerCountry).join('\0'),
+    [debouncedSupplierCountry, debouncedBuyerCountry],
+  );
+  const buyerCountriesKey = useMemo(
+    () => resolveRolePresetCountries('buyer', debouncedSupplierCountry, debouncedBuyerCountry).join('\0'),
+    [debouncedSupplierCountry, debouncedBuyerCountry],
   );
 
-  const buyerPresetsRaw = useMemo(
-    () =>
-      buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
-        countries: resolveRolePresetCountries('buyer', debouncedSupplierCountry, debouncedBuyerCountry),
-      }),
-    [allLicenses, portEntities, debouncedSupplierCountry, debouncedBuyerCountry],
-  );
+  const supplierPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
+  const buyerPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
+
+  const supplierPresetsRaw = useMemo(() => {
+    if (pickRole) return supplierPresetsCache.current;
+    const countries = supplierCountriesKey ? supplierCountriesKey.split('\0') : [];
+    const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
+    supplierPresetsCache.current = next;
+    return next;
+  }, [pickRole, presetLicensePool, portEntities, supplierCountriesKey]);
+
+  const buyerPresetsRaw = useMemo(() => {
+    if (pickRole) return buyerPresetsCache.current;
+    const countries = buyerCountriesKey ? buyerCountriesKey.split('\0') : [];
+    const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
+    buyerPresetsCache.current = next;
+    return next;
+  }, [pickRole, presetLicensePool, portEntities, buyerCountriesKey]);
 
   const supplierPresets = useDeferredValue(supplierPresetsRaw);
   const buyerPresets = useDeferredValue(buyerPresetsRaw);
@@ -595,3 +609,5 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
     </Card>
   );
 }
+
+export default memo(RoutePlannerPanel);

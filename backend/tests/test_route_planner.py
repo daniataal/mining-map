@@ -384,6 +384,129 @@ class RoutePlannerTests(unittest.TestCase):
                 f"Sea corridor midpoint ({lat:.2f}, {lng:.2f}) cuts across Sahara landmass",
             )
 
+    @patch("backend.services.routing_geometry.requests.get")
+    def test_ghana_to_tlv_sea_includes_road_delivery_via_haifa(self, mock_get: MagicMock):
+        """West Africa → Ben Gurion: sea trunk to Haifa, OSRM road connector to TLV (not skipped)."""
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = _osrm_mock_response(distance_m=92_000, duration_s=4500)
+        mock_get.return_value = response
+
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "Accra / Tema",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Ben Gurion Airport (TLV)",
+                    "lat": 32.011,
+                    "lng": 34.87,
+                    "kind": "airport",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        self.assertGreaterEqual(len(legs), 2)
+        sea_leg = next(leg for leg in legs if leg["method"] == "sea")
+        self.assertIn("Haifa", sea_leg["to"]["name"])
+        road_legs = [leg for leg in legs if leg["method"] == "road"]
+        self.assertTrue(road_legs, "Expected road connector from import port to TLV airport")
+        final_road = road_legs[-1]
+        self.assertGreater(len(final_road["path"]), 2)
+        self.assertLess(abs(final_road["to"]["lat"] - 32.011), 0.5)
+        self.assertLess(abs(final_road["to"]["lng"] - 34.87), 0.5)
+
+    @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
+    def test_ghana_to_tlv_sea_corridor_midpoints_not_deep_inland(self):
+        """Rough screen: corridor midpoints should not sit >50 km inside major landmasses."""
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "Accra / Tema",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Ben Gurion Airport (TLV)",
+                    "lat": 32.011,
+                    "lng": 34.87,
+                    "kind": "airport",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        self.assertGreater(len(sea_leg["path"]), 10)
+
+        def _in_sahara_inland(lat: float, lng: float) -> bool:
+            return 20.0 < lat < 30.0 and 2.0 < lng < 18.0
+
+        def _in_central_africa_inland(lat: float, lng: float) -> bool:
+            return 0.0 < lat < 12.0 and 8.0 < lng < 22.0 and lng > -5.0
+
+        sample = sea_leg["path"][1:-1]
+        if len(sample) > 10:
+            step = max(1, len(sample) // 10)
+            sample = sample[::step]
+        for lat, lng in sample:
+            self.assertFalse(
+                _in_sahara_inland(lat, lng),
+                f"Sea midpoint ({lat:.2f}, {lng:.2f}) is deep inland (Sahara shortcut)",
+            )
+            self.assertFalse(
+                _in_central_africa_inland(lat, lng),
+                f"Sea midpoint ({lat:.2f}, {lng:.2f}) cuts inland across Africa",
+            )
+
+    @patch("backend.services.routing_geometry.requests.get")
+    def test_haifa_to_tlv_road_leg_uses_osrm_when_available(self, mock_get: MagicMock):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = _osrm_mock_response(distance_m=92_000, duration_s=4500)
+        mock_get.return_value = response
+
+        result = plan_route(
+            {
+                "product": "Gold dore",
+                "quantity_tons": 2,
+                "origin": {
+                    "name": "Accra / Tema",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Ben Gurion Airport (TLV)",
+                    "lat": 32.011,
+                    "lng": 34.87,
+                    "kind": "airport",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        road_to_tlv = [leg for leg in result["route"]["legs"] if leg["method"] == "road"][-1]
+        self.assertIn(road_to_tlv["geometry_source"], {"osrm", "straight_line_fallback"})
+        if road_to_tlv["geometry_source"] == "osrm":
+            self.assertGreaterEqual(len(road_to_tlv["path"]), 4)
+
     def test_israel_airport_destination_sea_mode_uses_domestic_port(self):
         result = plan_route(
             {
