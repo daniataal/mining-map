@@ -15,15 +15,19 @@ import {
   resolveRolePresetCountries,
   resolveRouteHubCountries,
   buyerCountryRequiredForHubs,
+  routeHubCountriesReadyForMap,
   findNearestHubInCountry,
   searchLocationPresets,
 } from './locationPresets';
 import type { MiningLicense } from '../../types';
 
 describe('resolveRouteHubCountries', () => {
-  it('requires destination country', () => {
+  it('requires both origin and destination countries', () => {
     expect(resolveRouteHubCountries('Zambia', undefined)).toEqual([]);
+    expect(resolveRouteHubCountries(undefined, 'Netherlands')).toEqual([]);
     expect(buyerCountryRequiredForHubs(undefined)).toBe(true);
+    expect(routeHubCountriesReadyForMap('Zambia', undefined)).toBe(false);
+    expect(routeHubCountriesReadyForMap(undefined, 'Netherlands')).toBe(false);
   });
 
   it('includes origin and destination when both set', () => {
@@ -31,6 +35,17 @@ describe('resolveRouteHubCountries', () => {
     expect(countries).toContain('Zambia');
     expect(countries).toContain('Netherlands');
     expect(countries).toHaveLength(2);
+  });
+
+  it('returns Ghana and Germany hubs only for that corridor', () => {
+    const countries = resolveRouteHubCountries('Ghana', 'Germany');
+    expect(countries).toContain('Ghana');
+    expect(countries).toContain('Germany');
+    const ports = buildRoutePlannerPortMarkers([], { countries });
+    expect(ports.every((m) => m.country === 'Ghana' || m.country === 'Germany')).toBe(true);
+    expect(ports.some((m) => m.country === 'Netherlands')).toBe(false);
+    expect(ports.some((m) => m.name.includes('Tema'))).toBe(true);
+    expect(ports.some((m) => m.name.includes('Hamburg'))).toBe(true);
   });
 });
 
@@ -59,17 +74,30 @@ describe('countriesMatchRouteHubFilter', () => {
 
 describe('buildRoutePlannerPortMarkers', () => {
   it('returns only hubs in filter countries', () => {
-    const all = buildRoutePlannerPortMarkers([], [], { countries: ['Israel'] });
+    const all = buildRoutePlannerPortMarkers([], { countries: ['Israel'] });
     expect(all.length).toBeGreaterThan(0);
     expect(all.every((m) => m.country === 'Israel')).toBe(true);
     expect(all.some((m) => m.name.includes('Haifa'))).toBe(true);
   });
 
-  it('does not return world catalog when countries empty', () => {
-    const filtered = buildRoutePlannerPortMarkers([], [], { countries: [] });
-    expect(filtered).toHaveLength(0);
-    const unfiltered = buildRoutePlannerPortMarkers([], []);
-    expect(unfiltered.length).toBeGreaterThan(MARITIME_HUB_PRESETS.length);
+  it('returns no markers when countries empty or omitted', () => {
+    expect(buildRoutePlannerPortMarkers([], { countries: [] })).toHaveLength(0);
+    expect(buildRoutePlannerPortMarkers([])).toHaveLength(0);
+  });
+
+  it('does not scan licenses — catalog and port entities only', () => {
+    const licenses = Array.from({ length: 200 }, (_, i) => ({
+      id: `fr-${i}`,
+      company: `French Port ${i}`,
+      country: 'France',
+      entityKind: 'port',
+      entitySubtype: 'port',
+      lat: 43 + i * 0.001,
+      lng: 5,
+    })) as MiningLicense[];
+    const ports = buildRoutePlannerPortMarkers(licenses, { countries: ['Israel'] });
+    expect(ports.every((m) => m.country === 'Israel')).toBe(true);
+    expect(ports.some((m) => m.name.includes('French Port'))).toBe(false);
   });
 
   it('excludes Icelandic ISO2 ports from Israel marker filters', () => {
@@ -77,7 +105,7 @@ describe('buildRoutePlannerPortMarkers', () => {
       { id: 'is-port', company: 'Arskogssandur Port', country: 'IS', entityKind: 'port', entitySubtype: 'port', lat: 65.9, lng: -18.2 } as MiningLicense,
       { id: 'il-port', company: 'Haifa Custom Port', country: 'IL', entityKind: 'port', entitySubtype: 'port', lat: 32.81, lng: 34.98 } as MiningLicense,
     ];
-    const filtered = buildRoutePlannerPortMarkers([], portEntities, { countries: ['Israel'] });
+    const filtered = buildRoutePlannerPortMarkers(portEntities, { countries: ['Israel'] });
     expect(filtered.some((m) => m.name.includes('Arskogssandur'))).toBe(false);
     expect(filtered.some((m) => m.name.includes('Haifa Custom'))).toBe(true);
   });
@@ -114,7 +142,7 @@ describe('buildRoutePlannerPortMarkers', () => {
         lng: 34.6,
       } as MiningLicense,
     ];
-    const filtered = buildRoutePlannerPortMarkers([], portEntities, { countries: ['Israel'] });
+    const filtered = buildRoutePlannerPortMarkers(portEntities, { countries: ['Israel'] });
     expect(filtered.some((m) => m.name.includes('Haifa Custom'))).toBe(true);
     expect(filtered.some((m) => m.name.includes('Rail Terminal'))).toBe(false);
     expect(filtered.some((m) => m.name.includes('Logistics Hub'))).toBe(false);
@@ -291,7 +319,7 @@ describe('buildAllLocationPresets', () => {
 
 describe('route mode hub marker caps', () => {
   it('limits combined port markers in route mode', () => {
-    const ports = buildRoutePlannerPortMarkers([], [], {
+    const ports = buildRoutePlannerPortMarkers([], {
       countries: ['Israel', 'Netherlands'],
       maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
     });

@@ -8,7 +8,7 @@ Geometry sources (env-configurable, all degrade gracefully):
   - road: OSRM driving network (``OSRM_BASE_URL``)
   - sea: searoute marine network when ``SEAROUTE_ENABLED``; else offshore corridors
   - air: great-circle trunk; road access via OSRM when possible
-  - rail: simplified hub-to-hub great-circle segments (not a track database)
+  - rail: country-aware hub selection with OSRM land segments (not a track database)
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ try:
         inland_origin_heuristic,
         normalize_country_key,
         rank_trade_hubs,
+        rail_corridor_viable,
         resolve_leg_geometry,
         select_nearest_trade_hub,
     )
@@ -43,6 +44,7 @@ except ImportError:
         inland_origin_heuristic,
         normalize_country_key,
         rank_trade_hubs,
+        rail_corridor_viable,
         resolve_leg_geometry,
         select_nearest_trade_hub,
     )
@@ -136,9 +138,12 @@ RAIL_HUBS: tuple[TransportHub, ...] = (
     TransportHub("Durban Rail Terminal", -29.868, 31.050, "South Africa", "rail_hub"),
     TransportHub("Mombasa Rail Terminal", -4.043, 39.668, "Kenya", "rail_hub"),
     TransportHub("Dar es Salaam Rail Terminal", -6.823, 39.289, "Tanzania", "rail_hub"),
+    TransportHub("Lagos Rail Terminal", 6.450, 3.390, "Nigeria", "rail_hub"),
     TransportHub("Rotterdam Rail Terminal", 51.924, 4.477, "Netherlands", "rail_hub"),
     TransportHub("Antwerp Rail Terminal", 51.219, 4.402, "Belgium", "rail_hub"),
     TransportHub("Hamburg Rail Terminal", 53.545, 9.970, "Germany", "rail_hub"),
+    TransportHub("Frankfurt Rail Terminal", 50.107, 8.662, "Germany", "rail_hub"),
+    TransportHub("Munich Rail Terminal", 48.140, 11.558, "Germany", "rail_hub"),
 )
 
 AIR_HUBS: tuple[TransportHub, ...] = (
@@ -234,6 +239,48 @@ def _path_distance_km(path: list[tuple[float, float]]) -> float:
 
 def _nearest_hub(point: RoutePoint, hubs: tuple[TransportHub, ...]) -> TransportHub:
     return min(hubs, key=lambda hub: _haversine_km(point.lat, point.lng, hub.lat, hub.lng))
+
+
+def _select_rail_hubs_for_leg(
+    from_point: RoutePoint,
+    to_point: RoutePoint,
+) -> Optional[dict[str, Any]]:
+    """Country-aware export/import rail gateways for a leg."""
+    origin_country = _point_country(from_point)
+    dest_country = _point_country(to_point)
+    export_hub, export_notes = _select_hub(from_point, RAIL_HUBS, country=origin_country)
+    import_hub, import_notes = _select_hub(to_point, RAIL_HUBS, country=dest_country)
+
+    viable, viability_notes = rail_corridor_viable(
+        export_hub.lat,
+        export_hub.lng,
+        export_hub.country,
+        import_hub.lat,
+        import_hub.lng,
+        import_hub.country,
+        origin_country=origin_country,
+        dest_country=dest_country,
+    )
+    if not viable:
+        return None
+
+    return {
+        "export": (export_hub.lat, export_hub.lng),
+        "import": (import_hub.lat, import_hub.lng),
+        "export_country": export_hub.country,
+        "import_country": import_hub.country,
+        "origin_country": origin_country,
+        "dest_country": dest_country,
+        "export_name": export_hub.name,
+        "import_name": import_hub.name,
+        "notes": [
+            *export_notes,
+            *import_notes,
+            f"Export rail hub: {export_hub.name} ({export_hub.country}).",
+            f"Import rail hub: {import_hub.name} ({import_hub.country}).",
+            *viability_notes,
+        ],
+    }
 
 
 def _point_country(point: RoutePoint) -> str:
@@ -667,22 +714,53 @@ def _geometry_for_leg(
     *,
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
     deadline: Optional[float] = None,
-) -> ResolvedGeometry:
-    rail_hubs: Optional[tuple[tuple[float, float], tuple[float, float]]] = None
+) -> tuple[ResolvedGeometry, str]:
+    rail_hubs: Optional[dict[str, Any]] = None
+    rail_notes: list[str] = []
+    effective_method = method
     if method == "rail":
-        export_hub = _nearest_hub(from_point, RAIL_HUBS)
-        import_hub = _nearest_hub(to_point, RAIL_HUBS)
-        rail_hubs = ((export_hub.lat, export_hub.lng), (import_hub.lat, import_hub.lng))
-    return resolve_leg_geometry(
+        rail_hubs = _select_rail_hubs_for_leg(from_point, to_point)
+        if rail_hubs is None:
+            effective_method = "road"
+            rail_notes.append(
+                "Rail corridor unavailable (no domestic hub or would cross open water); using road geometry."
+            )
+        else:
+            rail_notes.extend(rail_hubs.pop("notes", []))
+
+    resolved = resolve_leg_geometry(
         from_point.lat,
         from_point.lng,
         to_point.lat,
         to_point.lng,
-        method,
+        effective_method if effective_method != "rail" else "rail",
         corridor_fallback=corridor_fallback,
         rail_hubs=rail_hubs,
         deadline=deadline,
     )
+    if method == "rail" and resolved.source == "rail_rejected":
+        effective_method = "road"
+        rail_notes.append(
+            "Rail corridor rejected during geometry resolution; using road geometry."
+        )
+        resolved = resolve_leg_geometry(
+            from_point.lat,
+            from_point.lng,
+            to_point.lat,
+            to_point.lng,
+            "road",
+            corridor_fallback=corridor_fallback,
+            deadline=deadline,
+        )
+    if rail_notes:
+        resolved = ResolvedGeometry(
+            path=resolved.path,
+            distance_km=resolved.distance_km,
+            duration_hours=resolved.duration_hours,
+            source=resolved.source,
+            notes=[*resolved.notes, *rail_notes],
+        )
+    return resolved, effective_method
 
 
 def _resolve_leg_geometries_parallel(
@@ -695,27 +773,27 @@ def _resolve_leg_geometries_parallel(
         return []
     if len(specs) == 1:
         from_point, to_point, method, corridor_fallback = specs[0]
-        return [
-            _geometry_for_leg(
-                from_point,
-                to_point,
-                method,
-                corridor_fallback=corridor_fallback,
-                deadline=deadline,
-            )
-        ]
-
-    results: list[Optional[ResolvedGeometry]] = [None] * len(specs)
-
-    def _resolve(index: int) -> tuple[int, ResolvedGeometry]:
-        from_point, to_point, method, corridor_fallback = specs[index]
-        return index, _geometry_for_leg(
+        geometry, _ = _geometry_for_leg(
             from_point,
             to_point,
             method,
             corridor_fallback=corridor_fallback,
             deadline=deadline,
         )
+        return [geometry]
+
+    results: list[Optional[ResolvedGeometry]] = [None] * len(specs)
+
+    def _resolve(index: int) -> tuple[int, ResolvedGeometry]:
+        from_point, to_point, method, corridor_fallback = specs[index]
+        geometry, _ = _geometry_for_leg(
+            from_point,
+            to_point,
+            method,
+            corridor_fallback=corridor_fallback,
+            deadline=deadline,
+        )
+        return index, geometry
 
     max_workers = min(4, len(specs))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -738,31 +816,41 @@ def _make_leg(
     geometry: Optional[ResolvedGeometry] = None,
     cost_overrides: Optional[dict[str, Any]] = None,
 ) -> PlannedLeg:
-    resolved = geometry or _geometry_for_leg(from_point, to_point, method)
+    if geometry is not None:
+        resolved = geometry
+        effective_method = method
+        if method == "rail" and (
+            resolved.source == "rail_rejected"
+            or any("Rail corridor unavailable" in note for note in resolved.notes)
+            or any("Rail corridor rejected" in note for note in resolved.notes)
+        ):
+            effective_method = "road"
+    else:
+        resolved, effective_method = _geometry_for_leg(from_point, to_point, method)
     route_path = list(resolved.path)
     raw_distance = resolved.distance_km if resolved.distance_km > 0 else _path_distance_km(route_path)
     if raw_distance <= 0:
         raw_distance = 0.001
-    multiplier = _distance_multiplier(method, resolved.source)
+    multiplier = _distance_multiplier(effective_method, resolved.source)
     effective_distance = raw_distance * multiplier
     duration_hours = resolved.duration_hours
     if duration_hours <= 0:
         duration_hours = raw_distance / 50.0
     score = effective_distance
-    if method == "air":
+    if effective_method == "air":
         score *= 3.0
-    if quantity_tons >= 300 and method in {"rail", "sea", "pipeline"}:
+    if quantity_tons >= 300 and effective_method in {"rail", "sea", "pipeline"}:
         score *= 0.9
 
-    notes = [_leg_note(method, stage), *resolved.notes]
-    if method == "sea":
+    notes = [_leg_note(effective_method, stage), *resolved.notes]
+    if effective_method == "sea":
         notes.append(f"AIS status references available: {len(NAVIGATIONAL_STATUS_LABELS)}")
 
     return PlannedLeg(
         leg_id=f"leg-{index + 1}",
         from_point=from_point,
         to_point=to_point,
-        method=method,
+        method=effective_method,
         distance_km=effective_distance,
         duration_hours=duration_hours,
         method_score=score,
@@ -790,8 +878,9 @@ def _append_if_not_same(
     if not _connector_leg_needed(from_point, to_point, max_km=connector_max_km):
         return
     resolved = geometry
+    leg_method = method
     if resolved is None:
-        resolved = _geometry_for_leg(
+        resolved, leg_method = _geometry_for_leg(
             from_point,
             to_point,
             method,
@@ -803,7 +892,7 @@ def _append_if_not_same(
             len(legs),
             from_point,
             to_point,
-            method,
+            leg_method,
             quantity_tons,
             stage=stage,
             geometry=resolved,

@@ -662,6 +662,88 @@ class RoutePlannerTests(unittest.TestCase):
         if road_to_tlv["geometry_source"] == "osrm":
             self.assertGreaterEqual(len(road_to_tlv["path"]), 4)
 
+    @patch("backend.services.routing_geometry.requests.get")
+    def test_hamburg_frankfurt_rail_avoids_antwerp_hub(self, mock_get: MagicMock):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = _osrm_mock_response(distance_m=420_000, duration_s=14_400)
+        mock_get.return_value = response
+
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Port of Hamburg",
+                    "lat": 53.545,
+                    "lng": 9.97,
+                    "kind": "origin",
+                    "metadata": {"country": "Germany"},
+                },
+                "destination": {
+                    "name": "Frankfurt Airport",
+                    "lat": 50.037,
+                    "lng": 8.562,
+                    "kind": "destination",
+                    "metadata": {"country": "Germany"},
+                },
+                "preferred_methods": ["rail", "road"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        self.assertGreaterEqual(len(legs), 1)
+        trunk = legs[0]
+        self.assertEqual(trunk["method"], "rail")
+        notes_text = " ".join(trunk.get("notes") or [])
+        self.assertNotIn("Antwerp", notes_text)
+        self.assertIn("Hamburg", notes_text)
+        self.assertIn("Frankfurt", notes_text)
+        self.assertIn(trunk["geometry_source"], {"rail_osrm", "rail_hub", "osrm"})
+        self.assertGreater(len(trunk["path"]), 2)
+
+    def test_nigeria_inland_origin_no_ocean_rail_polyline(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Korban Company",
+                    "lat": 7.45,
+                    "lng": 4.55,
+                    "kind": "origin",
+                    "metadata": {"country": "Nigeria"},
+                },
+                "destination": {
+                    "name": "Buyer Lagos",
+                    "lat": 6.52,
+                    "lng": 3.38,
+                    "kind": "destination",
+                    "metadata": {"country": "Nigeria"},
+                },
+                "preferred_methods": ["rail", "road"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        self.assertGreaterEqual(len(legs), 1)
+        leg = legs[0]
+        self.assertIn(leg["method"], {"rail", "road"})
+        path = leg["path"]
+        self.assertGreater(len(path), 0)
+
+        def _in_gulf_of_guinea_ocean(lat: float, lng: float) -> bool:
+            return -12.0 <= lat <= 8.0 and -18.0 <= lng <= 18.0 and not (5.0 <= lat <= 8.5 and 2.0 <= lng <= 5.5)
+
+        for lat, lng in path:
+            self.assertFalse(
+                _in_gulf_of_guinea_ocean(lat, lng),
+                f"Rail/road path must not cross open Gulf of Guinea at ({lat}, {lng})",
+            )
+        notes_text = " ".join(leg.get("notes") or [])
+        self.assertNotIn("Lobito", notes_text)
+        self.assertNotIn("Angola", notes_text)
+
     def test_israel_airport_destination_sea_mode_uses_domestic_port(self):
         result = plan_route(
             {
