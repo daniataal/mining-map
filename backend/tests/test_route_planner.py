@@ -186,6 +186,84 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertIn("sea", trunk_methods)
         self.assertIn("air", trunk_methods)
 
+    def test_egypt_origin_air_route_uses_domestic_airport_not_dubai(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 5,
+                "origin": {
+                    "name": "Abu Tartur Mine",
+                    "lat": 26.5,
+                    "lng": 28.5,
+                    "kind": "origin",
+                    "metadata": {"country": "Egypt"},
+                },
+                "destination": {
+                    "name": "Antwerp",
+                    "lat": 51.219,
+                    "lng": 4.402,
+                    "kind": "destination",
+                    "metadata": {"country": "Belgium"},
+                },
+                "preferred_methods": ["air"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        self.assertEqual(len(legs), 3)
+        self.assertEqual(legs[0]["method"], "road")
+        self.assertEqual(legs[1]["method"], "air")
+        self.assertEqual(legs[2]["method"], "road")
+
+        transit_names = [p["name"] for p in result["route"]["transit_points"]]
+        export_airport = legs[0]["to"]["name"]
+        import_airport = legs[1]["to"]["name"]
+        air_from = legs[1]["from"]["name"]
+        air_to = legs[1]["to"]["name"]
+
+        self.assertNotIn("Dubai", export_airport)
+        self.assertNotIn("Dubai", air_from)
+        egyptian_airports = ("Cairo", "Borg El Arab", "Hurghada", "Luxor")
+        self.assertTrue(
+            any(token in export_airport for token in egyptian_airports),
+            f"Expected Egyptian export airport, got {export_airport}",
+        )
+        self.assertTrue(
+            any(token in import_airport for token in ("Brussels", "Amsterdam")),
+            f"Expected Benelux import airport near Antwerp, got {import_airport}",
+        )
+        self.assertIn("Brussels", import_airport)
+        self.assertEqual(air_from, export_airport)
+        self.assertEqual(air_to, import_airport)
+        self.assertNotIn("Dubai", transit_names)
+
+    def test_egypt_origin_sea_route_prefers_port_said_over_foreign_hub(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 100,
+                "origin": {
+                    "name": "Abu Tartur Mine",
+                    "lat": 26.5,
+                    "lng": 28.5,
+                    "kind": "origin",
+                    "metadata": {"country": "Egypt"},
+                },
+                "destination": {
+                    "name": "Antwerp",
+                    "lat": 51.219,
+                    "lng": 4.402,
+                    "kind": "destination",
+                    "metadata": {"country": "Belgium"},
+                },
+                "preferred_methods": ["sea"],
+            }
+        )
+
+        export_port = result["route"]["legs"][0]["to"]["name"]
+        self.assertIn("Port Said", export_port)
+        self.assertNotIn("Jebel Ali", export_port)
+
 
 if __name__ == "__main__":
     unittest.main()
