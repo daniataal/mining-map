@@ -10,6 +10,7 @@ import {
 } from 'react';
 import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
 import { fetchRoutePlan, ROUTE_CALCULATING_HINT } from './fetchRoutePlan';
+import { routeHubCountriesReadyForMap } from './locationPresets';
 export type RoutePickRole = 'supplier' | 'buyer';
 export interface RoutePartyLocation {
   lat: number;
@@ -120,6 +121,13 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const computeInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (!routeHubCountriesReadyForMap(supplier.country, buyer.country)) {
+      setShowPortsOnMap(false);
+      setShowAirportsOnMap(false);
+    }
+  }, [supplier.country, buyer.country]);
 
   const setQuantityTons = useCallback((value: number) => {
     startTransition(() => {

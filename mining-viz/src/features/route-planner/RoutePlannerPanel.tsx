@@ -16,9 +16,9 @@ import RouteLegend from './RouteLegend';
 import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
 import {
   buildRouteHubPresets,
-  buyerCountryRequiredForHubs,
   resolveRolePresetCountries,
   resolveRouteHubCountries,
+  routeHubCountriesReadyForMap,
 } from './locationPresets';
 import RoutePlannerLocationBlock from './RoutePlannerLocationBlock';
 
@@ -87,7 +87,7 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
     [supplier.country, buyer.country],
   );
 
-  const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
+  const hubCountriesReady = routeHubCountriesReadyForMap(supplier.country, buyer.country);
 
   const supplierPresetCountries = useMemo(
     () => resolveRolePresetCountries('supplier', supplier.country, buyer.country),
@@ -107,10 +107,10 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
     [portEntities, buyerPresetCountries],
   );
 
-  const hubToggleHint = needsDestinationCountry
+  const hubToggleHint = !hubCountriesReady
     ? t(
-        'בחרו מדינת יעד (קונה) כדי להציג נמלים ושדות תעופה רלוונטיים בלבד',
-        'Set a destination country (buyer) to show only relevant ports and airports',
+        'בחרו מדינת מוצא ומדינת יעד לפני הצגת נמלים ושדות תעופה',
+        'Select origin and destination countries first',
       )
     : t(
         `מוצגים רק נמלים ושדות ב־${hubCountries.join(' · ')}`,
@@ -261,11 +261,11 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
               <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
             )}
 
-            {needsDestinationCountry && (
+            {!hubCountriesReady && (
               <div className="rounded-2xl border border-amber-500/35 bg-amber-500/[0.08] px-4 py-3 text-[11px] font-semibold text-amber-950 dark:text-amber-100">
                 {t(
-                  'הגדירו מדינת יעד לפני הצגת נמלים — בחרו קונה עם מדינה או הזינו מדינה בשדה היעד.',
-                  'Set a destination country before showing ports — pick a buyer preset with a country or use the country field below.',
+                  'הגדירו מדינת מוצא ומדינת יעד לפני הצגת נמלים — השתמשו בשדות המדינה למטה.',
+                  'Set origin and destination countries before showing ports — use the country fields below.',
                 )}
               </div>
             )}
@@ -274,7 +274,7 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
               <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
                 <Checkbox
                   checked={showPortsOnMap}
-                  disabled={needsDestinationCountry}
+                  disabled={!hubCountriesReady}
                   onCheckedChange={(v) => setShowPortsOnMap(Boolean(v))}
                 />
                 <div className="min-w-0">
@@ -287,7 +287,7 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
               <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
                 <Checkbox
                   checked={showAirportsOnMap}
-                  disabled={needsDestinationCountry}
+                  disabled={!hubCountriesReady}
                   onCheckedChange={(v) => setShowAirportsOnMap(Boolean(v))}
                 />
                 <div className="min-w-0">

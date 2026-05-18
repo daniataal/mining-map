@@ -425,6 +425,125 @@ def fetch_sea_route(
         return fallback
 
 
+# lat_min, lat_max, lng_min, lng_max — open water where rail geodesics must not run.
+OPEN_WATER_BOXES: tuple[tuple[float, float, float, float], ...] = (
+    (-12.0, 8.0, -18.0, 18.0),  # Gulf of Guinea & tropical Atlantic
+    (-25.0, -5.0, -25.0, 5.0),  # South Atlantic mid-ocean
+    (15.0, 45.0, -55.0, -20.0),  # North Atlantic mid-ocean
+)
+
+RAIL_MAX_CORRIDOR_KM = 2200.0
+RAIL_SHORT_SEGMENT_KM = 80.0
+
+
+def _point_in_open_water(lat: float, lng: float) -> bool:
+    for lat_min, lat_max, lng_min, lng_max in OPEN_WATER_BOXES:
+        if lat_min <= lat <= lat_max and lng_min <= lng <= lng_max:
+            return True
+    return False
+
+
+def _region_bucket(lat: float, lng: float) -> str:
+    if 35.0 <= lat <= 72.0 and -12.0 <= lng <= 35.0:
+        return "europe"
+    if -38.0 <= lat <= 38.0 and -20.0 <= lng <= 55.0:
+        return "africa"
+    return "other"
+
+
+def segment_likely_crosses_ocean(
+    a_lat: float,
+    a_lng: float,
+    b_lat: float,
+    b_lng: float,
+    *,
+    samples: int = 7,
+) -> bool:
+    """Heuristic: sample points along the geodesic and flag mid-segment open water."""
+    distance_km = haversine_km(a_lat, a_lng, b_lat, b_lng)
+    if distance_km < RAIL_SHORT_SEGMENT_KM:
+        return False
+    steps = max(2, samples)
+    for step in range(1, steps):
+        f = step / steps
+        lat = a_lat + (b_lat - a_lat) * f
+        lng = a_lng + (b_lng - a_lng) * f
+        if not _point_in_open_water(lat, lng):
+            continue
+        if (
+            haversine_km(a_lat, a_lng, lat, lng) > 40
+            and haversine_km(lat, lng, b_lat, b_lng) > 40
+        ):
+            return True
+    return False
+
+
+def rail_corridor_viable(
+    export_hub_lat: float,
+    export_hub_lng: float,
+    export_hub_country: str,
+    import_hub_lat: float,
+    import_hub_lng: float,
+    import_hub_country: str,
+    *,
+    origin_country: str = "",
+    dest_country: str = "",
+) -> tuple[bool, list[str]]:
+    """Return whether a hub-to-hub rail corridor is plausible on land."""
+    notes: list[str] = []
+    corridor_km = haversine_km(export_hub_lat, export_hub_lng, import_hub_lat, import_hub_lng)
+    if corridor_km > RAIL_MAX_CORRIDOR_KM:
+        notes.append(
+            f"Rail corridor {corridor_km:.0f} km between hubs exceeds "
+            f"{RAIL_MAX_CORRIDOR_KM:.0f} km screening limit."
+        )
+        return False, notes
+
+    export_region = _region_bucket(export_hub_lat, export_hub_lng)
+    import_region = _region_bucket(import_hub_lat, import_hub_lng)
+    if export_region != import_region and {export_region, import_region} <= {"europe", "africa"}:
+        notes.append(
+            "Intercontinental rail corridor rejected (Africa↔Europe requires sea or road intermodal)."
+        )
+        return False, notes
+
+    if segment_likely_crosses_ocean(
+        export_hub_lat, export_hub_lng, import_hub_lat, import_hub_lng
+    ):
+        notes.append("Rail hub pair would cross open ocean; corridor rejected.")
+        return False, notes
+
+    origin_key = normalize_country_key(origin_country)
+    dest_key = normalize_country_key(dest_country)
+    export_key = normalize_country_key(export_hub_country)
+    import_key = normalize_country_key(import_hub_country)
+    if origin_key and export_key and origin_key != export_key:
+        notes.append(
+            f"Export rail hub is in {export_hub_country.strip()} but origin is {origin_country.strip()}; "
+            "no same-country rail gateway in catalog."
+        )
+        return False, notes
+    if dest_key and import_key and dest_key != import_key:
+        notes.append(
+            f"Import rail hub is in {import_hub_country.strip()} but destination is {dest_country.strip()}; "
+            "no same-country rail gateway in catalog."
+        )
+        return False, notes
+
+    return True, notes
+
+
+def _merge_paths(segments: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not segments:
+        return []
+    merged: list[tuple[float, float]] = [segments[0]]
+    for lat, lng in segments[1:]:
+        if haversine_km(merged[-1][0], merged[-1][1], lat, lng) < 0.5:
+            continue
+        merged.append((lat, lng))
+    return merged
+
+
 def rail_hub_geometry(
     a_lat: float,
     a_lng: float,
@@ -433,8 +552,27 @@ def rail_hub_geometry(
     *,
     export_hub: tuple[float, float],
     import_hub: tuple[float, float],
-) -> ResolvedGeometry:
-    """Simplified rail: origin → export hub → import hub → destination."""
+    export_hub_country: str = "",
+    import_hub_country: str = "",
+    origin_country: str = "",
+    dest_country: str = "",
+    http_get: Optional[Callable[..., Any]] = None,
+    deadline: Optional[float] = None,
+) -> Optional[ResolvedGeometry]:
+    """Rail: origin → export hub → import hub → destination using OSRM on land segments."""
+
+    viable, viability_notes = rail_corridor_viable(
+        export_hub[0],
+        export_hub[1],
+        export_hub_country,
+        import_hub[0],
+        import_hub[1],
+        import_hub_country,
+        origin_country=origin_country,
+        dest_country=dest_country,
+    )
+    if not viable:
+        return None
 
     waypoints = [(a_lat, a_lng), export_hub, import_hub, (b_lat, b_lng)]
     deduped: list[tuple[float, float]] = []
@@ -446,31 +584,65 @@ def rail_hub_geometry(
         deduped = [(a_lat, a_lng), (b_lat, b_lng)]
 
     segments: list[tuple[float, float]] = []
+    notes = [
+        "Rail leg uses OSRM driving network between hubs on land; validate gauge and border clearance.",
+        *viability_notes,
+    ]
+    used_osrm = False
+
     for idx in range(len(deduped) - 1):
-        seg = great_circle_geometry(
-            deduped[idx][0],
-            deduped[idx][1],
-            deduped[idx + 1][0],
-            deduped[idx + 1][1],
-            method="rail",
-            num_points=12,
-            source="rail_segment",
-        )
+        seg_a = deduped[idx]
+        seg_b = deduped[idx + 1]
+        seg_km = haversine_km(seg_a[0], seg_a[1], seg_b[0], seg_b[1])
+        if seg_km < 1.0:
+            continue
+        if seg_km <= RAIL_SHORT_SEGMENT_KM:
+            if segment_likely_crosses_ocean(seg_a[0], seg_a[1], seg_b[0], seg_b[1]):
+                return None
+            seg = straight_line_geometry(
+                seg_a[0],
+                seg_a[1],
+                seg_b[0],
+                seg_b[1],
+                method="rail",
+                source="rail_short_haul",
+            )
+        else:
+            seg = fetch_osrm_route(
+                seg_a[0],
+                seg_a[1],
+                seg_b[0],
+                seg_b[1],
+                method="rail",
+                http_get=http_get,
+                deadline=deadline,
+            )
+            if seg.source == "straight_line_fallback" and segment_likely_crosses_ocean(
+                seg_a[0], seg_a[1], seg_b[0], seg_b[1]
+            ):
+                return None
+            if seg.source == "osrm":
+                used_osrm = True
         if not segments:
             segments.extend(seg.path)
         else:
             segments.extend(seg.path[1:])
 
+    if len(segments) < 2:
+        return None
+
     distance = path_distance_km(segments)
+    source = "rail_osrm" if used_osrm else "rail_hub"
     return ResolvedGeometry(
         path=tuple(segments),
         distance_km=distance,
         duration_hours=distance / DEFAULT_SPEED_KMH["rail"],
-        source="rail_hub",
-        notes=[
-            "Rail leg is a simplified hub-to-hub approximation; validate corridor slots and gauge compatibility.",
-        ],
+        source=source,
+        notes=notes,
     )
+
+
+RailHubSelection = dict[str, Any]
 
 
 def resolve_leg_geometry(
@@ -481,7 +653,7 @@ def resolve_leg_geometry(
     method: str,
     *,
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
-    rail_hubs: Optional[tuple[tuple[float, float], tuple[float, float]]] = None,
+    rail_hubs: Optional[RailHubSelection] = None,
     http_get: Optional[Callable[..., Any]] = None,
     deadline: Optional[float] = None,
 ) -> ResolvedGeometry:
@@ -509,14 +681,32 @@ def resolve_leg_geometry(
             deadline=deadline,
         )
     if method == "rail" and rail_hubs is not None:
-        export_hub, import_hub = rail_hubs
-        return rail_hub_geometry(
+        export_hub = rail_hubs["export"]
+        import_hub = rail_hubs["import"]
+        resolved = rail_hub_geometry(
             a_lat,
             a_lng,
             b_lat,
             b_lng,
             export_hub=export_hub,
             import_hub=import_hub,
+            export_hub_country=str(rail_hubs.get("export_country") or ""),
+            import_hub_country=str(rail_hubs.get("import_country") or ""),
+            origin_country=str(rail_hubs.get("origin_country") or ""),
+            dest_country=str(rail_hubs.get("dest_country") or ""),
+            http_get=http_get,
+            deadline=deadline,
+        )
+        if resolved is not None:
+            return resolved
+        return straight_line_geometry(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            method="road",
+            source="rail_rejected",
+            note="Rail corridor unavailable; caller should prefer road geometry.",
         )
     return straight_line_geometry(a_lat, a_lng, b_lat, b_lng, method=method)
 

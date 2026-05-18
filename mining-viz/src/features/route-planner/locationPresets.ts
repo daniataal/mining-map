@@ -128,21 +128,31 @@ export function countriesMatchRouteHubFilter(
   });
 }
 
-/** Origin + destination countries for hub markers and dropdowns. Requires destination (buyer) country. */
+/** Origin + destination countries for hub markers — both must be set. */
 export function resolveRouteHubCountries(
   supplierCountry?: string,
   buyerCountry?: string,
 ): string[] {
   const buyerCanon = canonicalRouteHubCountry(buyerCountry);
-  if (!buyerCanon) return [];
-  const out = new Set<string>([buyerCanon]);
   const supplierCanon = canonicalRouteHubCountry(supplierCountry);
-  if (supplierCanon) out.add(supplierCanon);
-  return Array.from(out);
+  if (!buyerCanon || !supplierCanon) return [];
+  if (normalizeCountryFocusQuery(buyerCanon) === normalizeCountryFocusQuery(supplierCanon)) {
+    return [buyerCanon];
+  }
+  return [supplierCanon, buyerCanon];
 }
 
+/** @deprecated Use routeHubCountriesReadyForMap */
 export function buyerCountryRequiredForHubs(buyerCountry?: string): boolean {
   return !canonicalRouteHubCountry(buyerCountry);
+}
+
+/** Map hub toggles stay off until origin and destination countries are chosen. */
+export function routeHubCountriesReadyForMap(
+  supplierCountry?: string,
+  buyerCountry?: string,
+): boolean {
+  return resolveRouteHubCountries(supplierCountry, buyerCountry).length > 0;
 }
 
 function hubDistanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -543,13 +553,17 @@ function capMarkersByCountry<T extends { country?: string }>(
   return out;
 }
 
+/**
+ * Route-map port markers — static catalog + maritime port entities only.
+ * Never scans the global license pool (avoids 15k+ main-thread filters).
+ */
 export function buildRoutePlannerPortMarkers(
-  allLicenses: MiningLicense[],
   portEntities: MiningLicense[] = [],
   options?: { countries?: readonly string[]; maxTotal?: number },
 ): RoutePlannerHubMarker[] {
-  const countries = options?.countries;
-  const hasCountryFilter = countries !== undefined;
+  const countries = options?.countries ?? [];
+  if (!countries.length) return [];
+
   const markers: RoutePlannerHubMarker[] = [];
   const seen = new Set<string>();
 
@@ -561,9 +575,7 @@ export function buildRoutePlannerPortMarkers(
     country: string | undefined,
     source: RoutePlannerHubMarker['source'],
   ) => {
-    if (hasCountryFilter && (!countries!.length || !countriesMatchRouteHubFilter(country, countries!))) {
-      return;
-    }
+    if (!countriesMatchRouteHubFilter(country, countries)) return;
     const key = coordKey(lat, lng);
     if (seen.has(key)) return;
     seen.add(key);
@@ -571,22 +583,24 @@ export function buildRoutePlannerPortMarkers(
   };
 
   for (const hub of MARITIME_HUB_PRESETS) {
+    if (!presetMatchesCountries(hub, countries)) continue;
     add(hub.id, hub.name, hub.lat, hub.lng, hub.country, 'catalog');
   }
-  for (const p of WORLD_TRADE_PRESETS.filter((x) => x.group === 'ports')) {
+  for (const p of WORLD_TRADE_PRESETS) {
+    if (p.group !== 'ports' || !presetMatchesCountries(p, countries)) continue;
     add(p.id, p.name, p.lat, p.lng, p.country, 'catalog');
   }
-  if (hasCountryFilter && countries!.length) {
-    for (const item of portEntities) {
-      if (item.lat == null || item.lng == null) continue;
-      if (!isRouteSelectablePortLicense(item) || !licenseMatchesRouteHubFilter(item, countries!)) continue;
-      add(`db-${item.id}`, item.company || item.region || 'Port', item.lat, item.lng, routeHubCountryForLicense(item), 'database');
-    }
-    for (const item of allLicenses) {
-      if (!isPortLikeLicense(item) || item.lat == null || item.lng == null) continue;
-      if (!licenseMatchesRouteHubFilter(item, countries!)) continue;
-      add(`lic-${item.id}`, item.company || 'Port', item.lat, item.lng, routeHubCountryForLicense(item), 'license');
-    }
+  for (const item of portEntities) {
+    if (item.lat == null || item.lng == null) continue;
+    if (!isRouteSelectablePortLicense(item) || !licenseMatchesRouteHubFilter(item, countries)) continue;
+    add(
+      `db-${item.id}`,
+      item.company || item.region || 'Port',
+      item.lat,
+      item.lng,
+      routeHubCountryForLicense(item),
+      'database',
+    );
   }
 
   const maxTotal = options?.maxTotal ?? MAX_TOTAL_HUB_MARKERS;
@@ -597,13 +611,12 @@ export function buildRoutePlannerAirportMarkers(options?: {
   countries?: readonly string[];
   maxTotal?: number;
 }): RoutePlannerHubMarker[] {
-  const countries = options?.countries;
-  const hasCountryFilter = countries !== undefined;
-  const markers: RoutePlannerHubMarker[] = AIR_HUB_PRESETS.filter((hub) => {
-    if (!hasCountryFilter) return true;
-    if (!countries!.length) return false;
-    return countriesMatchRouteHubFilter(hub.country, countries!);
-  }).map((hub) => ({
+  const countries = options?.countries ?? [];
+  if (!countries.length) return [];
+
+  const markers: RoutePlannerHubMarker[] = AIR_HUB_PRESETS.filter((hub) =>
+    countriesMatchRouteHubFilter(hub.country, countries),
+  ).map((hub) => ({
     id: hub.id,
     name: hub.name,
     lat: hub.lat,

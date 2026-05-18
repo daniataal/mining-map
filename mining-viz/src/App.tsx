@@ -27,9 +27,7 @@ import { useRoutePlanner } from './features/route-planner';
 import {
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
-  buyerCountryRequiredForHubs,
   canonicalRouteHubCountry,
-  filterLicensesForRouteHubs,
   MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
   resolveRouteHubCountries,
 } from './features/route-planner/locationPresets';
@@ -162,11 +160,7 @@ export default function App() {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
     error: portsError,
-  } = usePortLogisticsEntities(
-    viewMode === 'ports' ||
-      (viewMode === 'route_planner' &&
-        !buyerCountryRequiredForHubs(routePlanner.buyer.country)),
-  );
+  } = usePortLogisticsEntities(viewMode === 'ports' || viewMode === 'route_planner');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -243,16 +237,6 @@ export default function App() {
     },
     [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
   );
-  const routePlannerLicensePool = useMemo(() => {
-    const merged = [...rawData, ...localLicenses, ...portEntities, ...storageEntities];
-    const seen = new Set<string>();
-    return merged.filter((item) => {
-      if (seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-  }, [rawData, localLicenses, portEntities, storageEntities]);
-
   const debouncedRouteSupplierCountry = useDebouncedValue(routePlanner.supplier.country);
   const debouncedRouteBuyerCountry = useDebouncedValue(routePlanner.buyer.country);
   const routeHubCountries = useMemo(
@@ -278,20 +262,14 @@ export default function App() {
   ]);
   const routeMarkerCountriesKey = routeMarkerCountries.join('\0');
 
-  // Profiler: filterLicensesForRouteHubs + marker build only when toggles on (not on country pick).
+  // Catalog + maritime entities only — no global license scan when toggling hub markers.
   const routePlannerPortMarkers = useMemo(() => {
     if (!routePlanner.showPortsOnMap || !routeMarkerCountries.length) return [];
-    const hubLicenses = filterLicensesForRouteHubs(routePlannerLicensePool, routeMarkerCountries);
-    return buildRoutePlannerPortMarkers(hubLicenses, portEntities, {
+    return buildRoutePlannerPortMarkers(portEntities, {
       countries: routeMarkerCountries,
       maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
     });
-  }, [
-    routePlanner.showPortsOnMap,
-    routePlannerLicensePool,
-    portEntities,
-    routeMarkerCountriesKey,
-  ]);
+  }, [routePlanner.showPortsOnMap, portEntities, routeMarkerCountriesKey]);
 
   const routePlannerAirportMarkers = useMemo(() => {
     if (!routePlanner.showAirportsOnMap || !routeMarkerCountries.length) return [];
