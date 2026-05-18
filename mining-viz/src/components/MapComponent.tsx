@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -27,8 +27,10 @@ import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, 
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
+  CanvasVesselLayer,
   filterVesselsByViewport,
   sortVesselsForDisplay,
+  toVesselDrawRecords,
   VESSEL_SHIP_TYPE_OPTIONS,
   MARITIME_LEGEND_KEYS,
   VESSEL_CATEGORY_COLORS,
@@ -376,6 +378,7 @@ export default function MapComponent({
     const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
+    const canvasVesselLayerRef = useRef<CanvasVesselLayer | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
@@ -494,6 +497,22 @@ export default function MapComponent({
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
     const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
+
+    useLayoutEffect(() => {
+        if (!vesselsVisible || !isMaritimeLayerEnabled) return;
+        const layer = canvasVesselLayerRef.current;
+        if (!layer) return;
+        layer.setVessels(
+            maritimeVessels,
+            toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
+        );
+    }, [
+        vesselsVisible,
+        isMaritimeLayerEnabled,
+        maritimeVessels,
+        maritimeMapZoom,
+        selectedMaritimeVessel?.id,
+    ]);
 
     useEffect(() => {
         if (isMaritimeMapView) return;
@@ -1079,8 +1098,8 @@ export default function MapComponent({
                                             </p>
                                             <p className="mb-1 text-[9px] leading-snug text-slate-500">
                                                 {t(
-                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. כל כלי שיט בתצוגה הוא סמן נפרד — ללא קיבוץ.',
-                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. Every vessel in view is its own marker—no clustering.'
+                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. בזום עולמי מוצגת דגימת LOD (מכליות מועדפות) — לא קיבוץ; בזום אזורי מוצגים כל כלי השיט בתצוגה.',
+                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. At world zoom the map uses display LOD (tankers preferred)—not clustering; at regional zoom every in-view vessel is drawn.'
                                                 )}
                                             </p>
                                             <div className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -1286,7 +1305,7 @@ export default function MapComponent({
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
                             <LayerGroup>
                                 <CanvasVesselMarkers
-                                    vessels={maritimeVessels}
+                                    layerApiRef={canvasVesselLayerRef}
                                     mapZoom={maritimeMapZoom}
                                     selectedId={selectedMaritimeVessel?.id ?? null}
                                     onVesselClick={handleMaritimeVesselClick}
