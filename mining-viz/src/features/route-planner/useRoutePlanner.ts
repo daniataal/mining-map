@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
 import { fetchRoutePlan } from './fetchRoutePlan';
+import { buyerCountryRequiredForHubs } from './locationPresets';
 
 export type RoutePickRole = 'supplier' | 'buyer';
 export interface RoutePartyLocation {
@@ -115,6 +116,13 @@ export function useRoutePlanner(): RoutePlannerHook {
     setQuantityTonsState(Number.isFinite(value) ? Math.max(0, value) : 0);
   }, []);
 
+  useEffect(() => {
+    if (!buyerCountryRequiredForHubs(buyer.country)) {
+      setShowPortsOnMap(true);
+      setShowAirportsOnMap(true);
+    }
+  }, [buyer.country]);
+
   const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
     setSupplier({ lat, lng, label, ...meta });
     // Reset previous result so the user knows they need to compute with the new supplier
@@ -157,6 +165,8 @@ export function useRoutePlanner(): RoutePlannerHook {
           country: nextCountry ?? s.country,
           licenseId: undefined,
         }));
+        setResult(null);
+        setSelectedPlanId(null);
       } else {
         setBuyer((b) => ({
           ...b,
@@ -165,6 +175,8 @@ export function useRoutePlanner(): RoutePlannerHook {
           country: nextCountry ?? b.country,
         }));
       }
+      setResult(null);
+      setSelectedPlanId(null);
       setPickRole(null);
     },
     [],

@@ -15,6 +15,7 @@ import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
 import {
   buildAllLocationPresets,
   buyerCountryRequiredForHubs,
+  resolveRolePresetCountries,
   resolveRouteHubCountries,
 } from './locationPresets';
 import RoutePlannerLocationBlock from './RoutePlannerLocationBlock';
@@ -81,12 +82,20 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
 
   const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
 
-  const locationPresets = useMemo(
+  const supplierPresets = useMemo(
     () =>
       buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
-        countries: hubCountries,
+        countries: resolveRolePresetCountries('supplier', supplier.country, buyer.country),
       }),
-    [allLicenses, portEntities, hubCountries],
+    [allLicenses, portEntities, supplier.country, buyer.country],
+  );
+
+  const buyerPresets = useMemo(
+    () =>
+      buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
+        countries: resolveRolePresetCountries('buyer', supplier.country, buyer.country),
+      }),
+    [allLicenses, portEntities, supplier.country, buyer.country],
   );
 
   const hubToggleHint = needsDestinationCountry
@@ -235,7 +244,7 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
                 accentBorder="border-amber-500/60 bg-amber-500/[0.06]"
                 location={supplier}
                 setLocation={setSupplier}
-                presets={locationPresets}
+                presets={supplierPresets}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
@@ -247,7 +256,7 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
                 accentBorder="border-blue-500/60 bg-blue-500/[0.06]"
                 location={buyer}
                 setLocation={setBuyer}
-                presets={locationPresets}
+                presets={buyerPresets}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}

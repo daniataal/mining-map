@@ -40,10 +40,12 @@ export default function RoutePlannerPortMarkers({ ports, pickRole, onPortPick }:
           key={port.id}
           position={[port.lat, port.lng]}
           icon={createPortMapIcon(Boolean(pickRole))}
-          zIndexOffset={pickRole ? 600 : 400}
+          zIndexOffset={pickRole ? 2500 : 400}
+          bubblingMouseEvents={!pickRole}
           eventHandlers={{
             click: (e) => {
-              L.DomEvent.stopPropagation(e);
+              L.DomEvent.stopPropagation(e.originalEvent);
+              L.DomEvent.preventDefault(e.originalEvent);
               if (pickRole) onPortPick(port, pickRole);
             },
           }}

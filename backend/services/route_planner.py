@@ -251,6 +251,40 @@ def _select_hub(
     return hub, notes
 
 
+def _select_country_authoritative_hub(
+    point: RoutePoint,
+    hubs: tuple[TransportHub, ...],
+    *,
+    country: str = "",
+    role: str = "import",
+) -> tuple[TransportHub, list[str]]:
+    """Pick the nearest hub in the declared country when country metadata is known.
+
+  Coordinates may be stale (e.g. buyer country set to Israel while lat/lng still
+  point at a foreign port). For import/export gateway selection, the declared country
+  takes precedence so sea/air trunks terminate in the correct state.
+    """
+    resolved_country = (country or _point_country(point)).strip()
+    country_key = normalize_country_key(resolved_country)
+    if not country_key:
+        return _select_hub(point, hubs, country=resolved_country)
+
+    domestic = [hub for hub in hubs if normalize_country_key(hub.country) == country_key]
+    if not domestic:
+        return _select_hub(point, hubs, country=resolved_country)
+
+    hub = min(domestic, key=lambda item: _haversine_km(point.lat, point.lng, item.lat, item.lng))
+    notes: list[str] = []
+    global_hub, global_notes = select_nearest_trade_hub(point.lat, point.lng, hubs, country="")
+    notes.extend(global_notes)
+    if normalize_country_key(global_hub.country) != country_key:
+        notes.append(
+            f"{role.title()} gateway {hub.name} selected in {resolved_country} "
+            f"(nearest in destination country); global nearest hub was {global_hub.name}."
+        )
+    return hub, notes
+
+
 def _nearest_port_distance_km(point: RoutePoint) -> float:
     hub, _ = _select_hub(point, MARITIME_HUBS)
     return _haversine_km(point.lat, point.lng, hub.lat, hub.lng)
@@ -522,10 +556,11 @@ def _plan_sea_route(
     hub_notes: list[str] = []
     if export_hub is None:
         export_hub, hub_notes = _select_hub(origin, MARITIME_HUBS, country=_origin_country(origin))
-    import_hub, import_notes = _select_hub(
+    import_hub, import_notes = _select_country_authoritative_hub(
         destination,
         MARITIME_HUBS,
         country=_destination_country(destination),
+        role="import",
     )
     export_port = _point_from_hub(export_hub)
     import_port = _point_from_hub(import_hub)
@@ -573,10 +608,11 @@ def _plan_air_route(
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
     export_hub, export_notes = _select_hub(origin, AIR_HUBS, country=_origin_country(origin))
-    import_hub, import_notes = _select_hub(
+    import_hub, import_notes = _select_country_authoritative_hub(
         destination,
         AIR_HUBS,
         country=_destination_country(destination),
+        role="import",
     )
     export_airport = _point_from_hub(export_hub)
     import_airport = _point_from_hub(import_hub)

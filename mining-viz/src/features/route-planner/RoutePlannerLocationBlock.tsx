@@ -1,5 +1,5 @@
 import { Crosshair } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import type { LocationPreset } from './locationPresets';
-import { canonicalRouteHubCountry, matchPresetId } from './locationPresets';
+import { canonicalRouteHubCountry, findNearestHubInCountry, matchPresetId } from './locationPresets';
 import { countriesList } from '../../data/countries';
 import type { RoutePartyLocation, RoutePickRole } from './useRoutePlanner';
 
@@ -60,6 +60,7 @@ export default function RoutePlannerLocationBlock({
 }: RoutePlannerLocationBlockProps) {
   const { t } = useI18n();
   const active = pickRole === role;
+  const [coordsOpen, setCoordsOpen] = useState(false);
 
   const presetId = useMemo(
     () => matchPresetId(presets, location.lat, location.lng),
@@ -137,6 +138,19 @@ export default function RoutePlannerLocationBlock({
           if (val === '_unset') {
             setLocation({ ...location, country: undefined });
             return;
+          }
+          if (role === 'buyer') {
+            const snap = findNearestHubInCountry(location.lat, location.lng, val);
+            if (snap) {
+              setLocation({
+                lat: snap.lat,
+                lng: snap.lng,
+                label: snap.name,
+                country: val,
+              });
+              onFlyTo(snap.lat, snap.lng);
+              return;
+            }
           }
           setLocation({ ...location, country: val });
         }}
@@ -228,35 +242,61 @@ export default function RoutePlannerLocationBlock({
         </SelectContent>
       </Select>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <div>
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
-            {t('קו רוחב', 'Latitude')}
-          </p>
-          <Input
-            type="number"
-            step="any"
-            value={Number.isFinite(location.lat) ? location.lat : ''}
-            onChange={(e) => updateCoord('lat', e.target.value)}
-            className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
-          />
-        </div>
-        <div>
-          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
-            {t('קו אורך', 'Longitude')}
-          </p>
-          <Input
-            type="number"
-            step="any"
-            value={Number.isFinite(location.lng) ? location.lng : ''}
-            onChange={(e) => updateCoord('lng', e.target.value)}
-            className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
-          />
-        </div>
+      <div className="mt-3">
+        {!coordsOpen ? (
+          <button
+            type="button"
+            onClick={() => setCoordsOpen(true)}
+            className="text-[9px] font-bold uppercase tracking-wide text-amber-600 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-300"
+          >
+            {t('הזן קואורדינטות', 'Enter lat / lng')}
+          </button>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                {t('קואורדינטות', 'Coordinates')}
+              </p>
+              <button
+                type="button"
+                onClick={() => setCoordsOpen(false)}
+                className="text-[9px] font-bold uppercase tracking-wide text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              >
+                {t('הסתר', 'Hide')}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                  {t('קו רוחב', 'Latitude')}
+                </p>
+                <Input
+                  type="number"
+                  step="any"
+                  value={Number.isFinite(location.lat) ? location.lat : ''}
+                  onChange={(e) => updateCoord('lat', e.target.value)}
+                  className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
+                />
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                  {t('קו אורך', 'Longitude')}
+                </p>
+                <Input
+                  type="number"
+                  step="any"
+                  value={Number.isFinite(location.lng) ? location.lng : ''}
+                  onChange={(e) => updateCoord('lng', e.target.value)}
+                  className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-[9px] text-slate-400 font-bold">
+              📍 {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+            </p>
+          </>
+        )}
       </div>
-      <p className="mt-2 text-[9px] text-slate-400 font-bold">
-        📍 {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
-      </p>
     </div>
   );
 }

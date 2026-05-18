@@ -274,6 +274,105 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertIn("Port of Eilat", maritime_names)
         self.assertIn("Ben Gurion Airport (TLV)", air_names)
 
+    def test_europe_to_haifa_sea_terminates_in_israel_not_durban(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 1000,
+                "origin": {
+                    "name": "Hamburg",
+                    "lat": 53.545,
+                    "lng": 9.97,
+                    "kind": "origin",
+                    "metadata": {"country": "Germany"},
+                },
+                "destination": {
+                    "name": "Haifa Port",
+                    "lat": 32.819,
+                    "lng": 34.99,
+                    "kind": "destination",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea"],
+            }
+        )
+
+        legs = result["route"]["legs"]
+        sea_leg = next(leg for leg in legs if leg["method"] == "sea")
+        import_port = sea_leg["to"]["name"]
+        self.assertIn("Haifa", import_port)
+        self.assertNotIn("Durban", import_port)
+        if len(legs) >= 2:
+            final_leg = legs[-1]
+            self.assertLess(
+                abs(final_leg["to"]["lat"] - 32.819) + abs(final_leg["to"]["lng"] - 34.99),
+                2.0,
+                "Final leg should deliver near Haifa buyer coordinates",
+            )
+
+    def test_israel_country_with_stale_coords_still_uses_israeli_sea_port(self):
+        """Buyer country Israel but lat/lng still at Durban must not route sea trunk to Durban."""
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Hamburg",
+                    "lat": 53.545,
+                    "lng": 9.97,
+                    "kind": "origin",
+                    "metadata": {"country": "Germany"},
+                },
+                "destination": {
+                    "name": "Haifa Port",
+                    "lat": -29.868,
+                    "lng": 31.05,
+                    "kind": "destination",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        import_port = sea_leg["to"]["name"]
+        self.assertNotIn("Durban", import_port)
+        self.assertTrue(
+            any(token in import_port for token in ("Haifa", "Ashdod", "Eilat")),
+            f"Expected Israeli import port, got {import_port}",
+        )
+
+    def test_israel_airport_destination_sea_mode_uses_domestic_port(self):
+        result = plan_route(
+            {
+                "product": "Gold dore",
+                "quantity_tons": 2,
+                "origin": {
+                    "name": "Hamburg",
+                    "lat": 53.545,
+                    "lng": 9.97,
+                    "kind": "origin",
+                    "metadata": {"country": "Germany"},
+                },
+                "destination": {
+                    "name": "Ben Gurion Airport (TLV)",
+                    "lat": 32.011,
+                    "lng": 34.87,
+                    "kind": "destination",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        import_port = sea_leg["to"]["name"]
+        self.assertTrue(
+            any(token in import_port for token in ("Haifa", "Ashdod", "Eilat")),
+            f"Sea trunk should end at Israeli seaport, not airport; got {import_port}",
+        )
+        self.assertNotIn("Durban", import_port)
+
 
 if __name__ == "__main__":
     unittest.main()
