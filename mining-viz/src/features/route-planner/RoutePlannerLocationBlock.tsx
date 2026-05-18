@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import type { LocationPreset } from './locationPresets';
-import { matchPresetId } from './locationPresets';
+import { canonicalRouteHubCountry, matchPresetId } from './locationPresets';
+import { countriesList } from '../../data/countries';
 import type { RoutePartyLocation, RoutePickRole } from './useRoutePlanner';
 
 interface RoutePlannerLocationBlockProps {
@@ -28,6 +29,7 @@ interface RoutePlannerLocationBlockProps {
   beginPick: (role: RoutePickRole) => void;
   onFlyTo: (lat: number, lng: number) => void;
   showBuyerGroups?: boolean;
+  requireCountry?: boolean;
 }
 
 function presetToLocation(preset: LocationPreset): RoutePartyLocation {
@@ -54,6 +56,7 @@ export default function RoutePlannerLocationBlock({
   beginPick,
   onFlyTo,
   showBuyerGroups = false,
+  requireCountry = false,
 }: RoutePlannerLocationBlockProps) {
   const { t } = useI18n();
   const active = pickRole === role;
@@ -65,10 +68,16 @@ export default function RoutePlannerLocationBlock({
 
   const licensePresets = useMemo(() => presets.filter((p) => p.group === 'licenses'), [presets]);
   const portPresets = useMemo(
-    () => presets.filter((p) => p.group === 'ports' || p.group === 'catalog'),
+    () => presets.filter((p) => p.group === 'ports' || (p.group === 'catalog' && !p.id.startsWith('air-'))),
+    [presets],
+  );
+  const airportPresets = useMemo(
+    () => presets.filter((p) => p.group === 'catalog' && p.id.startsWith('air-')),
     [presets],
   );
   const buyerPresets = useMemo(() => presets.filter((p) => p.group === 'buyers'), [presets]);
+
+  const countrySelectValue = canonicalRouteHubCountry(location.country) ?? '';
 
   const applyPreset = (val: string) => {
     if (val === 'custom') return;
@@ -118,6 +127,40 @@ export default function RoutePlannerLocationBlock({
       </div>
 
       <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">
+        {role === 'buyer'
+          ? t('מדינת יעד (נדרש לנמלים)', 'Destination country (required for hubs)')
+          : t('מדינת מוצא', 'Origin country')}
+      </p>
+      <Select
+        value={countrySelectValue || '_unset'}
+        onValueChange={(val) => {
+          if (val === '_unset') {
+            setLocation({ ...location, country: undefined });
+            return;
+          }
+          setLocation({ ...location, country: val });
+        }}
+      >
+        <SelectTrigger
+          className={`h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10 mb-3 ${
+            requireCountry && !countrySelectValue ? 'border-amber-500/60' : ''
+          }`}
+        >
+          <SelectValue placeholder={t('בחר מדינה...', 'Select country...')} />
+        </SelectTrigger>
+        <SelectContent className="max-h-60">
+          <SelectItem value="_unset" className="text-xs text-slate-500">
+            {t('ללא / לא ידוע', 'Not set')}
+          </SelectItem>
+          {countriesList.map((c) => (
+            <SelectItem key={c} value={c} className="text-xs">
+              {c}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">
         {role === 'supplier'
           ? t('בחר נכס, נמל, או מיקום', 'Select asset, port, or location')
           : t('בחר יעד, נמל, או מיקום', 'Select destination, port, or location')}
@@ -152,6 +195,18 @@ export default function RoutePlannerLocationBlock({
                 🌊 {t('נמלים ומרכזי סחר', 'Ports & trade hubs')}
               </SelectLabel>
               {portPresets.map((p) => (
+                <SelectItem key={p.id} value={p.id} className="text-xs">
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
+          {airportPresets.length > 0 && (
+            <SelectGroup>
+              <SelectLabel className="text-[9px] font-black text-indigo-500 uppercase tracking-wider">
+                ✈ {t('שדות תעופה', 'Airports')}
+              </SelectLabel>
+              {airportPresets.map((p) => (
                 <SelectItem key={p.id} value={p.id} className="text-xs">
                   {p.name}
                 </SelectItem>

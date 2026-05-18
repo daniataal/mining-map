@@ -265,5 +265,15 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertNotIn("Jebel Ali", export_port)
 
 
+    def test_israel_maritime_and_air_hubs_in_catalog(self):
+        from backend.services.route_planner import AIR_HUBS, MARITIME_HUBS
+
+        maritime_names = {h.name for h in MARITIME_HUBS}
+        air_names = {h.name for h in AIR_HUBS}
+        self.assertIn("Haifa Port", maritime_names)
+        self.assertIn("Port of Eilat", maritime_names)
+        self.assertIn("Ben Gurion Airport (TLV)", air_names)
+
+
 if __name__ == "__main__":
     unittest.main()

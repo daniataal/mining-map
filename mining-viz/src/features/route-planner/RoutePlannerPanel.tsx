@@ -12,7 +12,11 @@ import type { DueDiligenceStatus } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
 import RouteLegend from './RouteLegend';
 import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
-import { buildAllLocationPresets } from './locationPresets';
+import {
+  buildAllLocationPresets,
+  buyerCountryRequiredForHubs,
+  resolveRouteHubCountries,
+} from './locationPresets';
 import RoutePlannerLocationBlock from './RoutePlannerLocationBlock';
 
 function fmtUsd(value: number) {
@@ -57,7 +61,9 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
     incoterm, setIncoterm,
     shippingMethods, toggleShippingMethod,
     pickRole, beginPick, cancelPick,
-    showPortsOnMap, setShowPortsOnMap, flyToLocation,
+    showPortsOnMap, setShowPortsOnMap,
+    showAirportsOnMap, setShowAirportsOnMap,
+    flyToLocation,
     result, loading, error, computeRoute,
     hasResult,
     routeOptions, selectedPlanId, activePlan, selectRoutePlan,
@@ -68,10 +74,30 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
   // Auto-jump to results when we have them
   useEffect(() => { if (hasResult) setStep('results'); }, [hasResult]);
 
-  const locationPresets = useMemo(
-    () => buildAllLocationPresets(allLicenses ?? [], portEntities ?? []),
-    [allLicenses, portEntities],
+  const hubCountries = useMemo(
+    () => resolveRouteHubCountries(supplier.country, buyer.country),
+    [supplier.country, buyer.country],
   );
+
+  const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
+
+  const locationPresets = useMemo(
+    () =>
+      buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
+        countries: hubCountries,
+      }),
+    [allLicenses, portEntities, hubCountries],
+  );
+
+  const hubToggleHint = needsDestinationCountry
+    ? t(
+        'בחרו מדינת יעד (קונה) כדי להציג נמלים ושדות תעופה רלוונטיים בלבד',
+        'Set a destination country (buyer) to show only relevant ports and airports',
+      )
+    : t(
+        `מוצגים רק נמלים ושדות ב־${hubCountries.join(' · ')}`,
+        `Showing hubs in ${hubCountries.join(' · ')} only`,
+      );
 
   const displayBreakdown = activePlan?.breakdown ?? result?.breakdown ?? [];
   const routeLegs = activePlan?.map.legs ?? result?.map.legs ?? [];
@@ -154,24 +180,52 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
           <div className="p-4 space-y-4">
             {pickRole && (
               <div className="rounded-2xl border border-cyan-500/35 bg-cyan-500/[0.08] px-4 py-3 text-[11px] text-cyan-900 dark:text-cyan-100 font-semibold">
-                📍 {t('לחצו על המפה או על סמן נמל ⚓. הבחירה נסגרת אחרי קליק.', 'Tap the map or a port anchor ⚓. Closes after one click.')}
+                📍 {t('לחצו על המפה, נמל ⚓ או שדה תעופה ✈. הבחירה נסגרת אחרי קליק.', 'Tap the map, port ⚓, or airport ✈. Closes after one click.')}
               </div>
             )}
             {error && (
               <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-800 dark:text-red-200">{error}</div>
             )}
 
-            <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
-              <Checkbox checked={showPortsOnMap} onCheckedChange={(v) => setShowPortsOnMap(Boolean(v))} />
-              <div className="min-w-0">
-                <span className="text-[11px] font-bold text-slate-900 dark:text-white">
-                  {t('הצג נמלים על המפה', 'Show ports on map')}
-                </span>
-                <p className="text-[9px] text-slate-500 leading-tight">
-                  {t('סמני ⚓ לבחירה במצב "מהמפה"', 'Anchor markers for map pick mode')}
-                </p>
+            {needsDestinationCountry && (
+              <div className="rounded-2xl border border-amber-500/35 bg-amber-500/[0.08] px-4 py-3 text-[11px] font-semibold text-amber-950 dark:text-amber-100">
+                {t(
+                  'הגדירו מדינת יעד לפני הצגת נמלים — בחרו קונה עם מדינה או הזינו מדינה בשדה היעד.',
+                  'Set a destination country before showing ports — pick a buyer preset with a country or use the country field below.',
+                )}
               </div>
-            </label>
+            )}
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
+                <Checkbox
+                  checked={showPortsOnMap}
+                  disabled={needsDestinationCountry}
+                  onCheckedChange={(v) => setShowPortsOnMap(Boolean(v))}
+                />
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold text-slate-900 dark:text-white">
+                    {t('הצג נמלים על המפה', 'Show ports on map')}
+                  </span>
+                  <p className="text-[9px] text-slate-500 leading-tight">{hubToggleHint}</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 rounded-xl border border-black/10 dark:border-white/10 px-3 py-2.5 cursor-pointer">
+                <Checkbox
+                  checked={showAirportsOnMap}
+                  disabled={needsDestinationCountry}
+                  onCheckedChange={(v) => setShowAirportsOnMap(Boolean(v))}
+                />
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold text-slate-900 dark:text-white">
+                    {t('הצג שדות תעופה על המפה', 'Show airports on map')}
+                  </span>
+                  <p className="text-[9px] text-slate-500 leading-tight">
+                    {t('סמני ✈ למטען אווירי', 'Airport markers for air freight')}
+                  </p>
+                </div>
+              </label>
+            </div>
 
             <div className="grid grid-cols-1 gap-4">
               <RoutePlannerLocationBlock
@@ -198,6 +252,7 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
                 showBuyerGroups
+                requireCountry
               />
             </div>
 

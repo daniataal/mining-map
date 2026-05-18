@@ -42,14 +42,17 @@ interface PetroleumLayerOverlayProps {
 function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: PetroleumLayerOverlayProps) {
   const { data } = usePetroleumLayerGeoJson(layerId, bbox, enabled, mapZoom);
   const style = LAYER_STYLE[layerId];
-  const geojson = useMemo(() => data ?? { type: 'FeatureCollection' as const, features: [] }, [data]);
+  const geojson = useMemo(
+    () => data ?? { type: 'FeatureCollection' as const, features: [] },
+    [data],
+  );
   const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
 
   return (
     <LayersControl.Overlay checked={DEFAULT_PETROLEUM_LAYER_VISIBILITY[layerId]} name={label}>
       <LayerGroup>
         <GeoJSON
-          key={`${layerId}:${data?.feature_count ?? 0}:${data?.zoom ?? mapZoom}`}
+          key={layerId}
           data={geojson}
           style={style}
           pointToLayer={(feature, latlng) => {
