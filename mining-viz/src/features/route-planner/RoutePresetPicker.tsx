@@ -28,7 +28,7 @@ function RoutePresetPicker({
   presets,
   selectedLabel,
   placeholder,
-  pending = false,
+  pending: _pending = false,
   disabled = false,
   showBuyerGroups = false,
   onOpenChange,
@@ -82,19 +82,19 @@ function RoutePresetPicker({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        disabled={disabled || pending}
+        disabled={disabled}
         onClick={() => setOpenState(!open)}
         className="flex h-9 w-full items-center justify-between rounded-xl border px-3 text-xs font-semibold border-black/10 bg-white dark:border-white/10 dark:bg-slate-950 disabled:opacity-60"
       >
         <span className={`truncate ${selectedLabel ? 'text-slate-900 dark:text-white' : 'text-slate-500'}`}>
-          {pending ? t('מעדכן רשימה...', 'Updating list...') : displayLabel}
+          {displayLabel}
         </span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
-      {open && !pending && (
+      {open && (
         <div
           role="listbox"
           className="absolute left-0 right-0 top-full z-[1200] mt-1 overflow-hidden rounded-xl border border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-950"

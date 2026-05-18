@@ -113,13 +113,14 @@ jobs:
         CSV_UPLOADED: ${{ steps.csv_import.outputs.csv_exists }}
         REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
         MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+        MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
         VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN
+        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -127,10 +128,11 @@ jobs:
           cd /opt/mining-map
 
           # Persist runtime-only backend secrets on the VM for docker compose.
+          MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
-            printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_ACCESS_TOKEN"
+            printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_EFFECTIVE"
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -296,6 +298,7 @@ jobs:
           export AI_ENRICHMENT_DEADLINE_SECONDS="${AI_ENRICHMENT_DEADLINE_SECONDS:-20}"
           export POLLINATIONS_HTTP_TIMEOUT_SECONDS="${POLLINATIONS_HTTP_TIMEOUT_SECONDS:-12}"
           export POLLINATIONS_HTTP_MAX_RETRIES="${POLLINATIONS_HTTP_MAX_RETRIES:-0}"
+          export MAPBOX_ACCESS_TOKEN="${MAPBOX_EFFECTIVE}"
           sudo -E docker compose up -d --remove-orphans
 
           # Wait until /licenses returns 200
@@ -310,7 +313,7 @@ jobs:
             sleep 2
           done
 
-          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
 
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \

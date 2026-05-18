@@ -95,6 +95,9 @@ def build_ai_unavailable_message(*, pollinations_disabled: bool) -> str:
 def log_ai_provider_status() -> None:
     status = get_ai_provider_status()
     env = status.get("env") if isinstance(status.get("env"), dict) else {}
+    summary = format_env_var_presence(
+        ("GROQ_API_KEY", "OPENROUTER_API_KEY", "DISABLE_POLLINATIONS_FALLBACK")
+    )
     logger.info(
         "AI providers: groq=%s openrouter=%s pollinations_enabled=%s ready=%s env=%s",
         status.get("groq"),
@@ -103,3 +106,4 @@ def log_ai_provider_status() -> None:
         status.get("ready"),
         {key: env.get(key) for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "DISABLE_POLLINATIONS_FALLBACK")},
     )
+    print(f"[startup] AI provider env: {summary} ready={status.get('ready')}")

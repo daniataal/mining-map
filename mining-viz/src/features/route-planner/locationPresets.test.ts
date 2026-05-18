@@ -6,6 +6,8 @@ import {
   MAX_PRESET_SEARCH_RESULTS,
   MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
   buildAllLocationPresets,
+  buildRouteHubPresets,
+  MAX_ROUTE_PRESET_ITEMS,
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
   filterLicensesForRouteHubs,
@@ -161,6 +163,24 @@ describe('searchLocationPresets', () => {
     const hits = searchLocationPresets(manyPresets, 'port');
     expect(hits.length).toBeLessThanOrEqual(MAX_PRESET_SEARCH_RESULTS);
     expect(hits.length).toBe(MAX_PRESET_SEARCH_RESULTS);
+  });
+});
+
+describe('buildRouteHubPresets', () => {
+  it('returns Ghana and Israel hubs without scanning licenses', () => {
+    const start = performance.now();
+    const ghana = buildRouteHubPresets([], { countries: ['Ghana'] });
+    const israel = buildRouteHubPresets([], { countries: ['Israel'] });
+    const elapsed = performance.now() - start;
+
+    expect(ghana.some((p) => p.name.includes('Tema'))).toBe(true);
+    expect(israel.some((p) => p.name.includes('Haifa'))).toBe(true);
+    expect(ghana.length).toBeLessThanOrEqual(MAX_ROUTE_PRESET_ITEMS);
+    expect(elapsed).toBeLessThan(50);
+  });
+
+  it('returns empty when no countries selected', () => {
+    expect(buildRouteHubPresets([], { countries: [] })).toEqual([]);
   });
 });
 

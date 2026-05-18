@@ -70,6 +70,8 @@ export const MAX_ROUTE_MODE_TOTAL_HUB_MARKERS = 40;
 export const MAX_DROPDOWN_PRESETS_PER_GROUP = 40;
 /** Searchable location picker — never render more than this many rows. */
 export const MAX_PRESET_SEARCH_RESULTS = 20;
+/** Route planner dropdown — catalog + API ports only (no license scan). */
+export const MAX_ROUTE_PRESET_ITEMS = 30;
 
 const ISO2_ROUTE_COUNTRY_OVERRIDES: Record<string, string> = {
   CD: 'Democratic Republic of the Congo',
@@ -356,6 +358,27 @@ function capPresetsByGroup(presets: LocationPreset[], maxPerGroup: number): Loca
     out.push(p);
   }
   return out;
+}
+
+/**
+ * Fast hub list for Route Intelligence dropdowns — static catalog + DB ports only.
+ * Never scans the global license pool (avoids 15k+ main-thread filters).
+ */
+export function buildRouteHubPresets(
+  portEntities: MiningLicense[] = [],
+  options?: { countries?: readonly string[] },
+): LocationPreset[] {
+  const countryList = options?.countries ?? [];
+  if (!countryList.length) return [];
+
+  const catalogMaritime = MARITIME_HUB_PRESETS.filter((p) => presetMatchesCountries(p, countryList));
+  const catalogAir = AIR_HUB_PRESETS.filter((p) => presetMatchesCountries(p, countryList));
+  const portsFromDb = buildPortPresetsFromEntities(
+    portEntities.filter((item) => licenseMatchesRouteHubFilter(item, countryList)),
+    Math.min(15, MAX_ROUTE_PRESET_ITEMS),
+  );
+
+  return dedupePresets([...catalogMaritime, ...catalogAir, ...portsFromDb]).slice(0, MAX_ROUTE_PRESET_ITEMS);
 }
 
 export function buildAllLocationPresets(
