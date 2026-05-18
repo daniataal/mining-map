@@ -74,6 +74,8 @@ const SEA_OFFSHORE_ANCHORS: Record<string, { lat: number; lng: number }> = {
   english_channel: { lat: 50.05, lng: 1.2 },
   bab_el_mandeb: { lat: 12.61, lng: 43.33 },
   suez: { lat: 29.96, lng: 32.55 },
+  red_sea_north: { lat: 27.7, lng: 34.2 },
+  gulf_aqaba: { lat: 28.6, lng: 34.75 },
   cape: { lat: -35, lng: 18.2 },
   mid_atlantic: { lat: 38, lng: -35 },
 };
@@ -132,6 +134,11 @@ function isMediterraneanDestination(lat: number, lng: number): boolean {
   return isEurope(lat, lng) || isEasternMediterranean(lat, lng);
 }
 
+function isRedSeaOrGulfOfAqaba(lat: number, lng: number, label?: string): boolean {
+  const name = (label ?? '').toLowerCase();
+  return name.includes('eilat') || name.includes('aqaba') || (lat >= 27 && lat <= 30.5 && lng >= 34 && lng <= 35.5);
+}
+
 function isWestAfrica(lat: number, lng: number): boolean {
   return lat >= -10 && lat <= 25 && lng >= -25 && lng <= 20;
 }
@@ -147,10 +154,17 @@ function atlanticToMediterraneanAnchorIds(destLat: number, destLng: number): str
 
 function seaAnchorIds(
   origin: { lat: number; lng: number },
-  destination: { lat: number; lng: number },
+  destination: { lat: number; lng: number; label?: string },
 ): string[] {
   const { lat: oLat, lng: oLng } = origin;
   const { lat: dLat, lng: dLng } = destination;
+  if (isRedSeaOrGulfOfAqaba(dLat, dLng, destination.label)) {
+    if (isWestAfrica(oLat, oLng)) {
+      return ['west_africa', 'atlantic_africa', 'gibraltar', 'western_med', 'suez', 'red_sea_north', 'gulf_aqaba'];
+    }
+    if (isEurope(oLat, oLng)) return ['english_channel', 'gibraltar', 'western_med', 'suez', 'red_sea_north', 'gulf_aqaba'];
+    if (isEastOrSouthAfrica(oLat, oLng)) return ['bab_el_mandeb', 'red_sea_north', 'gulf_aqaba'];
+  }
   if (isMediterraneanDestination(dLat, dLng)) {
     if (isWestAfrica(oLat, oLng)) return atlanticToMediterraneanAnchorIds(dLat, dLng);
     if (isEastOrSouthAfrica(oLat, oLng)) {
@@ -172,7 +186,7 @@ function seaAnchorIds(
 
 function buildSeaCorridorPath(
   from: { lat: number; lng: number },
-  to: { lat: number; lng: number },
+  to: { lat: number; lng: number; label?: string },
 ): [number, number][] {
   const anchorIds = seaAnchorIds(from, to);
   const waypoints: [number, number][] = [[from.lat, from.lng]];
@@ -397,6 +411,10 @@ function resolveImportPort(buyer: { lat: number; lng: number; label?: string; co
   lng: number;
 } {
   const key = countryKey(buyer.country);
+  const label = (buyer.label ?? '').toLowerCase();
+  if (key.includes('israel') && label.includes('eilat')) {
+    return { name: 'Port of Eilat', lat: 29.557, lng: 34.952 };
+  }
   if (key.includes('israel') || isEasternMediterranean(buyer.lat, buyer.lng)) {
     return { name: 'Haifa Port', lat: 32.819, lng: 34.99 };
   }

@@ -159,6 +159,8 @@ AIR_HUBS: tuple[TransportHub, ...] = (
 SEA_ANCHORS: dict[str, tuple[str, float, float]] = {
     "bab_el_mandeb": ("Bab el-Mandeb sea lane", 12.610, 43.330),
     "suez": ("Suez Canal approach", 29.960, 32.550),
+    "red_sea_north": ("Northern Red Sea lane", 27.700, 34.200),
+    "gulf_aqaba": ("Gulf of Aqaba approach", 28.600, 34.750),
     "east_med": ("Eastern Mediterranean lane", 34.200, 27.000),
     "western_med": ("Western Mediterranean lane", 36.500, 5.000),
     "gibraltar": ("Strait of Gibraltar", 35.960, -5.600),
@@ -289,6 +291,20 @@ def _canonical_maritime_hub(
     return None
 
 
+def _explicit_domestic_hub_from_point(
+    point: RoutePoint,
+    domestic: list[TransportHub],
+) -> Optional[TransportHub]:
+    point_name = normalize_country_key(point.name)
+    if not point_name:
+        return None
+    for hub in domestic:
+        hub_name = normalize_country_key(hub.name)
+        if hub_name and (hub_name in point_name or point_name in hub_name):
+            return hub
+    return None
+
+
 def _select_country_authoritative_hub(
     point: RoutePoint,
     hubs: tuple[TransportHub, ...],
@@ -310,6 +326,12 @@ def _select_country_authoritative_hub(
     domestic = [hub for hub in hubs if normalize_country_key(hub.country) == country_key]
     if not domestic:
         return _select_hub(point, hubs, country=resolved_country)
+
+    explicit_hub = _explicit_domestic_hub_from_point(point, domestic)
+    if explicit_hub is not None:
+        return explicit_hub, [
+            f"{role.title()} gateway {explicit_hub.name} selected from explicit destination name."
+        ]
 
     nearest_domestic = min(
         domestic,
@@ -457,6 +479,15 @@ def _is_eastern_mediterranean(point: RoutePoint) -> bool:
     return 28.0 <= point.lat < 35.0 and 25.0 <= point.lng <= 42.0
 
 
+def _is_red_sea_or_gulf_of_aqaba(point: RoutePoint) -> bool:
+    name = (point.name or "").lower()
+    return (
+        "eilat" in name
+        or "aqaba" in name
+        or (27.0 <= point.lat <= 30.5 and 34.0 <= point.lng <= 35.5)
+    )
+
+
 def _is_mediterranean_destination(point: RoutePoint) -> bool:
     return _is_europe(point) or _is_eastern_mediterranean(point)
 
@@ -490,6 +521,23 @@ def _atlantic_to_mediterranean_anchors(destination: RoutePoint) -> list[str]:
 
 
 def _sea_anchor_ids_one_way(origin: RoutePoint, destination: RoutePoint) -> list[str]:
+    if _is_red_sea_or_gulf_of_aqaba(destination):
+        if _is_west_africa(origin):
+            return [
+                "west_africa",
+                "atlantic_africa",
+                "gibraltar",
+                "western_med",
+                "suez",
+                "red_sea_north",
+                "gulf_aqaba",
+            ]
+        if _is_europe(origin):
+            return ["english_channel", "gibraltar", "western_med", "suez", "red_sea_north", "gulf_aqaba"]
+        if _is_americas(origin):
+            return ["mid_atlantic", "english_channel", "gibraltar", "western_med", "suez", "red_sea_north", "gulf_aqaba"]
+        if _is_east_or_south_africa(origin) or _is_asia_indian_ocean(origin):
+            return ["bab_el_mandeb", "red_sea_north", "gulf_aqaba"]
     if _is_mediterranean_destination(destination):
         if _is_asia_indian_ocean(origin):
             return ["malacca", "colombo", "bab_el_mandeb", "suez", "east_med", "gibraltar", "english_channel"]

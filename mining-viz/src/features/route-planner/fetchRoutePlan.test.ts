@@ -19,24 +19,20 @@ describe('fetchRoutePlan', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns simulation with liveUnavailableReason when API fails', async () => {
+  it('rejects instead of returning simulation when live API fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockRejectedValue(new Error('Failed to fetch')),
     );
 
-    const res = await fetchRoutePlan({
+    await expect(fetchRoutePlan({
       supplier: { lat: 5.5, lng: -0.2, label: 'Mine' },
       buyer: { lat: 32, lng: 34.8, label: 'Port' },
       productType: 'gold_concentrate',
       shippingMethods: ['sea_fcl'],
       quantityTons: 100,
       incoterm: 'FOB',
-    });
-
-    expect(res.source).toBe('simulation');
-    expect(res.liveUnavailableReason).toBeTruthy();
-    expect(res.limitations[0]).toContain(res.liveUnavailableReason!);
+    })).rejects.toThrow(/Failed to fetch|Live routing/i);
   });
 
   it('maps live Ghana→Haifa with supplier/buyer ends and correct sea direction', async () => {
@@ -54,6 +50,7 @@ describe('fetchRoutePlan', () => {
               from: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
               to: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
               method: 'sea',
+              geometry_source: 'searoute',
               path: [
                 [5.64, 0.018],
                 [3, -12],
@@ -99,10 +96,94 @@ describe('fetchRoutePlan', () => {
     expect(res.warnings.some((w) => /Ghana → Israel/i.test(w))).toBe(false);
   });
 
-  it('warns when supplier and buyer appear reversed (Israel→Ghana)', async () => {
+  it('blocks live degraded road geometry instead of drawing it', async () => {
+    const liveBody = {
+      recommended: {
+        id: 'recommended',
+        label: 'Recommended',
+        is_recommended: true,
+        route: {
+          origin: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'origin' },
+          destination: { name: 'Ben Gurion Airport', lat: 32.011, lng: 34.87, kind: 'airport' },
+          legs: [
+            {
+              leg_id: 'leg-1',
+              from: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
+              to: { name: 'Ben Gurion Airport', lat: 32.011, lng: 34.87, kind: 'airport' },
+              method: 'road',
+              geometry_source: 'straight_line_fallback',
+              path: [
+                [32.819, 34.99],
+                [32.011, 34.87],
+              ],
+            },
+          ],
+        },
+        cost_breakdown: {
+          leg_costs: [{ leg_id: 'leg-1', method: 'road', total_cost_usd: 1200, distance_km: 92 }],
+        },
+      },
+    };
+
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockRejectedValue(new Error('offline')),
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => liveBody,
+      }),
+    );
+
+    await expect(fetchRoutePlan({
+      supplier: haifaBuyer,
+      buyer: { lat: 32.011, lng: 34.87, label: 'Ben Gurion Airport', country: 'Israel' },
+      productType: 'gold_concentrate',
+      shippingMethods: ['truck_inland'],
+      quantityTons: 100,
+      incoterm: 'FOB',
+    })).rejects.toThrow(/degraded/i);
+  });
+
+  it('warns when supplier and buyer appear reversed (Israel→Ghana)', async () => {
+    const liveBody = {
+      recommended: {
+        id: 'recommended',
+        label: 'Recommended',
+        is_recommended: true,
+        route: {
+          origin: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'origin' },
+          destination: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
+          legs: [
+            {
+              leg_id: 'leg-1',
+              from: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
+              to: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
+              method: 'sea',
+              geometry_source: 'searoute',
+              path: [
+                [32.819, 34.99],
+                [30, 20],
+                [5.64, 0.018],
+              ],
+            },
+          ],
+        },
+        cost_breakdown: {
+          leg_costs: [{ leg_id: 'leg-1', method: 'sea', total_cost_usd: 12000, distance_km: 4800 }],
+        },
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: async () =>
+            String(url).includes('due-diligence')
+              ? { checks: [], recommendation: 'escalate' }
+              : liveBody,
+        }),
+      ),
     );
 
     const res = await fetchRoutePlan({

@@ -10,7 +10,6 @@ import type {
   RoutePlannerApiResponse,
   RoutePlannerFormPayload,
 } from './types';
-import { mockResponseForPayload } from './mockRoute';
 import { attachSupplierBuyerEnds, detectLikelySupplierBuyerReversal } from './routeCorridor';
 
 type BackendMethod = 'sea' | 'road' | 'rail' | 'air' | 'pipeline';
@@ -29,6 +28,7 @@ interface BackendRouteLeg {
   method?: BackendMethod | string;
   distance_km?: number;
   path?: [number, number][];
+  geometry_source?: string;
   hub_label?: string;
   map_label?: string;
 }
@@ -191,6 +191,7 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
         toName: to.name,
         toKind: to.kind,
         hubLabel,
+        geometrySource: leg.geometry_source,
         label: legDisplayLabel(leg.method, from.name, to.name, hubLabel),
       };
     })
@@ -317,6 +318,30 @@ function routePlanOptionsFromBackend(data: BackendRouteResponse): {
   return { recommended, alternatives };
 }
 
+function degradedLegReason(leg: RouteLeg): string | null {
+  const method = String(leg.method || '').toLowerCase();
+  const source = String(leg.geometrySource || '').toLowerCase();
+  if (method === 'road' && source !== 'osrm') {
+    return `${leg.label || 'Road leg'} used ${source || 'unknown'} geometry instead of OSRM.`;
+  }
+  if (method === 'sea' && source !== 'searoute') {
+    return `${leg.label || 'Sea leg'} used ${source || 'unknown'} geometry instead of searoute.`;
+  }
+  if ((method === 'road' || method === 'sea') && leg.path.length < 3) {
+    return `${leg.label || titleCase(method)} returned too few route points for executable navigation.`;
+  }
+  return null;
+}
+
+function assertExecutablePlan(plan: RoutePlanOption): void {
+  const reason = plan.map.legs.map(degradedLegReason).find((item): item is string => Boolean(item));
+  if (reason) {
+    throw new Error(
+      `Live route is degraded and was not drawn: ${reason} Check OSRM/searoute availability and retry.`,
+    );
+  }
+}
+
 function ddStatus(verdict: string | undefined): DueDiligenceStatus {
   if (verdict === 'fail') return 'fail';
   if (verdict === 'warn') return 'warn';
@@ -411,6 +436,13 @@ async function fetchDueDiligence(payload: RoutePlannerFormPayload): Promise<DdAp
 
 async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse | null> {
   const normalizedProduct = payload.productType.toLowerCase();
+  const destinationName = payload.buyer.label.toLowerCase();
+  const destinationKind =
+    destinationName.includes('airport') || destinationName.includes('ben gurion') || destinationName.includes('(tlv)')
+      ? 'airport'
+      : destinationName.includes('port')
+        ? 'port'
+        : 'destination';
   const route = await postJson<BackendRouteResponse>(
     `${API_BASE}/api/logistics/route-plan`,
     {
@@ -432,7 +464,7 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
         name: payload.buyer.label || 'Destination',
         lat: payload.buyer.lat,
         lng: payload.buyer.lng,
-        kind: 'destination',
+        kind: destinationKind,
         metadata: { country: payload.buyer.country },
       },
       transit_points: [],
@@ -451,6 +483,8 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
   const ddSummary = dueDiligenceFromBackend(dd);
   const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
   const { recommended, alternatives } = routePlanOptionsFromBackend(route);
+  assertExecutablePlan(recommended);
+  alternatives.forEach(assertExecutablePlan);
   const map = attachSupplierBuyerEnds(recommended.map, payload.supplier, payload.buyer);
   const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
   const freightTotal = recommended.totalCostUsd;
@@ -507,25 +541,8 @@ export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<
   } catch (error) {
     liveFailureReason = describeLiveRouteFailure(error);
   }
-  const simulation = mockResponseForPayload(
-    payload.supplier,
-    payload.buyer,
-    payload.productType,
-    payload.shippingMethods,
+  throw new Error(
+    liveFailureReason ??
+      'Live routing unavailable — no route was drawn because fallback geometry is not executable.',
   );
-  const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
-  const cargo = estimateCargoValue(payload.productType, payload.quantityTons);
-  return {
-    ...simulation,
-    map: attachSupplierBuyerEnds(simulation.map, payload.supplier, payload.buyer),
-    warnings: reversalWarning ? [...simulation.warnings, reversalWarning] : simulation.warnings,
-    liveUnavailableReason: liveFailureReason,
-    cargoValueUsd: cargo.valueUsd,
-    cargoValueNote: cargo.note,
-    limitations: [
-      liveFailureReason ?? 'Live routing unavailable.',
-      'Simulation only — do not use for deal execution until a live run succeeds.',
-      ...simulation.limitations,
-    ],
-  };
 }
