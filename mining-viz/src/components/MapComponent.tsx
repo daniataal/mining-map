@@ -60,7 +60,10 @@ import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerM
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
-import { countriesWithVisibleLicenses } from '../lib/countriesWithVisibleLicenses';
+import {
+  countriesWithVisibleLicenses,
+  countryLicenseCounts,
+} from '../lib/countriesWithVisibleLicenses';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
 import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
@@ -769,7 +772,12 @@ export default function MapComponent({
             return [focus].sort((a, b) => a.localeCompare(b));
         }
         // Outlines follow the same filtered license set as map markers (search + facet filters).
-        return countriesWithVisibleLicenses(processedData);
+        const MAX_BORDER_COUNTRIES = 30;
+        const all = countriesWithVisibleLicenses(processedData);
+        if (all.length <= MAX_BORDER_COUNTRIES) return all;
+        return countryLicenseCounts(processedData)
+            .slice(0, MAX_BORDER_COUNTRIES)
+            .map((row) => row.country);
     }, [processedData, countryFocusCountry, isRoutePlannerView]);
 
     const { data: filteredGeoJson } = useQuery({

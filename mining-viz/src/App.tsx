@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense, type KeyboardEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
@@ -22,12 +22,7 @@ import {
   readMaritimeIncludeCoastalDemoPreference,
   type VesselFilters,
 } from './lib/vessels';
-import {
-  matchExactCountryFocusQuery,
-  resolveCountryFocusToken,
-  suggestCountriesForFocus,
-  tryParseCountryColonQuery,
-} from './lib/countryFocusMatch';
+import IntelligenceSearchBox from './components/IntelligenceSearchBox';
 import { useRoutePlanner } from './features/route-planner';
 import {
   buildRoutePlannerAirportMarkers,
@@ -39,7 +34,6 @@ import {
   resolveRouteHubCountries,
 } from './features/route-planner/locationPresets';
 import {
-  Search as LucideSearch,
   Filter as LucideFilter,
   MapPin as LucideMapPin,
   LayoutGrid as LucideLayoutGrid,
@@ -362,36 +356,11 @@ export default function App() {
     miningData.resetFilters();
   }, [miningData]);
 
-  const countryFocusSuggestions = useMemo(
-    () =>
-      countryFocusCountry || miningData.debouncedFilter.trim().length < 2
-        ? []
-        : suggestCountriesForFocus(miningData.debouncedFilter, miningData.countries, 8),
-    [miningData.debouncedFilter, miningData.countries, countryFocusCountry],
-  );
-
-  const handleIntelligenceSearchKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== 'Enter') return;
-      const raw = miningData.filter;
-      const colon = tryParseCountryColonQuery(raw);
-      if (colon) {
-        const name = resolveCountryFocusToken(colon, miningData.countries);
-        if (name) {
-          e.preventDefault();
-          applyCountryFocus(name);
-        }
-        return;
-      }
-      if (autoFocusCountryOnEnter) {
-        const exact = matchExactCountryFocusQuery(raw, miningData.countries);
-        if (exact) {
-          e.preventDefault();
-          applyCountryFocus(exact);
-        }
-      }
+  const handleCommitLicenseSearch = useCallback(
+    (query: string) => {
+      miningData.commitSearchFilter(query);
     },
-    [miningData.filter, miningData.countries, autoFocusCountryOnEnter, applyCountryFocus],
+    [miningData.commitSearchFilter],
   );
 
   useEffect(() => {
@@ -830,58 +799,15 @@ export default function App() {
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
-                  <div className="relative w-80 shrink-0">
-                    <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl">
-                      <LucideSearch className="w-5 h-5 shrink-0 text-slate-400 dark:text-slate-500 mr-3" />
-                      <input
-                        type="text"
-                        placeholder={t(
-                          'חפש מודיעין… נסה גם country:UAE',
-                          'Search intelligence hub… try country:UAE',
-                        )}
-                        className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full min-w-0 placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
-                        value={miningData.filter}
-                        onChange={(e) => miningData.setFilter(e.target.value)}
-                        onKeyDown={handleIntelligenceSearchKeyDown}
-                        aria-autocomplete="list"
-                        aria-expanded={countryFocusSuggestions.length > 0 && !countryFocusCountry}
-                      />
-                    </div>
-                    {countryFocusSuggestions.length > 0 && !countryFocusCountry && (
-                      <ul
-                        className="absolute left-0 right-0 top-[calc(100%+4px)] z-[1200] max-h-56 overflow-y-auto rounded-xl border border-black/10 bg-white/95 py-1 text-left shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95"
-                        role="listbox"
-                      >
-                        {countryFocusSuggestions.map((name) => (
-                          <li key={name}>
-                            <button
-                              type="button"
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold text-slate-800 hover:bg-amber-500/15 dark:text-slate-100 dark:hover:bg-amber-500/20"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => applyCountryFocus(name)}
-                            >
-                              <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-                                {t('מיקוד', 'Focus')}
-                              </span>
-                              <span>{name}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    <label className="mt-1.5 flex cursor-pointer items-center gap-2 px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
-                        checked={autoFocusCountryOnEnter}
-                        onChange={(e) => setAutoFocusCountryOnEnter(e.target.checked)}
-                      />
-                      {t(
-                        'מיקוד מפה במדינה בלחיצת Enter כשהשם תואם',
-                        'Focus map on country with Enter when the name matches exactly',
-                      )}
-                    </label>
-                  </div>
+                  <IntelligenceSearchBox
+                    countries={miningData.countries}
+                    externalFilter={miningData.filter}
+                    countryFocusCountry={countryFocusCountry}
+                    autoFocusCountryOnEnter={autoFocusCountryOnEnter}
+                    onAutoFocusCountryOnEnterChange={setAutoFocusCountryOnEnter}
+                    onApplyCountryFocus={applyCountryFocus}
+                    onCommitLicenseSearch={handleCommitLicenseSearch}
+                  />
                   {countryFocusCountry && (
                     <button
                       type="button"

@@ -484,6 +484,7 @@ def _load_cached_geo_fallbacks(cur, rows) -> dict[str, dict]:
     if not keys:
         return {}
     try:
+        cur.execute("SAVEPOINT geo_cache_lookup")
         placeholders = ", ".join(["%s"] * len(keys))
         cur.execute(
             f"""
@@ -500,9 +501,18 @@ def _load_cached_geo_fallbacks(cur, rows) -> dict[str, dict]:
             if row.get("lat") is None or row.get("lng") is None:
                 continue
             cached[row["query_key"]] = row
+        cur.execute("RELEASE SAVEPOINT geo_cache_lookup")
         return cached
     except Exception:
         # geo_cache is optional; normal reads must still succeed when it is absent.
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT geo_cache_lookup")
+            cur.execute("RELEASE SAVEPOINT geo_cache_lookup")
+        except Exception:
+            try:
+                cur.connection.rollback()
+            except Exception:
+                pass
         return {}
 
 
@@ -1389,13 +1399,24 @@ def init_db(*, raise_on_error: bool = False) -> bool:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS geo_cache (
                 query_key TEXT PRIMARY KEY,
-                lat FLOAT NOT NULL,
-                lng FLOAT NOT NULL,
+                lat FLOAT,
+                lng FLOAT,
                 confidence FLOAT DEFAULT 1.0,
                 source TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                display_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                looked_up_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        try:
+            cur.execute("ALTER TABLE geo_cache ADD COLUMN IF NOT EXISTS display_name TEXT;")
+            cur.execute(
+                "ALTER TABLE geo_cache ADD COLUMN IF NOT EXISTS looked_up_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"
+            )
+            cur.execute("ALTER TABLE geo_cache ALTER COLUMN lat DROP NOT NULL;")
+            cur.execute("ALTER TABLE geo_cache ALTER COLUMN lng DROP NOT NULL;")
+        except Exception as geo_cache_migrate_exc:
+            print(f"geo_cache migration step skipped: {geo_cache_migrate_exc}")
 
         # Files Table
         cur.execute("""
