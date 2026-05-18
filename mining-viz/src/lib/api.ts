@@ -27,6 +27,9 @@ import {
   StorageTerminalResponse,
   PortLogisticsDetails,
   PortLogisticsResponse,
+  AgentJobResponse,
+  ContactEnrichmentOutput,
+  OperatorValidationOutput,
 } from '../types';
 import {
   isLicenseBundleCacheFresh,
@@ -448,6 +451,34 @@ export async function getEntityContacts(entityId: string, entityKind = 'license'
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+export async function runContactEnrichmentAgent(
+  entityId: string,
+  entityKind = 'license',
+): Promise<AgentJobResponse<ContactEnrichmentOutput>> {
+  const { data } = await apiClient.post<AgentJobResponse<ContactEnrichmentOutput>>(
+    '/api/agents/contact-enrichment',
+    {
+      entity_id: entityId,
+      entity_kind: entityKind,
+    },
+  );
+  return data;
+}
+
+export async function runOperatorValidationAgent(
+  entityId: string,
+  entityKind = 'license',
+): Promise<AgentJobResponse<OperatorValidationOutput>> {
+  const { data } = await apiClient.post<AgentJobResponse<OperatorValidationOutput>>(
+    '/api/agents/operator-validation',
+    {
+      entity_id: entityId,
+      entity_kind: entityKind,
+    },
+  );
+  return data;
 }
 
 export async function getEntityRelationships(entityId: string, entityKind = 'license'): Promise<EntityRelationship[]> {

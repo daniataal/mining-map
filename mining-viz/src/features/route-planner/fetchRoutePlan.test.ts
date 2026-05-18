@@ -96,6 +96,62 @@ describe('fetchRoutePlan', () => {
     expect(res.warnings.some((w) => /Ghana → Israel/i.test(w))).toBe(false);
   });
 
+  it('keeps the live route when due diligence is unavailable', async () => {
+    const liveBody = {
+      recommended: {
+        id: 'recommended',
+        label: 'Recommended',
+        is_recommended: true,
+        route: {
+          origin: { name: 'Accra', lat: 5.548, lng: -0.192, kind: 'origin' },
+          destination: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'destination' },
+          legs: [
+            {
+              leg_id: 'leg-1',
+              from: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
+              to: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
+              method: 'sea',
+              geometry_source: 'searoute',
+              path: [
+                [5.64, 0.018],
+                [3, -12],
+                [32.819, 34.99],
+              ],
+            },
+          ],
+        },
+        cost_breakdown: {
+          leg_costs: [{ leg_id: 'leg-1', method: 'sea', total_cost_usd: 12000, distance_km: 4800 }],
+        },
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes('due-diligence')) {
+          return Promise.reject(new Error('DD down'));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => liveBody,
+        });
+      }),
+    );
+
+    const res = await fetchRoutePlan({
+      supplier: ghanaSupplier,
+      buyer: haifaBuyer,
+      productType: 'gold_concentrate',
+      shippingMethods: ['sea_fcl'],
+      quantityTons: 100,
+      incoterm: 'FOB',
+    });
+
+    expect(res.source).toBe('live');
+    expect(res.limitations.some((line) => /due-diligence service did not respond/i.test(line))).toBe(true);
+  });
+
   it('blocks live degraded road geometry instead of drawing it', async () => {
     const liveBody = {
       recommended: {

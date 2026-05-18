@@ -9,6 +9,8 @@ import type {
   RoutePlanOption,
   RoutePlannerApiResponse,
   RoutePlannerFormPayload,
+  RouteRiskAnalysis,
+  AgentJobResponse,
 } from './types';
 import { attachSupplierBuyerEnds, detectLikelySupplierBuyerReversal } from './routeCorridor';
 
@@ -85,6 +87,9 @@ interface DdApiResponse {
   overall_score?: number;
   license_check_performed?: boolean;
 }
+
+const LIVE_ROUTE_TIMEOUT_MS = 12_000;
+const ROUTE_PANEL_DD_TIMEOUT_MS = 3_000;
 
 function backendMethod(method: string): BackendMethod {
   const map: Record<string, BackendMethod> = {
@@ -171,7 +176,7 @@ function legDisplayLabel(method: string | undefined, fromName: string, toName: s
 function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
   const legs = data.route?.legs ?? [];
   const overlayLegs = legs
-    .map((leg) => {
+    .map((leg): RouteLeg | null => {
       const from = pointOrNull(leg.from);
       const to = pointOrNull(leg.to);
       if (!from || !to) return null;
@@ -192,6 +197,7 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
         toKind: to.kind,
         hubLabel,
         geometrySource: leg.geometry_source,
+        distanceKm: Number.isFinite(leg.distance_km) ? leg.distance_km : undefined,
         label: legDisplayLabel(leg.method, from.name, to.name, hubLabel),
       };
     })
@@ -231,10 +237,10 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
 
 function titleCase(value: string): string {
   return value
-    .replaceAll('_', ' ')
+    .replace(/_/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
 
@@ -264,10 +270,6 @@ function costBreakdownFromBackendSlice(
       note: ['מחושב משירות המסלול', 'Calculated by the route service'],
     },
   ];
-}
-
-function costBreakdownFromBackend(data: BackendRouteResponse): CostLineItem[] {
-  return costBreakdownFromBackendSlice(data.cost_breakdown, data.route?.legs ?? []);
 }
 
 function planOptionFromBackendSlice(slice: BackendRoutePlanSlice): RoutePlanOption | null {
@@ -409,7 +411,10 @@ async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promi
   }
 }
 
-async function fetchDueDiligence(payload: RoutePlannerFormPayload): Promise<DdApiResponse | null> {
+async function fetchDueDiligence(
+  payload: RoutePlannerFormPayload,
+  timeoutMs = 10_000,
+): Promise<DdApiResponse | null> {
   try {
     const supplierCountry = payload.supplier.country || '';
     const buyerCountry = payload.buyer.country || '';
@@ -427,7 +432,7 @@ async function fetchDueDiligence(payload: RoutePlannerFormPayload): Promise<DdAp
         supplier_entity_name: payload.supplier.label || undefined,
         buyer_entity_name: payload.buyer.label || undefined,
       },
-      10_000,
+      timeoutMs,
     );
   } catch {
     return null;
@@ -435,6 +440,7 @@ async function fetchDueDiligence(payload: RoutePlannerFormPayload): Promise<DdAp
 }
 
 async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse | null> {
+  const ddPromise = fetchDueDiligence(payload, ROUTE_PANEL_DD_TIMEOUT_MS);
   const normalizedProduct = payload.productType.toLowerCase();
   const destinationName = payload.buyer.label.toLowerCase();
   const destinationKind =
@@ -476,15 +482,15 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
         normalizedProduct.includes('lng') ||
         normalizedProduct.includes('lpg'),
     },
-    12_000,
+    LIVE_ROUTE_TIMEOUT_MS,
   );
 
-  const dd = await fetchDueDiligence(payload);
-  const ddSummary = dueDiligenceFromBackend(dd);
   const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
   const { recommended, alternatives } = routePlanOptionsFromBackend(route);
   assertExecutablePlan(recommended);
   alternatives.forEach(assertExecutablePlan);
+  const dd = await ddPromise;
+  const ddSummary = dueDiligenceFromBackend(dd);
   const map = attachSupplierBuyerEnds(recommended.map, payload.supplier, payload.buyer);
   const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
   const freightTotal = recommended.totalCostUsd;
@@ -544,5 +550,15 @@ export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<
   throw new Error(
     liveFailureReason ??
       'Live routing unavailable — no route was drawn because fallback geometry is not executable.',
+  );
+}
+
+export async function analyzeRouteRisk(
+  route: RoutePlannerApiResponse,
+): Promise<AgentJobResponse<RouteRiskAnalysis>> {
+  return postJson<AgentJobResponse<RouteRiskAnalysis>>(
+    `${API_BASE}/api/agents/route-intelligence`,
+    { route },
+    20_000,
   );
 }

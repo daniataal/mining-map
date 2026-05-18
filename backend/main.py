@@ -171,6 +171,38 @@ def _load_gov_procurement_sync():
     return sync_gov_procurement_data
 
 
+def _load_agent_intelligence_services():
+    try:
+        from backend.services.agent_intelligence import (
+            ensure_agent_jobs_table,
+            get_agent_job,
+            run_contact_enrichment,
+            run_data_validation_batch,
+            run_entity_data_validation,
+            run_operator_validation,
+            run_route_intelligence,
+        )
+    except ImportError:
+        from services.agent_intelligence import (  # type: ignore[no-redef]
+            ensure_agent_jobs_table,
+            get_agent_job,
+            run_contact_enrichment,
+            run_data_validation_batch,
+            run_entity_data_validation,
+            run_operator_validation,
+            run_route_intelligence,
+        )
+    return (
+        ensure_agent_jobs_table,
+        get_agent_job,
+        run_route_intelligence,
+        run_contact_enrichment,
+        run_operator_validation,
+        run_entity_data_validation,
+        run_data_validation_batch,
+    )
+
+
 def _serialize_entity_contact(row: dict) -> dict:
     return {
         "id": row.get("id"),
@@ -1039,6 +1071,33 @@ def init_db(*, raise_on_error: bool = False) -> bool:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_dd_reports_entity_created
             ON dd_reports (entity_kind, entity_id, created_at DESC);
+        """)
+
+        # Lightweight agent job/cache store. Agent runs are synchronous for the
+        # MVP, but persisted by (agent_type, input_hash) so repeat clicks reuse
+        # completed structured JSON instead of re-running bounded AI prompts.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agent_jobs (
+                job_id VARCHAR(255) PRIMARY KEY,
+                agent_type VARCHAR(80) NOT NULL,
+                status VARCHAR(40) NOT NULL,
+                entity_id VARCHAR(255),
+                route_hash TEXT,
+                input_hash TEXT NOT NULL,
+                input_json JSONB,
+                output_json JSONB,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_type_input_hash
+            ON agent_jobs (agent_type, input_hash);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agent_jobs_entity_type_created
+            ON agent_jobs (entity_id, agent_type, created_at DESC);
         """)
 
         # General, source-backed contact store. This is separate from private
@@ -2167,6 +2226,8 @@ def read_entity_contacts(entity_id: str, entity_kind: str = "license"):
                 confidence_score,
                 raw_payload,
                 extracted_from,
+                discovered_by,
+                phone_verified_at,
                 verified_at,
                 last_seen_at
             FROM entity_contacts
@@ -2489,6 +2550,178 @@ def read_entity_relationships(entity_id: str, entity_kind: str = "license"):
     except Exception as e:
         conn.rollback()
         return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+class AgentRouteIntelligenceRequest(BaseModel):
+    route: dict[str, Any]
+    deterministic_warnings: Optional[list[dict[str, Any]]] = None
+    route_hash: Optional[str] = None
+    force_refresh: bool = False
+
+
+class AgentEntityRequest(BaseModel):
+    entity_id: Optional[str] = None
+    entity_kind: str = "license"
+    entity: Optional[dict[str, Any]] = None
+    force_refresh: bool = False
+
+
+class AgentDataValidationRunRequest(BaseModel):
+    limit: int = 25
+    force_refresh: bool = False
+
+
+def _agent_entity_id(payload: AgentEntityRequest) -> str:
+    entity_id = payload.entity_id
+    if not entity_id and isinstance(payload.entity, dict):
+        entity_id = (
+            payload.entity.get("id")
+            or payload.entity.get("entity_id")
+            or payload.entity.get("entityId")
+        )
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id or entity.id is required")
+    return str(entity_id)
+
+
+@app.post("/api/agents/route-intelligence")
+def agent_route_intelligence(payload: AgentRouteIntelligenceRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_route_intelligence(
+            conn,
+            route_payload=payload.route,
+            deterministic_warnings=payload.deterministic_warnings,
+            route_hash=payload.route_hash,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/contact-enrichment")
+def agent_contact_enrichment(payload: AgentEntityRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    entity_id = _agent_entity_id(payload)
+    conn = get_db_connection()
+    try:
+        return run_contact_enrichment(
+            conn,
+            entity_id=entity_id,
+            entity_kind=payload.entity_kind,
+            entity=payload.entity,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/operator-validation")
+def agent_operator_validation(payload: AgentEntityRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    entity_id = _agent_entity_id(payload)
+    conn = get_db_connection()
+    try:
+        return run_operator_validation(
+            conn,
+            entity_id=entity_id,
+            entity_kind=payload.entity_kind,
+            entity=payload.entity,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/api/agents/data-validation/entity/{entity_id:path}")
+def agent_entity_data_validation(entity_id: str, entity_kind: str = "license", force_refresh: bool = False):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_entity_data_validation(
+            conn,
+            entity_id=entity_id,
+            entity_kind=entity_kind,
+            force_refresh=force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/data-validation/run")
+def agent_data_validation_run(payload: AgentDataValidationRunRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_data_validation_batch(
+            conn,
+            limit=payload.limit,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/api/agents/jobs/{job_id}")
+def read_agent_job(job_id: str):
+    (
+        _ensure_agent_jobs_table,
+        get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        job = get_agent_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Agent job {job_id} not found")
+        return job
     finally:
         conn.close()
 

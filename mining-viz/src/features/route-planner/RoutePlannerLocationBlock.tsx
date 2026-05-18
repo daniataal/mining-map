@@ -1,5 +1,5 @@
 import { Crosshair } from 'lucide-react';
-import { memo, startTransition, useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -63,6 +63,11 @@ function RoutePlannerLocationBlock({
   const { t } = useI18n();
   const active = pickRole === role;
   const [coordsOpen, setCoordsOpen] = useState(false);
+  const [presetOpen, setPresetOpen] = useState(false);
+
+  useEffect(() => {
+    if (presetsPending) setPresetOpen(false);
+  }, [presetsPending]);
 
   const presetId = useMemo(
     () => matchPresetId(presets, location.lat, location.lng),
@@ -175,7 +180,13 @@ function RoutePlannerLocationBlock({
           ? t('בחר נכס, נמל, או מיקום', 'Select asset, port, or location')
           : t('בחר יעד, נמל, או מיקום', 'Select destination, port, or location')}
       </p>
-      <Select value={presetId} onValueChange={applyPreset} disabled={presetsPending}>
+      <Select
+        value={presetId}
+        onValueChange={applyPreset}
+        disabled={presetsPending}
+        open={presetOpen && !presetsPending}
+        onOpenChange={(open) => setPresetOpen(open && !presetsPending)}
+      >
         <SelectTrigger
           className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
           disabled={presetsPending}

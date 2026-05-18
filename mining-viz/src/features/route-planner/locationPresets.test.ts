@@ -68,12 +68,50 @@ describe('buildRoutePlannerPortMarkers', () => {
 
   it('excludes Icelandic ISO2 ports from Israel marker filters', () => {
     const portEntities = [
-      { id: 'is-port', company: 'Arskogssandur', country: 'IS', lat: 65.9, lng: -18.2 } as MiningLicense,
-      { id: 'il-port', company: 'Haifa Custom', country: 'IL', lat: 32.81, lng: 34.98 } as MiningLicense,
+      { id: 'is-port', company: 'Arskogssandur Port', country: 'IS', entityKind: 'port', entitySubtype: 'port', lat: 65.9, lng: -18.2 } as MiningLicense,
+      { id: 'il-port', company: 'Haifa Custom Port', country: 'IL', entityKind: 'port', entitySubtype: 'port', lat: 32.81, lng: 34.98 } as MiningLicense,
     ];
     const filtered = buildRoutePlannerPortMarkers([], portEntities, { countries: ['Israel'] });
     expect(filtered.some((m) => m.name.includes('Arskogssandur'))).toBe(false);
     expect(filtered.some((m) => m.name.includes('Haifa Custom'))).toBe(true);
+  });
+
+  it('excludes rail and logistics nodes from route port markers', () => {
+    const portEntities = [
+      {
+        id: 'il-port',
+        company: 'Haifa Custom Port',
+        country: 'Israel',
+        entityKind: 'port',
+        entitySubtype: 'port',
+        lat: 32.81,
+        lng: 34.98,
+      } as MiningLicense,
+      {
+        id: 'il-rail',
+        company: 'Israel Rail Terminal',
+        country: 'Israel',
+        entityKind: 'logistics_node',
+        entitySubtype: 'rail_terminal',
+        sector: 'ports',
+        lat: 31.8,
+        lng: 34.7,
+      } as MiningLicense,
+      {
+        id: 'il-logistics',
+        company: 'Israel Logistics Hub',
+        country: 'Israel',
+        entityKind: 'logistics_node',
+        entitySubtype: 'logistics_hub',
+        sector: 'ports',
+        lat: 31.7,
+        lng: 34.6,
+      } as MiningLicense,
+    ];
+    const filtered = buildRoutePlannerPortMarkers([], portEntities, { countries: ['Israel'] });
+    expect(filtered.some((m) => m.name.includes('Haifa Custom'))).toBe(true);
+    expect(filtered.some((m) => m.name.includes('Rail Terminal'))).toBe(false);
+    expect(filtered.some((m) => m.name.includes('Logistics Hub'))).toBe(false);
   });
 });
 
@@ -137,5 +175,62 @@ describe('buildAllLocationPresets', () => {
     expect(licenseNames.some((n) => n.includes('BC Mine'))).toBe(false);
     expect(presets.some((p) => p.name.includes('Haifa'))).toBe(true);
     expect(presets.some((p) => p.name.includes('Rotterdam'))).toBe(false);
+  });
+
+  it('shows only maritime ports and airports for a destination country hub list', () => {
+    const portEntities = [
+      {
+        id: 'il-port',
+        company: 'Haifa Custom Port',
+        country: 'IL',
+        countryIso2: 'IL',
+        entityKind: 'port',
+        entitySubtype: 'port',
+        sector: 'ports',
+        lat: 32.81,
+        lng: 34.98,
+      } as MiningLicense,
+      {
+        id: 'il-rail',
+        company: 'Israel Rail Terminal',
+        country: 'IL',
+        countryIso2: 'IL',
+        entityKind: 'logistics_node',
+        entitySubtype: 'rail_terminal',
+        sector: 'ports',
+        lat: 31.8,
+        lng: 34.7,
+      } as MiningLicense,
+      {
+        id: 'is-port',
+        company: 'Iceland Custom Port',
+        country: 'IS',
+        countryIso2: 'IS',
+        entityKind: 'port',
+        entitySubtype: 'port',
+        sector: 'ports',
+        lat: 65.9,
+        lng: -18.2,
+      } as MiningLicense,
+      {
+        id: 'global-port',
+        company: 'Global Fallback Port',
+        country: 'Global',
+        countryIso2: 'IL',
+        entityKind: 'port',
+        entitySubtype: 'port',
+        sector: 'ports',
+        recordOrigin: 'global_open_fallback',
+        lat: 32.9,
+        lng: 35.1,
+      } as MiningLicense,
+    ];
+    const presets = buildAllLocationPresets([], portEntities, { countries: ['Israel'] });
+    const names = presets.map((p) => p.name);
+    expect(names.some((name) => name.includes('Haifa Custom'))).toBe(true);
+    expect(names.some((name) => name.includes('Ben Gurion'))).toBe(true);
+    expect(names.some((name) => name.includes('Rail Terminal'))).toBe(false);
+    expect(names.some((name) => name.includes('Iceland'))).toBe(false);
+    expect(names.some((name) => name.includes('Global Fallback'))).toBe(false);
   });
 });
