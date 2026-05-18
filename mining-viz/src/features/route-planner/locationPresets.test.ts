@@ -95,6 +95,11 @@ describe('buildAllLocationPresets', () => {
     } as MiningLicense,
   ];
 
+  it('returns empty list when country filter is set but empty (avoids full-pool scan)', () => {
+    const presets = buildAllLocationPresets(mixedLicenses, [], { countries: [] });
+    expect(presets).toEqual([]);
+  });
+
   it('excludes non-matching concessions when destination country is set', () => {
     const presets = buildAllLocationPresets(mixedLicenses, [], {
       countries: ['Israel'],

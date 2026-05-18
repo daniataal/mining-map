@@ -282,10 +282,8 @@ export function buildAllLocationPresets(
   const countryList = countries ?? [];
 
   if (hasCountryFilter && !countryList.length) {
-    return capPresetsByGroup(
-      filterLocationPresetsByCountries(buildLicensePresets(allLicenses), []),
-      MAX_DROPDOWN_PRESETS_PER_GROUP,
-    );
+    // Skip scanning the full global license pool until a country is chosen.
+    return [];
   }
 
   const licensesForBuild =

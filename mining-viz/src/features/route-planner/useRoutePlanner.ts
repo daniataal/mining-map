@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
 import { fetchRoutePlan } from './fetchRoutePlan';
 import { buyerCountryRequiredForHubs } from './locationPresets';
@@ -117,11 +125,10 @@ export function useRoutePlanner(): RoutePlannerHook {
   }, []);
 
   useEffect(() => {
-    if (!buyerCountryRequiredForHubs(buyer.country)) {
-      setShowPortsOnMap(true);
-      setShowAirportsOnMap(true);
-    }
-  }, [buyer.country]);
+    if (buyerCountryRequiredForHubs(buyer.country)) return;
+    setShowPortsOnMap(true);
+    setShowAirportsOnMap(true);
+  }, []);
 
   const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
     setSupplier({ lat, lng, label, ...meta });
@@ -194,10 +201,12 @@ export function useRoutePlanner(): RoutePlannerHook {
         quantityTons,
         incoterm,
       });
-      setResult(res);
-      setSelectedPlanId(res.recommendedPlanId ?? null);
-      setShowPortsOnMap(false);
-      setShowAirportsOnMap(false);
+      startTransition(() => {
+        setResult(res);
+        setSelectedPlanId(res.recommendedPlanId ?? null);
+        setShowPortsOnMap(false);
+        setShowAirportsOnMap(false);
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
     } finally {

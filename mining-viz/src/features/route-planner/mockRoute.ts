@@ -27,16 +27,86 @@ function concatPaths(...segments: [number, number][][]): [number, number][] {
   return out;
 }
 
+/** Offshore waypoints aligned with backend route_planner SEA_ANCHORS. */
+const SEA_OFFSHORE_ANCHORS: Record<string, { lat: number; lng: number }> = {
+  west_africa: { lat: 3, lng: -12 },
+  atlantic_africa: { lat: 20, lng: -15 },
+  gibraltar: { lat: 35.96, lng: -5.6 },
+  western_med: { lat: 36.5, lng: 5 },
+  east_med: { lat: 34.2, lng: 27 },
+  english_channel: { lat: 50.05, lng: 1.2 },
+  bab_el_mandeb: { lat: 12.61, lng: 43.33 },
+  suez: { lat: 29.96, lng: 32.55 },
+  cape: { lat: -35, lng: 18.2 },
+  mid_atlantic: { lat: 38, lng: -35 },
+};
+
+function isEurope(lat: number, lng: number): boolean {
+  return lat >= 35 && lat <= 72 && lng >= -15 && lng <= 45;
+}
+
+function isEasternMediterranean(lat: number, lng: number): boolean {
+  return lat >= 28 && lat < 35 && lng >= 25 && lng <= 42;
+}
+
+function isMediterraneanDestination(lat: number, lng: number): boolean {
+  return isEurope(lat, lng) || isEasternMediterranean(lat, lng);
+}
+
+function isWestAfrica(lat: number, lng: number): boolean {
+  return lat >= -10 && lat <= 25 && lng >= -25 && lng <= 20;
+}
+
+function isEastOrSouthAfrica(lat: number, lng: number): boolean {
+  return lat >= -36 && lat <= 16 && lng >= 20 && lng <= 55;
+}
+
+function atlanticToMediterraneanAnchorIds(destLat: number, destLng: number): string[] {
+  const base = ['west_africa', 'atlantic_africa', 'gibraltar', 'western_med'];
+  return isEasternMediterranean(destLat, destLng) ? [...base, 'east_med'] : [...base, 'english_channel'];
+}
+
+function seaAnchorIds(
+  origin: { lat: number; lng: number },
+  destination: { lat: number; lng: number },
+): string[] {
+  const { lat: oLat, lng: oLng } = origin;
+  const { lat: dLat, lng: dLng } = destination;
+  if (isMediterraneanDestination(dLat, dLng)) {
+    if (isWestAfrica(oLat, oLng)) return atlanticToMediterraneanAnchorIds(dLat, dLng);
+    if (isEastOrSouthAfrica(oLat, oLng)) {
+      return isEasternMediterranean(dLat, dLng)
+        ? ['bab_el_mandeb', 'suez', 'east_med']
+        : ['bab_el_mandeb', 'suez', 'east_med', 'gibraltar', 'english_channel'];
+    }
+    if (isEurope(oLat, oLng)) {
+      return isEasternMediterranean(dLat, dLng)
+        ? ['english_channel', 'gibraltar', 'western_med', 'east_med']
+        : ['english_channel', 'gibraltar', 'western_med'];
+    }
+    if (isEasternMediterranean(oLat, oLng) && isEurope(dLat, dLng)) {
+      return ['east_med', 'western_med', 'gibraltar', 'english_channel'];
+    }
+  }
+  return [];
+}
+
 function buildSeaCorridorPath(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
 ): [number, number][] {
-  const hub = corridorHubFor(from, to);
-  // Denser polyline so simulation fallback resembles live searoute/corridor geometry.
-  return concatPaths(
-    interpolateLeg([from.lat, from.lng], [hub.lat, hub.lng], 16),
-    interpolateLeg([hub.lat, hub.lng], [to.lat, to.lng], 20),
-  );
+  const anchorIds = seaAnchorIds(from, to);
+  const waypoints: [number, number][] = [[from.lat, from.lng]];
+  for (const id of anchorIds) {
+    const anchor = SEA_OFFSHORE_ANCHORS[id];
+    if (anchor) waypoints.push([anchor.lat, anchor.lng]);
+  }
+  waypoints.push([to.lat, to.lng]);
+  const segments: [number, number][][] = [];
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    segments.push(interpolateLeg(waypoints[i], waypoints[i + 1], 14));
+  }
+  return concatPaths(...segments);
 }
 
 function inlandMethod(shippingMethods: string[]): RouteLeg['method'] {
@@ -86,10 +156,7 @@ function buildDemoMap(
       { lat: importAirport.lat, lng: importAirport.lng, role: 'transit', label: ['נמל תעופה יבוא', 'Import airport'] },
     );
   } else if (hasSea) {
-    const importCoast = {
-      lat: buyer.lat,
-      lng: Math.max(-180, Math.min(180, buyer.lng + (buyer.lng >= exportPort.lng ? -4 : 4))),
-    };
+    const importPort = resolveImportPort(buyer);
     legs.push(
       {
         path: interpolateLeg([supplier.lat, supplier.lng], [exportPort.lat, exportPort.lng], 10),
@@ -100,15 +167,17 @@ function buildDemoMap(
         hubLabel: exportPort.name,
       },
       {
-        path: buildSeaCorridorPath(exportPort, importCoast),
+        path: buildSeaCorridorPath(exportPort, importPort),
         method: 'sea',
-        label: `Sea leg: ${exportPort.name} → import coast`,
+        label: `Sea leg: ${exportPort.name} → ${importPort.name}`,
+        toName: importPort.name,
         toKind: 'port',
+        hubLabel: importPort.name,
       },
       {
-        path: interpolateLeg([importCoast.lat, importCoast.lng], [buyer.lat, buyer.lng], 8),
+        path: interpolateLeg([importPort.lat, importPort.lng], [buyer.lat, buyer.lng], 8),
         method: inland,
-        label: 'Road: import coast → buyer',
+        label: `Road: ${importPort.name} → buyer`,
       },
     );
     transitWaypoints.push({
@@ -145,7 +214,26 @@ function buildDemoMap(
   };
 }
 
-/** Deterministic midpoint so legs arc slightly offshore */
+/** Import seaport for simulation trunk termination (aligned with buyer region). */
+function resolveImportPort(buyer: { lat: number; lng: number; label?: string }): {
+  name: string;
+  lat: number;
+  lng: number;
+} {
+  if (isEasternMediterranean(buyer.lat, buyer.lng)) {
+    return { name: 'Haifa Port', lat: 32.819, lng: 34.99 };
+  }
+  if (buyer.lat >= 48 && buyer.lat <= 56 && buyer.lng >= -2 && buyer.lng <= 12) {
+    return { name: 'Rotterdam', lat: 51.924, lng: 4.478 };
+  }
+  return {
+    name: 'Import port',
+    lat: buyer.lat,
+    lng: Math.max(-180, Math.min(180, buyer.lng + (buyer.lng >= 0 ? -4 : 4))),
+  };
+}
+
+/** Midpoint hub for air corridors (great-circle arc). */
 function corridorHubFor(
   supplier: { lat: number; lng: number },
   buyer: { lat: number; lng: number },
