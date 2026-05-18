@@ -8,13 +8,19 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Callable, Optional, Protocol, Sequence
 
 import requests
 
 OSRM_BASE_URL = (os.getenv("OSRM_BASE_URL") or "https://router.project-osrm.org").rstrip("/")
 OSRM_TIMEOUT_SEC = float(os.getenv("OSRM_TIMEOUT_SEC", "8"))
+SEAROUTE_TIMEOUT_SEC = float(os.getenv("SEAROUTE_TIMEOUT_SEC", "15"))
+# Skip OSRM when less than this many seconds remain on the plan deadline.
+OSRM_DEADLINE_BUFFER_SEC = float(os.getenv("OSRM_DEADLINE_BUFFER_SEC", "1.5"))
+SEAROUTE_DEADLINE_BUFFER_SEC = float(os.getenv("SEAROUTE_DEADLINE_BUFFER_SEC", "2.0"))
 SEAROUTE_ENABLED = (os.getenv("SEAROUTE_ENABLED") or "1").strip().lower() in {
     "1",
     "true",
@@ -128,6 +134,36 @@ def great_circle_geometry(
     )
 
 
+def _remaining_deadline_seconds(deadline: Optional[float]) -> Optional[float]:
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return 0.0
+    return remaining
+
+
+def _effective_http_timeout(default_sec: float, deadline: Optional[float]) -> float:
+    remaining = _remaining_deadline_seconds(deadline)
+    if remaining is None:
+        return default_sec
+    if remaining <= 0:
+        return 0.25
+    return max(0.25, min(default_sec, remaining))
+
+
+def _osrm_cache_key(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> tuple[float, float, float, float]:
+    return (round(a_lat, 3), round(a_lng, 3), round(b_lat, 3), round(b_lng, 3))
+
+
+@lru_cache(maxsize=256)
+def _cached_osrm_route_key(key: tuple[float, float, float, float]) -> str:
+    return "|".join(str(v) for v in key)
+
+
+_osrm_geometry_cache: dict[str, ResolvedGeometry] = {}
+
+
 def _decode_osrm_coordinates(geojson_geometry: dict[str, Any]) -> list[tuple[float, float]]:
     coords = geojson_geometry.get("coordinates")
     if not isinstance(coords, list):
@@ -149,8 +185,28 @@ def fetch_osrm_route(
     *,
     method: str = "road",
     http_get: Optional[Callable[..., Any]] = None,
+    deadline: Optional[float] = None,
+    use_cache: bool = True,
 ) -> ResolvedGeometry:
     """Query OSRM driving profile; fall back to straight line on any error."""
+
+    cache_key = _osrm_cache_key(a_lat, a_lng, b_lat, b_lng)
+    if use_cache:
+        cached = _osrm_geometry_cache.get(_cached_osrm_route_key(cache_key))
+        if cached is not None:
+            return cached
+
+    remaining = _remaining_deadline_seconds(deadline)
+    if remaining is not None and remaining < OSRM_DEADLINE_BUFFER_SEC:
+        return straight_line_geometry(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            method=method,
+            source="straight_line_fallback",
+            note="OSRM skipped: route plan deadline nearly exceeded.",
+        )
 
     fallback = straight_line_geometry(
         a_lat,
@@ -168,7 +224,7 @@ def fetch_osrm_route(
     )
     getter = http_get or requests.get
     try:
-        response = getter(url, timeout=OSRM_TIMEOUT_SEC)
+        response = getter(url, timeout=_effective_http_timeout(OSRM_TIMEOUT_SEC, deadline))
         if getattr(response, "status_code", 200) != 200:
             return fallback
         payload = response.json() if hasattr(response, "json") else response
@@ -188,13 +244,16 @@ def fetch_osrm_route(
         duration_s = float(route0.get("duration") or 0.0)
         distance_km = distance_m / 1000.0 if distance_m > 0 else path_distance_km(path)
         duration_hours = duration_s / 3600.0 if duration_s > 0 else distance_km / DEFAULT_SPEED_KMH["road"]
-        return ResolvedGeometry(
+        resolved = ResolvedGeometry(
             path=tuple(path),
             distance_km=distance_km,
             duration_hours=duration_hours,
             source="osrm",
             notes=["Road geometry from OSRM driving network."],
         )
+        if use_cache and resolved.source == "osrm":
+            _osrm_geometry_cache[_cached_osrm_route_key(cache_key)] = resolved
+        return resolved
     except Exception:
         return fallback
 
@@ -264,6 +323,7 @@ def fetch_sea_route(
     b_lng: float,
     *,
     corridor_fallback: Callable[[], list[tuple[float, float]]],
+    deadline: Optional[float] = None,
 ) -> ResolvedGeometry:
     """Marine route via searoute when enabled; otherwise corridor fallback."""
 
@@ -282,6 +342,16 @@ def fetch_sea_route(
         notes=fallback_notes,
     )
 
+    remaining = _remaining_deadline_seconds(deadline)
+    if remaining is not None and remaining < SEAROUTE_DEADLINE_BUFFER_SEC:
+        return ResolvedGeometry(
+            path=fallback.path,
+            distance_km=fallback.distance_km,
+            duration_hours=fallback.duration_hours,
+            source="corridor_fallback",
+            notes=[*fallback.notes, "Searoute skipped: route plan deadline nearly exceeded."],
+        )
+
     if not SEAROUTE_ENABLED:
         return fallback
 
@@ -298,8 +368,17 @@ def fetch_sea_route(
         )
 
     try:
+        searoute_started = time.monotonic()
         # searoute expects [longitude, latitude]
         feature = sr.searoute([a_lng, a_lat], [b_lng, b_lat], units="km")
+        if time.monotonic() - searoute_started > SEAROUTE_TIMEOUT_SEC:
+            return ResolvedGeometry(
+                path=fallback.path,
+                distance_km=fallback.distance_km,
+                duration_hours=fallback.duration_hours,
+                source="corridor_fallback",
+                notes=[*fallback.notes, "Searoute exceeded time budget; using corridor fallback."],
+            )
         path = _searoute_linestring_coords(feature)
         if len(path) < 2:
             return fallback
@@ -381,15 +460,31 @@ def resolve_leg_geometry(
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
     rail_hubs: Optional[tuple[tuple[float, float], tuple[float, float]]] = None,
     http_get: Optional[Callable[..., Any]] = None,
+    deadline: Optional[float] = None,
 ) -> ResolvedGeometry:
     method = method.strip().lower()
     if method == "road":
-        return fetch_osrm_route(a_lat, a_lng, b_lat, b_lng, method=method, http_get=http_get)
+        return fetch_osrm_route(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            method=method,
+            http_get=http_get,
+            deadline=deadline,
+        )
     if method == "air":
         return great_circle_geometry(a_lat, a_lng, b_lat, b_lng, method=method)
     if method == "sea":
         fallback = corridor_fallback or (lambda: [(a_lat, a_lng), (b_lat, b_lng)])
-        return fetch_sea_route(a_lat, a_lng, b_lat, b_lng, corridor_fallback=fallback)
+        return fetch_sea_route(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            corridor_fallback=fallback,
+            deadline=deadline,
+        )
     if method == "rail" and rail_hubs is not None:
         export_hub, import_hub = rail_hubs
         return rail_hub_geometry(

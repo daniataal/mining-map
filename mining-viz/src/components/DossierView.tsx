@@ -89,7 +89,7 @@ function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string
     const record = payload as { message?: unknown; error_code?: unknown };
     if (typeof record.message === 'string' && record.message.trim()) return record.message.trim();
     if (record.error_code === 'AI_ALL_PROVIDERS_FAILED') {
-      return 'Intelligence providers are busy or rate-limited. Configure GROQ_API_KEY or OPENROUTER_API_KEY, or try again shortly.';
+      return 'Intelligence providers are unavailable. Check the platform status banner for backend env (SET/MISSING) and configure GROQ_API_KEY or OPENROUTER_API_KEY on the server.';
     }
   }
   if (status === 503) {

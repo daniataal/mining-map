@@ -1740,6 +1740,11 @@ def _bootstrap_open_data():
 @app.on_event("startup")
 def startup_schema_bootstrap():
     """Bind the HTTP port before heavy DB work: init runs in a background thread."""
+    try:
+        from backend.services.ai_providers import log_ai_provider_status
+    except ImportError:
+        from services.ai_providers import log_ai_provider_status  # type: ignore[no-redef]
+    log_ai_provider_status()
 
     def _warm():
         if not ensure_schema_initialized():

@@ -70,7 +70,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
     showPortsOnMap, setShowPortsOnMap,
     showAirportsOnMap, setShowAirportsOnMap,
     flyToLocation,
-    result, loading, error, computeRoute,
+    result, loading, routeCalculatingHint, error, computeRoute,
     hasResult,
     routeOptions, selectedPlanId, activePlan, selectRoutePlan,
   } = rp;
@@ -92,16 +92,19 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
 
   const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
 
-  const debouncedSupplierCountry = useDebouncedValue(supplier.country);
-  const debouncedBuyerCountry = useDebouncedValue(buyer.country);
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
+  const [buyerPickerOpen, setBuyerPickerOpen] = useState(false);
+
+  const debouncedSupplierCountry = useDebouncedValue(supplier.country, 300);
+  const debouncedBuyerCountry = useDebouncedValue(buyer.country, 300);
 
   const supplierCountriesKey = useMemo(
-    () => resolveRolePresetCountries('supplier', debouncedSupplierCountry, debouncedBuyerCountry).join('\0'),
-    [debouncedSupplierCountry, debouncedBuyerCountry],
+    () => resolveRolePresetCountries('supplier', supplier.country, buyer.country).join('\0'),
+    [supplier.country, buyer.country],
   );
   const buyerCountriesKey = useMemo(
-    () => resolveRolePresetCountries('buyer', debouncedSupplierCountry, debouncedBuyerCountry).join('\0'),
-    [debouncedSupplierCountry, debouncedBuyerCountry],
+    () => resolveRolePresetCountries('buyer', supplier.country, buyer.country).join('\0'),
+    [supplier.country, buyer.country],
   );
 
   const supplierPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
@@ -111,19 +114,44 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
     [presetLicensePool, portEntities],
   );
 
+  const [supplierPresetsReady, setSupplierPresetsReady] = useState(false);
+  const [buyerPresetsReady, setBuyerPresetsReady] = useState(false);
+
+  useEffect(() => {
+    setSupplierPresetsReady(false);
+  }, [supplier.country]);
+
+  useEffect(() => {
+    setBuyerPresetsReady(false);
+  }, [buyer.country]);
+
+  useEffect(() => {
+    setSupplierPresetsReady(Boolean(debouncedSupplierCountry));
+  }, [debouncedSupplierCountry]);
+
+  useEffect(() => {
+    setBuyerPresetsReady(Boolean(debouncedBuyerCountry));
+  }, [debouncedBuyerCountry]);
+
+  // Profiler: buildAllLocationPresets — only when picker opens or after 300ms country debounce.
+  const shouldBuildSupplierPresets = supplierPickerOpen || supplierPresetsReady;
+  const shouldBuildBuyerPresets = buyerPickerOpen || buyerPresetsReady;
+
   const supplierPresetsRaw = useMemo(() => {
+    if (!shouldBuildSupplierPresets) return supplierPresetsCache.current;
     const countries = supplierCountriesKey ? supplierCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetPool, [], { countries });
+    const next = buildAllLocationPresets(presetPool, portEntities ?? [], { countries });
     supplierPresetsCache.current = next;
     return next;
-  }, [presetPool, supplierCountriesKey]);
+  }, [presetPool, portEntities, supplierCountriesKey, shouldBuildSupplierPresets]);
 
   const buyerPresetsRaw = useMemo(() => {
+    if (!shouldBuildBuyerPresets) return buyerPresetsCache.current;
     const countries = buyerCountriesKey ? buyerCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetPool, [], { countries });
+    const next = buildAllLocationPresets(presetPool, portEntities ?? [], { countries });
     buyerPresetsCache.current = next;
     return next;
-  }, [presetPool, buyerCountriesKey]);
+  }, [presetPool, portEntities, buyerCountriesKey, shouldBuildBuyerPresets]);
 
   const supplierPresets = useDeferredValue(supplierPresetsRaw);
   const buyerPresets = useDeferredValue(buyerPresetsRaw);
@@ -341,11 +369,12 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 accentBorder="border-amber-500/60 bg-amber-500/[0.06]"
                 location={supplier}
                 setLocation={setSupplier}
-                presets={supplierPresets}
+                presets={supplierPickerOpen ? supplierPresets : []}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
                 presetsPending={supplierPresetsPending}
+                onPresetPickerOpenChange={setSupplierPickerOpen}
               />
               <RoutePlannerLocationBlock
                 role="buyer"
@@ -354,13 +383,14 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 accentBorder="border-blue-500/60 bg-blue-500/[0.06]"
                 location={buyer}
                 setLocation={setBuyer}
-                presets={buyerPresets}
+                presets={buyerPickerOpen ? buyerPresets : []}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
                 showBuyerGroups
                 requireCountry
                 presetsPending={buyerPresetsPending}
+                onPresetPickerOpenChange={setBuyerPickerOpen}
               />
             </div>
 
@@ -434,7 +464,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
             {loading && (
               <p className="flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[10px] font-semibold text-amber-900 dark:text-amber-100">
                 <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
-                {t('מחשב מסלול חי — אפשר להמשיך לערוך הגדרות', 'Computing live route — you can keep editing setup fields')}
+                {t(routeCalculatingHint, routeCalculatingHint)}
               </p>
             )}
             {error && step === 'setup' && (

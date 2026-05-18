@@ -14,8 +14,13 @@ Geometry sources (env-configurable, all degrade gracefully):
 from __future__ import annotations
 
 import math
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Optional
+
+ROUTE_PLAN_DEADLINE_SEC = float(os.getenv("ROUTE_PLAN_DEADLINE_SEC", "75"))
 
 try:
     from backend.services.routing_geometry import (
@@ -661,6 +666,7 @@ def _geometry_for_leg(
     method: str,
     *,
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
+    deadline: Optional[float] = None,
 ) -> ResolvedGeometry:
     rail_hubs: Optional[tuple[tuple[float, float], tuple[float, float]]] = None
     if method == "rail":
@@ -675,7 +681,50 @@ def _geometry_for_leg(
         method,
         corridor_fallback=corridor_fallback,
         rail_hubs=rail_hubs,
+        deadline=deadline,
     )
+
+
+def _resolve_leg_geometries_parallel(
+    specs: list[tuple[RoutePoint, RoutePoint, str, Optional[Callable[[], list[tuple[float, float]]]]]],
+    *,
+    deadline: Optional[float],
+) -> list[ResolvedGeometry]:
+    """Resolve independent leg geometries concurrently (OSRM + searoute)."""
+    if not specs:
+        return []
+    if len(specs) == 1:
+        from_point, to_point, method, corridor_fallback = specs[0]
+        return [
+            _geometry_for_leg(
+                from_point,
+                to_point,
+                method,
+                corridor_fallback=corridor_fallback,
+                deadline=deadline,
+            )
+        ]
+
+    results: list[Optional[ResolvedGeometry]] = [None] * len(specs)
+
+    def _resolve(index: int) -> tuple[int, ResolvedGeometry]:
+        from_point, to_point, method, corridor_fallback = specs[index]
+        return index, _geometry_for_leg(
+            from_point,
+            to_point,
+            method,
+            corridor_fallback=corridor_fallback,
+            deadline=deadline,
+        )
+
+    max_workers = min(4, len(specs))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_resolve, index) for index in range(len(specs))]
+        for future in as_completed(futures):
+            index, geometry = future.result()
+            results[index] = geometry
+
+    return [geometry for geometry in results if geometry is not None]
 
 
 def _make_leg(
@@ -736,6 +785,7 @@ def _append_if_not_same(
     corridor_fallback: Optional[Callable[[], list[tuple[float, float]]]] = None,
     cost_overrides: Optional[dict[str, Any]] = None,
     connector_max_km: float = 35.0,
+    deadline: Optional[float] = None,
 ) -> None:
     if not _connector_leg_needed(from_point, to_point, max_km=connector_max_km):
         return
@@ -746,6 +796,7 @@ def _append_if_not_same(
             to_point,
             method,
             corridor_fallback=corridor_fallback,
+            deadline=deadline,
         )
     legs.append(
         _make_leg(
@@ -768,6 +819,7 @@ def _plan_sea_route(
     quantity_tons: float,
     *,
     export_hub: Optional[TransportHub] = None,
+    deadline: Optional[float] = None,
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
     hub_notes: list[str] = []
@@ -782,36 +834,69 @@ def _plan_sea_route(
     import_port = _point_from_hub(import_hub)
 
     origin_to_port_km = _haversine_km(origin.lat, origin.lng, export_port.lat, export_port.lng)
-    import_to_dest_km = _haversine_km(import_port.lat, import_port.lng, destination.lat, destination.lng)
     pickup_notes = list(hub_notes)
-    _append_if_not_same(
-        legs,
-        origin,
-        export_port,
-        _inland_method(requested_methods, origin_to_port_km),
-        quantity_tons,
-        stage="1. Inland pickup to export port",
-    )
+
+    leg_specs: list[
+        tuple[
+            RoutePoint,
+            RoutePoint,
+            str,
+            str,
+            Optional[Callable[[], list[tuple[float, float]]]],
+            float,
+        ]
+    ] = []
+    if _connector_leg_needed(origin, export_port):
+        leg_specs.append(
+            (
+                origin,
+                export_port,
+                _inland_method(requested_methods, origin_to_port_km),
+                "1. Inland pickup to export port",
+                None,
+                35.0,
+            )
+        )
+    if _connector_leg_needed(export_port, import_port):
+        leg_specs.append(
+            (
+                export_port,
+                import_port,
+                "sea",
+                "2. Ocean trunk route between nominated ports",
+                lambda: _sea_path(export_port, import_port),
+                35.0,
+            )
+        )
+    if _connector_leg_needed(import_port, destination, max_km=8.0):
+        leg_specs.append(
+            (
+                import_port,
+                destination,
+                "road",
+                "3. Final delivery from import port",
+                None,
+                8.0,
+            )
+        )
+
+    geometry_specs = [(spec[0], spec[1], spec[2], spec[4]) for spec in leg_specs]
+    resolved_geometries = _resolve_leg_geometries_parallel(geometry_specs, deadline=deadline)
+
+    for index, spec in enumerate(leg_specs):
+        from_point, to_point, method, stage, _corridor, _max_km = spec
+        _append_if_not_same(
+            legs,
+            from_point,
+            to_point,
+            method,
+            quantity_tons,
+            stage=stage,
+            geometry=resolved_geometries[index] if index < len(resolved_geometries) else None,
+            deadline=deadline,
+        )
     if pickup_notes and legs:
         legs[0].notes.extend(pickup_notes)
-    _append_if_not_same(
-        legs,
-        export_port,
-        import_port,
-        "sea",
-        quantity_tons,
-        stage="2. Ocean trunk route between nominated ports",
-        corridor_fallback=lambda: _sea_path(export_port, import_port),
-    )
-    _append_if_not_same(
-        legs,
-        import_port,
-        destination,
-        "road",
-        quantity_tons,
-        stage="3. Final delivery from import port",
-        connector_max_km=8.0,
-    )
     if import_notes and len(legs) >= 1:
         legs[-1].notes.extend(import_notes)
     return legs, [export_port, import_port]
@@ -822,6 +907,8 @@ def _plan_air_route(
     destination: RoutePoint,
     requested_methods: list[str],
     quantity_tons: float,
+    *,
+    deadline: Optional[float] = None,
 ) -> tuple[list[PlannedLeg], list[RoutePoint]]:
     legs: list[PlannedLeg] = []
     export_hub, export_notes = _select_hub(origin, AIR_HUBS, country=_origin_country(origin))
@@ -836,34 +923,60 @@ def _plan_air_route(
     origin_to_air_km = _haversine_km(origin.lat, origin.lng, export_airport.lat, export_airport.lng)
     import_to_dest_km = _haversine_km(import_airport.lat, import_airport.lng, destination.lat, destination.lng)
 
-    _append_if_not_same(
-        legs,
-        origin,
-        export_airport,
-        _inland_method(requested_methods, origin_to_air_km),
-        quantity_tons,
-        stage="1. Secure pickup to export airport",
+    leg_specs: list[tuple[RoutePoint, RoutePoint, str, str, Optional[Callable[[], list[tuple[float, float]]]]]] = []
+    if _connector_leg_needed(origin, export_airport):
+        leg_specs.append(
+            (
+                origin,
+                export_airport,
+                _inland_method(requested_methods, origin_to_air_km),
+                "1. Secure pickup to export airport",
+                None,
+            )
+        )
+    if _connector_leg_needed(export_airport, import_airport):
+        leg_specs.append(
+            (
+                export_airport,
+                import_airport,
+                "air",
+                "2. Air cargo trunk route",
+                None,
+            )
+        )
+    if _connector_leg_needed(import_airport, destination):
+        leg_specs.append(
+            (
+                import_airport,
+                destination,
+                _inland_method(requested_methods, import_to_dest_km),
+                "3. Secure final delivery from airport",
+                None,
+            )
+        )
+
+    resolved_geometries = _resolve_leg_geometries_parallel(
+        [(spec[0], spec[1], spec[2], spec[4]) for spec in leg_specs],
+        deadline=deadline,
     )
+
+    for index, spec in enumerate(leg_specs):
+        from_point, to_point, method, stage, _corridor = spec
+        _append_if_not_same(
+            legs,
+            from_point,
+            to_point,
+            method,
+            quantity_tons,
+            stage=stage,
+            geometry=resolved_geometries[index] if index < len(resolved_geometries) else None,
+            deadline=deadline,
+        )
     if export_notes and legs:
         legs[0].notes.extend(export_notes)
-    _append_if_not_same(
-        legs,
-        export_airport,
-        import_airport,
-        "air",
-        quantity_tons,
-        stage="2. Air cargo trunk route",
-    )
-    if import_notes and len(legs) >= 2:
-        legs[1].notes.extend(import_notes)
-    _append_if_not_same(
-        legs,
-        import_airport,
-        destination,
-        _inland_method(requested_methods, import_to_dest_km),
-        quantity_tons,
-        stage="3. Secure final delivery from airport",
-    )
+    air_trunk_index = next((idx for idx, spec in enumerate(leg_specs) if spec[2] == "air"), None)
+    if import_notes and air_trunk_index is not None and air_trunk_index < len(legs):
+        legs[air_trunk_index].notes.extend(import_notes)
     return legs, [export_airport, import_airport]
 
 
@@ -988,18 +1101,23 @@ def _generate_route_plans(
     *,
     pipeline_layer_enabled: bool,
     offer_alternatives: bool,
+    deadline: Optional[float] = None,
 ) -> list[dict[str, Any]]:
     plans: list[dict[str, Any]] = []
+    export_hub_limit = 2
+    if deadline is not None and (deadline - time.monotonic()) < 25:
+        export_hub_limit = 1
 
     if offer_alternatives and "sea" in requested_methods:
         export_hubs = _nearest_maritime_hubs(origin, limit=3 if offer_alternatives else 1)
-        for idx, hub in enumerate(export_hubs[:2]):
+        for idx, hub in enumerate(export_hubs[:export_hub_limit]):
             legs, gateways = _plan_sea_route(
                 origin,
                 destination,
                 requested_methods,
                 quantity_tons,
                 export_hub=hub,
+                deadline=deadline,
             )
             alt_id = f"sea_{_port_slug(hub.name)}"
             label = f"Via {hub.name} (sea)" if idx > 0 else f"Recommended: via {hub.name} (sea)"
@@ -1018,7 +1136,13 @@ def _generate_route_plans(
             )
 
     if offer_alternatives and "air" in requested_methods:
-        legs, gateways = _plan_air_route(origin, destination, requested_methods, quantity_tons)
+        legs, gateways = _plan_air_route(
+            origin,
+            destination,
+            requested_methods,
+            quantity_tons,
+            deadline=deadline,
+        )
         plans.append(
             _build_route_plan_entry(
                 alternative_id="air",
@@ -1035,10 +1159,22 @@ def _generate_route_plans(
 
     if not plans:
         if "sea" in requested_methods:
-            legs, gateways = _plan_sea_route(origin, destination, requested_methods, quantity_tons)
+            legs, gateways = _plan_sea_route(
+                origin,
+                destination,
+                requested_methods,
+                quantity_tons,
+                deadline=deadline,
+            )
             strategy = "staged-inland-port-sea-port-inland"
         elif "air" in requested_methods:
-            legs, gateways = _plan_air_route(origin, destination, requested_methods, quantity_tons)
+            legs, gateways = _plan_air_route(
+                origin,
+                destination,
+                requested_methods,
+                quantity_tons,
+                deadline=deadline,
+            )
             strategy = "staged-secure-road-air-road"
         else:
             legs, gateways = _plan_direct_inland_route(
@@ -1076,6 +1212,8 @@ def _generate_route_plans(
 
 
 def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
+    plan_started = time.monotonic()
+    deadline = plan_started + ROUTE_PLAN_DEADLINE_SEC
     origin = _to_point(request_payload["origin"], "origin")
     destination = _to_point(request_payload["destination"], "destination")
 
@@ -1096,6 +1234,7 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
         quantity_tons,
         pipeline_layer_enabled=pipeline_layer_enabled,
         offer_alternatives=offer_alternatives,
+        deadline=deadline,
     )
     recommended = _pick_recommended_plan(candidate_plans, requested_methods)
     recommended_id = str(recommended["id"])
@@ -1108,10 +1247,12 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
         if str(plan.get("id")) != recommended_id
     ]
 
+    elapsed_sec = time.monotonic() - plan_started
     base_limitations = [
         "Gateway catalog is static and open-first; validate nominated port/airport acceptance, storage, and documentation.",
         "Road geometry uses OSRM when reachable; failures fall back to straight-line segments without failing the request.",
         "Sea geometry uses searoute when SEAROUTE_ENABLED and the package is installed; otherwise offshore corridor waypoints.",
+        f"Route geometry resolved in {elapsed_sec:.1f}s (budget {ROUTE_PLAN_DEADLINE_SEC:.0f}s); OSRM hub pairs may be cached.",
         "Rail is hub-to-hub screening only — not a track-level network graph.",
         "Air trunk is great-circle; airport drayage uses OSRM when available.",
         "Freight cost is a screening estimate; obtain broker/carrier quotes before committing.",

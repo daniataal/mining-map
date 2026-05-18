@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   MARITIME_HUB_PRESETS,
   AIR_HUB_PRESETS,
+  MAX_DROPDOWN_PRESETS_PER_GROUP,
+  MAX_PRESET_SEARCH_RESULTS,
+  MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
   buildAllLocationPresets,
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
@@ -11,6 +14,7 @@ import {
   resolveRouteHubCountries,
   buyerCountryRequiredForHubs,
   findNearestHubInCountry,
+  searchLocationPresets,
 } from './locationPresets';
 import type { MiningLicense } from '../../types';
 
@@ -143,6 +147,23 @@ describe('filterLicensesForRouteHubs', () => {
   });
 });
 
+describe('searchLocationPresets', () => {
+  const manyPresets = Array.from({ length: 50 }, (_, i) => ({
+    id: `p-${i}`,
+    name: `Port ${i} Israel`,
+    lat: 32 + i * 0.01,
+    lng: 34.8,
+    country: 'Israel',
+    group: 'ports' as const,
+  }));
+
+  it('caps search results at MAX_PRESET_SEARCH_RESULTS', () => {
+    const hits = searchLocationPresets(manyPresets, 'port');
+    expect(hits.length).toBeLessThanOrEqual(MAX_PRESET_SEARCH_RESULTS);
+    expect(hits.length).toBe(MAX_PRESET_SEARCH_RESULTS);
+  });
+});
+
 describe('buildAllLocationPresets', () => {
   const mixedLicenses: MiningLicense[] = [
     {
@@ -232,5 +253,28 @@ describe('buildAllLocationPresets', () => {
     expect(names.some((name) => name.includes('Rail Terminal'))).toBe(false);
     expect(names.some((name) => name.includes('Iceland'))).toBe(false);
     expect(names.some((name) => name.includes('Global Fallback'))).toBe(false);
+  });
+
+  it('caps each group at MAX_DROPDOWN_PRESETS_PER_GROUP', () => {
+    const licenses = Array.from({ length: 60 }, (_, i) => ({
+      id: `il-${i}`,
+      company: `Site ${i}`,
+      country: 'Israel',
+      lat: 30.6 + i * 0.001,
+      lng: 34.8,
+    })) as MiningLicense[];
+    const presets = buildAllLocationPresets(licenses, [], { countries: ['Israel'] });
+    const licenseCount = presets.filter((p) => p.group === 'licenses').length;
+    expect(licenseCount).toBeLessThanOrEqual(MAX_DROPDOWN_PRESETS_PER_GROUP);
+  });
+});
+
+describe('route mode hub marker caps', () => {
+  it('limits combined port markers in route mode', () => {
+    const ports = buildRoutePlannerPortMarkers([], [], {
+      countries: ['Israel', 'Netherlands'],
+      maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
+    });
+    expect(ports.length).toBeLessThanOrEqual(MAX_ROUTE_MODE_TOTAL_HUB_MARKERS);
   });
 });

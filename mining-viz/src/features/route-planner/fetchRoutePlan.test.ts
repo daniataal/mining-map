@@ -19,20 +19,53 @@ describe('fetchRoutePlan', () => {
     vi.unstubAllGlobals();
   });
 
-  it('rejects instead of returning simulation when live API fails', async () => {
+  it('falls back to simulation when health check fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockRejectedValue(new Error('Failed to fetch')),
     );
 
-    await expect(fetchRoutePlan({
+    const res = await fetchRoutePlan({
       supplier: { lat: 5.5, lng: -0.2, label: 'Mine' },
       buyer: { lat: 32, lng: 34.8, label: 'Port' },
       productType: 'gold_concentrate',
       shippingMethods: ['sea_fcl'],
       quantityTons: 100,
       incoterm: 'FOB',
-    })).rejects.toThrow(/Failed to fetch|Live routing/i);
+    });
+
+    expect(res.source).toBe('simulation');
+    expect(res.liveUnavailableReason).toMatch(/health check failed/i);
+  });
+
+  it('falls back to simulation when live route times out', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes('/api/health')) {
+          return Promise.resolve({ ok: true, json: async () => ({ api: 'ok' }) });
+        }
+        if (String(url).includes('route-plan')) {
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          return Promise.reject(err);
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ checks: [], recommendation: 'escalate' }) });
+      }),
+    );
+
+    const res = await fetchRoutePlan({
+      supplier: ghanaSupplier,
+      buyer: haifaBuyer,
+      productType: 'gold_concentrate',
+      shippingMethods: ['sea_fcl', 'truck_inland'],
+      quantityTons: 1000,
+      incoterm: 'CIF',
+    });
+
+    expect(res.source).toBe('simulation');
+    expect(res.liveUnavailableReason).toMatch(/timed out/i);
+    expect(res.map.legs.length).toBeGreaterThan(0);
   });
 
   it('maps live Ghana→Haifa with supplier/buyer ends and correct sea direction', async () => {
@@ -70,10 +103,11 @@ describe('fetchRoutePlan', () => {
       vi.fn().mockImplementation((url: string) =>
         Promise.resolve({
           ok: true,
-          json: async () =>
-            String(url).includes('due-diligence')
-              ? { checks: [], recommendation: 'escalate' }
-              : liveBody,
+          json: async () => {
+            if (String(url).includes('/api/health')) return { api: 'ok' };
+            if (String(url).includes('due-diligence')) return { checks: [], recommendation: 'escalate' };
+            return liveBody;
+          },
         }),
       ),
     );
@@ -129,6 +163,9 @@ describe('fetchRoutePlan', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes('/api/health')) {
+          return Promise.resolve({ ok: true, json: async () => ({ api: 'ok' }) });
+        }
         if (String(url).includes('due-diligence')) {
           return Promise.reject(new Error('DD down'));
         }
@@ -152,7 +189,7 @@ describe('fetchRoutePlan', () => {
     expect(res.limitations.some((line) => /due-diligence service did not respond/i.test(line))).toBe(true);
   });
 
-  it('blocks live degraded road geometry instead of drawing it', async () => {
+  it('falls back to simulation when live road geometry is degraded', async () => {
     const liveBody = {
       recommended: {
         id: 'recommended',
@@ -183,23 +220,31 @@ describe('fetchRoutePlan', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => liveBody,
-      }),
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            if (String(url).includes('/api/health')) return { api: 'ok' };
+            return liveBody;
+          },
+        }),
+      ),
     );
 
-    await expect(fetchRoutePlan({
+    const res = await fetchRoutePlan({
       supplier: haifaBuyer,
       buyer: { lat: 32.011, lng: 34.87, label: 'Ben Gurion Airport', country: 'Israel' },
       productType: 'gold_concentrate',
       shippingMethods: ['truck_inland'],
       quantityTons: 100,
       incoterm: 'FOB',
-    })).rejects.toThrow(/degraded/i);
+    });
+
+    expect(res.source).toBe('simulation');
+    expect(res.liveUnavailableReason).toMatch(/degraded/i);
   });
 
-  it('blocks sea geometry that still cuts land at Gibraltar', async () => {
+  it('falls back to simulation when sea geometry cuts land at Gibraltar', async () => {
     const liveBody = {
       recommended: {
         id: 'recommended',
@@ -233,20 +278,28 @@ describe('fetchRoutePlan', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => liveBody,
-      }),
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: async () => {
+            if (String(url).includes('/api/health')) return { api: 'ok' };
+            return liveBody;
+          },
+        }),
+      ),
     );
 
-    await expect(fetchRoutePlan({
+    const res = await fetchRoutePlan({
       supplier: ghanaSupplier,
       buyer: haifaBuyer,
       productType: 'gold_concentrate',
       shippingMethods: ['sea_fcl'],
       quantityTons: 100,
       incoterm: 'FOB',
-    })).rejects.toThrow(/Gibraltar/i);
+    });
+
+    expect(res.source).toBe('simulation');
+    expect(res.liveUnavailableReason).toMatch(/Gibraltar/i);
   });
 
   it('warns when supplier and buyer appear reversed (Israel→Ghana)', async () => {
@@ -284,10 +337,11 @@ describe('fetchRoutePlan', () => {
       vi.fn().mockImplementation((url: string) =>
         Promise.resolve({
           ok: true,
-          json: async () =>
-            String(url).includes('due-diligence')
-              ? { checks: [], recommendation: 'escalate' }
-              : liveBody,
+          json: async () => {
+            if (String(url).includes('/api/health')) return { api: 'ok' };
+            if (String(url).includes('due-diligence')) return { checks: [], recommendation: 'escalate' };
+            return liveBody;
+          },
         }),
       ),
     );
