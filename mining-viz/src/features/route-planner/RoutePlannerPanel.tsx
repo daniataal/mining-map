@@ -1,6 +1,5 @@
 import { AlertTriangle, CheckCircle2, Loader2, Navigation, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useDebouncedValue } from '../../hooks/use-debounced-value';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../lib/i18n';
 import type { MiningLicense } from '../../types';
 import { Badge } from '../../components/ui/badge';
@@ -16,7 +15,7 @@ import { analyzeRouteRisk } from './fetchRoutePlan';
 import RouteLegend from './RouteLegend';
 import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
 import {
-  buildAllLocationPresets,
+  buildRouteHubPresets,
   buyerCountryRequiredForHubs,
   resolveRolePresetCountries,
   resolveRouteHubCountries,
@@ -53,12 +52,10 @@ const FindingList = memo(function FindingList({ title, items, empty }: { title: 
 
 interface RoutePlannerPanelProps {
   rp: RoutePlannerHook;
-  /** Hub-filtered license slice — not the full ~15k pool (see App routePlannerHubLicenses). */
-  presetLicensePool?: MiningLicense[];
   portEntities?: MiningLicense[];
 }
 
-function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePlannerPanelProps) {
+function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
   const { t } = useI18n();
   const {
     supplier, setSupplier, buyer, setBuyer,
@@ -92,74 +89,23 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
 
   const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
 
-  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
-  const [buyerPickerOpen, setBuyerPickerOpen] = useState(false);
-
-  const debouncedSupplierCountry = useDebouncedValue(supplier.country, 300);
-  const debouncedBuyerCountry = useDebouncedValue(buyer.country, 300);
-
-  const supplierCountriesKey = useMemo(
-    () => resolveRolePresetCountries('supplier', supplier.country, buyer.country).join('\0'),
+  const supplierPresetCountries = useMemo(
+    () => resolveRolePresetCountries('supplier', supplier.country, buyer.country),
     [supplier.country, buyer.country],
   );
-  const buyerCountriesKey = useMemo(
-    () => resolveRolePresetCountries('buyer', supplier.country, buyer.country).join('\0'),
+  const buyerPresetCountries = useMemo(
+    () => resolveRolePresetCountries('buyer', supplier.country, buyer.country),
     [supplier.country, buyer.country],
   );
 
-  const supplierPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
-  const buyerPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
-  const presetPool = useMemo(
-    () => (presetLicensePool.length ? presetLicensePool : portEntities ?? []),
-    [presetLicensePool, portEntities],
+  const supplierPresets = useMemo(
+    () => buildRouteHubPresets(portEntities ?? [], { countries: supplierPresetCountries }),
+    [portEntities, supplierPresetCountries],
   );
-
-  const [supplierPresetsReady, setSupplierPresetsReady] = useState(false);
-  const [buyerPresetsReady, setBuyerPresetsReady] = useState(false);
-
-  useEffect(() => {
-    setSupplierPresetsReady(false);
-  }, [supplier.country]);
-
-  useEffect(() => {
-    setBuyerPresetsReady(false);
-  }, [buyer.country]);
-
-  useEffect(() => {
-    setSupplierPresetsReady(Boolean(debouncedSupplierCountry));
-  }, [debouncedSupplierCountry]);
-
-  useEffect(() => {
-    setBuyerPresetsReady(Boolean(debouncedBuyerCountry));
-  }, [debouncedBuyerCountry]);
-
-  // Profiler: buildAllLocationPresets — only when picker opens or after 300ms country debounce.
-  const shouldBuildSupplierPresets = supplierPickerOpen || supplierPresetsReady;
-  const shouldBuildBuyerPresets = buyerPickerOpen || buyerPresetsReady;
-
-  const supplierPresetsRaw = useMemo(() => {
-    if (!shouldBuildSupplierPresets) return supplierPresetsCache.current;
-    const countries = supplierCountriesKey ? supplierCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetPool, portEntities ?? [], { countries });
-    supplierPresetsCache.current = next;
-    return next;
-  }, [presetPool, portEntities, supplierCountriesKey, shouldBuildSupplierPresets]);
-
-  const buyerPresetsRaw = useMemo(() => {
-    if (!shouldBuildBuyerPresets) return buyerPresetsCache.current;
-    const countries = buyerCountriesKey ? buyerCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetPool, portEntities ?? [], { countries });
-    buyerPresetsCache.current = next;
-    return next;
-  }, [presetPool, portEntities, buyerCountriesKey, shouldBuildBuyerPresets]);
-
-  const supplierPresets = useDeferredValue(supplierPresetsRaw);
-  const buyerPresets = useDeferredValue(buyerPresetsRaw);
-  const supplierPresetsPending =
-    supplierPresets !== supplierPresetsRaw || supplier.country !== debouncedSupplierCountry;
-  const buyerPresetsPending =
-    buyerPresets !== buyerPresetsRaw || buyer.country !== debouncedBuyerCountry;
-  const presetsPending = supplierPresetsPending || buyerPresetsPending;
+  const buyerPresets = useMemo(
+    () => buildRouteHubPresets(portEntities ?? [], { countries: buyerPresetCountries }),
+    [portEntities, buyerPresetCountries],
+  );
 
   const hubToggleHint = needsDestinationCountry
     ? t(
@@ -260,7 +206,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
   const routeRiskWarnings = routeRisk?.deterministic_warnings ?? [];
 
   return (
-    <Card className="h-full w-full overflow-hidden rounded-2xl border border-black/10 bg-white/97 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/97 flex flex-col">
+    <Card className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-black/10 bg-white/97 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/97">
       {/* Header */}
       <div className="px-4 py-4 border-b border-black/5 dark:border-white/10 shrink-0">
         <div className="flex flex-col gap-3">
@@ -303,7 +249,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y">
         {step === 'setup' ? (
           <div className="p-4 space-y-4">
             {pickRole && (
@@ -355,12 +301,6 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
               </label>
             </div>
 
-            {presetsPending && (
-              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 animate-pulse">
-                {t('מעדכן רשימת מיקומים…', 'Updating location list…')}
-              </p>
-            )}
-
             <div className="grid grid-cols-1 gap-4">
               <RoutePlannerLocationBlock
                 role="supplier"
@@ -369,12 +309,10 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 accentBorder="border-amber-500/60 bg-amber-500/[0.06]"
                 location={supplier}
                 setLocation={setSupplier}
-                presets={supplierPickerOpen ? supplierPresets : []}
+                presets={supplierPresets}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
-                presetsPending={supplierPresetsPending}
-                onPresetPickerOpenChange={setSupplierPickerOpen}
               />
               <RoutePlannerLocationBlock
                 role="buyer"
@@ -383,14 +321,12 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 accentBorder="border-blue-500/60 bg-blue-500/[0.06]"
                 location={buyer}
                 setLocation={setBuyer}
-                presets={buyerPickerOpen ? buyerPresets : []}
+                presets={buyerPresets}
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
                 showBuyerGroups
                 requireCountry
-                presetsPending={buyerPresetsPending}
-                onPresetPickerOpenChange={setBuyerPickerOpen}
               />
             </div>
 

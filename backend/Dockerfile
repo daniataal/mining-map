@@ -16,6 +16,7 @@ COPY schemas/ ./schemas/
 COPY services/ ./services/
 COPY tests/ ./tests/
 COPY *.py ./
+COPY route_service/ ./route_service/
 COPY licenses.json ./
 
 # Expose backend port

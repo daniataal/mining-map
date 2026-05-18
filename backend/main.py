@@ -6019,17 +6019,44 @@ class LogisticsRoutePlanRequest(BaseModel):
     pipeline_layer_enabled: bool = False
 
 
+def _route_service_base_url() -> str:
+    return (os.getenv("ROUTE_SERVICE_URL") or "").strip().rstrip("/")
+
+
 @app.post("/api/logistics/route-plan")
 def plan_logistics_route(payload: LogisticsRoutePlanRequest):
+    request_payload = payload.model_dump()
+    transit = request_payload.get("transit_points") or []
+    request_payload["transit_points"] = [item for item in transit if isinstance(item, dict)]
+
+    route_service_url = _route_service_base_url()
+    if route_service_url:
+        import requests
+
+        try:
+            response = requests.post(
+                f"{route_service_url}/plan",
+                json=request_payload,
+                timeout=float(os.getenv("ROUTE_SERVICE_PROXY_TIMEOUT_SEC", "125")),
+            )
+            if response.status_code == 400:
+                raise HTTPException(status_code=400, detail=response.text)
+            response.raise_for_status()
+            return response.json()
+        except HTTPException:
+            raise
+        except requests.RequestException as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Route service unavailable at {route_service_url}: {exc}",
+            ) from exc
+
     try:
         try:
             from backend.services.route_planner import plan_route
         except ImportError:
             from services.route_planner import plan_route
 
-        request_payload = payload.model_dump()
-        transit = request_payload.get("transit_points") or []
-        request_payload["transit_points"] = [item for item in transit if isinstance(item, dict)]
         return plan_route(request_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

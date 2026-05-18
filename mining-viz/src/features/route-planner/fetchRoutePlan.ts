@@ -89,8 +89,16 @@ interface DdApiResponse {
   license_check_performed?: boolean;
 }
 
-/** Client abort for POST /api/logistics/route-plan (Vite proxy allows 120s). */
-export const LIVE_ROUTE_TIMEOUT_MS = 90_000;
+/** Client abort for route plan (Vite proxy / route-service allow 120s). */
+export const LIVE_ROUTE_TIMEOUT_MS = 120_000;
+
+function routePlanEndpoint(): string {
+  const direct = (import.meta.env.VITE_ROUTE_SERVICE_URL as string | undefined)?.trim();
+  if (direct) {
+    return `${direct.replace(/\/$/, '')}/plan`;
+  }
+  return `${API_BASE}/api/logistics/route-plan`;
+}
 const HEALTH_PREFLIGHT_TIMEOUT_MS = 5_000;
 const ROUTE_PANEL_DD_TIMEOUT_MS = 3_000;
 /** Shown while the route request is in flight (Ghana→Israel can take 30–60s). */
@@ -479,7 +487,7 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
         ? 'port'
         : 'destination';
   const route = await postJson<BackendRouteResponse>(
-    `${API_BASE}/api/logistics/route-plan`,
+    routePlanEndpoint(),
     {
       product: payload.productType,
       quantity_tons: payload.quantityTons,

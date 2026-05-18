@@ -162,6 +162,29 @@ def _cached_osrm_route_key(key: tuple[float, float, float, float]) -> str:
 
 
 _osrm_geometry_cache: dict[str, ResolvedGeometry] = {}
+_osrm_geometry_cache_max: int = int(os.getenv("OSRM_GEOMETRY_CACHE_MAX", "256"))
+
+
+def configure_osrm_geometry_cache(*, max_entries: int) -> None:
+    """Resize the in-memory OSRM geometry LRU (route-service sets a large cap at startup)."""
+    global _osrm_geometry_cache_max
+    _osrm_geometry_cache_max = max(64, int(max_entries))
+
+
+def osrm_cache_stats() -> dict[str, int]:
+    return {
+        "entries": len(_osrm_geometry_cache),
+        "max_entries": _osrm_geometry_cache_max,
+    }
+
+
+def _store_osrm_geometry_cache(key_str: str, resolved: ResolvedGeometry) -> None:
+    while len(_osrm_geometry_cache) >= _osrm_geometry_cache_max and _osrm_geometry_cache:
+        try:
+            _osrm_geometry_cache.pop(next(iter(_osrm_geometry_cache)))
+        except StopIteration:
+            break
+    _osrm_geometry_cache[key_str] = resolved
 
 
 def _decode_osrm_coordinates(geojson_geometry: dict[str, Any]) -> list[tuple[float, float]]:
@@ -252,7 +275,7 @@ def fetch_osrm_route(
             notes=["Road geometry from OSRM driving network."],
         )
         if use_cache and resolved.source == "osrm":
-            _osrm_geometry_cache[_cached_osrm_route_key(cache_key)] = resolved
+            _store_osrm_geometry_cache(_cached_osrm_route_key(cache_key), resolved)
         return resolved
     except Exception:
         return fallback

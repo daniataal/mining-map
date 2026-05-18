@@ -29,6 +29,11 @@ services:
       - DISABLE_POLLINATIONS_FALLBACK=${DISABLE_POLLINATIONS_FALLBACK:-}
       - SECRET_KEY=${SECRET_KEY}
       - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+      # Petroleum Mapbox tiles (oil/gas pipelines). GitHub Actions secret: MAPBOX_ACCESS_TOKEN
+      - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN:-}
+      - OILMAP_MAPBOX_TOKEN=${OILMAP_MAPBOX_TOKEN:-}
+      # Optional geocoding; same Mapbox token usually works if unset
+      - MAPBOX_GEOCODING_TOKEN=${MAPBOX_GEOCODING_TOKEN:-}
       - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-1}
       - MARITIME_MEMORY_CACHE_TTL_SECONDS=${MARITIME_MEMORY_CACHE_TTL_SECONDS:-10}
       - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
@@ -40,6 +45,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
+      - ROUTE_SERVICE_URL=http://route-service:8001
     healthcheck:
       test:
         [
@@ -57,6 +63,37 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      route-service:
+        condition: service_healthy
+
+  route-service:
+    build:
+      context: ./backend
+    container_name: mining-route-service
+    restart: always
+    command: ["python", "-m", "route_service"]
+    expose:
+      - "8001"
+    mem_limit: ${ROUTE_SERVICE_MEM_LIMIT:-3g}
+    environment:
+      - ROUTE_SERVICE_PORT=8001
+      - ROUTE_PLAN_DEADLINE_SEC=${ROUTE_PLAN_DEADLINE_SEC:-120}
+      - OSRM_GEOMETRY_CACHE_MAX=${OSRM_GEOMETRY_CACHE_MAX:-8192}
+      - OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+      - OSRM_TIMEOUT_SEC=${OSRM_TIMEOUT_SEC:-8}
+      - SEAROUTE_ENABLED=${SEAROUTE_ENABLED:-1}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5).read(1)",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
 
   # maritime-worker: continuous AIS ingest (start with: docker compose up -d maritime-worker)
   maritime-worker:
@@ -153,8 +190,11 @@ services:
     # .env only when you need a fixed API URL (e.g. VITE_API_BASE=http://host.docker.internal:8000 on Mac).
     environment:
       VITE_API_BASE: ${VITE_API_BASE:-}
+      VITE_ROUTE_SERVICE_URL: ${VITE_ROUTE_SERVICE_URL:-}
     depends_on:
       backend:
+        condition: service_healthy
+      route-service:
         condition: service_healthy
 
   db:

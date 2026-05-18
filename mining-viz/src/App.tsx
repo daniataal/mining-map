@@ -1060,11 +1060,10 @@ export default function App() {
             )}
             {viewMode === 'route_planner' && (
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
-                <div className="pointer-events-auto w-full sm:w-[min(560px,calc(100vw-6rem))]">
+                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(560px,calc(100vw-6rem))]">
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
                     <RoutePlannerPanel
                       rp={routePlanner}
-                      presetLicensePool={routePlannerLicensePool}
                       portEntities={portEntities}
                     />
                   </Suspense>

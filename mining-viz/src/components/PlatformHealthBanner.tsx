@@ -38,6 +38,14 @@ export default function PlatformHealthBanner() {
             <li key={issue}>{issue}</li>
           ))}
         </ul>
+        {issues.some((issue) => issue.includes('GROQ_API_KEY') || issue.includes('OPENROUTER')) && (
+          <p className="text-[10px] text-amber-200/90 leading-snug pt-1">
+            {t(
+              'לפיתוח מקומי: העתיקו .env.example ל-.env והגדירו מפתחות AI, או השאירו DISABLE_POLLINATIONS_FALLBACK ריק כדי לאפשר fallback חינמי.',
+              'Local dev: copy .env.example to .env and set GROQ_API_KEY and/or OPENROUTER_API_KEY, or leave DISABLE_POLLINATIONS_FALLBACK unset for the free fallback.',
+            )}
+          </p>
+        )}
       </div>
       <button
         type="button"
