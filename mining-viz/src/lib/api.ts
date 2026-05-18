@@ -30,6 +30,9 @@ import {
   AgentJobResponse,
   ContactEnrichmentOutput,
   OperatorValidationOutput,
+  DealRoom,
+  DealRoomRunResponse,
+  DealRoomExportPackage,
 } from '../types';
 import {
   isLicenseBundleCacheFresh,
@@ -476,6 +479,99 @@ export async function runOperatorValidationAgent(
     {
       entity_id: entityId,
       entity_kind: entityKind,
+    },
+  );
+  return data;
+}
+
+export async function getAgentJob<TOutput = Record<string, unknown>>(
+  jobId: string,
+): Promise<AgentJobResponse<TOutput>> {
+  const { data } = await apiClient.get<AgentJobResponse<TOutput>>(
+    `/api/agents/jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function listDealRooms(options: {
+  entityId?: string;
+  entityKind?: string;
+} = {}): Promise<DealRoom[]> {
+  const { data } = await apiClient.get<DealRoom[]>('/api/deal-rooms', {
+    params: {
+      ...(options.entityId ? { entity_id: options.entityId } : {}),
+      ...(options.entityKind ? { entity_kind: options.entityKind } : {}),
+    },
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createDealRoom(payload: {
+  entityId: string;
+  entityKind?: string;
+  title?: string;
+  status?: string;
+  routeSnapshot?: Record<string, unknown>;
+  notes?: string;
+}): Promise<DealRoom> {
+  const { data } = await apiClient.post<DealRoom>('/api/deal-rooms', {
+    entity_id: payload.entityId,
+    entity_kind: payload.entityKind ?? 'license',
+    title: payload.title,
+    status: payload.status,
+    route_snapshot: payload.routeSnapshot,
+    notes: payload.notes,
+  });
+  return data;
+}
+
+export async function updateDealRoom(
+  dealRoomId: string,
+  payload: {
+    title?: string;
+    status?: string;
+    routeSnapshot?: Record<string, unknown> | null;
+    evidence?: Record<string, unknown>;
+    notes?: string;
+  },
+): Promise<DealRoom> {
+  const { data } = await apiClient.patch<DealRoom>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}`,
+    {
+      title: payload.title,
+      status: payload.status,
+      route_snapshot: payload.routeSnapshot,
+      evidence: payload.evidence,
+      notes: payload.notes,
+    },
+  );
+  return data;
+}
+
+export async function runDealRoomAgents(
+  dealRoomId: string,
+  options: { agents?: string[]; forceRefresh?: boolean; runSync?: boolean } = {},
+): Promise<DealRoomRunResponse> {
+  const { data } = await apiClient.post<DealRoomRunResponse>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}/agents/run`,
+    {
+      agents: options.agents,
+      force_refresh: options.forceRefresh,
+      run_sync: options.runSync,
+    },
+  );
+  return data;
+}
+
+export async function exportDealRoom(
+  dealRoomId: string,
+  format: 'json' | 'markdown' = 'json',
+): Promise<DealRoomExportPackage | string> {
+  const { data } = await apiClient.get<DealRoomExportPackage | string>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}/export`,
+    {
+      params: format === 'markdown' ? { format: 'markdown' } : undefined,
+      responseType: format === 'markdown' ? 'text' : 'json',
     },
   );
   return data;

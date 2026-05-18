@@ -217,6 +217,46 @@ def _searoute_linestring_coords(feature: Any) -> list[tuple[float, float]]:
     return out
 
 
+GIBRALTAR_ATLANTIC_GUARD: tuple[tuple[float, float], ...] = (
+    (35.0, -7.8),
+    (35.8, -6.4),
+)
+
+
+def _segment_needs_gibraltar_guard(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    """Catch coarse Atlantic -> Strait segments that clip northern Morocco."""
+
+    a_lat, a_lng = a
+    b_lat, b_lng = b
+    min_lat, max_lat = sorted((a_lat, b_lat))
+    min_lng, max_lng = sorted((a_lng, b_lng))
+    if min_lat < 33.0 or max_lat > 36.3 or min_lng < -8.8 or max_lng > -5.0:
+        return False
+    southwest = (a_lat <= 35.2 and a_lng <= -6.5) or (b_lat <= 35.2 and b_lng <= -6.5)
+    strait = (a_lat >= 35.6 and a_lng >= -6.2) or (b_lat >= 35.6 and b_lng >= -6.2)
+    return southwest and strait
+
+
+def repair_known_sea_chokepoints(
+    path: Sequence[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], bool]:
+    """Insert guard waypoints for known places where coarse marine edges cross land."""
+
+    if len(path) < 2:
+        return list(path), False
+    repaired: list[tuple[float, float]] = [path[0]]
+    changed = False
+    for point in path[1:]:
+        previous = repaired[-1]
+        if _segment_needs_gibraltar_guard(previous, point):
+            for guard in GIBRALTAR_ATLANTIC_GUARD:
+                if haversine_km(repaired[-1][0], repaired[-1][1], guard[0], guard[1]) > 8:
+                    repaired.append(guard)
+                    changed = True
+        repaired.append(point)
+    return repaired, changed
+
+
 def fetch_sea_route(
     a_lat: float,
     a_lng: float,
@@ -227,16 +267,19 @@ def fetch_sea_route(
 ) -> ResolvedGeometry:
     """Marine route via searoute when enabled; otherwise corridor fallback."""
 
-    fallback_path = corridor_fallback()
+    fallback_path, fallback_repaired = repair_known_sea_chokepoints(corridor_fallback())
     if len(fallback_path) < 2:
         fallback_path = [(a_lat, a_lng), (b_lat, b_lng)]
     fallback_distance = path_distance_km(fallback_path)
+    fallback_notes = ["Sea leg uses static offshore corridor waypoints (searoute disabled or failed)."]
+    if fallback_repaired:
+        fallback_notes.append("Gibraltar guard waypoints added to avoid clipping northern Morocco.")
     fallback = ResolvedGeometry(
         path=tuple(fallback_path),
         distance_km=fallback_distance,
         duration_hours=fallback_distance / DEFAULT_SPEED_KMH["sea"],
         source="corridor_fallback",
-        notes=["Sea leg uses static offshore corridor waypoints (searoute disabled or failed)."],
+        notes=fallback_notes,
     )
 
     if not SEAROUTE_ENABLED:
@@ -260,17 +303,21 @@ def fetch_sea_route(
         path = _searoute_linestring_coords(feature)
         if len(path) < 2:
             return fallback
+        path, repaired = repair_known_sea_chokepoints(path)
         props = feature.get("properties") if isinstance(feature, dict) else {}
         length_km = 0.0
         if isinstance(props, dict):
             length_km = float(props.get("length") or props.get("distance") or 0.0)
-        distance_km = length_km if length_km > 0 else path_distance_km(path)
+        distance_km = path_distance_km(path) if repaired else (length_km if length_km > 0 else path_distance_km(path))
+        notes = ["Sea geometry from searoute marine network."]
+        if repaired:
+            notes.append("Gibraltar guard waypoints added to avoid clipping northern Morocco.")
         return ResolvedGeometry(
             path=tuple(path),
             distance_km=distance_km,
             duration_hours=distance_km / DEFAULT_SPEED_KMH["sea"],
             source="searoute",
-            notes=["Sea geometry from searoute marine network."],
+            notes=notes,
         )
     except Exception:
         return fallback

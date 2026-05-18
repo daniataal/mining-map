@@ -15,6 +15,7 @@ import {
   AgentJobResponse,
   ContactEnrichmentOutput,
   OperatorValidationOutput,
+  DealRoom,
 } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -57,6 +58,7 @@ import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
 import EntityRelationshipPanel from './EntityRelationshipPanel';
 import OperationsTab from './OperationsTab';
+import DealRoomPanel from './DealRoomPanel';
 import {
   API_BASE,
   getEntityContacts,
@@ -65,6 +67,8 @@ import {
   getLegalEvents,
   getGovProcurement,
   getGovProcurementCompanies,
+  createDealRoom,
+  listDealRooms,
   runContactEnrichmentAgent,
   runOperatorValidationAgent,
   useStorageTerminalDetails,
@@ -189,6 +193,10 @@ export default function DossierView({
   const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
   const [isValidatingOperator, setIsValidatingOperator] = useState(false);
   const [operatorValidationJob, setOperatorValidationJob] = useState<AgentJobResponse<OperatorValidationOutput> | null>(null);
+  const [dealRoom, setDealRoom] = useState<DealRoom | null>(null);
+  const [isLoadingDealRoom, setIsLoadingDealRoom] = useState(false);
+  const [isCreatingDealRoom, setIsCreatingDealRoom] = useState(false);
+  const [dealRoomError, setDealRoomError] = useState<string | null>(null);
   const [isLoadingDdReport, setIsLoadingDdReport] = useState(false);
   const [isLoadingLegalEvents, setIsLoadingLegalEvents] = useState(false);
   const [legalEventsError, setLegalEventsError] = useState<string | null>(null);
@@ -721,6 +729,29 @@ Output requirements:
     }
   };
 
+  const openOrCreateDealRoom = async () => {
+    if (!item || isCreatingDealRoom) return;
+    if (dealRoom) {
+      setActiveTab('deal-room');
+      return;
+    }
+    setIsCreatingDealRoom(true);
+    setDealRoomError(null);
+    try {
+      const created = await createDealRoom({
+        entityId: item.id,
+        entityKind: item.entityKind || 'license',
+        title: `${item.company} Investigation`,
+      });
+      setDealRoom(created);
+      setActiveTab('deal-room');
+    } catch {
+      setDealRoomError('Could not create deal room for this entity.');
+    } finally {
+      setIsCreatingDealRoom(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAnalyzing) {
       setAiSlowNetworkHint(false);
@@ -731,6 +762,33 @@ Output requirements:
       window.clearTimeout(t);
     };
   }, [isAnalyzing]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item) {
+      setDealRoom(null);
+      setDealRoomError(null);
+      setIsLoadingDealRoom(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+    setIsLoadingDealRoom(true);
+    setDealRoomError(null);
+    listDealRooms({ entityId: item.id, entityKind: item.entityKind || 'license' })
+      .then((rooms) => {
+        if (!isCancelled) setDealRoom(rooms[0] ?? null);
+      })
+      .catch(() => {
+        if (!isCancelled) setDealRoomError('Could not load deal room state.');
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoadingDealRoom(false);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id, item?.entityKind]);
 
   useEffect(() => {
     if (isOpen && item) {
@@ -770,12 +828,14 @@ Output requirements:
           setAiAnalysisError(null);
           return;
         }
-        void runAiAnalysis();
+        setAiAnalysis('');
+        setAiAnalysisError('No saved intelligence scan yet. Run the scan manually after configuring an AI provider.');
       })
       .catch(() => {
         if (!isCancelled) {
           setLatestDdReport(null);
-          void runAiAnalysis();
+          setAiAnalysis('');
+          setAiAnalysisError('Saved intelligence could not be loaded. Run the scan manually after configuring an AI provider.');
         }
       })
       .finally(() => {
@@ -1157,6 +1217,18 @@ Output requirements:
                 </Button>
               )}
               <Button
+                onClick={openOrCreateDealRoom}
+                disabled={isCreatingDealRoom || isLoadingDealRoom}
+                variant={dealRoom ? 'outline' : 'default'}
+                className={`h-10 text-[10px] font-black uppercase tracking-widest px-3 sm:px-6 flex items-center gap-2 ${
+                  dealRoom
+                    ? 'border-black/10 dark:border-white/10 text-slate-600 dark:text-slate-300'
+                    : 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200'
+                }`}
+              >
+                {dealRoom ? t('פתח חדר', 'Open Deal Room') : t('הוסף לחדר', 'Add to Deal Room')}
+              </Button>
+              <Button
                 variant="outline"
                 className="h-10 border-black/10 dark:border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-black/5 dark:hover:bg-white/5 px-3 sm:px-6 text-slate-600 dark:text-slate-300"
               >
@@ -1174,6 +1246,11 @@ Output requirements:
           </header>
 
           <main className="max-w-[1400px] mx-auto p-4 sm:p-6 md:p-10 pb-16 sm:pb-32">
+            {dealRoomError && (
+              <div className="mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs font-bold text-red-600 dark:text-red-300">
+                {dealRoomError}
+              </div>
+            )}
             {onAddToDueDiligence && onRemoveFromDueDiligence && (
               <div className="sm:hidden mb-6">
                 <AddToDueDiligenceButton
@@ -1229,9 +1306,10 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
+                  'deal-room': 'Deal Room',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
                   'gov-tenders': 'Gov Spending & Tenders',
@@ -1265,6 +1343,30 @@ Output requirements:
                 </button>
               )})}
             </nav>
+
+            {/* DEAL ROOM TAB */}
+            {activeTab === 'deal-room' && (
+              dealRoom ? (
+                <DealRoomPanel
+                  dealRoom={dealRoom}
+                  entity={item}
+                  onDealRoomChange={setDealRoom}
+                />
+              ) : (
+                <div className="max-w-3xl rounded-3xl border border-black/5 bg-black/[0.03] p-8 text-center dark:border-white/10 dark:bg-white/[0.04]">
+                  <p className="text-sm font-bold text-slate-500">
+                    {isLoadingDealRoom ? 'Loading deal room...' : 'No deal room exists for this entity yet.'}
+                  </p>
+                  <Button
+                    onClick={openOrCreateDealRoom}
+                    disabled={isCreatingDealRoom}
+                    className="mt-4 rounded-xl bg-amber-500 text-[10px] font-black uppercase tracking-widest text-slate-950 hover:bg-amber-600"
+                  >
+                    {isCreatingDealRoom ? 'Creating...' : 'Create Deal Room'}
+                  </Button>
+                </div>
+              )
+            )}
 
             {/* EXECUTION TAB */}
             {activeTab === 'execution' && (

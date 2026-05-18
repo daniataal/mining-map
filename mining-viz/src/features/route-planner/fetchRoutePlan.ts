@@ -332,7 +332,30 @@ function degradedLegReason(leg: RouteLeg): string | null {
   if ((method === 'road' || method === 'sea') && leg.path.length < 3) {
     return `${leg.label || titleCase(method)} returned too few route points for executable navigation.`;
   }
+  if (method === 'sea' && seaPathHasKnownLandCut(leg.path)) {
+    return `${leg.label || 'Sea leg'} crosses land near the Strait of Gibraltar.`;
+  }
   return null;
+}
+
+function seaPathHasKnownLandCut(path: [number, number][]): boolean {
+  for (let i = 0; i < path.length - 1; i += 1) {
+    if (segmentCutsNorthernMorocco(path[i], path[i + 1])) return true;
+  }
+  return false;
+}
+
+function segmentCutsNorthernMorocco(a: [number, number], b: [number, number]): boolean {
+  const [aLat, aLng] = a;
+  const [bLat, bLng] = b;
+  const minLat = Math.min(aLat, bLat);
+  const maxLat = Math.max(aLat, bLat);
+  const minLng = Math.min(aLng, bLng);
+  const maxLng = Math.max(aLng, bLng);
+  if (minLat < 33 || maxLat > 36.3 || minLng < -8.8 || maxLng > -5) return false;
+  const southwest = (aLat <= 35.2 && aLng <= -6.5) || (bLat <= 35.2 && bLng <= -6.5);
+  const strait = (aLat >= 35.6 && aLng >= -6.2) || (bLat >= 35.6 && bLng >= -6.2);
+  return southwest && strait;
 }
 
 function assertExecutablePlan(plan: RoutePlanOption): void {

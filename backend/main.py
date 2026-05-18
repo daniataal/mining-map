@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query
+from __future__ import annotations
+
+from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -201,6 +203,14 @@ def _load_agent_intelligence_services():
         run_entity_data_validation,
         run_data_validation_batch,
     )
+
+
+def _load_deal_room_services():
+    try:
+        from backend.services import deal_rooms
+    except ImportError:
+        from services import deal_rooms  # type: ignore[no-redef]
+    return deal_rooms
 
 
 def _serialize_entity_contact(row: dict) -> dict:
@@ -1100,6 +1110,33 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             ON agent_jobs (entity_id, agent_type, created_at DESC);
         """)
 
+        # Investigation / Deal Room store. These rows stitch together the
+        # entity, route snapshot, queued agent jobs, analyst notes, and export
+        # evidence without blocking the dossier UI.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS deal_rooms (
+                id VARCHAR(255) PRIMARY KEY,
+                title TEXT NOT NULL,
+                entity_id VARCHAR(255) NOT NULL,
+                entity_kind VARCHAR(50) NOT NULL DEFAULT 'license',
+                status VARCHAR(50) NOT NULL DEFAULT 'open',
+                route_snapshot_json JSONB,
+                agent_job_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_rooms_entity_updated
+            ON deal_rooms (entity_kind, entity_id, updated_at DESC);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_rooms_status_updated
+            ON deal_rooms (status, updated_at DESC);
+        """)
+
         # General, source-backed contact store. This is separate from private
         # CRM notes so the dossier can surface reviewable public business
         # numbers/emails/sites without guessing or mixing in internal notes.
@@ -1720,10 +1757,11 @@ def startup_schema_bootstrap():
 def login(user: UserLogin):
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
+    username = user.username.strip()
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+        c.execute("SELECT * FROM users WHERE username = %s", (username,))
         db_user = c.fetchone()
         
         if not db_user or not verify_password(user.password, db_user['password_hash']):
@@ -1740,7 +1778,7 @@ def login(user: UserLogin):
     except Exception as e:
         if _is_missing_relation_error(e, "users") and ensure_schema_initialized(force=True):
             try:
-                c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+                c.execute("SELECT * FROM users WHERE username = %s", (username,))
                 db_user = c.fetchone()
                 if not db_user or not verify_password(user.password, db_user["password_hash"]):
                     return Response("Invalid credentials", status_code=401)
@@ -2722,6 +2760,337 @@ def read_agent_job(job_id: str):
         if job is None:
             raise HTTPException(status_code=404, detail=f"Agent job {job_id} not found")
         return job
+    finally:
+        conn.close()
+
+
+class DealRoomCreateRequest(BaseModel):
+    entity_id: str
+    entity_kind: str = "license"
+    title: Optional[str] = None
+    status: str = "open"
+    route_snapshot: Optional[dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
+class DealRoomPatchRequest(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+    route_snapshot: Optional[dict[str, Any]] = None
+    evidence: Optional[dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
+class DealRoomAgentRunRequest(BaseModel):
+    agents: Optional[list[str]] = None
+    force_refresh: bool = False
+    run_sync: bool = False
+
+
+DEAL_ROOM_AGENT_ALIASES = {
+    "dd": "due_diligence_summary",
+    "due_diligence": "due_diligence_summary",
+    "due_diligence_summary": "due_diligence_summary",
+    "operator": "operator_validation",
+    "operator_validation": "operator_validation",
+    "contact": "contact_enrichment",
+    "contacts": "contact_enrichment",
+    "contact_enrichment": "contact_enrichment",
+    "route": "route_intelligence",
+    "route_intelligence": "route_intelligence",
+    "procurement": "procurement_summary",
+    "procurement_summary": "procurement_summary",
+}
+
+
+def _decorate_deal_room(conn, room: dict[str, Any]) -> dict[str, Any]:
+    services = _load_deal_room_services()
+    decorated = dict(room)
+    decorated["entity"] = services.load_entity_basics(conn, room["entityId"], room.get("entityKind") or "license")
+    decorated["jobs"] = services.get_deal_room_jobs(conn, room)
+    return decorated
+
+
+def _mark_agent_job_failed(conn, job_id: str, error: str) -> dict[str, Any] | None:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            UPDATE agent_jobs
+            SET status = 'failed',
+                error = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = %s
+            RETURNING job_id, agent_type, status, entity_id, route_hash, input_hash,
+                      input_json, output_json, error, created_at, updated_at
+            """,
+            (error[:2000], job_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    if not row:
+        return None
+    return {
+        "job_id": row.get("job_id"),
+        "agent_type": row.get("agent_type"),
+        "status": row.get("status"),
+        "entity_id": row.get("entity_id"),
+        "route_hash": row.get("route_hash"),
+        "input_hash": row.get("input_hash"),
+        "input": row.get("input_json"),
+        "output": row.get("output_json"),
+        "error": row.get("error"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "cached": False,
+    }
+
+
+def _execute_deal_room_agent_job(deal_room_id: str, job_id: str) -> None:
+    services = _load_deal_room_services()
+    (
+        _ensure_agent_jobs_table,
+        get_agent_job,
+        run_route_intelligence,
+        run_contact_enrichment,
+        run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        job = get_agent_job(conn, job_id)
+        if not job:
+            return
+        if job.get("status") == "completed":
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, job)
+            return
+        agent_type = job.get("agent_type")
+        payload = job.get("input") if isinstance(job.get("input"), dict) else {}
+        if agent_type == "contact_enrichment":
+            result = run_contact_enrichment(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "operator_validation":
+            result = run_operator_validation(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "route_intelligence":
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+            result = run_route_intelligence(
+                conn,
+                route_payload=route,
+                deterministic_warnings=payload.get("deterministic_warnings"),
+                route_hash=job.get("route_hash"),
+            )
+        elif agent_type == "due_diligence_summary":
+            result = services.run_due_diligence_summary(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "procurement_summary":
+            result = services.run_procurement_summary(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        else:
+            result = _mark_agent_job_failed(conn, job_id, f"Unsupported deal room agent: {agent_type}")
+        if result:
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, result)
+    except Exception as exc:
+        failed = _mark_agent_job_failed(conn, job_id, str(exc))
+        if failed:
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, failed)
+    finally:
+        conn.close()
+
+
+def _normalize_deal_room_agents(agents: Optional[list[str]]) -> list[str]:
+    requested = agents or ["due_diligence_summary", "operator_validation", "contact_enrichment", "procurement_summary", "route_intelligence"]
+    normalized: list[str] = []
+    for agent in requested:
+        agent_type = DEAL_ROOM_AGENT_ALIASES.get(str(agent).strip().lower())
+        if agent_type and agent_type not in normalized:
+            normalized.append(agent_type)
+    return normalized
+
+
+@app.post("/api/deal-rooms")
+def create_deal_room_endpoint(payload: DealRoomCreateRequest):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.create_deal_room(
+            conn,
+            entity_id=payload.entity_id,
+            entity_kind=payload.entity_kind,
+            title=payload.title,
+            status=payload.status,
+            route_snapshot=payload.route_snapshot,
+            notes=payload.notes,
+        )
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms")
+def list_deal_rooms_endpoint(entity_id: Optional[str] = None, entity_kind: Optional[str] = None):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        rooms = services.list_deal_rooms(conn, entity_id=entity_id, entity_kind=entity_kind)
+        return [_decorate_deal_room(conn, room) for room in rooms]
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}")
+def get_deal_room_endpoint(deal_room_id: str):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.get_deal_room(conn, deal_room_id)
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.patch("/api/deal-rooms/{deal_room_id}")
+def update_deal_room_endpoint(deal_room_id: str, payload: DealRoomPatchRequest):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.update_deal_room(
+            conn,
+            deal_room_id,
+            title=payload.title,
+            status=payload.status,
+            route_snapshot=payload.route_snapshot,
+            evidence=payload.evidence,
+            notes=payload.notes,
+        )
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.post("/api/deal-rooms/{deal_room_id}/agents/run")
+def run_deal_room_agents_endpoint(
+    deal_room_id: str,
+    payload: DealRoomAgentRunRequest,
+    background_tasks: BackgroundTasks,
+):
+    services = _load_deal_room_services()
+    try:
+        from backend.services.agent_intelligence import (
+            enqueue_contact_enrichment,
+            enqueue_operator_validation,
+            enqueue_route_intelligence,
+        )
+    except ImportError:
+        from services.agent_intelligence import (  # type: ignore[no-redef]
+            enqueue_contact_enrichment,
+            enqueue_operator_validation,
+            enqueue_route_intelligence,
+        )
+
+    conn = get_db_connection()
+    try:
+        room = services.get_deal_room(conn, deal_room_id)
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        entity_id = room["entityId"]
+        entity_kind = room.get("entityKind") or "license"
+        entity = services.load_entity_basics(conn, entity_id, entity_kind)
+        route_snapshot = room.get("routeSnapshot")
+        selected = _normalize_deal_room_agents(payload.agents)
+        jobs: list[dict[str, Any]] = []
+        skipped: list[dict[str, str]] = []
+        for agent_type in selected:
+            if agent_type == "contact_enrichment":
+                jobs.append(
+                    enqueue_contact_enrichment(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "operator_validation":
+                jobs.append(
+                    enqueue_operator_validation(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "route_intelligence":
+                route_payload = route_snapshot.get("result") if isinstance(route_snapshot, dict) and isinstance(route_snapshot.get("result"), dict) else route_snapshot
+                if not isinstance(route_payload, dict):
+                    skipped.append({"agent_type": agent_type, "reason": "No route snapshot attached."})
+                    continue
+                jobs.append(
+                    enqueue_route_intelligence(
+                        conn,
+                        route_payload=route_payload,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "due_diligence_summary":
+                jobs.append(
+                    services.enqueue_due_diligence_summary(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "procurement_summary":
+                jobs.append(
+                    services.enqueue_procurement_summary(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        entity=entity,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+        room = services.attach_agent_jobs(conn, deal_room_id, jobs) or room
+        for job in jobs:
+            if job.get("status") == "completed":
+                services.update_deal_room_evidence_from_job(conn, deal_room_id, job)
+            elif payload.run_sync:
+                _execute_deal_room_agent_job(deal_room_id, job["job_id"])
+            else:
+                background_tasks.add_task(_execute_deal_room_agent_job, deal_room_id, job["job_id"])
+        refreshed = services.get_deal_room(conn, deal_room_id) or room
+        return {"dealRoom": _decorate_deal_room(conn, refreshed), "jobs": jobs, "skipped": skipped}
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}/export")
+def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        package = services.build_export_package(conn, deal_room_id)
+        if package is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        if format.lower() in {"md", "markdown"}:
+            return Response(package["markdown"], media_type="text/markdown")
+        return package
     finally:
         conn.close()
 

@@ -163,6 +163,9 @@ SEA_ANCHORS: dict[str, tuple[str, float, float]] = {
     "gulf_aqaba": ("Gulf of Aqaba approach", 28.600, 34.750),
     "east_med": ("Eastern Mediterranean lane", 34.200, 27.000),
     "western_med": ("Western Mediterranean lane", 36.500, 5.000),
+    "canary_approach": ("Canary Islands offshore lane", 28.000, -14.500),
+    "morocco_atlantic": ("Morocco Atlantic offshore lane", 35.000, -7.800),
+    "gibraltar_west": ("Western Strait of Gibraltar approach", 35.800, -6.400),
     "gibraltar": ("Strait of Gibraltar", 35.960, -5.600),
     "atlantic_africa": ("Mid-Atlantic Africa offshore lane", 20.000, -15.000),
     "english_channel": ("English Channel approach", 50.050, 1.200),
@@ -514,7 +517,7 @@ def _is_americas(point: RoutePoint) -> bool:
 
 def _atlantic_to_mediterranean_anchors(destination: RoutePoint) -> list[str]:
     """Offshore Atlantic → Med corridor; branch for Levant vs NW Europe."""
-    base = ["west_africa", "atlantic_africa", "gibraltar", "western_med"]
+    base = ["west_africa", "canary_approach", "morocco_atlantic", "gibraltar_west", "gibraltar", "western_med"]
     if _is_eastern_mediterranean(destination):
         return [*base, "east_med"]
     return [*base, "english_channel"]
@@ -525,7 +528,9 @@ def _sea_anchor_ids_one_way(origin: RoutePoint, destination: RoutePoint) -> list
         if _is_west_africa(origin):
             return [
                 "west_africa",
-                "atlantic_africa",
+                "canary_approach",
+                "morocco_atlantic",
+                "gibraltar_west",
                 "gibraltar",
                 "western_med",
                 "suez",
@@ -542,7 +547,7 @@ def _sea_anchor_ids_one_way(origin: RoutePoint, destination: RoutePoint) -> list
         if _is_asia_indian_ocean(origin):
             return ["malacca", "colombo", "bab_el_mandeb", "suez", "east_med", "gibraltar", "english_channel"]
         if _is_southern_africa(origin):
-            return ["cape", "west_africa", "gibraltar", "english_channel"]
+            return ["cape", "west_africa", "canary_approach", "morocco_atlantic", "gibraltar_west", "gibraltar", "english_channel"]
         if _is_east_or_south_africa(origin):
             if _is_eastern_mediterranean(destination):
                 return ["bab_el_mandeb", "suez", "east_med"]

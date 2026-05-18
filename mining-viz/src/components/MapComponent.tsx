@@ -764,6 +764,9 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
+        if (isRoutePlannerView) {
+            return [];
+        }
         const focus = countryFocusCountry?.trim();
         if (focus) {
             return [focus].sort((a, b) => a.localeCompare(b));
@@ -784,7 +787,7 @@ export default function MapComponent({
             ordered.push(raw);
         }
         return ordered.sort((a, b) => a.localeCompare(b));
-    }, [allLicenses, countryFocusCountry]);
+    }, [allLicenses, countryFocusCountry, isRoutePlannerView]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
@@ -1566,7 +1569,7 @@ export default function MapComponent({
                         </FeatureGroup>
                     </LayersControl.Overlay>
 
-                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
+                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
                         <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
                                 key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
