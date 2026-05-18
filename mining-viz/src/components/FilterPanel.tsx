@@ -2,12 +2,19 @@ import { useI18n } from '../lib/i18n';
 import MultiSelect from './MultiSelect';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import { 
-  Filter as LucideFilter, 
-  RotateCcw as LucideRotateCcw, 
-  X as LucideX 
+import {
+  Filter as LucideFilter,
+  RotateCcw as LucideRotateCcw,
+  Ship as LucideShip,
+  X as LucideX,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import {
+  DEFAULT_VESSEL_FILTERS,
+  VESSEL_SHIP_TYPE_OPTIONS,
+  countActiveVesselFilters,
+  type VesselFilters,
+} from '../lib/vessels';
 
 interface FilterPanelProps {
   selectedCommodity: string[];
@@ -33,6 +40,16 @@ interface FilterPanelProps {
   sourceLabels: string[];
   isOpen: boolean;
   onClose: () => void;
+  /** When set, show AIS vessel layer controls in this panel. */
+  maritimeSection?: {
+    layerEnabled: boolean;
+    onLayerEnabledChange: (enabled: boolean) => void;
+    vesselFilters: VesselFilters;
+    onVesselFiltersChange: (filters: VesselFilters) => void;
+    prioritizePetroleum: boolean;
+    onPrioritizePetroleumChange: (enabled: boolean) => void;
+    showPetroleumPriority?: boolean;
+  };
 }
 
 export default function FilterPanel({
@@ -45,7 +62,8 @@ export default function FilterPanel({
   selectedConfidenceBucket, setSelectedConfidenceBucket,
   portLinkedOnly, setPortLinkedOnly,
   commodities, countries, licenseTypes, entitySubtypes, sourceLabels,
-  isOpen, onClose
+  isOpen, onClose,
+  maritimeSection,
 }: FilterPanelProps) {
   const { t } = useI18n();
 
@@ -58,6 +76,10 @@ export default function FilterPanel({
     setSelectedSourceLabel([]);
     setSelectedConfidenceBucket([]);
     setPortLinkedOnly(false);
+    if (maritimeSection) {
+      maritimeSection.onVesselFiltersChange(DEFAULT_VESSEL_FILTERS);
+      maritimeSection.onPrioritizePetroleumChange(maritimeSection.showPetroleumPriority ?? false);
+    }
   };
 
   const activeCount =
@@ -68,7 +90,10 @@ export default function FilterPanel({
     selectedEntitySubtype.length +
     selectedSourceLabel.length +
     selectedConfidenceBucket.length +
-    (portLinkedOnly ? 1 : 0);
+    (portLinkedOnly ? 1 : 0) +
+    (maritimeSection
+      ? (maritimeSection.layerEnabled ? 1 : 0) + countActiveVesselFilters(maritimeSection.vesselFilters)
+      : 0);
 
   return (
     <motion.div
@@ -88,7 +113,99 @@ export default function FilterPanel({
       </header>
 
       <ScrollArea className="flex-1 px-5">
-        <div className="py-6 space-y-8">
+        <motion.div className="py-6 space-y-8">
+          {maritimeSection && (
+            <section className="space-y-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+              <div className="flex items-center gap-2">
+                <LucideShip className="h-4 w-4 text-cyan-500" />
+                <label className="text-[10px] font-black uppercase tracking-widest text-cyan-600 dark:text-cyan-400">
+                  {t('שכבת כלי שיט (AIS)', 'Vessels (AIS)')}
+                </label>
+              </div>
+              <Button
+                type="button"
+                variant={maritimeSection.layerEnabled ? 'default' : 'outline'}
+                className={`h-10 w-full text-[10px] font-black uppercase tracking-widest ${
+                  maritimeSection.layerEnabled
+                    ? 'bg-cyan-500 text-slate-950 hover:bg-cyan-400'
+                    : 'border-black/10 dark:border-white/10'
+                }`}
+                onClick={() => maritimeSection.onLayerEnabledChange(!maritimeSection.layerEnabled)}
+              >
+                {maritimeSection.layerEnabled
+                  ? t('כבה שכבת כלי שיט', 'Turn off vessel layer')
+                  : t('הפעל שכבת כלי שיט', 'Enable vessel layer')}
+              </Button>
+              {maritimeSection.showPetroleumPriority && (
+                <Button
+                  type="button"
+                  variant={maritimeSection.prioritizePetroleum ? 'default' : 'outline'}
+                  className={`h-9 w-full text-[9px] font-black uppercase tracking-widest ${
+                    maritimeSection.prioritizePetroleum
+                      ? 'bg-amber-500/90 text-slate-950 hover:bg-amber-500'
+                      : 'border-black/10 dark:border-white/10 text-slate-500'
+                  }`}
+                  onClick={() =>
+                    maritimeSection.onPrioritizePetroleumChange(!maritimeSection.prioritizePetroleum)
+                  }
+                >
+                  {maritimeSection.prioritizePetroleum
+                    ? t('מועדף: נפט וגז (טנקרים)', 'Prioritizing oil & gas tankers')
+                    : t('העדף טנקרי נפט/גז', 'Prioritize oil & gas tankers')}
+                </Button>
+              )}
+              {maritimeSection.layerEnabled && (
+                <>
+                  <p className="text-[9px] leading-snug text-slate-500 dark:text-slate-400">
+                    {t(
+                      'כל כלי שיט בתצוגה מוצג כסמן בודד (ללא קיבוץ).',
+                      'Every vessel in view is shown as its own marker (no clustering).'
+                    )}
+                  </p>
+                  <input
+                    type="search"
+                    value={maritimeSection.vesselFilters.search}
+                    onChange={(e) =>
+                      maritimeSection.onVesselFiltersChange({
+                        ...maritimeSection.vesselFilters,
+                        search: e.target.value,
+                      })
+                    }
+                    placeholder={t('חיפוש שם, MMSI, IMO…', 'Search name, MMSI, IMO…')}
+                    className="h-9 w-full rounded-xl border border-black/10 bg-white/80 px-3 text-[11px] dark:border-white/10 dark:bg-slate-950/80"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {VESSEL_SHIP_TYPE_OPTIONS.map((typeLabel) => {
+                      const active = maritimeSection.vesselFilters.shipTypes.includes(typeLabel);
+                      return (
+                        <button
+                          key={typeLabel}
+                          type="button"
+                          onClick={() => {
+                            const next = active
+                              ? maritimeSection.vesselFilters.shipTypes.filter((t) => t !== typeLabel)
+                              : [...maritimeSection.vesselFilters.shipTypes, typeLabel];
+                            maritimeSection.onVesselFiltersChange({
+                              ...maritimeSection.vesselFilters,
+                              shipTypes: next,
+                            });
+                          }}
+                          className={`rounded-lg px-2 py-1 text-[9px] font-black uppercase tracking-wider ${
+                            active
+                              ? 'bg-cyan-500 text-slate-950'
+                              : 'bg-black/5 text-slate-500 dark:bg-white/5 dark:text-slate-400'
+                          }`}
+                        >
+                          {typeLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
           <section className="space-y-3">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">{t("סחורה", "Commodity Type")}</label>
             <MultiSelect
@@ -191,7 +308,7 @@ export default function FilterPanel({
                 : t("כלל הנכסים", "Show all assets")}
             </Button>
           </section>
-        </div>
+        </motion.div>
       </ScrollArea>
 
       <footer className="p-5 border-t border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 flex gap-3">

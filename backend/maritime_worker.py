@@ -7,20 +7,26 @@ from typing import Any
 
 try:
     from backend.services.maritime_intel import (
-        collect_live_maritime_vessel_feed,
+        collect_worker_maritime_vessel_feed,
         ensure_maritime_database_exists,
         ensure_maritime_tables,
+        invalidate_maritime_memory_cache,
+        load_maritime_seed_snapshot,
         persist_maritime_vessel_feed,
         update_maritime_ingest_status,
     )
+    from backend.services.maritime_snapshot import publish_maritime_snapshot_from_conn
 except ImportError:
     from services.maritime_intel import (
-        collect_live_maritime_vessel_feed,
+        collect_worker_maritime_vessel_feed,
         ensure_maritime_database_exists,
         ensure_maritime_tables,
+        invalidate_maritime_memory_cache,
+        load_maritime_seed_snapshot,
         persist_maritime_vessel_feed,
         update_maritime_ingest_status,
     )
+    from services.maritime_snapshot import publish_maritime_snapshot_from_conn
 
 
 def _int_env(name: str, default: int) -> int:
@@ -28,6 +34,11 @@ def _int_env(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         return default
+
+
+def _str_env(name: str, default: str) -> str:
+    value = os.getenv(name, default)
+    return value.strip() if isinstance(value, str) else default
 
 
 def _connect():
@@ -55,15 +66,26 @@ def _status_from_feed(feed: dict[str, Any]) -> tuple[str, str | None, bool]:
     return "empty", joined_limitations or None, False
 
 
+def _maybe_seed_from_file(conn) -> int:
+    seed_path = _str_env("MARITIME_AIS_SEED_FILE", "")
+    if not seed_path or not os.path.isfile(seed_path):
+        return 0
+    feed = load_maritime_seed_snapshot(seed_path)
+    count = persist_maritime_vessel_feed(conn, feed)
+    print(f"[maritime-worker] seeded={count} from={seed_path}")
+    return count
+
+
 def run_once() -> int:
     ensure_maritime_database_exists()
     conn = _connect()
     try:
         ensure_maritime_tables(conn)
-        feed = collect_live_maritime_vessel_feed(
-            max_vessels=_int_env("MARITIME_WORKER_MAX_VESSELS", 5000),
-            capture_window_seconds=_int_env("MARITIME_WORKER_CAPTURE_WINDOW_SECONDS", 10),
-            vessel_scope="all_vessels",
+        vessel_scope = _str_env("MARITIME_WORKER_SCOPE", "all_vessels")
+        feed = collect_worker_maritime_vessel_feed(
+            max_vessels=_int_env("MARITIME_WORKER_MAX_VESSELS", 15000),
+            capture_window_seconds=_int_env("MARITIME_WORKER_CAPTURE_WINDOW_SECONDS", 25),
+            vessel_scope=vessel_scope,
         )
         snapshot_count = persist_maritime_vessel_feed(conn, feed)
         status, error, mark_success = _status_from_feed(feed)
@@ -82,7 +104,12 @@ def run_once() -> int:
             mark_success=mark_success,
         )
         conn.commit()
-        print(f"[maritime-worker] status={status} upserted={snapshot_count}")
+        invalidate_maritime_memory_cache()
+        published = publish_maritime_snapshot_from_conn(conn, feed)
+        print(
+            f"[maritime-worker] status={status} upserted={snapshot_count} "
+            f"redis={'ok' if published else 'skip'} scope={vessel_scope}"
+        )
         return snapshot_count
     except Exception as exc:
         conn.rollback()
@@ -106,8 +133,23 @@ def run_once() -> int:
 
 
 def main() -> None:
-    interval_seconds = max(15, _int_env("MARITIME_WORKER_INTERVAL_SECONDS", 60))
+    interval_seconds = max(15, _int_env("MARITIME_WORKER_INTERVAL_SECONDS", 30))
     backoff_seconds = max(5, _int_env("MARITIME_WORKER_BACKOFF_SECONDS", 15))
+    seed_path = _str_env("MARITIME_AIS_SEED_FILE", "")
+    if seed_path:
+        try:
+            ensure_maritime_database_exists()
+            conn = _connect()
+            try:
+                ensure_maritime_tables(conn)
+                _maybe_seed_from_file(conn)
+                conn.commit()
+                invalidate_maritime_memory_cache()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"[maritime-worker] seed load failed: {exc}")
+
     while True:
         try:
             run_once()

@@ -1,94 +1,648 @@
 import { API_BASE } from '../../lib/api';
-import type { RoutePlannerApiResponse, RoutePlannerFormPayload } from './types';
 import { mockResponseForPayload } from './mockRoute';
+import type {
+  CostLineItem,
+  DueDiligenceCheck,
+  DueDiligenceRecommendation,
+  DueDiligenceStatus,
+  RouteLeg,
+  RouteMapOverlay,
+  RoutePlanOption,
+  RoutePlannerApiResponse,
+  RoutePlannerFormPayload,
+  RouteRiskAnalysis,
+  AgentJobResponse,
+} from './types';
+import { attachSupplierBuyerEnds, detectLikelySupplierBuyerReversal } from './routeCorridor';
 
-/**
- * Calls the backend route-planner endpoint.
- * The backend exposes  POST /api/routing/plans  only when ROUTE_PLANNER_ENABLED=1.
- * When it returns 503 (disabled) or the network fails we fall through to the
- * deterministic mock so the UI always shows something useful.
- *
- * Note: the backend stub returns a RoutePlan schema (not the RoutePlannerApiResponse
- * we use on the frontend) so this adapter bridges the gap.
- */
-async function fetchLiveRoute(
-  payload: RoutePlannerFormPayload,
-): Promise<RoutePlannerApiResponse | null> {
+type BackendMethod = 'sea' | 'road' | 'rail' | 'air' | 'pipeline';
+
+interface BackendRoutePoint {
+  name?: string;
+  lat?: number;
+  lng?: number;
+  kind?: string;
+}
+
+interface BackendRouteLeg {
+  leg_id?: string;
+  from?: BackendRoutePoint;
+  to?: BackendRoutePoint;
+  method?: BackendMethod | string;
+  distance_km?: number;
+  path?: [number, number][];
+  geometry_source?: string;
+  hub_label?: string;
+  map_label?: string;
+}
+
+interface BackendRoutePlanSlice {
+  id?: string;
+  alternative_id?: string;
+  label?: string;
+  is_recommended?: boolean;
+  route?: {
+    origin?: BackendRoutePoint;
+    destination?: BackendRoutePoint;
+    legs?: BackendRouteLeg[];
+  };
+  cost_breakdown?: BackendRouteResponse['cost_breakdown'];
+}
+
+interface BackendRouteResponse {
+  route?: {
+    origin?: BackendRoutePoint;
+    destination?: BackendRoutePoint;
+    legs?: BackendRouteLeg[];
+  };
+  recommended?: BackendRoutePlanSlice;
+  alternatives?: BackendRoutePlanSlice[];
+  routing_context?: {
+    inland_origin?: boolean;
+    landlocked_hint?: string;
+    alternatives_offered?: boolean;
+  };
+  cost_breakdown?: {
+    total_cost_usd?: number;
+    total_distance_km?: number;
+    leg_costs?: Array<{
+      leg_id?: string;
+      method?: string;
+      distance_km?: number;
+      total_cost_usd?: number;
+      components?: Array<{ component?: string; amount_usd?: number; formula?: string }>;
+    }>;
+  };
+  limitations?: string[];
+}
+
+interface DdApiResponse {
+  checks?: Array<{
+    check_id?: string;
+    dimension?: string;
+    verdict?: 'pass' | 'warn' | 'fail';
+    message?: string;
+  }>;
+  blockers?: string[];
+  recommendation?: DueDiligenceRecommendation;
+  overall_score?: number;
+  license_check_performed?: boolean;
+}
+
+/** Client abort for route plan (Vite proxy / route-service allow 120s). */
+export const LIVE_ROUTE_TIMEOUT_MS = 120_000;
+
+function routePlanEndpoint(): string {
+  const direct = (import.meta.env.VITE_ROUTE_SERVICE_URL as string | undefined)?.trim();
+  if (direct) {
+    return `${direct.replace(/\/$/, '')}/plan`;
+  }
+  return `${API_BASE}/api/logistics/route-plan`;
+}
+const HEALTH_PREFLIGHT_TIMEOUT_MS = 5_000;
+const ROUTE_PANEL_DD_TIMEOUT_MS = 3_000;
+/** Shown while the route request is in flight (Ghana→Israel can take 30–60s). */
+export const ROUTE_CALCULATING_HINT =
+  'Calculating route (may take up to 60s for long sea corridors)...';
+
+function backendMethod(method: string): BackendMethod {
+  const map: Record<string, BackendMethod> = {
+    sea_fcl: 'sea',
+    sea_lcl: 'sea',
+    truck_inland: 'road',
+    rail: 'rail',
+    air: 'air',
+    pipeline: 'pipeline',
+  };
+  return map[method] ?? 'road';
+}
+
+function productKind(productType: string): string {
+  const normalized = productType.toLowerCase();
+  if (normalized.includes('petroleum') || normalized.includes('oil')) return 'petroleum';
+  if (normalized.includes('gas') || normalized.includes('lng') || normalized.includes('lpg')) return 'gas';
+  if (normalized.includes('gold')) return 'gold';
+  return productType;
+}
+
+function estimateCargoValue(productType: string, quantityTons: number): { valueUsd: number; note: string } {
+  const normalized = productType.toLowerCase();
+  const model = normalized.includes('gold_dore') || normalized.includes('bullion')
+    ? {
+        perTon: 132_000_000,
+        note: 'Assumes 90% payable gold doré/bullion equivalent. Replace with assay, fineness, payable terms, and live fixing before execution.',
+      }
+    : normalized.includes('gold')
+      ? {
+          perTon: 2_800_000,
+          note: 'Assumes high-grade gold concentrate at roughly 2% payable gold. Real value depends on assay, moisture, penalties, treatment charges, and payability.',
+        }
+      : normalized.includes('cobalt')
+        ? { perTon: 35_000, note: 'Screening value for cobalt-bearing product; replace with assay and payable cobalt content.' }
+        : normalized.includes('lithium')
+          ? { perTon: 22_000, note: 'Screening value for lithium product; replace with product grade and index basis.' }
+          : normalized.includes('copper')
+            ? { perTon: 9_000, note: 'Uses rough copper metal benchmark basis; concentrate needs grade/payability/TC-RC terms.' }
+            : normalized.includes('petroleum') || normalized.includes('oil')
+              ? { perTon: 900, note: 'Uses rough refined/petroleum product per-ton screening basis; replace with Platts/Argus quote.' }
+              : { perTon: 400, note: 'Generic bulk commodity screening value; replace with contract price.' };
+  return {
+    valueUsd: Math.max(0, Math.round(quantityTons * model.perTon)),
+    note: model.note,
+  };
+}
+
+function estimateCargoValueUsd(productType: string, quantityTons: number): number {
+  return estimateCargoValue(productType, quantityTons).valueUsd;
+}
+
+function pointOrNull(point: BackendRoutePoint | undefined): { lat: number; lng: number; name: string; kind?: string } | null {
+  if (!point || point.lat == null || point.lng == null) return null;
+  if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null;
+  return {
+    lat: point.lat,
+    lng: point.lng,
+    name: point.name || point.kind || 'Route point',
+    kind: point.kind,
+  };
+}
+
+function hubLabelFromPoint(point: BackendRoutePoint | undefined, explicit?: string): string | undefined {
+  if (explicit?.trim()) return explicit.trim();
+  if (!point?.name) return undefined;
+  const kind = (point.kind || '').toLowerCase();
+  if (kind === 'port' || kind === 'airport' || kind === 'rail_hub') return point.name;
+  return undefined;
+}
+
+function legDisplayLabel(method: string | undefined, fromName: string, toName: string, hubLabel?: string): string {
+  const m = titleCase(method || 'transport');
+  if (hubLabel) {
+    const kind = (method || '').toLowerCase();
+    if (kind === 'sea') return `Sea leg · ${hubLabel}`;
+    if (kind === 'air') return `Air leg · ${hubLabel}`;
+    if (kind === 'rail') return `Rail · ${hubLabel}`;
+    if (kind === 'road') return `Road to ${hubLabel}`;
+  }
+  return `${m}: ${fromName} → ${toName}`;
+}
+
+function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
+  const legs = data.route?.legs ?? [];
+  const overlayLegs = legs
+    .map((leg): RouteLeg | null => {
+      const from = pointOrNull(leg.from);
+      const to = pointOrNull(leg.to);
+      if (!from || !to) return null;
+      const backendPath = Array.isArray(leg.path)
+        ? leg.path.filter((point): point is [number, number] =>
+            Array.isArray(point) &&
+            point.length === 2 &&
+            Number.isFinite(point[0]) &&
+            Number.isFinite(point[1]),
+          )
+        : [];
+      const hubLabel = hubLabelFromPoint(leg.to, leg.hub_label ?? leg.map_label);
+      return {
+        path: backendPath.length > 1 ? backendPath : ([[from.lat, from.lng], [to.lat, to.lng]] as [number, number][]),
+        method: leg.method,
+        fromName: from.name,
+        toName: to.name,
+        toKind: to.kind,
+        hubLabel,
+        geometrySource: leg.geometry_source,
+        distanceKm: Number.isFinite(leg.distance_km) ? leg.distance_km : undefined,
+        label: legDisplayLabel(leg.method, from.name, to.name, hubLabel),
+      };
+    })
+    .filter((leg): leg is RouteLeg => Boolean(leg));
+
+  const waypoints: RouteMapOverlay['waypoints'] = [];
+  const origin = pointOrNull(data.route?.origin ?? legs[0]?.from);
+  const destination = pointOrNull(data.route?.destination ?? legs[legs.length - 1]?.to);
+  if (origin) {
+    waypoints.push({
+      lat: origin.lat,
+      lng: origin.lng,
+      role: 'origin',
+      label: ['ספק (מוצא)', origin.name],
+    });
+  }
+  for (const leg of legs.slice(0, -1)) {
+    const transit = pointOrNull(leg.to);
+    if (!transit) continue;
+    waypoints.push({
+      lat: transit.lat,
+      lng: transit.lng,
+      role: 'transit',
+      label: ['נקודת מעבר', transit.name],
+    });
+  }
+  if (destination) {
+    waypoints.push({
+      lat: destination.lat,
+      lng: destination.lng,
+      role: 'destination',
+      label: ['קונה / יעד', destination.name],
+    });
+  }
+  return { legs: overlayLegs, waypoints };
+}
+
+function titleCase(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function costBreakdownFromBackendSlice(
+  costBreakdown: BackendRouteResponse['cost_breakdown'],
+  routeLegs: BackendRouteLeg[],
+): CostLineItem[] {
+  const legCosts = costBreakdown?.leg_costs ?? [];
+  const lines = legCosts.map((leg, index) => ({
+    id: leg.leg_id || `leg-${index + 1}`,
+    labelHe: `מקטע ${index + 1}: ${titleCase(leg.method || 'transport')}`,
+    labelEn: `Leg ${index + 1}: ${titleCase(leg.method || 'transport')}`,
+    amountUsd: Math.round(Number(leg.total_cost_usd) || 0),
+    note: [
+      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} ק"מ · ${routeLegs[index]?.from?.name || 'Origin'} ← ${routeLegs[index]?.to?.name || 'Destination'}`,
+      `${Math.round(Number(leg.distance_km) || 0).toLocaleString()} km · ${routeLegs[index]?.from?.name || 'Origin'} → ${routeLegs[index]?.to?.name || 'Destination'}`,
+    ] as [string, string],
+  }));
+  if (lines.length > 0) return lines;
+  const total = Number(costBreakdown?.total_cost_usd) || 0;
+  return [
+    {
+      id: 'route_total',
+      labelHe: 'אומדן מסלול חי',
+      labelEn: 'Live route estimate',
+      amountUsd: Math.round(total),
+      note: ['מחושב משירות המסלול', 'Calculated by the route service'],
+    },
+  ];
+}
+
+function planOptionFromBackendSlice(slice: BackendRoutePlanSlice): RoutePlanOption | null {
+  const legs = slice.route?.legs ?? [];
+  if (!legs.length) return null;
+  const id = String(slice.id || slice.alternative_id || 'plan');
+  const breakdown = costBreakdownFromBackendSlice(slice.cost_breakdown, legs);
+  const totalCostUsd = breakdown.reduce((sum, line) => sum + line.amountUsd, 0);
+  const labelEn = slice.label || id;
+  return {
+    id,
+    label: labelEn,
+    labelEn,
+    labelHe: slice.label?.includes('Recommended') ? 'מומלץ' : `חלופה: ${labelEn}`,
+    isRecommended: Boolean(slice.is_recommended),
+    map: routeMapFromBackend({ route: slice.route }),
+    breakdown,
+    totalCostUsd,
+  };
+}
+
+function routePlanOptionsFromBackend(data: BackendRouteResponse): {
+  recommended: RoutePlanOption;
+  alternatives: RoutePlanOption[];
+} {
+  const recommendedSlice = data.recommended ?? {
+    id: 'recommended',
+    label: 'Recommended',
+    is_recommended: true,
+    route: data.route,
+    cost_breakdown: data.cost_breakdown,
+  };
+  const recommended =
+    planOptionFromBackendSlice(recommendedSlice) ??
+    planOptionFromBackendSlice({
+      id: 'recommended',
+      label: 'Recommended',
+      is_recommended: true,
+      route: data.route,
+      cost_breakdown: data.cost_breakdown,
+    });
+  if (!recommended) {
+    throw new Error('Route plan missing legs');
+  }
+  const alternatives = (data.alternatives ?? [])
+    .map((slice) => planOptionFromBackendSlice(slice))
+    .filter((opt): opt is RoutePlanOption => Boolean(opt));
+  return { recommended, alternatives };
+}
+
+function degradedLegReason(leg: RouteLeg): string | null {
+  const method = String(leg.method || '').toLowerCase();
+  const source = String(leg.geometrySource || '').toLowerCase();
+  if (method === 'road' && source !== 'osrm') {
+    return `${leg.label || 'Road leg'} used ${source || 'unknown'} geometry instead of OSRM.`;
+  }
+  if (method === 'sea' && source !== 'searoute') {
+    return `${leg.label || 'Sea leg'} used ${source || 'unknown'} geometry instead of searoute.`;
+  }
+  if ((method === 'road' || method === 'sea') && leg.path.length < 3) {
+    return `${leg.label || titleCase(method)} returned too few route points for executable navigation.`;
+  }
+  if (method === 'sea' && seaPathHasKnownLandCut(leg.path)) {
+    return `${leg.label || 'Sea leg'} crosses land near the Strait of Gibraltar.`;
+  }
+  return null;
+}
+
+function seaPathHasKnownLandCut(path: [number, number][]): boolean {
+  for (let i = 0; i < path.length - 1; i += 1) {
+    if (segmentCutsNorthernMorocco(path[i], path[i + 1])) return true;
+  }
+  return false;
+}
+
+function segmentCutsNorthernMorocco(a: [number, number], b: [number, number]): boolean {
+  const [aLat, aLng] = a;
+  const [bLat, bLng] = b;
+  const minLat = Math.min(aLat, bLat);
+  const maxLat = Math.max(aLat, bLat);
+  const minLng = Math.min(aLng, bLng);
+  const maxLng = Math.max(aLng, bLng);
+  if (minLat < 33 || maxLat > 36.3 || minLng < -8.8 || maxLng > -5) return false;
+  const southwest = (aLat <= 35.2 && aLng <= -6.5) || (bLat <= 35.2 && bLng <= -6.5);
+  const strait = (aLat >= 35.6 && aLng >= -6.2) || (bLat >= 35.6 && bLng >= -6.2);
+  return southwest && strait;
+}
+
+function assertExecutablePlan(plan: RoutePlanOption): void {
+  const reason = plan.map.legs.map(degradedLegReason).find((item): item is string => Boolean(item));
+  if (reason) {
+    throw new Error(
+      `Live route is degraded and was not drawn: ${reason} Check OSRM/searoute availability and retry.`,
+    );
+  }
+}
+
+function ddStatus(verdict: string | undefined): DueDiligenceStatus {
+  if (verdict === 'fail') return 'fail';
+  if (verdict === 'warn') return 'warn';
+  return 'pass';
+}
+
+function dueDiligenceFromBackend(data: DdApiResponse | null): {
+  checks: DueDiligenceCheck[];
+  recommendation: DueDiligenceRecommendation;
+  blockers: string[];
+  warnings: string[];
+  limitations: string[];
+} {
+  if (!data) {
+    return {
+      checks: [
+        {
+          id: 'dd-unavailable',
+          labelHe: 'בדיקת נאותות לא זמינה',
+          labelEn: 'Due diligence unavailable',
+          status: 'warn',
+          detail: ['חייבים להריץ בדיקה חיה לפני ביצוע.', 'Run live checks before execution.'],
+        },
+      ],
+      recommendation: 'escalate',
+      blockers: [],
+      warnings: ['Due-diligence service unavailable.'],
+      limitations: ['Live route worked, but the due-diligence service did not respond.'],
+    };
+  }
+
+  const checks = (data.checks ?? []).map((check, index) => ({
+    id: check.check_id || `dd-${index + 1}`,
+    labelHe: titleCase(check.dimension || 'check'),
+    labelEn: titleCase(check.dimension || 'check'),
+    status: ddStatus(check.verdict),
+    detail: [check.message || '', check.message || ''] as [string, string],
+  }));
+  const warnings = (data.checks ?? [])
+    .filter((check) => check.verdict === 'warn')
+    .map((check) => check.message || check.dimension || 'Warning');
+  return {
+    checks,
+    recommendation: data.recommendation || 'escalate',
+    blockers: data.blockers ?? [],
+    warnings,
+    limitations: data.license_check_performed ? [] : ['License check degraded: no database license lookup was performed.'],
+  };
+}
+
+async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `${API_BASE}/api/routing/plans`;
-    const controller = new AbortController();
-    // Short timeout — if the backend is responding but disabled (503) it replies
-    // immediately.  If it's unreachable we don't want the UI frozen for 12 s.
-    const timer = window.setTimeout(() => controller.abort(), 5_000);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Map our simplified frontend payload into the RoutePlanRequest schema.
-        body: JSON.stringify({
-          supplier: {
-            id: 'ui-supplier',
-            company: payload.supplier.label || 'Supplier',
-            sector: 'mining',
-            origin: {
-              name: payload.supplier.label || 'Origin',
-              point: { lat: payload.supplier.lat, lng: payload.supplier.lng },
-            },
-            dd_status: { state: 'not_started' },
-          },
-          buyer: {
-            id: 'ui-buyer',
-            company: payload.buyer.label || 'Buyer',
-            destination: {
-              name: payload.buyer.label || 'Destination',
-              point: { lat: payload.buyer.lat, lng: payload.buyer.lng },
-            },
-            dd_status: { state: 'not_started' },
-          },
-          product: {
-            commodity: payload.productType,
-            quantity_mt: 1000,
-            hs_code: '2616',
-          },
-          preferred_methods: payload.shippingMethods.map((m) => {
-            // map frontend IDs → backend enum values
-            const map: Record<string, string> = {
-              sea_fcl: 'sea',
-              sea_lcl: 'sea',
-              rail: 'rail',
-              truck_inland: 'truck',
-              air: 'air',
-            };
-            return map[m] ?? m;
-          }),
-          avoid_country_iso2: [],
-        }),
-        signal: controller.signal,
-      });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
 
-      // 503 = route planner disabled on backend; fall through to mock silently.
-      if (res.status === 503 || res.status === 501) return null;
-      if (!res.ok) return null;
-
-      // Backend returned a RoutePlan stub — convert to our UI shape.
-      await res.json(); // consume response even if we can't use it
-      return null; // stub doesn't populate legs/breakdown yet — use mock
-    } finally {
-      window.clearTimeout(timer);
-    }
+async function fetchDueDiligence(
+  payload: RoutePlannerFormPayload,
+  timeoutMs = 10_000,
+): Promise<DdApiResponse | null> {
+  try {
+    const supplierCountry = payload.supplier.country || '';
+    const buyerCountry = payload.buyer.country || '';
+    if (!supplierCountry && !buyerCountry) return null;
+    return await postJson<DdApiResponse>(
+      `${API_BASE}/api/routing/due-diligence`,
+      {
+        supplier_country: supplierCountry || 'Unknown',
+        buyer_country: buyerCountry || 'Unknown',
+        product_type: productKind(payload.productType),
+        commodity: payload.supplier.commodity || payload.productType,
+        license_ids: payload.supplier.licenseId ? [payload.supplier.licenseId] : undefined,
+        quantity_tons: payload.quantityTons,
+        estimated_value_usd: estimateCargoValueUsd(payload.productType, payload.quantityTons),
+        supplier_entity_name: payload.supplier.label || undefined,
+        buyer_entity_name: payload.buyer.label || undefined,
+      },
+      timeoutMs,
+    );
   } catch {
     return null;
   }
 }
 
-/**
- * Prefers the live backend; falls back to a deterministic, geographically-
- * correct mock that scales costs by route distance.
- */
-export async function fetchRoutePlan(
+async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse | null> {
+  const ddPromise = fetchDueDiligence(payload, ROUTE_PANEL_DD_TIMEOUT_MS);
+  const normalizedProduct = payload.productType.toLowerCase();
+  const destinationName = payload.buyer.label.toLowerCase();
+  const destinationKind =
+    destinationName.includes('airport') || destinationName.includes('ben gurion') || destinationName.includes('(tlv)')
+      ? 'airport'
+      : destinationName.includes('port')
+        ? 'port'
+        : 'destination';
+  const route = await postJson<BackendRouteResponse>(
+    routePlanEndpoint(),
+    {
+      product: payload.productType,
+      quantity_tons: payload.quantityTons,
+      origin: {
+        name: payload.supplier.label || 'Supplier',
+        lat: payload.supplier.lat,
+        lng: payload.supplier.lng,
+        kind: payload.supplier.sector === 'oil_and_gas' ? 'terminal' : 'origin',
+        metadata: {
+          country: payload.supplier.country,
+          license_id: payload.supplier.licenseId,
+          commodity: payload.supplier.commodity,
+          sector: payload.supplier.sector,
+        },
+      },
+      destination: {
+        name: payload.buyer.label || 'Destination',
+        lat: payload.buyer.lat,
+        lng: payload.buyer.lng,
+        kind: destinationKind,
+        metadata: { country: payload.buyer.country },
+      },
+      transit_points: [],
+      preferred_methods: Array.from(new Set(payload.shippingMethods.map(backendMethod))),
+      pipeline_layer_enabled:
+        normalizedProduct.includes('petroleum') ||
+        normalizedProduct.includes('oil') ||
+        normalizedProduct.includes('gas') ||
+        normalizedProduct.includes('lng') ||
+        normalizedProduct.includes('lpg'),
+    },
+    LIVE_ROUTE_TIMEOUT_MS,
+  );
+
+  const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
+  const { recommended, alternatives } = routePlanOptionsFromBackend(route);
+  assertExecutablePlan(recommended);
+  alternatives.forEach(assertExecutablePlan);
+  const dd = await ddPromise;
+  const ddSummary = dueDiligenceFromBackend(dd);
+  const map = attachSupplierBuyerEnds(recommended.map, payload.supplier, payload.buyer);
+  const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
+  const freightTotal = recommended.totalCostUsd;
+  const routeLimitations = Array.isArray(route.limitations) ? route.limitations : [];
+  const landlockedHint = route.routing_context?.landlocked_hint;
+  return {
+    source: 'live',
+    map,
+    breakdown: recommended.breakdown,
+    recommendedPlanId: recommended.id,
+    routeAlternatives: alternatives.map((alt) => ({
+      ...alt,
+      map: attachSupplierBuyerEnds(alt.map, payload.supplier, payload.buyer),
+    })),
+    landlockedHint: landlockedHint || undefined,
+    dueDiligence: ddSummary.checks,
+    dueDiligenceRecommendation: ddSummary.recommendation,
+    blockers: ddSummary.blockers,
+    warnings: reversalWarning ? [...ddSummary.warnings, reversalWarning] : ddSummary.warnings,
+    limitations: [...ddSummary.limitations, ...routeLimitations],
+    routeAssumptions: [
+      'Route is staged as inland transport to export gateway, trunk leg, then final delivery from import gateway.',
+      'Gateway selection is nearest-hub screening logic, not a carrier booking.',
+      alternatives.length > 0
+        ? 'Compare route alternatives below (sea vs air or export ports); each is one sequential corridor.'
+        : 'Single recommended corridor returned.',
+      cargoValue.note,
+    ],
+    cargoValueUsd: cargoValue.valueUsd,
+    cargoValueNote: cargoValue.note,
+    freightToValuePct: cargoValue.valueUsd > 0 ? (freightTotal / cargoValue.valueUsd) * 100 : undefined,
+  };
+}
+
+export async function checkBackendHealthForRouting(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), HEALTH_PREFLIGHT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/api/health`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+function describeLiveRouteFailure(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') {
+      return `Route API timed out after ${Math.round(LIVE_ROUTE_TIMEOUT_MS / 1000)}s — showing simulation estimate. Ensure the backend is running for live OSRM/searoute geometry.`;
+    }
+    if (error.message.startsWith('HTTP ')) {
+      return `Route API returned ${error.message} — check backend logs and /api/logistics/route-plan.`;
+    }
+    return error.message;
+  }
+  return 'Live route API unreachable — start the backend (docker compose up backend) or check VITE_API_BASE.';
+}
+
+function simulationFallback(
   payload: RoutePlannerFormPayload,
-): Promise<RoutePlannerApiResponse> {
-  const live = await fetchLiveRoute(payload);
-  if (live) return live;
-  return mockResponseForPayload(payload.supplier, payload.buyer, payload.productType, payload.shippingMethods);
+  liveFailureReason: string,
+): RoutePlannerApiResponse {
+  const simulated = mockResponseForPayload(
+    payload.supplier,
+    payload.buyer,
+    payload.productType,
+    payload.shippingMethods,
+  );
+  return {
+    ...simulated,
+    liveUnavailableReason: liveFailureReason,
+    limitations: [
+      liveFailureReason,
+      ...simulated.limitations,
+    ],
+    warnings: [
+      'Simulation fallback — verify corridor, ports, and costs with a live route before execution.',
+      ...simulated.warnings,
+    ],
+  };
+}
+
+export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse> {
+  const backendUp = await checkBackendHealthForRouting();
+  if (!backendUp) {
+    return simulationFallback(
+      payload,
+      'Backend health check failed — start the API (docker compose up backend) or check VITE_API_BASE.',
+    );
+  }
+
+  let liveFailureReason: string | undefined;
+  try {
+    const live = await fetchLiveRoute(payload);
+    if (live && live.map.legs.length > 0) return live;
+    liveFailureReason = 'Live route returned no legs — check origin/destination coordinates and shipping methods.';
+  } catch (error) {
+    liveFailureReason = describeLiveRouteFailure(error);
+  }
+
+  return simulationFallback(
+    payload,
+    liveFailureReason ??
+      'Live routing unavailable — showing simulation estimate until the route service responds.',
+  );
+}
+
+export async function analyzeRouteRisk(
+  route: RoutePlannerApiResponse,
+): Promise<AgentJobResponse<RouteRiskAnalysis>> {
+  return postJson<AgentJobResponse<RouteRiskAnalysis>>(
+    `${API_BASE}/api/agents/route-intelligence`,
+    { route },
+    20_000,
+  );
 }

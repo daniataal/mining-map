@@ -1,25 +1,37 @@
-import { useState, useMemo, useEffect, useCallback, startTransition, useRef } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, deriveLicenseFetchCountries } from './lib/api';
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense } from 'react';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
+import { useDebouncedValue } from './hooks/use-debounced-value';
 import { useI18n } from './lib/i18n';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow, MaritimeViewportBounds } from './types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
 
 import Sidebar from './components/Sidebar';
-import MapComponent from './components/MapComponent';
-import DossierView from './components/DossierView';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
-import DueDiligencePanel from './components/DueDiligencePanel';
 import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
+import { useDealRooms } from './hooks/use-deal-rooms';
+import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
-import AdminPanel from './components/AdminPanel';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
-import { RoutePlannerPanel, useRoutePlanner } from './features/route-planner';
 import {
-  Search as LucideSearch,
+  DEFAULT_VESSEL_FILTERS,
+  prefetchMaritimeVesselSnapshot,
+  readMaritimeIncludeCoastalDemoPreference,
+  type VesselFilters,
+} from './lib/vessels';
+import IntelligenceSearchBox from './components/IntelligenceSearchBox';
+import { useRoutePlanner } from './features/route-planner';
+import {
+  buildRoutePlannerAirportMarkers,
+  buildRoutePlannerPortMarkers,
+  canonicalRouteHubCountry,
+  MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
+  resolveRouteHubCountries,
+} from './features/route-planner/locationPresets';
+import {
   Filter as LucideFilter,
   MapPin as LucideMapPin,
   LayoutGrid as LucideLayoutGrid,
@@ -28,45 +40,22 @@ import {
   Anchor as LucideAnchor,
   Droplets as LucideDroplets,
   Navigation2 as LucideNavigation,
+  X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
+import PlatformHealthBanner from './components/PlatformHealthBanner';
+import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 
-const LICENSE_MAP_BBOX_MAX_LAT_SPAN = 85;
-const LICENSE_MAP_BBOX_MAX_LNG_SPAN = 300;
+const MapComponent = lazy(() => import('./components/MapComponent'));
+const DossierView = lazy(() => import('./components/DossierView'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
+const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
 
-function licenseViewportUsesBbox(bounds: MaritimeViewportBounds): boolean {
-  const latSpan = bounds.north - bounds.south;
-  const lngSpan = bounds.east - bounds.west;
-  if (!Number.isFinite(latSpan) || !Number.isFinite(lngSpan)) return false;
-  if (latSpan <= 0 || lngSpan <= 0) return false;
-  if (latSpan >= LICENSE_MAP_BBOX_MAX_LAT_SPAN || lngSpan >= LICENSE_MAP_BBOX_MAX_LNG_SPAN) return false;
-  return true;
-}
-
-const LICENSE_VIEWPORT_DEBOUNCE_MS = 1200;
-const LICENSE_VIEWPORT_MIN_CHANGE_FRAC = 0.12;
-
-function licenseViewportChangedEnough(
-  prev: MaritimeViewportBounds,
-  next: MaritimeViewportBounds,
-  minFrac: number,
-): boolean {
-  const prevLat = prev.north - prev.south;
-  const prevLng = prev.east - prev.west;
-  const nextLat = next.north - next.south;
-  const nextLng = next.east - next.west;
-  if (![prevLat, prevLng, nextLat, nextLng].every((x) => Number.isFinite(x) && x > 0)) return true;
-  const latDelta = Math.abs(nextLat - prevLat) / Math.max(prevLat, 1e-9);
-  const lngDelta = Math.abs(nextLng - prevLng) / Math.max(prevLng, 1e-9);
-  const centerLatDelta =
-    Math.abs((next.north + next.south) / 2 - (prev.north + prev.south) / 2) / Math.max(prevLat, 1e-9);
-  const centerLngDelta =
-    Math.abs((next.east + next.west) / 2 - (prev.east + prev.west) / 2) / Math.max(prevLng, 1e-9);
-  return Math.max(latDelta, lngDelta, centerLatDelta, centerLngDelta) >= minFrac;
-}
+const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -121,57 +110,29 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
   );
 }
 
+function LazySurfaceFallback({ label = 'Loading intelligence surface...' }: { label?: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-white/70 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:bg-slate-950/70 dark:text-slate-400">
+      {label}
+    </div>
+  );
+}
+
 export default function App() {
   const { t, isRtl } = useI18n();
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
   const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'route_planner' | 'admin'
+    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'raw_evidence' | 'route_planner' | 'admin'
   >('global');
+  const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
+  const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
   const licenseSector =
     viewMode === 'mining'
       ? 'mining'
       : viewMode === 'oil_and_gas'
         ? 'oil_and_gas'
         : undefined;
-  const [licenseViewportDraft, setLicenseViewportDraft] = useState<MaritimeViewportBounds | null>(null);
-  const [licenseViewportDebounced, setLicenseViewportDebounced] = useState<MaritimeViewportBounds | null>(null);
-  const lastCommittedLicenseViewport = useRef<MaritimeViewportBounds | null>(null);
-
-  useEffect(() => {
-    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') {
-      setLicenseViewportDraft(null);
-      setLicenseViewportDebounced(null);
-      lastCommittedLicenseViewport.current = null;
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      if (!licenseViewportDraft) {
-        lastCommittedLicenseViewport.current = null;
-        setLicenseViewportDebounced(null);
-        return;
-      }
-      const prev = lastCommittedLicenseViewport.current;
-      const next = licenseViewportDraft;
-      if (
-        prev &&
-        !licenseViewportChangedEnough(prev, next, LICENSE_VIEWPORT_MIN_CHANGE_FRAC)
-      ) {
-        return;
-      }
-      lastCommittedLicenseViewport.current = next;
-      setLicenseViewportDebounced(next);
-    }, LICENSE_VIEWPORT_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [licenseViewportDraft, viewMode]);
-
-  const licenseBoundsForApi = useMemo(() => {
-    if (viewMode !== 'mining' && viewMode !== 'oil_and_gas') return null;
-    if (!licenseViewportDebounced) return null;
-    if (!licenseViewportUsesBbox(licenseViewportDebounced)) return null;
-    return licenseViewportDebounced;
-  }, [licenseViewportDebounced, viewMode]);
-
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -180,37 +141,16 @@ export default function App() {
   
   // Data Fetching
   const { data: worldCoverage } = useWorldCoverage(true);
-  const licenseFetchCountries = useMemo(
-    () => deriveLicenseFetchCountries(undefined, worldCoverage),
-    [worldCoverage],
-  );
   const {
     data: rawData = [],
     isLoading,
     isFetching,
     error: fetchError,
-    stillLoadingCountryCount,
-    failedCountryQueryCount,
-  } = useLicenses(undefined, null, licenseFetchCountries);
-  const licensesPartialMapHint = useMemo(() => {
-    if (stillLoadingCountryCount <= 0 || rawData.length === 0) return null;
-    const n = stillLoadingCountryCount;
-    return t(
-      `עדיין נטענות ${n} קבוצות רישיונות…`,
-      `Still loading ${n} ${n === 1 ? 'license request' : 'license requests'}…`,
-    );
-  }, [stillLoadingCountryCount, rawData.length, t]);
-  const licenseLoadPartialFailuresHint = useMemo(() => {
-    if (failedCountryQueryCount <= 0 || fetchError) return null;
-    if (rawData.length === 0) return null;
-    const n = failedCountryQueryCount;
-    return t(
-      `${n} קבוצות רישיונות לא נטענו — המפה מציגה את הזמין.`,
-      `${n} license ${n === 1 ? 'request' : 'requests'} could not be loaded — the map shows available data.`,
-    );
-  }, [failedCountryQueryCount, fetchError, rawData.length, t]);
-  const licensesMapSecondaryStatus =
-    [licensesPartialMapHint, licenseLoadPartialFailuresHint].filter(Boolean).join(' \u00b7 ') || null;
+  } = useLicenses(licenseSector);
+  const licensesMapSecondaryStatus = useMemo(() => {
+    if (!isFetching || isLoading || rawData.length === 0) return null;
+    return t('מרענן מאגר רישיונות…', 'Refreshing license bundle…');
+  }, [isFetching, isLoading, rawData.length, t]);
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
@@ -220,7 +160,7 @@ export default function App() {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
     error: portsError,
-  } = usePortLogisticsEntities(viewMode === 'ports');
+  } = usePortLogisticsEntities(viewMode === 'ports' || viewMode === 'route_planner');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -228,6 +168,7 @@ export default function App() {
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
+  const dealRooms = useDealRooms(Boolean(username));
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('mining_userid'));
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
@@ -238,6 +179,11 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
+  const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
+  const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
+  const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('15000');
+  const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('25');
+  const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -291,6 +237,58 @@ export default function App() {
     },
     [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
   );
+  const debouncedRouteSupplierCountry = useDebouncedValue(routePlanner.supplier.country);
+  const debouncedRouteBuyerCountry = useDebouncedValue(routePlanner.buyer.country);
+  const routeHubCountries = useMemo(
+    () => resolveRouteHubCountries(debouncedRouteSupplierCountry, debouncedRouteBuyerCountry),
+    [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry],
+  );
+
+  const routeMarkerCountries = useMemo(() => {
+    if (routePlanner.pickRole === 'supplier') {
+      const supplierCanon = canonicalRouteHubCountry(debouncedRouteSupplierCountry);
+      return supplierCanon ? [supplierCanon] : [];
+    }
+    if (routePlanner.pickRole === 'buyer') {
+      const buyerCanon = canonicalRouteHubCountry(debouncedRouteBuyerCountry);
+      return buyerCanon ? [buyerCanon] : [];
+    }
+    return routeHubCountries;
+  }, [
+    routePlanner.pickRole,
+    debouncedRouteSupplierCountry,
+    debouncedRouteBuyerCountry,
+    routeHubCountries,
+  ]);
+  const routeMarkerCountriesKey = routeMarkerCountries.join('\0');
+
+  // Catalog + maritime entities only — no global license scan when toggling hub markers.
+  const routePlannerPortMarkers = useMemo(() => {
+    if (!routePlanner.showPortsOnMap || !routeMarkerCountries.length) return [];
+    return buildRoutePlannerPortMarkers(portEntities, {
+      countries: routeMarkerCountries,
+      maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
+    });
+  }, [routePlanner.showPortsOnMap, portEntities, routeMarkerCountriesKey]);
+
+  const routePlannerAirportMarkers = useMemo(() => {
+    if (!routePlanner.showAirportsOnMap || !routeMarkerCountries.length) return [];
+    return buildRoutePlannerAirportMarkers({
+      countries: routeMarkerCountries,
+      maxTotal: MAX_ROUTE_MODE_TOTAL_HUB_MARKERS,
+    });
+  }, [routePlanner.showAirportsOnMap, routeMarkerCountriesKey]);
+
+  const handleRoutePlannerMapPick = routePlanner.handleMapPick;
+  const handleRoutePlannerHubPick = useCallback(
+    (hub: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
+      startTransition(() => {
+        handleRoutePlannerMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
+      });
+    },
+    [handleRoutePlannerMapPick],
+  );
+
   const entityIndex = useMemo(
     () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
     [allLicenses]
@@ -298,6 +296,58 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations);
+  const mapProcessedData = useDeferredValue(miningData.processedData);
+
+  const selectedCountryBeforeFocusRef = useRef<string[]>([]);
+  const selectedCountryLiveRef = useRef<string[]>([]);
+  useEffect(() => {
+    selectedCountryLiveRef.current = miningData.selectedCountry;
+  }, [miningData.selectedCountry]);
+
+  const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
+  const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
+  const [autoFocusCountryOnEnter, setAutoFocusCountryOnEnter] = useState(false);
+
+  const applyCountryFocus = useCallback(
+    (name: string) => {
+      setCountryFocusCountry((cur) => {
+        if (cur == null) {
+          selectedCountryBeforeFocusRef.current = selectedCountryLiveRef.current.slice();
+        }
+        return name;
+      });
+      miningData.setSelectedCountry([name]);
+      miningData.setFilter('');
+      setCountryFocusBoundsTrigger((n) => n + 1);
+    },
+    [miningData],
+  );
+
+  const clearCountryFocus = useCallback(() => {
+    setCountryFocusCountry(null);
+    miningData.setSelectedCountry(selectedCountryBeforeFocusRef.current.slice());
+  }, [miningData]);
+
+  const handleBannerClearFilters = useCallback(() => {
+    setCountryFocusCountry(null);
+    selectedCountryBeforeFocusRef.current = [];
+    miningData.resetFilters();
+  }, [miningData]);
+
+  const handleCommitLicenseSearch = useCallback(
+    (query: string) => {
+      miningData.commitSearchFilter(query);
+    },
+    [miningData.commitSearchFilter],
+  );
+
+  useEffect(() => {
+    if (!countryFocusCountry) return;
+    const sel = miningData.selectedCountry;
+    if (sel.length !== 1 || sel[0] !== countryFocusCountry) {
+      setCountryFocusCountry(null);
+    }
+  }, [miningData.selectedCountry, countryFocusCountry]);
 
   useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
@@ -349,6 +399,18 @@ export default function App() {
       logActivityMutation.mutate({ user_id: userId, username, action: 'VIEW_DOSSIER', details: `Viewed ${item.company} (${item.id})` });
     }
   }, [userId, username, logActivityMutation]);
+
+  const handleNavigateToDealRoom = useCallback((dealRoomId: string) => {
+    setInvestigationsSubTab('deal_rooms');
+    setHighlightedDealRoomId(dealRoomId);
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
+  const getDealRoomForLicense = useCallback(
+    (licenseId: string, entityKind = 'license') => dealRooms.getRoomForEntity(licenseId, entityKind),
+    [dealRooms],
+  );
 
   const handleSelectItem = useCallback((item: MiningLicense | null) => {
     setSelectedMaritimeVessel(null);
@@ -442,7 +504,7 @@ export default function App() {
   const sidebarViewMode =
     viewMode === 'admin'
       ? 'admin'
-      : viewMode === 'due_diligence'
+      : viewMode === 'investigations'
         ? 'dashboard'
         : viewMode === 'raw_evidence'
           ? 'pipeline'
@@ -453,7 +515,7 @@ export default function App() {
       return;
     }
     if (mode === 'dashboard') {
-      setViewMode('due_diligence');
+      setViewMode('investigations');
       return;
     }
     if (mode === 'pipeline') {
@@ -551,12 +613,31 @@ export default function App() {
 
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const maritimeMapViewActive = MARITIME_MAP_VIEWS.has(viewMode);
 
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas') {
-      setSelectedMaritimeVessel(null);
+    if (viewMode === 'oil_and_gas') {
+      setPrioritizePetroleumVessels(true);
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!maritimeMapViewActive) {
+      setIsMaritimeLayerEnabled(false);
+      setSelectedMaritimeVessel(null);
+    }
+  }, [maritimeMapViewActive]);
+
+  useEffect(() => {
+    if (!username || !maritimeMapViewActive) return;
+    const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
+    void prefetchMaritimeVesselSnapshot(queryClient, {
+      maxVessels: Number(maritimeMaxVessels) || 15000,
+      captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
+      scope,
+      includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
+    });
+  }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
   return (
     <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
@@ -589,6 +670,8 @@ export default function App() {
             </div>
          </div>
       </div>
+
+      <PlatformHealthBanner />
 
       {viewMode !== 'ports' && viewMode !== 'route_planner' && fetchError && (
         <div
@@ -675,6 +758,7 @@ export default function App() {
             isInDdQueue={ddQueue.isInQueue}
             onAddToDueDiligence={ddQueue.addToQueue}
             onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+            getDealRoomForLicense={getDealRoomForLicense}
           />
         </aside>
 
@@ -687,22 +771,33 @@ export default function App() {
             viewMode === 'oil_and_gas' ||
             viewMode === 'suppliers' ||
             viewMode === 'ports' ||
-            viewMode === 'due_diligence' ||
+            viewMode === 'investigations' ||
             viewMode === 'raw_evidence' ||
             viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
-              <div className="hidden sm:flex items-center gap-3 pointer-events-auto">
-                  <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl w-80">
-                    <LucideSearch className="w-5 h-5 text-slate-400 dark:text-slate-500 mr-3" />
-                    <input 
-                      type="text"
-                      placeholder={t("חפש מודיעין...", "Search intelligence hub...")}
-                      className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
-                      value={miningData.filter}
-                      onChange={(e) => miningData.setFilter(e.target.value)}
-                    />
-                  </div>
+              <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
+                  <IntelligenceSearchBox
+                    countries={miningData.countries}
+                    externalFilter={miningData.filter}
+                    countryFocusCountry={countryFocusCountry}
+                    autoFocusCountryOnEnter={autoFocusCountryOnEnter}
+                    onAutoFocusCountryOnEnterChange={setAutoFocusCountryOnEnter}
+                    onApplyCountryFocus={applyCountryFocus}
+                    onCommitLicenseSearch={handleCommitLicenseSearch}
+                  />
+                  {countryFocusCountry && (
+                    <button
+                      type="button"
+                      onClick={clearCountryFocus}
+                      className="flex h-10 max-w-[min(100%,16rem)] items-center gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/15 px-3 text-[10px] font-black uppercase tracking-widest text-amber-800 shadow-xl backdrop-blur-xl hover:bg-amber-500/25 dark:text-amber-200"
+                    >
+                      <span className="truncate">
+                        {t('מיקוד מדינה', 'Country focus')}: {countryFocusCountry}
+                      </span>
+                      <LucideX className="h-4 w-4 shrink-0" aria-hidden />
+                    </button>
+                  )}
                   {sectorCoverageSummary && viewMode !== 'route_planner' && (
                     <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
                       {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
@@ -713,7 +808,7 @@ export default function App() {
                       {t("מסננים פעילים", "Active filters")}: {miningData.activeFilterCount}
                       <button
                         type="button"
-                        onClick={miningData.resetFilters}
+                        onClick={handleBannerClearFilters}
                         className="rounded-lg border border-amber-500/50 px-2 py-1 text-[8px] font-black uppercase tracking-widest hover:bg-amber-500/20"
                       >
                         {t("נקה", "Clear")}
@@ -763,13 +858,13 @@ export default function App() {
                       {t('מסלול', 'Route')}
                     </button>
                     <button
-                      onClick={() => setViewMode('due_diligence')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'due_diligence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('investigations')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'investigations' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      {t("בדיקת נאותות", "Due Diligence")}
-                      {ddQueue.queue.length > 0 && (
-                        <span className="ml-1.5 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-slate-950/20 dark:bg-white/20 text-[9px] font-black px-1">
-                          {ddQueue.queue.length}
+                      {t('חקירות', 'Investigations')}
+                      {(ddQueue.queue.length > 0 || dealRooms.count > 0) && (
+                        <span className="inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-slate-950/20 dark:bg-white/20 text-[9px] font-black px-1">
+                          {ddQueue.queue.length + dealRooms.count}
                         </span>
                       )}
                     </button>
@@ -793,6 +888,12 @@ export default function App() {
             </div>
           )}
 
+          {viewMode === 'oil_and_gas' && (
+            <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
+              <OilGasOnboardingTip active />
+            </div>
+          )}
+
           <div className="w-full h-full z-0">
             {(viewMode === 'global' ||
               viewMode === 'mining' ||
@@ -800,71 +901,108 @@ export default function App() {
               viewMode === 'ports' ||
               viewMode === 'oil_and_gas' ||
               viewMode === 'route_planner') && (
-              <MapComponent
-                processedData={viewMode === 'route_planner' ? [] : miningData.processedData}
-                allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
-                userAnnotations={userAnnotations}
-                selectedItem={selectedItem}
-                mapFlyTrigger={mapFlyTrigger}
-                viewModeKey={viewMode}
-                worldCoverage={worldCoverage}
-                licensesFetchPending={
-                  viewMode !== 'route_planner' &&
-                  (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                  isLoading &&
-                  !fetchError
-                }
-                licensesRefetching={
-                  viewMode !== 'route_planner' &&
-                  (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                  isFetching &&
-                  !isLoading &&
-                  !fetchError
-                }
-                licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
-                trackLicenseViewport={false}
-                onLicenseViewportChange={setLicenseViewportDraft}
-                setSelectedItem={handleSelectItem}
-                handleOpenDossier={handleOpenDossier}
-                mapCenter={mapCenter}
-                updateAnnotation={updateAnnotation}
-                deleteLicense={deleteLicense}
-                selectedMaritimeVessel={selectedMaritimeVessel}
-                onSelectMaritimeVessel={setSelectedMaritimeVessel}
-                routePlannerOverlay={routePlanner.overlay}
-                routePlannerPickRole={routePlanner.pickRole}
-                onRoutePlannerMapPick={routePlanner.handleMapPick}
-                isInDdQueue={ddQueue.isInQueue}
-                onAddToDueDiligence={ddQueue.addToQueue}
-                onRemoveFromDueDiligence={ddQueue.removeFromQueue}
-              />
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
+                <MapComponent
+                  processedData={viewMode === 'route_planner' ? [] : mapProcessedData}
+                  allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
+                  userAnnotations={userAnnotations}
+                  selectedItem={selectedItem}
+                  mapFlyTrigger={mapFlyTrigger}
+                  viewModeKey={viewMode}
+                  worldCoverage={worldCoverage}
+                  licensesFetchPending={
+                    viewMode !== 'route_planner' &&
+                    (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                    isLoading &&
+                    !fetchError
+                  }
+                  licensesRefetching={
+                    viewMode !== 'route_planner' &&
+                    (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                    isFetching &&
+                    !isLoading &&
+                    !fetchError
+                  }
+                  licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
+                  setSelectedItem={handleSelectItem}
+                  handleOpenDossier={handleOpenDossier}
+                  mapCenter={mapCenter}
+                  updateAnnotation={updateAnnotation}
+                  deleteLicense={deleteLicense}
+                  selectedMaritimeVessel={selectedMaritimeVessel}
+                  onSelectMaritimeVessel={setSelectedMaritimeVessel}
+                  maritimeMapViewActive={maritimeMapViewActive}
+                  isMaritimeLayerEnabled={isMaritimeLayerEnabled}
+                  onMaritimeLayerEnabledChange={setIsMaritimeLayerEnabled}
+                  vesselFilters={vesselFilters}
+                  onVesselFiltersChange={setVesselFilters}
+                  maritimeMaxVessels={maritimeMaxVessels}
+                  onMaritimeMaxVesselsChange={setMaritimeMaxVessels}
+                  maritimeCaptureWindow={maritimeCaptureWindow}
+                  onMaritimeCaptureWindowChange={setMaritimeCaptureWindow}
+                  prioritizePetroleumVessels={prioritizePetroleumVessels}
+                  onPrioritizePetroleumVesselsChange={setPrioritizePetroleumVessels}
+                  routePlannerOverlay={routePlanner.overlay}
+                  routePlannerPickRole={routePlanner.pickRole}
+                  onRoutePlannerMapPick={routePlanner.handleMapPick}
+                  routePlannerPorts={routePlannerPortMarkers}
+                  routePlannerShowPorts={routePlanner.showPortsOnMap}
+                  onRoutePlannerPortPick={handleRoutePlannerHubPick}
+                  routePlannerAirports={routePlannerAirportMarkers}
+                  routePlannerShowAirports={routePlanner.showAirportsOnMap}
+                  onRoutePlannerAirportPick={handleRoutePlannerHubPick}
+                  routePlannerFlyTrigger={routePlanner.mapFlyTrigger}
+                  routePlannerFlyTarget={routePlanner.mapFlyTarget}
+                  isInDdQueue={ddQueue.isInQueue}
+                  onAddToDueDiligence={ddQueue.addToQueue}
+                  onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+                  getDealRoomForLicense={getDealRoomForLicense}
+                  countryFocusCountry={countryFocusCountry}
+                  countryFocusBoundsTrigger={countryFocusBoundsTrigger}
+                />
+              </Suspense>
             )}
             {viewMode === 'route_planner' && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[1100] flex justify-center px-2">
-                <div className="pointer-events-auto">
-                  <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
+              <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
+                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(560px,calc(100vw-6rem))]">
+                  <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
+                    <RoutePlannerPanel
+                      rp={routePlanner}
+                      portEntities={portEntities}
+                    />
+                  </Suspense>
                 </div>
               </div>
             )}
-            {viewMode === 'oil_and_gas' && selectedMaritimeVessel && !isDossierOpen && (
+            {maritimeMapViewActive && selectedMaritimeVessel && !isDossierOpen && (
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
             )}
-            {viewMode === 'due_diligence' && (
-              <DueDiligencePanel
-                allLicenses={allLicenses}
-                queue={ddQueue.queue}
-                queueIds={ddQueue.queueIds}
-                notesById={ddQueue.notesById}
-                userAnnotations={userAnnotations}
-                updateAnnotation={updateAnnotation}
-                updateNote={ddQueue.updateNote}
-                onRemoveFromQueue={ddQueue.removeFromQueue}
-                onCardClick={handleOpenDossier}
-                onOpenMap={() => setViewMode('global')}
-                isMobile={isMobile}
-              />
+            {viewMode === 'investigations' && (
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען חקירות...', 'Loading investigations...')} />}>
+                <InvestigationsPanel
+                  subTab={investigationsSubTab}
+                  onSubTabChange={setInvestigationsSubTab}
+                  allLicenses={allLicenses}
+                  queue={ddQueue.queue}
+                  queueIds={ddQueue.queueIds}
+                  notesById={ddQueue.notesById}
+                  userAnnotations={userAnnotations}
+                  updateAnnotation={updateAnnotation}
+                  updateNote={ddQueue.updateNote}
+                  onRemoveFromQueue={ddQueue.removeFromQueue}
+                  onCardClick={handleOpenDossier}
+                  onOpenMap={() => setViewMode('global')}
+                  isMobile={isMobile}
+                  dealRooms={dealRooms.rooms}
+                  dealRoomsLoading={dealRooms.isLoading}
+                  highlightedDealRoomId={highlightedDealRoomId}
+                  onHighlightedDealRoomConsumed={() => setHighlightedDealRoomId(null)}
+                  onDealRoomChange={dealRooms.upsertDealRoom}
+                  onRefreshDealRooms={() => void dealRooms.refreshDealRooms()}
+                />
+              </Suspense>
             )}
             {viewMode === 'raw_evidence' && (
               <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
@@ -876,25 +1014,31 @@ export default function App() {
             )}
             {viewMode === 'admin' && (
               <div className="h-full bg-white dark:bg-slate-950">
-                <AdminPanel 
-                  isOpen={true} 
-                  onClose={() => setViewMode('global')} 
-                  token={token || undefined} 
-                  isFullPage={true}
-                  currentUserId={userId}
-                />
+                <Suspense fallback={<LazySurfaceFallback label={t('טוען ניהול...', 'Loading admin...')} />}>
+                  <AdminPanel
+                    isOpen={true}
+                    onClose={() => setViewMode('global')}
+                    token={token || undefined}
+                    isFullPage={true}
+                    currentUserId={userId}
+                  />
+                </Suspense>
               </div>
             )}
           </div>
         </main>
 
         {/* PANEL 3: Right Tactical Filter Hub */}
-        <AdminPanel 
-          isOpen={isAdminPanelOpen} 
-          onClose={() => setIsAdminPanelOpen(false)} 
-          token={token || undefined} 
-          currentUserId={userId}
-        />
+        {isAdminPanelOpen && (
+          <Suspense fallback={null}>
+            <AdminPanel
+              isOpen={isAdminPanelOpen}
+              onClose={() => setIsAdminPanelOpen(false)}
+              token={token || undefined}
+              currentUserId={userId}
+            />
+          </Suspense>
+        )}
         <FilterPanel 
           isOpen={isFilterOpen}
           onClose={() => setIsFilterOpen(false)}
@@ -919,38 +1063,68 @@ export default function App() {
           licenseTypes={miningData.licenseTypes}
           entitySubtypes={miningData.entitySubtypes}
           sourceLabels={miningData.sourceLabels}
+          maritimeSection={
+            maritimeMapViewActive
+              ? {
+                  layerEnabled: isMaritimeLayerEnabled,
+                  onLayerEnabledChange: setIsMaritimeLayerEnabled,
+                  vesselFilters,
+                  onVesselFiltersChange: setVesselFilters,
+                  prioritizePetroleum: prioritizePetroleumVessels,
+                  onPrioritizePetroleumChange: setPrioritizePetroleumVessels,
+                  showPetroleumPriority: viewMode === 'oil_and_gas',
+                }
+              : undefined
+          }
         />
 
         {/* FULL-SCREEN OVERLAY: Intelligence Dossier */}
-        <DossierView 
-          isOpen={isDossierOpen} 
-          onClose={() => setIsDossierOpen(false)} 
-          item={dossierItem} 
-          marketPrices={marketPrices}
-          annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
-          updateAnnotation={updateAnnotation}
-          onDeleteLicense={
-            dossierItem && dossierItem.entityKind !== 'storage_terminal'
-              ? () => deleteLicense(dossierItem.id)
-              : undefined
-          }
-          isInDdQueue={dossierItem ? ddQueue.isInQueue(dossierItem.id) : false}
-          onAddToDueDiligence={
-            dossierItem ? () => ddQueue.addToQueue(dossierItem.id) : undefined
-          }
-          onRemoveFromDueDiligence={
-            dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
-          }
-          onPlanRoute={(licenseItem) => {
-            routePlanner.prefillSupplier(
-              licenseItem.lat ?? 0,
-              licenseItem.lng ?? 0,
-              `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
-            );
-            setIsDossierOpen(false);
-            setViewMode('route_planner');
-          }}
-        />
+        {isDossierOpen && (
+          <Suspense fallback={null}>
+            <DossierView
+              isOpen={isDossierOpen}
+              onClose={() => setIsDossierOpen(false)}
+              item={dossierItem}
+              marketPrices={marketPrices}
+              annotation={dossierItem ? userAnnotations[dossierItem.id] || {} : {}}
+              updateAnnotation={updateAnnotation}
+              onDeleteLicense={
+                dossierItem && dossierItem.entityKind !== 'storage_terminal'
+                  ? () => deleteLicense(dossierItem.id)
+                  : undefined
+              }
+              isInDdQueue={dossierItem ? ddQueue.isInQueue(dossierItem.id) : false}
+              onAddToDueDiligence={
+                dossierItem ? () => ddQueue.addToQueue(dossierItem.id) : undefined
+              }
+              onRemoveFromDueDiligence={
+                dossierItem ? () => ddQueue.removeFromQueue(dossierItem.id) : undefined
+              }
+              onPlanRoute={(licenseItem) => {
+                routePlanner.prefillSupplier(
+                  licenseItem.lat ?? 0,
+                  licenseItem.lng ?? 0,
+                  `${licenseItem.company}${licenseItem.region ? ` — ${licenseItem.region}` : ''}`,
+                  {
+                    country: licenseItem.country,
+                    licenseId: licenseItem.id,
+                    commodity: licenseItem.commodity,
+                    sector: licenseItem.sector,
+                  },
+                );
+                setIsDossierOpen(false);
+                setViewMode('route_planner');
+              }}
+              linkedDealRoom={
+                dossierItem
+                  ? getDealRoomForLicense(dossierItem.id, dossierItem.entityKind || 'license')
+                  : undefined
+              }
+              onNavigateToDealRoom={handleNavigateToDealRoom}
+              onDealRoomLinked={dealRooms.upsertDealRoom}
+            />
+          </Suspense>
+        )}
 
         <BulkImportLicensesModal
           isOpen={isBulkImportOpen}
@@ -1017,11 +1191,11 @@ export default function App() {
           <span className="text-[8px] font-black uppercase tracking-wider">{t("מסלול", "Route")}</span>
         </button>
         <button
-          onClick={() => setViewMode('due_diligence')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'due_diligence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('investigations')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'investigations' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucidePieChart className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("בדיקת נאותות", "DD")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t('חקירות', 'Investigate')}</span>
         </button>
         <button
           onClick={() => setViewMode('raw_evidence')}

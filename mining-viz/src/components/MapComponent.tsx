@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
 import {
     MapContainer,
-    TileLayer,
     useMap,
     LayersControl,
     useMapEvents,
@@ -16,6 +16,7 @@ import {
     CircleMarker,
     FeatureGroup,
     Circle,
+    LayerGroup,
 } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
@@ -26,20 +27,54 @@ import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, 
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
-  DEFAULT_VESSEL_FILTERS,
+  CanvasVesselLayer,
+  clearMaritimeSnapshotCache,
+  filterVesselsByViewport,
+  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
+  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
+  sortVesselsForDisplay,
+  toVesselDrawRecords,
   VESSEL_SHIP_TYPE_OPTIONS,
+  MARITIME_LEGEND_KEYS,
+  VESSEL_CATEGORY_COLORS,
+  VESSEL_LEGEND_T,
   type VesselFilters,
 } from '../lib/vessels';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
+import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
+import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
+import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
+import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
+import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
+import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
+import RoutePlannerFlyEffect from '../features/route-planner/RoutePlannerFlyEffect';
+
+// Lazy hub layers — Profiler: avoid mounting hundreds of Leaflet markers until toggled.
+const RoutePlannerPortMarkers = lazy(() => import('../features/route-planner/RoutePlannerPortMarkers'));
+const RoutePlannerAirportMarkers = lazy(() => import('../features/route-planner/RoutePlannerAirportMarkers'));
+import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerMapResizeEffect';
+import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
+import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
+import {
+  countriesWithVisibleLicenses,
+  countryLicenseCounts,
+} from '../lib/countriesWithVisibleLicenses';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
+import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
+import {
+  ESG_CONSERVATION_ZONES,
+  getEsgZoneIntersection,
+} from '../lib/esgConservationZones';
+
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 
@@ -58,172 +93,7 @@ let DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-export const ESG_CONSERVATION_ZONES = [
-  {
-    name: "Upper Guinean Rainforest Buffer",
-    center: [5.556, -0.196] as [number, number],
-    radius: 35000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Strict ecological protection zone. Critical wildlife habitat buffer. High water pollution threat index."
-  },
-  {
-    name: "Kruger National Park Protected Area",
-    center: [-23.988, 31.554] as [number, number],
-    radius: 45000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "National park sanctuary reserve. Mining operations strictly prohibited within buffer bounds."
-  },
-  {
-    name: "East African Rift Valley Ecological Zone",
-    center: [-1.292, 36.821] as [number, number],
-    radius: 50000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Volcanic active conservation area. Ground subsidence risk and protected flora/fauna."
-  },
-  {
-    name: "Nile Delta Protection Buffer",
-    center: [30.044, 31.235] as [number, number],
-    radius: 60000,
-    color: "#10b981",
-    fillColor: "#059669",
-    description: "Sensitive delta agricultural zone. Soil salinity warning and chemical runoff prevention area."
-  }
-];
-
-export function getEsgZoneIntersection(lat?: number | null, lng?: number | null) {
-  if (lat == null || lng == null) return null;
-  for (const zone of ESG_CONSERVATION_ZONES) {
-    const [zLat, zLng] = zone.center;
-    const R = 6371e3;
-    const phi1 = (lat * Math.PI) / 180;
-    const phi2 = (zLat * Math.PI) / 180;
-    const deltaPhi = ((zLat - lat) * Math.PI) / 180;
-    const deltaLambda = ((zLng - lng) * Math.PI) / 180;
-    const a =
-      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-      Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c;
-    if (distance <= zone.radius) {
-      return zone;
-    }
-  }
-  return null;
-}
-
-/** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
-type VesselCategoryKey =
-    | 'tanker'
-    | 'cargo'
-    | 'passenger'
-    | 'fishing'
-    | 'tug'
-    | 'service'
-    | 'pleasure'
-    | 'fast'
-    | 'other';
-
-const VESSEL_CATEGORY_COLORS: Record<VesselCategoryKey, string> = {
-    tanker: '#fbbf24',
-    cargo: '#38bdf8',
-    passenger: '#34d399',
-    fishing: '#2dd4bf',
-    tug: '#a78bfa',
-    service: '#94a3b8',
-    pleasure: '#f472b6',
-    fast: '#fb923c',
-    other: '#64748b',
-};
-
-function vesselCategoryFromTypeCode(code: number | null | undefined): VesselCategoryKey | null {
-    if (code == null || !Number.isFinite(code)) return null;
-    const c = Math.floor(code);
-    if (c === 0) return 'other';
-    if (c >= 80 && c <= 89) return 'tanker';
-    if (c >= 70 && c <= 79) return 'cargo';
-    if (c >= 60 && c <= 69) return 'passenger';
-    if (c === 30) return 'fishing';
-    if (c === 31 || c === 32 || c === 52) return 'tug';
-    if ([33, 34, 35, 50, 51, 53, 54, 55, 58, 59].includes(c)) return 'service';
-    if (c === 36 || c === 37) return 'pleasure';
-    if ((c >= 40 && c <= 49) || (c >= 20 && c <= 29)) return 'fast';
-    if (c >= 90 && c <= 99) return 'other';
-    return null;
-}
-
-function vesselCategoryFromLabel(label: string | null | undefined): VesselCategoryKey | null {
-    if (!label) return null;
-    const s = label.toLowerCase();
-    if (s.includes('tank')) return 'tanker';
-    if (s.includes('cargo') || s.includes('container') || s.includes('bulk') || s.includes('carrier')) return 'cargo';
-    if (s.includes('passenger') || s.includes('cruise')) return 'passenger';
-    if (s.includes('fish')) return 'fishing';
-    if (s.includes('tug') || s.includes('tow')) return 'tug';
-    if (
-        s.includes('pilot') ||
-        s.includes('search') ||
-        s.includes('sar') ||
-        s.includes('rescue') ||
-        s.includes('military') ||
-        s.includes('law') ||
-        s.includes('dredg') ||
-        s.includes('port tender') ||
-        s.includes('anti-pollution')
-    )
-        return 'service';
-    if (s.includes('pleasure') || s.includes('sailing') || s.includes('yacht')) return 'pleasure';
-    if (s.includes('high speed') || s.includes('hsc') || s.includes('wig')) return 'fast';
-    return null;
-}
-
-function getVesselMarkerColor(vessel: MaritimeVessel): string {
-    const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
-    if (fromCode) return VESSEL_CATEGORY_COLORS[fromCode];
-    const fromLabel = vesselCategoryFromLabel(vessel.ship_type_label);
-    if (fromLabel) return VESSEL_CATEGORY_COLORS[fromLabel];
-    return VESSEL_CATEGORY_COLORS.other;
-}
-
-/** Prefer true heading; else course over ground; invalid AIS (511) ignored. */
-function getVesselHeadingDegrees(vessel: MaritimeVessel): number {
-    const th = vessel.true_heading;
-    if (th != null && Number.isFinite(th) && th !== 511 && th >= 0 && th < 360) return th;
-    const cog = vessel.course_over_ground;
-    if (cog != null && Number.isFinite(cog)) {
-        let c = cog % 360;
-        if (c < 0) c += 360;
-        if (Math.abs(c - 360) < 1e-6 || c === 360) return 0;
-        return c;
-    }
-    return 0;
-}
-
-const MARITIME_LEGEND_KEYS: VesselCategoryKey[] = [
-    'tanker',
-    'cargo',
-    'passenger',
-    'fishing',
-    'tug',
-    'service',
-    'pleasure',
-    'fast',
-    'other',
-];
-
-const VESSEL_LEGEND_T: Record<VesselCategoryKey, [string, string]> = {
-    tanker: ['מכלית', 'Tanker'],
-    cargo: ['מטען', 'Cargo'],
-    passenger: ['נוסעים', 'Passenger'],
-    fishing: ['דיג', 'Fishing'],
-    tug: ['גוררת', 'Tug'],
-    service: ['שירות', 'Service'],
-    pleasure: ['שייט', 'Pleasure'],
-    fast: ['מהיר', 'Fast'],
-    other: ['אחר/לא ידוע', 'Other'],
-};
+export { ESG_CONSERVATION_ZONES, getEsgZoneIntersection };
 
 const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean) => {
     const isGold = color === '#FFD700';
@@ -257,30 +127,6 @@ const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean
     });
 };
 
-const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
-    const heading = getVesselHeadingDegrees(vessel);
-    const color = getVesselMarkerColor(vessel);
-    const dim = isSelected ? 26 : 20;
-    const half = dim / 2;
-    const scale = isSelected ? 1.12 : 1;
-    const glow =
-        isSelected
-            ? 'drop-shadow(0 0 8px rgba(255,255,255,0.45)) drop-shadow(0 0 12px rgba(34,211,238,0.35))'
-            : 'drop-shadow(0 0 5px rgba(0,0,0,0.75))';
-    const svgSize = Math.round(dim * 0.85);
-    const stroke = 'rgba(255,255,255,0.92)';
-    const inner = `<div class="vessel-marker-inner" style="width:${dim}px;height:${dim}px;display:flex;align-items:center;justify-content:center;transform:rotate(${heading}deg) scale(${scale});filter:${glow};">
-<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 24 24" style="display:block" aria-hidden="true">
-<path d="M12 2.5 L21.5 20.5 L12 15.2 L2.5 20.5 Z" fill="${color}" stroke="${stroke}" stroke-width="1.15" stroke-linejoin="round"/>
-</svg></div>`;
-    return new L.DivIcon({
-        className: `vessel-marker${isSelected ? ' is-selected' : ''}`,
-        html: inner,
-        iconSize: [dim, dim],
-        iconAnchor: [half, half],
-        popupAnchor: [0, -half],
-    });
-};
 
 // Applied to the marker root (.leaflet-marker-icon) when an item is the
 // active selection. We toggle a class instead of calling setIcon() because
@@ -290,16 +136,9 @@ const createVesselIcon = (vessel: MaritimeVessel, isSelected: boolean) => {
 // points.
 const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
-const MARITIME_MAX_VESSEL_OPTIONS = ['100', '300', '600', '1000'];
+const MARITIME_MAX_VESSEL_OPTIONS = ['1000', '2000', '5000', '10000', '15000'];
 
-/** Matches marker rendering: borders only for countries with at least one plottable license. */
-function licenseHasMapCoordinates(item: MiningLicense): boolean {
-    const lat = item.lat;
-    const lng = item.lng;
-    return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
-}
-const MARITIME_CAPTURE_WINDOW_OPTIONS = ['6', '10', '15'];
-const MARITIME_RENDER_SOFT_CAP = 1200;
+const MARITIME_CAPTURE_WINDOW_OPTIONS = ['10', '15', '25', '30'];
 
 const getMarkerColor = (
   commodity?: string,
@@ -314,6 +153,7 @@ const getMarkerColor = (
 
     if (entitySubtype === 'tank_farm') return '#f97316';
     if (entitySubtype === 'storage_terminal') return '#06b6d4';
+    if (entitySubtype === 'refinery') return '#fb923c';
 
     if (sector) {
       const s = sector.toLowerCase();
@@ -355,16 +195,44 @@ interface MapComponentProps {
   /** Optional status line while some country feeds are still loading or failed (non-blocking). */
   licensesSecondaryStatus?: string | null;
   /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
-  trackLicenseViewport?: boolean;
-  onLicenseViewportChange?: (bounds: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
+  maritimeMapViewActive?: boolean;
+  isMaritimeLayerEnabled?: boolean;
+  onMaritimeLayerEnabledChange?: (enabled: boolean) => void;
+  vesselFilters?: VesselFilters;
+  onVesselFiltersChange?: (filters: VesselFilters) => void;
+  maritimeMaxVessels?: string;
+  onMaritimeMaxVesselsChange?: (value: string) => void;
+  maritimeCaptureWindow?: string;
+  onMaritimeCaptureWindowChange?: (value: string) => void;
+  prioritizePetroleumVessels?: boolean;
+  onPrioritizePetroleumVesselsChange?: (enabled: boolean) => void;
   routePlannerOverlay?: RouteMapOverlay | null;
   routePlannerPickRole?: 'supplier' | 'buyer' | null;
-  onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+  onRoutePlannerMapPick?: (
+    lat: number,
+    lng: number,
+    role: 'supplier' | 'buyer',
+    label?: string,
+    country?: string,
+  ) => void;
+  routePlannerPorts?: RoutePlannerHubMarker[];
+  routePlannerShowPorts?: boolean;
+  onRoutePlannerPortPick?: (port: RoutePlannerHubMarker, role: 'supplier' | 'buyer') => void;
+  routePlannerAirports?: RoutePlannerHubMarker[];
+  routePlannerShowAirports?: boolean;
+  onRoutePlannerAirportPick?: (airport: RoutePlannerHubMarker, role: 'supplier' | 'buyer') => void;
+  routePlannerFlyTrigger?: number;
+  routePlannerFlyTarget?: { lat: number; lng: number } | null;
   isInDdQueue?: (id: string) => boolean;
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
+  getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
+  /** When set, only this country's outline is requested and emphasized; global outlines are hidden. */
+  countryFocusCountry?: string | null;
+  /** Increment when country focus is applied so the map can fit bounds after borders load. */
+  countryFocusBoundsTrigger?: number;
 }
 
 const MapEffect = ({
@@ -399,7 +267,13 @@ const MapClickHandler = ({
 }: {
     onMapClick: () => void;
     routePlannerPickRole?: 'supplier' | 'buyer' | null;
-    onRoutePlannerMapPick?: (lat: number, lng: number, role: 'supplier' | 'buyer') => void;
+    onRoutePlannerMapPick?: (
+      lat: number,
+      lng: number,
+      role: 'supplier' | 'buyer',
+      label?: string,
+      country?: string,
+    ) => void;
 }) => {
     useMapEvents({
         click(e) {
@@ -413,6 +287,28 @@ const MapClickHandler = ({
     return null;
 };
 
+function routeOverlayBounds(overlay: RouteMapOverlay): L.LatLngBounds | null {
+    const points: [number, number][] = [];
+    for (const leg of overlay.legs) {
+        for (const coord of leg.path) {
+            if (
+                Array.isArray(coord) &&
+                coord.length === 2 &&
+                Number.isFinite(coord[0]) &&
+                Number.isFinite(coord[1])
+            ) {
+                points.push([coord[0], coord[1]]);
+            }
+        }
+    }
+    for (const wp of overlay.waypoints) {
+        points.push([wp.lat, wp.lng]);
+    }
+    if (!points.length) return null;
+    const bounds = L.latLngBounds(points);
+    return bounds.isValid() ? bounds : null;
+}
+
 const RoutePlannerBoundsEffect = ({
     overlay,
 }: {
@@ -420,63 +316,54 @@ const RoutePlannerBoundsEffect = ({
 }) => {
     const map = useMap();
     useEffect(() => {
-        const wps = overlay?.waypoints;
-        if (!wps?.length) return;
-        const bounds = L.latLngBounds(wps.map((w) => [w.lat, w.lng]));
-        if (!bounds.isValid()) return;
-        map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: 8 });
+        if (!overlay?.legs?.length) return;
+        const bounds = routeOverlayBounds(overlay);
+        if (!bounds) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            map.fitBounds(bounds.pad(0.12), { animate: false, maxZoom: 7, padding: [40, 40] });
+        }, 80);
+        return () => window.clearTimeout(timer);
     }, [map, overlay]);
     return null;
 };
 
-const DataBoundsEffect = ({
-    data,
-    selectedItem,
-    viewModeKey,
+const CountryFocusBoundsFly = ({
+    active,
+    geojson,
+    trigger,
 }: {
-    data: Array<MiningLicense & { _displayLat?: number | null; _displayLng?: number | null }>;
-    selectedItem: MiningLicense | null;
-    viewModeKey: string;
+    active: boolean;
+    geojson: object | null | undefined;
+    trigger: number;
 }) => {
     const map = useMap();
-    const lastSignatureRef = useRef<string>('');
-
     useEffect(() => {
-        if (selectedItem) return;
-        const coords = data
-            .filter((item) => item._displayLat != null && item._displayLng != null)
-            .map((item) => [item._displayLat as number, item._displayLng as number] as [number, number]);
-        if (coords.length === 0) return;
-
-        const first = coords[0];
-        const last = coords[coords.length - 1];
-        const signature = `${viewModeKey}:${coords.length}:${first[0].toFixed(3)}:${first[1].toFixed(3)}:${last[0].toFixed(3)}:${last[1].toFixed(3)}`;
-        if (lastSignatureRef.current === signature) return;
-        lastSignatureRef.current = signature;
-
-        if (coords.length === 1) {
-            map.setView(coords[0], Math.max(map.getZoom(), 6), { animate: true });
-            return;
+        if (!active || !geojson || trigger <= 0) return;
+        try {
+            const gjLayer = L.geoJSON(geojson as never);
+            const bounds = gjLayer.getBounds();
+            if (!bounds.isValid()) return;
+            map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
+        } catch {
+            /* ignore malformed GeoJSON during development */
         }
-
-        map.fitBounds(L.latLngBounds(coords).pad(0.18), {
-            animate: true,
-            maxZoom: 6,
-        });
-    }, [data, map, selectedItem, viewModeKey]);
-
+    }, [active, geojson, trigger, map]);
     return null;
 };
 
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
+    debounceMs = 0,
 }: {
     active: boolean;
     onBoundsChange: (bbox: MaritimeViewportBounds | null) => void;
+    debounceMs?: number;
 }) => {
     const map = useMap();
     const lastSignatureRef = useRef<string>('');
+    const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const emitBounds = useCallback(() => {
         if (!active) return;
@@ -494,8 +381,21 @@ const ViewportBoundsTracker = ({
         onBoundsChange(nextBounds);
     }, [active, map, onBoundsChange]);
 
+    const scheduleEmitBounds = useCallback(() => {
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        if (debounceMs <= 0) {
+            emitBounds();
+            return;
+        }
+        debounceTimerRef.current = setTimeout(() => {
+            debounceTimerRef.current = null;
+            emitBounds();
+        }, debounceMs);
+    }, [debounceMs, emitBounds]);
+
     useEffect(() => {
         if (!active) {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
             lastSignatureRef.current = '';
             onBoundsChange(null);
             return;
@@ -503,9 +403,16 @@ const ViewportBoundsTracker = ({
         emitBounds();
     }, [active, emitBounds, onBoundsChange]);
 
+    useEffect(
+        () => () => {
+            if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        },
+        [],
+    );
+
     useMapEvents({
-        moveend: emitBounds,
-        zoomend: emitBounds,
+        moveend: scheduleEmitBounds,
+        zoomend: scheduleEmitBounds,
     });
 
     return null;
@@ -526,24 +433,46 @@ export default function MapComponent({
   licensesFetchPending = false,
   licensesRefetching = false,
   licensesSecondaryStatus = null,
-  trackLicenseViewport = false,
-  onLicenseViewportChange,
   selectedMaritimeVessel,
   onSelectMaritimeVessel,
+  maritimeMapViewActive = false,
+  isMaritimeLayerEnabled: isMaritimeLayerEnabledProp = false,
+  onMaritimeLayerEnabledChange,
+  vesselFilters: vesselFiltersProp,
+  onVesselFiltersChange,
+  maritimeMaxVessels: maritimeMaxVesselsProp = '15000',
+  onMaritimeMaxVesselsChange,
+  maritimeCaptureWindow: maritimeCaptureWindowProp = '25',
+  onMaritimeCaptureWindowChange,
+  prioritizePetroleumVessels = false,
+  onPrioritizePetroleumVesselsChange,
   worldCoverage,
   routePlannerOverlay = null,
   routePlannerPickRole = null,
   onRoutePlannerMapPick,
+  routePlannerPorts = [],
+  routePlannerShowPorts = false,
+  onRoutePlannerPortPick,
+  routePlannerAirports = [],
+  routePlannerShowAirports = false,
+  onRoutePlannerAirportPick,
+  routePlannerFlyTrigger = 0,
+  routePlannerFlyTarget = null,
   isInDdQueue,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  getDealRoomForLicense,
+  countryFocusCountry = null,
+  countryFocusBoundsTrigger = 0,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
+    const canvasVesselLayerRef = useRef<CanvasVesselLayer | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
@@ -553,18 +482,41 @@ export default function MapComponent({
         return window.innerWidth < 768 || /Mobi|Android|iPhone/i.test(navigator.userAgent);
     }, []);
 
-    const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
-    const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('5000');
-    const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('10');
+    const isMaritimeLayerEnabled = isMaritimeLayerEnabledProp;
+    const setIsMaritimeLayerEnabled = onMaritimeLayerEnabledChange ?? (() => {});
+    const maritimeMaxVessels = maritimeMaxVesselsProp;
+    const setMaritimeMaxVessels = onMaritimeMaxVesselsChange ?? (() => {});
+    const maritimeCaptureWindow = maritimeCaptureWindowProp;
+    const setMaritimeCaptureWindow = onMaritimeCaptureWindowChange ?? (() => {});
+    const vesselFilters = vesselFiltersProp ?? { search: '', shipTypes: [], minSpeedKnots: null, maxSpeedKnots: null, navigationalStatuses: [] };
+    const debouncedVesselSearch = useDebouncedValue(vesselFilters.search);
+    const vesselFiltersApplied = useMemo(
+        () => ({ ...vesselFilters, search: debouncedVesselSearch }),
+        [vesselFilters, debouncedVesselSearch],
+    );
+    const setVesselFilters = onVesselFiltersChange ?? (() => {});
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
+    const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
+    const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
-    const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
+    const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        if (window.localStorage.getItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY) === '1') {
+            return true;
+        }
+        return window.localStorage.getItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY) === '1';
+    });
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
-    const handleMaritimeLayerActiveChange = useCallback((active: boolean) => {
-        setIsMaritimeLayerEnabled(active);
-    }, []);
+    const handleMaritimeLayerActiveChange = useCallback(
+        (active: boolean) => {
+            setIsMaritimeLayerEnabled(active);
+        },
+        [setIsMaritimeLayerEnabled],
+    );
+    const vesselApiScope =
+        prioritizePetroleumVessels && isOilAndGasView ? ('oil_tankers' as const) : ('all_vessels' as const);
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -622,31 +574,79 @@ export default function MapComponent({
         error: maritimeError,
         refetch: refetchMaritime,
     } = useMaritimeVessels({
-        enabled: isOilAndGasView, // Load in background even if layer is off
+        enabled: isMaritimeMapView,
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
-        scope: 'all_vessels',
-        bbox: maritimeViewport,
+        scope: vesselApiScope,
+        includeCoastalDemo: includeCoastalDemoVessels,
     });
-    const maritimeVesselsRaw = isMaritimeLayerEnabled ? (maritimeFeed?.vessels ?? []) : [];
-    const maritimeVessels = useMemo(
-        () => applyVesselFilters(maritimeVesselsRaw, vesselFilters),
-        [maritimeVesselsRaw, vesselFilters],
+    const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
+    const maritimeSnapshotTotal =
+        maritimeFeed?.snapshot_vessel_count ?? maritimeFeed?.total_available ?? maritimeSnapshotVessels.length;
+    const maritimeSparseSnapshot = isMaritimeLayerEnabled && maritimeSnapshotTotal < 100;
+    const maritimeVesselsInViewport = useMemo(
+        () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
+        [maritimeSnapshotVessels, maritimeViewport],
     );
-    const maritimeVisibleVessels = maritimeVessels.slice(0, MARITIME_RENDER_SOFT_CAP);
+    const maritimeVessels = useMemo(() => {
+        const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
+        return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
+    }, [maritimeVesselsInViewport, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
+    const maritimeServedFromCache = Boolean(
+        maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
+    );
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
-    const vesselsVisible = isOilAndGasView && oilAndGasDisplayMode !== 'on_ground_only';
+    const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
+    useLayoutEffect(() => {
+        if (!vesselsVisible || !isMaritimeLayerEnabled) return;
+        const layer = canvasVesselLayerRef.current;
+        if (!layer) return;
+        layer.setVessels(
+            maritimeVessels,
+            toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
+        );
+    }, [
+        vesselsVisible,
+        isMaritimeLayerEnabled,
+        maritimeVessels,
+        maritimeMapZoom,
+        selectedMaritimeVessel?.id,
+    ]);
+
+    const prevCoastalDemoToggleMount = useRef(true);
     useEffect(() => {
-        if (isOilAndGasView) return;
-        setIsMaritimeLayerEnabled(false);
+        if (typeof window === 'undefined') return;
+        if (includeCoastalDemoVessels) {
+            window.localStorage.setItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY, '1');
+            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
+        } else {
+            window.localStorage.removeItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY);
+            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
+        }
+    }, [includeCoastalDemoVessels]);
+
+    useEffect(() => {
+        if (prevCoastalDemoToggleMount.current) {
+            prevCoastalDemoToggleMount.current = false;
+            return;
+        }
+        clearMaritimeSnapshotCache();
+    }, [includeCoastalDemoVessels]);
+
+    useEffect(() => {
+        if (isMaritimeMapView) return;
         setOilAndGasDisplayMode('combined');
         setMaritimeViewport(null);
         setMaritimeAdvancedOpen(false);
-        onSelectMaritimeVessel(null);
-    }, [isOilAndGasView, onSelectMaritimeVessel]);
+    }, [isMaritimeMapView]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setPetroleumDetailZoom(petroleumMapZoom), 400);
+        return () => window.clearTimeout(timer);
+    }, [petroleumMapZoom]);
 
     useEffect(() => {
         if (!isMaritimeLayerEnabled) setMaritimeAdvancedOpen(false);
@@ -664,8 +664,8 @@ export default function MapComponent({
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
     const maritimeIdleHint = t(
-        'הפעל את שכבת «כלי שיט (AIS)» בבקרת השכבות (למטה מימין) כדי לטעון כלי שיט לפי גבולות המפה.',
-        'Turn on the «Vessels (AIS)» overlay in the layer control (bottom-right) to load vessels for the current map bounds.'
+        'הפעל את שכבת «כלי שיט (AIS)» במסננים (אייקון שכבות) או בבקרת השכבות למטה מימין.',
+        'Enable «Vessels (AIS)» in the filter panel (layers icon) or the layer control (bottom-right).'
     );
     const maritimeHeadlineStatus = !isMaritimeLayerEnabled
         ? ''
@@ -674,17 +674,23 @@ export default function MapComponent({
             : maritimeError
                 ? t('טעינה נכשלה', 'Load failed')
                 : !maritimeFeed?.live_positions_enabled
-                    ? t('AIS חי לא זמין', 'Live AIS unavailable')
+                    ? t(
+                          `${maritimeSnapshotTotal.toLocaleString()} כלי שיט (AIS לא חי)`,
+                          `${maritimeSnapshotTotal.toLocaleString()} vessels (live AIS unavailable)`
+                      )
                     : maritimeVessels.length === 0
-                        ? t('אין כלי שיט בתצוגה', 'No vessels in view')
+                        ? t(
+                              `0 בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
+                              `0 in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
+                          )
                         : t(
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בפיקוח`,
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels on watch`
+                              `${maritimeVessels.length.toLocaleString()} בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
+                              `${maritimeVessels.length.toLocaleString()} in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
                           );
     const maritimeDetailNote = !isMaritimeLayerEnabled
         ? t(
-              'כלי השיט כבויים כברירת מחדל במצב נפט וגז. הפעל כדי לטעון רק את האזור הנראה במפה.',
-              'Vessels stay off by default in Oil & Gas. Turn the layer on to load only the visible map area.'
+              'כלי השיט כבויים כברירת מחדל. הפעל כדי להציג מיקומי AIS — הנתונים נטענים ברקע מראש.',
+              'Vessels stay off until you enable the layer. AIS data is prefetched in the background for instant display.'
           )
         : isMaritimeLoading && !maritimeFeed
             ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
@@ -706,6 +712,12 @@ export default function MapComponent({
                           );
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
+    const maritimeSparseWarning = maritimeSparseSnapshot
+        ? t(
+              'מעט כלי שיט במאגר. הפעל docker compose up -d maritime-worker והגדר AISSTREAM_API_KEY בקובץ .env.',
+              'Sparse vessel feed. Run docker compose up -d maritime-worker and set AISSTREAM_API_KEY in .env.'
+          )
+        : null;
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
@@ -752,23 +764,21 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
-    // Use allLicenses (full unfiltered set for current sector) so borders reflect
-    // every country with data in this tab — regardless of active search/filters.
-    // Only countries with at least one mappable coordinate get an outline (rows with
-    // country set but no lat/lng would otherwise show borders with zero markers).
-    const ordered: string[] = [];
-    const seenKey = new Set<string>();
-    for (const d of allLicenses) {
-        if (!licenseHasMapCoordinates(d)) continue;
-        const raw = d.country?.trim();
-        if (!raw) continue;
-        const dedupeKey = raw.toLowerCase();
-        if (seenKey.has(dedupeKey)) continue;
-        seenKey.add(dedupeKey);
-        ordered.push(raw);
-    }
-        return ordered.sort((a, b) => a.localeCompare(b));
-    }, [allLicenses]);
+        if (isRoutePlannerView) {
+            return [];
+        }
+        const focus = countryFocusCountry?.trim();
+        if (focus) {
+            return [focus].sort((a, b) => a.localeCompare(b));
+        }
+        // Outlines follow the same filtered license set as map markers (search + facet filters).
+        const MAX_BORDER_COUNTRIES = 30;
+        const all = countriesWithVisibleLicenses(processedData);
+        if (all.length <= MAX_BORDER_COUNTRIES) return all;
+        return countryLicenseCounts(processedData)
+            .slice(0, MAX_BORDER_COUNTRIES)
+            .map((row) => row.country);
+    }, [processedData, countryFocusCountry, isRoutePlannerView]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
@@ -805,6 +815,33 @@ export default function MapComponent({
         [isDark]
     );
 
+    const countryBorderLayerStyle = useMemo(() => {
+        if (countryFocusCountry?.trim()) {
+            return isDark
+                ? {
+                      className: 'map-country-border map-country-border--focus map-country-border--dark',
+                      fillColor: '#f59e0b',
+                      color: '#fbbf24',
+                      weight: 3,
+                      opacity: 0.95,
+                      fillOpacity: 0.08,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  }
+                : {
+                      className: 'map-country-border map-country-border--focus map-country-border--light',
+                      fillColor: '#f59e0b',
+                      color: '#d97706',
+                      weight: 2.5,
+                      opacity: 0.9,
+                      fillOpacity: 0.06,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  };
+        }
+        return countryBorderPathStyle;
+    }, [countryFocusCountry, isDark, countryBorderPathStyle]);
+
     const renderedMarkers = useMemo(() => {
         if (!onGroundVisible) return null;
         return mapDisplayData.map((item, index) => {
@@ -814,12 +851,20 @@ export default function MapComponent({
             const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
             const isEsgRisk = esgZone !== null;
             const esgZoneName = esgZone?.name;
+            const selected = selectedItem?.id === item.id;
+            const refineryPin = isRefineryEntity(item);
+            const oilFieldPin = !refineryPin && isOilFieldEntity(item);
+            const markerIcon = refineryPin
+              ? createRefineryMapIcon(selected)
+              : oilFieldPin
+                ? createOilFieldMapIcon(selected)
+                : createCustomIcon(color, false, isEsgRisk);
 
             return (
                 <Marker
                     key={getLicenseRenderKey(item, index)}
                     position={[item._displayLat, item._displayLng]}
-                    icon={createCustomIcon(color, false, isEsgRisk)}
+                    icon={markerIcon}
                     ref={(el) => {
                         if (!el) return;
                         markerRefs.current[item.id] = el;
@@ -850,7 +895,7 @@ export default function MapComponent({
                             )}
                         </div>
                     </Tooltip>
-                    <Popup className="custom-popup" minWidth={300}>
+                    <Popup className="custom-popup" minWidth={360} maxWidth={380}>
                         <PopupForm 
                           item={item}
                           annotation={annotation}
@@ -871,6 +916,9 @@ export default function MapComponent({
                           }
                           isEsgRisk={isEsgRisk}
                           esgZoneName={esgZoneName}
+                          dealRoomTitle={
+                            getDealRoomForLicense?.(item.id, item.entityKind || 'license')?.title
+                          }
                         />
                     </Popup>
                 </Marker>
@@ -888,8 +936,36 @@ export default function MapComponent({
         isInDdQueue,
         onAddToDueDiligence,
         onRemoveFromDueDiligence,
+        getDealRoomForLicense,
         onGroundVisible
     ]);
+
+    const handleMaritimeVesselClick = useCallback(
+        (vessel: MaritimeVessel) => {
+            setSelectedItem(null);
+            onSelectMaritimeVessel(vessel);
+        },
+        [onSelectMaritimeVessel, setSelectedItem],
+    );
+
+    const formatMaritimeVesselTooltip = useCallback((vessel: MaritimeVessel) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md';
+        const title = document.createElement('span');
+        title.className = 'text-[10px] font-black uppercase text-cyan-300 tracking-widest';
+        title.textContent = vessel.vessel_name;
+        const meta = document.createElement('p');
+        meta.className = 'text-[9px] text-slate-400';
+        meta.textContent = [
+            vessel.ship_type_label,
+            vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null,
+            vessel.nearest_port?.name,
+        ]
+            .filter(Boolean)
+            .join(' · ');
+        wrap.append(title, meta);
+        return wrap;
+    }, []);
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
@@ -924,6 +1000,25 @@ export default function MapComponent({
                     {licensesSecondaryStatus}
                 </div>
             )}
+
+            {isOilAndGasView &&
+                isMaritimeLayerEnabled &&
+                maritimeFeed?.aisstream_persian_gulf_coverage_gap && (
+                <div
+                    className="pointer-events-auto absolute left-3 right-3 top-3 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:max-w-xl"
+                    role="status"
+                >
+                    <p className="font-black uppercase tracking-widest text-[9px] text-amber-700 dark:text-amber-200">
+                        {t('פער AIS במפרץ הפרסי', 'Persian Gulf AIS upstream gap')}
+                    </p>
+                    <p className="mt-1">
+                        {t(
+                            'AISStream מדלג על המפרץ — הפעילו הצג מיקומי הדגמה בפאנל כלי השיט או הריצו maritime-worker.',
+                            'AISStream skips the Gulf — enable Show demo positions in the vessel panel or run maritime-worker.',
+                        )}
+                    </p>
+                </div>
+            )}
             {!isRoutePlannerView &&
               ((onGroundVisible ? processedData.length : 0) === 0) &&
               ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
@@ -933,7 +1028,7 @@ export default function MapComponent({
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
             )}
-            {isOilAndGasView && (
+            {isMaritimeMapView && (
                 <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
@@ -954,7 +1049,9 @@ export default function MapComponent({
                     <div className="space-y-3 px-3.5 pb-3.5 pt-3">
                         <Button
                             type="button"
-                            onClick={() => setIsMaritimeLayerEnabled((current) => !current)}
+                            onClick={() => {
+                                startTransition(() => setIsMaritimeLayerEnabled((current) => !current));
+                            }}
                             className={`h-10 w-full rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${
                                 isMaritimeLayerEnabled
                                     ? 'border border-black/10 bg-slate-900 text-white hover:bg-slate-800 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100'
@@ -999,6 +1096,32 @@ export default function MapComponent({
                             )}
                         </div>
 
+                        <label
+                            htmlFor="mining-include-coastal-demo"
+                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2.5 dark:border-white/10 dark:bg-white/[0.03]"
+                        >
+                            <Checkbox
+                                id="mining-include-coastal-demo"
+                                checked={includeCoastalDemoVessels}
+                                onCheckedChange={(value) => setIncludeCoastalDemoVessels(value === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="min-w-0 text-[9px] leading-snug text-slate-600 dark:text-slate-300">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                    {t(
+                                        'הצג מיקומי הדגמה כשה־AIS דליל (מפרץ + חופי אפריקה)',
+                                        'Show demo positions where AIS feed is sparse (Gulf + Africa coasts)',
+                                    )}
+                                </span>
+                                <span className="mt-0.5 block text-slate-500 dark:text-slate-400">
+                                    {t(
+                                        'שולח include_coastal_demo=1 לשרת; נשמר בדפדפן. כבו לתצוגת מאגר בלבד.',
+                                        'Sends include_coastal_demo=1 to the API; saved in the browser. Turn off for snapshot-only.',
+                                    )}
+                                </span>
+                            </span>
+                        </label>
+
                         {isMaritimeLayerEnabled && (
                             <>
                                 <div className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
@@ -1022,6 +1145,79 @@ export default function MapComponent({
                                         {t('רענון', 'Refresh')}
                                     </Button>
                                 </div>
+
+                                {maritimeSparseWarning && (
+                                    <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-800 dark:text-amber-200">
+                                        {maritimeSparseWarning}
+                                    </p>
+                                )}
+
+                                {(((maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0) ||
+                                    maritimeFeed?.persian_gulf_demo_synthetic) && (
+                                    <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
+                                        {(maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0 && (
+                                            <span className="block font-semibold text-cyan-950 dark:text-cyan-50">
+                                                {t(
+                                                    `אזורי הדגמה: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
+                                                    `Demo regions: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
+                                                )}
+                                            </span>
+                                        )}
+                                        <span className="mt-1 block">
+                                            {(() => {
+                                                const mode = maritimeFeed?.persian_gulf_demo_mode;
+                                                if (mode === 'api_opt_in') {
+                                                    return includeCoastalDemoVessels
+                                                        ? t(
+                                                              'נקודות סינתטיות/קובץ הדגמה (בקשת משתמש include_coastal_demo) לצד כלי שיט אמיתיים מהמאגר — לא AIS חי באותם תיבות.',
+                                                              'Synthetic / seed-file demo positions (your include_coastal_demo opt-in) appear alongside real snapshot vessels—not live AIS in those boxes.',
+                                                          )
+                                                        : t(
+                                                              'נקודות סינתטיות במפרץ (בקשת משתמש) לצד כלי שיט אמיתיים אחרים מהמאגר — לא AIS חי מהמפרץ.',
+                                                              'Synthetic Gulf demo markers (your opt-in) appear alongside other real snapshot vessels in this feed—not live Gulf AIS.',
+                                                          );
+                                                }
+                                                if (mode === 'env_coverage_gap') {
+                                                    return t(
+                                                        'נקודות הדגמה במפרץ (MARITIME_GULF_DEMO_SEED + פער AISStream) — לא AIS חי מהמפרץ.',
+                                                        'Gulf demo positions (MARITIME_GULF_DEMO_SEED + AISStream gap)—not live Gulf AIS.',
+                                                    );
+                                                }
+                                                if (mode === 'env_coastal_sparse') {
+                                                    return t(
+                                                        'נקודות הדגמה (MARITIME_COASTAL_DEMO_SEED) לתיבות יעד דלילות — לא AIS חי משוחזר.',
+                                                        'Demo positions (MARITIME_COASTAL_DEMO_SEED) for sparse target boxes—not restored live AIS.',
+                                                    );
+                                                }
+                                                return t(
+                                                    'נקודות הדגמה — לא AIS חי באותם אזורים; שאר הסימנים עלולים להיות AIS אמיתי מהמאגר.',
+                                                    'Demo positions—not live AIS in those areas; other markers may still be real snapshot AIS.',
+                                                );
+                                            })()}
+                                        </span>
+                                    </p>
+                                )}
+
+                                {maritimeFeed?.aisstream_persian_gulf_coverage_gap &&
+                                    !maritimeFeed?.persian_gulf_demo_synthetic && (
+                                        <p className="rounded-lg border border-slate-400/30 bg-slate-500/10 px-2.5 py-2 text-[9px] leading-snug text-slate-700 dark:text-slate-200">
+                                            {t(
+                                                'פער במקור AISStream במפרץ הפרסי — המפרץ עלול להיראות ריק למרות תנועה צפופה במקורות מסחריים.',
+                                                'AIS feed gap in the Persian Gulf — the Gulf may look empty even when commercial trackers show dense traffic.'
+                                            )}{' '}
+                                            <a
+                                                href={
+                                                    maritimeFeed.maritime_aisstream_issue_url ||
+                                                    'https://github.com/aisstream/aisstream/issues/17'
+                                                }
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="font-semibold text-cyan-700 underline underline-offset-2 hover:text-cyan-600 dark:text-cyan-300 dark:hover:text-cyan-200"
+                                            >
+                                                {t('מעקב בעיה', 'Track issue')}
+                                            </a>
+                                        </p>
+                                    )}
 
                                 <button
                                     type="button"
@@ -1149,11 +1345,11 @@ export default function MapComponent({
                                                     />
                                                 </div>
                                             </div>
-                                            {maritimeVesselsRaw.length > maritimeVessels.length && (
+                                            {maritimeVesselsInViewport.length > maritimeVessels.length && (
                                                 <p className="text-[9px] text-slate-500">
                                                     {t(
-                                                        `מוצגים ${maritimeVessels.length} מתוך ${maritimeVesselsRaw.length} לאחר סינון.`,
-                                                        `Showing ${maritimeVessels.length} of ${maritimeVesselsRaw.length} after filters.`
+                                                        `מוצגים ${maritimeVessels.length} מתוך ${maritimeVesselsInViewport.length} לאחר סינון.`,
+                                                        `Showing ${maritimeVessels.length} of ${maritimeVesselsInViewport.length} after filters.`
                                                     )}
                                                 </p>
                                             )}
@@ -1165,8 +1361,8 @@ export default function MapComponent({
                                             </p>
                                             <p className="mb-1 text-[9px] leading-snug text-slate-500">
                                                 {t(
-                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS.',
-                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category.'
+                                                    'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. בזום עולמי מוצגת דגימת LOD (מכליות מועדפות) — לא קיבוץ; בזום אזורי מוצגים כל כלי השיט בתצוגה.',
+                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. At world zoom the map uses display LOD (tankers preferred)—not clustering; at regional zoom every in-view vessel is drawn.'
                                                 )}
                                             </p>
                                             <div className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -1245,14 +1441,6 @@ export default function MapComponent({
                                                 )}
                                             </p>
                                         )}
-                                        {maritimeVessels.length > MARITIME_RENDER_SOFT_CAP && (
-                                            <p className="text-[9px] leading-snug text-slate-500">
-                                                {t(
-                                                    `התצוגה מוגבלת ל-${MARITIME_RENDER_SOFT_CAP} סמנים למניעת עומס.`,
-                                                    `Rendering is limited to ${MARITIME_RENDER_SOFT_CAP} markers to keep the map smooth.`
-                                                )}
-                                            </p>
-                                        )}
                                         {maritimeLimitationText && (
                                             <p className="text-[9px] leading-snug text-slate-500">{maritimeLimitationText}</p>
                                         )}
@@ -1275,6 +1463,7 @@ export default function MapComponent({
               zoom={viewModeKey === 'ports' ? 3 : viewModeKey === 'route_planner' ? 4 : 7} 
               className="w-full h-full"
               zoomControl={false}
+              preferCanvas
               // @ts-ignore
               ref={mapRef}
             >
@@ -1287,7 +1476,7 @@ export default function MapComponent({
                       onSelectMaritimeVessel(null);
                     }}
                 />
-                <ViewportBoundsTracker active={isOilAndGasView} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker active={isMaritimeMapView} debounceMs={50} onBoundsChange={setMaritimeViewport} />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1305,17 +1494,28 @@ export default function MapComponent({
                 {isOilAndGasView && onGroundVisible && (
                     <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
                 )}
-                {onLicenseViewportChange && (
-                  <ViewportBoundsTracker
-                    active={trackLicenseViewport}
-                    onBoundsChange={onLicenseViewportChange}
-                  />
+                {isMaritimeMapView && isMaritimeLayerEnabled && (
+                    <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
-                {!isRoutePlannerView && (
-                    <DataBoundsEffect data={mapDisplayData} selectedItem={selectedItem} viewModeKey={viewModeKey} />
-                )}
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
+                <RoutePlannerFlyEffect
+                  target={isRoutePlannerView ? routePlannerFlyTarget : null}
+                  trigger={isRoutePlannerView ? routePlannerFlyTrigger : 0}
+                />
+                <RoutePlannerMapResizeEffect
+                  active={isRoutePlannerView}
+                  resizeKey={
+                    isRoutePlannerView
+                      ? `${routePlannerOverlay?.legs.length ?? 0}:${routePlannerOverlay?.waypoints.length ?? 0}`
+                      : 0
+                  }
+                />
+                <CountryFocusBoundsFly
+                    active={Boolean(countryFocusCountry?.trim())}
+                    geojson={filteredGeoJson ?? null}
+                    trigger={countryFocusBoundsTrigger}
+                />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -1330,21 +1530,7 @@ export default function MapComponent({
                     </div>
                 )}
                 
-                {/* key forces remount when theme changes so `checked` re-applies */}
-                <LayersControl key={resolvedTheme ?? 'dark'} position="bottomright">
-                    <LayersControl.BaseLayer checked={isDark} name={t("כהה", "Dark")}>
-                        <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer checked={!isDark} name={t("בהיר", "Light")}>
-                        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer name={t("לוויין", "Satellite")}>
-                        <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer name={t("טופוגרפי", "Topographic")}>
-                        <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" />
-                    </LayersControl.BaseLayer>
-
+                <MapBasemapLayers isDark={isDark}>
                     <LayersControl.Overlay checked name={t("אזורי שימור סביבתיים (ESG)", "ESG Protected Zones")}>
                         <FeatureGroup>
                             {ESG_CONSERVATION_ZONES.map((zone, idx) => (
@@ -1359,74 +1545,57 @@ export default function MapComponent({
                                         weight: 2.2,
                                         dashArray: "6, 6"
                                     }}
+                                    eventHandlers={{
+                                        click: (e) => {
+                                            L.DomEvent.stopPropagation(e);
+                                        },
+                                    }}
                                 >
-                                    <Tooltip direction="top" opacity={0.95}>
-                                        <div className="p-3 max-w-[240px] font-sans">
-                                          <p className="text-xs font-black uppercase text-emerald-500 tracking-wider mb-1">
-                                            {zone.name}
-                                          </p>
-                                          <p className="text-[10px] text-slate-300 leading-normal">
-                                            {zone.description}
-                                          </p>
-                                        </div>
-                                    </Tooltip>
+                                    <Popup
+                                        className="esg-leaflet-popup"
+                                        minWidth={320}
+                                        maxWidth={380}
+                                        autoPanPadding={[16, 16]}
+                                    >
+                                        <EsgProtectedZonePopup zone={zone} />
+                                    </Popup>
                                 </Circle>
                             ))}
                         </FeatureGroup>
                     </LayersControl.Overlay>
 
-                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
-                        <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
+                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
+                        <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
-                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}`}
+                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
                                 data={filteredGeoJson}
                                 interactive={false}
-                                style={countryBorderPathStyle}
+                                style={countryBorderLayerStyle}
                             />
                         </LayersControl.Overlay>
                     )}
                     {isOilAndGasView && onGroundVisible && (
                         <PetroleumMapLayers
-                            bbox={maritimeViewport}
-                            mapZoom={petroleumMapZoom}
+                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                            mapZoom={petroleumDetailZoom}
                             enabled={isOilAndGasView && onGroundVisible}
                         />
                     )}
-                    {isOilAndGasView && vesselsVisible && (
+                    {vesselsVisible && isMaritimeLayerEnabled && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
-                            <FeatureGroup>
-                                {maritimeVisibleVessels.map((vessel) => (
-                                    <Marker
-                                        key={vessel.id}
-                                        position={[vessel.lat, vessel.lng]}
-                                        icon={createVesselIcon(vessel, selectedMaritimeVessel?.id === vessel.id)}
-                                        eventHandlers={{
-                                            click: (e) => {
-                                                L.DomEvent.stopPropagation(e);
-                                                setSelectedItem(null);
-                                                onSelectMaritimeVessel(vessel);
-                                            },
-                                        }}
-                                    >
-                                        <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                                            <div className="bg-slate-950 border border-cyan-500/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                                                <span className="text-[10px] font-black uppercase text-cyan-300 tracking-widest">
-                                                    {vessel.vessel_name}
-                                                </span>
-                                                <p className="text-[9px] text-slate-400">
-                                                    {[vessel.ship_type_label, vessel.speed_knots != null ? `${vessel.speed_knots} kn` : null, vessel.nearest_port?.name]
-                                                        .filter(Boolean)
-                                                        .join(' · ')}
-                                                </p>
-                                            </div>
-                                        </Tooltip>
-                                    </Marker>
-                                ))}
-                            </FeatureGroup>
+                            <LayerGroup>
+                                <CanvasVesselMarkers
+                                    layerApiRef={canvasVesselLayerRef}
+                                    mapZoom={maritimeMapZoom}
+                                    selectedId={selectedMaritimeVessel?.id ?? null}
+                                    onVesselClick={handleMaritimeVesselClick}
+                                    formatTooltip={formatMaritimeVesselTooltip}
+                                />
+                            </LayerGroup>
                         </LayersControl.Overlay>
                     )}
-                </LayersControl>
-                {isOilAndGasView && (
+                </MapBasemapLayers>
+                {isMaritimeMapView && (
                     <MaritimeLayerSync layerName={vesselLayerLabel} onLayerActiveChange={handleMaritimeLayerActiveChange} />
                 )}
 
@@ -1442,51 +1611,31 @@ export default function MapComponent({
                     {renderedMarkers}
                 </MarkerClusterGroup>
                 )}
+                {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (
+                  <Suspense fallback={null}>
+                    <RoutePlannerPortMarkers
+                      ports={routePlannerPorts}
+                      pickRole={routePlannerPickRole ?? null}
+                      onPortPick={onRoutePlannerPortPick}
+                    />
+                  </Suspense>
+                )}
+                {isRoutePlannerView && routePlannerShowAirports && routePlannerAirports.length > 0 && onRoutePlannerAirportPick && (
+                  <Suspense fallback={null}>
+                    <RoutePlannerAirportMarkers
+                      airports={routePlannerAirports}
+                      pickRole={routePlannerPickRole ?? null}
+                      onAirportPick={onRoutePlannerAirportPick}
+                    />
+                  </Suspense>
+                )}
                 {isRoutePlannerView && routePlannerOverlay && (
-                  <>
-                    {routePlannerOverlay.legs.map((leg, idx) =>
-                      Array.isArray(leg.path) && leg.path.length > 1 ? (
-                        <Polyline
-                          key={`rp-leg-${idx}`}
-                          positions={leg.path}
-                          pathOptions={{
-                            weight: idx === 0 ? 4 : 5,
-                            color: idx === 0 ? '#f59e0b' : '#fcd34d',
-                            opacity: 0.9,
-                            lineCap: 'round',
-                            lineJoin: 'round',
-                            ...(idx === 1 ? ({ dashArray: '10 14' as const }) : {}),
-                          }}
-                        />
-                      ) : null,
-                    )}
-                    {routePlannerOverlay.waypoints.map((wp, i) => {
-                      let fill = '#22c55e';
-                      if (wp.role === 'transit') fill = '#38bdf8';
-                      if (wp.role === 'destination') fill = '#f43f5e';
-                      const r =
-                        wp.role === 'destination' ? 14 : wp.role === 'origin' ? 13 : 10;
-                      return (
-                        <CircleMarker
-                          key={`rp-wp-${i}-${wp.role}`}
-                          center={[wp.lat, wp.lng]}
-                          radius={r}
-                          pathOptions={{
-                            fillColor: fill,
-                            color: 'rgba(255,255,255,0.9)',
-                            weight: 2,
-                            fillOpacity: 0.9,
-                          }}
-                        >
-                          <Tooltip direction="top" offset={[0, -12]} opacity={1}>
-                            <span className="text-[11px] font-bold text-slate-900">{t(wp.label[0], wp.label[1])}</span>
-                          </Tooltip>
-                        </CircleMarker>
-                      );
-                    })}
-                  </>
+                  <RoutePlannerMapLayers overlay={routePlannerOverlay} />
                 )}
             </MapContainer>
+            {isRoutePlannerView && routePlannerOverlay && routePlannerOverlay.legs.length > 0 && (
+              <RouteLegend className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,240px)]" />
+            )}
         </div>
     );
 }

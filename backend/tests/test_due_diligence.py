@@ -375,6 +375,22 @@ class TestEvaluateDueDiligence(unittest.TestCase):
         self.assertLessEqual(report.overall_score, 100)
         self.assertIn(report.recommendation, ("approve", "escalate", "block"))
 
+    def test_high_value_transaction_requires_escalation(self):
+        req = DDRequest(
+            supplier_country="Zambia",
+            buyer_country="Netherlands",
+            product_type="gold",
+            supplier_entity_name="PrimeRose Resources Zambia Limited",
+            buyer_entity_name="Rotterdam Buyer BV",
+            estimated_value_usd=2_800_000_000,
+        )
+        with patch("services.due_diligence._load_rules", return_value=RULES):
+            reload_rules()
+            report = evaluate_due_diligence(req, db_conn=None)
+
+        self.assertEqual(report.recommendation, "escalate")
+        self.assertTrue(any(check.check_id == "kyc.high_value" for check in report.checks))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -48,6 +48,29 @@ If you see **"Database error"** or permissions issues:
 
 If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
 
+Start the AIS ingest worker (required for dense vessel maps):
+
+```bash
+docker compose up -d maritime-worker
+curl -s http://localhost:8000/api/maritime/stats | python3 -m json.tool
+```
+
+Useful `.env` overrides for denser maps:
+
+- `MARITIME_WORKER_WATCH_MODE=all_regions` (default) — subscribes to every curated box including West/South/East Africa
+- `MARITIME_WORKER_WATCH_MODE=global` — single world bounding box (heaviest)
+- `MARITIME_WORKER_MAX_VESSELS=15000` and `MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25`
+- `MARITIME_ALWAYS_ON_REGION_IDS=persian_gulf,arabian_gulf,malacca,east_mediterranean` — high-traffic boxes stay subscribed in rotating mode
+- `MARITIME_AIS_SEED_FILE=/path/to/vessels.json` — optional cold-start JSON (`{"vessels": [...]}`)
+
+Persian Gulf empty map check:
+
+```bash
+curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
+```
+
+If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
+
 ### Remote PostGIS Recovery
 
 Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. After the workflow deploys this image, recreate the stack with `sudo docker compose pull && sudo docker compose up -d --remove-orphans`; only delete the `postgres_data` volume if the existing remote database is disposable, because that reset permanently removes DB data.

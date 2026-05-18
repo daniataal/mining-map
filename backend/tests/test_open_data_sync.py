@@ -8,6 +8,7 @@ from backend.services.ingest.open_data_sync import (
     _normalize_date,
     AFRICA_COVERAGE_OVERRIDES,
     arcgis_geometry_centroid,
+    describe_license_source_record,
     get_source_registry_index,
     infer_world_macro_region,
     normalize_feature,
@@ -191,6 +192,14 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(registry["british_columbia_mineral_tenure"]["coverage_state"], "official_syncable")
         self.assertEqual(registry["usgs_mrds_global"]["source_kind"], "global_open_fallback")
         self.assertEqual(registry["usgs_mrds_global"]["coverage_state"], "global_fallback_only")
+
+    def test_global_open_fallback_provenance_is_explicit(self):
+        provenance = describe_license_source_record("opec_gulf_reference", "global_open_fallback")
+
+        self.assertEqual(provenance["source_kind"], "global_open_fallback")
+        self.assertEqual(provenance["source_access"], "open_reference_dataset")
+        self.assertEqual(provenance["coverage_state"], "global_fallback_only")
+        self.assertIn("verify against official registry", provenance["provenance_note"])
 
 
 if __name__ == "__main__":

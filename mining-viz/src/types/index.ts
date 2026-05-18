@@ -10,6 +10,8 @@ export interface MiningLicense {
   photoUrl?: string | null;
   entityKind?: 'license' | 'storage_terminal' | 'port' | 'logistics_node' | string;
   entitySubtype?:
+    | 'refinery'
+    | 'refinery_complex'
     | 'tank_farm'
     | 'storage_terminal'
     | 'port'
@@ -104,6 +106,105 @@ export interface EntityContact {
   lastSeenAt?: string | null;
 }
 
+export interface AgentJobResponse<TOutput> {
+  job_id: string;
+  agent_type: string;
+  status: 'running' | 'completed' | 'failed' | string;
+  entity_id?: string | null;
+  route_hash?: string | null;
+  input_hash: string;
+  output?: TOutput | null;
+  error?: string | null;
+  cached?: boolean;
+}
+
+export interface ContactEnrichmentOutput {
+  agent: 'contact_enrichment' | string;
+  entity_id: string;
+  entity_kind: string;
+  status: string;
+  contacts: EntityContact[];
+  not_found: string[];
+  limitations: string[];
+  ai?: {
+    status?: string | null;
+    reason?: string | null;
+  };
+  token_saving?: Record<string, unknown>;
+}
+
+export interface OperatorValidationFinding {
+  severity: 'pass' | 'warn' | 'fail' | string;
+  code: string;
+  message: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface DealRoom {
+  id: string;
+  title: string;
+  entityId: string;
+  entityKind: string;
+  status: string;
+  routeSnapshot?: Record<string, unknown> | null;
+  agentJobIds: string[];
+  evidence?: {
+    entity?: Record<string, unknown>;
+    agentOutputs?: Record<string, unknown>;
+    confidence?: number | null;
+    [key: string]: unknown;
+  };
+  notes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  entity?: Record<string, unknown> | null;
+  jobs?: AgentJobResponse<Record<string, unknown>>[];
+}
+
+export interface DealRoomRunResponse {
+  dealRoom: DealRoom;
+  jobs: AgentJobResponse<Record<string, unknown>>[];
+  skipped: Array<{ agent_type: string; reason: string }>;
+}
+
+export interface DealRoomExportPackage {
+  dealRoom: DealRoom;
+  entity: Record<string, unknown>;
+  routeSummary: Record<string, unknown>;
+  agentJobs: AgentJobResponse<Record<string, unknown>>[];
+  agentOutputs: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  procurementAwardsSummary: Record<string, unknown>;
+  procurementAwards: unknown[];
+  risks: string[];
+  confidence?: number | null;
+  decision: string;
+  exportedAt?: string;
+  markdown?: string;
+}
+
+export interface OperatorValidationOutput {
+  agent: 'operator_validation' | string;
+  entity_id: string;
+  entity_kind: string;
+  holder_names: string[];
+  operator_names: string[];
+  findings: OperatorValidationFinding[];
+  score: number;
+  recommendation: 'approve' | 'review' | 'block' | string;
+  confidence?: number;
+  summary?: string;
+  next_steps?: string[];
+  confidence_note?: string;
+  ai?: {
+    status?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    bounded?: boolean;
+  };
+  token_saving?: Record<string, unknown>;
+}
+
 /**
  * Public litigation / regulatory event stored in the ``legal_events`` table.
  * The dossier groups these by ``role`` so analysts can quickly distinguish
@@ -129,6 +230,100 @@ export interface LegalEvent {
   confidenceScore?: number | null;
   lastSeenAt?: string | null;
   createdAt?: string | null;
+}
+
+/** U.S. federal award row from USAspending.gov (Gov Spending & Tenders tab). */
+export interface GovProcurementAward {
+  id: string;
+  title: string;
+  agency: string;
+  value: number;
+  commodity: string;
+  category: 'precious' | 'fuels' | 'strategic' | 'other' | string;
+  uei?: string | null;
+  duns?: string | null;
+  status: string;
+  period: string;
+  recipient?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  naics?: string | null;
+  psc?: string | null;
+  awardType?: string | null;
+  sourceName?: string | null;
+  sourceUrl?: string | null;
+}
+
+export interface GovProcurementRecipientProfile {
+  name?: string | null;
+  uei?: string | null;
+  duns?: string | null;
+  recipientId?: string | null;
+}
+
+export interface GovProcurementResponse {
+  source: string;
+  sourceUrl: string;
+  scope: string;
+  limitations: string[];
+  warnings: string[];
+  queriedAt?: string | null;
+  queryCompany?: string | null;
+  recipientProfile?: GovProcurementRecipientProfile | null;
+  summary: {
+    totalAwardedUsd: number;
+    activeContractCount: number;
+    awardCount: number;
+    topFundingAgency?: string | null;
+    portfolioByCategoryPct: {
+      precious: number;
+      fuels: number;
+      strategic: number;
+      other: number;
+    };
+  };
+  awards: GovProcurementAward[];
+  dataOrigin?: 'database' | 'live' | string | null;
+  lastSyncedAt?: string | null;
+}
+
+/** Federal contractor aggregated from USAspending commodity browse feed. */
+export interface GovProcurementCompany {
+  companyKey?: string | null;
+  name: string;
+  uei?: string | null;
+  duns?: string | null;
+  recipientId?: string | null;
+  totalAwardedUsd: number;
+  awardCount: number;
+  activeAwardCount: number;
+  commodities: string[];
+  categories: string[];
+  topAgency?: string | null;
+  topAward?: {
+    id?: string | null;
+    title?: string | null;
+    value?: number | null;
+    commodity?: string | null;
+    agency?: string | null;
+    sourceUrl?: string | null;
+  } | null;
+  matchedLicenseIds?: string[];
+}
+
+export interface GovProcurementCompaniesResponse {
+  source: string;
+  sourceUrl: string;
+  scope: string;
+  limitations: string[];
+  warnings: string[];
+  cached?: boolean;
+  dataOrigin?: 'database' | 'live' | string | null;
+  cachedAt?: string | null;
+  queriedAt?: string | null;
+  pagination?: { page: number; pageSize: number; total: number } | null;
+  commodityProfiles: { id: string; label: string; category: string }[];
+  companies: GovProcurementCompany[];
 }
 
 export interface EntityRelationship {

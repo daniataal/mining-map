@@ -18,7 +18,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onLogin(username, password);
+        onLogin(username.trim(), password);
     };
 
     return (

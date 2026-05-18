@@ -9,6 +9,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -51,6 +55,19 @@ export default defineConfig({
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          map: ['leaflet', 'react-leaflet', 'react-leaflet-cluster'],
+          markdown: ['react-markdown', 'remark-gfm'],
+          motion: ['framer-motion'],
+          query: ['@tanstack/react-query', 'axios'],
+        },
       },
     },
   },
