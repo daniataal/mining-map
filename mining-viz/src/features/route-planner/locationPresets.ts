@@ -63,6 +63,8 @@ export const AIR_HUB_PRESETS: LocationPreset[] = [
 
 export const MAX_HUB_MARKERS_PER_COUNTRY = 48;
 export const MAX_TOTAL_HUB_MARKERS = 96;
+/** Cap dropdown options per group to keep selects responsive. */
+export const MAX_DROPDOWN_PRESETS_PER_GROUP = 40;
 
 export function canonicalRouteHubCountry(country: string | undefined): string | null {
   const raw = country?.trim();
@@ -99,6 +101,42 @@ export function resolveRouteHubCountries(
 
 export function buyerCountryRequiredForHubs(buyerCountry?: string): boolean {
   return !canonicalRouteHubCountry(buyerCountry);
+}
+
+function hubDistanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const r = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const aa =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+}
+
+/** Nearest catalog port or airport in the given country (for buyer country sync). */
+export function findNearestHubInCountry(
+  lat: number,
+  lng: number,
+  country: string,
+): LocationPreset | null {
+  const canon = canonicalRouteHubCountry(country);
+  if (!canon) return null;
+  const hubs = [...MARITIME_HUB_PRESETS, ...AIR_HUB_PRESETS].filter((hub) =>
+    countriesMatchRouteHubFilter(hub.country, [canon]),
+  );
+  if (!hubs.length) return null;
+  let best = hubs[0];
+  let bestKm = Infinity;
+  for (const hub of hubs) {
+    const km = hubDistanceKm({ lat, lng }, hub);
+    if (km < bestKm) {
+      bestKm = km;
+      best = hub;
+    }
+  }
+  return best;
 }
 
 export const WORLD_TRADE_PRESETS: LocationPreset[] = [
@@ -195,6 +233,10 @@ export function buildPortPresetsFromEntities(entities: MiningLicense[]): Locatio
   );
 }
 
+function presetMatchesCountries(p: LocationPreset, countries: readonly string[]): boolean {
+  return p.country != null && countriesMatchRouteHubFilter(p.country, countries);
+}
+
 export function filterLocationPresetsByCountries(
   presets: LocationPreset[],
   countries: readonly string[],
@@ -202,12 +244,32 @@ export function filterLocationPresetsByCountries(
   if (!countries.length) {
     return presets.filter((p) => p.group === 'licenses' || p.group === 'buyers');
   }
-  return presets.filter(
-    (p) =>
-      p.group === 'licenses' ||
-      p.group === 'buyers' ||
-      (p.country != null && countriesMatchRouteHubFilter(p.country, countries)),
-  );
+  return presets.filter((p) => presetMatchesCountries(p, countries));
+}
+
+/** Countries used to filter each location block's dropdown. */
+export function resolveRolePresetCountries(
+  role: 'supplier' | 'buyer',
+  supplierCountry?: string,
+  buyerCountry?: string,
+): string[] {
+  if (role === 'supplier') {
+    const supplierCanon = canonicalRouteHubCountry(supplierCountry);
+    return supplierCanon ? [supplierCanon] : [];
+  }
+  return resolveRouteHubCountries(supplierCountry, buyerCountry);
+}
+
+function capPresetsByGroup(presets: LocationPreset[], maxPerGroup: number): LocationPreset[] {
+  const counts = new Map<LocationPreset['group'], number>();
+  const out: LocationPreset[] = [];
+  for (const p of presets) {
+    const n = counts.get(p.group) ?? 0;
+    if (n >= maxPerGroup) continue;
+    counts.set(p.group, n + 1);
+    out.push(p);
+  }
+  return out;
 }
 
 export function buildAllLocationPresets(
@@ -215,17 +277,57 @@ export function buildAllLocationPresets(
   portEntities: MiningLicense[] = [],
   options?: { countries?: readonly string[] },
 ): LocationPreset[] {
-  const merged = dedupePresets([
-    ...buildLicensePresets(allLicenses),
-    ...buildPortPresetsFromEntities(portEntities),
-    ...MARITIME_HUB_PRESETS,
-    ...AIR_HUB_PRESETS,
-    ...WORLD_TRADE_PRESETS,
-  ]);
-  if (options?.countries !== undefined) {
-    return filterLocationPresetsByCountries(merged, options.countries);
+  const countries = options?.countries;
+  const hasCountryFilter = countries !== undefined;
+  const countryList = countries ?? [];
+
+  if (hasCountryFilter && !countryList.length) {
+    return capPresetsByGroup(
+      filterLocationPresetsByCountries(buildLicensePresets(allLicenses), []),
+      MAX_DROPDOWN_PRESETS_PER_GROUP,
+    );
   }
-  return merged;
+
+  const licensesForBuild =
+    hasCountryFilter && countryList.length
+      ? allLicenses.filter((item) => countriesMatchRouteHubFilter(item.country, countryList))
+      : allLicenses;
+
+  const portsForBuild =
+    hasCountryFilter && countryList.length
+      ? portEntities.filter((item) => countriesMatchRouteHubFilter(item.country, countryList))
+      : hasCountryFilter
+        ? []
+        : portEntities;
+
+  const catalogMaritime =
+    !hasCountryFilter || !countryList.length
+      ? MARITIME_HUB_PRESETS
+      : MARITIME_HUB_PRESETS.filter((p) => presetMatchesCountries(p, countryList));
+
+  const catalogAir =
+    !hasCountryFilter || !countryList.length
+      ? AIR_HUB_PRESETS
+      : AIR_HUB_PRESETS.filter((p) => presetMatchesCountries(p, countryList));
+
+  const worldTrade =
+    !hasCountryFilter || !countryList.length
+      ? WORLD_TRADE_PRESETS
+      : WORLD_TRADE_PRESETS.filter((p) => presetMatchesCountries(p, countryList));
+
+  const merged = dedupePresets([
+    ...buildLicensePresets(licensesForBuild),
+    ...buildPortPresetsFromEntities(portsForBuild),
+    ...catalogMaritime,
+    ...catalogAir,
+    ...worldTrade,
+  ]);
+
+  const filtered = hasCountryFilter
+    ? filterLocationPresetsByCountries(merged, countryList)
+    : merged;
+
+  return capPresetsByGroup(filtered, MAX_DROPDOWN_PRESETS_PER_GROUP);
 }
 
 export function matchPresetId(

@@ -44,10 +44,12 @@ export default function RoutePlannerAirportMarkers({
           key={airport.id}
           position={[airport.lat, airport.lng]}
           icon={createAirportMapIcon(Boolean(pickRole))}
-          zIndexOffset={pickRole ? 610 : 410}
+          zIndexOffset={pickRole ? 2510 : 410}
+          bubblingMouseEvents={!pickRole}
           eventHandlers={{
             click: (e) => {
-              L.DomEvent.stopPropagation(e);
+              L.DomEvent.stopPropagation(e.originalEvent);
+              L.DomEvent.preventDefault(e.originalEvent);
               if (pickRole) onAirportPick(airport, pickRole);
             },
           }}
