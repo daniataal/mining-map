@@ -70,7 +70,12 @@ export interface RoutePlannerHook {
   pickRole: RoutePickRole | null;
   beginPick: (role: RoutePickRole) => void;
   cancelPick: () => void;
-  handleMapPick: (lat: number, lng: number, role: RoutePickRole) => void;
+  handleMapPick: (lat: number, lng: number, role: RoutePickRole, label?: string, country?: string) => void;
+  showPortsOnMap: boolean;
+  setShowPortsOnMap: (value: boolean) => void;
+  mapFlyTrigger: number;
+  mapFlyTarget: { lat: number; lng: number } | null;
+  flyToLocation: (lat: number, lng: number) => void;
   overlay: RouteMapOverlay | null;
   result: RoutePlannerApiResponse | null;
   /** All route options: recommended first, then alternatives. */
@@ -95,6 +100,9 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [incoterm, setIncoterm] = useState('FOB');
   const [shippingMethods, setShippingMethods] = useState<string[]>(() => ['sea_fcl', 'truck_inland']);
   const [pickRole, setPickRole] = useState<RoutePickRole | null>(null);
+  const [showPortsOnMap, setShowPortsOnMap] = useState(true);
+  const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
+  const [mapFlyTarget, setMapFlyTarget] = useState<{ lat: number; lng: number } | null>(null);
   const [result, setResult] = useState<RoutePlannerApiResponse | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,15 +133,39 @@ export function useRoutePlanner(): RoutePlannerHook {
 
   const cancelPick = useCallback(() => setPickRole(null), []);
 
-  const handleMapPick = useCallback((lat: number, lng: number, role: RoutePickRole) => {
-    const snap = {
-      lat: Math.round(lat * 1e5) / 1e5,
-      lng: Math.round(lng * 1e5) / 1e5,
-    };
-    if (role === 'supplier') setSupplier((s) => ({ ...s, ...snap, licenseId: undefined }));
-    else setBuyer((b) => ({ ...b, ...snap }));
-    setPickRole(null);
+  const flyToLocation = useCallback((lat: number, lng: number) => {
+    setMapFlyTarget({ lat, lng });
+    setMapFlyTrigger((n) => n + 1);
   }, []);
+
+  const handleMapPick = useCallback(
+    (lat: number, lng: number, role: RoutePickRole, label?: string, country?: string) => {
+      const snap = {
+        lat: Math.round(lat * 1e5) / 1e5,
+        lng: Math.round(lng * 1e5) / 1e5,
+      };
+      const nextLabel = label?.trim() || undefined;
+      const nextCountry = country?.trim() || undefined;
+      if (role === 'supplier') {
+        setSupplier((s) => ({
+          ...s,
+          ...snap,
+          label: nextLabel ?? s.label,
+          country: nextCountry ?? s.country,
+          licenseId: undefined,
+        }));
+      } else {
+        setBuyer((b) => ({
+          ...b,
+          ...snap,
+          label: nextLabel ?? b.label,
+          country: nextCountry ?? b.country,
+        }));
+      }
+      setPickRole(null);
+    },
+    [],
+  );
 
   const computeRoute = useCallback(async () => {
     setLoading(true);
@@ -205,6 +237,11 @@ export function useRoutePlanner(): RoutePlannerHook {
     beginPick,
     cancelPick,
     handleMapPick,
+    showPortsOnMap,
+    setShowPortsOnMap,
+    mapFlyTrigger,
+    mapFlyTarget,
+    flyToLocation,
     overlay,
     result,
     routeOptions,

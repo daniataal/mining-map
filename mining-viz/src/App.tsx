@@ -26,6 +26,7 @@ import {
   tryParseCountryColonQuery,
 } from './lib/countryFocusMatch';
 import { useRoutePlanner } from './features/route-planner';
+import { buildRoutePlannerPortMarkers } from './features/route-planner/locationPresets';
 import {
   Search as LucideSearch,
   Filter as LucideFilter,
@@ -152,7 +153,7 @@ export default function App() {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
     error: portsError,
-  } = usePortLogisticsEntities(viewMode === 'ports');
+  } = usePortLogisticsEntities(viewMode === 'ports' || viewMode === 'route_planner');
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -228,6 +229,28 @@ export default function App() {
     },
     [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
   );
+  const routePlannerLicensePool = useMemo(() => {
+    const merged = [...rawData, ...localLicenses, ...portEntities, ...storageEntities];
+    const seen = new Set<string>();
+    return merged.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [rawData, localLicenses, portEntities, storageEntities]);
+
+  const routePlannerPortMarkers = useMemo(
+    () => buildRoutePlannerPortMarkers(routePlannerLicensePool, portEntities),
+    [routePlannerLicensePool, portEntities],
+  );
+
+  const handleRoutePlannerPortPick = useCallback(
+    (port: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
+      routePlanner.handleMapPick(port.lat, port.lng, role, port.name, port.country);
+    },
+    [routePlanner],
+  );
+
   const entityIndex = useMemo(
     () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
     [allLicenses]
@@ -930,6 +953,11 @@ export default function App() {
                   routePlannerOverlay={routePlanner.overlay}
                   routePlannerPickRole={routePlanner.pickRole}
                   onRoutePlannerMapPick={routePlanner.handleMapPick}
+                  routePlannerPorts={routePlannerPortMarkers}
+                  routePlannerShowPorts={routePlanner.showPortsOnMap}
+                  onRoutePlannerPortPick={handleRoutePlannerPortPick}
+                  routePlannerFlyTrigger={routePlanner.mapFlyTrigger}
+                  routePlannerFlyTarget={routePlanner.mapFlyTarget}
                   isInDdQueue={ddQueue.isInQueue}
                   onAddToDueDiligence={ddQueue.addToQueue}
                   onRemoveFromDueDiligence={ddQueue.removeFromQueue}
@@ -942,7 +970,11 @@ export default function App() {
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
                 <div className="pointer-events-auto w-full sm:w-[min(560px,calc(100vw-6rem))]">
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
-                    <RoutePlannerPanel rp={routePlanner} allLicenses={allLicenses} />
+                    <RoutePlannerPanel
+                      rp={routePlanner}
+                      allLicenses={routePlannerLicensePool}
+                      portEntities={portEntities}
+                    />
                   </Suspense>
                 </div>
               </div>
