@@ -4435,6 +4435,23 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     }
 
 
+@app.get("/api/maritime/snapshot")
+def get_maritime_snapshot_meta():
+    """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
+    try:
+        try:
+            from backend.services.maritime_snapshot import get_snapshot_meta
+        except ImportError:
+            from services.maritime_snapshot import get_snapshot_meta
+        return get_snapshot_meta()
+    except Exception as exc:
+        return {
+            "available": False,
+            "source": None,
+            "error": str(exc),
+        }
+
+
 @app.get("/api/maritime/stats")
 def get_maritime_stats_endpoint(
     south: Optional[float] = None,

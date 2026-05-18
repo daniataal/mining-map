@@ -30,6 +30,8 @@ import { useRoutePlanner } from './features/route-planner';
 import {
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
+  canonicalRouteHubCountry,
+  filterLicensesForRouteHubs,
   resolveRouteHubCountries,
 } from './features/route-planner/locationPresets';
 import {
@@ -250,25 +252,42 @@ export default function App() {
     () => resolveRouteHubCountries(debouncedRouteSupplierCountry, debouncedRouteBuyerCountry),
     [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry],
   );
+  const routeHubCountriesKey = routeHubCountries.join('\0');
 
-  const routePlannerPortMarkers = useMemo(
-    () =>
-      buildRoutePlannerPortMarkers(routePlannerLicensePool, portEntities, {
-        countries: routeHubCountries,
-      }),
-    [routePlannerLicensePool, portEntities, routeHubCountries],
+  const routePresetCountries = useMemo(() => {
+    const out: string[] = [];
+    for (const raw of [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry]) {
+      const canon = canonicalRouteHubCountry(raw);
+      if (canon && !out.includes(canon)) out.push(canon);
+    }
+    return out;
+  }, [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry]);
+  const routePresetCountriesKey = routePresetCountries.join('\0');
+
+  /** Corridor-only licenses for dropdowns — avoids scanning ~15k rows (React Profiler: buildAllLocationPresets). */
+  const routePlannerHubLicenses = useMemo(
+    () => filterLicensesForRouteHubs(routePlannerLicensePool, routePresetCountries),
+    [routePlannerLicensePool, routePresetCountriesKey],
   );
 
-  const routePlannerAirportMarkers = useMemo(
-    () => buildRoutePlannerAirportMarkers({ countries: routeHubCountries }),
-    [routeHubCountries],
-  );
+  const routePlannerPortMarkers = useMemo(() => {
+    if (!routeHubCountries.length) return [];
+    return buildRoutePlannerPortMarkers(routePlannerHubLicenses, portEntities, {
+      countries: routeHubCountries,
+    });
+  }, [routePlannerHubLicenses, portEntities, routeHubCountriesKey]);
 
+  const routePlannerAirportMarkers = useMemo(() => {
+    if (!routeHubCountries.length) return [];
+    return buildRoutePlannerAirportMarkers({ countries: routeHubCountries });
+  }, [routeHubCountriesKey]);
+
+  const handleRoutePlannerMapPick = routePlanner.handleMapPick;
   const handleRoutePlannerHubPick = useCallback(
     (hub: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
-      routePlanner.handleMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
+      handleRoutePlannerMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
     },
-    [routePlanner],
+    [handleRoutePlannerMapPick],
   );
 
   const entityIndex = useMemo(
@@ -995,7 +1014,7 @@ export default function App() {
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען חדר עסקאות...', 'Loading deal cockpit...')} />}>
                     <RoutePlannerPanel
                       rp={routePlanner}
-                      allLicenses={routePlannerLicensePool}
+                      presetLicensePool={routePlannerHubLicenses}
                       portEntities={portEntities}
                     />
                   </Suspense>

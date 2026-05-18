@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -51,9 +51,11 @@ import MapBasemapLayers from './map/MapBasemapLayers';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
-import RoutePlannerPortMarkers from '../features/route-planner/RoutePlannerPortMarkers';
-import RoutePlannerAirportMarkers from '../features/route-planner/RoutePlannerAirportMarkers';
 import RoutePlannerFlyEffect from '../features/route-planner/RoutePlannerFlyEffect';
+
+// Lazy hub layers — Profiler: avoid mounting hundreds of Leaflet markers until toggled.
+const RoutePlannerPortMarkers = lazy(() => import('../features/route-planner/RoutePlannerPortMarkers'));
+const RoutePlannerAirportMarkers = lazy(() => import('../features/route-planner/RoutePlannerAirportMarkers'));
 import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerMapResizeEffect';
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
@@ -1593,18 +1595,22 @@ export default function MapComponent({
                 </MarkerClusterGroup>
                 )}
                 {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (
-                  <RoutePlannerPortMarkers
-                    ports={routePlannerPorts}
-                    pickRole={routePlannerPickRole ?? null}
-                    onPortPick={onRoutePlannerPortPick}
-                  />
+                  <Suspense fallback={null}>
+                    <RoutePlannerPortMarkers
+                      ports={routePlannerPorts}
+                      pickRole={routePlannerPickRole ?? null}
+                      onPortPick={onRoutePlannerPortPick}
+                    />
+                  </Suspense>
                 )}
                 {isRoutePlannerView && routePlannerShowAirports && routePlannerAirports.length > 0 && onRoutePlannerAirportPick && (
-                  <RoutePlannerAirportMarkers
-                    airports={routePlannerAirports}
-                    pickRole={routePlannerPickRole ?? null}
-                    onAirportPick={onRoutePlannerAirportPick}
-                  />
+                  <Suspense fallback={null}>
+                    <RoutePlannerAirportMarkers
+                      airports={routePlannerAirports}
+                      pickRole={routePlannerPickRole ?? null}
+                      onAirportPick={onRoutePlannerAirportPick}
+                    />
+                  </Suspense>
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (
                   <RoutePlannerMapLayers overlay={routePlannerOverlay} />

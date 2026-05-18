@@ -121,7 +121,33 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [error, setError] = useState<string | null>(null);
 
   const setQuantityTons = useCallback((value: number) => {
-    setQuantityTonsState(Number.isFinite(value) ? Math.max(0, value) : 0);
+    startTransition(() => {
+      setQuantityTonsState(Number.isFinite(value) ? Math.max(0, value) : 0);
+    });
+  }, []);
+
+  const setSupplierTransition = useCallback((value: SetStateAction<RoutePartyLocation>) => {
+    startTransition(() => setSupplier(value));
+  }, []);
+
+  const setBuyerTransition = useCallback((value: SetStateAction<RoutePartyLocation>) => {
+    startTransition(() => setBuyer(value));
+  }, []);
+
+  const setProductTypeTransition = useCallback((value: string) => {
+    startTransition(() => setProductType(value));
+  }, []);
+
+  const setIncotermTransition = useCallback((value: string) => {
+    startTransition(() => setIncoterm(value));
+  }, []);
+
+  const setShowPortsOnMapTransition = useCallback((value: boolean) => {
+    startTransition(() => setShowPortsOnMap(value));
+  }, []);
+
+  const setShowAirportsOnMapTransition = useCallback((value: boolean) => {
+    startTransition(() => setShowAirportsOnMap(value));
   }, []);
 
   useEffect(() => {
@@ -139,21 +165,27 @@ export function useRoutePlanner(): RoutePlannerHook {
   }, []);
 
   const toggleShippingMethod = useCallback((id: string, checked: boolean) => {
-    setShippingMethods((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
+    startTransition(() => {
+      setShippingMethods((prev) => {
+        if (checked) return prev.includes(id) ? prev : [...prev, id];
+        return prev.filter((x) => x !== id);
+      });
     });
   }, []);
 
   const beginPick = useCallback((role: RoutePickRole) => {
-    setPickRole((prev) => (prev === role ? null : role));
+    startTransition(() => setPickRole((prev) => (prev === role ? null : role)));
   }, []);
 
-  const cancelPick = useCallback(() => setPickRole(null), []);
+  const cancelPick = useCallback(() => {
+    startTransition(() => setPickRole(null));
+  }, []);
 
   const flyToLocation = useCallback((lat: number, lng: number) => {
-    setMapFlyTarget({ lat, lng });
-    setMapFlyTrigger((n) => n + 1);
+    startTransition(() => {
+      setMapFlyTarget({ lat, lng });
+      setMapFlyTrigger((n) => n + 1);
+    });
   }, []);
 
   const handleMapPick = useCallback(
@@ -164,27 +196,27 @@ export function useRoutePlanner(): RoutePlannerHook {
       };
       const nextLabel = label?.trim() || undefined;
       const nextCountry = country?.trim() || undefined;
-      if (role === 'supplier') {
-        setSupplier((s) => ({
-          ...s,
-          ...snap,
-          label: nextLabel ?? s.label,
-          country: nextCountry ?? s.country,
-          licenseId: undefined,
-        }));
+      startTransition(() => {
+        if (role === 'supplier') {
+          setSupplier((s) => ({
+            ...s,
+            ...snap,
+            label: nextLabel ?? s.label,
+            country: nextCountry ?? s.country,
+            licenseId: undefined,
+          }));
+        } else {
+          setBuyer((b) => ({
+            ...b,
+            ...snap,
+            label: nextLabel ?? b.label,
+            country: nextCountry ?? b.country,
+          }));
+        }
         setResult(null);
         setSelectedPlanId(null);
-      } else {
-        setBuyer((b) => ({
-          ...b,
-          ...snap,
-          label: nextLabel ?? b.label,
-          country: nextCountry ?? b.country,
-        }));
-      }
-      setResult(null);
-      setSelectedPlanId(null);
-      setPickRole(null);
+        setPickRole(null);
+      });
     },
     [],
   );
@@ -240,7 +272,7 @@ export function useRoutePlanner(): RoutePlannerHook {
   }, [routeOptions, selectedPlanId]);
 
   const selectRoutePlan = useCallback((planId: string) => {
-    setSelectedPlanId(planId);
+    startTransition(() => setSelectedPlanId(planId));
   }, []);
 
   const overlay = activePlan?.map ?? null;
@@ -248,15 +280,15 @@ export function useRoutePlanner(): RoutePlannerHook {
 
   return {
     supplier,
-    setSupplier,
+    setSupplier: setSupplierTransition,
     buyer,
-    setBuyer,
+    setBuyer: setBuyerTransition,
     productType,
-    setProductType,
+    setProductType: setProductTypeTransition,
     quantityTons,
     setQuantityTons,
     incoterm,
-    setIncoterm,
+    setIncoterm: setIncotermTransition,
     shippingMethods,
     toggleShippingMethod,
     pickRole,
@@ -264,9 +296,9 @@ export function useRoutePlanner(): RoutePlannerHook {
     cancelPick,
     handleMapPick,
     showPortsOnMap,
-    setShowPortsOnMap,
+    setShowPortsOnMap: setShowPortsOnMapTransition,
     showAirportsOnMap,
-    setShowAirportsOnMap,
+    setShowAirportsOnMap: setShowAirportsOnMapTransition,
     mapFlyTrigger,
     mapFlyTarget,
     flyToLocation,

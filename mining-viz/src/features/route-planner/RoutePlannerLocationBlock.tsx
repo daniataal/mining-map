@@ -1,5 +1,5 @@
 import { Crosshair } from 'lucide-react';
-import { startTransition, useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { memo, startTransition, useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -44,7 +44,7 @@ function presetToLocation(preset: LocationPreset): RoutePartyLocation {
   };
 }
 
-export default function RoutePlannerLocationBlock({
+function RoutePlannerLocationBlock({
   role,
   title,
   titleClass,
@@ -113,8 +113,10 @@ export default function RoutePlannerLocationBlock({
     if (val === 'custom') return;
     const found = presets.find((p) => p.id === val);
     if (!found) return;
-    setLocation(presetToLocation(found));
-    onFlyTo(found.lat, found.lng);
+    startTransition(() => {
+      setLocation(presetToLocation(found));
+      onFlyTo(found.lat, found.lng);
+    });
   };
 
   const updateCoord = (field: 'lat' | 'lng', raw: string) => {
@@ -122,10 +124,12 @@ export default function RoutePlannerLocationBlock({
     if (!Number.isFinite(parsed)) return;
     const clamped =
       field === 'lat' ? Math.max(-90, Math.min(90, parsed)) : Math.max(-180, Math.min(180, parsed));
-    setLocation({
-      ...location,
-      [field]: clamped,
-      licenseId: undefined,
+    startTransition(() => {
+      setLocation((loc) => ({
+        ...loc,
+        [field]: clamped,
+        licenseId: undefined,
+      }));
     });
   };
 
@@ -293,3 +297,5 @@ export default function RoutePlannerLocationBlock({
     </div>
   );
 }
+
+export default memo(RoutePlannerLocationBlock);
