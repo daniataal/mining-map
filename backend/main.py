@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
+from __future__ import annotations
+
+from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -123,6 +125,92 @@ def _load_legal_intel_services():
         list_legal_events,
         serialize_legal_event,
     )
+
+
+def _load_gov_procurement_services():
+    try:
+        from backend.services.gov_procurement_intel import (
+            collect_gov_procurement,
+            serialize_gov_procurement_response,
+        )
+    except ImportError:
+        from services.gov_procurement_intel import (
+            collect_gov_procurement,
+            serialize_gov_procurement_response,
+        )
+    return collect_gov_procurement, serialize_gov_procurement_response
+
+
+def _load_gov_procurement_feed_services():
+    try:
+        from backend.services.gov_procurement_intel import serialize_commodity_feed_response
+    except ImportError:
+        from services.gov_procurement_intel import serialize_commodity_feed_response
+    return serialize_commodity_feed_response
+
+
+def _load_gov_procurement_store():
+    try:
+        from backend.services.gov_procurement_store import (
+            collect_commodity_feed_from_db,
+            collect_gov_procurement_from_db,
+            ensure_gov_procurement_tables,
+        )
+    except ImportError:
+        from services.gov_procurement_store import (
+            collect_commodity_feed_from_db,
+            collect_gov_procurement_from_db,
+            ensure_gov_procurement_tables,
+        )
+    return collect_commodity_feed_from_db, collect_gov_procurement_from_db, ensure_gov_procurement_tables
+
+
+def _load_gov_procurement_sync():
+    try:
+        from backend.services.ingest.gov_procurement_sync import sync_gov_procurement_data
+    except ImportError:
+        from services.ingest.gov_procurement_sync import sync_gov_procurement_data
+    return sync_gov_procurement_data
+
+
+def _load_agent_intelligence_services():
+    try:
+        from backend.services.agent_intelligence import (
+            ensure_agent_jobs_table,
+            get_agent_job,
+            run_contact_enrichment,
+            run_data_validation_batch,
+            run_entity_data_validation,
+            run_operator_validation,
+            run_route_intelligence,
+        )
+    except ImportError:
+        from services.agent_intelligence import (  # type: ignore[no-redef]
+            ensure_agent_jobs_table,
+            get_agent_job,
+            run_contact_enrichment,
+            run_data_validation_batch,
+            run_entity_data_validation,
+            run_operator_validation,
+            run_route_intelligence,
+        )
+    return (
+        ensure_agent_jobs_table,
+        get_agent_job,
+        run_route_intelligence,
+        run_contact_enrichment,
+        run_operator_validation,
+        run_entity_data_validation,
+        run_data_validation_batch,
+    )
+
+
+def _load_deal_room_services():
+    try:
+        from backend.services import deal_rooms
+    except ImportError:
+        from services import deal_rooms  # type: ignore[no-redef]
+    return deal_rooms
 
 
 def _serialize_entity_contact(row: dict) -> dict:
@@ -396,6 +484,7 @@ def _load_cached_geo_fallbacks(cur, rows) -> dict[str, dict]:
     if not keys:
         return {}
     try:
+        cur.execute("SAVEPOINT geo_cache_lookup")
         placeholders = ", ".join(["%s"] * len(keys))
         cur.execute(
             f"""
@@ -412,9 +501,18 @@ def _load_cached_geo_fallbacks(cur, rows) -> dict[str, dict]:
             if row.get("lat") is None or row.get("lng") is None:
                 continue
             cached[row["query_key"]] = row
+        cur.execute("RELEASE SAVEPOINT geo_cache_lookup")
         return cached
     except Exception:
         # geo_cache is optional; normal reads must still succeed when it is absent.
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT geo_cache_lookup")
+            cur.execute("RELEASE SAVEPOINT geo_cache_lookup")
+        except Exception:
+            try:
+                cur.connection.rollback()
+            except Exception:
+                pass
         return {}
 
 
@@ -457,25 +555,39 @@ def _licenses_sector_sql_fragment(normalized_sector: Optional[str]) -> tuple[str
     )
 
 
+_LICENSE_COUNTRY_QUERY_ALIASES: dict[str, tuple[str, ...]] = {
+    "united arab emirates": ("United Arab Emirates", "UAE"),
+    "uae": ("United Arab Emirates", "UAE"),
+}
+
+
 def _licenses_countries_sql_fragment(requested_countries: list[str]) -> tuple[str, list[Any]]:
     """Index-friendly match on ``licenses.country``."""
     if not requested_countries:
         return "TRUE", []
-    
+
     # We use the raw country column to hit the index.
     # We provide both original and lowercase versions to maximize match probability.
-    norms = []
+    norms: list[str] = []
     for c in requested_countries:
-        if not c: continue
+        if not c:
+            continue
         s = str(c).strip()
-        if not s: continue
+        if not s:
+            continue
         norms.append(s)
         if s.lower() != s:
             norms.append(s.lower())
+        for alias in _LICENSE_COUNTRY_QUERY_ALIASES.get(s.lower(), ()):
+            norms.append(alias)
+            if alias.lower() != alias:
+                norms.append(alias.lower())
+
+    norms = list(dict.fromkeys(norms))
 
     if not norms:
         return "TRUE", []
-        
+
     return ("country = ANY(%s) OR LOWER(country) = ANY(%s)", [norms, [n.lower() for n in norms]])
 
 
@@ -523,11 +635,14 @@ def _build_license_api_results(
                 "sourceRecordUrl": row["source_record_url"] if "source_record_url" in keys else None,
                 "sourceUpdatedAt": row["source_updated_at"] if "source_updated_at" in keys else None,
                 "lastSyncedAt": row["last_synced_at"] if "last_synced_at" in keys else None,
-                "sourceKind": provenance.get("source_kind"),
+                "sourceKind": (row["source_kind"] if "source_kind" in keys and row["source_kind"] else None) or provenance.get("source_kind"),
                 "sourceAccess": provenance.get("source_access"),
                 "coverageState": provenance.get("coverage_state"),
                 "provenanceNote": provenance.get("provenance_note"),
-                "entityKind": "license",
+                "entityKind": row["entity_kind"] if "entity_kind" in keys and row["entity_kind"] else "license",
+                "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
+                "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
+                "confidenceNote": row["confidence_note"] if "confidence_note" in keys else None,
                 "geoSource": display_geo_source if "geo_source" in keys else None,
                 "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
                 "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
@@ -578,12 +693,12 @@ class RedisCache:
             return None
         if self._client is None:
             try:
-                self._client = redis.Redis(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
-                    decode_responses=True,
-                    socket_connect_timeout=2,
-                )
+                try:
+                    from backend.services.redis_connection import redis_client_kwargs
+                except ImportError:
+                    from services.redis_connection import redis_client_kwargs
+
+                self._client = redis.Redis(**redis_client_kwargs())
             except Exception as exc:
                 print(f"[Redis] Initialization failed: {exc}")
                 self._client = None
@@ -978,6 +1093,60 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             ON dd_reports (entity_kind, entity_id, created_at DESC);
         """)
 
+        # Lightweight agent job/cache store. Agent runs are synchronous for the
+        # MVP, but persisted by (agent_type, input_hash) so repeat clicks reuse
+        # completed structured JSON instead of re-running bounded AI prompts.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS agent_jobs (
+                job_id VARCHAR(255) PRIMARY KEY,
+                agent_type VARCHAR(80) NOT NULL,
+                status VARCHAR(40) NOT NULL,
+                entity_id VARCHAR(255),
+                route_hash TEXT,
+                input_hash TEXT NOT NULL,
+                input_json JSONB,
+                output_json JSONB,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_jobs_type_input_hash
+            ON agent_jobs (agent_type, input_hash);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_agent_jobs_entity_type_created
+            ON agent_jobs (entity_id, agent_type, created_at DESC);
+        """)
+
+        # Investigation / Deal Room store. These rows stitch together the
+        # entity, route snapshot, queued agent jobs, analyst notes, and export
+        # evidence without blocking the dossier UI.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS deal_rooms (
+                id VARCHAR(255) PRIMARY KEY,
+                title TEXT NOT NULL,
+                entity_id VARCHAR(255) NOT NULL,
+                entity_kind VARCHAR(50) NOT NULL DEFAULT 'license',
+                status VARCHAR(50) NOT NULL DEFAULT 'open',
+                route_snapshot_json JSONB,
+                agent_job_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_rooms_entity_updated
+            ON deal_rooms (entity_kind, entity_id, updated_at DESC);
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_deal_rooms_status_updated
+            ON deal_rooms (status, updated_at DESC);
+        """)
+
         # General, source-backed contact store. This is separate from private
         # CRM notes so the dossier can surface reviewable public business
         # numbers/emails/sites without guessing or mixing in internal notes.
@@ -1149,6 +1318,12 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_updated_at TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS raw_payload TEXT;")
             cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS source_kind TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS external_id TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS entity_kind TEXT DEFAULT 'license';")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS entity_subtype TEXT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS confidence_score FLOAT;")
+            cur.execute("ALTER TABLE licenses ADD COLUMN IF NOT EXISTS confidence_note TEXT;")
             # Speed up viewport queries (GET /licenses with bbox); partial index skips null coords.
             cur.execute(
                 """
@@ -1160,6 +1335,7 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
                 CREATE INDEX IF NOT EXISTS idx_licenses_id ON licenses (id);
                 CREATE INDEX IF NOT EXISTS idx_licenses_origin ON licenses (record_origin);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);
                 """
             )
             # Normalized relationship layer for cross-sector role transparency.
@@ -1223,13 +1399,24 @@ def init_db(*, raise_on_error: bool = False) -> bool:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS geo_cache (
                 query_key TEXT PRIMARY KEY,
-                lat FLOAT NOT NULL,
-                lng FLOAT NOT NULL,
+                lat FLOAT,
+                lng FLOAT,
                 confidence FLOAT DEFAULT 1.0,
                 source TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                display_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                looked_up_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        try:
+            cur.execute("ALTER TABLE geo_cache ADD COLUMN IF NOT EXISTS display_name TEXT;")
+            cur.execute(
+                "ALTER TABLE geo_cache ADD COLUMN IF NOT EXISTS looked_up_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"
+            )
+            cur.execute("ALTER TABLE geo_cache ALTER COLUMN lat DROP NOT NULL;")
+            cur.execute("ALTER TABLE geo_cache ALTER COLUMN lng DROP NOT NULL;")
+        except Exception as geo_cache_migrate_exc:
+            print(f"geo_cache migration step skipped: {geo_cache_migrate_exc}")
 
         # Files Table
         cur.execute("""
@@ -1359,6 +1546,19 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("RELEASE SAVEPOINT maritime_schema")
             print(f"Maritime snapshot table init skipped: {maritime_exc}")
 
+        try:
+            cur.execute("SAVEPOINT gov_procurement_schema")
+            try:
+                from backend.services.gov_procurement_store import ensure_gov_procurement_tables
+            except ImportError:
+                from services.gov_procurement_store import ensure_gov_procurement_tables
+            ensure_gov_procurement_tables(conn)
+            cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
+        except Exception as gov_proc_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT gov_procurement_schema")
+            cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
+            print(f"Gov procurement table init skipped: {gov_proc_exc}")
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -1402,6 +1602,62 @@ def ensure_schema_initialized(*, force: bool = False) -> bool:
             _SCHEMA_READY = True
             return True
         return False
+
+
+def _gov_procurement_sync_on_startup_enabled() -> bool:
+    flag = (os.getenv("GOV_PROCUREMENT_SYNC_ON_STARTUP") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
+def _sync_gov_procurement_reference() -> None:
+    if not _gov_procurement_sync_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[GovProcurement] Skipping sync until schema is ready.")
+        return
+    try:
+        sync_gov_procurement_data = _load_gov_procurement_sync()
+        conn = get_db_connection()
+        try:
+            summary = sync_gov_procurement_data(conn)
+            print(
+                f"[GovProcurement] Sync complete — status={summary.get('status')}, "
+                f"records={summary.get('records_upserted', 0)}"
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[GovProcurement] Sync skipped or failed: {exc}")
+
+
+def _sync_opec_gulf_reference() -> None:
+    """Upsert curated OPEC / Persian Gulf rows — runs even when heavy open-data bootstrap is skipped."""
+    if not ensure_schema_initialized():
+        print("[OPEC] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.ingest.opec_gulf_sync import sync_opec_gulf_data
+        except ImportError:
+            from services.ingest.opec_gulf_sync import sync_opec_gulf_data
+
+        opec_conn = get_db_connection()
+        try:
+            opec_summary = sync_opec_gulf_data(opec_conn)
+            print(
+                f"[OPEC] Persian Gulf / OPEC sync complete — "
+                f"{opec_summary.get('entities_written', 0)} entities upserted, "
+                f"{opec_summary.get('eia_countries_enriched', 0)} countries enriched with live EIA data."
+            )
+            if opec_summary.get("entities_written", 0) > 0:
+                try:
+                    cache.delete_pattern("licenses:*")
+                except Exception:
+                    pass
+        finally:
+            opec_conn.close()
+    except Exception as exc:
+        print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
 
 
 def _bootstrap_open_data():
@@ -1486,31 +1742,6 @@ def _bootstrap_open_data():
         except Exception as exc:
             print(f"[OpenData] Oil trade seeding skipped: {exc}")
 
-        # ── OPEC / Persian Gulf national oil companies & major fields ─────────
-        try:
-            try:
-                from backend.services.ingest.opec_gulf_sync import sync_opec_gulf_data
-            except ImportError:
-                from services.ingest.opec_gulf_sync import sync_opec_gulf_data
-
-            opec_conn = get_db_connection()
-            try:
-                opec_summary = sync_opec_gulf_data(opec_conn)
-                print(
-                    f"[OPEC] Persian Gulf / OPEC sync complete — "
-                    f"{opec_summary.get('entities_written', 0)} entities upserted, "
-                    f"{opec_summary.get('eia_countries_enriched', 0)} countries enriched with live EIA data."
-                )
-                if opec_summary.get("entities_written", 0) > 0:
-                    try:
-                        cache.delete_pattern("licenses:*")
-                    except Exception:
-                        pass
-            finally:
-                opec_conn.close()
-        except Exception as exc:
-            print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
-
         try:
             try:
                 from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
@@ -1530,11 +1761,18 @@ def _bootstrap_open_data():
 @app.on_event("startup")
 def startup_schema_bootstrap():
     """Bind the HTTP port before heavy DB work: init runs in a background thread."""
+    try:
+        from backend.services.ai_providers import log_ai_provider_status
+    except ImportError:
+        from services.ai_providers import log_ai_provider_status  # type: ignore[no-redef]
+    log_ai_provider_status()
 
     def _warm():
         if not ensure_schema_initialized():
             print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
             return
+        _sync_opec_gulf_reference()
+        _sync_gov_procurement_reference()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
@@ -1545,10 +1783,11 @@ def startup_schema_bootstrap():
 def login(user: UserLogin):
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
+    username = user.username.strip()
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+        c.execute("SELECT * FROM users WHERE username = %s", (username,))
         db_user = c.fetchone()
         
         if not db_user or not verify_password(user.password, db_user['password_hash']):
@@ -1565,7 +1804,7 @@ def login(user: UserLogin):
     except Exception as e:
         if _is_missing_relation_error(e, "users") and ensure_schema_initialized(force=True):
             try:
-                c.execute("SELECT * FROM users WHERE username = %s", (user.username,))
+                c.execute("SELECT * FROM users WHERE username = %s", (username,))
                 db_user = c.fetchone()
                 if not db_user or not verify_password(user.password, db_user["password_hash"]):
                     return Response("Invalid credentials", status_code=401)
@@ -1754,6 +1993,7 @@ def _license_api_columns_sql() -> str:
         "id, company, license_type, commodity, status, date_issued, country, region, "
         "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
         "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
+        "source_kind, entity_kind, entity_subtype, confidence_score, confidence_note, "
         "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
     )
 
@@ -2050,6 +2290,8 @@ def read_entity_contacts(entity_id: str, entity_kind: str = "license"):
                 confidence_score,
                 raw_payload,
                 extracted_from,
+                discovered_by,
+                phone_verified_at,
                 verified_at,
                 last_seen_at
             FROM entity_contacts
@@ -2177,6 +2419,144 @@ def read_legal_events(entity_id: str, entity_kind: str = "license", refresh: boo
         conn.close()
 
 
+@app.get("/gov-procurement/companies")
+def read_gov_procurement_companies(
+    commodity: Optional[str] = None,
+    refresh: bool = False,
+    match_licenses: bool = False,
+    page: int = 1,
+    page_size: int = 50,
+    limit: int = 100,
+):
+    """Browse U.S. federal contractors with commodity-tagged awards (database-backed)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
+    try:
+        serialize_commodity_feed_response = _load_gov_procurement_feed_services()
+        collect_commodity_feed_from_db, _, ensure_gov_procurement_tables = _load_gov_procurement_store()
+        conn = get_db_connection()
+        try:
+            ensure_gov_procurement_tables(conn)
+            conn.commit()
+            if refresh:
+                sync_gov_procurement_data = _load_gov_procurement_sync()
+                sync_gov_procurement_data(conn)
+            effective_page_size = max(1, min(int(page_size or limit), 500))
+            payload = collect_commodity_feed_from_db(
+                conn,
+                commodity=commodity,
+                page=max(1, int(page)),
+                page_size=effective_page_size,
+            )
+        finally:
+            conn.close()
+        serialized = serialize_commodity_feed_response(payload)
+        companies = serialized.get("companies") or []
+
+        if match_licenses and companies:
+            conn = get_db_connection()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    for company in companies:
+                        name = (company.get("name") or "").strip()
+                        if not name or len(name) < 3:
+                            company["matchedLicenseIds"] = []
+                            continue
+                        pattern = f"%{name[:80]}%"
+                        cur.execute(
+                            """
+                            SELECT id FROM licenses
+                            WHERE company ILIKE %s
+                            ORDER BY id
+                            LIMIT 10
+                            """,
+                            (pattern,),
+                        )
+                        company["matchedLicenseIds"] = [
+                            str(row["id"]) for row in cur.fetchall() if row.get("id")
+                        ]
+            finally:
+                conn.close()
+
+        serialized["companies"] = companies
+        return serialized
+    except Exception as e:
+        logger.exception("gov-procurement companies feed failed: %s", e)
+        return Response(str(e), status_code=500)
+
+
+@app.post("/api/admin/gov-procurement/sync")
+def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
+    try:
+        sync_gov_procurement_data = _load_gov_procurement_sync()
+        conn = get_db_connection()
+        try:
+            summary = sync_gov_procurement_data(conn)
+        finally:
+            conn.close()
+        return {"status": summary.get("status", "ok"), **summary}
+    except Exception as exc:
+        logger.exception("gov-procurement admin sync failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/entities/{entity_id:path}/gov-procurement")
+def read_gov_procurement(entity_id: str, entity_kind: str = "license", live: bool = False):
+    """Return U.S. federal awards for the licensee — database first, optional live USAspending."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing gov procurement schema")
+    conn = get_db_connection()
+    try:
+        collect_gov_procurement, serialize_gov_procurement_response = _load_gov_procurement_services()
+        collect_gov_procurement_from_db, _, ensure_gov_procurement_tables = _load_gov_procurement_store()
+        ensure_gov_procurement_tables(conn)
+        conn.commit()
+
+        company_name = ""
+        country = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company_name = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+
+        if not company_name:
+            return serialize_gov_procurement_response(
+                collect_gov_procurement(company_name="", country=country)
+            )
+
+        if not live:
+            db_payload = collect_gov_procurement_from_db(
+                conn, company_name=company_name, country=country or None
+            )
+            return serialize_gov_procurement_response(db_payload)
+
+        payload = collect_gov_procurement(company_name=company_name, country=country or None)
+        payload["data_origin"] = "live"
+        if live and payload.get("awards"):
+            try:
+                from backend.services.ingest.gov_procurement_sync import sync_entity_awards_to_db
+            except ImportError:
+                from services.ingest.gov_procurement_sync import sync_entity_awards_to_db
+            sync_entity_awards_to_db(conn, company_name)
+        return serialize_gov_procurement_response(payload)
+    except Exception as e:
+        logger.exception("gov-procurement failed for %s: %s", entity_id, e)
+        return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
 @app.get("/entities/{entity_id:path}/relationships")
 def read_entity_relationships(entity_id: str, entity_kind: str = "license"):
     conn = get_db_connection()
@@ -2234,6 +2614,509 @@ def read_entity_relationships(entity_id: str, entity_kind: str = "license"):
     except Exception as e:
         conn.rollback()
         return Response(str(e), status_code=500)
+    finally:
+        conn.close()
+
+
+class AgentRouteIntelligenceRequest(BaseModel):
+    route: dict[str, Any]
+    deterministic_warnings: Optional[list[dict[str, Any]]] = None
+    route_hash: Optional[str] = None
+    force_refresh: bool = False
+
+
+class AgentEntityRequest(BaseModel):
+    entity_id: Optional[str] = None
+    entity_kind: str = "license"
+    entity: Optional[dict[str, Any]] = None
+    force_refresh: bool = False
+
+
+class AgentDataValidationRunRequest(BaseModel):
+    limit: int = 25
+    force_refresh: bool = False
+
+
+def _agent_entity_id(payload: AgentEntityRequest) -> str:
+    entity_id = payload.entity_id
+    if not entity_id and isinstance(payload.entity, dict):
+        entity_id = (
+            payload.entity.get("id")
+            or payload.entity.get("entity_id")
+            or payload.entity.get("entityId")
+        )
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id or entity.id is required")
+    return str(entity_id)
+
+
+@app.post("/api/agents/route-intelligence")
+def agent_route_intelligence(payload: AgentRouteIntelligenceRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_route_intelligence(
+            conn,
+            route_payload=payload.route,
+            deterministic_warnings=payload.deterministic_warnings,
+            route_hash=payload.route_hash,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/contact-enrichment")
+def agent_contact_enrichment(payload: AgentEntityRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    entity_id = _agent_entity_id(payload)
+    conn = get_db_connection()
+    try:
+        return run_contact_enrichment(
+            conn,
+            entity_id=entity_id,
+            entity_kind=payload.entity_kind,
+            entity=payload.entity,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/operator-validation")
+def agent_operator_validation(payload: AgentEntityRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    entity_id = _agent_entity_id(payload)
+    conn = get_db_connection()
+    try:
+        return run_operator_validation(
+            conn,
+            entity_id=entity_id,
+            entity_kind=payload.entity_kind,
+            entity=payload.entity,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/api/agents/data-validation/entity/{entity_id:path}")
+def agent_entity_data_validation(entity_id: str, entity_kind: str = "license", force_refresh: bool = False):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_entity_data_validation(
+            conn,
+            entity_id=entity_id,
+            entity_kind=entity_kind,
+            force_refresh=force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/api/agents/data-validation/run")
+def agent_data_validation_run(payload: AgentDataValidationRunRequest):
+    (
+        _ensure_agent_jobs_table,
+        _get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        return run_data_validation_batch(
+            conn,
+            limit=payload.limit,
+            force_refresh=payload.force_refresh,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/api/agents/jobs/{job_id}")
+def read_agent_job(job_id: str):
+    (
+        _ensure_agent_jobs_table,
+        get_agent_job,
+        _run_route_intelligence,
+        _run_contact_enrichment,
+        _run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        job = get_agent_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Agent job {job_id} not found")
+        return job
+    finally:
+        conn.close()
+
+
+class DealRoomCreateRequest(BaseModel):
+    entity_id: str
+    entity_kind: str = "license"
+    title: Optional[str] = None
+    status: str = "open"
+    route_snapshot: Optional[dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
+class DealRoomPatchRequest(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+    route_snapshot: Optional[dict[str, Any]] = None
+    evidence: Optional[dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
+class DealRoomAgentRunRequest(BaseModel):
+    agents: Optional[list[str]] = None
+    force_refresh: bool = False
+    run_sync: bool = False
+
+
+DEAL_ROOM_AGENT_ALIASES = {
+    "dd": "due_diligence_summary",
+    "due_diligence": "due_diligence_summary",
+    "due_diligence_summary": "due_diligence_summary",
+    "operator": "operator_validation",
+    "operator_validation": "operator_validation",
+    "contact": "contact_enrichment",
+    "contacts": "contact_enrichment",
+    "contact_enrichment": "contact_enrichment",
+    "route": "route_intelligence",
+    "route_intelligence": "route_intelligence",
+    "procurement": "procurement_summary",
+    "procurement_summary": "procurement_summary",
+}
+
+
+def _decorate_deal_room(conn, room: dict[str, Any]) -> dict[str, Any]:
+    services = _load_deal_room_services()
+    decorated = dict(room)
+    decorated["entity"] = services.load_entity_basics(conn, room["entityId"], room.get("entityKind") or "license")
+    decorated["jobs"] = services.get_deal_room_jobs(conn, room)
+    return decorated
+
+
+def _mark_agent_job_failed(conn, job_id: str, error: str) -> dict[str, Any] | None:
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            UPDATE agent_jobs
+            SET status = 'failed',
+                error = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = %s
+            RETURNING job_id, agent_type, status, entity_id, route_hash, input_hash,
+                      input_json, output_json, error, created_at, updated_at
+            """,
+            (error[:2000], job_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    if not row:
+        return None
+    return {
+        "job_id": row.get("job_id"),
+        "agent_type": row.get("agent_type"),
+        "status": row.get("status"),
+        "entity_id": row.get("entity_id"),
+        "route_hash": row.get("route_hash"),
+        "input_hash": row.get("input_hash"),
+        "input": row.get("input_json"),
+        "output": row.get("output_json"),
+        "error": row.get("error"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "cached": False,
+    }
+
+
+def _execute_deal_room_agent_job(deal_room_id: str, job_id: str) -> None:
+    services = _load_deal_room_services()
+    (
+        _ensure_agent_jobs_table,
+        get_agent_job,
+        run_route_intelligence,
+        run_contact_enrichment,
+        run_operator_validation,
+        _run_entity_data_validation,
+        _run_data_validation_batch,
+    ) = _load_agent_intelligence_services()
+    conn = get_db_connection()
+    try:
+        job = get_agent_job(conn, job_id)
+        if not job:
+            return
+        if job.get("status") == "completed":
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, job)
+            return
+        agent_type = job.get("agent_type")
+        payload = job.get("input") if isinstance(job.get("input"), dict) else {}
+        if agent_type == "contact_enrichment":
+            result = run_contact_enrichment(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "operator_validation":
+            result = run_operator_validation(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "route_intelligence":
+            route = payload.get("route") if isinstance(payload.get("route"), dict) else {}
+            result = run_route_intelligence(
+                conn,
+                route_payload=route,
+                deterministic_warnings=payload.get("deterministic_warnings"),
+                route_hash=job.get("route_hash"),
+            )
+        elif agent_type == "due_diligence_summary":
+            result = services.run_due_diligence_summary(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        elif agent_type == "procurement_summary":
+            result = services.run_procurement_summary(
+                conn,
+                entity_id=str(payload.get("entity_id") or job.get("entity_id")),
+                entity_kind=str(payload.get("entity_kind") or "license"),
+            )
+        else:
+            result = _mark_agent_job_failed(conn, job_id, f"Unsupported deal room agent: {agent_type}")
+        if result:
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, result)
+    except Exception as exc:
+        failed = _mark_agent_job_failed(conn, job_id, str(exc))
+        if failed:
+            services.update_deal_room_evidence_from_job(conn, deal_room_id, failed)
+    finally:
+        conn.close()
+
+
+def _normalize_deal_room_agents(agents: Optional[list[str]]) -> list[str]:
+    requested = agents or ["due_diligence_summary", "operator_validation", "contact_enrichment", "procurement_summary", "route_intelligence"]
+    normalized: list[str] = []
+    for agent in requested:
+        agent_type = DEAL_ROOM_AGENT_ALIASES.get(str(agent).strip().lower())
+        if agent_type and agent_type not in normalized:
+            normalized.append(agent_type)
+    return normalized
+
+
+@app.post("/api/deal-rooms")
+def create_deal_room_endpoint(payload: DealRoomCreateRequest):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.create_deal_room(
+            conn,
+            entity_id=payload.entity_id,
+            entity_kind=payload.entity_kind,
+            title=payload.title,
+            status=payload.status,
+            route_snapshot=payload.route_snapshot,
+            notes=payload.notes,
+        )
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms")
+def list_deal_rooms_endpoint(entity_id: Optional[str] = None, entity_kind: Optional[str] = None):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        rooms = services.list_deal_rooms(conn, entity_id=entity_id, entity_kind=entity_kind)
+        return [_decorate_deal_room(conn, room) for room in rooms]
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}")
+def get_deal_room_endpoint(deal_room_id: str):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.get_deal_room(conn, deal_room_id)
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.patch("/api/deal-rooms/{deal_room_id}")
+def update_deal_room_endpoint(deal_room_id: str, payload: DealRoomPatchRequest):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        room = services.update_deal_room(
+            conn,
+            deal_room_id,
+            title=payload.title,
+            status=payload.status,
+            route_snapshot=payload.route_snapshot,
+            evidence=payload.evidence,
+            notes=payload.notes,
+        )
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        return _decorate_deal_room(conn, room)
+    finally:
+        conn.close()
+
+
+@app.post("/api/deal-rooms/{deal_room_id}/agents/run")
+def run_deal_room_agents_endpoint(
+    deal_room_id: str,
+    payload: DealRoomAgentRunRequest,
+    background_tasks: BackgroundTasks,
+):
+    services = _load_deal_room_services()
+    try:
+        from backend.services.agent_intelligence import (
+            enqueue_contact_enrichment,
+            enqueue_operator_validation,
+            enqueue_route_intelligence,
+        )
+    except ImportError:
+        from services.agent_intelligence import (  # type: ignore[no-redef]
+            enqueue_contact_enrichment,
+            enqueue_operator_validation,
+            enqueue_route_intelligence,
+        )
+
+    conn = get_db_connection()
+    try:
+        room = services.get_deal_room(conn, deal_room_id)
+        if room is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        entity_id = room["entityId"]
+        entity_kind = room.get("entityKind") or "license"
+        entity = services.load_entity_basics(conn, entity_id, entity_kind)
+        route_snapshot = room.get("routeSnapshot")
+        selected = _normalize_deal_room_agents(payload.agents)
+        jobs: list[dict[str, Any]] = []
+        skipped: list[dict[str, str]] = []
+        for agent_type in selected:
+            if agent_type == "contact_enrichment":
+                jobs.append(
+                    enqueue_contact_enrichment(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "operator_validation":
+                jobs.append(
+                    enqueue_operator_validation(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "route_intelligence":
+                route_payload = route_snapshot.get("result") if isinstance(route_snapshot, dict) and isinstance(route_snapshot.get("result"), dict) else route_snapshot
+                if not isinstance(route_payload, dict):
+                    skipped.append({"agent_type": agent_type, "reason": "No route snapshot attached."})
+                    continue
+                jobs.append(
+                    enqueue_route_intelligence(
+                        conn,
+                        route_payload=route_payload,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "due_diligence_summary":
+                jobs.append(
+                    services.enqueue_due_diligence_summary(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+            elif agent_type == "procurement_summary":
+                jobs.append(
+                    services.enqueue_procurement_summary(
+                        conn,
+                        entity_id=entity_id,
+                        entity_kind=entity_kind,
+                        entity=entity,
+                        force_refresh=payload.force_refresh,
+                    )
+                )
+        room = services.attach_agent_jobs(conn, deal_room_id, jobs) or room
+        for job in jobs:
+            if job.get("status") == "completed":
+                services.update_deal_room_evidence_from_job(conn, deal_room_id, job)
+            elif payload.run_sync:
+                _execute_deal_room_agent_job(deal_room_id, job["job_id"])
+            else:
+                background_tasks.add_task(_execute_deal_room_agent_job, deal_room_id, job["job_id"])
+        refreshed = services.get_deal_room(conn, deal_room_id) or room
+        return {"dealRoom": _decorate_deal_room(conn, refreshed), "jobs": jobs, "skipped": skipped}
+    finally:
+        conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}/export")
+def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
+    services = _load_deal_room_services()
+    conn = get_db_connection()
+    try:
+        package = services.build_export_package(conn, deal_room_id)
+        if package is None:
+            raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
+        if format.lower() in {"md", "markdown"}:
+            return Response(package["markdown"], media_type="text/markdown")
+        return package
     finally:
         conn.close()
 
@@ -4180,12 +5063,85 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     }
 
 
+@app.get("/api/health")
+def platform_health():
+    """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
+    try:
+        from backend.services.platform_health import build_platform_health
+    except ImportError:
+        from services.platform_health import build_platform_health
+    try:
+        from backend.services.maritime_snapshot import get_snapshot_meta
+        from backend.services.maritime_intel import get_maritime_stats
+    except ImportError:
+        from services.maritime_snapshot import get_snapshot_meta
+        from services.maritime_intel import get_maritime_stats
+
+    return build_platform_health(
+        redis_enabled=REDIS_ENABLED,
+        redis_ping=cache.get_client,
+        get_snapshot_meta=get_snapshot_meta,
+        get_maritime_stats=get_maritime_stats,
+    )
+
+
+@app.get("/api/maritime/snapshot")
+def get_maritime_snapshot_meta():
+    """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
+    try:
+        try:
+            from backend.services.maritime_snapshot import get_snapshot_meta
+        except ImportError:
+            from services.maritime_snapshot import get_snapshot_meta
+        return get_snapshot_meta()
+    except Exception as exc:
+        return {
+            "available": False,
+            "source": None,
+            "error": str(exc),
+        }
+
+
+@app.get("/api/maritime/stats")
+def get_maritime_stats_endpoint(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
+    """Debug counts for persisted AIS snapshots and worker ingest health."""
+    try:
+        try:
+            from backend.services.maritime_intel import get_maritime_stats
+        except ImportError:
+            from services.maritime_intel import get_maritime_stats
+        bbox = None
+        if all(value is not None for value in (south, west, north, east)):
+            bbox = (float(south), float(west), float(north), float(east))
+        return get_maritime_stats(bbox=bbox)
+    except Exception as exc:
+        return {
+            "stored_vessel_count": 0,
+            "snapshot_vessel_count": 0,
+            "aisstream_configured": False,
+            "worker": {"status": "error", "last_error": str(exc)},
+        }
+
+
 @app.get("/api/maritime/vessels")
 def get_maritime_vessels(
-    max_vessels: int = 300,
+    max_vessels: int = 15000,
     capture_window_seconds: int = 10,
-    scope: str = "oil_tankers",
+    scope: str = "all_vessels",
     offset: int = 0,
+    include_gulf_demo: bool = False,
+    include_coastal_demo: bool = Query(
+        False,
+        description=(
+            "When true, merges Hormuz + Africa-adjacent synthetic demo positions (server must allow demo seeding). "
+            "See MARITIME_COASTAL_DEMO_SEED / MARITIME_GULF_DEMO_SEED. Overrides sparse-only merge for all coastal demo regions."
+        ),
+    ),
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
@@ -4206,6 +5162,8 @@ def get_maritime_vessels(
             vessel_scope=scope,
             bbox=bbox,
             offset=offset,
+            include_gulf_demo=include_gulf_demo,
+            include_coastal_demo=include_coastal_demo,
         )
     except Exception as exc:
         return {
@@ -4226,6 +5184,8 @@ def get_maritime_vessels(
             "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
             "effective_bbox_count": 0,
             "region_labels": [],
+            "coastal_demo_regions": [],
+            "coastal_demo_synthetic": False,
         }
 
 
@@ -4389,7 +5349,11 @@ def get_port_logistics_entities(force_refresh: bool = False):
             from backend.services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
         except ImportError:
             from services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
-        return build_port_logistics_entities(force_refresh=force_refresh)
+        payload = build_port_logistics_entities(force_refresh=force_refresh)
+        return JSONResponse(
+            content=payload,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
     except Exception as exc:
         return {
             "entities": [],
@@ -5076,17 +6040,44 @@ class LogisticsRoutePlanRequest(BaseModel):
     pipeline_layer_enabled: bool = False
 
 
+def _route_service_base_url() -> str:
+    return (os.getenv("ROUTE_SERVICE_URL") or "").strip().rstrip("/")
+
+
 @app.post("/api/logistics/route-plan")
 def plan_logistics_route(payload: LogisticsRoutePlanRequest):
+    request_payload = payload.model_dump()
+    transit = request_payload.get("transit_points") or []
+    request_payload["transit_points"] = [item for item in transit if isinstance(item, dict)]
+
+    route_service_url = _route_service_base_url()
+    if route_service_url:
+        import requests
+
+        try:
+            response = requests.post(
+                f"{route_service_url}/plan",
+                json=request_payload,
+                timeout=float(os.getenv("ROUTE_SERVICE_PROXY_TIMEOUT_SEC", "125")),
+            )
+            if response.status_code == 400:
+                raise HTTPException(status_code=400, detail=response.text)
+            response.raise_for_status()
+            return response.json()
+        except HTTPException:
+            raise
+        except requests.RequestException as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Route service unavailable at {route_service_url}: {exc}",
+            ) from exc
+
     try:
         try:
             from backend.services.route_planner import plan_route
         except ImportError:
             from services.route_planner import plan_route
 
-        request_payload = payload.model_dump()
-        transit = request_payload.get("transit_points") or []
-        request_payload["transit_points"] = [item for item in transit if isinstance(item, dict)]
         return plan_route(request_payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

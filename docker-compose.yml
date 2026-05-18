@@ -1,3 +1,6 @@
+# Local stack: MARITIME_COASTAL_DEMO_SEED defaults to 1 so Hormuz + Africa-adjacent reference
+# boxes merge synthetic demo traffic when live AIS counts are low (see backend maritime_intel).
+# Legacy MARITIME_GULF_DEMO_SEED still supported; set both to 0 in .env for production-like behavior.
 
 services:
   backend:
@@ -13,12 +16,36 @@ services:
       - DB_NAME=mining_db
       - DB_USER=postgres
       - DB_PASSWORD=password
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # AI provider runtime config from .env. Keep secrets out of this file.
+      # Safe check: docker compose exec backend python -c "import os; print({k: bool(os.getenv(k)) for k in ('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK')})"
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - AI_HTTP_TIMEOUT_SECONDS=${AI_HTTP_TIMEOUT_SECONDS:-18}
+      - AI_HTTP_MAX_RETRIES=${AI_HTTP_MAX_RETRIES:-1}
+      - AI_ANALYSIS_DEADLINE_SECONDS=${AI_ANALYSIS_DEADLINE_SECONDS:-45}
+      - AI_ENRICHMENT_DEADLINE_SECONDS=${AI_ENRICHMENT_DEADLINE_SECONDS:-20}
+      - POLLINATIONS_HTTP_TIMEOUT_SECONDS=${POLLINATIONS_HTTP_TIMEOUT_SECONDS:-12}
+      - POLLINATIONS_HTTP_MAX_RETRIES=${POLLINATIONS_HTTP_MAX_RETRIES:-0}
+      - DISABLE_POLLINATIONS_FALLBACK=${DISABLE_POLLINATIONS_FALLBACK:-}
       - SECRET_KEY=${SECRET_KEY}
       - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
+      # Petroleum Mapbox tiles (oil/gas pipelines). GitHub Actions secret: MAPBOX_ACCESS_TOKEN
+      - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN:-}
+      - OILMAP_MAPBOX_TOKEN=${OILMAP_MAPBOX_TOKEN:-}
+      # Optional geocoding; same Mapbox token usually works if unset
+      - MAPBOX_GEOCODING_TOKEN=${MAPBOX_GEOCODING_TOKEN:-}
+      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-1}
+      - MARITIME_MEMORY_CACHE_TTL_SECONDS=${MARITIME_MEMORY_CACHE_TTL_SECONDS:-10}
+      - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
+      - AIS_MAX_VESSELS=${AIS_MAX_VESSELS:-15000}
+      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-600}
+      - MARITIME_SNAPSHOT_TTL_SEC=${MARITIME_SNAPSHOT_TTL_SEC:-600}
+      - MARITIME_SNAPSHOT_REDIS_KEY=${MARITIME_SNAPSHOT_REDIS_KEY:-maritime:snapshot:global}
+      - MARITIME_COASTAL_DEMO_SEED=${MARITIME_COASTAL_DEMO_SEED:-1}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
+      - ROUTE_SERVICE_URL=http://route-service:8001
     healthcheck:
       test:
         [
@@ -36,13 +63,46 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      route-service:
+        condition: service_healthy
 
+  route-service:
+    build:
+      context: ./backend
+    container_name: mining-route-service
+    restart: always
+    command: ["python", "-m", "route_service"]
+    expose:
+      - "8001"
+    mem_limit: ${ROUTE_SERVICE_MEM_LIMIT:-3g}
+    environment:
+      - ROUTE_SERVICE_PORT=8001
+      - ROUTE_PLAN_DEADLINE_SEC=${ROUTE_PLAN_DEADLINE_SEC:-120}
+      - OSRM_GEOMETRY_CACHE_MAX=${OSRM_GEOMETRY_CACHE_MAX:-8192}
+      - OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+      - OSRM_TIMEOUT_SEC=${OSRM_TIMEOUT_SEC:-8}
+      - SEAROUTE_ENABLED=${SEAROUTE_ENABLED:-1}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5).read(1)",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+
+  # maritime-worker: continuous AIS ingest (start with: docker compose up -d maritime-worker)
   maritime-worker:
     build:
       context: ./backend
     container_name: mining-maritime-worker
     restart: always
     command: ["python", "maritime_worker.py"]
+    mem_limit: ${MARITIME_WORKER_MEM_LIMIT:-1g}
     environment:
       - DB_HOST=db
       - DB_PORT=5432
@@ -50,13 +110,25 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=password
       - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
-      - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-60}
-      - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-10}
-      - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-120}
+      - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-30}
+      - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-25}
+      - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-15000}
       - MARITIME_WORKER_SCOPE=${MARITIME_WORKER_SCOPE:-all_vessels}
-      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-300}
+      - MARITIME_WORKER_WATCH_MODE=${MARITIME_WORKER_WATCH_MODE:-all_regions}
+      - MARITIME_ALWAYS_ON_REGION_IDS=${MARITIME_ALWAYS_ON_REGION_IDS:-persian_gulf,arabian_gulf,malacca,east_mediterranean}
+      - MARITIME_GULF_SUPPLEMENT_MAX_VESSELS=${MARITIME_GULF_SUPPLEMENT_MAX_VESSELS:-4000}
+      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-1}
+      - MARITIME_AIS_SEED_FILE=${MARITIME_AIS_SEED_FILE:-}
+      - AIS_MAX_VESSELS=${AIS_MAX_VESSELS:-15000}
+      - AIS_MAX_CAPTURE_WINDOW_SECONDS=${AIS_MAX_CAPTURE_WINDOW_SECONDS:-30}
+      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-600}
+      - MARITIME_SNAPSHOT_TTL_SEC=${MARITIME_SNAPSHOT_TTL_SEC:-600}
+      - MARITIME_SNAPSHOT_REDIS_KEY=${MARITIME_SNAPSHOT_REDIS_KEY:-maritime:snapshot:global}
+      - MARITIME_SNAPSHOT_RETENTION_SECONDS=${MARITIME_SNAPSHOT_RETENTION_SECONDS:-86400}
+      - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -79,6 +151,7 @@ services:
       - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=${LICENSE_DAILY_SYNC_BACKOFF_SECONDS:-600}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
     depends_on:
       db:
         condition: service_healthy
@@ -89,8 +162,21 @@ services:
     image: redis:alpine
     container_name: mining-redis
     restart: always
+    # Internal-only by default — not exposed on the host. Use `docker compose exec redis redis-cli -a "$REDIS_PASSWORD"`.
+    # To attach redis-cli from the host (dev only), set REDIS_PUBLISH_PORT=6379 in .env.
+    expose:
+      - "6379"
     ports:
-      - "6379:6379"
+      - "${REDIS_PUBLISH_PORT:-}:6379"
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:-mining_redis_dev}
+      - --rename-command
+      - REPLICAOF
+      - ""
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
 
   frontend:
     build:
@@ -104,8 +190,11 @@ services:
     # .env only when you need a fixed API URL (e.g. VITE_API_BASE=http://host.docker.internal:8000 on Mac).
     environment:
       VITE_API_BASE: ${VITE_API_BASE:-}
+      VITE_ROUTE_SERVICE_URL: ${VITE_ROUTE_SERVICE_URL:-}
     depends_on:
       backend:
+        condition: service_healthy
+      route-service:
         condition: service_healthy
 
   db:

@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -51,7 +52,7 @@ _EIA_OPEC_COUNTRY_CODES = {
     "Iraq": "IRQ",
     "Iran": "IRN",
     "Kuwait": "KWT",
-    "UAE": "ARE",
+    "United Arab Emirates": "ARE",
     "Qatar": "QAT",
     "Libya": "LBY",
     "Algeria": "DZA",
@@ -129,6 +130,22 @@ class GulfOilEntity:
     entity_subtype: str = "oil_field"
 
 
+def _resolve_entity_subtype(entity: GulfOilEntity) -> str:
+    """Map license_type text to stable entity_subtype for map icons and filters."""
+    if entity.entity_subtype != "oil_field":
+        return entity.entity_subtype
+    lt = entity.license_type.lower()
+    if "refinery" in lt or "refining" in lt:
+        return "refinery"
+    if "export terminal" in lt or lt.endswith("terminal"):
+        return "export_terminal"
+    if "gas processing" in lt or "lng" in lt:
+        return "gas_processing"
+    if entity.commodity.lower().startswith(("steel", "gold", "aluminium", "aluminum", "phosphate")):
+        return "mining"
+    return entity.entity_subtype
+
+
 # Key Persian-Gulf / OPEC entities — national oil companies + major fields
 # Coordinates are field/HQ centroids from public domain sources.
 GULF_OIL_ENTITIES: list[GulfOilEntity] = [
@@ -156,21 +173,30 @@ GULF_OIL_ENTITIES: list[GulfOilEntity] = [
                   24.688, 46.722, "Gold / Phosphate / Aluminium", "Mining Conglomerate", "Active",
                   "https://www.maaden.com.sa/", entity_subtype="mining"),
 
-    # ── UAE ───────────────────────────────────────────────────────────────────
-    GulfOilEntity("ADNOC (Abu Dhabi National Oil Company)", "UAE", "Abu Dhabi",
+    # ── United Arab Emirates ──────────────────────────────────────────────────
+    GulfOilEntity("ADNOC (Abu Dhabi National Oil Company)", "United Arab Emirates", "Abu Dhabi",
                   24.450, 54.377, "Crude Oil & Gas", "National Oil Company", "Active",
                   "https://www.adnoc.ae/"),
-    GulfOilEntity("Zakum Oil Field", "UAE", "Abu Dhabi Offshore",
+    GulfOilEntity("Zakum Oil Field", "United Arab Emirates", "Abu Dhabi Offshore",
                   24.850, 53.380, "Crude Oil", "Supergiant Offshore Field", "Producing",
                   notes="Third-largest oil field in the Middle East (~1 Mb/d)."),
-    GulfOilEntity("ADNOC Refining (Ruwais)", "UAE", "Al Dhafra, Abu Dhabi",
+    GulfOilEntity("ADNOC Refining (Ruwais)", "United Arab Emirates", "Al Dhafra, Abu Dhabi",
                   24.112, 52.728, "Refined Products", "Refinery Complex", "Active",
-                  notes="One of the world's largest refinery complexes."),
-    GulfOilEntity("Murban Oil Field", "UAE", "Abu Dhabi Onshore",
+                  notes="One of the world's largest refinery complexes (~922 kb/d).",
+                  entity_subtype="refinery"),
+    GulfOilEntity("ENOC Jebel Ali Refinery", "United Arab Emirates", "Jebel Ali, Dubai",
+                  25.010, 55.060, "Refined Products", "Refinery", "Active",
+                  notes="Dubai's primary refining complex on the Arabian Gulf coast.",
+                  entity_subtype="refinery"),
+    GulfOilEntity("Fujairah Oil Industry Zone (FOIZ)", "United Arab Emirates", "Fujairah",
+                  25.116, 56.356, "Refined Products", "Refinery Complex", "Active",
+                  notes="Strategic bunkering and refining hub at the Gulf of Oman.",
+                  entity_subtype="refinery"),
+    GulfOilEntity("Murban Oil Field", "United Arab Emirates", "Abu Dhabi Onshore",
                   23.800, 53.750, "Crude Oil", "Giant Oil Field", "Producing"),
-    GulfOilEntity("ADNOC Gas Processing (Habshan)", "UAE", "Al Dhafra",
+    GulfOilEntity("ADNOC Gas Processing (Habshan)", "United Arab Emirates", "Al Dhafra",
                   23.832, 53.535, "Natural Gas", "Gas Processing Plant", "Active"),
-    GulfOilEntity("Emirates Steel / EMIRATES GLOBAL ALUMINIUM", "UAE", "Abu Dhabi",
+    GulfOilEntity("Emirates Steel / EMIRATES GLOBAL ALUMINIUM", "United Arab Emirates", "Abu Dhabi",
                   24.313, 54.601, "Steel / Aluminium", "Industrial Conglomerate", "Active",
                   entity_subtype="mining"),
 
@@ -187,7 +213,8 @@ GULF_OIL_ENTITIES: list[GulfOilEntity] = [
                   29.150, 47.500, "Crude Oil", "Giant Oil Field", "Producing"),
     GulfOilEntity("Mina Al-Ahmadi Refinery", "Kuwait", "Ahmadi",
                   29.076, 48.135, "Refined Products", "Refinery", "Active",
-                  notes="Largest refinery in Kuwait."),
+                  notes="Largest refinery in Kuwait.",
+                  entity_subtype="refinery"),
 
     # ── Qatar ─────────────────────────────────────────────────────────────────
     GulfOilEntity("QatarEnergy (formerly Qatar Petroleum)", "Qatar", "Doha",
@@ -336,15 +363,17 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                     INSERT INTO licenses (
                         id, company, country, region, lat, lng,
                         commodity, license_type, status,
-                        sector, source_kind, source_name,
+                        sector, record_origin, source_kind, source_id, source_name,
                         external_id, source_record_url,
-                        last_synced_at, entity_kind, entity_subtype
+                        last_synced_at, entity_kind, entity_subtype,
+                        confidence_score, confidence_note
                     ) VALUES (
-                        gen_random_uuid(), %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
                         %s, %s, %s,
-                        %s, %s, %s,
+                        %s, %s, %s, %s, %s,
                         %s, %s,
-                        NOW(), %s, %s
+                        NOW(), %s, %s,
+                        %s, %s
                     )
                     ON CONFLICT (external_id) DO UPDATE SET
                         company          = EXCLUDED.company,
@@ -355,18 +384,27 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         commodity        = EXCLUDED.commodity,
                         license_type     = EXCLUDED.license_type,
                         status           = EXCLUDED.status,
+                        record_origin    = EXCLUDED.record_origin,
+                        source_kind      = EXCLUDED.source_kind,
+                        source_id        = EXCLUDED.source_id,
                         source_name      = EXCLUDED.source_name,
                         last_synced_at   = NOW(),
-                        entity_subtype   = EXCLUDED.entity_subtype
+                        entity_subtype   = EXCLUDED.entity_subtype,
+                        confidence_score = EXCLUDED.confidence_score,
+                        confidence_note  = EXCLUDED.confidence_note
                     """,
                     (
+                        str(uuid.uuid4()),
                         entity.company, entity.country, entity.region,
                         entity.lat, entity.lng,
                         commodity, entity.license_type, entity.status,
-                        "oil_and_gas", "global_open_fallback",
+                        "oil_and_gas", "global_open_fallback", "global_open_fallback",
+                        "opec_gulf_reference",
                         "OPEC / Persian Gulf Reference Data",
                         external_id, entity.source_url,
-                        "license", entity.entity_subtype,
+                        "license", _resolve_entity_subtype(entity),
+                        0.72,
+                        "Curated OPEC/Persian Gulf reference row; verify against official registry before execution.",
                     ),
                 )
                 written += 1

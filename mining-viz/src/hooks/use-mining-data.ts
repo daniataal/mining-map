@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback, startTransition } from 'react';
 import {
-  commodityMatchesQuery,
   getLicenseCommodityLabels,
   licenseMatchesSelectedCommodities,
 } from '../lib/commodities';
+import { FilterResultCache } from '../lib/filterResultCache';
+import { buildLicenseSearchIndex, licenseHaystackMatches } from '../lib/licenseSearchIndex';
 import { MiningLicense, UserAnnotation } from '../types';
 
 function normalizeSubtypeLabel(value: string | null | undefined): string {
@@ -34,8 +35,56 @@ function confidenceBucketFromScore(score?: number | null): string {
   return 'Needs review';
 }
 
+function buildProcessedDataCacheKey(
+  rawDataLength: number,
+  appliedFilter: string,
+  sortBy: string,
+  selectedCountry: string[],
+  selectedCommodity: string[],
+  selectedLicenseType: string[],
+  userStatusFilter: string[],
+  selectedEntitySubtype: string[],
+  selectedSourceLabel: string[],
+  selectedConfidenceBucket: string[],
+  selectedSector: string | null,
+  portLinkedOnly: boolean,
+  annotationRevision: number,
+): string {
+  return [
+    rawDataLength,
+    appliedFilter,
+    sortBy,
+    selectedCountry.join('\u0001'),
+    selectedCommodity.join('\u0001'),
+    selectedLicenseType.join('\u0001'),
+    userStatusFilter.join('\u0001'),
+    selectedEntitySubtype.join('\u0001'),
+    selectedSourceLabel.join('\u0001'),
+    selectedConfidenceBucket.join('\u0001'),
+    selectedSector ?? '',
+    portLinkedOnly ? '1' : '0',
+    String(annotationRevision),
+  ].join('|');
+}
+
 export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<string, UserAnnotation>) => {
   const [filter, setFilter] = useState('');
+  /** Drives license list + map; updated on Enter / clear, not on every keystroke. */
+  const [appliedFilter, setAppliedFilter] = useState('');
+  const setFilterDeferred = useCallback((value: string) => {
+    startTransition(() => {
+      setFilter(value);
+      if (!value.trim()) setAppliedFilter('');
+    });
+  }, []);
+  const commitSearchFilter = useCallback((value?: string) => {
+    const raw = value ?? filter;
+    const next = raw.trim();
+    startTransition(() => {
+      setFilter(raw);
+      setAppliedFilter(next);
+    });
+  }, [filter]);
   const [sortBy, setSortBy] = useState<keyof MiningLicense>('company');
   const [selectedCountry, setSelectedCountry] = useState<string[]>([]);
   const [selectedCommodity, setSelectedCommodity] = useState<string[]>([]);
@@ -46,6 +95,18 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const [selectedConfidenceBucket, setSelectedConfidenceBucket] = useState<string[]>([]);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [portLinkedOnly, setPortLinkedOnly] = useState(false);
+  const filterCacheRef = useRef(new FilterResultCache<MiningLicense[]>());
+  const annotationRevisionRef = useRef(0);
+
+  useEffect(() => {
+    annotationRevisionRef.current += 1;
+    filterCacheRef.current.clear();
+  }, [userAnnotations]);
+
+  useEffect(() => {
+    filterCacheRef.current.clear();
+  }, [rawData]);
+
   const activeFilterCount =
     selectedCommodity.length +
     selectedCountry.length +
@@ -57,20 +118,47 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     (portLinkedOnly ? 1 : 0);
 
   const resetFilters = () => {
-    setSelectedCommodity([]);
-    setSelectedCountry([]);
-    setUserStatusFilter([]);
-    setSelectedLicenseType([]);
-    setSelectedEntitySubtype([]);
-    setSelectedSourceLabel([]);
-    setSelectedConfidenceBucket([]);
-    setSelectedSector(null);
-    setPortLinkedOnly(false);
+    startTransition(() => {
+      setFilter('');
+      setAppliedFilter('');
+      setSelectedCommodity([]);
+      setSelectedCountry([]);
+      setUserStatusFilter([]);
+      setSelectedLicenseType([]);
+      setSelectedEntitySubtype([]);
+      setSelectedSourceLabel([]);
+      setSelectedConfidenceBucket([]);
+      setSelectedSector(null);
+      setPortLinkedOnly(false);
+    });
   };
 
+  const searchIndex = useMemo(
+    () => buildLicenseSearchIndex(rawData, userAnnotations),
+    [rawData, userAnnotations],
+  );
+
   const processedData = useMemo(() => {
+    const cacheKey = buildProcessedDataCacheKey(
+      rawData.length,
+      appliedFilter,
+      sortBy,
+      selectedCountry,
+      selectedCommodity,
+      selectedLicenseType,
+      userStatusFilter,
+      selectedEntitySubtype,
+      selectedSourceLabel,
+      selectedConfidenceBucket,
+      selectedSector,
+      portLinkedOnly,
+      annotationRevisionRef.current,
+    );
+    const cached = filterCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
     let data: MiningLicense[] = rawData;
-    
+
     if (selectedSector) {
       data = data.filter((item) => {
         const itemSector = (item.sector || 'mining').toLowerCase();
@@ -86,7 +174,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     }
 
     if (selectedCommodity.length > 0) {
-      data = data.filter(item => {
+      data = data.filter((item) => {
         const annotation = userAnnotations[item.id] || {};
         const labels = getLicenseCommodityLabels(item.commodity, annotation.commodity);
         return licenseMatchesSelectedCommodities(labels, selectedCommodity);
@@ -94,10 +182,10 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     }
 
     if (selectedLicenseType.length > 0) {
-      data = data.filter(item => {
+      data = data.filter((item) => {
         const annotation = userAnnotations[item.id] || {};
         const val = (annotation.licenseType || item.licenseType || 'Unknown').trim();
-        const normalized = val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        const normalized = val.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
         return selectedLicenseType.includes(normalized);
       });
     }
@@ -127,33 +215,13 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       data = data.filter((item) => Boolean(item.nearbyPort));
     }
 
-    if (filter) {
-      const lower = filter.toLowerCase();
-      data = data.filter(item => {
-        const annotation = userAnnotations[item.id] || {};
-        const comment = annotation.comment || '';
-        const commodity = annotation.commodity || item.commodity || '';
-        const operator = item.operatorName || '';
-        const portName = item.nearbyPort?.name || '';
-        const subtype = item.entitySubtype || '';
-        const locode = item.locode || '';
-
-        return (
-          (item.company && item.company.toLowerCase().includes(lower)) ||
-          (item.licenseType && item.licenseType.toLowerCase().includes(lower)) ||
-          operator.toLowerCase().includes(lower) ||
-          portName.toLowerCase().includes(lower) ||
-          subtype.toLowerCase().includes(lower) ||
-          locode.toLowerCase().includes(lower) ||
-          (item.country && item.country.toLowerCase().includes(lower)) ||
-          commodityMatchesQuery(commodity, lower) ||
-          (comment.toLowerCase().includes(lower))
-        );
-      });
+    const lower = appliedFilter.trim().toLowerCase();
+    if (lower) {
+      data = data.filter((item) => licenseHaystackMatches(searchIndex, item.id, lower));
     }
 
     if (userStatusFilter.length > 0) {
-      data = data.filter(item => {
+      data = data.filter((item) => {
         const selected = userStatusFilter.map((value) => value.toLowerCase());
         const status = (userAnnotations[item.id]?.status || '').toLowerCase();
         if (selected.includes('unmarked') && !status) return true;
@@ -161,14 +229,17 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       });
     }
 
-    return data.slice().sort((a, b) => {
+    const sorted = data.slice().sort((a, b) => {
       const valA = (a[sortBy] ?? '').toString().toLowerCase();
       const valB = (b[sortBy] ?? '').toString().toLowerCase();
       return valA.localeCompare(valB);
     });
+
+    filterCacheRef.current.set(cacheKey, sorted);
+    return sorted;
   }, [
     rawData,
-    filter,
+    appliedFilter,
     sortBy,
     selectedCountry,
     selectedCommodity,
@@ -178,14 +249,16 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     selectedEntitySubtype,
     selectedSourceLabel,
     selectedConfidenceBucket,
+    selectedSector,
     portLinkedOnly,
+    searchIndex,
   ]);
 
   const countries = useMemo(() => {
     const c = new Set(
       rawData
         .map((item) => item.country?.trim())
-        .filter((country): country is string => Boolean(country))
+        .filter((country): country is string => Boolean(country)),
     );
     return Array.from(c).sort();
   }, [rawData]);
@@ -203,11 +276,16 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   }, [rawData, userAnnotations]);
 
   const licenseTypes = useMemo(() => {
-    const t = new Set(rawData.map(item => {
-      const annotation = userAnnotations[item.id] || {};
-      const val = (annotation.licenseType || item.licenseType || 'Unknown').trim();
-      return val.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-    }));
+    const t = new Set(
+      rawData.map((item) => {
+        const annotation = userAnnotations[item.id] || {};
+        const val = (annotation.licenseType || item.licenseType || 'Unknown').trim();
+        return val
+          .split(' ')
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(' ');
+      }),
+    );
     return Array.from(t).sort();
   }, [rawData, userAnnotations]);
 
@@ -232,7 +310,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
 
   const infrastructureStats = useMemo(() => {
     const infrastructureItems = processedData.filter(
-      (item) => item.entityKind && item.entityKind !== 'license'
+      (item) => item.entityKind && item.entityKind !== 'license',
     );
     const countries = new Set(infrastructureItems.map((item) => item.country).filter(Boolean));
     const bySubtype: Record<string, number> = {};
@@ -273,6 +351,31 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     };
   }, [processedData]);
 
+  const setSelectedCountryDeferred = (val: string[]) => {
+    startTransition(() => setSelectedCountry(val));
+  };
+  const setSelectedCommodityDeferred = (val: string[]) => {
+    startTransition(() => setSelectedCommodity(val));
+  };
+  const setSelectedLicenseTypeDeferred = (val: string[]) => {
+    startTransition(() => setSelectedLicenseType(val));
+  };
+  const setUserStatusFilterDeferred = (val: string[]) => {
+    startTransition(() => setUserStatusFilter(val));
+  };
+  const setSelectedEntitySubtypeDeferred = (val: string[]) => {
+    startTransition(() => setSelectedEntitySubtype(val));
+  };
+  const setSelectedSourceLabelDeferred = (val: string[]) => {
+    startTransition(() => setSelectedSourceLabel(val));
+  };
+  const setSelectedConfidenceBucketDeferred = (val: string[]) => {
+    startTransition(() => setSelectedConfidenceBucket(val));
+  };
+  const setPortLinkedOnlyDeferred = (val: boolean) => {
+    startTransition(() => setPortLinkedOnly(val));
+  };
+
   return {
     processedData,
     countries,
@@ -282,28 +385,31 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     sourceLabels,
     infrastructureStats,
     filter,
-    setFilter,
+    appliedFilter,
+    setFilter: setFilterDeferred,
+    commitSearchFilter,
     sortBy,
     setSortBy,
     selectedCountry,
-    setSelectedCountry,
+    setSelectedCountry: setSelectedCountryDeferred,
     selectedCommodity,
-    setSelectedCommodity,
+    setSelectedCommodity: setSelectedCommodityDeferred,
     selectedLicenseType,
-    setSelectedLicenseType,
+    setSelectedLicenseType: setSelectedLicenseTypeDeferred,
     userStatusFilter,
-    setUserStatusFilter,
+    setUserStatusFilter: setUserStatusFilterDeferred,
     selectedEntitySubtype,
-    setSelectedEntitySubtype,
+    setSelectedEntitySubtype: setSelectedEntitySubtypeDeferred,
     selectedSourceLabel,
-    setSelectedSourceLabel,
+    setSelectedSourceLabel: setSelectedSourceLabelDeferred,
     selectedConfidenceBucket,
-    setSelectedConfidenceBucket,
+    setSelectedConfidenceBucket: setSelectedConfidenceBucketDeferred,
     selectedSector,
     setSelectedSector,
     portLinkedOnly,
-    setPortLinkedOnly,
+    setPortLinkedOnly: setPortLinkedOnlyDeferred,
     activeFilterCount,
     resetFilters,
+    isFilterPending: filter.trim() !== appliedFilter,
   };
 };

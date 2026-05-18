@@ -1,8 +1,7 @@
 import axios, { isCancel } from 'axios';
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo } from 'react';
 import {
   useQuery,
-  useQueries,
   useMutation,
   useQueryClient,
   type QueryFunctionContext,
@@ -21,13 +20,34 @@ import {
   EntityRelationship,
   DdReport,
   LegalEvent,
+  GovProcurementResponse,
+  GovProcurementCompaniesResponse,
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
   PortLogisticsDetails,
   PortLogisticsResponse,
+  AgentJobResponse,
+  ContactEnrichmentOutput,
+  OperatorValidationOutput,
+  DealRoom,
+  DealRoomRunResponse,
+  DealRoomExportPackage,
 } from '../types';
-import bundledLicenses from '../data/licenses.json';
+import {
+  isLicenseBundleCacheFresh,
+  licenseBundleModeFromSector,
+  readLicenseBundleCache,
+  readLicenseBundleCacheSync,
+  writeLicenseBundleCache,
+  type LicenseBundleMode,
+} from './licenseBundleCache';
+
+export {
+  clearLicenseBundleCaches,
+  LICENSE_BUNDLE_TTL_MS,
+  type LicenseBundleMode,
+} from './licenseBundleCache';
 
 /** Same base URL for fetch() and axios. 
  *  Empty string means 'same origin', which works because we use Vite proxy in dev 
@@ -60,13 +80,29 @@ export const apiClient = axios.create({
   },
 });
 
-const LICENSES_FALLBACK_DATA = (bundledLicenses as MiningLicense[]).map((item) => ({
-  ...item,
-  sector: item.sector || 'mining',
-  recordOrigin: item.recordOrigin || 'bundled_json',
-  sourceId: item.sourceId || 'bundled_json',
-  sourceName: item.sourceName || 'Bundled JSON fallback',
-}));
+let licensesFallbackDataPromise: Promise<MiningLicense[]> | null = null;
+
+async function loadBundledLicenseFallback(): Promise<MiningLicense[]> {
+  if (!licensesFallbackDataPromise) {
+    licensesFallbackDataPromise = import('../data/licenses.json').then(({ default: bundledLicenses }) =>
+      (bundledLicenses as MiningLicense[]).map((item) => ({
+        ...item,
+        sector: item.sector || 'mining',
+        recordOrigin: item.recordOrigin || 'bundled_json',
+        sourceId: item.sourceId || 'bundled_json',
+        sourceName: item.sourceName || 'Bundled JSON fallback',
+        sourceKind: item.sourceKind || 'bundled_json',
+        sourceAccess: item.sourceAccess || 'local_fallback',
+        coverageState: item.coverageState || 'fallback_only',
+        confidenceScore: item.confidenceScore ?? 0.35,
+        confidenceNote:
+          item.confidenceNote ||
+          'Bundled local fallback loaded after the live licenses API failed; verify against official source before deal execution.',
+      })),
+    );
+  }
+  return licensesFallbackDataPromise;
+}
 export type CountryBordersGeoJson = FeatureCollection<Geometry, GeoJsonProperties>;
 
 function canUseBundledLicenseFallback(): boolean {
@@ -156,16 +192,33 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-/** Viewport for GET /licenses bbox params (south/west/north/east). */
+/** Viewport for GET /licenses bbox params (south/west/north/east). Kept for API typing; map loads ignore bbox. */
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
-/** One country per GET /licenses so the server-side per-country row cap is not shared across a batch. */
-const LICENSE_COUNTRY_BATCH_SIZE = 1;
+/** One GET /licenses per view mode; filters (country, commodity, etc.) run client-side only. */
+const LICENSE_BULK_LIMIT = 15_000;
+const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
 /** USGS global fallback — excluded from map country fetches (dominates shared SQL limits). */
 const LICENSE_MAP_EXCLUDED_COUNTRIES = new Set(['Global']);
 /** Always requested for map loads when coverage metadata is available. */
 const CSV_PRIORITY_LICENSE_COUNTRIES = ['Ghana', 'South Africa'] as const;
+
+/** OPEC / Persian Gulf — always fetched on the oil & gas map even before world-coverage counts exist. */
+const OPEC_GULF_PRIORITY_LICENSE_COUNTRIES = [
+  'Saudi Arabia',
+  'United Arab Emirates',
+  'Kuwait',
+  'Qatar',
+  'Iran',
+  'Iraq',
+  'Oman',
+  'Bahrain',
+  'Libya',
+  'Algeria',
+  'Nigeria',
+  'Venezuela',
+] as const;
 
 /** Fallback country list used when world-coverage metadata is unavailable. */
 const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
@@ -198,6 +251,12 @@ const FALLBACK_LICENSE_FETCH_COUNTRIES: string[] = [
   'Botswana',
   'United Arab Emirates',
   'Saudi Arabia',
+  'Kuwait',
+  'Qatar',
+  'Iran',
+  'Bahrain',
+  'Libya',
+  'Venezuela',
   'Australia',
   'Canada',
   'Peru',
@@ -243,6 +302,11 @@ export function deriveLicenseFetchCountries(
   sector: 'mining' | 'oil_and_gas' | undefined,
   worldCoverage: WorldCoverageResponse | undefined,
 ): string[] {
+  const priorityCountries =
+    sector === 'oil_and_gas'
+      ? [...OPEC_GULF_PRIORITY_LICENSE_COUNTRIES, ...CSV_PRIORITY_LICENSE_COUNTRIES]
+      : [...CSV_PRIORITY_LICENSE_COUNTRIES];
+
   const rows = worldCoverage?.countries;
   if (rows?.length) {
     const scored: { name: string; w: number }[] = [];
@@ -266,13 +330,23 @@ export function deriveLicenseFetchCountries(
       .map(([name]) => name);
     const merged: string[] = [];
     const seen = new Set<string>();
-    for (const name of [...CSV_PRIORITY_LICENSE_COUNTRIES, ...ranked]) {
+    for (const name of [...priorityCountries, ...ranked]) {
       if (seen.has(name) || LICENSE_MAP_EXCLUDED_COUNTRIES.has(name)) continue;
       seen.add(name);
       merged.push(name);
       if (merged.length >= MAX_LICENSE_FETCH_COUNTRIES) break;
     }
     if (merged.length) return merged;
+  }
+  if (sector === 'oil_and_gas') {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const name of [...priorityCountries, ...FALLBACK_LICENSE_FETCH_COUNTRIES]) {
+      if (seen.has(name) || LICENSE_MAP_EXCLUDED_COUNTRIES.has(name)) continue;
+      seen.add(name);
+      merged.push(name);
+    }
+    return merged;
   }
   return [...FALLBACK_LICENSE_FETCH_COUNTRIES];
 }
@@ -282,172 +356,92 @@ export type UseLicensesResult = {
   isLoading: boolean;
   isFetching: boolean;
   error: Error | null;
-  /** Sub-queries not yet fetched (batched country groups, not individual ISO rows). */
+  /** Always 0 or 1 — one bundle request per view mode (no per-country fan-out). */
   stillLoadingCountryCount: number;
   failedCountryQueryCount: number;
+  bundleMode: LicenseBundleMode;
 };
 
-export const useLicenses = (
-  sector?: 'mining' | 'oil_and_gas',
-  viewportBounds?: LicenseViewportBounds | null,
-  countries?: string[],
-): UseLicensesResult => {
-  const bboxKey =
-    viewportBounds &&
-    Number.isFinite(viewportBounds.south) &&
-    Number.isFinite(viewportBounds.west) &&
-    Number.isFinite(viewportBounds.north) &&
-    Number.isFinite(viewportBounds.east)
-      ? `${viewportBounds.south.toFixed(4)},${viewportBounds.west.toFixed(4)},${viewportBounds.north.toFixed(4)},${viewportBounds.east.toFixed(4)}`
-      : 'full';
+async function fetchLicenseBundleFromApi(
+  sector: 'mining' | 'oil_and_gas' | undefined,
+  signal?: AbortSignal,
+): Promise<MiningLicense[]> {
+  const { data } = await apiClient.get<unknown>('/licenses', {
+    signal,
+    timeout: LICENSE_GET_TIMEOUT_MS,
+    params: {
+      prefer_open_data: true,
+      limit: LICENSE_BULK_LIMIT,
+      ...(sector ? { sector } : {}),
+    },
+  });
+  if (Array.isArray(data)) return data as MiningLicense[];
+  if (data && typeof data === 'object' && 'error' in data) {
+    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+    throw new Error(msg);
+  }
+  console.warn('[useLicenses] Expected array from /licenses, got:', data);
+  return [];
+}
 
-  const sortedCountries = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (countries?.length ? countries : FALLBACK_LICENSE_FETCH_COUNTRIES)
-            .map((c) => c.trim())
-            .filter((c) => c && !LICENSE_MAP_EXCLUDED_COUNTRIES.has(c)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [countries],
-  );
+export const useLicenses = (sector?: 'mining' | 'oil_and_gas'): UseLicensesResult => {
+  const bundleMode = licenseBundleModeFromSector(sector);
+  const syncCached = useMemo(() => readLicenseBundleCacheSync(bundleMode), [bundleMode]);
 
-  const countryBatches = useMemo(() => {
-    const batches: string[][] = [];
-    for (let i = 0; i < sortedCountries.length; i += LICENSE_COUNTRY_BATCH_SIZE) {
-      batches.push(sortedCountries.slice(i, i + LICENSE_COUNTRY_BATCH_SIZE));
-    }
-    return batches;
-  }, [sortedCountries]);
-
-  const licenseQueries = useMemo(
-    () =>
-      countryBatches.map((batch) => ({
-        queryKey: ['licenses', sector ?? 'all', bboxKey, batch.join('|')] as const,
-        staleTime: 300_000,
-        retry: 1,
-        refetchOnWindowFocus: false,
-        placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
-        queryFn: async ({ signal }: QueryFunctionContext) => {
-          const countriesParam = batch.join(',');
-          const countrySet = new Set(batch.map((b) => b.trim().toLowerCase()));
-          try {
-            const useBbox = Boolean(viewportBounds);
-            const { data } = await apiClient.get<unknown>('/licenses', {
-              signal,
-              timeout: LICENSE_GET_TIMEOUT_MS,
-              params: {
-                prefer_open_data: true,
-                limit: 10000,
-                countries: countriesParam,
-                ...(sector ? { sector } : {}),
-                ...(useBbox && viewportBounds
-                  ? {
-                      min_lat: viewportBounds.south,
-                      max_lat: viewportBounds.north,
-                      min_lng: viewportBounds.west,
-                      max_lng: viewportBounds.east,
-                    }
-                  : {}),
-              },
-            });
-            if (Array.isArray(data)) return data as MiningLicense[];
-            if (data && typeof data === 'object' && 'error' in data) {
-              const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-              throw new Error(msg);
-            }
-            console.warn('[useLicenses] Expected array from /licenses, got:', data);
-            return [];
-          } catch (error) {
-            if (isLicensesRequestAborted(error)) {
-              throw error;
-            }
-            if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
-              console.warn(
-                '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
-                error,
-              );
-              const base = sector
-                ? LICENSES_FALLBACK_DATA.filter((item) => item.sector === sector)
-                : LICENSES_FALLBACK_DATA;
-              return base.filter((item) => countrySet.has((item.country ?? '').trim().toLowerCase()));
-            }
-            throw error;
-          }
-        },
-      })),
-    [countryBatches, sector, bboxKey, viewportBounds],
-  );
-
-  const results = useQueries({ queries: licenseQueries });
-
-  const mergedData = useMemo(() => {
-    const byId = new Map<string, MiningLicense>();
-    for (const q of results) {
-      const arr = q.data;
-      if (!Array.isArray(arr)) continue;
-      for (const lic of arr) {
-        if (lic?.id) byId.set(lic.id, lic);
+  const query = useQuery({
+    queryKey: ['licenses', 'bundle', bundleMode] as const,
+    staleTime: LICENSE_BUNDLE_STALE_MS,
+    gcTime: 2 * LICENSE_BUNDLE_STALE_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
+    initialData: syncCached?.licenses,
+    initialDataUpdatedAt: syncCached?.fetchedAt,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      const cached = await readLicenseBundleCache(bundleMode);
+      if (cached && isLicenseBundleCacheFresh(cached)) {
+        return cached.licenses;
       }
-    }
-    return Array.from(byId.values());
-  }, [results]);
 
-  /** Bbox changes should not wipe the map: keep last good rows until new data arrives. */
-  const cacheEpoch = `${sector ?? 'all'}::${sortedCountries.join('|')}`;
-  const cacheEpochRef = useRef(cacheEpoch);
-  const lastStableLicenses = useRef<MiningLicense[]>([]);
+      try {
+        const fresh = await fetchLicenseBundleFromApi(sector, signal);
+        await writeLicenseBundleCache(bundleMode, fresh);
+        return fresh;
+      } catch (error) {
+        if (isLicensesRequestAborted(error)) {
+          throw error;
+        }
+        if (cached?.licenses.length) {
+          return cached.licenses;
+        }
+        if (sector !== 'oil_and_gas' && canUseBundledLicenseFallback()) {
+          console.warn(
+            '[useLicenses] /licenses failed; using bundled mining fallback because local fallback is enabled.',
+            error,
+          );
+          const fallbackData = await loadBundledLicenseFallback();
+          const base = sector
+            ? fallbackData.filter((item) => item.sector === sector)
+            : fallbackData;
+          await writeLicenseBundleCache(bundleMode, base);
+          return base;
+        }
+        throw error;
+      }
+    },
+  });
 
-  useEffect(() => {
-    if (cacheEpochRef.current !== cacheEpoch) {
-      cacheEpochRef.current = cacheEpoch;
-      lastStableLicenses.current = [];
-    }
-  }, [cacheEpoch]);
-
-  useEffect(() => {
-    if (mergedData.length > 0) {
-      lastStableLicenses.current = mergedData;
-    }
-  }, [mergedData]);
-
-  const displayData =
-    mergedData.length > 0 ? mergedData : lastStableLicenses.current;
-
-  const isLoading = useMemo(() => {
-    if (!results.length) return false;
-    if (displayData.length > 0) return false;
-    return !results.every((r) => r.isFetched);
-  }, [displayData.length, results]);
-
-  const isFetching = useMemo(() => results.some((r) => r.isFetching), [results]);
-
-  const error = useMemo((): Error | null => {
-    if (displayData.length > 0) return null;
-    if (!results.length) return null;
-    const settled = results.filter((r) => !r.isPending);
-    if (settled.length < results.length) return null;
-    const failed = settled.filter((r) => r.error);
-    if (failed.length !== settled.length) return null;
-    const first = failed[0]?.error;
-    return first instanceof Error ? first : new Error(String(first ?? 'Licenses request failed'));
-  }, [displayData.length, results]);
-
-  const stillLoadingCountryCount = useMemo(
-    () => results.filter((r) => !r.isFetched).length,
-    [results],
-  );
-
-  const failedCountryQueryCount = useMemo(() => results.filter((r) => r.isError).length, [results]);
+  const stillLoadingCountryCount = query.isLoading && !query.data?.length ? 1 : 0;
+  const failedCountryQueryCount = query.isError && !query.data?.length ? 1 : 0;
 
   return {
-    data: displayData,
-    isLoading,
-    isFetching,
-    error,
+    data: query.data ?? [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error instanceof Error ? query.error : query.error ? new Error(String(query.error)) : null,
     stillLoadingCountryCount,
     failedCountryQueryCount,
+    bundleMode,
   };
 };
 
@@ -460,6 +454,127 @@ export async function getEntityContacts(entityId: string, entityKind = 'license'
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+export async function runContactEnrichmentAgent(
+  entityId: string,
+  entityKind = 'license',
+): Promise<AgentJobResponse<ContactEnrichmentOutput>> {
+  const { data } = await apiClient.post<AgentJobResponse<ContactEnrichmentOutput>>(
+    '/api/agents/contact-enrichment',
+    {
+      entity_id: entityId,
+      entity_kind: entityKind,
+    },
+  );
+  return data;
+}
+
+export async function runOperatorValidationAgent(
+  entityId: string,
+  entityKind = 'license',
+): Promise<AgentJobResponse<OperatorValidationOutput>> {
+  const { data } = await apiClient.post<AgentJobResponse<OperatorValidationOutput>>(
+    '/api/agents/operator-validation',
+    {
+      entity_id: entityId,
+      entity_kind: entityKind,
+    },
+  );
+  return data;
+}
+
+export async function getAgentJob<TOutput = Record<string, unknown>>(
+  jobId: string,
+): Promise<AgentJobResponse<TOutput>> {
+  const { data } = await apiClient.get<AgentJobResponse<TOutput>>(
+    `/api/agents/jobs/${encodeURIComponent(jobId)}`,
+  );
+  return data;
+}
+
+export async function listDealRooms(options: {
+  entityId?: string;
+  entityKind?: string;
+} = {}): Promise<DealRoom[]> {
+  const { data } = await apiClient.get<DealRoom[]>('/api/deal-rooms', {
+    params: {
+      ...(options.entityId ? { entity_id: options.entityId } : {}),
+      ...(options.entityKind ? { entity_kind: options.entityKind } : {}),
+    },
+  });
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createDealRoom(payload: {
+  entityId: string;
+  entityKind?: string;
+  title?: string;
+  status?: string;
+  routeSnapshot?: Record<string, unknown>;
+  notes?: string;
+}): Promise<DealRoom> {
+  const { data } = await apiClient.post<DealRoom>('/api/deal-rooms', {
+    entity_id: payload.entityId,
+    entity_kind: payload.entityKind ?? 'license',
+    title: payload.title,
+    status: payload.status,
+    route_snapshot: payload.routeSnapshot,
+    notes: payload.notes,
+  });
+  return data;
+}
+
+export async function updateDealRoom(
+  dealRoomId: string,
+  payload: {
+    title?: string;
+    status?: string;
+    routeSnapshot?: Record<string, unknown> | null;
+    evidence?: Record<string, unknown>;
+    notes?: string;
+  },
+): Promise<DealRoom> {
+  const { data } = await apiClient.patch<DealRoom>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}`,
+    {
+      title: payload.title,
+      status: payload.status,
+      route_snapshot: payload.routeSnapshot,
+      evidence: payload.evidence,
+      notes: payload.notes,
+    },
+  );
+  return data;
+}
+
+export async function runDealRoomAgents(
+  dealRoomId: string,
+  options: { agents?: string[]; forceRefresh?: boolean; runSync?: boolean } = {},
+): Promise<DealRoomRunResponse> {
+  const { data } = await apiClient.post<DealRoomRunResponse>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}/agents/run`,
+    {
+      agents: options.agents,
+      force_refresh: options.forceRefresh,
+      run_sync: options.runSync,
+    },
+  );
+  return data;
+}
+
+export async function exportDealRoom(
+  dealRoomId: string,
+  format: 'json' | 'markdown' = 'json',
+): Promise<DealRoomExportPackage | string> {
+  const { data } = await apiClient.get<DealRoomExportPackage | string>(
+    `/api/deal-rooms/${encodeURIComponent(dealRoomId)}/export`,
+    {
+      params: format === 'markdown' ? { format: 'markdown' } : undefined,
+      responseType: format === 'markdown' ? 'text' : 'json',
+    },
+  );
+  return data;
 }
 
 export async function getEntityRelationships(entityId: string, entityKind = 'license'): Promise<EntityRelationship[]> {
@@ -504,6 +619,78 @@ export async function getLegalEvents(
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+/** U.S. federal awards for a licensee (database-backed; optional live USAspending). */
+export async function getGovProcurement(
+  entityId: string,
+  entityKind = 'license',
+  options: { live?: boolean } = {},
+): Promise<GovProcurementResponse> {
+  const { data } = await apiClient.get<GovProcurementResponse>(
+    `/entities/${encodeURIComponent(entityId)}/gov-procurement`,
+    {
+      params: {
+        entity_kind: entityKind,
+        ...(options.live ? { live: true } : {}),
+      },
+    },
+  );
+  if (!data || typeof data !== 'object') {
+    return {
+      source: 'USAspending.gov',
+      sourceUrl: 'https://www.usaspending.gov',
+      scope: 'U.S. federal awards',
+      limitations: [],
+      warnings: ['Unexpected response from gov-procurement endpoint.'],
+      summary: {
+        totalAwardedUsd: 0,
+        activeContractCount: 0,
+        awardCount: 0,
+        portfolioByCategoryPct: { precious: 0, fuels: 0, strategic: 0, other: 0 },
+      },
+      awards: [],
+    };
+  }
+  return data;
+}
+
+/** Browse U.S. federal contractors with commodity-tagged awards (database-backed). */
+export async function getGovProcurementCompanies(
+  options: {
+    commodity?: string;
+    refresh?: boolean;
+    matchLicenses?: boolean;
+    page?: number;
+    pageSize?: number;
+    limit?: number;
+  } = {},
+): Promise<GovProcurementCompaniesResponse> {
+  const { data } = await apiClient.get<GovProcurementCompaniesResponse>(
+    '/gov-procurement/companies',
+    {
+      params: {
+        ...(options.commodity ? { commodity: options.commodity } : {}),
+        ...(options.refresh ? { refresh: true } : {}),
+        ...(options.matchLicenses ? { match_licenses: true } : {}),
+        ...(options.page ? { page: options.page } : {}),
+        ...(options.pageSize ? { page_size: options.pageSize } : {}),
+        ...(options.limit ? { limit: options.limit } : {}),
+      },
+    },
+  );
+  if (!data || typeof data !== 'object') {
+    return {
+      source: 'USAspending.gov',
+      sourceUrl: 'https://www.usaspending.gov',
+      scope: 'U.S. federal contracts by commodity',
+      limitations: [],
+      warnings: ['Unexpected response from gov-procurement companies endpoint.'],
+      commodityProfiles: [],
+      companies: [],
+    };
+  }
+  return data;
 }
 
 export async function getCountryBorders(countries: string[]): Promise<CountryBordersGeoJson> {
@@ -754,8 +941,16 @@ export interface MaritimeContextQuery {
   destination?: string;
 }
 
-export { useMaritimeVessels } from './vessels/useVessels';
-export type { MaritimeVesselQueryOptions } from './vessels/useVessels';
+export {
+  useMaritimeVessels,
+  prefetchMaritimeVesselSnapshot,
+  fetchMaritimeVesselSnapshot,
+  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
+  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
+  readMaritimeIncludeGulfDemoPreference,
+  readMaritimeIncludeCoastalDemoPreference,
+} from './vessels/useVessels';
+export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
 
 export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
   const hasUsefulQuery =

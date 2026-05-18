@@ -720,6 +720,61 @@
   color: #fff;
 }
 
+/* Petroleum infrastructure popups (oilmap GeoJSON layers) */
+.leaflet-popup.petroleum-leaflet-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+}
+
+.leaflet-popup.petroleum-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 14px 12px 14px 16px;
+  min-width: 320px;
+}
+
+.leaflet-popup.petroleum-leaflet-popup a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #94a3b8;
+}
+
+.leaflet-popup.petroleum-leaflet-popup a.leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}
+
+.petroleum-map-popup-mount {
+  width: 100%;
+}
+
+/* ESG protected-area popups (conservation buffer circles) */
+.leaflet-popup.esg-leaflet-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+}
+
+.leaflet-popup.esg-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 14px 12px 14px 16px;
+  min-width: 320px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.leaflet-popup.esg-leaflet-popup a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #94a3b8;
+}
+
+.leaflet-popup.esg-leaflet-popup a.leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}
+
+.esg-map-popup {
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Dossier Panel Styles */
 .dossier-panel {
   position: fixed;
@@ -1257,6 +1312,38 @@
   z-index: 1100 !important;
 }
 
+.leaflet-canvas-vessel-layer {
+  pointer-events: auto;
+  z-index: 450;
+}
+
+.leaflet-tooltip.vessel-canvas-tooltip {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+.refinery-marker,
+.oil-field-marker {
+  background: transparent !important;
+  border: none !important;
+}
+.refinery-marker-pin,
+.oil-field-marker-pin {
+  line-height: 0;
+}
+.refinery-marker-pin svg,
+.oil-field-marker-pin svg {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.refinery-marker-pin.is-selected,
+.oil-field-marker-pin.is-selected {
+  transform: scale(1.12);
+  z-index: 1100;
+}
+
 /* GeoJSON country borders: Carto dark_all swallows thin cyan strokes; neutral color + weight set in MapComponent. */
 .dark .leaflet-container svg path.map-country-border--dark {
   filter: drop-shadow(0 0 1px rgba(15, 23, 42, 0.95)) drop-shadow(0 0 2px rgba(226, 232, 240, 0.22));
@@ -1264,4 +1351,19 @@
 
 .leaflet-container svg path.map-country-border--light {
   filter: drop-shadow(0 0 0.5px rgba(255, 255, 255, 0.9));
+}
+
+/* Route planner map overlays */
+.route-method-icon,
+.route-hub-label {
+  background: transparent !important;
+  border: none !important;
+}
+
+.leaflet-tooltip.route-leg-method-tip {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 2px 6px;
 }

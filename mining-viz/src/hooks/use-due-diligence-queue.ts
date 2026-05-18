@@ -22,7 +22,7 @@ export function useDueDiligenceQueue() {
         return [...prev, { id, addedAt: new Date().toISOString() }];
       });
       toast.success(t('נוסף לבדיקת נאותות', 'Added to Due Diligence'), {
-        description: t('מופיע בלשונית בדיקת הנאותות שלך', 'Visible in your Due Diligence tab'),
+        description: t('מופיע בלשונית חקירות → בדיקת נאותות', 'Visible in Investigations → Due Diligence'),
       });
     },
     [t],

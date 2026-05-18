@@ -120,10 +120,25 @@ export interface MaritimeVesselFeedResponse {
   effective_bbox_count?: number;
   region_labels?: string[];
   cached?: boolean;
+  memory_cached?: boolean;
+  memory_cache_age_seconds?: number | null;
+  snapshot_vessel_count?: number;
   stale?: boolean;
   snapshot_age_seconds?: number | null;
   stale_after_seconds?: number;
   worker?: Record<string, unknown>;
+  /** True when DB shows vessels in North Sea but none in Persian Gulf while worker is healthy (AISStream upstream gap). */
+  aisstream_persian_gulf_coverage_gap?: boolean;
+  /** True when Hormuz-area demo rows were merged (synthetic or seed file). */
+  persian_gulf_demo_synthetic?: boolean;
+  /** Labels of regions that received demo/seed positions in this response (Gulf + Africa-adjacent when enabled). */
+  coastal_demo_regions?: string[];
+  /** True when any merged coastal demo used built-in synthetic generators (not only static seed files). */
+  coastal_demo_synthetic?: boolean;
+  /** How Gulf demo rows were merged: UI/API opt-in vs env heuristics. */
+  persian_gulf_demo_mode?: 'api_opt_in' | 'env_coverage_gap' | 'env_coastal_sparse' | null;
+  /** Public tracker for AISStream Persian Gulf coverage (for UI banner link). */
+  maritime_aisstream_issue_url?: string | null;
 }
 
 export interface VesselFilters {

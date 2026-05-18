@@ -1,9 +1,26 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
-import type { RoutePlannerApiResponse } from './types';
-import { fetchRoutePlan } from './fetchRoutePlan';
-import { getMockRouteResponse } from './mockRoute';
-
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
+import type { RoutePlanOption, RoutePlannerApiResponse } from './types';
+import { fetchRoutePlan, ROUTE_CALCULATING_HINT } from './fetchRoutePlan';
+import { routeHubCountriesReadyForMap } from './locationPresets';
 export type RoutePickRole = 'supplier' | 'buyer';
+export interface RoutePartyLocation {
+  lat: number;
+  lng: number;
+  label: string;
+  country?: string;
+  licenseId?: string;
+  commodity?: string;
+  sector?: string;
+}
 
 export const SHIPPING_METHOD_IDS = ['sea_fcl', 'sea_lcl', 'rail', 'truck_inland', 'air'] as const;
 export type ShippingMethodId = (typeof SHIPPING_METHOD_IDS)[number];
@@ -24,6 +41,7 @@ export const SHIPPING_OPTIONS: {
 
 export const PRODUCT_OPTIONS: { value: string; labelHe: string; labelEn: string; icon: string }[] = [
   { value: 'gold_concentrate', labelHe: 'ריכוז זהב', labelEn: 'Gold concentrate', icon: '🥇' },
+  { value: 'gold_dore', labelHe: 'דוריי / מטילי זהב', labelEn: 'Gold doré / bullion', icon: '🟡' },
   { value: 'cobalt', labelHe: 'קובלט', labelEn: 'Cobalt', icon: '🔋' },
   { value: 'lithium', labelHe: 'ליתיום', labelEn: 'Lithium', icon: '⚡' },
   { value: 'bauxite', labelHe: 'בוקסיט', labelEn: 'Bauxite', icon: '🪨' },
@@ -36,7 +54,7 @@ export const PRODUCT_OPTIONS: { value: string; labelHe: string; labelEn: string;
 ];
 
 export interface RouteMapOverlay {
-  legs: { path: [number, number][] }[];
+  legs: { path: [number, number][]; method?: string; label?: string }[];
   waypoints: Array<{
     lat: number;
     lng: number;
@@ -46,106 +64,269 @@ export interface RouteMapOverlay {
 }
 
 export interface RoutePlannerHook {
-  supplier: { lat: number; lng: number; label: string };
-  setSupplier: Dispatch<SetStateAction<{ lat: number; lng: number; label: string }>>;
-  buyer: { lat: number; lng: number; label: string };
-  setBuyer: Dispatch<SetStateAction<{ lat: number; lng: number; label: string }>>;
+  supplier: RoutePartyLocation;
+  setSupplier: Dispatch<SetStateAction<RoutePartyLocation>>;
+  buyer: RoutePartyLocation;
+  setBuyer: Dispatch<SetStateAction<RoutePartyLocation>>;
   productType: string;
   setProductType: (value: string) => void;
+  quantityTons: number;
+  setQuantityTons: (value: number) => void;
+  incoterm: string;
+  setIncoterm: (value: string) => void;
   shippingMethods: string[];
   toggleShippingMethod: (id: string, checked: boolean) => void;
   pickRole: RoutePickRole | null;
   beginPick: (role: RoutePickRole) => void;
   cancelPick: () => void;
-  handleMapPick: (lat: number, lng: number, role: RoutePickRole) => void;
+  handleMapPick: (lat: number, lng: number, role: RoutePickRole, label?: string, country?: string) => void;
+  showPortsOnMap: boolean;
+  setShowPortsOnMap: (value: boolean) => void;
+  showAirportsOnMap: boolean;
+  setShowAirportsOnMap: (value: boolean) => void;
+  mapFlyTrigger: number;
+  mapFlyTarget: { lat: number; lng: number } | null;
+  flyToLocation: (lat: number, lng: number) => void;
   overlay: RouteMapOverlay | null;
   result: RoutePlannerApiResponse | null;
+  /** All route options: recommended first, then alternatives. */
+  routeOptions: RoutePlanOption[];
+  selectedPlanId: string | null;
+  activePlan: RoutePlanOption | null;
+  selectRoutePlan: (planId: string) => void;
   loading: boolean;
+  routeCalculatingHint: string;
   error: string | null;
-  computeRoute: () => Promise<void>;
-  sourceLabel: 'live' | 'mock' | null;
+  computeRoute: () => Promise<boolean>;
+  sourceLabel: 'live' | 'simulation' | null;
   /** Pre-fill supplier from a license/asset — call before switching to route_planner view */
-  prefillSupplier: (lat: number, lng: number, label: string) => void;
+  prefillSupplier: (lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => void;
   hasResult: boolean;
 }
 
 export function useRoutePlanner(): RoutePlannerHook {
-  const [supplier, setSupplier] = useState({ lat: 5.548, lng: -0.192, label: '' });
-  const [buyer, setBuyer] = useState({ lat: 51.924, lng: 4.478, label: '' });
+  const [supplier, setSupplier] = useState<RoutePartyLocation>({ lat: 5.548, lng: -0.192, label: '' });
+  const [buyer, setBuyer] = useState<RoutePartyLocation>({ lat: 51.924, lng: 4.478, label: '' });
   const [productType, setProductType] = useState('gold_concentrate');
+  const [quantityTons, setQuantityTonsState] = useState(1000);
+  const [incoterm, setIncoterm] = useState('FOB');
   const [shippingMethods, setShippingMethods] = useState<string[]>(() => ['sea_fcl', 'truck_inland']);
   const [pickRole, setPickRole] = useState<RoutePickRole | null>(null);
+  const [showPortsOnMap, setShowPortsOnMap] = useState(false);
+  const [showAirportsOnMap, setShowAirportsOnMap] = useState(false);
+  const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
+  const [mapFlyTarget, setMapFlyTarget] = useState<{ lat: number; lng: number } | null>(null);
   const [result, setResult] = useState<RoutePlannerApiResponse | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const computeInFlightRef = useRef(false);
 
-  const prefillSupplier = useCallback((lat: number, lng: number, label: string) => {
-    setSupplier({ lat, lng, label });
+  useEffect(() => {
+    if (!routeHubCountriesReadyForMap(supplier.country, buyer.country)) {
+      setShowPortsOnMap(false);
+      setShowAirportsOnMap(false);
+    }
+  }, [supplier.country, buyer.country]);
+
+  const setQuantityTons = useCallback((value: number) => {
+    startTransition(() => {
+      setQuantityTonsState(Number.isFinite(value) ? Math.max(0, value) : 0);
+    });
+  }, []);
+
+  const setSupplierTransition = useCallback((value: SetStateAction<RoutePartyLocation>) => {
+    startTransition(() => setSupplier(value));
+  }, []);
+
+  const setBuyerTransition = useCallback((value: SetStateAction<RoutePartyLocation>) => {
+    startTransition(() => setBuyer(value));
+  }, []);
+
+  const setProductTypeTransition = useCallback((value: string) => {
+    startTransition(() => setProductType(value));
+  }, []);
+
+  const setIncotermTransition = useCallback((value: string) => {
+    startTransition(() => setIncoterm(value));
+  }, []);
+
+  const setShowPortsOnMapTransition = useCallback((value: boolean) => {
+    startTransition(() => setShowPortsOnMap(value));
+  }, []);
+
+  const setShowAirportsOnMapTransition = useCallback((value: boolean) => {
+    startTransition(() => setShowAirportsOnMap(value));
+  }, []);
+
+  const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
+    setSupplier({ lat, lng, label, ...meta });
     // Reset previous result so the user knows they need to compute with the new supplier
     setResult(null);
+    setSelectedPlanId(null);
     setError(null);
   }, []);
 
   const toggleShippingMethod = useCallback((id: string, checked: boolean) => {
-    setShippingMethods((prev) => {
-      if (checked) return prev.includes(id) ? prev : [...prev, id];
-      return prev.filter((x) => x !== id);
+    startTransition(() => {
+      setShippingMethods((prev) => {
+        if (checked) return prev.includes(id) ? prev : [...prev, id];
+        return prev.filter((x) => x !== id);
+      });
     });
   }, []);
 
   const beginPick = useCallback((role: RoutePickRole) => {
-    setPickRole((prev) => (prev === role ? null : role));
+    startTransition(() => setPickRole((prev) => (prev === role ? null : role)));
   }, []);
 
-  const cancelPick = useCallback(() => setPickRole(null), []);
-
-  const handleMapPick = useCallback((lat: number, lng: number, role: RoutePickRole) => {
-    const snap = {
-      lat: Math.round(lat * 1e5) / 1e5,
-      lng: Math.round(lng * 1e5) / 1e5,
-    };
-    if (role === 'supplier') setSupplier((s) => ({ ...s, ...snap }));
-    else setBuyer((b) => ({ ...b, ...snap }));
-    setPickRole(null);
+  const cancelPick = useCallback(() => {
+    startTransition(() => setPickRole(null));
   }, []);
+
+  const flyToLocation = useCallback((lat: number, lng: number) => {
+    startTransition(() => {
+      setMapFlyTarget({ lat, lng });
+      setMapFlyTrigger((n) => n + 1);
+    });
+  }, []);
+
+  const handleMapPick = useCallback(
+    (lat: number, lng: number, role: RoutePickRole, label?: string, country?: string) => {
+      const snap = {
+        lat: Math.round(lat * 1e5) / 1e5,
+        lng: Math.round(lng * 1e5) / 1e5,
+      };
+      const nextLabel = label?.trim() || undefined;
+      const nextCountry = country?.trim() || undefined;
+      startTransition(() => {
+        if (role === 'supplier') {
+          setSupplier((s) => ({
+            ...s,
+            ...snap,
+            label: nextLabel ?? s.label,
+            country: nextCountry ?? s.country,
+            licenseId: undefined,
+          }));
+        } else {
+          setBuyer((b) => ({
+            ...b,
+            ...snap,
+            label: nextLabel ?? b.label,
+            country: nextCountry ?? b.country,
+          }));
+        }
+        setResult(null);
+        setSelectedPlanId(null);
+        setPickRole(null);
+      });
+    },
+    [],
+  );
 
   const computeRoute = useCallback(async () => {
+    if (computeInFlightRef.current) return false;
+    computeInFlightRef.current = true;
     setLoading(true);
     setError(null);
+    setResult(null);
+    setSelectedPlanId(null);
     try {
       const res = await fetchRoutePlan({
         supplier,
         buyer,
         productType,
         shippingMethods,
+        quantityTons,
+        incoterm,
       });
-      setResult(res);
+      startTransition(() => {
+        setResult(res);
+        setSelectedPlanId(res.recommendedPlanId ?? null);
+        setShowPortsOnMap(false);
+        setShowAirportsOnMap(false);
+        if (res.source === 'simulation' && res.liveUnavailableReason) {
+          setError(res.liveUnavailableReason);
+        }
+      });
+      return true;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
+      startTransition(() => {
+        setResult(null);
+        setSelectedPlanId(null);
+      });
+      return false;
     } finally {
+      computeInFlightRef.current = false;
       setLoading(false);
     }
-  }, [supplier, buyer, productType, shippingMethods]);
+  }, [supplier, buyer, productType, shippingMethods, quantityTons, incoterm]);
 
-  const overlay = result?.map ?? null;
+  const routeOptions = useMemo((): RoutePlanOption[] => {
+    if (!result) return [];
+    const recommended: RoutePlanOption = {
+      id: result.recommendedPlanId ?? 'recommended',
+      label: 'Recommended',
+      labelHe: 'מומלץ',
+      labelEn: 'Recommended',
+      isRecommended: true,
+      map: result.map,
+      breakdown: result.breakdown,
+      totalCostUsd: result.breakdown.reduce((s, r) => s + r.amountUsd, 0),
+    };
+    const alts = result.routeAlternatives ?? [];
+    return [recommended, ...alts.filter((a) => a.id !== recommended.id)];
+  }, [result]);
+
+  const activePlan = useMemo(() => {
+    if (!routeOptions.length) return null;
+    if (selectedPlanId) {
+      const match = routeOptions.find((p) => p.id === selectedPlanId);
+      if (match) return match;
+    }
+    return routeOptions[0];
+  }, [routeOptions, selectedPlanId]);
+
+  const selectRoutePlan = useCallback((planId: string) => {
+    startTransition(() => setSelectedPlanId(planId));
+  }, []);
+
+  const overlay = activePlan?.map ?? null;
   const sourceLabel = result ? result.source : null;
 
   return {
     supplier,
-    setSupplier,
+    setSupplier: setSupplierTransition,
     buyer,
-    setBuyer,
+    setBuyer: setBuyerTransition,
     productType,
-    setProductType,
+    setProductType: setProductTypeTransition,
+    quantityTons,
+    setQuantityTons,
+    incoterm,
+    setIncoterm: setIncotermTransition,
     shippingMethods,
     toggleShippingMethod,
     pickRole,
     beginPick,
     cancelPick,
     handleMapPick,
+    showPortsOnMap,
+    setShowPortsOnMap: setShowPortsOnMapTransition,
+    showAirportsOnMap,
+    setShowAirportsOnMap: setShowAirportsOnMapTransition,
+    mapFlyTrigger,
+    mapFlyTarget,
+    flyToLocation,
     overlay,
     result,
+    routeOptions,
+    selectedPlanId: activePlan?.id ?? null,
+    activePlan,
+    selectRoutePlan,
     loading,
+    routeCalculatingHint: ROUTE_CALCULATING_HINT,
     error,
     computeRoute,
     sourceLabel,

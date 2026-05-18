@@ -1,6 +1,16 @@
+from unittest.mock import patch
+
+from backend.services.ai_providers import _env_secret
 from backend.services.dd.orchestrator import (
+    _ai_analysis_deadline_seconds,
+    _ai_http_extra_retries,
+    _ai_http_timeout_seconds,
+    _pollinations_http_extra_retries,
+    _pollinations_http_timeout_seconds,
     build_ai_discovered_phone_candidates,
     build_promotable_contact_candidates,
+    generate_dd_report,
+    generate_markdown_analysis,
     normalize_extracted_contacts,
     should_auto_promote_contact,
 )
@@ -143,6 +153,43 @@ def test_build_ai_discovered_phone_candidates_marks_provenance_and_caps_confiden
     assert candidate["raw_payload"]["promotion_guardrails"]["requires_human_verification"] is True
     assert candidate["normalized_value"] == "233302223344"
     assert candidate["extracted_from"] == "ai.discover_phone"
+
+
+def test_ai_http_defaults_are_ui_friendly():
+    assert _ai_http_timeout_seconds() == 18.0
+    assert _ai_http_extra_retries() == 1
+    assert _pollinations_http_timeout_seconds() == 12.0
+    assert _pollinations_http_extra_retries() == 0
+    assert _ai_analysis_deadline_seconds() == 45.0
+
+
+def test_generate_dd_report_skips_enrichment_when_analysis_fails():
+    snapshot = {
+        "entity": {"id": "lic-1", "company": "Acme Mining"},
+        "source": {},
+    }
+    with patch(
+        "backend.services.dd.orchestrator.generate_markdown_analysis",
+        return_value={"status": "error", "analysis": None, "error_code": "AI_ALL_PROVIDERS_FAILED"},
+    ), patch("backend.services.dd.orchestrator.extract_legal_events_via_ai") as legal_mock, patch(
+        "backend.services.dd.orchestrator.discover_phone_via_ai"
+    ) as phone_mock:
+        report = generate_dd_report("query", snapshot)
+    assert report["status"] == "error"
+    legal_mock.assert_not_called()
+    phone_mock.assert_not_called()
+
+
+def test_generate_markdown_analysis_returns_fast_error_without_pollinations_when_disabled(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("DISABLE_POLLINATIONS_FALLBACK", "1")
+    with patch("backend.services.dd.orchestrator._run_provider_cascade", return_value=None):
+        result = generate_markdown_analysis("test entity")
+    assert result["status"] == "error"
+    assert result["error_code"] == "AI_ALL_PROVIDERS_FAILED"
+    assert "GROQ_API_KEY=MISSING" in (result.get("message") or "")
+    assert "DISABLE_POLLINATIONS_FALLBACK=SET" in (result.get("message") or "")
 
 
 def test_build_ai_discovered_phone_candidates_is_idempotent_per_source_url():

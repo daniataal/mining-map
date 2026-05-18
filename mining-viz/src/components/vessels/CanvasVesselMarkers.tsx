@@ -1,0 +1,61 @@
+import type { MutableRefObject } from 'react';
+import { createElementObject, createLayerComponent } from '@react-leaflet/core';
+import type { Layer } from 'leaflet';
+import type { MaritimeVessel } from '../../types';
+import { CanvasVesselLayer } from '../../lib/vessels/canvasVesselLayer';
+
+export interface CanvasVesselMarkersProps {
+  mapZoom: number;
+  selectedId: string | null;
+  onVesselClick: (vessel: MaritimeVessel) => void;
+  formatTooltip: (vessel: MaritimeVessel) => HTMLElement | string;
+  /** Filled when the Leaflet layer is constructed; parent pushes AIS rows via `setVessels` to avoid React diffing huge arrays. */
+  layerApiRef?: MutableRefObject<CanvasVesselLayer | null>;
+}
+
+function createCanvasVesselLayer(
+  props: CanvasVesselMarkersProps,
+  context: Parameters<typeof createElementObject>[1],
+) {
+  const layer = new CanvasVesselLayer({
+    mapZoom: props.mapZoom,
+    selectedId: props.selectedId,
+    onVesselClick: props.onVesselClick,
+    formatTooltip: props.formatTooltip,
+  });
+  if (props.layerApiRef) {
+    props.layerApiRef.current = layer;
+    layer.on('remove', () => {
+      if (props.layerApiRef?.current === layer) props.layerApiRef.current = null;
+    });
+  }
+  return createElementObject(layer, context);
+}
+
+function updateCanvasVesselLayer(
+  layer: CanvasVesselLayer,
+  props: CanvasVesselMarkersProps,
+  prevProps: CanvasVesselMarkersProps,
+): void {
+  if (props.onVesselClick !== prevProps.onVesselClick) {
+    layer.setOnVesselClick(props.onVesselClick);
+  }
+  if (props.formatTooltip !== prevProps.formatTooltip) {
+    layer.setFormatTooltip(props.formatTooltip);
+  }
+  if (props.mapZoom !== prevProps.mapZoom) {
+    layer.setMapZoom(props.mapZoom);
+  }
+  if (props.selectedId !== prevProps.selectedId) {
+    layer.setSelectedId(props.selectedId);
+  }
+}
+
+const CanvasVesselMarkersLayer = createLayerComponent<Layer, CanvasVesselMarkersProps>(
+  createCanvasVesselLayer,
+  updateCanvasVesselLayer,
+);
+
+export default function CanvasVesselMarkers(props: CanvasVesselMarkersProps) {
+  return <CanvasVesselMarkersLayer {...props} />;
+}
