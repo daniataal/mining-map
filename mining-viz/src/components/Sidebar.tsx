@@ -50,6 +50,7 @@ interface SidebarProps {
   isInDdQueue?: (id: string) => boolean;
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
+  getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
 }
 
 function sourceTrustLabel(item: MiningLicense): string {
@@ -90,6 +91,7 @@ export default function Sidebar({
   isInDdQueue,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  getDealRoomForLicense,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -315,6 +317,14 @@ export default function Sidebar({
                       {item.nearbyPort?.name && (
                         <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[8px] font-black uppercase">
                           Port {item.nearbyPort.name}
+                        </Badge>
+                      )}
+                      {getDealRoomForLicense?.(item.id, item.entityKind || 'license') && (
+                        <Badge
+                          className="bg-violet-500/10 text-violet-600 dark:text-violet-300 border-none text-[8px] font-black uppercase max-w-full truncate"
+                          title={getDealRoomForLicense(item.id, item.entityKind || 'license')?.title}
+                        >
+                          {t('חדר עסקאות', 'Deal room')}
                         </Badge>
                       )}
                     </div>

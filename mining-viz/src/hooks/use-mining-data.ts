@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useEffect, startTransition } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback, startTransition } from 'react';
 import {
   getLicenseCommodityLabels,
   licenseMatchesSelectedCommodities,
@@ -6,7 +6,7 @@ import {
 import { FilterResultCache } from '../lib/filterResultCache';
 import { buildLicenseSearchIndex, licenseHaystackMatches } from '../lib/licenseSearchIndex';
 import { MiningLicense, UserAnnotation } from '../types';
-import { useDebouncedValue } from './use-debounced-value';
+import { SEARCH_DEBOUNCE_MS, useDebouncedValue } from './use-debounced-value';
 
 function normalizeSubtypeLabel(value: string | null | undefined): string {
   const raw = (value || '').trim();
@@ -70,7 +70,10 @@ function buildProcessedDataCacheKey(
 
 export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<string, UserAnnotation>) => {
   const [filter, setFilter] = useState('');
-  const debouncedFilter = useDebouncedValue(filter);
+  const debouncedFilter = useDebouncedValue(filter, SEARCH_DEBOUNCE_MS);
+  const setFilterDeferred = useCallback((value: string) => {
+    startTransition(() => setFilter(value));
+  }, []);
   const [sortBy, setSortBy] = useState<keyof MiningLicense>('company');
   const [selectedCountry, setSelectedCountry] = useState<string[]>([]);
   const [selectedCommodity, setSelectedCommodity] = useState<string[]>([]);
@@ -370,7 +373,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     sourceLabels,
     infrastructureStats,
     filter,
-    setFilter,
+    debouncedFilter,
+    setFilter: setFilterDeferred,
     sortBy,
     setSortBy,
     selectedCountry,

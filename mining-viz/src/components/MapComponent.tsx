@@ -60,6 +60,7 @@ import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerM
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
+import { countriesWithVisibleLicenses } from '../lib/countriesWithVisibleLicenses';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import PopupForm from './PopupForm';
 import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
@@ -134,12 +135,6 @@ const SELECTED_CLASS = 'is-selected';
 const PORTS_MAP_RENDER_LIMIT = 3000;
 const MARITIME_MAX_VESSEL_OPTIONS = ['1000', '2000', '5000', '10000', '15000'];
 
-/** Matches marker rendering: borders only for countries with at least one plottable license. */
-function licenseHasMapCoordinates(item: MiningLicense): boolean {
-    const lat = item.lat;
-    const lng = item.lng;
-    return lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
-}
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['10', '15', '25', '30'];
 
 const getMarkerColor = (
@@ -230,6 +225,7 @@ interface MapComponentProps {
   isInDdQueue?: (id: string) => boolean;
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
+  getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
   /** When set, only this country's outline is requested and emphasized; global outlines are hidden. */
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
@@ -462,6 +458,7 @@ export default function MapComponent({
   isInDdQueue,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  getDealRoomForLicense,
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
 }: MapComponentProps) {
@@ -771,23 +768,9 @@ export default function MapComponent({
         if (focus) {
             return [focus].sort((a, b) => a.localeCompare(b));
         }
-        // Use allLicenses (full unfiltered set for current sector) so borders reflect
-        // every country with data in this tab — regardless of active search/filters.
-        // Only countries with at least one mappable coordinate get an outline (rows with
-        // country set but no lat/lng would otherwise show borders with zero markers).
-        const ordered: string[] = [];
-        const seenKey = new Set<string>();
-        for (const d of allLicenses) {
-            if (!licenseHasMapCoordinates(d)) continue;
-            const raw = d.country?.trim();
-            if (!raw) continue;
-            const dedupeKey = raw.toLowerCase();
-            if (seenKey.has(dedupeKey)) continue;
-            seenKey.add(dedupeKey);
-            ordered.push(raw);
-        }
-        return ordered.sort((a, b) => a.localeCompare(b));
-    }, [allLicenses, countryFocusCountry, isRoutePlannerView]);
+        // Outlines follow the same filtered license set as map markers (search + facet filters).
+        return countriesWithVisibleLicenses(processedData);
+    }, [processedData, countryFocusCountry, isRoutePlannerView]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
@@ -925,6 +908,9 @@ export default function MapComponent({
                           }
                           isEsgRisk={isEsgRisk}
                           esgZoneName={esgZoneName}
+                          dealRoomTitle={
+                            getDealRoomForLicense?.(item.id, item.entityKind || 'license')?.title
+                          }
                         />
                     </Popup>
                 </Marker>
@@ -942,6 +928,7 @@ export default function MapComponent({
         isInDdQueue,
         onAddToDueDiligence,
         onRemoveFromDueDiligence,
+        getDealRoomForLicense,
         onGroundVisible
     ]);
 
