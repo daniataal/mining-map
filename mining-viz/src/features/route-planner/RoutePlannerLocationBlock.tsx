@@ -87,23 +87,20 @@ function RoutePlannerLocationBlock({
           setLocation((loc) => ({ ...loc, country: undefined }));
           return;
         }
-        if (role === 'buyer') {
-          setLocation((loc) => {
-            const snap = findNearestHubInCountry(loc.lat, loc.lng, val);
-            if (snap) {
-              onFlyTo(snap.lat, snap.lng);
-              return {
-                lat: snap.lat,
-                lng: snap.lng,
-                label: snap.name,
-                country: val,
-              };
-            }
-            return { ...loc, country: val };
-          });
-          return;
-        }
-        setLocation((loc) => ({ ...loc, country: val }));
+        setLocation((loc) => {
+          const snap = findNearestHubInCountry(loc.lat, loc.lng, val);
+          if (snap) {
+            onFlyTo(snap.lat, snap.lng);
+            return {
+              lat: snap.lat,
+              lng: snap.lng,
+              label: snap.name,
+              country: val,
+              ...(role === 'supplier' ? { licenseId: undefined } : {}),
+            };
+          }
+          return { ...loc, country: val, ...(role === 'supplier' ? { licenseId: undefined } : {}) };
+        });
       });
     },
     [role, setLocation, onFlyTo],

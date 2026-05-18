@@ -1002,6 +1002,25 @@ export default function MapComponent({
                     {licensesSecondaryStatus}
                 </div>
             )}
+
+            {isOilAndGasView &&
+                isMaritimeLayerEnabled &&
+                maritimeFeed?.aisstream_persian_gulf_coverage_gap && (
+                <div
+                    className="pointer-events-auto absolute left-3 right-3 top-3 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:max-w-xl"
+                    role="status"
+                >
+                    <p className="font-black uppercase tracking-widest text-[9px] text-amber-700 dark:text-amber-200">
+                        {t('פער AIS במפרץ הפרסי', 'Persian Gulf AIS upstream gap')}
+                    </p>
+                    <p className="mt-1">
+                        {t(
+                            'AISStream מדלג על המפרץ — הפעילו הצג מיקומי הדגמה בפאנל כלי השיט או הריצו maritime-worker.',
+                            'AISStream skips the Gulf — enable Show demo positions in the vessel panel or run maritime-worker.',
+                        )}
+                    </p>
+                </div>
+            )}
             {!isRoutePlannerView &&
               ((onGroundVisible ? processedData.length : 0) === 0) &&
               ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (

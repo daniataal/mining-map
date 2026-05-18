@@ -48,13 +48,12 @@ def _get_redis_client():
         return _redis_client
     _redis_init_attempted = True
     try:
-        _redis_client = redis.Redis(
-            host=os.getenv("REDIS_HOST", "").strip(),
-            port=_int_env("REDIS_PORT", 6379),
-            decode_responses=True,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-        )
+        try:
+            from backend.services.redis_connection import redis_client_kwargs
+        except ImportError:
+            from services.redis_connection import redis_client_kwargs
+
+        _redis_client = redis.Redis(**redis_client_kwargs())
         _redis_client.ping()
     except Exception as exc:
         print(f"[maritime-snapshot] Redis unavailable: {exc}")

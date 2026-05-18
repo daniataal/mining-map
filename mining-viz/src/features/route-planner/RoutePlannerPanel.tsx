@@ -101,20 +101,18 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
   const buyerPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
 
   const supplierPresetsRaw = useMemo(() => {
-    if (pickRole) return supplierPresetsCache.current;
     const countries = supplierCountriesKey ? supplierCountriesKey.split('\0') : [];
     const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
     supplierPresetsCache.current = next;
     return next;
-  }, [pickRole, presetLicensePool, portEntities, supplierCountriesKey]);
+  }, [presetLicensePool, portEntities, supplierCountriesKey]);
 
   const buyerPresetsRaw = useMemo(() => {
-    if (pickRole) return buyerPresetsCache.current;
     const countries = buyerCountriesKey ? buyerCountriesKey.split('\0') : [];
     const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
     buyerPresetsCache.current = next;
     return next;
-  }, [pickRole, presetLicensePool, portEntities, buyerCountriesKey]);
+  }, [presetLicensePool, portEntities, buyerCountriesKey]);
 
   const supplierPresets = useDeferredValue(supplierPresetsRaw);
   const buyerPresets = useDeferredValue(buyerPresetsRaw);
@@ -361,10 +359,23 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
               </div>
             </div>
 
+            {loading && (
+              <p className="flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[10px] font-semibold text-amber-900 dark:text-amber-100">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                {t('מחשב מסלול חי — אפשר להמשיך לערוך הגדרות', 'Computing live route — you can keep editing setup fields')}
+              </p>
+            )}
+            {error && step === 'setup' && (
+              <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] font-bold text-red-800 dark:text-red-200" role="alert">
+                {error}
+              </p>
+            )}
+
             <Button
               className="w-full h-12 rounded-xl text-[11px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20"
               onClick={handleCompute}
               disabled={loading || !isReady}
+              aria-busy={loading}
             >
               {loading ? (
                 <><Loader2 className="inline h-4 w-4 animate-spin mr-2" />{t('מחשב מסלול ועלויות...', 'Calculating route & costs...')}</>
@@ -419,10 +430,11 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest">{t('סימולציה בלבד', 'Simulation only')}</p>
                   <p className="mt-1 text-[11px] font-semibold leading-relaxed">
-                    {t(
-                      'המסלול או בדיקת הנאותות החיה לא זמינים כרגע. אין להשתמש בתוצאה לביצוע עסקה בלי הרצה חיה.',
-                      'Live routing or due diligence is unavailable. Do not use this result to execute a deal until a live run succeeds.'
-                    )}
+                    {result.liveUnavailableReason ??
+                      t(
+                        'המסלול החי לא זמין. אין להשתמש בתוצאה לביצוע עסקה בלי הרצה חיה.',
+                        'Live routing is unavailable. Do not use this result to execute a deal until a live run succeeds.',
+                      )}
                   </p>
                 </div>
               </div>

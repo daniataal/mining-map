@@ -30,6 +30,7 @@ import { useRoutePlanner } from './features/route-planner';
 import {
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
+  buyerCountryRequiredForHubs,
   canonicalRouteHubCountry,
   filterLicensesForRouteHubs,
   resolveRouteHubCountries,
@@ -47,6 +48,8 @@ import {
   X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
+import PlatformHealthBanner from './components/PlatformHealthBanner';
+import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -160,7 +163,11 @@ export default function App() {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
     error: portsError,
-  } = usePortLogisticsEntities(viewMode === 'ports' || viewMode === 'route_planner');
+  } = usePortLogisticsEntities(
+    viewMode === 'ports' ||
+      (viewMode === 'route_planner' &&
+        !buyerCountryRequiredForHubs(routePlanner.buyer.country)),
+  );
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -285,7 +292,9 @@ export default function App() {
   const handleRoutePlannerMapPick = routePlanner.handleMapPick;
   const handleRoutePlannerHubPick = useCallback(
     (hub: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
-      handleRoutePlannerMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
+      startTransition(() => {
+        handleRoutePlannerMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
+      });
     },
     [handleRoutePlannerMapPick],
   );
@@ -684,6 +693,8 @@ export default function App() {
          </div>
       </div>
 
+      <PlatformHealthBanner />
+
       {viewMode !== 'ports' && viewMode !== 'route_planner' && fetchError && (
         <div
           className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
@@ -938,6 +949,12 @@ export default function App() {
                     <LucideFilter className="w-5 h-5" />
                   </button>
               </div>
+            </div>
+          )}
+
+          {viewMode === 'oil_and_gas' && (
+            <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
+              <OilGasOnboardingTip active />
             </div>
           )}
 

@@ -641,12 +641,12 @@ class RedisCache:
             return None
         if self._client is None:
             try:
-                self._client = redis.Redis(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
-                    decode_responses=True,
-                    socket_connect_timeout=2,
-                )
+                try:
+                    from backend.services.redis_connection import redis_client_kwargs
+                except ImportError:
+                    from services.redis_connection import redis_client_kwargs
+
+                self._client = redis.Redis(**redis_client_kwargs())
             except Exception as exc:
                 print(f"[Redis] Initialization failed: {exc}")
                 self._client = None
@@ -4435,6 +4435,28 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     }
 
 
+@app.get("/api/health")
+def platform_health():
+    """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
+    try:
+        from backend.services.platform_health import build_platform_health
+    except ImportError:
+        from services.platform_health import build_platform_health
+    try:
+        from backend.services.maritime_snapshot import get_snapshot_meta
+        from backend.services.maritime_intel import get_maritime_stats
+    except ImportError:
+        from services.maritime_snapshot import get_snapshot_meta
+        from services.maritime_intel import get_maritime_stats
+
+    return build_platform_health(
+        redis_enabled=REDIS_ENABLED,
+        redis_ping=cache.get_client,
+        get_snapshot_meta=get_snapshot_meta,
+        get_maritime_stats=get_maritime_stats,
+    )
+
+
 @app.get("/api/maritime/snapshot")
 def get_maritime_snapshot_meta():
     """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
@@ -4699,7 +4721,11 @@ def get_port_logistics_entities(force_refresh: bool = False):
             from backend.services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
         except ImportError:
             from services.port_logistics import get_port_logistics_entities as build_port_logistics_entities
-        return build_port_logistics_entities(force_refresh=force_refresh)
+        payload = build_port_logistics_entities(force_refresh=force_refresh)
+        return JSONResponse(
+            content=payload,
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
     except Exception as exc:
         return {
             "entities": [],

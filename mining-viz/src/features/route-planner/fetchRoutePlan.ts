@@ -11,6 +11,7 @@ import type {
   RoutePlannerFormPayload,
 } from './types';
 import { mockResponseForPayload } from './mockRoute';
+import { attachSupplierBuyerEnds, detectLikelySupplierBuyerReversal } from './routeCorridor';
 
 type BackendMethod = 'sea' | 'road' | 'rail' | 'air' | 'pipeline';
 
@@ -368,7 +369,7 @@ function dueDiligenceFromBackend(data: DdApiResponse | null): {
 
 async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -379,7 +380,7 @@ async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promi
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as T;
   } finally {
-    window.clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   }
 }
 
@@ -450,20 +451,25 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
   const ddSummary = dueDiligenceFromBackend(dd);
   const cargoValue = estimateCargoValue(payload.productType, payload.quantityTons);
   const { recommended, alternatives } = routePlanOptionsFromBackend(route);
+  const map = attachSupplierBuyerEnds(recommended.map, payload.supplier, payload.buyer);
+  const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
   const freightTotal = recommended.totalCostUsd;
   const routeLimitations = Array.isArray(route.limitations) ? route.limitations : [];
   const landlockedHint = route.routing_context?.landlocked_hint;
   return {
     source: 'live',
-    map: recommended.map,
+    map,
     breakdown: recommended.breakdown,
     recommendedPlanId: recommended.id,
-    routeAlternatives: alternatives,
+    routeAlternatives: alternatives.map((alt) => ({
+      ...alt,
+      map: attachSupplierBuyerEnds(alt.map, payload.supplier, payload.buyer),
+    })),
     landlockedHint: landlockedHint || undefined,
     dueDiligence: ddSummary.checks,
     dueDiligenceRecommendation: ddSummary.recommendation,
     blockers: ddSummary.blockers,
-    warnings: ddSummary.warnings,
+    warnings: reversalWarning ? [...ddSummary.warnings, reversalWarning] : ddSummary.warnings,
     limitations: [...ddSummary.limitations, ...routeLimitations],
     routeAssumptions: [
       'Route is staged as inland transport to export gateway, trunk leg, then final delivery from import gateway.',
@@ -479,12 +485,27 @@ async function fetchLiveRoute(payload: RoutePlannerFormPayload): Promise<RoutePl
   };
 }
 
+function describeLiveRouteFailure(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') {
+      return 'Route API timed out — ensure the backend is running and reachable.';
+    }
+    if (error.message.startsWith('HTTP ')) {
+      return `Route API returned ${error.message} — check backend logs and /api/logistics/route-plan.`;
+    }
+    return error.message;
+  }
+  return 'Live route API unreachable — start the backend (docker compose up backend) or check VITE_API_BASE.';
+}
+
 export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<RoutePlannerApiResponse> {
+  let liveFailureReason: string | undefined;
   try {
     const live = await fetchLiveRoute(payload);
     if (live && live.map.legs.length > 0) return live;
-  } catch {
-    // Fallback below is intentionally explicit in the returned payload.
+    liveFailureReason = 'Live route returned no legs — check origin/destination coordinates and shipping methods.';
+  } catch (error) {
+    liveFailureReason = describeLiveRouteFailure(error);
   }
   const simulation = mockResponseForPayload(
     payload.supplier,
@@ -492,12 +513,18 @@ export async function fetchRoutePlan(payload: RoutePlannerFormPayload): Promise<
     payload.productType,
     payload.shippingMethods,
   );
+  const reversalWarning = detectLikelySupplierBuyerReversal(payload.supplier, payload.buyer);
+  const cargo = estimateCargoValue(payload.productType, payload.quantityTons);
   return {
     ...simulation,
-    cargoValueUsd: estimateCargoValue(payload.productType, payload.quantityTons).valueUsd,
-    cargoValueNote: estimateCargoValue(payload.productType, payload.quantityTons).note,
+    map: attachSupplierBuyerEnds(simulation.map, payload.supplier, payload.buyer),
+    warnings: reversalWarning ? [...simulation.warnings, reversalWarning] : simulation.warnings,
+    liveUnavailableReason: liveFailureReason,
+    cargoValueUsd: cargo.valueUsd,
+    cargoValueNote: cargo.note,
     limitations: [
-      'Live routing or due-diligence endpoint unavailable; showing simulation only.',
+      liveFailureReason ?? 'Live routing unavailable.',
+      'Simulation only — do not use for deal execution until a live run succeeds.',
       ...simulation.limitations,
     ],
   };
