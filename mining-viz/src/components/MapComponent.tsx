@@ -956,6 +956,36 @@ export default function MapComponent({
                                     </p>
                                 )}
 
+                                {maritimeFeed?.persian_gulf_demo_synthetic && (
+                                    <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
+                                        {t(
+                                            'מוצגות נקודות הדגמה סינתטיות במפרץ הפרסי (MARITIME_GULF_DEMO_SEED) — לא AIS חי באזור.',
+                                            'Synthetic Hormuz-area positions are shown (MARITIME_GULF_DEMO_SEED)—not live AIS for the Gulf.'
+                                        )}
+                                    </p>
+                                )}
+
+                                {maritimeFeed?.aisstream_persian_gulf_coverage_gap &&
+                                    !maritimeFeed?.persian_gulf_demo_synthetic && (
+                                        <p className="rounded-lg border border-slate-400/30 bg-slate-500/10 px-2.5 py-2 text-[9px] leading-snug text-slate-700 dark:text-slate-200">
+                                            {t(
+                                                'פער במקור AISStream במפרץ הפרסי — המפרץ עלול להיראות ריק למרות תנועה צפופה במקורות מסחריים.',
+                                                'AIS feed gap in the Persian Gulf — the Gulf may look empty even when commercial trackers show dense traffic.'
+                                            )}{' '}
+                                            <a
+                                                href={
+                                                    maritimeFeed.maritime_aisstream_issue_url ||
+                                                    'https://github.com/aisstream/aisstream/issues/17'
+                                                }
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="font-semibold text-cyan-700 underline underline-offset-2 hover:text-cyan-600 dark:text-cyan-300 dark:hover:text-cyan-200"
+                                            >
+                                                {t('מעקב בעיה', 'Track issue')}
+                                            </a>
+                                        </p>
+                                    )}
+
                                 <button
                                     type="button"
                                     onClick={() => setMaritimeAdvancedOpen((o) => !o)}

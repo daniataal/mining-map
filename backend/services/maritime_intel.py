@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
+AISSTREAM_PERSIAN_GULF_ISSUE_URL = "https://github.com/aisstream/aisstream/issues/17"
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 UNLOCODE_CSV_URL = "https://raw.githubusercontent.com/datasets/un-locode/main/data/code-list.csv"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -1474,7 +1475,26 @@ def get_maritime_vessel_feed(
 
         all_rows = list(_maritime_memory_cache.get("rows") or [])
         status = _maritime_memory_cache.get("status")
-        scoped_rows = filter_maritime_rows_by_bbox(all_rows, normalized_bbox)
+
+        worker_ok = (status or {}).get("status") == "ok"
+        gulf_c = count_maritime_rows_in_bbox(all_rows, PERSIAN_GULF_CORE_BBOX)
+        north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
+        coverage_gap = bool(gulf_c == 0 and north_c >= 25 and worker_ok)
+
+        demo_rows: list[dict[str, Any]] = []
+        demo_env = os.getenv("MARITIME_GULF_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
+        if demo_env and coverage_gap:
+            seed_path = os.getenv("MARITIME_GULF_SEED_FILE", "").strip()
+            try:
+                if seed_path and os.path.isfile(seed_path):
+                    demo_rows = load_maritime_gulf_demo_rows_from_file(seed_path)
+                else:
+                    demo_rows = build_synthetic_persian_gulf_demo_rows(_maritime_gulf_demo_target_count())
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                demo_rows = []
+
+        augmented_rows = all_rows + demo_rows
+        scoped_rows = filter_maritime_rows_by_bbox(augmented_rows, normalized_bbox)
         sorted_rows = _sort_maritime_rows(scoped_rows, normalized_scope)
         total_available = len(sorted_rows)
         page_rows = sorted_rows[normalized_offset : normalized_offset + normalized_max_vessels]
@@ -1491,6 +1511,18 @@ def get_maritime_vessel_feed(
         response["memory_cached"] = True
         response["memory_cache_age_seconds"] = round(cache_age, 2) if cache_age >= 0 else None
         response["snapshot_vessel_count"] = len(all_rows)
+        response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
+        response["persian_gulf_demo_synthetic"] = bool(demo_rows)
+        response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
+        if demo_rows:
+            demo_note = (
+                "Persian Gulf Hormuz demo: synthetic positions merged while MARITIME_GULF_DEMO_SEED is enabled; "
+                "this does not represent restored AISStream coverage."
+            )
+            lim = list(response.get("limitations") or [])
+            if demo_note not in lim:
+                lim.append(demo_note)
+            response["limitations"] = lim
         return response
     except Exception as exc:
         conn.rollback()
@@ -1677,6 +1709,130 @@ def load_maritime_seed_snapshot(path: str) -> dict[str, Any]:
         "region_labels": [],
         "effective_bbox_count": 0,
     }
+
+
+
+def _maritime_gulf_demo_target_count() -> int:
+    try:
+        raw = int(os.getenv("MARITIME_GULF_DEMO_COUNT", "200"))
+    except (TypeError, ValueError):
+        raw = 200
+    return max(20, min(raw, 2000))
+
+
+def _snapshot_row_from_demo_vessel(vessel: dict[str, Any]) -> dict[str, Any]:
+    """Build an in-memory cache row compatible with `_build_stored_feed_response`."""
+    observed = _parse_datetime(vessel.get("observed_at")) or datetime.now(timezone.utc)
+    last_seen = _parse_datetime(vessel.get("last_seen_at")) or observed
+    payload = dict(vessel)
+    return {
+        "mmsi": _clean_text(vessel.get("mmsi")),
+        "vessel_name": vessel.get("vessel_name"),
+        "lat": float(vessel["lat"]),
+        "lng": float(vessel["lng"]),
+        "observed_at": observed,
+        "source_label": vessel.get("source_label"),
+        "source_url": vessel.get("source_url"),
+        "ship_type_code": vessel.get("ship_type_code"),
+        "ship_type_label": vessel.get("ship_type_label"),
+        "payload": payload,
+        "last_seen_at": last_seen,
+    }
+
+
+def build_synthetic_persian_gulf_demo_rows(count: int) -> list[dict[str, Any]]:
+    """Deterministic synthetic AIS-like rows inside PERSIAN_GULF_CORE_BBOX (demo / UX only)."""
+    south, west, north, east = PERSIAN_GULF_CORE_BBOX
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    labels_specs = [
+        ("Tanker", 82),
+        ("Tanker", 81),
+        ("Cargo", 71),
+        ("Cargo", 72),
+        ("Passenger", 60),
+        ("Unknown", 0),
+    ]
+    rows: list[dict[str, Any]] = []
+    span_lat = north - south
+    span_lng = east - west
+    for i in range(count):
+        a = (i * 1103515245 + 12345) & 0x7FFFFFFF
+        b = (i * 7919 + 104729) & 0x7FFFFFFF
+        u = (a % 1_000_000) / 1_000_000.0
+        v = (b % 1_000_000) / 1_000_000.0
+        lat = south + u * span_lat
+        lng = west + v * span_lng
+        _label, code = labels_specs[i % len(labels_specs)]
+        mmsi = str(999_000_000 + i + 1)
+        st_label = "Unknown" if code == 0 else _label
+        vessel = {
+            "id": f"demo:gulf:{i + 1:04d}",
+            "mmsi": mmsi,
+            "vessel_name": f"Hormuz Demo {i + 1:03d}",
+            "lat": lat,
+            "lng": lng,
+            "observed_at": now_iso,
+            "last_seen_at": now_iso,
+            "source_label": "Hormuz demo (synthetic)",
+            "source_url": AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+            "speed_knots": 8.0 + (i % 9) * 0.5,
+            "ship_type_code": code,
+            "ship_type_label": st_label,
+        }
+        rows.append(_snapshot_row_from_demo_vessel(vessel))
+    return rows
+
+
+def load_maritime_gulf_demo_rows_from_file(path: str) -> list[dict[str, Any]]:
+    """
+    Load demo vessels from JSON / GeoJSON.
+    Accepts: {\"vessels\": [...]}, a top-level array, or a GeoJSON FeatureCollection of Points.
+    Each vessel should include lat/lng (or GeoJSON coordinates), mmsi, and optional ship fields.
+    """
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    rows: list[dict[str, Any]] = []
+    if isinstance(data, dict) and str(data.get("type")).lower() == "featurecollection":
+        for idx, feat in enumerate(data.get("features") or []):
+            if not isinstance(feat, dict):
+                continue
+            geom = feat.get("geometry")
+            props = feat.get("properties") if isinstance(feat.get("properties"), dict) else {}
+            if not isinstance(geom, dict):
+                continue
+            coords = geom.get("coordinates")
+            if str(geom.get("type")).lower() != "point" or not isinstance(coords, list) or len(coords) < 2:
+                continue
+            lng_f = float(coords[0])
+            lat_f = float(coords[1])
+            mmsi = _clean_text(props.get("mmsi")) or f"998{idx + 1:06d}"
+            code_raw = props.get("ship_type_code", props.get("ship_type"))
+            code_i, st_lbl = classify_ais_ship_type(code_raw)
+            vessel = {
+                "id": props.get("id") or f"demo:gulf:{idx + 1:04d}",
+                "mmsi": mmsi,
+                "vessel_name": props.get("vessel_name") or props.get("name") or f"Hormuz Seed {idx + 1}",
+                "lat": lat_f,
+                "lng": lng_f,
+                "observed_at": props.get("observed_at") or _now_iso(),
+                "last_seen_at": props.get("last_seen_at") or props.get("observed_at") or _now_iso(),
+                "source_label": props.get("source_label") or "Hormuz demo (seed file)",
+                "source_url": props.get("source_url") or AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+                "ship_type_code": props.get("ship_type_code", code_i),
+                "ship_type_label": props.get("ship_type_label") or st_lbl,
+            }
+            rows.append(_snapshot_row_from_demo_vessel(vessel))
+        return rows
+    vessels_list: list[Any] = []
+    if isinstance(data, dict):
+        vessels_list = data.get("vessels") or []
+    elif isinstance(data, list):
+        vessels_list = data
+    for item in vessels_list:
+        if isinstance(item, dict):
+            rows.append(_snapshot_row_from_demo_vessel(item))
+    return rows
 
 
 def get_maritime_stats(

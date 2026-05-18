@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -13,10 +15,12 @@ from backend.services.maritime_intel import (
     _normalize_requested_bbox,
     _ship_matches_scope,
     build_counterparty_proxies,
+    build_synthetic_persian_gulf_demo_rows,
     classify_ais_ship_type,
     classify_evidence_type,
     filter_maritime_rows_by_bbox,
     haversine_km,
+    load_maritime_gulf_demo_rows_from_file,
     match_destination_to_port,
     merge_maritime_vessel_feeds,
     parse_unlocode_coordinates,
@@ -161,6 +165,42 @@ class MaritimeIntelTests(unittest.TestCase):
 
     def test_match_destination_to_port_handles_empty(self):
         self.assertIsNone(match_destination_to_port(""))
+
+    def test_build_synthetic_persian_gulf_demo_rows_stays_in_core_bbox(self):
+        rows = build_synthetic_persian_gulf_demo_rows(80)
+        self.assertEqual(len(rows), 80)
+        south, west, north, east = PERSIAN_GULF_CORE_BBOX
+        for row in rows:
+            lat = float(row["lat"])
+            lng = float(row["lng"])
+            self.assertGreaterEqual(lat, south)
+            self.assertLessEqual(lat, north)
+            self.assertGreaterEqual(lng, west)
+            self.assertLessEqual(lng, east)
+            self.assertTrue(str(row.get("mmsi", "")).startswith("999"))
+
+    def test_load_maritime_gulf_demo_rows_from_geojson_file(self):
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [52.0, 25.5]},
+                    "properties": {"mmsi": "900111222", "vessel_name": "Seed One", "ship_type_code": 82},
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".geojson", delete=False, encoding="utf-8") as tmp:
+            json.dump(payload, tmp)
+            path = tmp.name
+        try:
+            rows = load_maritime_gulf_demo_rows_from_file(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["lat"], 25.5)
+        self.assertAlmostEqual(rows[0]["lng"], 52.0)
+        self.assertEqual(rows[0]["mmsi"], "900111222")
 
     def test_filter_maritime_rows_by_bbox(self):
         rows = [
