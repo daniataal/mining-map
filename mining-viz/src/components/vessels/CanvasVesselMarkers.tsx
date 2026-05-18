@@ -1,30 +1,34 @@
+import type { MutableRefObject } from 'react';
 import { createElementObject, createLayerComponent } from '@react-leaflet/core';
 import type { Layer } from 'leaflet';
 import type { MaritimeVessel } from '../../types';
 import { CanvasVesselLayer } from '../../lib/vessels/canvasVesselLayer';
-import { toVesselDrawRecords } from '../../lib/vessels/vesselMarkerStyle';
 
 export interface CanvasVesselMarkersProps {
-  vessels: MaritimeVessel[];
   mapZoom: number;
   selectedId: string | null;
   onVesselClick: (vessel: MaritimeVessel) => void;
   formatTooltip: (vessel: MaritimeVessel) => HTMLElement | string;
+  /** Filled when the Leaflet layer is constructed; parent pushes AIS rows via `setVessels` to avoid React diffing huge arrays. */
+  layerApiRef?: MutableRefObject<CanvasVesselLayer | null>;
 }
 
 function createCanvasVesselLayer(
-  {
-    vessels,
-    mapZoom,
-    selectedId,
-    onVesselClick,
-    formatTooltip,
-  }: CanvasVesselMarkersProps,
+  props: CanvasVesselMarkersProps,
   context: Parameters<typeof createElementObject>[1],
 ) {
-  const layer = new CanvasVesselLayer({ mapZoom, selectedId, onVesselClick, formatTooltip });
-  const records = toVesselDrawRecords(vessels, mapZoom, selectedId);
-  layer.setVessels(vessels, records);
+  const layer = new CanvasVesselLayer({
+    mapZoom: props.mapZoom,
+    selectedId: props.selectedId,
+    onVesselClick: props.onVesselClick,
+    formatTooltip: props.formatTooltip,
+  });
+  if (props.layerApiRef) {
+    props.layerApiRef.current = layer;
+    layer.on('remove', () => {
+      if (props.layerApiRef?.current === layer) props.layerApiRef.current = null;
+    });
+  }
   return createElementObject(layer, context);
 }
 
@@ -44,14 +48,6 @@ function updateCanvasVesselLayer(
   }
   if (props.selectedId !== prevProps.selectedId) {
     layer.setSelectedId(props.selectedId);
-  }
-  if (
-    props.vessels !== prevProps.vessels ||
-    props.mapZoom !== prevProps.mapZoom ||
-    props.selectedId !== prevProps.selectedId
-  ) {
-    const records = toVesselDrawRecords(props.vessels, props.mapZoom, props.selectedId);
-    layer.setVessels(props.vessels, records);
   }
 }
 

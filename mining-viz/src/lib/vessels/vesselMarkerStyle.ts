@@ -98,6 +98,26 @@ export function getVesselMarkerColor(vessel: MaritimeVessel): string {
   return VESSEL_CATEGORY_COLORS.other;
 }
 
+/** Lower = drawn first under LOD cell competition (tankers win over fishing, etc.). */
+export function getVesselLodPriority(vessel: MaritimeVessel): number {
+  const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
+  const fromLabel = fromCode ? null : vesselCategoryFromLabel(vessel.ship_type_label);
+  const key = fromCode ?? fromLabel ?? 'other';
+  const order: VesselCategoryKey[] = [
+    'tanker',
+    'cargo',
+    'passenger',
+    'fast',
+    'fishing',
+    'tug',
+    'service',
+    'pleasure',
+    'other',
+  ];
+  const idx = order.indexOf(key);
+  return idx === -1 ? order.length : idx;
+}
+
 /** Prefer true heading; else course over ground; invalid AIS (511) ignored. */
 export function getVesselHeadingDegrees(vessel: MaritimeVessel): number {
   const th = vessel.true_heading;
@@ -124,6 +144,8 @@ export interface VesselDrawRecord {
   heading: number;
   color: string;
   isSelected: boolean;
+  /** Display LOD priority (not clustering): lower = preferred when subsampling at low zoom. */
+  lodPriority: number;
 }
 
 export function toVesselDrawRecords(
@@ -138,5 +160,6 @@ export function toVesselDrawRecords(
     heading: getVesselHeadingDegrees(vessel),
     color: getVesselMarkerColor(vessel),
     isSelected: vessel.id === selectedId,
+    lodPriority: getVesselLodPriority(vessel),
   }));
 }
