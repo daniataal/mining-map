@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 /** Delay filter/map work until typing pauses — keeps the input responsive. */
-export const SEARCH_DEBOUNCE_MS = 250;
+export const SEARCH_DEBOUNCE_MS = 300;
 
 export function useDebouncedValue<T>(value: T, delayMs = SEARCH_DEBOUNCE_MS): T {
   const [debounced, setDebounced] = useState(value);

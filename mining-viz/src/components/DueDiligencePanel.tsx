@@ -34,6 +34,8 @@ interface DueDiligencePanelProps {
   onCardClick: (item: MiningLicense) => void;
   onOpenMap?: () => void;
   isMobile?: boolean;
+  /** When nested inside InvestigationsPanel, omit outer page chrome. */
+  embedded?: boolean;
 }
 
 export default function DueDiligencePanel({
@@ -48,6 +50,7 @@ export default function DueDiligencePanel({
   onCardClick,
   onOpenMap,
   isMobile,
+  embedded = false,
 }: DueDiligencePanelProps) {
   const { t } = useI18n();
   const [listMode, setListMode] = useState<DdListMode>('queue');
@@ -99,17 +102,27 @@ export default function DueDiligencePanel({
   const showEmptyQueue = listMode === 'queue' && queue.length === 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0 pt-20 sm:pt-24 px-2 sm:px-4 pb-4 bg-white dark:bg-slate-950">
+    <div
+      className={`flex flex-col h-full min-h-0 px-2 sm:px-4 pb-4 bg-white dark:bg-slate-950 ${
+        embedded ? '' : 'pt-20 sm:pt-24'
+      }`}
+    >
       <header className="shrink-0 space-y-4 mb-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white italic">
-              {t('בדיקת נאותות', 'Due Diligence')}
-            </h1>
-            <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] font-black uppercase">
-              {queue.length} {t('בתור', 'queued')}
-            </Badge>
-          </div>
+        <div
+          className={`flex flex-col sm:flex-row sm:items-center gap-3 ${
+            embedded ? 'sm:justify-end' : 'sm:justify-between'
+          }`}
+        >
+          {!embedded && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white italic">
+                {t('בדיקת נאותות', 'Due Diligence')}
+              </h1>
+              <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] font-black uppercase">
+                {queue.length} {t('בתור', 'queued')}
+              </Badge>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex rounded-xl border border-black/10 dark:border-white/10 p-0.5 bg-black/[0.03] dark:bg-white/[0.03]">

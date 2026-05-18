@@ -125,6 +125,9 @@ interface DossierViewProps {
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
   onPlanRoute?: (item: MiningLicense) => void;
+  linkedDealRoom?: DealRoom | null;
+  onNavigateToDealRoom?: (dealRoomId: string) => void;
+  onDealRoomLinked?: (room: DealRoom) => void;
 }
 
 const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
@@ -176,6 +179,9 @@ export default function DossierView({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   onPlanRoute,
+  linkedDealRoom: linkedDealRoomProp,
+  onNavigateToDealRoom,
+  onDealRoomLinked,
 }: DossierViewProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState('overview');
@@ -732,7 +738,11 @@ Output requirements:
   const openOrCreateDealRoom = async () => {
     if (!item || isCreatingDealRoom) return;
     if (dealRoom) {
-      setActiveTab('deal-room');
+      if (onNavigateToDealRoom) {
+        onNavigateToDealRoom(dealRoom.id);
+      } else {
+        setActiveTab('deal-room');
+      }
       return;
     }
     setIsCreatingDealRoom(true);
@@ -744,7 +754,12 @@ Output requirements:
         title: `${item.company} Investigation`,
       });
       setDealRoom(created);
-      setActiveTab('deal-room');
+      onDealRoomLinked?.(created);
+      if (onNavigateToDealRoom) {
+        onNavigateToDealRoom(created.id);
+      } else {
+        setActiveTab('deal-room');
+      }
     } catch {
       setDealRoomError('Could not create deal room for this entity.');
     } finally {
@@ -789,6 +804,10 @@ Output requirements:
       isCancelled = true;
     };
   }, [isOpen, item?.id, item?.entityKind]);
+
+  useEffect(() => {
+    if (linkedDealRoomProp) setDealRoom(linkedDealRoomProp);
+  }, [linkedDealRoomProp?.id, linkedDealRoomProp]);
 
   useEffect(() => {
     if (isOpen && item) {
@@ -1194,6 +1213,14 @@ Output requirements:
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
                     {item.region}, {item.country}
                   </span>
+                  {dealRoom && (
+                    <Badge
+                      className="bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/25 text-[9px] font-black h-5 px-2 uppercase shrink-0 max-w-[min(100%,280px)] truncate"
+                      title={dealRoom.title}
+                    >
+                      {t('בחדר עסקאות', 'In Deal Room')}: {dealRoom.title}
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -1226,7 +1253,11 @@ Output requirements:
                     : 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200'
                 }`}
               >
-                {dealRoom ? t('פתח חדר', 'Open Deal Room') : t('הוסף לחדר', 'Add to Deal Room')}
+                {dealRoom
+                  ? onNavigateToDealRoom
+                    ? t('צפה בחקירות', 'View in Investigations')
+                    : t('פתח חדר', 'Open Deal Room')
+                  : t('הוסף לחדר', 'Add to Deal Room')}
               </Button>
               <Button
                 variant="outline"

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, startTransition, lazy, Suspense, type KeyboardEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense, type KeyboardEvent } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
@@ -11,6 +11,8 @@ import Sidebar from './components/Sidebar';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
 import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
+import { useDealRooms } from './hooks/use-deal-rooms';
+import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import OilMaritimePanel from './components/OilMaritimePanel';
@@ -58,7 +60,7 @@ import './App.css';
 const MapComponent = lazy(() => import('./components/MapComponent'));
 const DossierView = lazy(() => import('./components/DossierView'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
-const DueDiligencePanel = lazy(() => import('./components/DueDiligencePanel'));
+const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
 
 const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
@@ -129,8 +131,10 @@ export default function App() {
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
   const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'due_diligence' | 'raw_evidence' | 'route_planner' | 'admin'
+    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'raw_evidence' | 'route_planner' | 'admin'
   >('global');
+  const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
+  const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
   const licenseSector =
     viewMode === 'mining'
       ? 'mining'
@@ -176,6 +180,7 @@ export default function App() {
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
+  const dealRooms = useDealRooms(Boolean(username));
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('mining_userid'));
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
@@ -319,6 +324,7 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations);
+  const mapProcessedData = useDeferredValue(miningData.processedData);
 
   const selectedCountryBeforeFocusRef = useRef<string[]>([]);
   const selectedCountryLiveRef = useRef<string[]>([]);
@@ -358,10 +364,10 @@ export default function App() {
 
   const countryFocusSuggestions = useMemo(
     () =>
-      countryFocusCountry || miningData.filter.trim().length < 2
+      countryFocusCountry || miningData.debouncedFilter.trim().length < 2
         ? []
-        : suggestCountriesForFocus(miningData.filter, miningData.countries, 8),
-    [miningData.filter, miningData.countries, countryFocusCountry],
+        : suggestCountriesForFocus(miningData.debouncedFilter, miningData.countries, 8),
+    [miningData.debouncedFilter, miningData.countries, countryFocusCountry],
   );
 
   const handleIntelligenceSearchKeyDown = useCallback(
@@ -446,6 +452,18 @@ export default function App() {
       logActivityMutation.mutate({ user_id: userId, username, action: 'VIEW_DOSSIER', details: `Viewed ${item.company} (${item.id})` });
     }
   }, [userId, username, logActivityMutation]);
+
+  const handleNavigateToDealRoom = useCallback((dealRoomId: string) => {
+    setInvestigationsSubTab('deal_rooms');
+    setHighlightedDealRoomId(dealRoomId);
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
+  const getDealRoomForLicense = useCallback(
+    (licenseId: string, entityKind = 'license') => dealRooms.getRoomForEntity(licenseId, entityKind),
+    [dealRooms],
+  );
 
   const handleSelectItem = useCallback((item: MiningLicense | null) => {
     setSelectedMaritimeVessel(null);
@@ -539,7 +557,7 @@ export default function App() {
   const sidebarViewMode =
     viewMode === 'admin'
       ? 'admin'
-      : viewMode === 'due_diligence'
+      : viewMode === 'investigations'
         ? 'dashboard'
         : viewMode === 'raw_evidence'
           ? 'pipeline'
@@ -550,7 +568,7 @@ export default function App() {
       return;
     }
     if (mode === 'dashboard') {
-      setViewMode('due_diligence');
+      setViewMode('investigations');
       return;
     }
     if (mode === 'pipeline') {
@@ -793,6 +811,7 @@ export default function App() {
             isInDdQueue={ddQueue.isInQueue}
             onAddToDueDiligence={ddQueue.addToQueue}
             onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+            getDealRoomForLicense={getDealRoomForLicense}
           />
         </aside>
 
@@ -805,7 +824,7 @@ export default function App() {
             viewMode === 'oil_and_gas' ||
             viewMode === 'suppliers' ||
             viewMode === 'ports' ||
-            viewMode === 'due_diligence' ||
+            viewMode === 'investigations' ||
             viewMode === 'raw_evidence' ||
             viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
@@ -935,13 +954,13 @@ export default function App() {
                       {t('מסלול', 'Route')}
                     </button>
                     <button
-                      onClick={() => setViewMode('due_diligence')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'due_diligence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      onClick={() => setViewMode('investigations')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'investigations' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
                     >
-                      {t("בדיקת נאותות", "Due Diligence")}
-                      {ddQueue.queue.length > 0 && (
-                        <span className="ml-1.5 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-slate-950/20 dark:bg-white/20 text-[9px] font-black px-1">
-                          {ddQueue.queue.length}
+                      {t('חקירות', 'Investigations')}
+                      {(ddQueue.queue.length > 0 || dealRooms.count > 0) && (
+                        <span className="inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-slate-950/20 dark:bg-white/20 text-[9px] font-black px-1">
+                          {ddQueue.queue.length + dealRooms.count}
                         </span>
                       )}
                     </button>
@@ -980,7 +999,7 @@ export default function App() {
               viewMode === 'route_planner') && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
                 <MapComponent
-                  processedData={viewMode === 'route_planner' ? [] : miningData.processedData}
+                  processedData={viewMode === 'route_planner' ? [] : mapProcessedData}
                   allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
                   userAnnotations={userAnnotations}
                   selectedItem={selectedItem}
@@ -1033,6 +1052,7 @@ export default function App() {
                   isInDdQueue={ddQueue.isInQueue}
                   onAddToDueDiligence={ddQueue.addToQueue}
                   onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+                  getDealRoomForLicense={getDealRoomForLicense}
                   countryFocusCountry={countryFocusCountry}
                   countryFocusBoundsTrigger={countryFocusBoundsTrigger}
                 />
@@ -1056,9 +1076,11 @@ export default function App() {
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
             )}
-            {viewMode === 'due_diligence' && (
-              <Suspense fallback={<LazySurfaceFallback label={t('טוען בדיקת נאותות...', 'Loading due diligence...')} />}>
-                <DueDiligencePanel
+            {viewMode === 'investigations' && (
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען חקירות...', 'Loading investigations...')} />}>
+                <InvestigationsPanel
+                  subTab={investigationsSubTab}
+                  onSubTabChange={setInvestigationsSubTab}
                   allLicenses={allLicenses}
                   queue={ddQueue.queue}
                   queueIds={ddQueue.queueIds}
@@ -1070,6 +1092,12 @@ export default function App() {
                   onCardClick={handleOpenDossier}
                   onOpenMap={() => setViewMode('global')}
                   isMobile={isMobile}
+                  dealRooms={dealRooms.rooms}
+                  dealRoomsLoading={dealRooms.isLoading}
+                  highlightedDealRoomId={highlightedDealRoomId}
+                  onHighlightedDealRoomConsumed={() => setHighlightedDealRoomId(null)}
+                  onDealRoomChange={dealRooms.upsertDealRoom}
+                  onRefreshDealRooms={() => void dealRooms.refreshDealRooms()}
                 />
               </Suspense>
             )}
@@ -1184,6 +1212,13 @@ export default function App() {
                 setIsDossierOpen(false);
                 setViewMode('route_planner');
               }}
+              linkedDealRoom={
+                dossierItem
+                  ? getDealRoomForLicense(dossierItem.id, dossierItem.entityKind || 'license')
+                  : undefined
+              }
+              onNavigateToDealRoom={handleNavigateToDealRoom}
+              onDealRoomLinked={dealRooms.upsertDealRoom}
             />
           </Suspense>
         )}
@@ -1253,11 +1288,11 @@ export default function App() {
           <span className="text-[8px] font-black uppercase tracking-wider">{t("מסלול", "Route")}</span>
         </button>
         <button
-          onClick={() => setViewMode('due_diligence')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'due_diligence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          onClick={() => setViewMode('investigations')}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'investigations' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LucidePieChart className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("בדיקת נאותות", "DD")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t('חקירות', 'Investigate')}</span>
         </button>
         <button
           onClick={() => setViewMode('raw_evidence')}

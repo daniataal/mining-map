@@ -18,6 +18,7 @@ interface PopupFormProps {
   onRemoveFromDueDiligence?: () => void;
   isEsgRisk?: boolean;
   esgZoneName?: string;
+  dealRoomTitle?: string;
 }
 
 export default function PopupForm({
@@ -29,6 +30,7 @@ export default function PopupForm({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   isEsgRisk = false,
+  dealRoomTitle,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -121,6 +123,11 @@ export default function PopupForm({
                           </Badge>
                         )}
                       </div>
+                    )}
+                    {dealRoomTitle && (
+                      <Badge className="mb-2 bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/25 text-[8px] font-black uppercase max-w-full truncate">
+                        {t('בחדר עסקאות', 'In Deal Room')}: {dealRoomTitle}
+                      </Badge>
                     )}
                     <h3
                       className={`font-bold text-sm tracking-tight leading-snug text-slate-900 dark:text-white break-words ${
