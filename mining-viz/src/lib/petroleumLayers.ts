@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { apiClient } from './api';
 
 export type PetroleumLayerId =
@@ -65,13 +65,14 @@ export const PETROLEUM_LAYER_IDS: PetroleumLayerId[] = [
   'gas_pipelines',
 ];
 
+/** Oil & gas map: only refineries on by default; other petroleum overlays are opt-in. */
 export const DEFAULT_PETROLEUM_LAYER_VISIBILITY: Record<PetroleumLayerId, boolean> = {
-  exploration: true,
-  production: true,
+  exploration: false,
+  production: false,
   bid_rounds: false,
   refineries: true,
-  oil_pipelines: true,
-  gas_pipelines: true,
+  oil_pipelines: false,
+  gas_pipelines: false,
 };
 
 export function usePetroleumLayerCatalog(enabled = true) {
@@ -111,7 +112,7 @@ export function usePetroleumLayerGeoJson(
     enabled: enabled && Boolean(bbox),
     staleTime: 60 * 60_000,
     gcTime: 2 * 60 * 60_000,
-    placeholderData: (prev) => prev,
+    placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
   });
 }

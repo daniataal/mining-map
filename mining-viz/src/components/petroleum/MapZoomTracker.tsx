@@ -10,7 +10,6 @@ export default function MapZoomTracker({ onZoomChange }: { onZoomChange: (zoom: 
 
   useMapEvents({
     zoomend: emit,
-    moveend: emit,
   });
 
   useEffect(() => {

@@ -52,8 +52,9 @@ import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
 import RoutePlannerPortMarkers from '../features/route-planner/RoutePlannerPortMarkers';
+import RoutePlannerAirportMarkers from '../features/route-planner/RoutePlannerAirportMarkers';
 import RoutePlannerFlyEffect from '../features/route-planner/RoutePlannerFlyEffect';
-import type { RoutePlannerPortMarker } from '../features/route-planner/locationPresets';
+import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
@@ -215,9 +216,12 @@ interface MapComponentProps {
     label?: string,
     country?: string,
   ) => void;
-  routePlannerPorts?: RoutePlannerPortMarker[];
+  routePlannerPorts?: RoutePlannerHubMarker[];
   routePlannerShowPorts?: boolean;
-  onRoutePlannerPortPick?: (port: RoutePlannerPortMarker, role: 'supplier' | 'buyer') => void;
+  onRoutePlannerPortPick?: (port: RoutePlannerHubMarker, role: 'supplier' | 'buyer') => void;
+  routePlannerAirports?: RoutePlannerHubMarker[];
+  routePlannerShowAirports?: boolean;
+  onRoutePlannerAirportPick?: (airport: RoutePlannerHubMarker, role: 'supplier' | 'buyer') => void;
   routePlannerFlyTrigger?: number;
   routePlannerFlyTarget?: { lat: number; lng: number } | null;
   isInDdQueue?: (id: string) => boolean;
@@ -420,8 +424,11 @@ export default function MapComponent({
   routePlannerPickRole = null,
   onRoutePlannerMapPick,
   routePlannerPorts = [],
-  routePlannerShowPorts = true,
+  routePlannerShowPorts = false,
   onRoutePlannerPortPick,
+  routePlannerAirports = [],
+  routePlannerShowAirports = false,
+  onRoutePlannerAirportPick,
   routePlannerFlyTrigger = 0,
   routePlannerFlyTarget = null,
   isInDdQueue,
@@ -1505,7 +1512,7 @@ export default function MapComponent({
                     </LayersControl.Overlay>
 
                     {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
-                        <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
+                        <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
                                 key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
                                 data={filteredGeoJson}
@@ -1556,6 +1563,13 @@ export default function MapComponent({
                     ports={routePlannerPorts}
                     pickRole={routePlannerPickRole ?? null}
                     onPortPick={onRoutePlannerPortPick}
+                  />
+                )}
+                {isRoutePlannerView && routePlannerShowAirports && routePlannerAirports.length > 0 && onRoutePlannerAirportPick && (
+                  <RoutePlannerAirportMarkers
+                    airports={routePlannerAirports}
+                    pickRole={routePlannerPickRole ?? null}
+                    onAirportPick={onRoutePlannerAirportPick}
                   />
                 )}
                 {isRoutePlannerView && routePlannerOverlay && (

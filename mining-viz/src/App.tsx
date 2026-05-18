@@ -26,7 +26,11 @@ import {
   tryParseCountryColonQuery,
 } from './lib/countryFocusMatch';
 import { useRoutePlanner } from './features/route-planner';
-import { buildRoutePlannerPortMarkers } from './features/route-planner/locationPresets';
+import {
+  buildRoutePlannerAirportMarkers,
+  buildRoutePlannerPortMarkers,
+  resolveRouteHubCountries,
+} from './features/route-planner/locationPresets';
 import {
   Search as LucideSearch,
   Filter as LucideFilter,
@@ -239,14 +243,27 @@ export default function App() {
     });
   }, [rawData, localLicenses, portEntities, storageEntities]);
 
-  const routePlannerPortMarkers = useMemo(
-    () => buildRoutePlannerPortMarkers(routePlannerLicensePool, portEntities),
-    [routePlannerLicensePool, portEntities],
+  const routeHubCountries = useMemo(
+    () => resolveRouteHubCountries(routePlanner.supplier.country, routePlanner.buyer.country),
+    [routePlanner.supplier.country, routePlanner.buyer.country],
   );
 
-  const handleRoutePlannerPortPick = useCallback(
-    (port: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
-      routePlanner.handleMapPick(port.lat, port.lng, role, port.name, port.country);
+  const routePlannerPortMarkers = useMemo(
+    () =>
+      buildRoutePlannerPortMarkers(routePlannerLicensePool, portEntities, {
+        countries: routeHubCountries,
+      }),
+    [routePlannerLicensePool, portEntities, routeHubCountries],
+  );
+
+  const routePlannerAirportMarkers = useMemo(
+    () => buildRoutePlannerAirportMarkers({ countries: routeHubCountries }),
+    [routeHubCountries],
+  );
+
+  const handleRoutePlannerHubPick = useCallback(
+    (hub: { lat: number; lng: number; name: string; country?: string }, role: 'supplier' | 'buyer') => {
+      routePlanner.handleMapPick(hub.lat, hub.lng, role, hub.name, hub.country);
     },
     [routePlanner],
   );
@@ -955,7 +972,10 @@ export default function App() {
                   onRoutePlannerMapPick={routePlanner.handleMapPick}
                   routePlannerPorts={routePlannerPortMarkers}
                   routePlannerShowPorts={routePlanner.showPortsOnMap}
-                  onRoutePlannerPortPick={handleRoutePlannerPortPick}
+                  onRoutePlannerPortPick={handleRoutePlannerHubPick}
+                  routePlannerAirports={routePlannerAirportMarkers}
+                  routePlannerShowAirports={routePlanner.showAirportsOnMap}
+                  onRoutePlannerAirportPick={handleRoutePlannerHubPick}
                   routePlannerFlyTrigger={routePlanner.mapFlyTrigger}
                   routePlannerFlyTarget={routePlanner.mapFlyTarget}
                   isInDdQueue={ddQueue.isInQueue}

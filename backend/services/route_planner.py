@@ -112,6 +112,9 @@ MARITIME_HUBS: tuple[TransportHub, ...] = (
     TransportHub("Port of Houston", 29.735, -95.275, "United States", "port"),
     TransportHub("Port of Los Angeles", 33.729, -118.269, "United States", "port"),
     TransportHub("Port of Santos", -23.960, -46.333, "Brazil", "port"),
+    TransportHub("Haifa Port", 32.819, 34.990, "Israel", "port"),
+    TransportHub("Port of Eilat", 29.557, 34.952, "Israel", "port"),
+    TransportHub("Port of Ashdod", 31.801, 34.645, "Israel", "port"),
 )
 
 COASTAL_COUNTRIES: frozenset[str] = frozenset(
@@ -148,6 +151,7 @@ AIR_HUBS: tuple[TransportHub, ...] = (
     TransportHub("London Heathrow Airport", 51.470, -0.454, "United Kingdom", "airport"),
     TransportHub("Singapore Changi Airport", 1.364, 103.991, "Singapore", "airport"),
     TransportHub("Shanghai Pudong Airport", 31.144, 121.808, "China", "airport"),
+    TransportHub("Ben Gurion Airport (TLV)", 32.011, 34.870, "Israel", "airport"),
 )
 
 SEA_ANCHORS: dict[str, tuple[str, float, float]] = {

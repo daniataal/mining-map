@@ -1,4 +1,6 @@
 import type { MiningLicense } from '../../types';
+import { countriesList } from '../../data/countries';
+import { normalizeCountryFocusQuery, resolveCountryFocusToken } from '../../lib/countryFocusMatch';
 
 export interface LocationPreset {
   id: string;
@@ -35,7 +37,69 @@ export const MARITIME_HUB_PRESETS: LocationPreset[] = [
   { id: 'hub-houston', name: 'Port of Houston', lat: 29.735, lng: -95.275, country: 'United States', group: 'catalog' },
   { id: 'hub-la', name: 'Port of Los Angeles', lat: 33.729, lng: -118.269, country: 'United States', group: 'catalog' },
   { id: 'hub-santos', name: 'Port of Santos', lat: -23.96, lng: -46.333, country: 'Brazil', group: 'catalog' },
+  { id: 'hub-haifa', name: 'Haifa Port', lat: 32.819, lng: 34.99, country: 'Israel', group: 'catalog' },
+  { id: 'hub-eilat', name: 'Port of Eilat', lat: 29.557, lng: 34.952, country: 'Israel', group: 'catalog' },
+  { id: 'hub-ashdod', name: 'Port of Ashdod', lat: 31.801, lng: 34.645, country: 'Israel', group: 'catalog' },
 ];
+
+/** Mirrors backend AIR_HUBS in route_planner.py */
+export const AIR_HUB_PRESETS: LocationPreset[] = [
+  { id: 'air-lun', name: 'Kenneth Kaunda International Airport', lat: -15.33, lng: 28.452, country: 'Zambia', group: 'catalog' },
+  { id: 'air-jnb', name: 'OR Tambo International Airport', lat: -26.133, lng: 28.242, country: 'South Africa', group: 'catalog' },
+  { id: 'air-dar', name: 'Julius Nyerere International Airport', lat: -6.878, lng: 39.202, country: 'Tanzania', group: 'catalog' },
+  { id: 'air-acc', name: 'Kotoka International Airport', lat: 5.605, lng: -0.167, country: 'Ghana', group: 'catalog' },
+  { id: 'air-nbo', name: 'Jomo Kenyatta International Airport', lat: -1.319, lng: 36.928, country: 'Kenya', group: 'catalog' },
+  { id: 'air-cai', name: 'Cairo International Airport', lat: 30.122, lng: 31.406, country: 'Egypt', group: 'catalog' },
+  { id: 'air-hrg', name: 'Hurghada International Airport', lat: 27.178, lng: 33.799, country: 'Egypt', group: 'catalog' },
+  { id: 'air-dxb', name: 'Dubai International Airport', lat: 25.253, lng: 55.365, country: 'United Arab Emirates', group: 'catalog' },
+  { id: 'air-bru', name: 'Brussels Airport', lat: 50.901, lng: 4.484, country: 'Belgium', group: 'catalog' },
+  { id: 'air-ams', name: 'Amsterdam Schiphol Airport', lat: 52.31, lng: 4.768, country: 'Netherlands', group: 'catalog' },
+  { id: 'air-fra', name: 'Frankfurt Airport', lat: 50.037, lng: 8.562, country: 'Germany', group: 'catalog' },
+  { id: 'air-lhr', name: 'London Heathrow Airport', lat: 51.47, lng: -0.454, country: 'United Kingdom', group: 'catalog' },
+  { id: 'air-sin', name: 'Singapore Changi Airport', lat: 1.364, lng: 103.991, country: 'Singapore', group: 'catalog' },
+  { id: 'air-pvg', name: 'Shanghai Pudong Airport', lat: 31.144, lng: 121.808, country: 'China', group: 'catalog' },
+  { id: 'air-tlv', name: 'Ben Gurion Airport (TLV)', lat: 32.011, lng: 34.87, country: 'Israel', group: 'catalog' },
+];
+
+export const MAX_HUB_MARKERS_PER_COUNTRY = 48;
+export const MAX_TOTAL_HUB_MARKERS = 96;
+
+export function canonicalRouteHubCountry(country: string | undefined): string | null {
+  const raw = country?.trim();
+  if (!raw) return null;
+  return resolveCountryFocusToken(raw, countriesList) ?? raw;
+}
+
+export function countriesMatchRouteHubFilter(
+  markerCountry: string | undefined,
+  filterCountries: readonly string[],
+): boolean {
+  if (!filterCountries.length || !markerCountry?.trim()) return false;
+  const markerCanon = canonicalRouteHubCountry(markerCountry);
+  if (!markerCanon) return false;
+  const markerKey = normalizeCountryFocusQuery(markerCanon);
+  return filterCountries.some((c) => {
+    const canon = canonicalRouteHubCountry(c);
+    return canon != null && normalizeCountryFocusQuery(canon) === markerKey;
+  });
+}
+
+/** Origin + destination countries for hub markers and dropdowns. Requires destination (buyer) country. */
+export function resolveRouteHubCountries(
+  supplierCountry?: string,
+  buyerCountry?: string,
+): string[] {
+  const buyerCanon = canonicalRouteHubCountry(buyerCountry);
+  if (!buyerCanon) return [];
+  const out = new Set<string>([buyerCanon]);
+  const supplierCanon = canonicalRouteHubCountry(supplierCountry);
+  if (supplierCanon) out.add(supplierCanon);
+  return Array.from(out);
+}
+
+export function buyerCountryRequiredForHubs(buyerCountry?: string): boolean {
+  return !canonicalRouteHubCountry(buyerCountry);
+}
 
 export const WORLD_TRADE_PRESETS: LocationPreset[] = [
   { id: 'p-rotterdam', name: 'Rotterdam, Netherlands', lat: 51.924, lng: 4.477, country: 'Netherlands', group: 'ports' },
@@ -131,16 +195,37 @@ export function buildPortPresetsFromEntities(entities: MiningLicense[]): Locatio
   );
 }
 
+export function filterLocationPresetsByCountries(
+  presets: LocationPreset[],
+  countries: readonly string[],
+): LocationPreset[] {
+  if (!countries.length) {
+    return presets.filter((p) => p.group === 'licenses' || p.group === 'buyers');
+  }
+  return presets.filter(
+    (p) =>
+      p.group === 'licenses' ||
+      p.group === 'buyers' ||
+      (p.country != null && countriesMatchRouteHubFilter(p.country, countries)),
+  );
+}
+
 export function buildAllLocationPresets(
   allLicenses: MiningLicense[],
   portEntities: MiningLicense[] = [],
+  options?: { countries?: readonly string[] },
 ): LocationPreset[] {
-  return dedupePresets([
+  const merged = dedupePresets([
     ...buildLicensePresets(allLicenses),
     ...buildPortPresetsFromEntities(portEntities),
     ...MARITIME_HUB_PRESETS,
+    ...AIR_HUB_PRESETS,
     ...WORLD_TRADE_PRESETS,
   ]);
+  if (options?.countries !== undefined) {
+    return filterLocationPresetsByCountries(merged, options.countries);
+  }
+  return merged;
 }
 
 export function matchPresetId(
@@ -152,27 +237,62 @@ export function matchPresetId(
   return m ? m.id : 'custom';
 }
 
-export interface RoutePlannerPortMarker {
+export interface RoutePlannerHubMarker {
   id: string;
   name: string;
   lat: number;
   lng: number;
   country?: string;
+  hubType: 'port' | 'airport';
   source: 'catalog' | 'database' | 'license';
+}
+
+/** @deprecated Use RoutePlannerHubMarker */
+export type RoutePlannerPortMarker = RoutePlannerHubMarker;
+
+function capMarkersByCountry<T extends { country?: string }>(
+  markers: T[],
+  maxPerCountry: number,
+  maxTotal: number,
+): T[] {
+  const perCountry = new Map<string, number>();
+  const out: T[] = [];
+  for (const m of markers) {
+    if (out.length >= maxTotal) break;
+    const key = canonicalRouteHubCountry(m.country) ?? '_unknown';
+    const n = perCountry.get(key) ?? 0;
+    if (n >= maxPerCountry) continue;
+    perCountry.set(key, n + 1);
+    out.push(m);
+  }
+  return out;
 }
 
 export function buildRoutePlannerPortMarkers(
   allLicenses: MiningLicense[],
   portEntities: MiningLicense[] = [],
-): RoutePlannerPortMarker[] {
-  const markers: RoutePlannerPortMarker[] = [];
+  options?: { countries?: readonly string[] },
+): RoutePlannerHubMarker[] {
+  const countries = options?.countries;
+  const hasCountryFilter = countries !== undefined;
+  const markers: RoutePlannerHubMarker[] = [];
   const seen = new Set<string>();
 
-  const add = (id: string, name: string, lat: number, lng: number, country: string | undefined, source: RoutePlannerPortMarker['source']) => {
+  const add = (
+    id: string,
+    name: string,
+    lat: number,
+    lng: number,
+    country: string | undefined,
+    source: RoutePlannerHubMarker['source'],
+  ) => {
+    if (hasCountryFilter && (!countries!.length || !countriesMatchRouteHubFilter(country, countries!))) {
+      return;
+    }
     const key = coordKey(lat, lng);
     if (seen.has(key)) return;
     seen.add(key);
-    markers.push({ id, name, lat, lng, country, source });
+    markers.push({ id, name, lat, lng, country, hubType: 'port', source });
   };
 
   for (const hub of MARITIME_HUB_PRESETS) {
@@ -181,14 +301,37 @@ export function buildRoutePlannerPortMarkers(
   for (const p of WORLD_TRADE_PRESETS.filter((x) => x.group === 'ports')) {
     add(p.id, p.name, p.lat, p.lng, p.country, 'catalog');
   }
-  for (const item of portEntities) {
-    if (item.lat == null || item.lng == null) continue;
-    add(`db-${item.id}`, item.company || item.region || 'Port', item.lat, item.lng, item.country, 'database');
-  }
-  for (const item of allLicenses) {
-    if (!isPortLikeLicense(item) || item.lat == null || item.lng == null) continue;
-    add(`lic-${item.id}`, item.company || 'Port', item.lat, item.lng, item.country, 'license');
+  if (hasCountryFilter && countries!.length) {
+    for (const item of portEntities) {
+      if (item.lat == null || item.lng == null) continue;
+      add(`db-${item.id}`, item.company || item.region || 'Port', item.lat, item.lng, item.country, 'database');
+    }
+    for (const item of allLicenses) {
+      if (!isPortLikeLicense(item) || item.lat == null || item.lng == null) continue;
+      add(`lic-${item.id}`, item.company || 'Port', item.lat, item.lng, item.country, 'license');
+    }
   }
 
-  return markers;
+  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, MAX_TOTAL_HUB_MARKERS);
+}
+
+export function buildRoutePlannerAirportMarkers(options?: {
+  countries?: readonly string[];
+}): RoutePlannerHubMarker[] {
+  const countries = options?.countries;
+  const hasCountryFilter = countries !== undefined;
+  const markers: RoutePlannerHubMarker[] = AIR_HUB_PRESETS.filter((hub) => {
+    if (!hasCountryFilter) return true;
+    if (!countries!.length) return false;
+    return countriesMatchRouteHubFilter(hub.country, countries!);
+  }).map((hub) => ({
+    id: hub.id,
+    name: hub.name,
+    lat: hub.lat,
+    lng: hub.lng,
+    country: hub.country,
+    hubType: 'airport' as const,
+    source: 'catalog' as const,
+  }));
+  return capMarkersByCountry(markers, MAX_HUB_MARKERS_PER_COUNTRY, MAX_TOTAL_HUB_MARKERS);
 }

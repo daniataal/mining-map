@@ -73,6 +73,8 @@ export interface RoutePlannerHook {
   handleMapPick: (lat: number, lng: number, role: RoutePickRole, label?: string, country?: string) => void;
   showPortsOnMap: boolean;
   setShowPortsOnMap: (value: boolean) => void;
+  showAirportsOnMap: boolean;
+  setShowAirportsOnMap: (value: boolean) => void;
   mapFlyTrigger: number;
   mapFlyTarget: { lat: number; lng: number } | null;
   flyToLocation: (lat: number, lng: number) => void;
@@ -100,7 +102,8 @@ export function useRoutePlanner(): RoutePlannerHook {
   const [incoterm, setIncoterm] = useState('FOB');
   const [shippingMethods, setShippingMethods] = useState<string[]>(() => ['sea_fcl', 'truck_inland']);
   const [pickRole, setPickRole] = useState<RoutePickRole | null>(null);
-  const [showPortsOnMap, setShowPortsOnMap] = useState(true);
+  const [showPortsOnMap, setShowPortsOnMap] = useState(false);
+  const [showAirportsOnMap, setShowAirportsOnMap] = useState(false);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
   const [mapFlyTarget, setMapFlyTarget] = useState<{ lat: number; lng: number } | null>(null);
   const [result, setResult] = useState<RoutePlannerApiResponse | null>(null);
@@ -181,6 +184,8 @@ export function useRoutePlanner(): RoutePlannerHook {
       });
       setResult(res);
       setSelectedPlanId(res.recommendedPlanId ?? null);
+      setShowPortsOnMap(false);
+      setShowAirportsOnMap(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
     } finally {
@@ -239,6 +244,8 @@ export function useRoutePlanner(): RoutePlannerHook {
     handleMapPick,
     showPortsOnMap,
     setShowPortsOnMap,
+    showAirportsOnMap,
+    setShowAirportsOnMap,
     mapFlyTrigger,
     mapFlyTarget,
     flyToLocation,
