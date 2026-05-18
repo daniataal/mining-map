@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef, startTransition, laz
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
+import { useDebouncedValue } from './hooks/use-debounced-value';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
@@ -243,9 +244,11 @@ export default function App() {
     });
   }, [rawData, localLicenses, portEntities, storageEntities]);
 
+  const debouncedRouteSupplierCountry = useDebouncedValue(routePlanner.supplier.country);
+  const debouncedRouteBuyerCountry = useDebouncedValue(routePlanner.buyer.country);
   const routeHubCountries = useMemo(
-    () => resolveRouteHubCountries(routePlanner.supplier.country, routePlanner.buyer.country),
-    [routePlanner.supplier.country, routePlanner.buyer.country],
+    () => resolveRouteHubCountries(debouncedRouteSupplierCountry, debouncedRouteBuyerCountry),
+    [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry],
   );
 
   const routePlannerPortMarkers = useMemo(

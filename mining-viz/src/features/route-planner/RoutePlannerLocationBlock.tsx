@@ -1,5 +1,5 @@
 import { Crosshair } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { startTransition, useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useI18n } from '../../lib/i18n';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -14,7 +14,7 @@ import {
 } from '../../components/ui/select';
 import type { LocationPreset } from './locationPresets';
 import { canonicalRouteHubCountry, findNearestHubInCountry, matchPresetId } from './locationPresets';
-import { countriesList } from '../../data/countries';
+import RouteCountryCombobox from './RouteCountryCombobox';
 import type { RoutePartyLocation, RoutePickRole } from './useRoutePlanner';
 
 interface RoutePlannerLocationBlockProps {
@@ -23,7 +23,7 @@ interface RoutePlannerLocationBlockProps {
   titleClass: string;
   accentBorder: string;
   location: RoutePartyLocation;
-  setLocation: (next: RoutePartyLocation) => void;
+  setLocation: Dispatch<SetStateAction<RoutePartyLocation>>;
   presets: LocationPreset[];
   pickRole: RoutePickRole | null;
   beginPick: (role: RoutePickRole) => void;
@@ -80,6 +80,35 @@ export default function RoutePlannerLocationBlock({
 
   const countrySelectValue = canonicalRouteHubCountry(location.country) ?? '';
 
+  const handleCountryChange = useCallback(
+    (val: string | undefined) => {
+      startTransition(() => {
+        if (!val) {
+          setLocation((loc) => ({ ...loc, country: undefined }));
+          return;
+        }
+        if (role === 'buyer') {
+          setLocation((loc) => {
+            const snap = findNearestHubInCountry(loc.lat, loc.lng, val);
+            if (snap) {
+              onFlyTo(snap.lat, snap.lng);
+              return {
+                lat: snap.lat,
+                lng: snap.lng,
+                label: snap.name,
+                country: val,
+              };
+            }
+            return { ...loc, country: val };
+          });
+          return;
+        }
+        setLocation((loc) => ({ ...loc, country: val }));
+      });
+    },
+    [role, setLocation, onFlyTo],
+  );
+
   const applyPreset = (val: string) => {
     if (val === 'custom') return;
     const found = presets.find((p) => p.id === val);
@@ -132,47 +161,11 @@ export default function RoutePlannerLocationBlock({
           ? t('מדינת יעד (נדרש לנמלים)', 'Destination country (required for hubs)')
           : t('מדינת מוצא', 'Origin country')}
       </p>
-      <Select
-        value={countrySelectValue || '_unset'}
-        onValueChange={(val) => {
-          if (val === '_unset') {
-            setLocation({ ...location, country: undefined });
-            return;
-          }
-          if (role === 'buyer') {
-            const snap = findNearestHubInCountry(location.lat, location.lng, val);
-            if (snap) {
-              setLocation({
-                lat: snap.lat,
-                lng: snap.lng,
-                label: snap.name,
-                country: val,
-              });
-              onFlyTo(snap.lat, snap.lng);
-              return;
-            }
-          }
-          setLocation({ ...location, country: val });
-        }}
-      >
-        <SelectTrigger
-          className={`h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10 mb-3 ${
-            requireCountry && !countrySelectValue ? 'border-amber-500/60' : ''
-          }`}
-        >
-          <SelectValue placeholder={t('בחר מדינה...', 'Select country...')} />
-        </SelectTrigger>
-        <SelectContent className="max-h-60">
-          <SelectItem value="_unset" className="text-xs text-slate-500">
-            {t('ללא / לא ידוע', 'Not set')}
-          </SelectItem>
-          {countriesList.map((c) => (
-            <SelectItem key={c} value={c} className="text-xs">
-              {c}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <RouteCountryCombobox
+        value={countrySelectValue}
+        onChange={handleCountryChange}
+        requireHighlight={requireCountry}
+      />
 
       <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">
         {role === 'supplier'

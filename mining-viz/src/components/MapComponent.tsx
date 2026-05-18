@@ -54,6 +54,7 @@ import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLaye
 import RoutePlannerPortMarkers from '../features/route-planner/RoutePlannerPortMarkers';
 import RoutePlannerAirportMarkers from '../features/route-planner/RoutePlannerAirportMarkers';
 import RoutePlannerFlyEffect from '../features/route-planner/RoutePlannerFlyEffect';
+import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerMapResizeEffect';
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
@@ -285,6 +286,28 @@ const MapClickHandler = ({
     return null;
 };
 
+function routeOverlayBounds(overlay: RouteMapOverlay): L.LatLngBounds | null {
+    const points: [number, number][] = [];
+    for (const leg of overlay.legs) {
+        for (const coord of leg.path) {
+            if (
+                Array.isArray(coord) &&
+                coord.length === 2 &&
+                Number.isFinite(coord[0]) &&
+                Number.isFinite(coord[1])
+            ) {
+                points.push([coord[0], coord[1]]);
+            }
+        }
+    }
+    for (const wp of overlay.waypoints) {
+        points.push([wp.lat, wp.lng]);
+    }
+    if (!points.length) return null;
+    const bounds = L.latLngBounds(points);
+    return bounds.isValid() ? bounds : null;
+}
+
 const RoutePlannerBoundsEffect = ({
     overlay,
 }: {
@@ -292,11 +315,14 @@ const RoutePlannerBoundsEffect = ({
 }) => {
     const map = useMap();
     useEffect(() => {
-        const wps = overlay?.waypoints;
-        if (!wps?.length) return;
-        const bounds = L.latLngBounds(wps.map((w) => [w.lat, w.lng]));
-        if (!bounds.isValid()) return;
-        map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: 8 });
+        if (!overlay?.legs?.length) return;
+        const bounds = routeOverlayBounds(overlay);
+        if (!bounds) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            map.fitBounds(bounds.pad(0.12), { animate: false, maxZoom: 7, padding: [40, 40] });
+        }, 80);
+        return () => window.clearTimeout(timer);
     }, [map, overlay]);
     return null;
 };
@@ -1457,6 +1483,14 @@ export default function MapComponent({
                 <RoutePlannerFlyEffect
                   target={isRoutePlannerView ? routePlannerFlyTarget : null}
                   trigger={isRoutePlannerView ? routePlannerFlyTrigger : 0}
+                />
+                <RoutePlannerMapResizeEffect
+                  active={isRoutePlannerView}
+                  resizeKey={
+                    isRoutePlannerView
+                      ? `${routePlannerOverlay?.legs.length ?? 0}:${routePlannerOverlay?.waypoints.length ?? 0}`
+                      : 0
+                  }
                 />
                 <CountryFocusBoundsFly
                     active={Boolean(countryFocusCountry?.trim())}

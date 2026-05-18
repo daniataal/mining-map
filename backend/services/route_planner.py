@@ -21,6 +21,7 @@ try:
     from backend.services.routing_geometry import (
         INLAND_PORT_THRESHOLD_KM,
         ResolvedGeometry,
+        great_circle_geometry,
         inland_origin_heuristic,
         normalize_country_key,
         rank_trade_hubs,
@@ -33,6 +34,7 @@ except ImportError:
     from services.routing_geometry import (  # type: ignore[no-redef]
         INLAND_PORT_THRESHOLD_KM,
         ResolvedGeometry,
+        great_circle_geometry,
         inland_origin_heuristic,
         normalize_country_key,
         rank_trade_hubs,
@@ -158,7 +160,9 @@ SEA_ANCHORS: dict[str, tuple[str, float, float]] = {
     "bab_el_mandeb": ("Bab el-Mandeb sea lane", 12.610, 43.330),
     "suez": ("Suez Canal approach", 29.960, 32.550),
     "east_med": ("Eastern Mediterranean lane", 34.200, 27.000),
+    "western_med": ("Western Mediterranean lane", 36.500, 5.000),
     "gibraltar": ("Strait of Gibraltar", 35.960, -5.600),
+    "atlantic_africa": ("Mid-Atlantic Africa offshore lane", 20.000, -15.000),
     "english_channel": ("English Channel approach", 50.050, 1.200),
     "cape": ("Cape of Good Hope lane", -35.000, 18.200),
     "west_africa": ("West Africa offshore lane", 3.000, -12.000),
@@ -332,6 +336,15 @@ def _is_europe(point: RoutePoint) -> bool:
     return 35.0 <= point.lat <= 72.0 and -15.0 <= point.lng <= 45.0
 
 
+def _is_eastern_mediterranean(point: RoutePoint) -> bool:
+    """Levant, Cyprus, and eastern Med coast (Haifa, Beirut, Alexandria, etc.)."""
+    return 28.0 <= point.lat < 35.0 and 25.0 <= point.lng <= 42.0
+
+
+def _is_mediterranean_destination(point: RoutePoint) -> bool:
+    return _is_europe(point) or _is_eastern_mediterranean(point)
+
+
 def _is_east_or_south_africa(point: RoutePoint) -> bool:
     return -36.0 <= point.lat <= 16.0 and 20.0 <= point.lng <= 55.0
 
@@ -352,20 +365,34 @@ def _is_americas(point: RoutePoint) -> bool:
     return -60.0 <= point.lat <= 70.0 and -170.0 <= point.lng <= -30.0
 
 
+def _atlantic_to_mediterranean_anchors(destination: RoutePoint) -> list[str]:
+    """Offshore Atlantic → Med corridor; branch for Levant vs NW Europe."""
+    base = ["west_africa", "atlantic_africa", "gibraltar", "western_med"]
+    if _is_eastern_mediterranean(destination):
+        return [*base, "east_med"]
+    return [*base, "english_channel"]
+
+
 def _sea_anchor_ids_one_way(origin: RoutePoint, destination: RoutePoint) -> list[str]:
-    if _is_europe(destination):
+    if _is_mediterranean_destination(destination):
         if _is_asia_indian_ocean(origin):
             return ["malacca", "colombo", "bab_el_mandeb", "suez", "east_med", "gibraltar", "english_channel"]
         if _is_southern_africa(origin):
             return ["cape", "west_africa", "gibraltar", "english_channel"]
         if _is_east_or_south_africa(origin):
+            if _is_eastern_mediterranean(destination):
+                return ["bab_el_mandeb", "suez", "east_med"]
             return ["bab_el_mandeb", "suez", "east_med", "gibraltar", "english_channel"]
         if _is_west_africa(origin):
-            return ["west_africa", "gibraltar", "english_channel"]
+            return _atlantic_to_mediterranean_anchors(destination)
         if _is_americas(origin):
             return ["mid_atlantic", "english_channel"]
-    if _is_europe(origin):
-        return list(reversed(_sea_anchor_ids_one_way(destination, origin)))
+        if _is_europe(origin):
+            if _is_eastern_mediterranean(destination):
+                return ["english_channel", "gibraltar", "western_med", "east_med"]
+            return ["english_channel", "gibraltar", "western_med"]
+        if _is_eastern_mediterranean(origin) and _is_europe(destination):
+            return ["east_med", "western_med", "gibraltar", "english_channel"]
     if _is_americas(origin) and _is_asia_indian_ocean(destination):
         return ["panama", "malacca"]
     if _is_asia_indian_ocean(origin) and _is_americas(destination):
@@ -374,14 +401,34 @@ def _sea_anchor_ids_one_way(origin: RoutePoint, destination: RoutePoint) -> list
 
 
 def _sea_path(origin: RoutePoint, destination: RoutePoint) -> list[tuple[float, float]]:
-    points = [(origin.lat, origin.lng)]
+    waypoints = [(origin.lat, origin.lng)]
     for anchor_id in _sea_anchor_ids_one_way(origin, destination):
         anchor = _anchor_point(anchor_id)
-        if _haversine_km(points[-1][0], points[-1][1], anchor.lat, anchor.lng) > 120:
-            points.append((anchor.lat, anchor.lng))
-    if _haversine_km(points[-1][0], points[-1][1], destination.lat, destination.lng) > 1:
-        points.append((destination.lat, destination.lng))
-    return points
+        if _haversine_km(waypoints[-1][0], waypoints[-1][1], anchor.lat, anchor.lng) > 120:
+            waypoints.append((anchor.lat, anchor.lng))
+    if _haversine_km(waypoints[-1][0], waypoints[-1][1], destination.lat, destination.lng) > 1:
+        waypoints.append((destination.lat, destination.lng))
+    if len(waypoints) < 2:
+        waypoints = [(origin.lat, origin.lng), (destination.lat, destination.lng)]
+
+    segments: list[tuple[float, float]] = []
+    for idx in range(len(waypoints) - 1):
+        a_lat, a_lng = waypoints[idx]
+        b_lat, b_lng = waypoints[idx + 1]
+        seg = great_circle_geometry(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            method="sea",
+            num_points=14,
+            source="corridor_segment",
+        )
+        if not segments:
+            segments.extend(seg.path)
+        else:
+            segments.extend(seg.path[1:])
+    return segments
 
 
 def _pipeline_viable(a: RoutePoint, b: RoutePoint, layer_enabled: bool) -> bool:

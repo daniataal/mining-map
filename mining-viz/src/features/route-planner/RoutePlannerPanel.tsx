@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Loader2, Navigation, MapPin, ChevronRight, ShieldAlert } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useDebouncedValue } from '../../hooks/use-debounced-value';
 import { useI18n } from '../../lib/i18n';
 import type { MiningLicense } from '../../types';
 import { Badge } from '../../components/ui/badge';
@@ -82,21 +83,29 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
 
   const needsDestinationCountry = buyerCountryRequiredForHubs(buyer.country);
 
-  const supplierPresets = useMemo(
+  const debouncedSupplierCountry = useDebouncedValue(supplier.country);
+  const debouncedBuyerCountry = useDebouncedValue(buyer.country);
+
+  const supplierPresetsRaw = useMemo(
     () =>
       buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
-        countries: resolveRolePresetCountries('supplier', supplier.country, buyer.country),
+        countries: resolveRolePresetCountries('supplier', debouncedSupplierCountry, debouncedBuyerCountry),
       }),
-    [allLicenses, portEntities, supplier.country, buyer.country],
+    [allLicenses, portEntities, debouncedSupplierCountry, debouncedBuyerCountry],
   );
 
-  const buyerPresets = useMemo(
+  const buyerPresetsRaw = useMemo(
     () =>
       buildAllLocationPresets(allLicenses ?? [], portEntities ?? [], {
-        countries: resolveRolePresetCountries('buyer', supplier.country, buyer.country),
+        countries: resolveRolePresetCountries('buyer', debouncedSupplierCountry, debouncedBuyerCountry),
       }),
-    [allLicenses, portEntities, supplier.country, buyer.country],
+    [allLicenses, portEntities, debouncedSupplierCountry, debouncedBuyerCountry],
   );
+
+  const supplierPresets = useDeferredValue(supplierPresetsRaw);
+  const buyerPresets = useDeferredValue(buyerPresetsRaw);
+  const presetsPending =
+    supplierPresets !== supplierPresetsRaw || buyerPresets !== buyerPresetsRaw;
 
   const hubToggleHint = needsDestinationCountry
     ? t(
@@ -235,6 +244,12 @@ export default function RoutePlannerPanel({ rp, allLicenses, portEntities }: Rou
                 </div>
               </label>
             </div>
+
+            {presetsPending && (
+              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 animate-pulse">
+                {t('מעדכן רשימת מיקומים…', 'Updating location list…')}
+              </p>
+            )}
 
             <div className="grid grid-cols-1 gap-4">
               <RoutePlannerLocationBlock

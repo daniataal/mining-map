@@ -342,6 +342,48 @@ class RoutePlannerTests(unittest.TestCase):
             f"Expected Israeli import port, got {import_port}",
         )
 
+    @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
+    def test_ghana_to_haifa_sea_corridor_avoids_sahara_shortcut(self):
+        """West Africa → Levant must use offshore anchors, not a geodesic over the Sahara."""
+        result = plan_route(
+                {
+                    "product": "Gold concentrate",
+                    "quantity_tons": 1000,
+                    "origin": {
+                        "name": "Accra / Tema",
+                        "lat": 5.548,
+                        "lng": -0.192,
+                        "kind": "origin",
+                        "metadata": {"country": "Ghana"},
+                    },
+                    "destination": {
+                        "name": "Haifa Port",
+                        "lat": 32.819,
+                        "lng": 34.99,
+                        "kind": "destination",
+                        "metadata": {"country": "Israel"},
+                    },
+                    "preferred_methods": ["sea", "road"],
+                }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        self.assertGreater(len(sea_leg["path"]), 6)
+        self.assertIn(sea_leg["geometry_source"], {"corridor_fallback", "searoute"})
+
+        def _in_sahara_shortcut(lat: float, lng: float) -> bool:
+            return 20.0 < lat < 30.0 and 2.0 < lng < 18.0
+
+        sample = sea_leg["path"][1:-1]
+        if len(sample) > 8:
+            step = max(1, len(sample) // 8)
+            sample = sample[::step]
+        for lat, lng in sample:
+            self.assertFalse(
+                _in_sahara_shortcut(lat, lng),
+                f"Sea corridor midpoint ({lat:.2f}, {lng:.2f}) cuts across Sahara landmass",
+            )
+
     def test_israel_airport_destination_sea_mode_uses_domestic_port(self):
         result = plan_route(
             {
