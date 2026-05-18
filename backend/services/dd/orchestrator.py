@@ -48,6 +48,17 @@ PUBLIC_PHONE_TOKENS = {
     "head office",
 }
 
+
+def _env_secret(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    if not value:
+        return ""
+    # Local template files may contain unresolved placeholders such as
+    # {{Secrets.GROQ_AI_API_KEY}}; treating them as real keys only burns time.
+    if value.startswith("{{") and value.endswith("}}"):
+        return ""
+    return value
+
 def run_dd_pack(entity_data, raw_evidence):
     """
     Orchestrates the AI due diligence process.
@@ -57,8 +68,8 @@ def run_dd_pack(entity_data, raw_evidence):
     logger.info(f"Running DD pack for {entity_data.get('name')} in sector {sector}")
     
     # Example logic using the API keys from environment
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    groq_api_key = _env_secret("GROQ_API_KEY")
+    openrouter_api_key = _env_secret("OPENROUTER_API_KEY")
     
     if not groq_api_key and not openrouter_api_key:
         logger.warning("No AI API keys configured. Returning mock DD result.")
@@ -197,13 +208,13 @@ def _provider_specs() -> list[dict[str, Any]]:
         {
             "name": "Groq",
             "url": "https://api.groq.com/openai/v1/chat/completions",
-            "key": os.getenv("GROQ_API_KEY"),
+            "key": _env_secret("GROQ_API_KEY"),
             "models": GROQ_MODELS,
         },
         {
             "name": "OpenRouter",
             "url": "https://openrouter.ai/api/v1/chat/completions",
-            "key": os.getenv("OPENROUTER_API_KEY"),
+            "key": _env_secret("OPENROUTER_API_KEY"),
             "models": OPENROUTER_MODELS,
         },
     ]

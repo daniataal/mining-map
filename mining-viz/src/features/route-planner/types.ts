@@ -20,6 +20,8 @@ export interface RouteLeg {
   hubLabel?: string;
   /** Backend geometry provider, e.g. osrm, searoute, corridor_fallback. */
   geometrySource?: string;
+  /** Screening distance from backend when available. */
+  distanceKm?: number;
 }
 
 export interface CostLineItem {
@@ -90,6 +92,41 @@ export interface RoutePlannerApiResponse {
   routeAlternatives?: RoutePlanOption[];
   /** Shown for inland / landlocked origins when the API offers multiple export paths. */
   landlockedHint?: string;
+}
+
+export interface RouteRiskFinding {
+  code: string;
+  severity: 'pass' | 'warn' | 'fail' | string;
+  message: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface RouteRiskAnalysis {
+  score?: number;
+  risk_level?: 'low' | 'medium' | 'high' | string;
+  summary?: string;
+  deterministic_warnings?: RouteRiskFinding[];
+  recommendations?: string[];
+  requires_human_review?: boolean;
+  ai?: {
+    status?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    bounded?: boolean;
+  };
+  token_saving?: Record<string, unknown>;
+}
+
+export interface AgentJobResponse<TOutput> {
+  job_id: string;
+  agent_type: string;
+  status: 'running' | 'completed' | 'failed' | string;
+  input_hash: string;
+  entity_id?: string | null;
+  route_hash?: string | null;
+  output?: TOutput | null;
+  error?: string | null;
+  cached?: boolean;
 }
 
 export interface RoutePlannerFormPayload {

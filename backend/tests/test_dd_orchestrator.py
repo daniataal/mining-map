@@ -4,6 +4,7 @@ from backend.services.dd.orchestrator import (
     _ai_analysis_deadline_seconds,
     _ai_http_extra_retries,
     _ai_http_timeout_seconds,
+    _env_secret,
     _pollinations_http_extra_retries,
     _pollinations_http_timeout_seconds,
     build_ai_discovered_phone_candidates,
@@ -160,6 +161,13 @@ def test_ai_http_defaults_are_ui_friendly():
     assert _pollinations_http_timeout_seconds() == 12.0
     assert _pollinations_http_extra_retries() == 0
     assert _ai_analysis_deadline_seconds() == 45.0
+
+
+def test_env_secret_ignores_unresolved_template_placeholders(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "{{Secrets.GROQ_AI_API_KEY}}")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-realish")
+    assert _env_secret("GROQ_API_KEY") == ""
+    assert _env_secret("OPENROUTER_API_KEY") == "sk-or-realish"
 
 
 def test_generate_dd_report_skips_enrichment_when_analysis_fails():

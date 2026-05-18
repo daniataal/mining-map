@@ -105,11 +105,7 @@ export function filterLicensesForRouteHubs(
   countries: readonly string[],
 ): MiningLicense[] {
   if (!countries.length) return [];
-  return licenses.filter(
-    (item) =>
-      !isGlobalFallbackLicense(item) &&
-      countriesMatchRouteHubFilter(item.country, countries),
-  );
+  return licenses.filter((item) => licenseMatchesRouteHubFilter(item, countries));
 }
 
 export function countriesMatchRouteHubFilter(
@@ -196,34 +192,65 @@ export const WORLD_TRADE_PRESETS: LocationPreset[] = [
   { id: 'p-bp', name: 'BP Trading Hub, London', lat: 51.507, lng: -0.127, country: 'United Kingdom', group: 'buyers' },
 ];
 
-const PORT_LIKE_SUBTYPES = new Set([
+const ROUTE_PORT_SUBTYPES = new Set([
   'port',
-  'storage_terminal',
   'port_adm',
   'terminal',
-  'logistics_hub',
-  'rail_terminal',
 ]);
 
-export function isPortLikeLicense(item: MiningLicense): boolean {
+const ROUTE_NON_PORT_SUBTYPES = new Set([
+  'logistics_hub',
+  'rail_terminal',
+  'depot',
+]);
+
+function routeHubCountryForLicense(item: MiningLicense): string | undefined {
+  const rawCountry = item.country?.trim();
+  if (rawCountry && normalizeCountryFocusQuery(rawCountry) !== 'global') {
+    const canon = canonicalRouteHubCountry(rawCountry);
+    if (canon) return canon;
+  }
+  const isoCountry = canonicalRouteHubCountry(item.countryIso2);
+  return isoCountry ?? rawCountry ?? item.countryIso2 ?? undefined;
+}
+
+function licenseMatchesRouteHubFilter(item: MiningLicense, countries: readonly string[]): boolean {
+  if (!countries.length || isGlobalFallbackLicense(item)) return false;
+  const candidates = [item.countryIso2, item.country].filter(
+    (value): value is string => Boolean(value?.trim()),
+  );
+  return candidates.some((country) => countriesMatchRouteHubFilter(country, countries));
+}
+
+export function isRouteSelectablePortLicense(item: MiningLicense): boolean {
+  if (isGlobalFallbackLicense(item)) return false;
   const kind = (item.entityKind || '').toLowerCase();
-  if (kind === 'port' || kind === 'logistics_node') return true;
   const sub = (item.entitySubtype || '').toLowerCase();
-  if (PORT_LIKE_SUBTYPES.has(sub)) return true;
+  if (kind === 'logistics_node' || ROUTE_NON_PORT_SUBTYPES.has(sub)) return false;
+  if (kind === 'port' || ROUTE_PORT_SUBTYPES.has(sub)) return true;
+
   const sector = (item.sector || '').toLowerCase();
-  return sector === 'ports' || sector === 'logistics';
+  if (!sector.includes('port')) return false;
+  const label = `${item.company || ''} ${item.region || ''} ${item.licenseType || ''} ${item.commodity || ''}`.toLowerCase();
+  return /\b(port|harbou?r|seaport|maritime|marine|quay|wharf|berth|dock)\b/.test(label);
+}
+
+export function isPortLikeLicense(item: MiningLicense): boolean {
+  return isRouteSelectablePortLicense(item);
 }
 
 export function licenseToPreset(item: MiningLicense): LocationPreset | null {
   if (item.lat == null || item.lng == null || !Number.isFinite(item.lat) || !Number.isFinite(item.lng)) {
     return null;
   }
+  const country = routeHubCountryForLicense(item);
+  const region = item.region || country || '';
   return {
     id: `lic-${item.id}`,
-    name: `${item.company || 'Unknown'} — ${item.region || item.country || ''}`,
+    name: `${item.company || 'Unknown'} — ${region}`,
     lat: item.lat,
     lng: item.lng,
-    country: item.country,
+    country,
     licenseId: item.id,
     commodity: item.commodity,
     sector: item.sector,
@@ -262,22 +289,29 @@ export function buildLicensePresets(allLicenses: MiningLicense[], limit = 200): 
   for (const item of allLicenses) {
     const preset = licenseToPreset(item);
     if (!preset) continue;
-    if (preset.group === 'ports') portLike.push(preset);
-    else other.push(preset);
+    if (preset.group === 'ports') {
+      if (portLike.length < limit) portLike.push(preset);
+    } else if (other.length < limit) {
+      other.push(preset);
+    }
+    if (portLike.length >= limit && other.length >= limit) break;
   }
-  return dedupePresets([...portLike, ...other.slice(0, limit)]);
+  return dedupePresets([...portLike, ...other]);
 }
 
-export function buildPortPresetsFromEntities(entities: MiningLicense[]): LocationPreset[] {
-  return dedupePresets(
-    entities
-      .map((item) => {
-        const preset = licenseToPreset(item);
-        if (!preset) return null;
-        return { ...preset, id: `db-port-${item.id}`, group: 'ports' as const };
-      })
-      .filter((p): p is LocationPreset => p != null),
-  );
+export function buildPortPresetsFromEntities(
+  entities: MiningLicense[],
+  limit = MAX_DROPDOWN_PRESETS_PER_GROUP,
+): LocationPreset[] {
+  const presets: LocationPreset[] = [];
+  for (const item of entities) {
+    if (presets.length >= limit) break;
+    if (!isRouteSelectablePortLicense(item)) continue;
+    const preset = licenseToPreset(item);
+    if (!preset) continue;
+    presets.push({ ...preset, id: `db-port-${item.id}`, group: 'ports' as const });
+  }
+  return dedupePresets(presets);
 }
 
 function presetMatchesCountries(p: LocationPreset, countries: readonly string[]): boolean {
@@ -338,14 +372,13 @@ export function buildAllLocationPresets(
     hasCountryFilter && countryList.length
       ? allLicenses.filter(
           (item) =>
-            !isGlobalFallbackLicense(item) &&
-            countriesMatchRouteHubFilter(item.country, countryList),
+            licenseMatchesRouteHubFilter(item, countryList),
         )
       : allLicenses;
 
   const portsForBuild =
     hasCountryFilter && countryList.length
-      ? portEntities.filter((item) => countriesMatchRouteHubFilter(item.country, countryList))
+      ? portEntities.filter((item) => licenseMatchesRouteHubFilter(item, countryList))
       : hasCountryFilter
         ? []
         : portEntities;
@@ -456,11 +489,13 @@ export function buildRoutePlannerPortMarkers(
   if (hasCountryFilter && countries!.length) {
     for (const item of portEntities) {
       if (item.lat == null || item.lng == null) continue;
-      add(`db-${item.id}`, item.company || item.region || 'Port', item.lat, item.lng, item.country, 'database');
+      if (!isRouteSelectablePortLicense(item) || !licenseMatchesRouteHubFilter(item, countries!)) continue;
+      add(`db-${item.id}`, item.company || item.region || 'Port', item.lat, item.lng, routeHubCountryForLicense(item), 'database');
     }
     for (const item of allLicenses) {
       if (!isPortLikeLicense(item) || item.lat == null || item.lng == null) continue;
-      add(`lic-${item.id}`, item.company || 'Port', item.lat, item.lng, item.country, 'license');
+      if (!licenseMatchesRouteHubFilter(item, countries!)) continue;
+      add(`lic-${item.id}`, item.company || 'Port', item.lat, item.lng, routeHubCountryForLicense(item), 'license');
     }
   }
 

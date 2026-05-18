@@ -12,6 +12,9 @@ import {
   LeadValue,
   OilHsCategory,
   MarketTickerRow,
+  AgentJobResponse,
+  ContactEnrichmentOutput,
+  OperatorValidationOutput,
 } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -62,6 +65,8 @@ import {
   getLegalEvents,
   getGovProcurement,
   getGovProcurementCompanies,
+  runContactEnrichmentAgent,
+  runOperatorValidationAgent,
   useStorageTerminalDetails,
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
@@ -179,7 +184,11 @@ export default function DossierView({
   const [latestDdReport, setLatestDdReport] = useState<DdReport | null>(null);
   const [legalEvents, setLegalEvents] = useState<LegalEvent[]>([]);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [isFindingContacts, setIsFindingContacts] = useState(false);
+  const [contactAgentJob, setContactAgentJob] = useState<AgentJobResponse<ContactEnrichmentOutput> | null>(null);
   const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
+  const [isValidatingOperator, setIsValidatingOperator] = useState(false);
+  const [operatorValidationJob, setOperatorValidationJob] = useState<AgentJobResponse<OperatorValidationOutput> | null>(null);
   const [isLoadingDdReport, setIsLoadingDdReport] = useState(false);
   const [isLoadingLegalEvents, setIsLoadingLegalEvents] = useState(false);
   const [legalEventsError, setLegalEventsError] = useState<string | null>(null);
@@ -681,6 +690,37 @@ Output requirements:
     }
   };
 
+  const runContactAgent = async () => {
+    if (!item || isFindingContacts) return;
+    setIsFindingContacts(true);
+    setContactsError(null);
+    try {
+      const job = await runContactEnrichmentAgent(item.id, item.entityKind || 'license');
+      setContactAgentJob(job);
+      if (Array.isArray(job.output?.contacts)) {
+        setEntityContacts(job.output.contacts);
+      }
+    } catch {
+      setContactsError('Contact agent could not complete. Existing source-backed contacts remain unchanged.');
+    } finally {
+      setIsFindingContacts(false);
+    }
+  };
+
+  const runOperatorAgent = async () => {
+    if (!item || isValidatingOperator) return;
+    setIsValidatingOperator(true);
+    setRelationshipsError(null);
+    try {
+      const job = await runOperatorValidationAgent(item.id, item.entityKind || 'license');
+      setOperatorValidationJob(job);
+    } catch {
+      setRelationshipsError('Operator validation agent could not complete.');
+    } finally {
+      setIsValidatingOperator(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAnalyzing) {
       setAiSlowNetworkHint(false);
@@ -753,6 +793,7 @@ Output requirements:
     let isCancelled = false;
     if (!isOpen || !item) {
       setEntityContacts([]);
+      setContactAgentJob(null);
       setContactsError(null);
       setIsLoadingContacts(false);
       return () => {
@@ -761,6 +802,7 @@ Output requirements:
     }
 
     setIsLoadingContacts(true);
+    setContactAgentJob(null);
     setContactsError(null);
 
     getEntityContacts(item.id, item.entityKind || 'license')
@@ -790,6 +832,7 @@ Output requirements:
     let isCancelled = false;
     if (!isOpen || !item) {
       setEntityRelationships([]);
+      setOperatorValidationJob(null);
       setRelationshipsError(null);
       setIsLoadingRelationships(false);
       return () => {
@@ -798,6 +841,7 @@ Output requirements:
     }
 
     setIsLoadingRelationships(true);
+    setOperatorValidationJob(null);
     setRelationshipsError(null);
 
     getEntityRelationships(item.id, item.entityKind || 'license')
@@ -1042,7 +1086,7 @@ Output requirements:
       entityRelationships
         .map((relationship) => relationship.relationshipType)
         .filter(Boolean)
-        .map((role) => roleLabelMap[role] || role.replaceAll('_', ' '))
+        .map((role) => roleLabelMap[role] || role.replace(/_/g, ' '))
     )
   ).join(' · ');
   const ownershipStatusLabel = roleSummary || 'Source-backed split pending';
@@ -1074,7 +1118,7 @@ Output requirements:
                   )}
                   {item.sector && (
                     <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
-                      {item.sector.replaceAll('_', ' ')}
+                      {item.sector.replace(/_/g, ' ')}
                     </Badge>
                   )}
                   {item.sourceName && (
@@ -1375,7 +1419,7 @@ Output requirements:
                           <div className="p-5 bg-white/50 dark:bg-slate-950/40 backdrop-blur-md rounded-2xl border border-black/5 dark:border-white/5 shadow-sm transition-all duration-300 hover:shadow-md hover:border-black/10 dark:hover:border-white/10">
                             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                               <Badge className={`border font-black text-[9px] uppercase px-2 h-5 tracking-wider ${badgeColor}`}>
-                                {log.action.replaceAll('_', ' ')}
+                                {log.action.replace(/_/g, ' ')}
                               </Badge>
                               <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
                                 {new Date(log.timestamp || log.created_at).toLocaleString()}
@@ -2325,6 +2369,16 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                         {roleSummary}
                       </Badge>
                     )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl text-[10px] font-black uppercase"
+                      onClick={runOperatorAgent}
+                      disabled={isValidatingOperator}
+                    >
+                      {isValidatingOperator ? 'Validating...' : 'Validate operator'}
+                    </Button>
                   </div>
 
                   {isLoadingRelationships ? (
@@ -2343,6 +2397,40 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
 
                   {relationshipsError && (
                     <p className="text-[10px] text-red-500 font-bold">{relationshipsError}</p>
+                  )}
+
+                  {operatorValidationJob?.output && (
+                    <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.07] p-4">
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <Badge className="border-none bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 text-[9px] font-black uppercase">
+                          {operatorValidationJob.output.recommendation}
+                        </Badge>
+                        <Badge className="border-none bg-white/70 text-slate-600 dark:bg-slate-950/50 dark:text-slate-300 text-[9px] font-black uppercase">
+                          {operatorValidationJob.output.score}/100
+                        </Badge>
+                        {operatorValidationJob.cached && (
+                          <Badge className="border-none bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 text-[9px] font-black uppercase">
+                            Cached
+                          </Badge>
+                        )}
+                      </div>
+                      {operatorValidationJob.output.summary && (
+                        <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                          {operatorValidationJob.output.summary}
+                        </p>
+                      )}
+                      {operatorValidationJob.output.findings.length > 0 && (
+                        <ul className="mt-3 space-y-1.5 text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                          {operatorValidationJob.output.findings.slice(0, 4).map((finding, index) => (
+                            <li key={`${finding.code}-${index}`}>
+                              <span className="font-black uppercase text-cyan-600 dark:text-cyan-300">{finding.severity}</span>
+                              {' · '}
+                              {finding.message}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
 
                   <div className="grid grid-cols-2 gap-4">
@@ -3113,7 +3201,7 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                       {terminalDetails.entitySubtype && (
                         <SpecItem
                           label={t('סוג תשתית', 'Infrastructure Type')}
-                          value={terminalDetails.entitySubtype.replaceAll('_', ' ')}
+                          value={terminalDetails.entitySubtype.replace(/_/g, ' ')}
                         />
                       )}
                       {terminalDetails.operatorName && (
@@ -3475,11 +3563,52 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                             'Only source-backed public business contacts appear here. Private numbers and guessed details are intentionally excluded.'
                           )}
                     </p>
+                    {!isStorageTerminal && (
+                      <div className="mb-4 rounded-2xl border border-amber-500/15 bg-amber-500/[0.06] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
+                              Company Contact Agent
+                            </p>
+                            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                              Searches only known source fields and saved source URLs. Missing phones/emails/sites stay “not found.”
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl text-[10px] font-black uppercase"
+                            onClick={runContactAgent}
+                            disabled={isFindingContacts}
+                          >
+                            {isFindingContacts ? 'Searching...' : 'Find contacts'}
+                          </Button>
+                        </div>
+                        {contactAgentJob?.output && (
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <Badge className="border-none bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 text-[9px] font-black uppercase">
+                              {contactAgentJob.output.contacts.length} found
+                            </Badge>
+                            {contactAgentJob.output.not_found.map((kind) => (
+                              <Badge key={kind} className="border-none bg-slate-500/10 text-slate-500 text-[9px] font-black uppercase">
+                                {kind} not found
+                              </Badge>
+                            ))}
+                            {contactAgentJob.cached && (
+                              <Badge className="border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 text-[9px] font-black uppercase">
+                                Cached
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="space-y-3">
                       {isStorageTerminal ? (
                         <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
                           <div className="space-y-2">
-                            <ReadRow label={t('תת-סוג', 'Subtype')} value={terminalDetails.entitySubtype?.replaceAll('_', ' ') || '—'} />
+                            <ReadRow label={t('תת-סוג', 'Subtype')} value={terminalDetails.entitySubtype?.replace(/_/g, ' ') || '—'} />
                             <ReadRow label={t('מפעיל', 'Operator')} value={terminalDetails.operatorName || '—'} />
                             <ReadRow label={t('נמל קרוב', 'Nearby Port')} value={terminalDetails.nearbyPort?.name || '—'} />
                             <ReadRow label={t('מרחק לנמל', 'Port Distance')} value={terminalDetails.nearbyPort?.distance_km != null ? `${terminalDetails.nearbyPort.distance_km} km` : '—'} />
@@ -3841,7 +3970,7 @@ function formatContactTypeLabel(contactType: string): string {
     case 'address':
       return 'Address';
     default:
-      return contactType.replaceAll('_', ' ');
+      return contactType.replace(/_/g, ' ');
   }
 }
 
@@ -4017,7 +4146,7 @@ function LegalEventCard({ event }: { event: LegalEvent }) {
             </Badge>
             {event.discoveredBy && (
               <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-300 border-none text-[9px] font-black uppercase">
-                {event.discoveredBy.replaceAll('_', ' ')}
+                {event.discoveredBy.replace(/_/g, ' ')}
               </Badge>
             )}
             {event.confidenceScore != null && (

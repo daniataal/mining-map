@@ -106,6 +106,62 @@ export interface EntityContact {
   lastSeenAt?: string | null;
 }
 
+export interface AgentJobResponse<TOutput> {
+  job_id: string;
+  agent_type: string;
+  status: 'running' | 'completed' | 'failed' | string;
+  entity_id?: string | null;
+  route_hash?: string | null;
+  input_hash: string;
+  output?: TOutput | null;
+  error?: string | null;
+  cached?: boolean;
+}
+
+export interface ContactEnrichmentOutput {
+  agent: 'contact_enrichment' | string;
+  entity_id: string;
+  entity_kind: string;
+  status: string;
+  contacts: EntityContact[];
+  not_found: string[];
+  limitations: string[];
+  ai?: {
+    status?: string | null;
+    reason?: string | null;
+  };
+  token_saving?: Record<string, unknown>;
+}
+
+export interface OperatorValidationFinding {
+  severity: 'pass' | 'warn' | 'fail' | string;
+  code: string;
+  message: string;
+  evidence?: Record<string, unknown>;
+}
+
+export interface OperatorValidationOutput {
+  agent: 'operator_validation' | string;
+  entity_id: string;
+  entity_kind: string;
+  holder_names: string[];
+  operator_names: string[];
+  findings: OperatorValidationFinding[];
+  score: number;
+  recommendation: 'approve' | 'review' | 'block' | string;
+  confidence?: number;
+  summary?: string;
+  next_steps?: string[];
+  confidence_note?: string;
+  ai?: {
+    status?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    bounded?: boolean;
+  };
+  token_saving?: Record<string, unknown>;
+}
+
 /**
  * Public litigation / regulatory event stored in the ``legal_events`` table.
  * The dossier groups these by ``role`` so analysts can quickly distinguish

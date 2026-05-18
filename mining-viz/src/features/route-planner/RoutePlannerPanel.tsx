@@ -9,8 +9,9 @@ import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import type { DueDiligenceStatus } from './types';
+import type { AgentJobResponse, DueDiligenceStatus, RouteRiskAnalysis } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
+import { analyzeRouteRisk } from './fetchRoutePlan';
 import RouteLegend from './RouteLegend';
 import { getRouteMethodStyle, legMethodLabel } from './routeMapStyles';
 import {
@@ -74,6 +75,9 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
   } = rp;
 
   const [step, setStep] = useState<'setup' | 'results'>('setup');
+  const [routeRiskJob, setRouteRiskJob] = useState<AgentJobResponse<RouteRiskAnalysis> | null>(null);
+  const [routeRiskLoading, setRouteRiskLoading] = useState(false);
+  const [routeRiskError, setRouteRiskError] = useState<string | null>(null);
 
   // Auto-jump to results when we have them
   useEffect(() => { if (hasResult) setStep('results'); }, [hasResult]);
@@ -99,20 +103,24 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
 
   const supplierPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
   const buyerPresetsCache = useRef<ReturnType<typeof buildAllLocationPresets>>([]);
+  const presetPool = useMemo(
+    () => (presetLicensePool.length ? presetLicensePool : portEntities ?? []),
+    [presetLicensePool, portEntities],
+  );
 
   const supplierPresetsRaw = useMemo(() => {
     const countries = supplierCountriesKey ? supplierCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
+    const next = buildAllLocationPresets(presetPool, [], { countries });
     supplierPresetsCache.current = next;
     return next;
-  }, [presetLicensePool, portEntities, supplierCountriesKey]);
+  }, [presetPool, supplierCountriesKey]);
 
   const buyerPresetsRaw = useMemo(() => {
     const countries = buyerCountriesKey ? buyerCountriesKey.split('\0') : [];
-    const next = buildAllLocationPresets(presetLicensePool, portEntities ?? [], { countries });
+    const next = buildAllLocationPresets(presetPool, [], { countries });
     buyerPresetsCache.current = next;
     return next;
-  }, [presetLicensePool, portEntities, buyerCountriesKey]);
+  }, [presetPool, buyerCountriesKey]);
 
   const supplierPresets = useDeferredValue(supplierPresetsRaw);
   const buyerPresets = useDeferredValue(buyerPresetsRaw);
@@ -158,11 +166,29 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
         : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20';
 
   async function handleCompute() {
+    setRouteRiskJob(null);
+    setRouteRiskError(null);
     const ok = await computeRoute();
     setStep(ok ? 'results' : 'setup');
   }
 
+  async function handleAnalyzeRouteRisk() {
+    if (!result || routeRiskLoading) return;
+    setRouteRiskLoading(true);
+    setRouteRiskError(null);
+    try {
+      const job = await analyzeRouteRisk(result);
+      setRouteRiskJob(job);
+    } catch (error) {
+      setRouteRiskError(error instanceof Error ? error.message : 'Route intelligence failed.');
+    } finally {
+      setRouteRiskLoading(false);
+    }
+  }
+
   const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0 && quantityTons > 0;
+  const routeRisk = routeRiskJob?.output ?? null;
+  const routeRiskWarnings = routeRisk?.deterministic_warnings ?? [];
 
   return (
     <Card className="h-full w-full overflow-hidden rounded-2xl border border-black/10 bg-white/97 shadow-2xl backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/97 flex flex-col">
@@ -468,6 +494,80 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                     <FindingList title={t('חסמים', 'Blockers')} items={result.blockers} empty={t('אין חסמים', 'No blockers')} />
                     <FindingList title={t('אזהרות', 'Warnings')} items={result.warnings} empty={t('אין אזהרות', 'No warnings')} />
                     <FindingList title={t('מגבלות', 'Limitations')} items={result.limitations} empty={t('אין מגבלות', 'No limitations')} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {result && (
+              <div className="rounded-2xl border border-black/10 bg-black/[0.02] p-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                      {t('סוכן סיכוני מסלול', 'Route Intelligence Agent')}
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                      {t(
+                        'בדיקה דטרמיניסטית תחילה; AI מופעל רק כשיש חריגות במסלול.',
+                        'Deterministic checks first; AI only runs when route anomalies are found.',
+                      )}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-xl text-[10px] font-black uppercase"
+                    onClick={handleAnalyzeRouteRisk}
+                    disabled={routeRiskLoading}
+                  >
+                    {routeRiskLoading ? (
+                      <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />{t('מנתח...', 'Analyzing...')}</>
+                    ) : (
+                      t('נתח סיכוני מסלול', 'Analyze route risk')
+                    )}
+                  </Button>
+                </div>
+                {routeRiskError && (
+                  <p className="mt-3 text-[10px] font-bold text-red-500">{routeRiskError}</p>
+                )}
+                {routeRisk && (
+                  <div className="mt-4 space-y-3 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="border-none bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[9px] font-black uppercase">
+                        {t('סיכון', 'Risk')}: {routeRisk.risk_level || 'unknown'}
+                      </Badge>
+                      {typeof routeRisk.score === 'number' && (
+                        <Badge className="border-none bg-slate-500/10 text-slate-600 dark:text-slate-300 text-[9px] font-black uppercase">
+                          {routeRisk.score}/100
+                        </Badge>
+                      )}
+                      {routeRiskJob?.cached && (
+                        <Badge className="border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 text-[9px] font-black uppercase">
+                          {t('מטמון', 'Cached')}
+                        </Badge>
+                      )}
+                    </div>
+                    {routeRisk.summary && (
+                      <p className="leading-relaxed text-slate-600 dark:text-slate-300">{routeRisk.summary}</p>
+                    )}
+                    {routeRiskWarnings.length > 0 && (
+                      <ul className="space-y-1.5 rounded-xl bg-white/60 p-3 dark:bg-slate-950/40">
+                        {routeRiskWarnings.slice(0, 4).map((warning, index) => (
+                          <li key={`${warning.code}-${index}`} className="leading-snug">
+                            <span className="font-black uppercase text-amber-600 dark:text-amber-400">{warning.severity}</span>
+                            {' · '}
+                            {warning.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {routeRisk.recommendations && routeRisk.recommendations.length > 0 && (
+                      <ul className="space-y-1.5 rounded-xl bg-emerald-500/[0.07] p-3 text-emerald-900 dark:text-emerald-100">
+                        {routeRisk.recommendations.slice(0, 3).map((item, index) => (
+                          <li key={`${item}-${index}`} className="leading-snug">{item}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 )}
               </div>
