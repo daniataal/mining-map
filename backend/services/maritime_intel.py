@@ -61,6 +61,75 @@ MARITIME_ALWAYS_ON_REGION_IDS = tuple(
 # Core Persian Gulf + Strait of Hormuz (south, west, north, east).
 PERSIAN_GULF_CORE_BBOX = (22.0, 47.0, 30.5, 60.0)
 
+# Africa-adjacent reference boxes for sparse-feed demo seeding (south, west, north, east).
+GULF_OF_GUINEA_DEMO_BBOX = (0.0, -3.5, 6.5, 5.5)
+MOZAMBIQUE_CHANNEL_DEMO_BBOX = (-24.0, 34.5, -11.0, 47.5)
+RED_SEA_SOUTH_DEMO_BBOX = (12.5, 37.0, 19.5, 43.5)
+HORN_OF_AFRICA_DEMO_BBOX = (2.0, 41.0, 13.5, 52.0)
+EAST_AFRICA_INDIAN_DEMO_BBOX = (-11.5, 39.0, 4.5, 50.5)
+
+try:
+    MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD = max(
+        1,
+        int(os.getenv("MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD", "12")),
+    )
+except (TypeError, ValueError):
+    MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD = 12
+
+# Curated coastal-demo regions (excluding Hormuz here — handled via PERSIAN_GULF_CORE_BBOX + Gulf seed file).
+MARITIME_COASTAL_DEMO_AFRICA_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "gulf_of_guinea",
+        "label": "Gulf of Guinea",
+        "bbox": GULF_OF_GUINEA_DEMO_BBOX,
+        "id_prefix": "demo:guinea",
+        "vessel_name_prefix": "Guinea Demo",
+        "source_label": "Gulf of Guinea demo (synthetic)",
+        "mmsi_start": 998_010_000,
+        "prng_salt": 11_035,
+    },
+    {
+        "id": "mozambique_channel",
+        "label": "Mozambique Channel",
+        "bbox": MOZAMBIQUE_CHANNEL_DEMO_BBOX,
+        "id_prefix": "demo:mozambique",
+        "vessel_name_prefix": "Mozambique Demo",
+        "source_label": "Mozambique Channel demo (synthetic)",
+        "mmsi_start": 998_020_000,
+        "prng_salt": 22_071,
+    },
+    {
+        "id": "red_sea_south",
+        "label": "Red Sea (south)",
+        "bbox": RED_SEA_SOUTH_DEMO_BBOX,
+        "id_prefix": "demo:red_sea_south",
+        "vessel_name_prefix": "Red Sea Demo",
+        "source_label": "Red Sea south demo (synthetic)",
+        "mmsi_start": 998_030_000,
+        "prng_salt": 33_103,
+    },
+    {
+        "id": "horn_of_africa",
+        "label": "Horn of Africa / Gulf of Aden",
+        "bbox": HORN_OF_AFRICA_DEMO_BBOX,
+        "id_prefix": "demo:horn",
+        "vessel_name_prefix": "Horn Demo",
+        "source_label": "Horn of Africa demo (synthetic)",
+        "mmsi_start": 998_040_000,
+        "prng_salt": 44_137,
+    },
+    {
+        "id": "east_africa_indian",
+        "label": "East Africa / Indian Ocean approaches",
+        "bbox": EAST_AFRICA_INDIAN_DEMO_BBOX,
+        "id_prefix": "demo:east_africa",
+        "vessel_name_prefix": "E Africa Demo",
+        "source_label": "East Africa coast demo (synthetic)",
+        "mmsi_start": 998_050_000,
+        "prng_salt": 55_171,
+    },
+)
+
 _maritime_memory_cache: dict[str, Any] = {
     "loaded_at": 0.0,
     "rows": [],
@@ -1433,6 +1502,113 @@ async def _collect_ais_snapshot(
     }
 
 
+def _maritime_gulf_demo_env() -> bool:
+    return os.getenv("MARITIME_GULF_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _maritime_coastal_demo_env() -> bool:
+    """Unified Gulf + Africa sparse-region demo seed (server-side)."""
+    return os.getenv("MARITIME_COASTAL_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _coastal_demo_reference_ingest_ok(
+    all_rows: list[dict[str, Any]],
+    *,
+    worker_ok: bool,
+    north_reference_count: int,
+) -> bool:
+    """True when snapshots look healthy enough to treat empty coastal boxes as upstream sparsity, not total outage."""
+    if not worker_ok:
+        return False
+    if north_reference_count >= 25:
+        return True
+    if len(all_rows) >= 150:
+        return True
+    return False
+
+
+def _maritime_coastal_demo_per_region_count() -> int:
+    try:
+        raw = int(os.getenv("MARITIME_COASTAL_DEMO_PER_REGION", "72"))
+    except (TypeError, ValueError):
+        raw = 72
+    return max(12, min(raw, 500))
+
+
+def maritime_coastal_demo_merge_decision(
+    *,
+    live_counts: dict[str, int],
+    reference_ingest_ok: bool,
+    coverage_gap_persian_gulf: bool,
+    include_coastal_demo: bool,
+    include_gulf_demo: bool,
+    env_coastal: bool,
+    env_gulf_only: bool,
+    sparse_threshold: int,
+) -> dict[str, Any]:
+    """
+    Pure helper for tests: decide which coastal demo regions merge into the feed.
+
+    live_counts keys: persian_gulf_hormuz plus each MARITIME_COASTAL_DEMO_AFRICA_SPECS id.
+    """
+    ref_ok = reference_ingest_ok
+
+    merge_gulf = False
+    merge_africa = False
+
+    if include_coastal_demo:
+        merge_gulf = True
+        merge_africa = True
+    elif include_gulf_demo:
+        merge_gulf = True
+    elif env_coastal:
+        merge_gulf = bool(ref_ok and live_counts.get("persian_gulf_hormuz", 0) < sparse_threshold)
+        merge_africa = bool(ref_ok)
+    elif env_gulf_only:
+        merge_gulf = bool(coverage_gap_persian_gulf)
+
+    africa_region_ids: list[str] = []
+    if merge_africa:
+        for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
+            rid = str(spec["id"])
+            if include_coastal_demo or (ref_ok and live_counts.get(rid, 0) < sparse_threshold):
+                africa_region_ids.append(rid)
+
+    return {
+        "merge_gulf": merge_gulf,
+        "merge_africa_region_ids": africa_region_ids,
+        "reference_ingest_ok": ref_ok,
+    }
+
+
+def _load_persian_gulf_demo_seed_rows() -> list[dict[str, Any]]:
+    """Load Hormuz-area demo rows from MARITIME_GULF_SEED_FILE or built-in synthetic generator."""
+    seed_path = os.getenv("MARITIME_GULF_SEED_FILE", "").strip()
+    try:
+        if seed_path and os.path.isfile(seed_path):
+            return load_maritime_gulf_demo_rows_from_file(seed_path)
+        return build_synthetic_persian_gulf_demo_rows(_maritime_gulf_demo_target_count())
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return []
+
+
+def _load_africa_coastal_demo_seed_rows() -> list[dict[str, Any]]:
+    path = os.getenv("MARITIME_AFRICA_SEED_FILE", "").strip()
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        return load_maritime_africa_demo_rows_from_file(path)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return []
+
+
+def _should_merge_persian_gulf_demo_rows(*, include_gulf_demo: bool, demo_env: bool, coverage_gap: bool) -> bool:
+    """Explicit API opt-in always wins; otherwise env-gated merge only when AISStream gap heuristic fires."""
+    if include_gulf_demo:
+        return True
+    return bool(demo_env and coverage_gap)
+
+
 def get_maritime_vessel_feed(
     *,
     max_vessels: int = AIS_DEFAULT_MAX_VESSELS,
@@ -1440,6 +1616,8 @@ def get_maritime_vessel_feed(
     vessel_scope: str = "oil_tankers",
     bbox: Optional[tuple[float, float, float, float]] = None,
     offset: int = 0,
+    include_gulf_demo: bool = False,
+    include_coastal_demo: bool = False,
 ) -> dict[str, Any]:
     normalized_scope = _normalize_vessel_scope(vessel_scope)
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
@@ -1481,17 +1659,74 @@ def get_maritime_vessel_feed(
         north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
         coverage_gap = bool(gulf_c == 0 and north_c >= 25 and worker_ok)
 
-        demo_rows: list[dict[str, Any]] = []
-        demo_env = os.getenv("MARITIME_GULF_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
-        if demo_env and coverage_gap:
-            seed_path = os.getenv("MARITIME_GULF_SEED_FILE", "").strip()
-            try:
-                if seed_path and os.path.isfile(seed_path):
-                    demo_rows = load_maritime_gulf_demo_rows_from_file(seed_path)
-                else:
-                    demo_rows = build_synthetic_persian_gulf_demo_rows(_maritime_gulf_demo_target_count())
-            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-                demo_rows = []
+        env_gulf = _maritime_gulf_demo_env()
+        env_coastal = _maritime_coastal_demo_env()
+        ref_ok = _coastal_demo_reference_ingest_ok(all_rows, worker_ok=worker_ok, north_reference_count=north_c)
+
+        live_counts: dict[str, int] = {"persian_gulf_hormuz": gulf_c}
+        for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
+            live_counts[str(spec["id"])] = count_maritime_rows_in_bbox(all_rows, spec["bbox"])
+
+        decision = maritime_coastal_demo_merge_decision(
+            live_counts=live_counts,
+            reference_ingest_ok=ref_ok,
+            coverage_gap_persian_gulf=coverage_gap,
+            include_coastal_demo=bool(include_coastal_demo),
+            include_gulf_demo=bool(include_gulf_demo),
+            env_coastal=env_coastal,
+            env_gulf_only=bool(env_gulf and not env_coastal),
+            sparse_threshold=MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD,
+        )
+
+        gulf_demo_rows: list[dict[str, Any]] = []
+        africa_demo_rows: list[dict[str, Any]] = []
+        coastal_demo_regions: list[str] = []
+        coastal_demo_synthetic = False
+
+        if decision["merge_gulf"]:
+            gulf_demo_rows = _load_persian_gulf_demo_seed_rows()
+        if gulf_demo_rows:
+            coastal_demo_regions.append("Persian Gulf / Strait of Hormuz")
+            coastal_demo_synthetic = coastal_demo_synthetic or any(
+                "synthetic" in str(r.get("source_label") or "").lower() for r in gulf_demo_rows
+            )
+
+        per_region = _maritime_coastal_demo_per_region_count()
+        africa_ids = set(decision.get("merge_africa_region_ids") or [])
+        for spec in MARITIME_COASTAL_DEMO_AFRICA_SPECS:
+            if str(spec["id"]) not in africa_ids:
+                continue
+            block = build_synthetic_maritime_demo_rows_for_bbox(
+                spec["bbox"],
+                per_region,
+                id_prefix=str(spec["id_prefix"]),
+                vessel_name_prefix=str(spec["vessel_name_prefix"]),
+                source_label=str(spec["source_label"]),
+                source_url=AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+                mmsi_start=int(spec["mmsi_start"]),
+                prng_salt=int(spec.get("prng_salt") or 0),
+            )
+            africa_demo_rows.extend(block)
+            coastal_demo_regions.append(str(spec["label"]))
+            coastal_demo_synthetic = True
+
+        africa_file_rows: list[dict[str, Any]] = []
+        if include_coastal_demo or env_coastal:
+            africa_file_rows = _load_africa_coastal_demo_seed_rows()
+        demo_rows = list(gulf_demo_rows) + list(africa_demo_rows)
+        if africa_file_rows:
+            seen_mmsi = {_clean_text(r.get("mmsi")) for r in demo_rows if _clean_text(r.get("mmsi"))}
+            file_added = 0
+            for row in africa_file_rows:
+                mmsi_key = _clean_text(row.get("mmsi"))
+                if mmsi_key and mmsi_key in seen_mmsi:
+                    continue
+                demo_rows.append(row)
+                file_added += 1
+                if mmsi_key:
+                    seen_mmsi.add(mmsi_key)
+            if file_added:
+                coastal_demo_regions.append("Africa coast (seed file)")
 
         augmented_rows = all_rows + demo_rows
         scoped_rows = filter_maritime_rows_by_bbox(augmented_rows, normalized_bbox)
@@ -1512,13 +1747,46 @@ def get_maritime_vessel_feed(
         response["memory_cache_age_seconds"] = round(cache_age, 2) if cache_age >= 0 else None
         response["snapshot_vessel_count"] = len(all_rows)
         response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
-        response["persian_gulf_demo_synthetic"] = bool(demo_rows)
+        response["persian_gulf_demo_synthetic"] = bool(gulf_demo_rows)
+        response["coastal_demo_regions"] = coastal_demo_regions
+        response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
+        if gulf_demo_rows:
+            if include_coastal_demo or include_gulf_demo:
+                pg_mode = "api_opt_in"
+            elif env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
+                pg_mode = "env_coastal_sparse"
+            elif env_gulf and coverage_gap:
+                pg_mode = "env_coverage_gap"
+            else:
+                pg_mode = None
+        else:
+            pg_mode = None
+        response["persian_gulf_demo_mode"] = pg_mode
         response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
         if demo_rows:
-            demo_note = (
-                "Persian Gulf Hormuz demo: synthetic positions merged while MARITIME_GULF_DEMO_SEED is enabled; "
-                "this does not represent restored AISStream coverage."
-            )
+            if include_coastal_demo:
+                demo_note = (
+                    "Coastal sparse-feed demo: synthetic Gulf and Africa-adjacent positions merged because "
+                    "include_coastal_demo=1 was requested; these are not live AIS for those boxes. Other rows may "
+                    "still be real persisted AIS snapshot positions."
+                )
+            elif include_gulf_demo:
+                demo_note = (
+                    "Persian Gulf Hormuz demo: synthetic positions merged because include_gulf_demo was requested; "
+                    "these are not live AIS positions for the Gulf. Other vessels in this response may still be "
+                    "real persisted AIS snapshot positions."
+                )
+            elif env_coastal:
+                demo_note = (
+                    "Coastal sparse-feed demo: synthetic positions merged while MARITIME_COASTAL_DEMO_SEED is enabled "
+                    "for low-coverage Hormuz and/or Africa-adjacent reference boxes; this does not represent restored "
+                    "AISStream coverage."
+                )
+            else:
+                demo_note = (
+                    "Persian Gulf Hormuz demo: synthetic positions merged while MARITIME_GULF_DEMO_SEED is enabled; "
+                    "this does not represent restored AISStream coverage."
+                )
             lim = list(response.get("limitations") or [])
             if demo_note not in lim:
                 lim.append(demo_note)
@@ -1740,9 +2008,19 @@ def _snapshot_row_from_demo_vessel(vessel: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_synthetic_persian_gulf_demo_rows(count: int) -> list[dict[str, Any]]:
-    """Deterministic synthetic AIS-like rows inside PERSIAN_GULF_CORE_BBOX (demo / UX only)."""
-    south, west, north, east = PERSIAN_GULF_CORE_BBOX
+def build_synthetic_maritime_demo_rows_for_bbox(
+    bbox: tuple[float, float, float, float],
+    count: int,
+    *,
+    id_prefix: str,
+    vessel_name_prefix: str,
+    source_label: str,
+    source_url: str,
+    mmsi_start: int,
+    prng_salt: int = 0,
+) -> list[dict[str, Any]]:
+    """Deterministic synthetic AIS-like rows inside ``bbox`` (demo / UX only)."""
+    south, west, north, east = bbox
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     labels_specs = [
@@ -1757,25 +2035,25 @@ def build_synthetic_persian_gulf_demo_rows(count: int) -> list[dict[str, Any]]:
     span_lat = north - south
     span_lng = east - west
     for i in range(count):
-        a = (i * 1103515245 + 12345) & 0x7FFFFFFF
-        b = (i * 7919 + 104729) & 0x7FFFFFFF
+        a = (i * 1103515245 + 12345 + prng_salt * 9973) & 0x7FFFFFFF
+        b = (i * 7919 + 104729 + prng_salt * 13) & 0x7FFFFFFF
         u = (a % 1_000_000) / 1_000_000.0
         v = (b % 1_000_000) / 1_000_000.0
         lat = south + u * span_lat
         lng = west + v * span_lng
         _label, code = labels_specs[i % len(labels_specs)]
-        mmsi = str(999_000_000 + i + 1)
+        mmsi = str(mmsi_start + i + 1)
         st_label = "Unknown" if code == 0 else _label
         vessel = {
-            "id": f"demo:gulf:{i + 1:04d}",
+            "id": f"{id_prefix}:{i + 1:04d}",
             "mmsi": mmsi,
-            "vessel_name": f"Hormuz Demo {i + 1:03d}",
+            "vessel_name": f"{vessel_name_prefix} {i + 1:03d}",
             "lat": lat,
             "lng": lng,
             "observed_at": now_iso,
             "last_seen_at": now_iso,
-            "source_label": "Hormuz demo (synthetic)",
-            "source_url": AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+            "source_label": source_label,
+            "source_url": source_url,
             "speed_knots": 8.0 + (i % 9) * 0.5,
             "ship_type_code": code,
             "ship_type_label": st_label,
@@ -1784,7 +2062,28 @@ def build_synthetic_persian_gulf_demo_rows(count: int) -> list[dict[str, Any]]:
     return rows
 
 
-def load_maritime_gulf_demo_rows_from_file(path: str) -> list[dict[str, Any]]:
+def build_synthetic_persian_gulf_demo_rows(count: int) -> list[dict[str, Any]]:
+    """Deterministic synthetic AIS-like rows inside PERSIAN_GULF_CORE_BBOX (demo / UX only)."""
+    return build_synthetic_maritime_demo_rows_for_bbox(
+        PERSIAN_GULF_CORE_BBOX,
+        count,
+        id_prefix="demo:gulf",
+        vessel_name_prefix="Hormuz Demo",
+        source_label="Hormuz demo (synthetic)",
+        source_url=AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+        mmsi_start=999_000_000,
+        prng_salt=0,
+    )
+
+
+def load_maritime_gulf_demo_rows_from_file(
+    path: str,
+    *,
+    geojson_id_prefix: str = "demo:gulf",
+    seed_name_prefix: str = "Hormuz Seed",
+    default_source_label: str = "Hormuz demo (seed file)",
+    default_source_url: str = AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+) -> list[dict[str, Any]]:
     """
     Load demo vessels from JSON / GeoJSON.
     Accepts: {\"vessels\": [...]}, a top-level array, or a GeoJSON FeatureCollection of Points.
@@ -1810,15 +2109,15 @@ def load_maritime_gulf_demo_rows_from_file(path: str) -> list[dict[str, Any]]:
             code_raw = props.get("ship_type_code", props.get("ship_type"))
             code_i, st_lbl = classify_ais_ship_type(code_raw)
             vessel = {
-                "id": props.get("id") or f"demo:gulf:{idx + 1:04d}",
+                "id": props.get("id") or f"{geojson_id_prefix}:{idx + 1:04d}",
                 "mmsi": mmsi,
-                "vessel_name": props.get("vessel_name") or props.get("name") or f"Hormuz Seed {idx + 1}",
+                "vessel_name": props.get("vessel_name") or props.get("name") or f"{seed_name_prefix} {idx + 1}",
                 "lat": lat_f,
                 "lng": lng_f,
                 "observed_at": props.get("observed_at") or _now_iso(),
                 "last_seen_at": props.get("last_seen_at") or props.get("observed_at") or _now_iso(),
-                "source_label": props.get("source_label") or "Hormuz demo (seed file)",
-                "source_url": props.get("source_url") or AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+                "source_label": props.get("source_label") or default_source_label,
+                "source_url": props.get("source_url") or default_source_url,
                 "ship_type_code": props.get("ship_type_code", code_i),
                 "ship_type_label": props.get("ship_type_label") or st_lbl,
             }
@@ -1833,6 +2132,17 @@ def load_maritime_gulf_demo_rows_from_file(path: str) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             rows.append(_snapshot_row_from_demo_vessel(item))
     return rows
+
+
+def load_maritime_africa_demo_rows_from_file(path: str) -> list[dict[str, Any]]:
+    """Optional JSON/GeoJSON seed for Africa-adjacent coastal demo positions (``MARITIME_AFRICA_SEED_FILE``)."""
+    return load_maritime_gulf_demo_rows_from_file(
+        path,
+        geojson_id_prefix="demo:africa",
+        seed_name_prefix="Africa Seed",
+        default_source_label="Africa coast demo (seed file)",
+        default_source_url=AISSTREAM_PERSIAN_GULF_ISSUE_URL,
+    )
 
 
 def get_maritime_stats(

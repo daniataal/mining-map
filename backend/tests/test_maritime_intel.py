@@ -10,19 +10,26 @@ from backend.services.maritime_intel import (
     _regions_for_worker_watch_mode,
     AISSTREAM_WATCH_REGIONS,
     PERSIAN_GULF_CORE_BBOX,
+    GULF_OF_GUINEA_DEMO_BBOX,
+    MARITIME_COASTAL_DEMO_AFRICA_SPECS,
+    MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD,
     _build_stored_feed_response,
     _parse_datetime,
     _normalize_requested_bbox,
     _ship_matches_scope,
+    _should_merge_persian_gulf_demo_rows,
     build_counterparty_proxies,
+    build_synthetic_maritime_demo_rows_for_bbox,
     build_synthetic_persian_gulf_demo_rows,
     classify_ais_ship_type,
     classify_evidence_type,
     filter_maritime_rows_by_bbox,
     haversine_km,
     load_maritime_gulf_demo_rows_from_file,
+    load_maritime_africa_demo_rows_from_file,
     match_destination_to_port,
     merge_maritime_vessel_feeds,
+    maritime_coastal_demo_merge_decision,
     parse_unlocode_coordinates,
     petroleum_vessel_priority,
 )
@@ -179,6 +186,106 @@ class MaritimeIntelTests(unittest.TestCase):
             self.assertLessEqual(lng, east)
             self.assertTrue(str(row.get("mmsi", "")).startswith("999"))
 
+    def test_build_synthetic_maritime_demo_rows_stays_in_guinea_bbox(self):
+        rows = build_synthetic_maritime_demo_rows_for_bbox(
+            GULF_OF_GUINEA_DEMO_BBOX,
+            40,
+            id_prefix="demo:guinea",
+            vessel_name_prefix="Guinea Demo",
+            source_label="Gulf of Guinea demo (synthetic)",
+            source_url="https://example.invalid/demo",
+            mmsi_start=998_010_000,
+            prng_salt=11_035,
+        )
+        self.assertEqual(len(rows), 40)
+        south, west, north, east = GULF_OF_GUINEA_DEMO_BBOX
+        for row in rows:
+            lat = float(row["lat"])
+            lng = float(row["lng"])
+            self.assertGreaterEqual(lat, south)
+            self.assertLessEqual(lat, north)
+            self.assertGreaterEqual(lng, west)
+            self.assertLessEqual(lng, east)
+            self.assertTrue(str(row.get("mmsi", "")).startswith("998010"))
+
+    def test_maritime_coastal_demo_merge_decision_api_coastal(self):
+        live = {"persian_gulf_hormuz": 50, "gulf_of_guinea": 50}
+        d = maritime_coastal_demo_merge_decision(
+            live_counts=live,
+            reference_ingest_ok=True,
+            coverage_gap_persian_gulf=False,
+            include_coastal_demo=True,
+            include_gulf_demo=False,
+            env_coastal=False,
+            env_gulf_only=False,
+            sparse_threshold=MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD,
+        )
+        self.assertTrue(d["merge_gulf"])
+        self.assertEqual(len(d["merge_africa_region_ids"]), len(MARITIME_COASTAL_DEMO_AFRICA_SPECS))
+
+    def test_maritime_coastal_demo_merge_decision_env_coastal_sparse(self):
+        live = {
+            "persian_gulf_hormuz": 2,
+            "gulf_of_guinea": 0,
+            "mozambique_channel": 50,
+            "red_sea_south": 1,
+            "horn_of_africa": 50,
+            "east_africa_indian": 50,
+        }
+        d = maritime_coastal_demo_merge_decision(
+            live_counts=live,
+            reference_ingest_ok=True,
+            coverage_gap_persian_gulf=False,
+            include_coastal_demo=False,
+            include_gulf_demo=False,
+            env_coastal=True,
+            env_gulf_only=False,
+            sparse_threshold=12,
+        )
+        self.assertTrue(d["merge_gulf"])
+        self.assertIn("gulf_of_guinea", d["merge_africa_region_ids"])
+        self.assertIn("red_sea_south", d["merge_africa_region_ids"])
+        self.assertNotIn("mozambique_channel", d["merge_africa_region_ids"])
+
+    def test_maritime_coastal_demo_merge_decision_gulf_only_env(self):
+        live = {"persian_gulf_hormuz": 0, "gulf_of_guinea": 0}
+        d = maritime_coastal_demo_merge_decision(
+            live_counts=live,
+            reference_ingest_ok=True,
+            coverage_gap_persian_gulf=True,
+            include_coastal_demo=False,
+            include_gulf_demo=False,
+            env_coastal=False,
+            env_gulf_only=True,
+            sparse_threshold=12,
+        )
+        self.assertTrue(d["merge_gulf"])
+        self.assertEqual(d["merge_africa_region_ids"], [])
+
+    def test_load_maritime_africa_demo_rows_from_geojson_file(self):
+        payload = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [4.2, 2.1]},
+                    "properties": {"mmsi": "900222333", "vessel_name": "Africa Seed One", "ship_type_code": 71},
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".geojson", delete=False, encoding="utf-8") as tmp:
+            json.dump(payload, tmp)
+            path = tmp.name
+        try:
+            rows = load_maritime_africa_demo_rows_from_file(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["lat"], 2.1)
+        self.assertAlmostEqual(rows[0]["lng"], 4.2)
+        self.assertEqual(rows[0]["mmsi"], "900222333")
+        self.assertIn("Africa", str(rows[0].get("source_label") or ""))
+
     def test_load_maritime_gulf_demo_rows_from_geojson_file(self):
         payload = {
             "type": "FeatureCollection",
@@ -211,6 +318,20 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0]["mmsi"], "1")
         self.assertEqual(len(filter_maritime_rows_by_bbox(rows, None)), 2)
+
+    def test_should_merge_persian_gulf_demo_rows(self):
+        self.assertTrue(
+            _should_merge_persian_gulf_demo_rows(include_gulf_demo=True, demo_env=False, coverage_gap=False)
+        )
+        self.assertTrue(
+            _should_merge_persian_gulf_demo_rows(include_gulf_demo=False, demo_env=True, coverage_gap=True)
+        )
+        self.assertFalse(
+            _should_merge_persian_gulf_demo_rows(include_gulf_demo=False, demo_env=False, coverage_gap=True)
+        )
+        self.assertFalse(
+            _should_merge_persian_gulf_demo_rows(include_gulf_demo=False, demo_env=True, coverage_gap=False)
+        )
 
     def test_stored_feed_response_marks_fresh_worker_snapshots_live(self):
         now = datetime.now(timezone.utc)

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException
+from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -4467,6 +4467,14 @@ def get_maritime_vessels(
     capture_window_seconds: int = 10,
     scope: str = "all_vessels",
     offset: int = 0,
+    include_gulf_demo: bool = False,
+    include_coastal_demo: bool = Query(
+        False,
+        description=(
+            "When true, merges Hormuz + Africa-adjacent synthetic demo positions (server must allow demo seeding). "
+            "See MARITIME_COASTAL_DEMO_SEED / MARITIME_GULF_DEMO_SEED. Overrides sparse-only merge for all coastal demo regions."
+        ),
+    ),
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
@@ -4487,6 +4495,8 @@ def get_maritime_vessels(
             vessel_scope=scope,
             bbox=bbox,
             offset=offset,
+            include_gulf_demo=include_gulf_demo,
+            include_coastal_demo=include_coastal_demo,
         )
     except Exception as exc:
         return {
@@ -4507,6 +4517,8 @@ def get_maritime_vessels(
             "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
             "effective_bbox_count": 0,
             "region_labels": [],
+            "coastal_demo_regions": [],
+            "coastal_demo_synthetic": False,
         }
 
 

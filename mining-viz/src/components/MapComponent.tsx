@@ -28,7 +28,10 @@ import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
   CanvasVesselLayer,
+  clearMaritimeSnapshotCache,
   filterVesselsByViewport,
+  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
+  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
   sortVesselsForDisplay,
   toVesselDrawRecords,
   VESSEL_SHIP_TYPE_OPTIONS,
@@ -60,6 +63,7 @@ import {
 
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 
@@ -205,6 +209,10 @@ interface MapComponentProps {
   isInDdQueue?: (id: string) => boolean;
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
+  /** When set, only this country's outline is requested and emphasized; global outlines are hidden. */
+  countryFocusCountry?: string | null;
+  /** Increment when country focus is applied so the map can fit bounds after borders load. */
+  countryFocusBoundsTrigger?: number;
 }
 
 const MapEffect = ({
@@ -266,6 +274,30 @@ const RoutePlannerBoundsEffect = ({
         if (!bounds.isValid()) return;
         map.fitBounds(bounds.pad(0.18), { animate: true, maxZoom: 8 });
     }, [map, overlay]);
+    return null;
+};
+
+const CountryFocusBoundsFly = ({
+    active,
+    geojson,
+    trigger,
+}: {
+    active: boolean;
+    geojson: object | null | undefined;
+    trigger: number;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!active || !geojson || trigger <= 0) return;
+        try {
+            const gjLayer = L.geoJSON(geojson as never);
+            const bounds = gjLayer.getBounds();
+            if (!bounds.isValid()) return;
+            map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
+        } catch {
+            /* ignore malformed GeoJSON during development */
+        }
+    }, [active, geojson, trigger, map]);
     return null;
 };
 
@@ -370,6 +402,8 @@ export default function MapComponent({
   isInDdQueue,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
+  countryFocusCountry = null,
+  countryFocusBoundsTrigger = 0,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -407,6 +441,13 @@ export default function MapComponent({
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
+    const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        if (window.localStorage.getItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY) === '1') {
+            return true;
+        }
+        return window.localStorage.getItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY) === '1';
+    });
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
     const handleMaritimeLayerActiveChange = useCallback(
         (active: boolean) => {
@@ -477,6 +518,7 @@ export default function MapComponent({
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
+        includeCoastalDemo: includeCoastalDemoVessels,
     });
     const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
     const maritimeSnapshotTotal =
@@ -513,6 +555,26 @@ export default function MapComponent({
         maritimeMapZoom,
         selectedMaritimeVessel?.id,
     ]);
+
+    const prevCoastalDemoToggleMount = useRef(true);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (includeCoastalDemoVessels) {
+            window.localStorage.setItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY, '1');
+            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
+        } else {
+            window.localStorage.removeItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY);
+            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
+        }
+    }, [includeCoastalDemoVessels]);
+
+    useEffect(() => {
+        if (prevCoastalDemoToggleMount.current) {
+            prevCoastalDemoToggleMount.current = false;
+            return;
+        }
+        clearMaritimeSnapshotCache();
+    }, [includeCoastalDemoVessels]);
 
     useEffect(() => {
         if (isMaritimeMapView) return;
@@ -642,23 +704,27 @@ export default function MapComponent({
     }, [selectedItem?.id]);
 
     const borderCountries = useMemo(() => {
-    // Use allLicenses (full unfiltered set for current sector) so borders reflect
-    // every country with data in this tab — regardless of active search/filters.
-    // Only countries with at least one mappable coordinate get an outline (rows with
-    // country set but no lat/lng would otherwise show borders with zero markers).
-    const ordered: string[] = [];
-    const seenKey = new Set<string>();
-    for (const d of allLicenses) {
-        if (!licenseHasMapCoordinates(d)) continue;
-        const raw = d.country?.trim();
-        if (!raw) continue;
-        const dedupeKey = raw.toLowerCase();
-        if (seenKey.has(dedupeKey)) continue;
-        seenKey.add(dedupeKey);
-        ordered.push(raw);
-    }
+        const focus = countryFocusCountry?.trim();
+        if (focus) {
+            return [focus].sort((a, b) => a.localeCompare(b));
+        }
+        // Use allLicenses (full unfiltered set for current sector) so borders reflect
+        // every country with data in this tab — regardless of active search/filters.
+        // Only countries with at least one mappable coordinate get an outline (rows with
+        // country set but no lat/lng would otherwise show borders with zero markers).
+        const ordered: string[] = [];
+        const seenKey = new Set<string>();
+        for (const d of allLicenses) {
+            if (!licenseHasMapCoordinates(d)) continue;
+            const raw = d.country?.trim();
+            if (!raw) continue;
+            const dedupeKey = raw.toLowerCase();
+            if (seenKey.has(dedupeKey)) continue;
+            seenKey.add(dedupeKey);
+            ordered.push(raw);
+        }
         return ordered.sort((a, b) => a.localeCompare(b));
-    }, [allLicenses]);
+    }, [allLicenses, countryFocusCountry]);
 
     const { data: filteredGeoJson } = useQuery({
         queryKey: ['country-borders', borderCountries],
@@ -694,6 +760,33 @@ export default function MapComponent({
                   },
         [isDark]
     );
+
+    const countryBorderLayerStyle = useMemo(() => {
+        if (countryFocusCountry?.trim()) {
+            return isDark
+                ? {
+                      className: 'map-country-border map-country-border--focus map-country-border--dark',
+                      fillColor: '#f59e0b',
+                      color: '#fbbf24',
+                      weight: 3,
+                      opacity: 0.95,
+                      fillOpacity: 0.08,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  }
+                : {
+                      className: 'map-country-border map-country-border--focus map-country-border--light',
+                      fillColor: '#f59e0b',
+                      color: '#d97706',
+                      weight: 2.5,
+                      opacity: 0.9,
+                      fillOpacity: 0.06,
+                      lineCap: 'round' as const,
+                      lineJoin: 'round' as const,
+                  };
+        }
+        return countryBorderPathStyle;
+    }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
     const renderedMarkers = useMemo(() => {
         if (!onGroundVisible) return null;
@@ -926,6 +1019,32 @@ export default function MapComponent({
                             )}
                         </div>
 
+                        <label
+                            htmlFor="mining-include-coastal-demo"
+                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2.5 dark:border-white/10 dark:bg-white/[0.03]"
+                        >
+                            <Checkbox
+                                id="mining-include-coastal-demo"
+                                checked={includeCoastalDemoVessels}
+                                onCheckedChange={(value) => setIncludeCoastalDemoVessels(value === true)}
+                                className="mt-0.5"
+                            />
+                            <span className="min-w-0 text-[9px] leading-snug text-slate-600 dark:text-slate-300">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100">
+                                    {t(
+                                        'הצג מיקומי הדגמה כשה־AIS דליל (מפרץ + חופי אפריקה)',
+                                        'Show demo positions where AIS feed is sparse (Gulf + Africa coasts)',
+                                    )}
+                                </span>
+                                <span className="mt-0.5 block text-slate-500 dark:text-slate-400">
+                                    {t(
+                                        'שולח include_coastal_demo=1 לשרת; נשמר בדפדפן. כבו לתצוגת מאגר בלבד.',
+                                        'Sends include_coastal_demo=1 to the API; saved in the browser. Turn off for snapshot-only.',
+                                    )}
+                                </span>
+                            </span>
+                        </label>
+
                         {isMaritimeLayerEnabled && (
                             <>
                                 <div className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
@@ -956,12 +1075,49 @@ export default function MapComponent({
                                     </p>
                                 )}
 
-                                {maritimeFeed?.persian_gulf_demo_synthetic && (
+                                {(((maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0) ||
+                                    maritimeFeed?.persian_gulf_demo_synthetic) && (
                                     <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
-                                        {t(
-                                            'מוצגות נקודות הדגמה סינתטיות במפרץ הפרסי (MARITIME_GULF_DEMO_SEED) — לא AIS חי באזור.',
-                                            'Synthetic Hormuz-area positions are shown (MARITIME_GULF_DEMO_SEED)—not live AIS for the Gulf.'
+                                        {(maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0 && (
+                                            <span className="block font-semibold text-cyan-950 dark:text-cyan-50">
+                                                {t(
+                                                    `אזורי הדגמה: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
+                                                    `Demo regions: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
+                                                )}
+                                            </span>
                                         )}
+                                        <span className="mt-1 block">
+                                            {(() => {
+                                                const mode = maritimeFeed?.persian_gulf_demo_mode;
+                                                if (mode === 'api_opt_in') {
+                                                    return includeCoastalDemoVessels
+                                                        ? t(
+                                                              'נקודות סינתטיות/קובץ הדגמה (בקשת משתמש include_coastal_demo) לצד כלי שיט אמיתיים מהמאגר — לא AIS חי באותם תיבות.',
+                                                              'Synthetic / seed-file demo positions (your include_coastal_demo opt-in) appear alongside real snapshot vessels—not live AIS in those boxes.',
+                                                          )
+                                                        : t(
+                                                              'נקודות סינתטיות במפרץ (בקשת משתמש) לצד כלי שיט אמיתיים אחרים מהמאגר — לא AIS חי מהמפרץ.',
+                                                              'Synthetic Gulf demo markers (your opt-in) appear alongside other real snapshot vessels in this feed—not live Gulf AIS.',
+                                                          );
+                                                }
+                                                if (mode === 'env_coverage_gap') {
+                                                    return t(
+                                                        'נקודות הדגמה במפרץ (MARITIME_GULF_DEMO_SEED + פער AISStream) — לא AIS חי מהמפרץ.',
+                                                        'Gulf demo positions (MARITIME_GULF_DEMO_SEED + AISStream gap)—not live Gulf AIS.',
+                                                    );
+                                                }
+                                                if (mode === 'env_coastal_sparse') {
+                                                    return t(
+                                                        'נקודות הדגמה (MARITIME_COASTAL_DEMO_SEED) לתיבות יעד דלילות — לא AIS חי משוחזר.',
+                                                        'Demo positions (MARITIME_COASTAL_DEMO_SEED) for sparse target boxes—not restored live AIS.',
+                                                    );
+                                                }
+                                                return t(
+                                                    'נקודות הדגמה — לא AIS חי באותם אזורים; שאר הסימנים עלולים להיות AIS אמיתי מהמאגר.',
+                                                    'Demo positions—not live AIS in those areas; other markers may still be real snapshot AIS.',
+                                                );
+                                            })()}
+                                        </span>
                                     </p>
                                 )}
 
@@ -1266,6 +1422,11 @@ export default function MapComponent({
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
+                <CountryFocusBoundsFly
+                    active={Boolean(countryFocusCountry?.trim())}
+                    geojson={filteredGeoJson ?? null}
+                    trigger={countryFocusBoundsTrigger}
+                />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -1317,10 +1478,10 @@ export default function MapComponent({
                     {filteredGeoJson && !hideCountryBordersForVesselsOnly && (
                         <LayersControl.Overlay checked name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
-                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}`}
+                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
                                 data={filteredGeoJson}
                                 interactive={false}
-                                style={countryBorderPathStyle}
+                                style={countryBorderLayerStyle}
                             />
                         </LayersControl.Overlay>
                     )}
