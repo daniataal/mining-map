@@ -107,6 +107,11 @@ jobs:
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
       env:
+        # GitHub secret names → runtime env names mapped in remote script below.
+        GROQ_AI_API_KEY: ${{ secrets.GROQ_AI_API_KEY }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        OPENROUTER_AI_API_KEY: ${{ secrets.OPENROUTER_AI_API_KEY }}
+        OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
         ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         AUTO_IMPORT_LICENSES_CSV: ${{ steps.csv_import.outputs.enabled }}
@@ -120,19 +125,26 @@ jobs:
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
           sudo mkdir -p /opt/mining-map/data
           cd /opt/mining-map
 
-          # Persist runtime-only backend secrets on the VM for docker compose.
+          # Map GitHub secret names to container/runtime env names (see .env.example).
+          GROQ_EFFECTIVE="${GROQ_AI_API_KEY:-${GROQ_API_KEY:-}}"
+          OPENROUTER_EFFECTIVE="${OPENROUTER_AI_API_KEY:-${OPENROUTER_API_KEY:-}}"
           MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
+
+          # Persist runtime env for backend + maritime-worker (env_file: backend.env).
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
             printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_EFFECTIVE"
+            printf 'GROQ_API_KEY=%s\n' "$GROQ_EFFECTIVE"
+            printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_EFFECTIVE"
+            printf 'DISABLE_POLLINATIONS_FALLBACK=1\n'
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -286,11 +298,11 @@ jobs:
           # Pull and Restart
           sudo docker compose pull
 
-          # Export AI runtime config in this same shell for docker compose (sudo -E below).
-          # DISABLE_POLLINATIONS_FALLBACK=1 is intentional in prod: dossier AI requires
-          # GROQ_API_KEY and/or OPENROUTER_API_KEY repo secrets; Pollinations is not used.
-          export GROQ_API_KEY='${{ secrets.GROQ_API_KEY }}'
-          export OPENROUTER_API_KEY='${{ secrets.OPENROUTER_API_KEY }}'
+          # Export runtime names for compose `environment: - VAR` passthrough (sudo -E).
+          export GROQ_API_KEY="${GROQ_EFFECTIVE}"
+          export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
+          export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"
+          export MAPBOX_ACCESS_TOKEN="${MAPBOX_EFFECTIVE}"
           export DISABLE_POLLINATIONS_FALLBACK=1
           export AI_HTTP_TIMEOUT_SECONDS="${AI_HTTP_TIMEOUT_SECONDS:-18}"
           export AI_HTTP_MAX_RETRIES="${AI_HTTP_MAX_RETRIES:-1}"
@@ -298,7 +310,6 @@ jobs:
           export AI_ENRICHMENT_DEADLINE_SECONDS="${AI_ENRICHMENT_DEADLINE_SECONDS:-20}"
           export POLLINATIONS_HTTP_TIMEOUT_SECONDS="${POLLINATIONS_HTTP_TIMEOUT_SECONDS:-12}"
           export POLLINATIONS_HTTP_MAX_RETRIES="${POLLINATIONS_HTTP_MAX_RETRIES:-0}"
-          export MAPBOX_ACCESS_TOKEN="${MAPBOX_EFFECTIVE}"
           sudo -E docker compose up -d --remove-orphans
 
           # Wait until /licenses returns 200
@@ -313,7 +324,7 @@ jobs:
             sleep 2
           done
 
-          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
 
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \
