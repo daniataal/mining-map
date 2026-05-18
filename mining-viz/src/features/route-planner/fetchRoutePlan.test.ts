@@ -199,6 +199,56 @@ describe('fetchRoutePlan', () => {
     })).rejects.toThrow(/degraded/i);
   });
 
+  it('blocks sea geometry that still cuts land at Gibraltar', async () => {
+    const liveBody = {
+      recommended: {
+        id: 'recommended',
+        label: 'Recommended',
+        is_recommended: true,
+        route: {
+          origin: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
+          destination: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
+          legs: [
+            {
+              leg_id: 'leg-1',
+              from: { name: 'Port of Tema', lat: 5.64, lng: 0.018, kind: 'port' },
+              to: { name: 'Haifa Port', lat: 32.819, lng: 34.99, kind: 'port' },
+              method: 'sea',
+              geometry_source: 'searoute',
+              path: [
+                [31.8, -10.1],
+                [34.4, -7.1],
+                [35.95, -5.75],
+                [36.5, 5],
+                [32.819, 34.99],
+              ],
+            },
+          ],
+        },
+        cost_breakdown: {
+          leg_costs: [{ leg_id: 'leg-1', method: 'sea', total_cost_usd: 12000, distance_km: 4800 }],
+        },
+      },
+    };
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => liveBody,
+      }),
+    );
+
+    await expect(fetchRoutePlan({
+      supplier: ghanaSupplier,
+      buyer: haifaBuyer,
+      productType: 'gold_concentrate',
+      shippingMethods: ['sea_fcl'],
+      quantityTons: 100,
+      incoterm: 'FOB',
+    })).rejects.toThrow(/Gibraltar/i);
+  });
+
   it('warns when supplier and buyer appear reversed (Israel→Ghana)', async () => {
     const liveBody = {
       recommended: {

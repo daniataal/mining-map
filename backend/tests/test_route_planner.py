@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from backend.services.route_planner import plan_route
-from backend.services.routing_geometry import fetch_osrm_route
+from backend.services.routing_geometry import fetch_osrm_route, repair_known_sea_chokepoints
 from backend.services.shipping_costs import estimate_route_cost
 
 
@@ -27,6 +27,18 @@ def _osrm_mock_response(distance_m: float = 250_000, duration_s: float = 18_000)
 
 
 class RoutePlannerTests(unittest.TestCase):
+    def test_sea_chokepoint_repair_adds_gibraltar_guard_waypoints(self):
+        repaired, changed = repair_known_sea_chokepoints(
+            [
+                (34.4, -7.1),
+                (35.95, -5.75),
+            ]
+        )
+
+        self.assertTrue(changed)
+        self.assertGreater(len(repaired), 2)
+        self.assertTrue(any(abs(lat - 35.8) < 0.01 and abs(lng + 6.4) < 0.01 for lat, lng in repaired))
+
     def test_estimate_route_cost_for_sea_and_road(self):
         breakdown = estimate_route_cost(
             [

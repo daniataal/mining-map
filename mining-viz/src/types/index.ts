@@ -140,6 +140,49 @@ export interface OperatorValidationFinding {
   evidence?: Record<string, unknown>;
 }
 
+export interface DealRoom {
+  id: string;
+  title: string;
+  entityId: string;
+  entityKind: string;
+  status: string;
+  routeSnapshot?: Record<string, unknown> | null;
+  agentJobIds: string[];
+  evidence?: {
+    entity?: Record<string, unknown>;
+    agentOutputs?: Record<string, unknown>;
+    confidence?: number | null;
+    [key: string]: unknown;
+  };
+  notes?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  entity?: Record<string, unknown> | null;
+  jobs?: AgentJobResponse<Record<string, unknown>>[];
+}
+
+export interface DealRoomRunResponse {
+  dealRoom: DealRoom;
+  jobs: AgentJobResponse<Record<string, unknown>>[];
+  skipped: Array<{ agent_type: string; reason: string }>;
+}
+
+export interface DealRoomExportPackage {
+  dealRoom: DealRoom;
+  entity: Record<string, unknown>;
+  routeSummary: Record<string, unknown>;
+  agentJobs: AgentJobResponse<Record<string, unknown>>[];
+  agentOutputs: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  procurementAwardsSummary: Record<string, unknown>;
+  procurementAwards: unknown[];
+  risks: string[];
+  confidence?: number | null;
+  decision: string;
+  exportedAt?: string;
+  markdown?: string;
+}
+
 export interface OperatorValidationOutput {
   agent: 'operator_validation' | string;
   entity_id: string;

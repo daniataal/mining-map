@@ -36,6 +36,8 @@ AGENT_JOB_TYPES = {
     "contact_enrichment",
     "operator_validation",
     "data_validation",
+    "due_diligence_summary",
+    "procurement_summary",
 }
 
 CONTACT_TYPE_ORDER = {"phone": 0, "email": 1, "website": 2, "address": 3}
@@ -121,6 +123,26 @@ def _serialize_job(row: dict[str, Any], *, cached: bool = False) -> dict[str, An
     }
 
 
+def _select_job_by_type_hash(conn: Any, agent_type: str, input_hash: str) -> Optional[dict[str, Any]]:
+    with conn.cursor(**_cursor_kwargs()) as cur:
+        cur.execute(
+            """
+            SELECT job_id, agent_type, status, entity_id, route_hash, input_hash,
+                   input_json, output_json, error, created_at, updated_at
+            FROM agent_jobs
+            WHERE agent_type = %s
+              AND input_hash = %s
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (agent_type, input_hash),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return _serialize_job(_row_to_dict(row))
+
+
 def get_agent_job(conn: Any, job_id: str) -> Optional[dict[str, Any]]:
     ensure_agent_jobs_table(conn)
     with conn.cursor(**_cursor_kwargs()) as cur:
@@ -168,6 +190,7 @@ def _insert_job(
     input_json: dict[str, Any],
     entity_id: Optional[str] = None,
     route_hash: Optional[str] = None,
+    status: str = "running",
 ) -> str:
     job_id = str(uuid.uuid4())
     with conn.cursor() as cur:
@@ -176,10 +199,10 @@ def _insert_job(
             INSERT INTO agent_jobs (
                 job_id, agent_type, status, entity_id, route_hash, input_hash, input_json, updated_at
             )
-            VALUES (%s, %s, 'running', %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT (agent_type, input_hash) DO NOTHING
             """,
-            (job_id, agent_type, entity_id, route_hash, input_hash, _jsonb(input_json)),
+            (job_id, agent_type, status, entity_id, route_hash, input_hash, _jsonb(input_json)),
         )
         if cur.rowcount == 0:
             cur.execute(
@@ -196,6 +219,100 @@ def _insert_job(
             if row:
                 return row[0] if not hasattr(row, "keys") else row["job_id"]
     return job_id
+
+
+def _mark_job_running(conn: Any, job_id: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE agent_jobs
+            SET status = 'running',
+                error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = %s
+            """,
+            (job_id,),
+        )
+
+
+def _requeue_job(
+    conn: Any,
+    *,
+    job_id: str,
+    input_json: dict[str, Any],
+    entity_id: Optional[str] = None,
+    route_hash: Optional[str] = None,
+) -> dict[str, Any]:
+    with conn.cursor(**_cursor_kwargs()) as cur:
+        cur.execute(
+            """
+            UPDATE agent_jobs
+            SET status = 'queued',
+                entity_id = %s,
+                route_hash = %s,
+                input_json = %s,
+                output_json = NULL,
+                error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = %s
+            RETURNING job_id, agent_type, status, entity_id, route_hash, input_hash,
+                      input_json, output_json, error, created_at, updated_at
+            """,
+            (entity_id, route_hash, _jsonb(input_json), job_id),
+        )
+        row = cur.fetchone()
+    return _serialize_job(_row_to_dict(row))
+
+
+def enqueue_agent_job(
+    conn: Any,
+    *,
+    agent_type: str,
+    input_json: dict[str, Any],
+    entity_id: Optional[str] = None,
+    route_hash: Optional[str] = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    if agent_type not in AGENT_JOB_TYPES:
+        raise ValueError(f"Unsupported agent_type: {agent_type}")
+    ensure_agent_jobs_table(conn)
+    input_hash = stable_input_hash(input_json)
+    if not force_refresh:
+        cached = _cached_completed_job(conn, agent_type, input_hash)
+        if cached:
+            return cached
+
+    job_id = _insert_job(
+        conn,
+        agent_type=agent_type,
+        input_hash=input_hash,
+        input_json=input_json,
+        entity_id=entity_id,
+        route_hash=route_hash,
+        status="queued",
+    )
+    existing = _select_job_by_type_hash(conn, agent_type, input_hash)
+    if existing and (force_refresh or existing.get("status") == "failed"):
+        existing = _requeue_job(
+            conn,
+            job_id=job_id,
+            input_json=input_json,
+            entity_id=entity_id,
+            route_hash=route_hash,
+        )
+    conn.commit()
+    return existing or get_agent_job(conn, job_id) or {
+        "job_id": job_id,
+        "agent_type": agent_type,
+        "status": "queued",
+        "entity_id": entity_id,
+        "route_hash": route_hash,
+        "input_hash": input_hash,
+        "input": input_json,
+        "output": None,
+        "error": None,
+        "cached": False,
+    }
 
 
 def _complete_job(conn: Any, job_id: str, output: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +383,8 @@ def _run_cached_agent(
     )
     conn.commit()
     try:
+        _mark_job_running(conn, job_id)
+        conn.commit()
         output = producer(input_hash)
     except Exception as exc:
         return _fail_job(conn, job_id, str(exc))
@@ -525,11 +644,7 @@ def run_route_intelligence(
     route_hash: Optional[str] = None,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    route_input = {
-        "route": route_payload,
-        "deterministic_warnings": deterministic_warnings or [],
-        "prompt_version": "route_intelligence_v1",
-    }
+    route_input = build_route_intelligence_input(route_payload, deterministic_warnings)
     effective_route_hash = route_hash or stable_input_hash(route_payload)
 
     def produce(input_hash: str) -> dict[str, Any]:
@@ -577,6 +692,35 @@ def run_route_intelligence(
         agent_type="route_intelligence",
         input_json=route_input,
         producer=produce,
+        route_hash=effective_route_hash,
+        force_refresh=force_refresh,
+    )
+
+
+def build_route_intelligence_input(
+    route_payload: dict[str, Any],
+    deterministic_warnings: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    return {
+        "route": route_payload,
+        "deterministic_warnings": deterministic_warnings or [],
+        "prompt_version": "route_intelligence_v1",
+    }
+
+
+def enqueue_route_intelligence(
+    conn: Any,
+    *,
+    route_payload: dict[str, Any],
+    deterministic_warnings: Optional[list[dict[str, Any]]] = None,
+    route_hash: Optional[str] = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    effective_route_hash = route_hash or stable_input_hash(route_payload)
+    return enqueue_agent_job(
+        conn,
+        agent_type="route_intelligence",
+        input_json=build_route_intelligence_input(route_payload, deterministic_warnings),
         route_hash=effective_route_hash,
         force_refresh=force_refresh,
     )
@@ -743,12 +887,7 @@ def run_contact_enrichment(
 ) -> dict[str, Any]:
     loaded = load_license_agent_row(conn, entity_id) if entity_kind == "license" else None
     source_entity = loaded or entity or {"id": entity_id, "entity_kind": entity_kind}
-    input_json = {
-        "entity_id": entity_id,
-        "entity_kind": entity_kind,
-        "entity": _compact_entity_for_input(source_entity),
-        "agent_version": "contact_enrichment_v1",
-    }
+    input_json = build_contact_enrichment_input(entity_id, entity_kind, source_entity)
 
     def produce(input_hash: str) -> dict[str, Any]:
         if entity_kind != "license" or loaded is None:
@@ -786,6 +925,34 @@ def run_contact_enrichment(
         agent_type="contact_enrichment",
         input_json=input_json,
         producer=produce,
+        entity_id=entity_id,
+        force_refresh=force_refresh,
+    )
+
+
+def build_contact_enrichment_input(entity_id: str, entity_kind: str, source_entity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "entity_id": entity_id,
+        "entity_kind": entity_kind,
+        "entity": _compact_entity_for_input(source_entity),
+        "agent_version": "contact_enrichment_v1",
+    }
+
+
+def enqueue_contact_enrichment(
+    conn: Any,
+    *,
+    entity_id: str,
+    entity_kind: str = "license",
+    entity: Optional[dict[str, Any]] = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    loaded = load_license_agent_row(conn, entity_id) if entity_kind == "license" else None
+    source_entity = loaded or entity or {"id": entity_id, "entity_kind": entity_kind}
+    return enqueue_agent_job(
+        conn,
+        agent_type="contact_enrichment",
+        input_json=build_contact_enrichment_input(entity_id, entity_kind, source_entity),
         entity_id=entity_id,
         force_refresh=force_refresh,
     )
@@ -873,13 +1040,7 @@ def run_operator_validation(
     loaded = load_license_agent_row(conn, entity_id) if entity_kind == "license" else None
     source_entity = loaded or entity or {"id": entity_id, "entity_kind": entity_kind}
     relationships = build_license_relationship_candidates(loaded) if loaded is not None else []
-    input_json = {
-        "entity_id": entity_id,
-        "entity_kind": entity_kind,
-        "entity": _compact_entity_for_input(source_entity),
-        "relationships": [_serialize_relationship(rel) for rel in relationships],
-        "agent_version": "operator_validation_v1",
-    }
+    input_json = build_operator_validation_input(entity_id, entity_kind, source_entity, relationships)
 
     def produce(input_hash: str) -> dict[str, Any]:
         validation = deterministic_operator_validation(source_entity, relationships)
@@ -919,6 +1080,41 @@ def run_operator_validation(
         agent_type="operator_validation",
         input_json=input_json,
         producer=produce,
+        entity_id=entity_id,
+        force_refresh=force_refresh,
+    )
+
+
+def build_operator_validation_input(
+    entity_id: str,
+    entity_kind: str,
+    source_entity: dict[str, Any],
+    relationships: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "entity_id": entity_id,
+        "entity_kind": entity_kind,
+        "entity": _compact_entity_for_input(source_entity),
+        "relationships": [_serialize_relationship(rel) for rel in relationships],
+        "agent_version": "operator_validation_v1",
+    }
+
+
+def enqueue_operator_validation(
+    conn: Any,
+    *,
+    entity_id: str,
+    entity_kind: str = "license",
+    entity: Optional[dict[str, Any]] = None,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    loaded = load_license_agent_row(conn, entity_id) if entity_kind == "license" else None
+    source_entity = loaded or entity or {"id": entity_id, "entity_kind": entity_kind}
+    relationships = build_license_relationship_candidates(loaded) if loaded is not None else []
+    return enqueue_agent_job(
+        conn,
+        agent_type="operator_validation",
+        input_json=build_operator_validation_input(entity_id, entity_kind, source_entity, relationships),
         entity_id=entity_id,
         force_refresh=force_refresh,
     )

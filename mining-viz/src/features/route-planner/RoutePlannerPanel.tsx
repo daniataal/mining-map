@@ -9,6 +9,7 @@ import { Card } from '../../components/ui/card';
 import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { createDealRoom, listDealRooms, updateDealRoom } from '../../lib/api';
 import type { AgentJobResponse, DueDiligenceStatus, RouteRiskAnalysis } from './types';
 import { PRODUCT_OPTIONS, SHIPPING_OPTIONS, type RoutePlannerHook } from './useRoutePlanner';
 import { analyzeRouteRisk } from './fetchRoutePlan';
@@ -78,6 +79,8 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
   const [routeRiskJob, setRouteRiskJob] = useState<AgentJobResponse<RouteRiskAnalysis> | null>(null);
   const [routeRiskLoading, setRouteRiskLoading] = useState(false);
   const [routeRiskError, setRouteRiskError] = useState<string | null>(null);
+  const [routeAttachLoading, setRouteAttachLoading] = useState(false);
+  const [routeAttachMessage, setRouteAttachMessage] = useState<string | null>(null);
 
   // Auto-jump to results when we have them
   useEffect(() => { if (hasResult) setStep('results'); }, [hasResult]);
@@ -183,6 +186,44 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
       setRouteRiskError(error instanceof Error ? error.message : 'Route intelligence failed.');
     } finally {
       setRouteRiskLoading(false);
+    }
+  }
+
+  async function handleAttachRouteToDealRoom() {
+    if (!result || routeAttachLoading) return;
+    setRouteAttachLoading(true);
+    setRouteAttachMessage(null);
+    const entityId =
+      supplier.licenseId ||
+      `route-${(supplier.label || 'supplier').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'supplier'}-${(buyer.label || 'buyer').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'buyer'}`.slice(0, 120);
+    const entityKind = supplier.licenseId ? 'license' : 'route_counterparty';
+    const routeSnapshot = {
+      result,
+      activePlan,
+      supplier,
+      buyer,
+      productType,
+      quantityTons,
+      incoterm,
+      selectedPlanId,
+      attachedAt: new Date().toISOString(),
+    } as Record<string, unknown>;
+    try {
+      const existing = await listDealRooms({ entityId, entityKind });
+      const room = existing[0] ?? (await createDealRoom({
+        entityId,
+        entityKind,
+        title: `${supplier.label || 'Supplier'} → ${buyer.label || 'Buyer'} Investigation`,
+        routeSnapshot,
+      }));
+      const updated = existing[0]
+        ? await updateDealRoom(room.id, { routeSnapshot })
+        : room;
+      setRouteAttachMessage(`Route attached to ${updated.title}.`);
+    } catch (error) {
+      setRouteAttachMessage(error instanceof Error ? error.message : 'Could not attach route to a deal room.');
+    } finally {
+      setRouteAttachLoading(false);
     }
   }
 
@@ -569,6 +610,36 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                       </ul>
                     )}
                   </div>
+                )}
+              </div>
+            )}
+
+            {result && (
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.07] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                      Deal Room Route Snapshot
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                      Attach this route, selected plan, and cost/DD summary to an investigation package.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="h-9 rounded-xl text-[10px] font-black uppercase"
+                    onClick={handleAttachRouteToDealRoom}
+                    disabled={routeAttachLoading}
+                  >
+                    {routeAttachLoading ? (
+                      <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />{t('מצרף...', 'Attaching...')}</>
+                    ) : (
+                      t('צרף לחדר עסקאות', 'Attach route to Deal Room')
+                    )}
+                  </Button>
+                </div>
+                {routeAttachMessage && (
+                  <p className="mt-3 text-[10px] font-bold text-slate-500">{routeAttachMessage}</p>
                 )}
               </div>
             )}
