@@ -406,6 +406,68 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertIn("Haifa", sea_leg["to"]["name"])
         self.assertNotIn("Eilat", sea_leg["to"]["name"])
 
+    def test_ghana_supplier_eilat_destination_uses_explicit_eilat_port(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Accra",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Port of Eilat",
+                    "lat": 29.557,
+                    "lng": 34.952,
+                    "kind": "port",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        self.assertIn("Eilat", sea_leg["to"]["name"])
+        self.assertNotIn("Haifa", sea_leg["to"]["name"])
+        self.assertFalse(
+            any(leg["method"] == "road" and "Eilat" in leg["to"]["name"] for leg in result["route"]["legs"]),
+            "Destination is already the selected seaport; final road connector should not be added.",
+        )
+
+    @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
+    def test_ghana_to_eilat_fallback_corridor_uses_red_sea_anchors(self):
+        result = plan_route(
+            {
+                "product": "Gold concentrate",
+                "quantity_tons": 500,
+                "origin": {
+                    "name": "Accra",
+                    "lat": 5.548,
+                    "lng": -0.192,
+                    "kind": "origin",
+                    "metadata": {"country": "Ghana"},
+                },
+                "destination": {
+                    "name": "Port of Eilat",
+                    "lat": 29.557,
+                    "lng": 34.952,
+                    "kind": "port",
+                    "metadata": {"country": "Israel"},
+                },
+                "preferred_methods": ["sea", "road"],
+            }
+        )
+
+        sea_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "sea")
+        self.assertEqual(sea_leg["geometry_source"], "corridor_fallback")
+        self.assertIn("Eilat", sea_leg["to"]["name"])
+        path = sea_leg["path"]
+        self.assertTrue(any(29.0 <= lat <= 30.5 and 32.0 <= lng <= 33.0 for lat, lng in path))
+        self.assertTrue(any(27.0 <= lat <= 29.0 and 34.0 <= lng <= 35.0 for lat, lng in path))
+
     @patch("backend.services.routing_geometry.SEAROUTE_ENABLED", False)
     def test_ghana_to_haifa_sea_corridor_avoids_sahara_shortcut(self):
         """West Africa → Levant must use offshore anchors, not a geodesic over the Sahara."""

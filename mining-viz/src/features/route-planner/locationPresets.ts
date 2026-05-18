@@ -67,9 +67,35 @@ export const MAX_TOTAL_HUB_MARKERS = 120;
 /** Cap dropdown options per group to keep selects responsive. */
 export const MAX_DROPDOWN_PRESETS_PER_GROUP = 40;
 
+const ISO2_ROUTE_COUNTRY_OVERRIDES: Record<string, string> = {
+  CD: 'Democratic Republic of the Congo',
+  CG: 'Congo (Congo-Brazzaville)',
+  CI: "Cote d'Ivoire",
+  GB: 'United Kingdom',
+  IL: 'Israel',
+  IS: 'Iceland',
+  TZ: 'Tanzania',
+  US: 'United States of America',
+};
+
+function countryFromIso2(value: string): string | null {
+  const code = value.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return null;
+  const override = ISO2_ROUTE_COUNTRY_OVERRIDES[code];
+  if (override) return override;
+  try {
+    const display = new Intl.DisplayNames(['en'], { type: 'region' }).of(code);
+    return display?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalRouteHubCountry(country: string | undefined): string | null {
   const raw = country?.trim();
   if (!raw) return null;
+  const isoCountry = countryFromIso2(raw);
+  if (isoCountry) return resolveCountryFocusToken(isoCountry, countriesList) ?? isoCountry;
   return resolveCountryFocusToken(raw, countriesList) ?? raw;
 }
 
@@ -79,7 +105,11 @@ export function filterLicensesForRouteHubs(
   countries: readonly string[],
 ): MiningLicense[] {
   if (!countries.length) return [];
-  return licenses.filter((item) => countriesMatchRouteHubFilter(item.country, countries));
+  return licenses.filter(
+    (item) =>
+      !isGlobalFallbackLicense(item) &&
+      countriesMatchRouteHubFilter(item.country, countries),
+  );
 }
 
 export function countriesMatchRouteHubFilter(
@@ -201,6 +231,13 @@ export function licenseToPreset(item: MiningLicense): LocationPreset | null {
   };
 }
 
+function isGlobalFallbackLicense(item: MiningLicense): boolean {
+  const country = normalizeCountryFocusQuery(item.country || '');
+  const recordOrigin = String(item.recordOrigin || '').toLowerCase();
+  const sourceKind = String(item.sourceKind || '').toLowerCase();
+  return country === 'global' || recordOrigin.includes('global') || sourceKind.includes('global');
+}
+
 function coordKey(lat: number, lng: number): string {
   return `${lat.toFixed(4)}:${lng.toFixed(4)}`;
 }
@@ -267,7 +304,8 @@ export function resolveRolePresetCountries(
     const supplierCanon = canonicalRouteHubCountry(supplierCountry);
     return supplierCanon ? [supplierCanon] : [];
   }
-  return resolveRouteHubCountries(supplierCountry, buyerCountry);
+  const buyerCanon = canonicalRouteHubCountry(buyerCountry);
+  return buyerCanon ? [buyerCanon] : [];
 }
 
 function capPresetsByGroup(presets: LocationPreset[], maxPerGroup: number): LocationPreset[] {
@@ -298,7 +336,11 @@ export function buildAllLocationPresets(
 
   const licensesForBuild =
     hasCountryFilter && countryList.length
-      ? allLicenses.filter((item) => countriesMatchRouteHubFilter(item.country, countryList))
+      ? allLicenses.filter(
+          (item) =>
+            !isGlobalFallbackLicense(item) &&
+            countriesMatchRouteHubFilter(item.country, countryList),
+        )
       : allLicenses;
 
   const portsForBuild =

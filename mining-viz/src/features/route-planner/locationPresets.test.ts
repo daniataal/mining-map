@@ -43,6 +43,12 @@ describe('countriesMatchRouteHubFilter', () => {
     expect(countriesMatchRouteHubFilter('United States', ['United States of America'])).toBe(true);
     expect(countriesMatchRouteHubFilter('Israel', ['Netherlands'])).toBe(false);
   });
+
+  it('treats ISO2 country codes as exact codes before fuzzy names', () => {
+    expect(countriesMatchRouteHubFilter('IL', ['Israel'])).toBe(true);
+    expect(countriesMatchRouteHubFilter('IS', ['Israel'])).toBe(false);
+    expect(countriesMatchRouteHubFilter('IS', ['Iceland'])).toBe(true);
+  });
 });
 
 describe('buildRoutePlannerPortMarkers', () => {
@@ -59,6 +65,16 @@ describe('buildRoutePlannerPortMarkers', () => {
     const unfiltered = buildRoutePlannerPortMarkers([], []);
     expect(unfiltered.length).toBeGreaterThan(MARITIME_HUB_PRESETS.length);
   });
+
+  it('excludes Icelandic ISO2 ports from Israel marker filters', () => {
+    const portEntities = [
+      { id: 'is-port', company: 'Arskogssandur', country: 'IS', lat: 65.9, lng: -18.2 } as MiningLicense,
+      { id: 'il-port', company: 'Haifa Custom', country: 'IL', lat: 32.81, lng: 34.98 } as MiningLicense,
+    ];
+    const filtered = buildRoutePlannerPortMarkers([], portEntities, { countries: ['Israel'] });
+    expect(filtered.some((m) => m.name.includes('Arskogssandur'))).toBe(false);
+    expect(filtered.some((m) => m.name.includes('Haifa Custom'))).toBe(true);
+  });
 });
 
 describe('buildRoutePlannerAirportMarkers', () => {
@@ -70,11 +86,9 @@ describe('buildRoutePlannerAirportMarkers', () => {
 });
 
 describe('resolveRolePresetCountries', () => {
-  it('filters supplier dropdown by origin country only', () => {
+  it('filters supplier dropdown by origin country and buyer dropdown by destination country', () => {
     expect(resolveRolePresetCountries('supplier', 'Zambia', 'Israel')).toEqual(['Zambia']);
-    expect(resolveRolePresetCountries('buyer', 'Zambia', 'Israel')).toEqual(
-      expect.arrayContaining(['Zambia', 'Israel']),
-    );
+    expect(resolveRolePresetCountries('buyer', 'Zambia', 'Israel')).toEqual(['Israel']);
   });
 });
 
@@ -83,6 +97,7 @@ describe('filterLicensesForRouteHubs', () => {
     const licenses = [
       { id: 'a', country: 'Israel', lat: 1, lng: 2 } as MiningLicense,
       { id: 'b', country: 'Canada', lat: 3, lng: 4 } as MiningLicense,
+      { id: 'c', country: 'Global', lat: 5, lng: 6, recordOrigin: 'global_open_fallback' } as MiningLicense,
     ];
     const filtered = filterLicensesForRouteHubs(licenses, ['Israel']);
     expect(filtered).toHaveLength(1);

@@ -259,7 +259,24 @@ export default function App() {
     () => resolveRouteHubCountries(debouncedRouteSupplierCountry, debouncedRouteBuyerCountry),
     [debouncedRouteSupplierCountry, debouncedRouteBuyerCountry],
   );
-  const routeHubCountriesKey = routeHubCountries.join('\0');
+
+  const routeMarkerCountries = useMemo(() => {
+    if (routePlanner.pickRole === 'supplier') {
+      const supplierCanon = canonicalRouteHubCountry(debouncedRouteSupplierCountry);
+      return supplierCanon ? [supplierCanon] : [];
+    }
+    if (routePlanner.pickRole === 'buyer') {
+      const buyerCanon = canonicalRouteHubCountry(debouncedRouteBuyerCountry);
+      return buyerCanon ? [buyerCanon] : [];
+    }
+    return routeHubCountries;
+  }, [
+    routePlanner.pickRole,
+    debouncedRouteSupplierCountry,
+    debouncedRouteBuyerCountry,
+    routeHubCountries,
+  ]);
+  const routeMarkerCountriesKey = routeMarkerCountries.join('\0');
 
   const routePresetCountries = useMemo(() => {
     const out: string[] = [];
@@ -278,16 +295,16 @@ export default function App() {
   );
 
   const routePlannerPortMarkers = useMemo(() => {
-    if (!routeHubCountries.length) return [];
+    if (!routeMarkerCountries.length) return [];
     return buildRoutePlannerPortMarkers(routePlannerHubLicenses, portEntities, {
-      countries: routeHubCountries,
+      countries: routeMarkerCountries,
     });
-  }, [routePlannerHubLicenses, portEntities, routeHubCountriesKey]);
+  }, [routePlannerHubLicenses, portEntities, routeMarkerCountriesKey]);
 
   const routePlannerAirportMarkers = useMemo(() => {
-    if (!routeHubCountries.length) return [];
-    return buildRoutePlannerAirportMarkers({ countries: routeHubCountries });
-  }, [routeHubCountriesKey]);
+    if (!routeMarkerCountries.length) return [];
+    return buildRoutePlannerAirportMarkers({ countries: routeMarkerCountries });
+  }, [routeMarkerCountriesKey]);
 
   const handleRoutePlannerMapPick = routePlanner.handleMapPick;
   const handleRoutePlannerHubPick = useCallback(

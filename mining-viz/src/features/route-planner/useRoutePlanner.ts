@@ -97,7 +97,7 @@ export interface RoutePlannerHook {
   selectRoutePlan: (planId: string) => void;
   loading: boolean;
   error: string | null;
-  computeRoute: () => Promise<void>;
+  computeRoute: () => Promise<boolean>;
   sourceLabel: 'live' | 'simulation' | null;
   /** Pre-fill supplier from a license/asset — call before switching to route_planner view */
   prefillSupplier: (lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => void;
@@ -224,10 +224,12 @@ export function useRoutePlanner(): RoutePlannerHook {
   );
 
   const computeRoute = useCallback(async () => {
-    if (computeInFlightRef.current) return;
+    if (computeInFlightRef.current) return false;
     computeInFlightRef.current = true;
     setLoading(true);
     setError(null);
+    setResult(null);
+    setSelectedPlanId(null);
     try {
       const res = await fetchRoutePlan({
         supplier,
@@ -246,8 +248,14 @@ export function useRoutePlanner(): RoutePlannerHook {
           setError(res.liveUnavailableReason);
         }
       });
+      return true;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e ?? 'route error'));
+      startTransition(() => {
+        setResult(null);
+        setSelectedPlanId(null);
+      });
+      return false;
     } finally {
       computeInFlightRef.current = false;
       setLoading(false);

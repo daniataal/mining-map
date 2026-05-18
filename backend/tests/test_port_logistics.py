@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.services.port_logistics import (
+    _country_name_from_iso2,
     _infer_subtype,
     _normalize_nearby_infrastructure,
     _normalize_unlocode_row,
@@ -9,6 +10,11 @@ from backend.services.port_logistics import (
 
 
 class PortLogisticsTests(unittest.TestCase):
+    def test_country_name_from_iso2_uses_geojson_alpha2_codes(self):
+        self.assertEqual(_country_name_from_iso2("IS"), "Iceland")
+        self.assertEqual(_country_name_from_iso2("IL"), "Israel")
+        self.assertEqual(_country_name_from_iso2("GH"), "Ghana")
+
     def test_infer_subtype_marks_maritime_terminal(self):
         subtype, confidence, note = _infer_subtype(
             "1-------",
@@ -57,6 +63,8 @@ class PortLogisticsTests(unittest.TestCase):
         entity = _normalize_unlocode_row(row, "2026-05-12T21:00:00Z")
         assert entity is not None
         self.assertEqual(entity["id"], "unlocode:GHMDP")
+        self.assertEqual(entity["country"], "Ghana")
+        self.assertEqual(entity["countryIso2"], "GH")
         self.assertEqual(entity["entityKind"], "logistics_node")
         self.assertEqual(entity["entitySubtype"], "depot")
         self.assertEqual(entity["locode"], "GHMDP")

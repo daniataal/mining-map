@@ -116,8 +116,11 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
 
   const supplierPresets = useDeferredValue(supplierPresetsRaw);
   const buyerPresets = useDeferredValue(buyerPresetsRaw);
-  const presetsPending =
-    supplierPresets !== supplierPresetsRaw || buyerPresets !== buyerPresetsRaw;
+  const supplierPresetsPending =
+    supplierPresets !== supplierPresetsRaw || supplier.country !== debouncedSupplierCountry;
+  const buyerPresetsPending =
+    buyerPresets !== buyerPresetsRaw || buyer.country !== debouncedBuyerCountry;
+  const presetsPending = supplierPresetsPending || buyerPresetsPending;
 
   const hubToggleHint = needsDestinationCountry
     ? t(
@@ -155,8 +158,8 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
         : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20';
 
   async function handleCompute() {
-    await computeRoute();
-    setStep('results');
+    const ok = await computeRoute();
+    setStep(ok ? 'results' : 'setup');
   }
 
   const isReady = supplier.lat !== 0 && buyer.lat !== 0 && shippingMethods.length > 0 && quantityTons > 0;
@@ -275,6 +278,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 pickRole={pickRole}
                 beginPick={beginPick}
                 onFlyTo={flyToLocation}
+                presetsPending={supplierPresetsPending}
               />
               <RoutePlannerLocationBlock
                 role="buyer"
@@ -289,6 +293,7 @@ function RoutePlannerPanel({ rp, presetLicensePool = [], portEntities }: RoutePl
                 onFlyTo={flyToLocation}
                 showBuyerGroups
                 requireCountry
+                presetsPending={buyerPresetsPending}
               />
             </div>
 

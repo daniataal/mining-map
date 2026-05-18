@@ -30,6 +30,7 @@ interface RoutePlannerLocationBlockProps {
   onFlyTo: (lat: number, lng: number) => void;
   showBuyerGroups?: boolean;
   requireCountry?: boolean;
+  presetsPending?: boolean;
 }
 
 function presetToLocation(preset: LocationPreset): RoutePartyLocation {
@@ -57,6 +58,7 @@ function RoutePlannerLocationBlock({
   onFlyTo,
   showBuyerGroups = false,
   requireCountry = false,
+  presetsPending = false,
 }: RoutePlannerLocationBlockProps) {
   const { t } = useI18n();
   const active = pickRole === role;
@@ -173,11 +175,16 @@ function RoutePlannerLocationBlock({
           ? t('בחר נכס, נמל, או מיקום', 'Select asset, port, or location')
           : t('בחר יעד, נמל, או מיקום', 'Select destination, port, or location')}
       </p>
-      <Select value={presetId} onValueChange={applyPreset}>
-        <SelectTrigger className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10">
+      <Select value={presetId} onValueChange={applyPreset} disabled={presetsPending}>
+        <SelectTrigger
+          className="h-9 rounded-xl text-xs font-semibold border-black/10 dark:border-white/10"
+          disabled={presetsPending}
+        >
           <SelectValue
             placeholder={
-              role === 'supplier'
+              presetsPending
+                ? t('מעדכן רשימה...', 'Updating list...')
+                : role === 'supplier'
                 ? t('בחר נכס ממפת ה-AI שלך...', 'Choose an asset from your AI map...')
                 : t('בחר נמל, מזקקה, או לקוח...', 'Select port, refinery, or buyer...')
             }

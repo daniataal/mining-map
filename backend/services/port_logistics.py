@@ -116,6 +116,8 @@ def _country_names() -> dict[str, str]:
             or properties.get("iso_a2")
             or properties.get("ISO2")
             or properties.get("iso2")
+            or properties.get("ISO3166-1-Alpha-2")
+            or properties.get("iso3166-1-alpha-2")
         ).upper()
         name = _clean_text(
             properties.get("ADMIN")

@@ -18,6 +18,8 @@ export interface RouteLeg {
   toKind?: string;
   /** Short hub name for map labels (export port, airport, rail terminal). */
   hubLabel?: string;
+  /** Backend geometry provider, e.g. osrm, searoute, corridor_fallback. */
+  geometrySource?: string;
 }
 
 export interface CostLineItem {
