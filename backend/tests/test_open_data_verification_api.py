@@ -125,6 +125,61 @@ class OpenDataVerificationApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("text/csv", res.headers.get("content-type", ""))
 
+    @patch("backend.main.get_db_connection")
+    def test_export_with_provenance_flag(self, mock_conn):
+        conn = MagicMock()
+        cursor = MagicMock()
+        mock_conn.return_value = conn
+        conn.cursor.return_value = cursor
+        cursor.fetchall.return_value = [
+            {
+                "id": "lic-1",
+                "company": "Co",
+                "country": "Kenya",
+                "region": "",
+                "commodity": "Gold",
+                "license_type": "License",
+                "status": "Active",
+                "lat": 1.0,
+                "lng": 2.0,
+                "phone_number": "",
+                "contact_person": "",
+                "public_business_phone": None,
+                "public_business_phone_source": None,
+                "public_business_phone_source_type": None,
+                "date_issued": None,
+                "sector": "mining",
+                "record_origin": "open_data",
+                "source_id": "kenya",
+                "source_name": "Kenya",
+                "source_url": None,
+                "source_record_url": None,
+                "source_updated_at": None,
+                "last_synced_at": None,
+                "manually_edited": False,
+            }
+        ]
+
+        res = self.client.get(
+            "/licenses/export?include_provenance=true",
+            headers={"Authorization": f"Bearer {self.user_token}"},
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.text
+        self.assertIn("record_origin", body)
+        self.assertIn("source_id", body)
+
+    def test_import_validation_summary(self):
+        csv_text = "company,country\n,,\n"
+        res = self.client.post(
+            "/licenses/import-text",
+            json={"csv": csv_text},
+        )
+        self.assertEqual(res.status_code, 422)
+        detail = res.json().get("detail") or {}
+        self.assertIn("message", detail)
+        self.assertGreaterEqual(detail.get("error_count", 0), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

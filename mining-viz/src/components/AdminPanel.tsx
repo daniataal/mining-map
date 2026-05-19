@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { useI18n } from '../lib/i18n';
 import { User, ActivityLog, MeetingPoint, MinerListing } from '../types';
 import { Button } from './ui/button';
@@ -9,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase } from 'lucide-react';
+import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
 
@@ -17,34 +18,76 @@ interface AdminPanelProps {
   isOpen: boolean;
   onClose: () => void;
   token?: string;
+  adminApiToken?: string;
   isFullPage?: boolean;
   currentUserId?: string | null;
 }
 
-export default function AdminPanel({ isOpen, onClose, token, isFullPage, currentUserId }: AdminPanelProps) {
+type ComtradeSyncRun = {
+  id: number;
+  status: string;
+  year?: number;
+  requests_made?: number;
+  rows_upserted?: number;
+  started_at?: string;
+  finished_at?: string | null;
+  errors?: unknown[];
+  note?: string | null;
+};
+
+type LicenseSyncRun = {
+  id: number;
+  source_id?: string | null;
+  status: string;
+  records_written?: number;
+  records_fetched?: number;
+  started_at?: string;
+  finished_at?: string | null;
+  drift_warning?: { drop_pct?: number; message?: string } | null;
+};
+
+type DataHealthPayload = {
+  status?: string;
+  license_sync_runs_latest?: LicenseSyncRun[];
+  license_drift_alerts?: LicenseSyncRun[];
+  comtrade_sync_runs?: ComtradeSyncRun[];
+  license_counts_by_country?: Array<{ country: string; license_count: number }>;
+  manually_edited_count?: number;
+  petroleum_osm_layers?: Record<string, { feature_count?: number; last_fetched_at?: string }>;
+};
+
+const DEFAULT_ADMIN_API_TOKEN =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ADMIN_API_TOKEN) || '';
+
+export default function AdminPanel({
+  isOpen,
+  onClose,
+  token,
+  adminApiToken,
+  isFullPage,
+  currentUserId,
+}: AdminPanelProps) {
     const { t } = useI18n();
     const [activeTab, setActiveTab] = useState('users');
     const [users, setUsers] = useState<User[]>([]);
     const [logs, setLogs] = useState<ActivityLog[]>([]);
     const [meetingPoints, setMeetingPoints] = useState<MeetingPoint[]>([]);
     const [minerListings, setMinerListings] = useState<MinerListing[]>([]);
-    const [syncRuns, setSyncRuns] = useState<Array<{
-        id: number;
-        source_id?: string | null;
-        status: string;
-        records_written?: number;
-        records_fetched?: number;
-        started_at?: string;
-        finished_at?: string | null;
-        error?: string | null;
-        drift_warning?: {
-            drop_pct?: number;
-            message?: string;
-        } | null;
-    }>>([]);
-    const [syncAlerts, setSyncAlerts] = useState<typeof syncRuns>([]);
+    const [syncRuns, setSyncRuns] = useState<LicenseSyncRun[]>([]);
+    const [syncAlerts, setSyncAlerts] = useState<LicenseSyncRun[]>([]);
     const [loadingSyncRuns, setLoadingSyncRuns] = useState(false);
-    
+    const [adminTokenInput, setAdminTokenInput] = useState(
+      () => adminApiToken || DEFAULT_ADMIN_API_TOKEN || sessionStorage.getItem('meridian_admin_api_token') || ''
+    );
+    const [comtradeRuns, setComtradeRuns] = useState<ComtradeSyncRun[]>([]);
+    const [loadingComtrade, setLoadingComtrade] = useState(false);
+    const [comtradeSyncing, setComtradeSyncing] = useState(false);
+    const [comtradeYear, setComtradeYear] = useState(String(new Date().getFullYear() - 2));
+    const [dataHealth, setDataHealth] = useState<DataHealthPayload | null>(null);
+    const [loadingDataHealth, setLoadingDataHealth] = useState(false);
+
+    const resolvedAdminToken = (adminApiToken || adminTokenInput || '').trim();
+
     // Activity Log per user
     const [selectedUserForLogs, setSelectedUserForLogs] = useState<User | null>(null);
     const [userLogs, setUserLogs] = useState<ActivityLog[]>([]);
@@ -63,6 +106,12 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
     const authHeaders = (): HeadersInit => {
         const h: Record<string, string> = {};
         if (token) h.Authorization = `Bearer ${token}`;
+        return h;
+    };
+
+    const adminHeaders = (): HeadersInit => {
+        const h: Record<string, string> = { ...authHeaders() as Record<string, string> };
+        if (resolvedAdminToken) h['X-Admin-Token'] = resolvedAdminToken;
         return h;
     };
 
@@ -179,6 +228,63 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
         }
     };
 
+    const fetchComtradeRuns = async () => {
+        if (!resolvedAdminToken) return;
+        setLoadingComtrade(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/comtrade/sync-runs?limit=30`, {
+                headers: adminHeaders(),
+            });
+            const data = await res.json();
+            setComtradeRuns(Array.isArray(data?.runs) ? data.runs : []);
+        } catch (err) {
+            console.error('Failed to fetch Comtrade sync runs', err);
+            setComtradeRuns([]);
+        } finally {
+            setLoadingComtrade(false);
+        }
+    };
+
+    const triggerComtradeSync = async () => {
+        if (!resolvedAdminToken) {
+            toast.error(t('נדרש Admin API token', 'Admin API token required (X-Admin-Token)'));
+            return;
+        }
+        setComtradeSyncing(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/comtrade/sync`, {
+                method: 'POST',
+                headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ year: parseInt(comtradeYear, 10) || undefined }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.status === 'error') {
+                throw new Error(data.message || data.reason || res.statusText);
+            }
+            toast.success(t('סנכרון Comtrade הושלם', 'Comtrade sync finished'));
+            await fetchComtradeRuns();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err));
+        } finally {
+            setComtradeSyncing(false);
+        }
+    };
+
+    const fetchDataHealth = async () => {
+        if (!resolvedAdminToken) return;
+        setLoadingDataHealth(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/admin/data-health`, { headers: adminHeaders() });
+            const data = await res.json();
+            setDataHealth(data);
+        } catch (err) {
+            console.error('Failed to fetch data health', err);
+            setDataHealth(null);
+        } finally {
+            setLoadingDataHealth(false);
+        }
+    };
+
     const fetchSyncRuns = async () => {
         if (!token?.trim()) return;
         setLoadingSyncRuns(true);
@@ -208,8 +314,18 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
             fetchData('/meeting-points', setMeetingPoints);
             fetchData('/miner-listings', setMinerListings);
             fetchSyncRuns();
+            if (resolvedAdminToken) {
+                fetchComtradeRuns();
+                fetchDataHealth();
+            }
         }
-    }, [isOpen, isFullPage, token]);
+    }, [isOpen, isFullPage, token, resolvedAdminToken]);
+
+    useEffect(() => {
+        if (adminTokenInput.trim()) {
+            sessionStorage.setItem('meridian_admin_api_token', adminTokenInput.trim());
+        }
+    }, [adminTokenInput]);
 
     const fetchUserLogs = async (user: User) => {
         setSelectedUserForLogs(user);
@@ -254,6 +370,12 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                         </TabsTrigger>
                         <TabsTrigger value="open-data" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideDatabase className="w-4 h-4" /> {t("נתונים פתוחים", "Open Data")}
+                        </TabsTrigger>
+                        <TabsTrigger value="comtrade" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
+                            <LucideShip className="w-4 h-4" /> Comtrade
+                        </TabsTrigger>
+                        <TabsTrigger value="data-health" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
+                            <LucideActivity className="w-4 h-4" /> {t('בריאות נתונים', 'Data health')}
                         </TabsTrigger>
                     </TabsList>
                 </div>
@@ -319,6 +441,18 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                     </TabsContent>
 
                     <TabsContent value="open-data" className="h-full m-0 p-6 overflow-y-auto space-y-6">
+                        <Card className="bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 shadow-xl p-4">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                {t('Admin API token', 'Admin API token')} (X-Admin-Token)
+                            </p>
+                            <Input
+                                type="password"
+                                value={adminTokenInput}
+                                onChange={(e) => setAdminTokenInput(e.target.value)}
+                                placeholder={t('הדבק ADMIN_TOKEN', 'Paste ADMIN_TOKEN from .env')}
+                                className="font-mono text-xs"
+                            />
+                        </Card>
                         <Card className="bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 shadow-2xl">
                             <CardHeader className="flex flex-row items-center justify-between border-b border-black/5 dark:border-white/5 pb-6">
                                 <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
@@ -391,6 +525,127 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                                 </CardContent>
                             </Card>
                         )}
+                    </TabsContent>
+
+                    <TabsContent value="comtrade" className="h-full m-0 p-6 overflow-y-auto space-y-6">
+                        <Card className="bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 shadow-2xl">
+                            <CardHeader className="flex flex-row items-center justify-between border-b border-black/5 dark:border-white/5 pb-6">
+                                <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                                    UN Comtrade HS27
+                                </CardTitle>
+                                <motion.div className="flex items-center gap-2">
+                                    <Input
+                                        className="w-20 h-8 text-xs font-mono"
+                                        value={comtradeYear}
+                                        onChange={(e) => setComtradeYear(e.target.value)}
+                                        placeholder="2023"
+                                    />
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={triggerComtradeSync}
+                                        disabled={comtradeSyncing || !resolvedAdminToken}
+                                        className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black uppercase text-[10px]"
+                                    >
+                                        {comtradeSyncing ? t('מסנכרן...', 'Syncing...') : t('סנכרן', 'Sync now')}
+                                    </Button>
+                                    <Button type="button" size="sm" variant="outline" onClick={fetchComtradeRuns} disabled={loadingComtrade}>
+                                        {t('רענן', 'Refresh')}
+                                    </Button>
+                                </motion.div>
+                            </CardHeader>
+                            <CardContent className="pt-6 overflow-x-auto">
+                                {!resolvedAdminToken && (
+                                    <p className="text-sm text-slate-500 mb-4">
+                                        {t('הגדר Admin API token בלשונית Open Data', 'Set Admin API token on the Open Data tab first.')}
+                                    </p>
+                                )}
+                                <Table className="min-w-[560px]">
+                                    <TableHeader>
+                                        <TableRow className="border-black/5 dark:border-white/5 hover:bg-transparent">
+                                            <TableHead className="text-[9px] font-black uppercase tracking-widest text-slate-500">Year</TableHead>
+                                            <TableHead className="text-[9px] font-black uppercase tracking-widest text-slate-500">Status</TableHead>
+                                            <TableHead className="text-[9px] font-black uppercase tracking-widest text-slate-500">Rows</TableHead>
+                                            <TableHead className="text-[9px] font-black uppercase tracking-widest text-slate-500">Finished</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {comtradeRuns.length === 0 && !loadingComtrade && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="text-slate-500 text-sm">
+                                                    {t('אין הרצות Comtrade', 'No Comtrade sync runs yet. Requires COMTRADE_API_KEY.')}
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                        {comtradeRuns.map((run) => (
+                                            <TableRow key={run.id} className="border-black/5 dark:border-white/5">
+                                                <TableCell className="font-mono text-[10px]">{run.year ?? '—'}</TableCell>
+                                                <TableCell>
+                                                    <Badge className={run.status === 'success' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}>
+                                                        {run.status}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-[10px] font-bold">{run.rows_upserted ?? 0}</TableCell>
+                                                <TableCell className="text-[10px] text-slate-500">
+                                                    {run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    <TabsContent value="data-health" className="h-full m-0 p-6 overflow-y-auto space-y-6">
+                        <Card className="bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 shadow-2xl">
+                            <CardHeader className="flex flex-row items-center justify-between border-b border-black/5 dark:border-white/5 pb-6">
+                                <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                                    {t('בריאות נתונים', 'Data health')}
+                                </CardTitle>
+                                <Button type="button" size="sm" variant="outline" onClick={fetchDataHealth} disabled={loadingDataHealth || !resolvedAdminToken}>
+                                    {loadingDataHealth ? t('טוען...', 'Loading...') : t('רענן', 'Refresh')}
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="pt-6 space-y-6">
+                                {!resolvedAdminToken ? (
+                                    <p className="text-sm text-slate-500">
+                                        {t('נדרש Admin API token', 'Admin API token required.')}
+                                    </p>
+                                ) : dataHealth ? (
+                                    <>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            <motion.div className="rounded-xl border border-black/5 dark:border-white/5 p-3">
+                                                <p className="text-[9px] uppercase text-slate-500 font-black">Manual edits</p>
+                                                <p className="text-lg font-black">{dataHealth.manually_edited_count ?? 0}</p>
+                                            </motion.div>
+                                            {dataHealth.petroleum_osm_layers &&
+                                                Object.entries(dataHealth.petroleum_osm_layers).map(([layer, stats]) => (
+                                                    <motion.div key={layer} className="rounded-xl border border-black/5 dark:border-white/5 p-3">
+                                                        <p className="text-[9px] uppercase text-slate-500 font-black">OSM {layer}</p>
+                                                        <p className="text-lg font-black">{stats.feature_count ?? 0}</p>
+                                                    </motion.div>
+                                                ))}
+                                        </motion.div>
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                                {t('רישיונות לפי מדינה (20 ראשונות)', 'Licenses by country (top 20)')}
+                                            </p>
+                                            <div className="max-h-48 overflow-y-auto font-mono text-[10px] space-y-1">
+                                                {(dataHealth.license_counts_by_country || []).slice(0, 20).map((row) => (
+                                                    <motion.div key={row.country} className="flex justify-between gap-4">
+                                                        <span>{row.country}</span>
+                                                        <span className="text-amber-600">{row.license_count}</span>
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-sm text-slate-500">{t('לחץ רענן', 'Click Refresh to load.')}</p>
+                                )}
+                            </CardContent>
+                        </Card>
                     </TabsContent>
 
                     <TabsContent value="logs" className="h-full m-0 p-6 overflow-y-auto">
