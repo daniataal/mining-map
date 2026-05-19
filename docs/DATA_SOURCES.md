@@ -38,6 +38,8 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Canada (north) | oil_and_gas | `canada_northern_oil_gas_rights` | SAC-ISC open data |
 | Norway | oil_and_gas | `norway_npd_production_licences_current` | NPD Factmaps |
 | Finland | mining | `finland_tukes_active_mining_areas` | Tukes via GTK |
+| Colombia | mining | `colombia_anm_titulo_vigente` | ANM ServiciosANM layer 4, capped 2000 |
+| Peru | mining | `peru_ingemmet_derechos_mineros` | INGEMMET Derechos Mineros; ~2k cap (no offset pagination) |
 | Australia (QLD) | mining | `australia_queensland_mineral_tenement` | State only, capped |
 | Global | mining | `usgs_mrds_global` | **Fallback** — sites/deposits, not licences; updates ceased ~2011 |
 | Global | oil_and_gas | `megagiant_oil_gas_fields_world` | **Fallback** — giant fields only |
@@ -52,6 +54,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
+| `comtrade_scheduled_sync.py` | Scheduled HS27 refresh | UN Comtrade keyed API | `comtrade_sync_runs`; worker + admin sync |
 | Bundled `licenses.json` | Legacy snapshot | Deprecated for prod UX | `bundled_json`; excluded when `prefer_open_data=true` |
 
 ### 2.3 Company / deal signals (in app today)
@@ -114,6 +117,8 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 ### 5.1 Tables (implemented / stubbed)
 
 - **`license_sync_runs`** — one row per `open_data_sync` / source run: `source_id`, `started_at`, `finished_at`, `status`, `records_fetched`, `records_written`, `records_skipped_manual`, `error`.
+- **`comtrade_sync_runs`** — one row per scheduled HS27 Comtrade refresh: `year`, `requests_made`, `rows_upserted`, `errors`.
+- **`petroleum_osm_features`** — stub for future nightly OSM pipeline/refinery snapshots (geometry + tags); live layers still use Overpass.
 - **`licenses.manually_edited`** — when `TRUE`, automated upsert (ArcGIS sync, bulk CSV) must **not** overwrite the row (`UPSERT ... WHERE manually_edited IS NOT TRUE`).
 
 ### 5.2 Verification UI (roadmap)
@@ -146,6 +151,17 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Sync observability** | Log runs; admin dashboard for last sync per source. |
 | **Verification v1** | Dossier “Open source” block links `source_record_url`; coverage API linked from UI. |
 
+### Weeks 9–12 (breadth) — Phase 3 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Central Asia hydrocarbons** | Done | KZ ArcGIS hub unverified (timeout); TM/UZ `WORLD_COVERAGE_OVERRIDES`. |
+| **EU mining** | Done | Sweden SGU OGC + Poland PGI portal refs in `WORLD_COVERAGE_OVERRIDES` (no ArcGIS sync). |
+| **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `peru_ingemmet_derechos_mineros` (Peru capped ~2k, no offset pagination). |
+| **Comtrade HS27** | Done | Daily worker + admin endpoints; 429/503 backoff in `ingest_oil_trades._fetch_comtrade_bulk`. |
+| **GLEIF LEI** | Done | Free public API lookup endpoint. |
+| **OSM petroleum DB** | Stub | `petroleum_osm_features` table created on init; nightly worker not wired. |
+
 ### Weeks 5–8 (breadth) — Phase 2 implemented (2026-05-19)
 
 | Workstream | Status | Notes |
@@ -155,9 +171,11 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Kazakhstan mining** | Done (starter) | `KZ_EGOV_API_KEY` in `.env.example`; robust `normalize_egov_row`; `POST /api/admin/kazakhstan-mining/sync`; mocked HTTP tests. |
 | **OSM petroleum** | Done (starter) | `GET /api/petroleum/osm-layers/{pipelines\|refineries}`; Overpass tile cache; opt-in map layers labeled “OpenStreetMap (community)”. |
 | **SEC EDGAR linker** | Done (starter) | `GET /api/companies/{name}/sec-filings`; dossier SEC link; `SEC_EDGAR_USER_AGENT`; mocked ticker JSON tests. |
-| **Central Asia hydrocarbons** | Not started | KZ ArcGIS verify; Turkmenistan/Uzbekistan portal research → Phase 3. |
-| **EU mining / LatAm** | Not started | INSPIRE WFS, Colombia ANM, Peru INGEMMET → Phase 3. |
-| **Comtrade refresh** | Not started | Scheduled HS27 with quota backoff → Phase 3. |
+| **Central Asia hydrocarbons** | Done (honest gaps) | KZ oil: `official_portal_only` + arcgis.gis-center.kz timeout note; TM/UZ portal refs in `WORLD_COVERAGE_OVERRIDES`. |
+| **EU mining / LatAm** | Done (partial) | Sweden SGU OGC documented (not ArcGIS sync); Colombia ANM + Peru INGEMMET in `OPEN_DATA_SOURCES` (verified 2026-05). |
+| **Comtrade refresh** | Done | `comtrade_scheduled_sync.py`, `comtrade_sync_runs`, admin sync + sync-runs, `comtrade-sync-worker` in docker-compose. |
+| **GLEIF LEI** | Done (starter) | `GET /api/companies/{name}/lei` via GLEIF public API. |
+| **OSM petroleum persist** | Stub | `petroleum_osm_features` table on init; nightly worker deferred. |
 
 ### Parallel agents (if splitting work)
 
@@ -191,6 +209,14 @@ curl -X POST "http://localhost:8000/api/admin/open-data/sync" \
 
 # Admin export with provenance
 curl -s "http://localhost:8000/api/admin/licenses/export" -H "X-Admin-Token: $ADMIN_TOKEN" -o licenses_admin_export.csv
+
+# Comtrade HS27 sync (requires COMTRADE_API_KEY)
+curl -X POST "http://localhost:8000/api/admin/comtrade/sync" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"year": 2023}'
+curl -s "http://localhost:8000/api/admin/comtrade/sync-runs" -H "X-Admin-Token: $ADMIN_TOKEN" | jq .
+
+# GLEIF LEI lookup
+curl -s "http://localhost:8000/api/companies/Newmont/lei" | jq .
 ```
 
 ---
@@ -203,5 +229,9 @@ curl -s "http://localhost:8000/api/admin/licenses/export" -H "X-Admin-Token: $AD
 | `backend/services/ingest/opec_gulf_sync.py` | Gulf/OPEC reference |
 | `backend/services/petroleum_infrastructure.py` | Mapbox oilmap layers |
 | `backend/services/ingest/gov_procurement_sync.py` | USAspending + `gov_procurement_sync_runs` |
+| `backend/services/ingest/comtrade_scheduled_sync.py` | Comtrade HS27 + `comtrade_sync_runs` |
+| `backend/services/gleif_lookup.py` | GLEIF LEI public API |
+| `backend/services/petroleum_osm_store.py` | `petroleum_osm_features` table stub |
+| `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |

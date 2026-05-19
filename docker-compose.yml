@@ -158,6 +158,28 @@ services:
       redis:
         condition: service_started
 
+  comtrade-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-comtrade-sync-worker
+    restart: always
+    command: ["python", "comtrade_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - COMTRADE_API_KEY=${COMTRADE_API_KEY:-}
+      - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
+      - COMTRADE_SYNC_INTERVAL_SECONDS=${COMTRADE_SYNC_INTERVAL_SECONDS:-86400}
+      - COMTRADE_SYNC_BACKOFF_SECONDS=${COMTRADE_SYNC_BACKOFF_SECONDS:-3600}
+      - COMTRADE_SYNC_YEAR=${COMTRADE_SYNC_YEAR:-}
+      - COMTRADE_SYNC_SLEEP_SECONDS=${COMTRADE_SYNC_SLEEP_SECONDS:-1.2}
+    depends_on:
+      db:
+        condition: service_healthy
+
   redis:
     image: redis:alpine
     container_name: mining-redis
