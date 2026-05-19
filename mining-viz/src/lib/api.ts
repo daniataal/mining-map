@@ -655,6 +655,61 @@ export async function getGovProcurement(
   return data;
 }
 
+export type EuProcurementNotice = {
+  notice_id: string;
+  title?: string;
+  buyer?: string;
+  country?: string;
+  cpv?: string;
+  award_value?: number;
+  published_at?: string;
+  source_url?: string;
+};
+
+export type EuProcurementResponse = {
+  source?: string;
+  sourceUrl?: string;
+  scope?: string;
+  queryCompany?: string;
+  countryFilter?: string;
+  cpvBucket?: string;
+  cpvBucketLabel?: string;
+  licenseCommodity?: string;
+  limitations?: string[];
+  warnings?: string[];
+  notices?: EuProcurementNotice[];
+  summary?: { notice_count?: number; countries?: string[] };
+};
+
+/** EU TED notices matched to a licensee (fuzzy company name). */
+export async function getEuProcurement(
+  entityId: string,
+  entityKind = 'license',
+  options: { cpvBucket?: string; limit?: number } = {},
+): Promise<EuProcurementResponse> {
+  const { data } = await apiClient.get<EuProcurementResponse>(
+    `/entities/${encodeURIComponent(entityId)}/eu-procurement`,
+    {
+      params: {
+        entity_kind: entityKind,
+        ...(options.cpvBucket ? { cpv_bucket: options.cpvBucket } : {}),
+        ...(options.limit ? { limit: options.limit } : {}),
+      },
+    },
+  );
+  if (!data || typeof data !== 'object') {
+    return {
+      source: 'TED (EU procurement)',
+      sourceUrl: 'https://ted.europa.eu/',
+      limitations: [],
+      warnings: ['Unexpected response from eu-procurement endpoint.'],
+      notices: [],
+      summary: { notice_count: 0, countries: [] },
+    };
+  }
+  return data;
+}
+
 /** Browse U.S. federal contractors with commodity-tagged awards (database-backed). */
 export async function getGovProcurementCompanies(
   options: {
@@ -1063,13 +1118,16 @@ function isWorldCoverageResponse(value: unknown): value is WorldCoverageResponse
   );
 }
 
-export const useWorldCoverage = (enabled = true, region?: string) => {
+export const useWorldCoverage = (enabled = true, region?: string, country?: string) => {
   return useQuery<WorldCoverageResponse>({
-    queryKey: ['world-coverage', region ?? 'all'],
+    queryKey: ['world-coverage', region ?? 'all', country ?? ''],
     queryFn: async () => {
       try {
+        const params: Record<string, string> = {};
+        if (region) params.region = region;
+        if (country?.trim()) params.country = country.trim();
         const { data } = await apiClient.get<unknown>('/api/open-data/coverage/world', {
-          params: region ? { region } : undefined,
+          params: Object.keys(params).length ? params : undefined,
         });
         if (isWorldCoverageResponse(data)) return data;
         console.warn('[useWorldCoverage] Invalid coverage payload; falling back to empty coverage.', data);

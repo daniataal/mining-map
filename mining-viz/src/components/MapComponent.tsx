@@ -20,7 +20,9 @@ import {
 } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
+import { useLeafletContext } from '@react-leaflet/core';
 import L from 'leaflet';
+import 'leaflet.markercluster';
 import 'leaflet/dist/leaflet.css';
 import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
@@ -43,11 +45,13 @@ import {
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
+import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
+import { createLicenseClusterIconFactory } from '../lib/mapClusterIcons';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
@@ -64,8 +68,15 @@ import {
   countriesWithVisibleLicenses,
   countryLicenseCounts,
 } from '../lib/countriesWithVisibleLicenses';
-import { getLicenseRenderKey } from '../lib/licenseRenderKey';
-import PopupForm from './PopupForm';
+import {
+  createLicenseMarkerIconCache,
+  markerIconSignature,
+} from '../lib/licenseMarkerIconCache';
+import {
+  asLicenseMarkerClusterGroup,
+  type LicenseMarkerClusterGroup,
+} from '../lib/markerClusterTypes';
+import LicenseMapPopupController from './map/LicenseMapPopupController';
 import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
 import {
   ESG_CONSERVATION_ZONES,
@@ -95,10 +106,18 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 export { ESG_CONSERVATION_ZONES, getEsgZoneIntersection };
 
-const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean) => {
+const createCustomIcon = (
+    color: string,
+    isHovered: boolean,
+    isEsgRisk: boolean | undefined,
+    isDark: boolean,
+) => {
     const isGold = color === '#FFD700';
     const size = isHovered ? 24 : (isGold ? 14 : 10);
-    let border = isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)');
+    const lightStroke = isHovered ? '#0f172a' : 'rgba(15, 23, 42, 0.72)';
+    let border = isDark
+        ? (isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)'))
+        : (isHovered ? `2px solid ${lightStroke}` : `1.5px solid ${lightStroke}`);
 
     let boxShadow;
     if (isEsgRisk) {
@@ -157,7 +176,7 @@ const getMarkerColor = (
 
     if (sector) {
       const s = sector.toLowerCase();
-      if (s === 'oil_and_gas' || s === 'oil') return '#000000';
+      if (s === 'oil_and_gas' || s === 'oil') return '#1e40af';
       if (s === 'suppliers' || s === 'logistics') return '#6366f1';
       if (s === 'ports') return '#0ea5e9';
     }
@@ -169,7 +188,7 @@ const getMarkerColor = (
     if (c.includes('bauxite')) return '#f87171';
     if (c.includes('manganese')) return '#a78bfa';
     if (c.includes('lithium')) return '#34d399';
-    if (c.includes('oil') || c.includes('petroleum')) return '#000000';
+    if (c.includes('oil') || c.includes('petroleum')) return '#1e40af';
     if (c.includes('gas')) return '#94a3b8';
     return '#64748b';
 };
@@ -233,6 +252,25 @@ interface MapComponentProps {
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
   countryFocusBoundsTrigger?: number;
+}
+
+/** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
+function ClusterGroupRefBridge({
+    clusterGroupRef,
+}: {
+    clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
+}) {
+    const { layerContainer } = useLeafletContext();
+    useEffect(() => {
+        const group = asLicenseMarkerClusterGroup(layerContainer);
+        clusterGroupRef.current = group;
+        return () => {
+            if (clusterGroupRef.current === group) {
+                clusterGroupRef.current = null;
+            }
+        };
+    }, [layerContainer, clusterGroupRef]);
+    return null;
 }
 
 const MapEffect = ({
@@ -474,6 +512,8 @@ export default function MapComponent({
     const mapRef = useRef<L.Map | null>(null);
     const canvasVesselLayerRef = useRef<CanvasVesselLayer | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
+    const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
+    const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
     const prevSelectedIdRef = useRef<string | null>(null);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
 
@@ -726,20 +766,19 @@ export default function MapComponent({
         return { lat: j._displayLat, lng: j._displayLng };
     }, [selectedItem, displayData, mapDisplayData]);
 
-    // Selection-driven side effects:
-    //   - toggle a CSS class on the previous & next markers (no setIcon swap
-    //     because that would replace the marker DOM node and collapse any
-    //     active spiderfy);
-    //   - open the popup. For sidebar-driven selection we wait one tick so
-    //     the camera flyTo can start; for marker clicks the popup is already
-    //     opened synchronously inside the click handler below, so the
-    //     openPopup call here is a harmless no-op.
+    const setMarkerSelectedVisual = useCallback((marker: L.Marker | undefined, selected: boolean) => {
+        const el = marker?.getElement();
+        if (!el) return;
+        el.classList.toggle(SELECTED_CLASS, selected);
+        const pin = el.querySelector('.refinery-marker-pin, .oil-field-marker-pin');
+        if (pin) pin.classList.toggle('is-selected', selected);
+    }, []);
+
+    // Selection highlight only — popup open/close is handled by LicenseMapPopupController.
     useEffect(() => {
         const prevId = prevSelectedIdRef.current;
         if (prevId && prevId !== selectedItem?.id) {
-            const prevMarker = markerRefs.current[prevId];
-            const el = prevMarker?.getElement();
-            if (el) el.classList.remove(SELECTED_CLASS);
+            setMarkerSelectedVisual(markerRefs.current[prevId], false);
         }
 
         if (!selectedItem) {
@@ -747,21 +786,9 @@ export default function MapComponent({
             return;
         }
 
-        const marker = markerRefs.current[selectedItem.id];
-        const el = marker?.getElement();
-        if (el) el.classList.add(SELECTED_CLASS);
-        if (marker && !marker.isPopupOpen?.()) {
-            // Defer openPopup so flyTo (from the sidebar path) and any
-            // pending cluster animation can settle. If the popup is already
-            // open from a synchronous marker-click handler this is a no-op.
-            const handle = setTimeout(() => {
-                if (markerRefs.current[selectedItem.id] === marker) marker.openPopup();
-            }, 60);
-            prevSelectedIdRef.current = selectedItem.id;
-            return () => clearTimeout(handle);
-        }
+        setMarkerSelectedVisual(markerRefs.current[selectedItem.id], true);
         prevSelectedIdRef.current = selectedItem.id;
-    }, [selectedItem?.id]);
+    }, [selectedItem?.id, setMarkerSelectedVisual]);
 
     const borderCountries = useMemo(() => {
         if (isRoutePlannerView) {
@@ -804,11 +831,11 @@ export default function MapComponent({
                   }
                 : {
                       className: 'map-country-border map-country-border--light',
-                      fillColor: '#06b6d4',
-                      color: '#06b6d4',
-                      weight: 1,
-                      opacity: 0.5,
-                      fillOpacity: 0.02,
+                      fillColor: '#0284c7',
+                      color: '#0369a1',
+                      weight: 2,
+                      opacity: 0.85,
+                      fillOpacity: 0.04,
                       lineCap: 'round' as const,
                       lineJoin: 'round' as const,
                   },
@@ -842,41 +869,67 @@ export default function MapComponent({
         return countryBorderPathStyle;
     }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
-    const renderedMarkers = useMemo(() => {
-        if (!onGroundVisible) return null;
-        return mapDisplayData.map((item, index) => {
-            if (item._displayLat == null || item._displayLng == null) return null;
+    const licenseMarkerIcons = useMemo(() => {
+        const cache = markerIconCacheRef.current;
+        const icons = new Map<string, L.DivIcon>();
+        const validIds = new Set<string>();
+        for (const item of mapDisplayData) {
+            if (item._displayLat == null || item._displayLng == null) continue;
+            validIds.add(item.id);
             const annotation = userAnnotations[item.id] || {};
-            const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
+            const color = getMarkerColor(
+                annotation.commodity || item.commodity,
+                annotation.status,
+                item.sector,
+                item.entitySubtype,
+            );
             const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
             const isEsgRisk = esgZone !== null;
-            const esgZoneName = esgZone?.name;
-            const selected = selectedItem?.id === item.id;
             const refineryPin = isRefineryEntity(item);
             const oilFieldPin = !refineryPin && isOilFieldEntity(item);
-            const markerIcon = refineryPin
-              ? createRefineryMapIcon(selected)
-              : oilFieldPin
-                ? createOilFieldMapIcon(selected)
-                : createCustomIcon(color, false, isEsgRisk);
+            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
+            icons.set(
+                item.id,
+                cache.get(item.id, sig, () =>
+                    refineryPin
+                        ? createRefineryMapIcon()
+                        : oilFieldPin
+                          ? createOilFieldMapIcon()
+                          : createCustomIcon(color, false, isEsgRisk, isDark),
+                ),
+            );
+        }
+        cache.prune(validIds);
+        return icons;
+    }, [mapDisplayData, userAnnotations, isDark]);
+
+    const licenseClusterIconCreate = useMemo(
+        () => createLicenseClusterIconFactory(isDark),
+        [isDark],
+    );
+
+    const renderedMarkers = useMemo(() => {
+        if (!onGroundVisible) return null;
+        return mapDisplayData.map((item) => {
+            if (item._displayLat == null || item._displayLng == null) return null;
+            const markerIcon = licenseMarkerIcons.get(item.id);
+            if (!markerIcon) return null;
 
             return (
                 <Marker
-                    key={getLicenseRenderKey(item, index)}
+                    key={item.id}
                     position={[item._displayLat, item._displayLng]}
                     icon={markerIcon}
                     ref={(el) => {
-                        if (!el) return;
-                        markerRefs.current[item.id] = el;
-                        if (selectedItem?.id === item.id) {
-                            const root = el.getElement();
-                            if (root) root.classList.add(SELECTED_CLASS);
+                        if (!el) {
+                            delete markerRefs.current[item.id];
+                            return;
                         }
+                        markerRefs.current[item.id] = el;
                     }}
                     eventHandlers={{
                         click: (e) => {
                             L.DomEvent.stopPropagation(e);
-                            e.target.openPopup();
                             onSelectMaritimeVessel(null);
                             setSelectedItem(item);
                         },
@@ -895,49 +948,16 @@ export default function MapComponent({
                             )}
                         </div>
                     </Tooltip>
-                    <Popup className="custom-popup" minWidth={360} maxWidth={380}>
-                        <PopupForm 
-                          item={item}
-                          annotation={annotation}
-                          updateAnnotation={updateAnnotation}
-                          onDelete={() => deleteLicense(item.id)}
-                          onOpenDossier={() => handleOpenDossier(item)}
-                          isOpen={selectedItem?.id === item.id}
-                          isInDdQueue={isInDdQueue?.(item.id) ?? false}
-                          onAddToDueDiligence={
-                            onAddToDueDiligence
-                              ? () => onAddToDueDiligence(item.id)
-                              : undefined
-                          }
-                          onRemoveFromDueDiligence={
-                            onRemoveFromDueDiligence
-                              ? () => onRemoveFromDueDiligence(item.id)
-                              : undefined
-                          }
-                          isEsgRisk={isEsgRisk}
-                          esgZoneName={esgZoneName}
-                          dealRoomTitle={
-                            getDealRoomForLicense?.(item.id, item.entityKind || 'license')?.title
-                          }
-                        />
-                    </Popup>
                 </Marker>
             );
         });
     }, [
+        licenseMarkerIcons,
         mapDisplayData,
         userAnnotations,
-        selectedItem,
         onSelectMaritimeVessel,
         setSelectedItem,
-        updateAnnotation,
-        deleteLicense,
-        handleOpenDossier,
-        isInDdQueue,
-        onAddToDueDiligence,
-        onRemoveFromDueDiligence,
-        getDealRoomForLicense,
-        onGroundVisible
+        onGroundVisible,
     ]);
 
     const handleMaritimeVesselClick = useCallback(
@@ -1029,7 +1049,7 @@ export default function MapComponent({
                 </div>
             )}
             {isMaritimeMapView && (
-                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
+                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10">
@@ -1498,6 +1518,20 @@ export default function MapComponent({
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <LicenseMapPopupController
+                    selectedItem={selectedItem}
+                    mapFlyTrigger={mapFlyTrigger}
+                    markerRefs={markerRefs}
+                    clusterGroupRef={clusterGroupRef}
+                    userAnnotations={userAnnotations}
+                    updateAnnotation={updateAnnotation}
+                    deleteLicense={deleteLicense}
+                    handleOpenDossier={handleOpenDossier}
+                    isInDdQueue={isInDdQueue}
+                    onAddToDueDiligence={onAddToDueDiligence}
+                    onRemoveFromDueDiligence={onRemoveFromDueDiligence}
+                    getDealRoomForLicense={getDealRoomForLicense}
+                />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 <RoutePlannerFlyEffect
                   target={isRoutePlannerView ? routePlannerFlyTarget : null}
@@ -1575,11 +1609,17 @@ export default function MapComponent({
                         </LayersControl.Overlay>
                     )}
                     {isOilAndGasView && onGroundVisible && (
-                        <PetroleumMapLayers
-                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
-                            mapZoom={petroleumDetailZoom}
-                            enabled={isOilAndGasView && onGroundVisible}
-                        />
+                        <>
+                            <PetroleumMapLayers
+                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                mapZoom={petroleumDetailZoom}
+                                enabled={isOilAndGasView && onGroundVisible}
+                            />
+                            <OsmPetroleumMapLayers
+                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                enabled={isOilAndGasView && onGroundVisible}
+                            />
+                        </>
                     )}
                     {vesselsVisible && isMaritimeLayerEnabled && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>
@@ -1606,8 +1646,15 @@ export default function MapComponent({
                 {onGroundVisible && (
                 <MarkerClusterGroup
                     showCoverageOnHover={false}
-                    spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
+                    iconCreateFunction={licenseClusterIconCreate}
+                    spiderLegPolylineOptions={{
+                        weight: 1.5,
+                        color: isDark ? '#64748b' : '#334155',
+                        opacity: isDark ? 0.5 : 0.65,
+                        interactive: false,
+                    }}
                 >
+                    <ClusterGroupRefBridge clusterGroupRef={clusterGroupRef} />
                     {renderedMarkers}
                 </MarkerClusterGroup>
                 )}

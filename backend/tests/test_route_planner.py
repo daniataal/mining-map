@@ -156,7 +156,10 @@ class RoutePlannerTests(unittest.TestCase):
         )
         air_leg = next(leg for leg in result["route"]["legs"] if leg["method"] == "air")
         self.assertGreater(len(air_leg["path"]), 10)
-        self.assertEqual(air_leg["geometry_source"], "great_circle")
+        self.assertEqual(air_leg["geometry_source"], "air_great_circle_trunk")
+        self.assertIn("routing_engine", air_leg)
+        self.assertIn("limitations", air_leg)
+        self.assertTrue(air_leg["routing_engine"])
 
     def test_landlocked_origin_returns_alternatives_with_distinct_trunks(self):
         result = plan_route(
@@ -662,8 +665,9 @@ class RoutePlannerTests(unittest.TestCase):
         if road_to_tlv["geometry_source"] == "osrm":
             self.assertGreaterEqual(len(road_to_tlv["path"]), 4)
 
+    @patch("backend.services.routing_geometry.fetch_rail_corridor_geometry", return_value=None)
     @patch("backend.services.routing_geometry.requests.get")
-    def test_hamburg_frankfurt_rail_avoids_antwerp_hub(self, mock_get: MagicMock):
+    def test_hamburg_frankfurt_rail_avoids_antwerp_hub(self, mock_get: MagicMock, _mock_rail: MagicMock):
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = _osrm_mock_response(distance_m=420_000, duration_s=14_400)
@@ -699,10 +703,16 @@ class RoutePlannerTests(unittest.TestCase):
         self.assertNotIn("Antwerp", notes_text)
         self.assertIn("Hamburg", notes_text)
         self.assertIn("Frankfurt", notes_text)
-        self.assertIn(trunk["geometry_source"], {"rail_osrm", "rail_hub", "osrm"})
+        self.assertIn(
+            trunk["geometry_source"],
+            {"rail_osm", "rail_approximation_road", "rail_osrm", "rail_hub", "osrm"},
+        )
+        self.assertIn("routing_engine", trunk)
+        self.assertIsInstance(trunk.get("limitations"), list)
         self.assertGreater(len(trunk["path"]), 2)
 
-    def test_nigeria_inland_origin_no_ocean_rail_polyline(self):
+    @patch("backend.services.routing_geometry.fetch_rail_corridor_geometry", return_value=None)
+    def test_nigeria_inland_origin_no_ocean_rail_polyline(self, _mock_rail: MagicMock):
         result = plan_route(
             {
                 "product": "Gold concentrate",

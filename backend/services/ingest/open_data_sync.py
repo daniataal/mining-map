@@ -237,6 +237,7 @@ class ArcGISOpenDataSource:
     max_records: Optional[int] = None
     page_size: int = 250
     request_pause_seconds: float = 0.0
+    supports_result_offset: bool = True
     sync_contacts: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -492,6 +493,72 @@ def _finland_active_mining_areas_source() -> ArcGISOpenDataSource:
     )
 
 
+def _colombia_anm_titulo_vigente_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="colombia_anm_titulo_vigente",
+        source_name="Colombia ANM — Active mining titles (Titulo Vigente)",
+        layer_url="https://geo.anm.gov.co/webgis/rest/services/ANM/ServiciosANM/MapServer/4",
+        sector="mining",
+        country="Colombia",
+        external_id_fields=("CODIGO_EXPEDIENTE", "OBJECTID"),
+        company_fields=("NOMBRE_DE_TITULAR", "IDENTIFICACION_TITULARES"),
+        commodity_fields=("MINERALES",),
+        license_type_fields=("MODALIDAD", "ETAPA"),
+        status_fields=("ESTADO",),
+        issued_fields=("FECHA_DE_INSCRIPCION",),
+        updated_fields=("FECHA_TERMINACION",),
+        region_builder=_fixed_region("Colombia"),
+        default_commodity="Minerals",
+        default_license_type="Mining title",
+        default_status="Active",
+        order_by="OBJECTID DESC",
+        max_records=2000,
+        page_size=250,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "americas",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Colombia",
+            "summary_note": "ANM ServiciosANM MapServer layer 4 (Titulo Vigente); verified query 2026-05.",
+        },
+    )
+
+
+def _peru_ingemmet_derechos_mineros_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="peru_ingemmet_derechos_mineros",
+        source_name="Peru INGEMMET — Mining rights (Derechos Mineros)",
+        layer_url="https://geocatmin.ingemmet.gob.pe/arcgis/rest/services/WGS84/SERV_CATASTRO_MINERO_DERMIN/MapServer/0",
+        sector="mining",
+        country="Peru",
+        external_id_fields=("CG_CODIGO", "TI_CODTIT", "OBJECTID"),
+        company_fields=("NJ_NOMSOC", "PE_NOMDER"),
+        commodity_fields=("PE_METALI",),
+        license_type_fields=("TE_TIPOEX", "LEYENDA"),
+        status_fields=("EE_ESTAEX", "SE_SITUEX"),
+        issued_fields=("CG_FECREG",),
+        region_builder=_fixed_region("Peru"),
+        default_commodity="Minerals",
+        default_license_type="Mining right",
+        default_status="Active",
+        where="OBJECTID>0",
+        max_records=2000,
+        supports_result_offset=False,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "americas",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Peru",
+            "summary_note": (
+                "INGEMMET GeoCATMIN Derechos Mineros layer; service rejects resultOffset pagination "
+                "— sync capped at first transfer batch (~2000 features)."
+            ),
+        },
+    )
+
+
 def _queensland_mineral_tenement_source() -> ArcGISOpenDataSource:
     return ArcGISOpenDataSource(
         source_id="australia_queensland_mineral_tenement",
@@ -717,10 +784,21 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
     _canada_northern_oil_rights_source(),
     _norway_production_licences_current_source(),
     _finland_active_mining_areas_source(),
+    _colombia_anm_titulo_vigente_source(),
+    _peru_ingemmet_derechos_mineros_source(),
     _queensland_mineral_tenement_source(),
     _usgs_mrds_global_source(),
     _megagiant_oil_gas_fields_source(),
 )
+
+try:
+    from backend.services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+except ImportError:
+    from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+
+_kz_petroleum = optional_kazakhstan_petroleum_source()
+if _kz_petroleum is not None:
+    OPEN_DATA_SOURCES = OPEN_DATA_SOURCES + (_kz_petroleum,)
 
 
 AFRICAN_COUNTRIES: tuple[tuple[str, str], ...] = (
@@ -1179,6 +1257,143 @@ def infer_world_macro_region(country: str) -> str:
 
 # Non-African coverage notes (token walls, portal-only cadastres, etc.).
 WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "Kazakhstan": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": (
+                "Kazakhstan publishes solid-mineral licence registers on the national open-data portal "
+                "and the unified e-qazyna subsoil platform, but no stable open ArcGIS FeatureServer "
+                "for unattended sync was verified in this pass."
+            ),
+            "references": [
+                {
+                    "name": "Register of issued licences (solid minerals) — data.egov.kz",
+                    "url": "https://data.egov.kz/datasets/view?index=reestr_vydannyh_licenzii_na_ne1",
+                    "access": "open_data_download",
+                },
+                {
+                    "name": "Unified subsoil use e-service (e-qazyna)",
+                    "url": "https://minerals.e-qazyna.kz/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Hydrocarbon contract areas are published via national GIS portals (gis-terra.kz, "
+                "arcgis.gis-center.kz), but no stable unattended ArcGIS query URL was verified — "
+                "arcgis.gis-center.kz timed out from the sync verifier (2026-05). "
+                "Megagiant global fallback may show major fields only — not licence polygons."
+            ),
+            "references": [
+                {
+                    "name": "Contract areas GIS (Committee of Geology / Terra)",
+                    "url": "https://gis-terra.kz/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "Kazakhstan GIS Center ArcGIS REST (unverified — connection timeout)",
+                    "url": "https://arcgis.gis-center.kz/server/rest/services",
+                    "access": "research",
+                },
+            ],
+        },
+    },
+    "Turkmenistan": {
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Turkmenistan publishes hydrocarbon sector information via state portals; no open "
+                "ArcGIS FeatureServer for licence polygons was verified for unattended sync."
+            ),
+            "references": [
+                {
+                    "name": "Turkmenistan Oil & Gas (official catalogs)",
+                    "url": "https://www.oilgas.gov.tm/en/catalogs",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "TURKMENGEOLOGY State Corporation",
+                    "url": "https://www.tmgeology.gov.tm/en",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Uzbekistan": {
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Subsoil-use licences and open-data registers are published on government portals; "
+                "no verified public ArcGIS layer for hydrocarbon contract polygons was found."
+            ),
+            "references": [
+                {
+                    "name": "Ministry of Mining Industry and Geology — open data",
+                    "url": "https://gov.uz/en/mingeo/pages/ochiq-ma-lumotlar",
+                    "access": "open_data_download",
+                },
+                {
+                    "name": "Center for Subsoil Use — Uzbekistan Geoportal",
+                    "url": "https://www.geoportal-uz.org/center-for-subsoil-use/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "State Committee for Geology — interactive services",
+                    "url": "http://uzgeocom.uz/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Sweden": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": (
+                "SGU mineral permits sync via OGC API Features (POST /api/admin/sweden-mining/sync). "
+                "source_id prefix sweden_sgu_*. Manual CSV fallback: docs/eu_mining_import_template.csv"
+            ),
+            "references": [
+                {
+                    "name": "SGU Mineral permits — OGC API Features",
+                    "url": "https://api.sgu.se/oppnadata/mineralrattigheter/ogc/features/v1",
+                    "access": "ogc_features_api",
+                },
+                {
+                    "name": "SGU Mineral permits map viewer",
+                    "url": "https://www.sgu.se/en/products/maps/map-viewer/bedrock-map-viewers/mineral-permits/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Poland": {
+        "mining": {
+            "status": "official_syncable",
+            "note": (
+                "PGI MIDAS mining areas via ArcGIS MapServer (cbdgmapa.pgi.gov.pl). "
+                "Sync: POST /api/admin/poland-mining/sync. CSV fallback: docs/eu_mining_import_template.csv"
+            ),
+            "source_ids": ["poland_pgi_deposits", "poland_pgi_midas_layer1", "poland_pgi_midas_layer2"],
+            "note": (
+                "Poland PGI MIDAS MapServer: layer 0 złoża (deposits) via poland_pgi_deposits; "
+                "layers 1–2 mining areas/territories. Capped per PGI_SYNC_MAX_PER_LAYER."
+            ),
+            "references": [
+                {
+                    "name": "PGI map portal (concessions / mining areas)",
+                    "url": "https://mapy.pgi.gov.pl/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "Polish Geological Institute — open data",
+                    "url": "https://www.pgi.gov.pl/en/open-data",
+                    "access": "open_data_download",
+                },
+            ],
+        },
+    },
     "Philippines": {
         "mining": {
             "status": "official_api_restricted",
@@ -1222,6 +1437,25 @@ def _fetch_json(url: str, retries: int = 3, pause_seconds: float = 1.0) -> dict[
 
 
 def fetch_arcgis_features(source: ArcGISOpenDataSource) -> list[dict[str, Any]]:
+    if not source.supports_result_offset:
+        params: dict[str, Any] = {
+            "where": source.where,
+            "outFields": "*",
+            "returnGeometry": "true",
+            "f": "pjson",
+            "outSR": "4326",
+        }
+        if source.order_by:
+            params["orderByFields"] = source.order_by
+        query_url = f"{source.layer_url}/query?{urlencode(params)}"
+        payload = _fetch_json(query_url)
+        if payload.get("error"):
+            raise RuntimeError(f"{source.source_id} ArcGIS query failed: {payload['error']}")
+        features = list(payload.get("features") or [])
+        if source.max_records is not None:
+            features = features[: source.max_records]
+        return features
+
     all_features: list[dict[str, Any]] = []
     offset = 0
     while True:
@@ -1360,7 +1594,8 @@ UPSERT_SQL = """
         source_record_url = EXCLUDED.source_record_url,
         source_updated_at = EXCLUDED.source_updated_at,
         raw_payload = EXCLUDED.raw_payload,
-        last_synced_at = CURRENT_TIMESTAMP;
+        last_synced_at = CURRENT_TIMESTAMP
+    WHERE licenses.manually_edited IS NOT TRUE;
 """
 
 
@@ -1544,33 +1779,80 @@ def sync_open_data_sources(
         "records_fetched": 0,
         "records_written": 0,
         "bundled_rows_marked": 0,
+        "sync_runs": [],
         "errors": [],
     }
 
     try:
+        try:
+            from backend.services.license_sync_store import (
+                evaluate_sync_drift,
+                finish_license_sync_run,
+                start_license_sync_run,
+            )
+        except ImportError:
+            from services.license_sync_store import (
+                evaluate_sync_drift,
+                finish_license_sync_run,
+                start_license_sync_run,
+            )
+
         summary["bundled_rows_marked"] = mark_existing_bundled_rows(conn)
         for source in OPEN_DATA_SOURCES:
             if requested and source.source_id not in requested:
                 continue
+            run_id: int | None = None
             try:
+                run_id = start_license_sync_run(conn, source_id=source.source_id)
                 features = fetch_arcgis_features(source)
                 records = _dedupe_by_id(normalize_feature(source, feature) for feature in features)
                 written = upsert_open_data_records(conn, records, sync_contacts=source.sync_contacts)
                 summary["records_fetched"] += len(features)
                 summary["records_written"] += written
-                summary["sources"].append(
-                    {
-                        "source_id": source.source_id,
-                        "source_name": source.source_name,
-                        "sector": source.sector,
-                        "country": source.country,
-                        "fetched": len(features),
-                        "written": written,
-                        "metadata": source.metadata,
-                    }
-                )
+                source_summary = {
+                    "source_id": source.source_id,
+                    "source_name": source.source_name,
+                    "sector": source.sector,
+                    "country": source.country,
+                    "fetched": len(features),
+                    "written": written,
+                    "metadata": source.metadata,
+                }
+                summary["sources"].append(source_summary)
+                if run_id is not None:
+                    drift_warning = evaluate_sync_drift(
+                        conn,
+                        run_id=run_id,
+                        source_id=source.source_id,
+                        records_written=written,
+                    )
+                    finish_license_sync_run(
+                        conn,
+                        run_id,
+                        status="success",
+                        records_fetched=len(features),
+                        records_written=written,
+                        drift_warning=drift_warning,
+                    )
+                    run_entry = {"run_id": run_id, **source_summary, "status": "success"}
+                    if drift_warning:
+                        run_entry["drift_warning"] = drift_warning
+                    summary["sync_runs"].append(run_entry)
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
+                if run_id is not None:
+                    try:
+                        finish_license_sync_run(
+                            conn,
+                            run_id,
+                            status="error",
+                            error=str(exc),
+                        )
+                        summary["sync_runs"].append(
+                            {"run_id": run_id, "source_id": source.source_id, "status": "error"}
+                        )
+                    except Exception:
+                        pass
         return summary
     finally:
         if own_connection and conn is not None:
@@ -1805,7 +2087,11 @@ def _build_world_source_catalog(conn: Any) -> list[dict[str, Any]]:
     )
 
 
-def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) -> dict[str, Any]:
+def get_world_coverage(
+    conn: Any | None = None,
+    region: Optional[str] = None,
+    country: Optional[str] = None,
+) -> dict[str, Any]:
     own_connection = conn is None
     if conn is None:
         conn = _default_db_connection()
@@ -1951,11 +2237,24 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
                 item for item in all_countries if (item.get("macro_region") or "other") == normalized_region
             ]
 
+        country_filter: Optional[str] = None
+        country_needle = (country or "").strip()
+        if country_needle:
+            needle = country_needle.lower()
+            matched = [
+                item
+                for item in filtered_countries
+                if (item.get("country") or "").strip().lower() == needle
+            ]
+            filtered_countries = matched
+            country_filter = country_needle if matched else country_needle
+
         return {
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "summary": summary,
             "regional_summary": regional_summary,
             "region_filter": normalized_region or None,
+            "country_filter": country_filter,
             "countries": filtered_countries,
             "sources": _build_world_source_catalog(conn),
         }

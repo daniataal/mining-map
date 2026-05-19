@@ -111,7 +111,7 @@ FEED_LIMITATIONS = [
     *LIMITATIONS,
     "Commodity feed uses NAICS/PSC/keyword filters on federal contracts (last 5 years); grants and loans are not included in the browse feed.",
     "Aggregate company list is deduplicated by UEI or recipient name; totals are summed across matched commodity filters.",
-    "Browse list is loaded from the local database (refreshed at most once per 24h via sync) — run scripts/sync_gov_procurement.py or POST /api/admin/gov-procurement/sync.",
+    "Browse list is loaded from the local database (refreshed on schedule by gov-procurement-sync-worker).",
 ]
 
 # Profiles for browsing federal contractors by commodity (contracts only to limit API volume).

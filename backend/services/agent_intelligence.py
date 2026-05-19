@@ -542,6 +542,55 @@ def deterministic_route_warnings(route_payload: dict[str, Any]) -> list[dict[str
                         "evidence": {"leg_index": index, "geometry_source": geometry_source or "unknown"},
                     }
                 )
+            elif geometry_source == "corridor_fallback":
+                warnings.append(
+                    {
+                        "code": "route.sea_corridor_approximate",
+                        "severity": "warn",
+                        "message": "Sea leg uses static offshore corridor waypoints, not live searoute.",
+                        "evidence": {"leg_index": index, "geometry_source": geometry_source},
+                    }
+                )
+
+        if method == "air":
+            if geometry_source not in {"air_great_circle_trunk", "great_circle"}:
+                warnings.append(
+                    {
+                        "code": "route.air_geometry_unexpected",
+                        "severity": "warn",
+                        "message": "Air trunk is not using the expected great-circle geometry source.",
+                        "evidence": {"leg_index": index, "geometry_source": geometry_source or "unknown"},
+                    }
+                )
+            elif geometry_source == "great_circle":
+                warnings.append(
+                    {
+                        "code": "route.air_geometry_legacy_source",
+                        "severity": "warn",
+                        "message": "Air leg uses legacy great_circle source; expect air_great_circle_trunk.",
+                        "evidence": {"leg_index": index, "geometry_source": geometry_source},
+                    }
+                )
+
+        if method == "rail":
+            if geometry_source in {"rail_approximation_road", "rail_osrm", "rail_hub", "rail_short_haul"}:
+                warnings.append(
+                    {
+                        "code": "route.rail_not_track_mapped",
+                        "severity": "warn",
+                        "message": "Rail leg is not fully mapped to OSM track geometry.",
+                        "evidence": {"leg_index": index, "geometry_source": geometry_source},
+                    }
+                )
+            elif geometry_source == "straight_line_fallback":
+                warnings.append(
+                    {
+                        "code": "route.rail_geometry_degraded",
+                        "severity": "warn",
+                        "message": "Rail leg fell back to straight-line geometry.",
+                        "evidence": {"leg_index": index, "geometry_source": geometry_source},
+                    }
+                )
 
         if method in {"road", "truck", "truck_inland"}:
             from_country = _metadata_country(from_point)

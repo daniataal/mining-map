@@ -261,49 +261,98 @@ def ensure_table(conn: psycopg2.extensions.connection) -> None:
 # Comtrade live fetch
 # ---------------------------------------------------------------------------
 
+def _comtrade_bulk_url(reporter_m49: str, hs_code: str, year: int, api_key: str) -> str:
+    return (
+        f"{COMTRADE_URL}?reporterCode={reporter_m49}"
+        f"&cmdCode={hs_code}&period={year}"
+        f"&flowCode=X,M&partnerCode=0"
+        f"&subscription-key={api_key}&limit=20"
+    )
+
+
+def _parse_comtrade_bulk_rows(
+    payload: dict,
+    *,
+    reporter_m49: str,
+    hs_code: str,
+    year: int,
+) -> list[dict]:
+    rows = payload.get("data", [])
+    results = []
+    for row in rows:
+        results.append({
+            "reporter_m49": reporter_m49,
+            "reporter": row.get("reporterDesc", ""),
+            "reporter_iso2": row.get("reporterISO", ""),
+            "partner": row.get("partnerDesc", "World"),
+            "partner_m49": str(row.get("partnerCode", "0")),
+            "hs_code": hs_code,
+            "flow_type": row.get("flowCode", "X"),
+            "year": int(row.get("period", year)),
+            "trade_value_usd": row.get("primaryValue"),
+            "net_weight_kg": row.get("netWgt"),
+            "data_source": "UN Comtrade",
+        })
+    return results
+
+
 def _fetch_comtrade_bulk(
     reporter_m49: str,
     hs_code: str,
     year: int,
     api_key: str,
+    *,
+    max_retries: int = 3,
 ) -> list[dict]:
     """
     Fetch annual trade flows from UN Comtrade v1 API.
     Returns list of row dicts ready for upsert.
     Returns [] on any error or missing key.
+    On HTTP 429/403 with COMTRADE_API_KEY_SECONDARY set, retries once with secondary.
+    Retries with backoff on HTTP 429/503 (free-tier quota).
     """
-    url = (
-        f"{COMTRADE_URL}?reporterCode={reporter_m49}"
-        f"&cmdCode={hs_code}&period={year}"
-        f"&flowCode=X,M&partnerCode=0"       # partner 0 = World total
-        f"&subscription-key={api_key}&limit=20"
-    )
     try:
-        r = requests.get(url, timeout=10)
-        if r.status_code != 200:
-            print(f"    Comtrade HTTP {r.status_code} for m49={reporter_m49} hs={hs_code} yr={year}")
+        from backend.services.comtrade_keys import get_json_with_key_failover
+    except ImportError:
+        from services.comtrade_keys import get_json_with_key_failover
+
+    def build_url(key: str) -> str:
+        return _comtrade_bulk_url(reporter_m49, hs_code, year, key)
+
+    backoff = COMTRADE_SLEEP
+    for attempt in range(max_retries):
+        try:
+            payload, status = get_json_with_key_failover(
+                build_url, api_key=api_key, timeout=15
+            )
+            if payload is not None:
+                return _parse_comtrade_bulk_rows(
+                    payload, reporter_m49=reporter_m49, hs_code=hs_code, year=year
+                )
+
+            if status in (429, 503):
+                print(
+                    f"    Comtrade HTTP {status} for m49={reporter_m49} "
+                    f"hs={hs_code} yr={year} (retry {attempt + 1}/{max_retries})"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(min(60.0, backoff * (2**attempt)))
+                    continue
+                return []
+
+            if status:
+                print(
+                    f"    Comtrade HTTP {status} for m49={reporter_m49} "
+                    f"hs={hs_code} yr={year}"
+                )
             return []
-        payload = r.json()
-        rows = payload.get("data", [])
-        results = []
-        for row in rows:
-            results.append({
-                "reporter_m49": reporter_m49,
-                "reporter": row.get("reporterDesc", ""),
-                "reporter_iso2": row.get("reporterISO", ""),
-                "partner": row.get("partnerDesc", "World"),
-                "partner_m49": str(row.get("partnerCode", "0")),
-                "hs_code": hs_code,
-                "flow_type": row.get("flowCode", "X"),
-                "year": int(row.get("period", year)),
-                "trade_value_usd": row.get("primaryValue"),
-                "net_weight_kg": row.get("netWgt"),
-                "data_source": "UN Comtrade",
-            })
-        return results
-    except Exception as exc:
-        print(f"    Comtrade error m49={reporter_m49}: {exc}")
-        return []
+        except Exception as exc:
+            print(f"    Comtrade error m49={reporter_m49}: {exc}")
+            if attempt < max_retries - 1:
+                time.sleep(min(60.0, backoff * (2**attempt)))
+                continue
+            return []
+    return []
 
 
 # ---------------------------------------------------------------------------
