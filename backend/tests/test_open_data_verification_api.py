@@ -70,6 +70,25 @@ class OpenDataVerificationApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 401)
 
     @patch("backend.main.get_db_connection")
+    def test_list_annotations_bulk(self, mock_conn):
+        conn = MagicMock()
+        cursor = MagicMock()
+        mock_conn.return_value = conn
+        conn.cursor.return_value = cursor
+        cursor.fetchall.return_value = [
+            {"license_id": "lic-1", "payload": {"stage": "New"}, "updated_at": None},
+        ]
+
+        res = self.client.get(
+            "/api/licenses/annotations",
+            headers={"Authorization": f"Bearer {self.user_token}"},
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["count"], 1)
+        self.assertIn("lic-1", body["annotations"])
+
+    @patch("backend.main.get_db_connection")
     def test_annotations_put_success(self, mock_conn):
         conn = MagicMock()
         cursor = MagicMock()

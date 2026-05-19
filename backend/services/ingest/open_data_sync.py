@@ -1594,11 +1594,13 @@ def sync_open_data_sources(
     try:
         try:
             from backend.services.license_sync_store import (
+                evaluate_sync_drift,
                 finish_license_sync_run,
                 start_license_sync_run,
             )
         except ImportError:
             from services.license_sync_store import (
+                evaluate_sync_drift,
                 finish_license_sync_run,
                 start_license_sync_run,
             )
@@ -1626,14 +1628,24 @@ def sync_open_data_sources(
                 }
                 summary["sources"].append(source_summary)
                 if run_id is not None:
+                    drift_warning = evaluate_sync_drift(
+                        conn,
+                        run_id=run_id,
+                        source_id=source.source_id,
+                        records_written=written,
+                    )
                     finish_license_sync_run(
                         conn,
                         run_id,
                         status="success",
                         records_fetched=len(features),
                         records_written=written,
+                        drift_warning=drift_warning,
                     )
-                    summary["sync_runs"].append({"run_id": run_id, **source_summary, "status": "success"})
+                    run_entry = {"run_id": run_id, **source_summary, "status": "success"}
+                    if drift_warning:
+                        run_entry["drift_warning"] = drift_warning
+                    summary["sync_runs"].append(run_entry)
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
                 if run_id is not None:

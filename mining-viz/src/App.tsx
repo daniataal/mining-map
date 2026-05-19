@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, st
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
+import { useLicenseAnnotations } from './hooks/use-license-annotations';
 import { useDebouncedValue } from './hooks/use-debounced-value';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
@@ -191,15 +192,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
-  // User Annotations (Local storage for now, ideally backend)
-  const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() => {
-    try {
-      const saved = localStorage.getItem('mining_user_data');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
+  const { userAnnotations, updateAnnotation: persistAnnotation } = useLicenseAnnotations(token);
 
   // Locally-added licenses (persisted to localStorage)
   const [localLicenses, setLocalLicenses] = useState<MiningLicense[]>(() => {
@@ -419,11 +412,7 @@ export default function App() {
   }, []);
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
-    setUserAnnotations(prev => {
-      const next = { ...prev, [id]: { ...(prev[id] || {}), ...updates } };
-      localStorage.setItem('mining_user_data', JSON.stringify(next));
-      return next;
-    });
+    persistAnnotation(id, updates);
 
     const targetEntity = entityIndex[id];
     if (targetEntity?.entityKind === 'storage_terminal') {
@@ -440,7 +429,7 @@ export default function App() {
     if (Object.keys(backendPayload).length > 0) {
       updateLicenseMutation.mutate({ id, updates: backendPayload });
     }
-  }, [updateLicenseMutation, entityIndex]);
+  }, [persistAnnotation, updateLicenseMutation, entityIndex]);
 
   const deleteLicense = useCallback((id: string) => {
     const targetEntity = entityIndex[id];

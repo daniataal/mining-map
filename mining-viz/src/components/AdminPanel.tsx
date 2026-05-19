@@ -37,7 +37,12 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
         started_at?: string;
         finished_at?: string | null;
         error?: string | null;
+        drift_warning?: {
+            drop_pct?: number;
+            message?: string;
+        } | null;
     }>>([]);
+    const [syncAlerts, setSyncAlerts] = useState<typeof syncRuns>([]);
     const [loadingSyncRuns, setLoadingSyncRuns] = useState(false);
     
     // Activity Log per user
@@ -178,14 +183,19 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
         if (!token?.trim()) return;
         setLoadingSyncRuns(true);
         try {
-            const res = await fetch(`${API_BASE}/api/open-data/sync-runs?per_source_latest=true&limit=100`, {
-                headers: authHeaders(),
-            });
-            const data = await res.json();
-            setSyncRuns(Array.isArray(data?.runs) ? data.runs : []);
+            const headers = authHeaders();
+            const [runsRes, alertsRes] = await Promise.all([
+                fetch(`${API_BASE}/api/open-data/sync-runs?per_source_latest=true&limit=100`, { headers }),
+                fetch(`${API_BASE}/api/open-data/sync-alerts?limit=50`, { headers }),
+            ]);
+            const runsData = await runsRes.json();
+            const alertsData = await alertsRes.json();
+            setSyncRuns(Array.isArray(runsData?.runs) ? runsData.runs : []);
+            setSyncAlerts(Array.isArray(alertsData?.alerts) ? alertsData.alerts : []);
         } catch (err) {
             console.error('Failed to fetch sync runs', err);
             setSyncRuns([]);
+            setSyncAlerts([]);
         } finally {
             setLoadingSyncRuns(false);
         }
@@ -338,7 +348,16 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                                         )}
                                         {syncRuns.map((run) => (
                                             <TableRow key={run.id} className="border-black/5 dark:border-white/5">
-                                                <TableCell className="font-mono text-[10px] text-slate-700 dark:text-slate-200">{run.source_id || '—'}</TableCell>
+                                                <TableCell className="font-mono text-[10px] text-slate-700 dark:text-slate-200">
+                                                    <span className="flex items-center gap-2 flex-wrap">
+                                                        {run.source_id || '—'}
+                                                        {run.drift_warning && (
+                                                            <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[8px] uppercase">
+                                                                {t('סטייה', 'Drift')} {run.drift_warning.drop_pct ?? '?'}%
+                                                            </Badge>
+                                                        )}
+                                                    </span>
+                                                </TableCell>
                                                 <TableCell>
                                                     <Badge className={run.status === 'success' ? 'bg-emerald-500/10 text-emerald-600' : run.status === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-amber-500/10 text-amber-600'}>
                                                         {run.status}
@@ -354,6 +373,24 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                                 </Table>
                             </CardContent>
                         </Card>
+                        {syncAlerts.length > 0 && (
+                            <Card className="bg-amber-500/5 border-amber-500/20 shadow-xl">
+                                <CardHeader className="border-b border-amber-500/10 pb-4">
+                                    <CardTitle className="text-xs font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">
+                                        {t('התראות סטייה בסנכרון', 'Sync drift alerts')}
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="pt-4 space-y-2">
+                                    {syncAlerts.slice(0, 8).map((alert) => (
+                                        <div key={alert.id} className="text-[10px] text-slate-600 dark:text-slate-300 font-mono">
+                                            <span className="font-bold text-amber-600">{alert.source_id}</span>
+                                            {' — '}
+                                            {alert.drift_warning?.message || t('ירידה בכמות רשומות', 'Record count drop')}
+                                        </div>
+                                    ))}
+                                </CardContent>
+                            </Card>
+                        )}
                     </TabsContent>
 
                     <TabsContent value="logs" className="h-full m-0 p-6 overflow-y-auto">

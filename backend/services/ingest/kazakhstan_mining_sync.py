@@ -26,15 +26,97 @@ EGOV_PORTAL_URL = (
 )
 API_BASE = os.getenv("KZ_EGOV_API_BASE", "https://data.egov.kz/api/v4")
 
+# Common egov.kz / register field aliases (Kazakh + Russian transliterations).
+_LICENSE_NUMBER_KEYS = (
+    "licence_number",
+    "license_number",
+    "nomer_licenzii",
+    "nomer_licenzii_na_pravo_polzovaniya",
+    "license_no",
+    "lic_no",
+    "reg_number",
+    "registration_number",
+    "id",
+)
+_HOLDER_KEYS = (
+    "company",
+    "holder",
+    "licensee",
+    "naimenovanie",
+    "naimenovanie_organizacii",
+    "naimenovanie_subekta",
+    "name_ru",
+    "name_kz",
+    "subsoil_user",
+)
+_LAT_KEYS = ("latitude", "lat", "shirota", "geo_lat", "y")
+_LNG_KEYS = ("longitude", "lng", "lon", "dolgota", "geo_lon", "x")
+_REGION_KEYS = ("region", "oblast", "obl", "kato", "administrative_unit")
+_COMMODITY_KEYS = ("commodity", "mineral", "poleznoe_iskopaemoe", "minerals", "resource")
+_STATUS_KEYS = ("status", "status_licenzii", "sostoyanie", "state")
+_LICENSE_TYPE_KEYS = ("license_type", "vid", "vid_licenzii", "type")
+_DATE_ISSUED_KEYS = ("date_issued", "data_vydachi", "issue_date", "data_registracii")
+
 
 def _api_key() -> Optional[str]:
     return (os.getenv("KZ_EGOV_API_KEY") or "").strip() or None
+
+
+def _first_str(raw: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        val = raw.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text and text.lower() not in ("null", "none", "nan"):
+            return text
+    return ""
+
+
+def _parse_coord(raw: dict[str, Any], keys: tuple[str, ...]) -> Optional[float]:
+    text = _first_str(raw, keys)
+    if not text:
+        return None
+    try:
+        return float(text.replace(",", "."))
+    except (TypeError, ValueError):
+        return None
 
 
 def build_egov_record_url(licence_number: str) -> str:
     """Deep link to the dataset portal (no per-row public URL documented)."""
     q = urllib.parse.urlencode({"index": DATASET_INDEX})
     return f"https://data.egov.kz/datasets/view?{q}"
+
+
+def normalize_egov_row(raw: dict[str, Any], *, fallback_index: int) -> dict[str, str]:
+    """Map one egov register row to admin CSV import columns."""
+    lic_num = _first_str(raw, _LICENSE_NUMBER_KEYS) or str(fallback_index)
+    company = _first_str(raw, _HOLDER_KEYS) or lic_num
+    lat = _parse_coord(raw, _LAT_KEYS)
+    lng = _parse_coord(raw, _LNG_KEYS)
+
+    # Some exports nest coordinates under geo / location objects.
+    if lat is None or lng is None:
+        for nested_key in ("geo", "location", "coordinates", "geom"):
+            nested = raw.get(nested_key)
+            if isinstance(nested, dict):
+                lat = lat or _parse_coord(nested, _LAT_KEYS)
+                lng = lng or _parse_coord(nested, _LNG_KEYS)
+
+    status = _first_str(raw, _STATUS_KEYS) or "Active"
+    return {
+        "id": lic_num,
+        "company": company,
+        "country": "Kazakhstan",
+        "region": _first_str(raw, _REGION_KEYS),
+        "commodity": _first_str(raw, _COMMODITY_KEYS) or "Minerals",
+        "license_type": _first_str(raw, _LICENSE_TYPE_KEYS) or "Mining licence",
+        "status": status,
+        "lat": str(lat) if lat is not None else "",
+        "lng": str(lng) if lng is not None else "",
+        "date_issued": _first_str(raw, _DATE_ISSUED_KEYS),
+    }
 
 
 def fetch_register_page(*, size: int = 500, from_offset: int = 0) -> list[dict[str, Any]]:
@@ -59,7 +141,7 @@ def fetch_register_page(*, size: int = 500, from_offset: int = 0) -> list[dict[s
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
     if isinstance(payload, dict):
-        for key in ("data", "items", "hits", "results"):
+        for key in ("data", "items", "hits", "results", "records"):
             block = payload.get(key)
             if isinstance(block, list):
                 return [row for row in block if isinstance(row, dict)]
@@ -70,8 +152,8 @@ def sync_kazakhstan_mining_register(conn: Any, *, max_rows: int = 5000) -> dict[
     """
     Pull egov register rows and upsert via csv_fallback normalizer when coordinates exist.
 
-    Field names vary by dataset version; mapping is best-effort. Prefer verified CSV
-  import when API key or schema is unavailable.
+    Field names vary by dataset version; mapping uses normalize_egov_row. Prefer verified
+    CSV import when API key or schema is unavailable.
     """
     try:
         from backend.services.ingest.csv_fallback_import import import_csv_text
@@ -97,42 +179,10 @@ def sync_kazakhstan_mining_register(conn: Any, *, max_rows: int = 5000) -> dict[
             "source_id": SOURCE_ID,
         }
 
-    # Map egov rows to admin CSV columns (best-effort; adjust after mapping probe).
-    csv_rows: list[dict[str, str]] = []
-    for idx, raw in enumerate(rows[:max_rows]):
-        lic_num = str(
-            raw.get("licence_number")
-            or raw.get("license_number")
-            or raw.get("nomer_licenzii")
-            or raw.get("id")
-            or idx
-        ).strip()
-        company = str(
-            raw.get("company")
-            or raw.get("naimenovanie")
-            or raw.get("holder")
-            or raw.get("licensee")
-            or lic_num
-        ).strip()
-        lat = raw.get("latitude") or raw.get("lat") or raw.get("shirota")
-        lng = raw.get("longitude") or raw.get("lng") or raw.get("dolgota")
-        csv_rows.append(
-            {
-                "id": lic_num,
-                "company": company,
-                "country": "Kazakhstan",
-                "region": str(raw.get("region") or raw.get("oblast") or ""),
-                "commodity": str(raw.get("commodity") or raw.get("mineral") or "Minerals"),
-                "license_type": str(raw.get("license_type") or raw.get("vid") or "Mining licence"),
-                "status": str(raw.get("status") or "Active"),
-                "lat": str(lat) if lat not in (None, "") else "",
-                "lng": str(lng) if lng not in (None, "") else "",
-                "date_issued": str(raw.get("date_issued") or raw.get("data_vydachi") or ""),
-            }
-        )
+    csv_rows = [normalize_egov_row(raw, fallback_index=idx) for idx, raw in enumerate(rows[:max_rows])]
 
-    import io
     import csv as csv_module
+    import io
 
     buf = io.StringIO()
     writer = csv_module.DictWriter(
@@ -160,9 +210,11 @@ def sync_kazakhstan_mining_register(conn: Any, *, max_rows: int = 5000) -> dict[
         sector="mining",
         conn=conn,
     )
+    with_coords = sum(1 for row in csv_rows if row.get("lat") and row.get("lng"))
     return {
         "status": "success",
         "source_id": SOURCE_ID,
         "rows_fetched": len(rows),
+        "rows_with_coordinates": with_coords,
         **result,
     }

@@ -62,7 +62,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Deal rooms | `/api/deal-rooms` | App data | Export JSON/Markdown; agent jobs |
 | Agent intelligence | `/api/agent-intelligence/*` | LLM + public web | Requires human review; not a registry |
 | Company intel | `GET /company-intel` | Heuristic aggregation | No OpenCorporates API (paid) wired |
-| SEC EDGAR | Not wired | Free (US issuers) | **Roadmap** — 10-K/8-K for listed miners/oil cos |
+| SEC EDGAR | `GET /api/companies/{name}/sec-filings` | Free (US issuers) | CIK + browse-edgar link (US listed cos only) |
 | EU beneficial ownership | Not wired | Varies by MS | **Thin** open API coverage |
 
 ---
@@ -85,7 +85,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Africa** | Zambia/Kenya/SA petroleum & mining | In repo | Official cadastre | `arcgis` | Source layer URL + external id |
 | **Middle East** | OPEC Gulf reference + Megagiant | In repo + `opec_gulf_sync` | Reference / open layer | `static` + `arcgis` | Flag as fallback; NOC website |
 | **Latin America** | ANM Colombia, ANM-style portals | National URLs vary | Open gov (varies) | **Gap** | Per-country licence ID |
-| **Petroleum infra** | OSM pipelines (`man_made=pipeline`) | Overpass API | ODbL | **Recommended** `overpass` | OSM way ID + tag inspection |
+| **Petroleum infra** | OSM pipelines (`man_made=pipeline`) | Overpass API | ODbL | **`overpass`** (opt-in map layers) | OSM way ID + tag inspection |
 | **Petroleum infra** | oilmap / Mapbox tilesets | Mapbox | Third-party | **Paid** — `petroleum_infrastructure` | Document token; not official |
 | **Trade** | UN Comtrade HS 2709/2710 | https://comtrade.un.org/ | UN terms (free tier) | `api` (partial in repo) | Reporter/partner/year in response |
 | **US deals** | USAspending | https://api.usaspending.gov/ | US open data | `api` | `award_id` link |
@@ -146,16 +146,18 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Sync observability** | Log runs; admin dashboard for last sync per source. |
 | **Verification v1** | Dossier “Open source” block links `source_record_url`; coverage API linked from UI. |
 
-### Weeks 5–8 (breadth)
+### Weeks 5–8 (breadth) — Phase 2 implemented (2026-05-19)
 
-| Workstream | Tasks |
-|------------|-------|
-| **Central Asia** | Verify KZ hydrocarbon ArcGIS; Turkmenistan/Uzbekistan portal research. |
-| **EU mining** | INSPIRE/ national WFS (Sweden, Poland mineral permits). |
-| **LatAm** | Colombia ANM, Peru INGEMMET open services. |
-| **OSM petroleum** | Overpass pipeline/refinery layer behind feature flag. |
-| **Deals** | SEC EDGAR filer linker; expand USAspending → non-US when open APIs exist. |
-| **Comtrade** | Scheduled HS27 refresh with quota-aware backoff. |
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Annotations persistence** | Done | `GET/PUT /api/licenses/{id}/annotations`, bulk `GET /api/licenses/annotations`; frontend hydrates from server when logged in, one-time localStorage merge. |
+| **Sync drift alerts** | Done | `SYNC_DRIFT_ALERT_PCT` (default 20); `drift_warning` on `license_sync_runs`; `GET /api/open-data/sync-alerts`; admin Open Data drift badges. |
+| **Kazakhstan mining** | Done (starter) | `KZ_EGOV_API_KEY` in `.env.example`; robust `normalize_egov_row`; `POST /api/admin/kazakhstan-mining/sync`; mocked HTTP tests. |
+| **OSM petroleum** | Done (starter) | `GET /api/petroleum/osm-layers/{pipelines\|refineries}`; Overpass tile cache; opt-in map layers labeled “OpenStreetMap (community)”. |
+| **SEC EDGAR linker** | Done (starter) | `GET /api/companies/{name}/sec-filings`; dossier SEC link; `SEC_EDGAR_USER_AGENT`; mocked ticker JSON tests. |
+| **Central Asia hydrocarbons** | Not started | KZ ArcGIS verify; Turkmenistan/Uzbekistan portal research → Phase 3. |
+| **EU mining / LatAm** | Not started | INSPIRE WFS, Colombia ANM, Peru INGEMMET → Phase 3. |
+| **Comtrade refresh** | Not started | Scheduled HS27 with quota backoff → Phase 3. |
 
 ### Parallel agents (if splitting work)
 
