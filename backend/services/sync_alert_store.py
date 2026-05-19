@@ -40,6 +40,89 @@ def ensure_sync_alert_tables(conn: Any) -> None:
         )
 
 
+def record_probe_status_change(
+    conn: Any,
+    *,
+    probe_key: str,
+    previous: Optional[dict[str, Any]],
+    current: dict[str, Any],
+) -> Optional[int]:
+    """
+    Insert probe_status_change alert when reachability or status changes.
+    Returns alert id when inserted, else None.
+    """
+    prev_reachable = bool(previous.get("reachable")) if previous else None
+    curr_reachable = bool(current.get("reachable"))
+    prev_status = str(previous.get("status") or "") if previous else ""
+    curr_status = str(current.get("status") or "unknown")
+
+    changed = previous is None or prev_reachable != curr_reachable or prev_status != curr_status
+    if not changed:
+        return None
+
+    became_success = curr_reachable and (previous is None or not prev_reachable)
+    payload = {
+        "type": "probe_status_change",
+        "probe_key": probe_key,
+        "previous": {
+            "reachable": prev_reachable,
+            "status": prev_status or None,
+        },
+        "current": {
+            "reachable": curr_reachable,
+            "status": curr_status,
+            "message": current.get("message"),
+            "url": current.get("url"),
+        },
+        "became_success": became_success,
+        "message": current.get("message")
+        or f"Probe {probe_key} status {prev_status or 'n/a'} → {curr_status}",
+    }
+    ensure_sync_alert_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sync_alert_events (run_id, source_id, alert_type, payload)
+            VALUES (NULL, %s, %s, %s::jsonb)
+            RETURNING id;
+            """,
+            (probe_key, "probe_status_change", json.dumps(payload)),
+        )
+        row = cur.fetchone()
+        alert_id = int(row[0] if not isinstance(row, dict) else row.get("id"))
+
+    _maybe_notify_probe_webhook(probe_key=probe_key, payload=payload)
+    return alert_id
+
+
+def _maybe_notify_probe_webhook(*, probe_key: str, payload: dict[str, Any]) -> None:
+    url = (os.getenv("SYNC_ALERT_WEBHOOK_URL") or "").strip()
+    if not url:
+        return
+    admin_url = _admin_ui_url()
+    body = json.dumps(
+        {
+            "type": "probe_status_change",
+            "probe_key": probe_key,
+            "alert_type": "probe_status_change",
+            "admin_ui_url": admin_url,
+            "admin_ui_path": _admin_data_health_path(),
+            **payload,
+        }
+    ).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json", "User-Agent": _user_agent()},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+    except Exception as exc:
+        print(f"[sync-alert] probe webhook POST failed: {exc}")
+
+
 def record_drift_alert(
     conn: Any,
     *,

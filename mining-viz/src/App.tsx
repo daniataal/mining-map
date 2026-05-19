@@ -128,6 +128,7 @@ export default function App() {
     'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'raw_evidence' | 'route_planner' | 'admin'
   >('global');
   const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
+  const [euProcurementCpvBucket, setEuProcurementCpvBucket] = useState<string | null>(null);
   const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
   const licenseSector =
     viewMode === 'mining'
@@ -397,6 +398,13 @@ export default function App() {
   const handleNavigateToDealRoom = useCallback((dealRoomId: string) => {
     setInvestigationsSubTab('deal_rooms');
     setHighlightedDealRoomId(dealRoomId);
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
+  const handleNavigateToEuProcurement = useCallback((cpvBucket: string) => {
+    setEuProcurementCpvBucket(cpvBucket);
+    setInvestigationsSubTab('due_diligence');
     setViewMode('investigations');
     setIsDossierOpen(false);
   }, []);
@@ -991,6 +999,7 @@ export default function App() {
                   onHighlightedDealRoomConsumed={() => setHighlightedDealRoomId(null)}
                   onDealRoomChange={dealRooms.upsertDealRoom}
                   onRefreshDealRooms={() => void dealRooms.refreshDealRooms()}
+                  euProcurementCpvBucket={euProcurementCpvBucket}
                 />
               </Suspense>
             )}
@@ -1111,6 +1120,7 @@ export default function App() {
                   : undefined
               }
               onNavigateToDealRoom={handleNavigateToDealRoom}
+              onNavigateToEuProcurement={handleNavigateToEuProcurement}
               onDealRoomLinked={dealRooms.upsertDealRoom}
             />
           </Suspense>

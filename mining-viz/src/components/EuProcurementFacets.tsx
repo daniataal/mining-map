@@ -22,11 +22,20 @@ type CpvBucket = { id: string; label: string };
 type EuProcurementFacetsProps = {
   adminToken?: string;
   authHeaders?: () => Record<string, string>;
+  /** Pre-select CPV bucket when navigating from dossier Gov Tenders tab */
+  initialCpvBucket?: string | null;
 };
 
-export default function EuProcurementFacets({ adminToken, authHeaders }: EuProcurementFacetsProps) {
+export default function EuProcurementFacets({
+  adminToken,
+  authHeaders,
+  initialCpvBucket,
+}: EuProcurementFacetsProps) {
   const { t } = useI18n();
-  const [cpvBucket, setCpvBucket] = useState<string>('all');
+  const [cpvBucket, setCpvBucket] = useState<string>(() => {
+    const seed = (initialCpvBucket || '').trim();
+    return seed && seed !== 'all' ? seed : 'all';
+  });
   const [buckets, setBuckets] = useState<CpvBucket[]>([]);
   const [notices, setNotices] = useState<EuNotice[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,6 +48,11 @@ export default function EuProcurementFacets({ adminToken, authHeaders }: EuProcu
     }
     return base;
   }, [adminToken, authHeaders]);
+
+  useEffect(() => {
+    const seed = (initialCpvBucket || '').trim();
+    if (seed && seed !== 'all') setCpvBucket(seed);
+  }, [initialCpvBucket]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/eu-procurement/cpv-buckets`)

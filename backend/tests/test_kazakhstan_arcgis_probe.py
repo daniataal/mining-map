@@ -25,6 +25,7 @@ class KazakhstanArcgisProbeTests(unittest.TestCase):
         result = probe.probe_kazakhstan_arcgis_hub(urlopen=urlopen, timeout=5)
         self.assertTrue(result["reachable"])
         self.assertEqual(result["service_count"], 1)
+        self.assertIn("enable_when_verified_hint", result)
 
     def test_probe_timeout(self):
         def urlopen(_req, timeout=12):

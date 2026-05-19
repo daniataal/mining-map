@@ -5,9 +5,9 @@ from __future__ import annotations
 from urllib.parse import quote
 
 try:
-    from backend.services.eu_company_registers import build_eu_register_link
+    from backend.services.company_registers import build_register_link
 except ImportError:
-    from services.eu_company_registers import build_eu_register_link  # type: ignore[no-redef]
+    from services.company_registers import build_register_link  # type: ignore[no-redef]
 
 
 OPENCORPORATES_DISCLAIMER = (
@@ -36,7 +36,7 @@ def collect_registry_links(company: str, country: str = "") -> dict[str, object]
     links: list[dict[str, object]] = []
     if company:
         links.append(build_opencorporates_link(company))
-    national = build_eu_register_link(company, country) if company and country else None
+    national = build_register_link(company, country) if company and country else None
     if national:
         links.append(national)
     return {

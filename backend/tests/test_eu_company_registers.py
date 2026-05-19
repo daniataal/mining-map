@@ -23,8 +23,14 @@ class EuCompanyRegistersTests(unittest.TestCase):
         self.assertIn("inpi.fr", link["url"])
         self.assertTrue(link["manual_only"])
 
-    def test_unknown_country_returns_none(self):
+    def test_ghana_eu_module_returns_none(self):
         self.assertIsNone(build_eu_register_link("Acme", "Ghana"))
+
+    def test_ghana_via_company_registers(self):
+        from backend.services.company_registers import build_register_link
+
+        link = build_register_link("Acme", "Ghana")
+        self.assertIsNotNone(link)
 
 
 if __name__ == "__main__":

@@ -67,6 +67,52 @@ BUCKET_LABELS: dict[str, str] = {
 }
 
 
+def license_commodity_to_cpv_bucket(
+    commodity: Optional[str],
+    *,
+    license_type: Optional[str] = None,
+) -> Optional[str]:
+    """Map license commodity / type to TED CPV bucket (mining, metals, petroleum)."""
+    text = f"{commodity or ''} {license_type or ''}".strip().lower()
+    if not text:
+        return None
+    petroleum_tokens = (
+        "petroleum",
+        "oil",
+        "gas",
+        "lng",
+        "lpg",
+        "crude",
+        "hydrocarbon",
+        "natural gas",
+        "fuel",
+    )
+    metals_tokens = (
+        "gold",
+        "silver",
+        "copper",
+        "zinc",
+        "nickel",
+        "iron",
+        "lithium",
+        "cobalt",
+        "manganese",
+        "platinum",
+        "palladium",
+        "uranium",
+        "ore",
+        "metal",
+    )
+    mining_tokens = ("mining", "mineral", "coal", "quarry", "aggregate", "gravel", "sand")
+    if any(tok in text for tok in petroleum_tokens):
+        return "petroleum"
+    if any(tok in text for tok in metals_tokens):
+        return "metals"
+    if any(tok in text for tok in mining_tokens):
+        return "mining"
+    return None
+
+
 def normalize_cpv_bucket(bucket: Optional[str]) -> Optional[str]:
     if not bucket:
         return None

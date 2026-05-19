@@ -174,6 +174,17 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Poland złoża layer** | Done | `poland_pgi_deposits` (MIDAS layer 0); capped via `PGI_SYNC_MAX_PER_LAYER`. |
 | **Drift alert deep links** | Done | Webhook/email include `source_id`, `drop_pct`, `admin_ui_url` from `APP_PUBLIC_URL`. |
 
+### Weeks 33–36 (operations) — Phase 9 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Kazakhstan ArcGIS hub probe** | Done | Lists services + hydrocarbon name matches; `KZ_ARCGIS_HYDROCARBON_LAYER_URL` + `KZ_ARCGIS_SYNC_ENABLED=1` appends `kazakhstan_petroleum_arcgis` to `OPEN_DATA_SOURCES`; honest timeout messaging. |
+| **TED CPV ↔ license commodity** | Done | `license_commodity_to_cpv_bucket`; dossier Gov Tenders shows CPV bucket + link to Investigations with pre-selected facet. |
+| **Deal room true PDF** | Done | `reportlab` in `requirements.txt`; `GET /api/deal-rooms/{id}/export.pdf` returns `application/pdf` (HTML fallback if lib missing). |
+| **Probe status alerts** | Done | `record_probe_status_change` → `sync_alert_events` + optional `SYNC_ALERT_WEBHOOK_URL` POST (`probe_status_change`). |
+| **Global company registers** | Done | `company_registers.py` — Ghana, South Africa, Colombia, Peru, Brazil, Chile, Mexico, Australia, Canada (+ EU via `eu_company_registers.py`). |
+| **Trade-flow charts** | Done | `TradeFlowsChart` SVG bar chart in dossier `EntityTradeFlowsPanel` (export/import by year from `oil_trade_flows`). |
+
 ### Weeks 29–32 (operations) — Phase 8 implemented (2026-05-19)
 
 | Workstream | Status | Notes |
@@ -320,8 +331,14 @@ curl -s "http://localhost:8000/api/companies/Newmont/registry-links?country=Unit
 # Stored Comtrade rows for a license (oil_trade_flows)
 curl -s "http://localhost:8000/entities/YOUR_LICENSE_ID/trade-flows?entity_kind=license" | jq .
 
-# Deal room printable export (HTML attachment; browser Print → PDF)
-curl -s "http://localhost:8000/api/deal-rooms/ROOM_ID/export.pdf" -o deal-room.html
+# Deal room PDF export (application/pdf when reportlab installed)
+curl -s "http://localhost:8000/api/deal-rooms/ROOM_ID/export.pdf" -o deal-room.pdf
+
+# Entity EU procurement with auto CPV bucket from license commodity
+curl -s "http://localhost:8000/entities/YOUR_LICENSE_ID/eu-procurement?entity_kind=license" | jq '.cpvBucket,.cpvBucketLabel'
+
+# Ghana company register (manual link)
+curl -s "http://localhost:8000/api/companies/Gold%20Fields/registry-links?country=Ghana" | jq .
 
 # Petroleum Mapbox-off catalog (OSM-only mode)
 PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" | jq '.mapbox_disabled,.layers'
@@ -351,7 +368,10 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/services/sync_sla.py` | Per-source sync SLA (green/yellow/red) |
 | `backend/services/deal_room_export_enrichment.py` | Deal export USAspending + TED fuzzy match |
 | `backend/services/company_registry_links.py` | OpenCorporates + EU MS manual registry links |
-| `backend/services/eu_company_registers.py` | EU member-state register URL mapping |
+| `backend/services/company_registers.py` | EU + Africa/LatAm/Oceania manual register URLs |
+| `backend/services/eu_company_registers.py` | EU member-state register URL mapping (legacy import) |
+| `backend/services/deal_room_export_pdf.py` | Reportlab PDF deal export (+ HTML fallback) |
+| `mining-viz/src/components/dossier/TradeFlowsChart.tsx` | Comtrade year bar chart in dossier |
 | `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27 linkage |
 | `backend/services/deal_room_export_html.py` | Printable HTML deal export |
 | `backend/arcgis_probe_sync_worker.py` | Weekly KZ + PH ArcGIS probes |

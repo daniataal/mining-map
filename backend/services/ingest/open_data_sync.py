@@ -791,6 +791,15 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
     _megagiant_oil_gas_fields_source(),
 )
 
+try:
+    from backend.services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+except ImportError:
+    from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+
+_kz_petroleum = optional_kazakhstan_petroleum_source()
+if _kz_petroleum is not None:
+    OPEN_DATA_SOURCES = OPEN_DATA_SOURCES + (_kz_petroleum,)
+
 
 AFRICAN_COUNTRIES: tuple[tuple[str, str], ...] = (
     ("DZ", "Algeria"),

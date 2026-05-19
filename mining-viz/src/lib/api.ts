@@ -672,6 +672,9 @@ export type EuProcurementResponse = {
   scope?: string;
   queryCompany?: string;
   countryFilter?: string;
+  cpvBucket?: string;
+  cpvBucketLabel?: string;
+  licenseCommodity?: string;
   limitations?: string[];
   warnings?: string[];
   notices?: EuProcurementNotice[];

@@ -134,6 +134,7 @@ interface DossierViewProps {
   onPlanRoute?: (item: MiningLicense) => void;
   linkedDealRoom?: DealRoom | null;
   onNavigateToDealRoom?: (dealRoomId: string) => void;
+  onNavigateToEuProcurement?: (cpvBucket: string) => void;
   onDealRoomLinked?: (room: DealRoom) => void;
 }
 
@@ -188,6 +189,7 @@ export default function DossierView({
   onPlanRoute,
   linkedDealRoom: linkedDealRoomProp,
   onNavigateToDealRoom,
+  onNavigateToEuProcurement,
   onDealRoomLinked,
 }: DossierViewProps) {
   const { t } = useI18n();
@@ -2308,9 +2310,28 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                       </a>
                     )}
                   </div>
-                  <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
-                    {t('מכרזי EU (TED)', 'EU procurement (TED)')}
-                  </h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                      {t('מכרזי EU (TED)', 'EU procurement (TED)')}
+                    </h3>
+                    {euProcurement?.cpvBucket && (
+                      <Badge variant="outline" className="text-[9px] font-black uppercase">
+                        CPV {euProcurement.cpvBucket}
+                        {euProcurement.cpvBucketLabel ? ` · ${euProcurement.cpvBucketLabel}` : ''}
+                      </Badge>
+                    )}
+                    {euProcurement?.cpvBucket && onNavigateToEuProcurement && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="text-[9px] font-black uppercase h-8"
+                        onClick={() => onNavigateToEuProcurement(euProcurement.cpvBucket!)}
+                      >
+                        {t('חקירות EU', 'EU procurement in Investigations')}
+                      </Button>
+                    )}
+                  </div>
                   {(euProcurementError || (euProcurement?.warnings?.length ?? 0) > 0) && (
                     <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[10px] text-amber-700 dark:text-amber-300 space-y-1">
                       {euProcurementError && <p className="font-bold">{euProcurementError}</p>}
