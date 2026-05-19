@@ -1366,7 +1366,11 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
                 "PGI MIDAS mining areas via ArcGIS MapServer (cbdgmapa.pgi.gov.pl). "
                 "Sync: POST /api/admin/poland-mining/sync. CSV fallback: docs/eu_mining_import_template.csv"
             ),
-            "source_ids": ["poland_pgi_midas_layer1", "poland_pgi_midas_layer2"],
+            "source_ids": ["poland_pgi_deposits", "poland_pgi_midas_layer1", "poland_pgi_midas_layer2"],
+            "note": (
+                "Poland PGI MIDAS MapServer: layer 0 złoża (deposits) via poland_pgi_deposits; "
+                "layers 1–2 mining areas/territories. Capped per PGI_SYNC_MAX_PER_LAYER."
+            ),
             "references": [
                 {
                     "name": "PGI map portal (concessions / mining areas)",

@@ -579,6 +579,21 @@ def build_export_package(conn: Any, deal_room_id: str) -> Optional[dict[str, Any
     if isinstance(entity.get("confidenceScore"), (int, float)):
         confidence_values.append(float(entity["confidenceScore"]))
     confidence = round(sum(confidence_values) / len(confidence_values), 2) if confidence_values else None
+    procurement_enrichment: dict[str, Any] = {}
+    try:
+        try:
+            from backend.services.deal_room_export_enrichment import enrich_deal_room_export
+        except ImportError:
+            from services.deal_room_export_enrichment import enrich_deal_room_export  # type: ignore[no-redef]
+
+        procurement_enrichment = enrich_deal_room_export(conn, room=room, entity=entity)
+    except Exception as exc:
+        procurement_enrichment = {
+            "relatedUsaAwards": [],
+            "relatedEuNotices": [],
+            "relatedProcurementWarnings": [f"Procurement enrichment skipped: {str(exc)[:200]}"],
+        }
+
     package = {
         "dealRoom": room,
         "entity": entity,
@@ -588,6 +603,10 @@ def build_export_package(conn: Any, deal_room_id: str) -> Optional[dict[str, Any
         "evidence": room.get("evidence") or {},
         "procurementAwardsSummary": procurement.get("summary") or {},
         "procurementAwards": procurement.get("awards") or [],
+        "relatedUsaAwards": procurement_enrichment.get("relatedUsaAwards") or [],
+        "relatedEuNotices": procurement_enrichment.get("relatedEuNotices") or [],
+        "relatedProcurementWarnings": procurement_enrichment.get("relatedProcurementWarnings") or [],
+        "partyNamesQueried": procurement_enrichment.get("partyNamesQueried") or [],
         "risks": risks,
         "confidence": confidence,
         "decision": _decision_from_risks_and_confidence(risks, confidence),
@@ -688,6 +707,8 @@ def render_decision_package_markdown(package: dict[str, Any]) -> str:
         "## Procurement",
         f"- Award count: {procurement.get('awardCount') or procurement.get('award_count') or 0}",
         f"- Total awarded USD: {procurement.get('totalAwardedUsd') or procurement.get('total_awarded_usd') or 0}",
+        f"- Related USAspending (fuzzy): {len(package.get('relatedUsaAwards') or [])}",
+        f"- Related EU TED notices (fuzzy): {len(package.get('relatedEuNotices') or [])}",
         "",
         "## Risks",
     ]

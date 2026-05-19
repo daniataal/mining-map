@@ -162,6 +162,20 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
 | **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
 
+### Weeks 25–28 (operations) — Phase 7 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Philippines MGB probe** | Done | `philippines_mgb_arcgis_probe.py`; `open_data_probe_results`; coverage `official_api_restricted`; data-health + `PH_MGB_ARCGIS_TOKEN`. |
+| **Norway / Finland breadth** | Done | NPD + Tukes documented in coverage; data-health `nordic_source_admin_notes` + per-`source_id` row counts. |
+| **GLEIF dossier header** | Done | `GleifLeiLink` compact chip next to company name on Overview header (Raw Evidence card unchanged). |
+| **Deal room export enrichment** | Done | Export package includes `relatedUsaAwards` + `relatedEuNotices` (fuzzy party match). |
+| **Sync SLA dashboard** | Done | `source_sync_sla` on data-health; env `SYNC_SLA_*_HOURS`; `POST /api/admin/open-data/sync?source_id=X`. |
+| **Poland złoża layer** | Done | `poland_pgi_deposits` (MIDAS layer 0); capped via `PGI_SYNC_MAX_PER_LAYER`. |
+| **Drift alert deep links** | Done | Webhook/email include `source_id`, `drop_pct`, `admin_ui_url` from `APP_PUBLIC_URL`. |
+
+**Phase 8 ideas:** OpenCorporates manual-only UX; national company registers (EU MS); scheduled probe workers; deal-room export PDF; Comtrade ↔ license commodity linkage; Mapbox-off pipeline-only production mode.
+
 ### Weeks 21–24 (operations) — Phase 6 implemented (2026-05-19)
 
 | Workstream | Status | Notes |
@@ -276,6 +290,13 @@ curl -X POST "http://localhost:8000/api/open-data/sync-alerts/mark-all-read" -H 
 # Poland PGI MIDAS mining sync
 curl -X POST "http://localhost:8000/api/admin/poland-mining/sync" -H "X-Admin-Token: $ADMIN_TOKEN"
 
+# Philippines MGB probe (stored in open_data_probe_results; refresh via data-health)
+curl -s "http://localhost:8000/api/admin/data-health?refresh_probes=true" -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.philippines_mgb_arcgis_probe'
+
+# Single-source open-data sync
+curl -X POST "http://localhost:8000/api/admin/open-data/sync?source_id=kenya_mining_cadastre" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
+
 # Coverage single country (server-side filter)
 curl -s "http://localhost:8000/api/open-data/coverage/world?country=Ghana" | jq '.countries'
 
@@ -304,6 +325,9 @@ curl -s "http://localhost:8000/api/eu-procurement/notices?cpv_bucket=mining&limi
 | `backend/services/ingest/ted_procurement_sync.py` | EU TED procurement (CPV 091*) |
 | `backend/services/eu_procurement_store.py` | `eu_procurement_notices` persistence |
 | `backend/services/ingest/kazakhstan_arcgis_probe.py` | KZ ArcGIS hub reachability probe |
+| `backend/services/ingest/philippines_mgb_arcgis_probe.py` | PH MGB ControlMap token probe |
+| `backend/services/sync_sla.py` | Per-source sync SLA (green/yellow/red) |
+| `backend/services/deal_room_export_enrichment.py` | Deal export USAspending + TED fuzzy match |
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |

@@ -39,6 +39,10 @@ SAMPLE_FEATURE = {
 
 
 class PolandPgiMiningSyncTests(unittest.TestCase):
+    def test_layer_source_id_deposits(self):
+        self.assertEqual(poland.layer_source_id(0), "poland_pgi_deposits")
+        self.assertEqual(poland.layer_source_id(1), "poland_pgi_midas_layer1")
+
     def test_normalize_midas_feature(self):
         row = poland.normalize_midas_feature(SAMPLE_FEATURE, layer_id=1)
         self.assertIsNotNone(row)

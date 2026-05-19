@@ -119,13 +119,15 @@ jobs:
         REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
         MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
         MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+        COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
+        COMTRADE_API_KEY_SECONDARY: ${{ secrets.COMTRADE_API_KEY_SECONDARY }}
         VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -136,8 +138,9 @@ jobs:
           GROQ_EFFECTIVE="${GROQ_AI_API_KEY:-${GROQ_API_KEY:-}}"
           OPENROUTER_EFFECTIVE="${OPENROUTER_AI_API_KEY:-${OPENROUTER_API_KEY:-}}"
           MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
+          COMTRADE_EFFECTIVE="${COMTRADE_API_KEY:-}"
 
-          # Persist runtime env for backend + maritime-worker (env_file: backend.env).
+          # Persist runtime env for backend + workers (env_file: backend.env).
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
@@ -145,6 +148,11 @@ jobs:
             printf 'GROQ_API_KEY=%s\n' "$GROQ_EFFECTIVE"
             printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_EFFECTIVE"
             printf 'DISABLE_POLLINATIONS_FALLBACK=1\n'
+            printf 'COMTRADE_API_KEY=%s\n' "$COMTRADE_EFFECTIVE"
+            if [ -n "${COMTRADE_API_KEY_SECONDARY:-}" ]; then
+              printf 'COMTRADE_API_KEY_SECONDARY=%s\n' "$COMTRADE_API_KEY_SECONDARY"
+            fi
+            printf 'COMTRADE_SYNC_ENABLED=true\n'
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -187,6 +195,9 @@ jobs:
                 - POLLINATIONS_HTTP_TIMEOUT_SECONDS
                 - POLLINATIONS_HTTP_MAX_RETRIES
                 - DISABLE_POLLINATIONS_FALLBACK
+                - COMTRADE_API_KEY
+                - COMTRADE_API_KEY_SECONDARY
+                - COMTRADE_SYNC_ENABLED=true
                 - REDIS_HOST=redis
                 - REDIS_PORT=6379
               healthcheck:
@@ -253,6 +264,30 @@ jobs:
                 redis:
                   condition: service_started
 
+            comtrade-sync-worker:
+              image: dannyatalla/mining-backend:$VERSION_TAG
+              platform: linux/arm64
+              container_name: mining-comtrade-sync-worker
+              restart: always
+              command: ["python", "comtrade_sync_worker.py"]
+              env_file:
+                - backend.env
+              environment:
+                - DB_HOST=db
+                - DB_PORT=5432
+                - DB_NAME=mining_db
+                - DB_USER=postgres
+                - DB_PASSWORD=password
+                - COMTRADE_API_KEY
+                - COMTRADE_API_KEY_SECONDARY
+                - COMTRADE_SYNC_ENABLED=true
+                - COMTRADE_SYNC_INTERVAL_SECONDS=86400
+                - COMTRADE_SYNC_BACKOFF_SECONDS=3600
+                - COMTRADE_SYNC_SLEEP_SECONDS=1.2
+              depends_on:
+                db:
+                  condition: service_healthy
+
             redis:
               image: redis:alpine
               platform: linux/arm64
@@ -303,6 +338,9 @@ jobs:
           export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
           export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"
           export MAPBOX_ACCESS_TOKEN="${MAPBOX_EFFECTIVE}"
+          export COMTRADE_API_KEY="${COMTRADE_EFFECTIVE}"
+          export COMTRADE_API_KEY_SECONDARY="${COMTRADE_API_KEY_SECONDARY:-}"
+          export COMTRADE_SYNC_ENABLED=true
           export DISABLE_POLLINATIONS_FALLBACK=1
           export AI_HTTP_TIMEOUT_SECONDS="${AI_HTTP_TIMEOUT_SECONDS:-18}"
           export AI_HTTP_MAX_RETRIES="${AI_HTTP_MAX_RETRIES:-1}"
@@ -324,7 +362,7 @@ jobs:
             sleep 2
           done
 
-          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','COMTRADE_API_KEY','COMTRADE_API_KEY_SECONDARY','COMTRADE_SYNC_ENABLED','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
 
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \

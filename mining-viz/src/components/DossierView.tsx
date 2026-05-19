@@ -1221,9 +1221,12 @@ Output requirements:
           <header className="sticky top-0 z-10 w-full bg-white/80 dark:bg-slate-950/80 border-b border-black/5 dark:border-white/5 flex items-center justify-between px-4 sm:px-8 py-3 sm:py-0 sm:h-16 backdrop-blur-md gap-3">
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex flex-col min-w-0">
-                <h2 className="text-base sm:text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight truncate">
-                  {item.company}
-                </h2>
+                <motion.div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <h2 className="text-base sm:text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight truncate">
+                    {item.company}
+                  </h2>
+                  {item.company && <GleifLeiLink companyName={item.company} variant="compact" />}
+                </motion.div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
                     {commoditySummaryLabel}

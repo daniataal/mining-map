@@ -67,6 +67,31 @@ class SyncAlertStoreTests(unittest.TestCase):
             )
         mock_smtp.send_message.assert_called_once()
 
+    @patch("backend.services.sync_alert_store.urllib.request.urlopen")
+    def test_webhook_includes_admin_url_and_drop_pct(self, mock_urlopen):
+        mock_urlopen.return_value.__enter__.return_value = MagicMock()
+        with patch.dict(
+            os.environ,
+            {
+                "SYNC_ALERT_WEBHOOK_URL": "https://hooks.example.com/drift",
+                "APP_PUBLIC_URL": "https://app.example.com",
+                "ADMIN_DATA_HEALTH_PATH": "/admin?tab=data-health",
+            },
+            clear=False,
+        ):
+            alerts._maybe_notify_webhook(
+                run_id=9,
+                source_id="kenya_mining_cadastre",
+                drift_warning={"drop_pct": 33.5, "message": "big drop"},
+            )
+        posted = mock_urlopen.call_args[0][0]
+        import json
+
+        body = json.loads(posted.data.decode("utf-8"))
+        self.assertEqual(body["source_id"], "kenya_mining_cadastre")
+        self.assertEqual(body["drop_pct"], 33.5)
+        self.assertEqual(body["admin_ui_url"], "https://app.example.com/admin?tab=data-health")
+
 
 if __name__ == "__main__":
     unittest.main()
