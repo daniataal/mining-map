@@ -12,7 +12,6 @@ interface PopupFormProps {
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDelete: () => void;
   onOpenDossier?: () => void;
-  isOpen: boolean;
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;

@@ -65,6 +65,7 @@ import {
   countryLicenseCounts,
 } from '../lib/countriesWithVisibleLicenses';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
+import { licensePopupOpenDelayMs } from '../lib/licensePopupOpenDelay';
 import PopupForm from './PopupForm';
 import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
 import {
@@ -475,6 +476,7 @@ export default function MapComponent({
     const canvasVesselLayerRef = useRef<CanvasVesselLayer | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const prevSelectedIdRef = useRef<string | null>(null);
+    const prevMapFlyTriggerForPopupRef = useRef(mapFlyTrigger);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
 
     const isMobileDevice = useMemo(() => {
@@ -726,20 +728,23 @@ export default function MapComponent({
         return { lat: j._displayLat, lng: j._displayLng };
     }, [selectedItem, displayData, mapDisplayData]);
 
+    const setMarkerSelectedVisual = useCallback((marker: L.Marker | undefined, selected: boolean) => {
+        const el = marker?.getElement();
+        if (!el) return;
+        el.classList.toggle(SELECTED_CLASS, selected);
+        const pin = el.querySelector('.refinery-marker-pin, .oil-field-marker-pin');
+        if (pin) pin.classList.toggle('is-selected', selected);
+    }, []);
+
     // Selection-driven side effects:
-    //   - toggle a CSS class on the previous & next markers (no setIcon swap
-    //     because that would replace the marker DOM node and collapse any
-    //     active spiderfy);
-    //   - open the popup. For sidebar-driven selection we wait one tick so
-    //     the camera flyTo can start; for marker clicks the popup is already
-    //     opened synchronously inside the click handler below, so the
-    //     openPopup call here is a harmless no-op.
+    //   - toggle CSS on markers (never swap icons — setIcon replaces DOM and
+    //     closes/reopens the Leaflet popup);
+    //   - open the popup once after React commit. Sidebar picks defer 60ms so
+    //     flyTo can start; map marker clicks open on the next frame.
     useEffect(() => {
         const prevId = prevSelectedIdRef.current;
         if (prevId && prevId !== selectedItem?.id) {
-            const prevMarker = markerRefs.current[prevId];
-            const el = prevMarker?.getElement();
-            if (el) el.classList.remove(SELECTED_CLASS);
+            setMarkerSelectedVisual(markerRefs.current[prevId], false);
         }
 
         if (!selectedItem) {
@@ -748,20 +753,33 @@ export default function MapComponent({
         }
 
         const marker = markerRefs.current[selectedItem.id];
-        const el = marker?.getElement();
-        if (el) el.classList.add(SELECTED_CLASS);
-        if (marker && !marker.isPopupOpen?.()) {
-            // Defer openPopup so flyTo (from the sidebar path) and any
-            // pending cluster animation can settle. If the popup is already
-            // open from a synchronous marker-click handler this is a no-op.
-            const handle = setTimeout(() => {
-                if (markerRefs.current[selectedItem.id] === marker) marker.openPopup();
-            }, 60);
-            prevSelectedIdRef.current = selectedItem.id;
-            return () => clearTimeout(handle);
+        setMarkerSelectedVisual(marker, true);
+
+        const sidebarDriven =
+            licensePopupOpenDelayMs(mapFlyTrigger, prevMapFlyTriggerForPopupRef.current) > 0;
+        prevMapFlyTriggerForPopupRef.current = mapFlyTrigger;
+
+        let timeoutId: number | undefined;
+        let rafId: number | undefined;
+
+        const openPopupOnce = () => {
+            const current = markerRefs.current[selectedItem.id];
+            if (!current || current.isPopupOpen?.()) return;
+            current.openPopup();
+        };
+
+        if (sidebarDriven) {
+            timeoutId = window.setTimeout(openPopupOnce, 60);
+        } else {
+            rafId = window.requestAnimationFrame(openPopupOnce);
         }
+
         prevSelectedIdRef.current = selectedItem.id;
-    }, [selectedItem?.id]);
+        return () => {
+            if (timeoutId != null) window.clearTimeout(timeoutId);
+            if (rafId != null) window.cancelAnimationFrame(rafId);
+        };
+    }, [mapFlyTrigger, selectedItem?.id, setMarkerSelectedVisual]);
 
     const borderCountries = useMemo(() => {
         if (isRoutePlannerView) {
@@ -842,23 +860,43 @@ export default function MapComponent({
         return countryBorderPathStyle;
     }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
+    const licenseMarkerIcons = useMemo(() => {
+        const icons = new Map<string, L.DivIcon>();
+        for (const item of mapDisplayData) {
+            if (item._displayLat == null || item._displayLng == null) continue;
+            const annotation = userAnnotations[item.id] || {};
+            const color = getMarkerColor(
+                annotation.commodity || item.commodity,
+                annotation.status,
+                item.sector,
+                item.entitySubtype,
+            );
+            const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
+            const isEsgRisk = esgZone !== null;
+            const refineryPin = isRefineryEntity(item);
+            const oilFieldPin = !refineryPin && isOilFieldEntity(item);
+            icons.set(
+                item.id,
+                refineryPin
+                    ? createRefineryMapIcon()
+                    : oilFieldPin
+                      ? createOilFieldMapIcon()
+                      : createCustomIcon(color, false, isEsgRisk),
+            );
+        }
+        return icons;
+    }, [mapDisplayData, userAnnotations]);
+
     const renderedMarkers = useMemo(() => {
         if (!onGroundVisible) return null;
         return mapDisplayData.map((item, index) => {
             if (item._displayLat == null || item._displayLng == null) return null;
             const annotation = userAnnotations[item.id] || {};
-            const color = getMarkerColor(annotation.commodity || item.commodity, annotation.status, item.sector, item.entitySubtype);
             const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
             const isEsgRisk = esgZone !== null;
             const esgZoneName = esgZone?.name;
-            const selected = selectedItem?.id === item.id;
-            const refineryPin = isRefineryEntity(item);
-            const oilFieldPin = !refineryPin && isOilFieldEntity(item);
-            const markerIcon = refineryPin
-              ? createRefineryMapIcon(selected)
-              : oilFieldPin
-                ? createOilFieldMapIcon(selected)
-                : createCustomIcon(color, false, isEsgRisk);
+            const markerIcon = licenseMarkerIcons.get(item.id);
+            if (!markerIcon) return null;
 
             return (
                 <Marker
@@ -866,17 +904,15 @@ export default function MapComponent({
                     position={[item._displayLat, item._displayLng]}
                     icon={markerIcon}
                     ref={(el) => {
-                        if (!el) return;
-                        markerRefs.current[item.id] = el;
-                        if (selectedItem?.id === item.id) {
-                            const root = el.getElement();
-                            if (root) root.classList.add(SELECTED_CLASS);
+                        if (!el) {
+                            delete markerRefs.current[item.id];
+                            return;
                         }
+                        markerRefs.current[item.id] = el;
                     }}
                     eventHandlers={{
                         click: (e) => {
                             L.DomEvent.stopPropagation(e);
-                            e.target.openPopup();
                             onSelectMaritimeVessel(null);
                             setSelectedItem(item);
                         },
@@ -902,7 +938,6 @@ export default function MapComponent({
                           updateAnnotation={updateAnnotation}
                           onDelete={() => deleteLicense(item.id)}
                           onOpenDossier={() => handleOpenDossier(item)}
-                          isOpen={selectedItem?.id === item.id}
                           isInDdQueue={isInDdQueue?.(item.id) ?? false}
                           onAddToDueDiligence={
                             onAddToDueDiligence
@@ -925,9 +960,9 @@ export default function MapComponent({
             );
         });
     }, [
+        licenseMarkerIcons,
         mapDisplayData,
         userAnnotations,
-        selectedItem,
         onSelectMaritimeVessel,
         setSelectedItem,
         updateAnnotation,
@@ -937,7 +972,7 @@ export default function MapComponent({
         onAddToDueDiligence,
         onRemoveFromDueDiligence,
         getDealRoomForLicense,
-        onGroundVisible
+        onGroundVisible,
     ]);
 
     const handleMaritimeVesselClick = useCallback(
