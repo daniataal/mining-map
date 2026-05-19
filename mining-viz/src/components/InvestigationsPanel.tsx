@@ -29,6 +29,7 @@ interface InvestigationsPanelProps {
   onHighlightedDealRoomConsumed?: () => void;
   onDealRoomChange: (room: DealRoom) => void;
   onRefreshDealRooms: () => void;
+  euProcurementCpvBucket?: string | null;
 }
 
 export default function InvestigationsPanel({
@@ -51,6 +52,7 @@ export default function InvestigationsPanel({
   onHighlightedDealRoomConsumed,
   onDealRoomChange,
   onRefreshDealRooms,
+  euProcurementCpvBucket,
 }: InvestigationsPanelProps) {
   const { t } = useI18n();
   const [internalTab, setInternalTab] = useState<InvestigationsSubTab>(subTab);
@@ -130,7 +132,7 @@ export default function InvestigationsPanel({
               />
             </motion.div>
             <motion.div className="shrink-0 p-4 border-t border-black/5 dark:border-white/5 max-h-[40vh] overflow-y-auto">
-              <EuProcurementFacets />
+              <EuProcurementFacets initialCpvBucket={euProcurementCpvBucket} />
             </motion.div>
           </motion.div>
         ) : (

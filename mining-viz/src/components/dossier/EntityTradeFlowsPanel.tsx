@@ -3,6 +3,7 @@ import { apiClient } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
+import TradeFlowsChart from './TradeFlowsChart';
 
 interface StoredTradeFlow {
   reporter?: string;
@@ -92,6 +93,7 @@ export default function EntityTradeFlowsPanel({
           {w}
         </p>
       ))}
+      {flows.length > 0 && <TradeFlowsChart flows={flows} />}
       {flows.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">

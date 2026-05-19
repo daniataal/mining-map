@@ -3270,20 +3270,28 @@ def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
         fmt = format.lower()
         if fmt in {"md", "markdown"}:
             return Response(package["markdown"], media_type="text/markdown")
-        if fmt in {"html", "pdf"}:
+        if fmt == "html":
             try:
                 from backend.services.deal_room_export_html import render_deal_room_export_html
             except ImportError:
                 from services.deal_room_export_html import render_deal_room_export_html
             body = render_deal_room_export_html(package)
-            media = "text/html"
-            filename = f"deal-room-{deal_room_id}.html"
-            if fmt == "pdf":
-                filename = f"deal-room-{deal_room_id}.html"
             return Response(
                 content=body,
-                media_type=media,
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                media_type="text/html",
+                headers={"Content-Disposition": f'attachment; filename="deal-room-{deal_room_id}.html"'},
+            )
+        if fmt == "pdf":
+            try:
+                from backend.services.deal_room_export_pdf import render_deal_room_export_pdf
+            except ImportError:
+                from services.deal_room_export_pdf import render_deal_room_export_pdf
+            body_bytes, media_type = render_deal_room_export_pdf(package)
+            ext = "pdf" if media_type.startswith("application/pdf") else "html"
+            return Response(
+                content=body_bytes,
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="deal-room-{deal_room_id}.{ext}"'},
             )
         return package
     finally:
@@ -3292,7 +3300,7 @@ def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
 
 @app.get("/api/deal-rooms/{deal_room_id}/export.pdf")
 def export_deal_room_pdf_endpoint(deal_room_id: str):
-    """Printable HTML attachment (no reportlab/weasyprint — use browser Print → PDF)."""
+    """application/pdf when reportlab is installed; otherwise printable HTML fallback."""
     return export_deal_room_endpoint(deal_room_id, format="pdf")
 
 
@@ -6410,16 +6418,37 @@ def read_entity_eu_procurement(
     try:
         company_name = ""
         country = ""
+        commodity = ""
+        license_type = ""
         if (entity_kind or "").strip().lower() == "license":
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT company, country FROM licenses WHERE id = %s",
+                    "SELECT company, country, commodity, license_type FROM licenses WHERE id = %s",
                     (entity_id,),
                 )
                 row = cur.fetchone()
             if row:
                 company_name = (row.get("company") or "").strip()
                 country = (row.get("country") or "").strip()
+                commodity = (row.get("commodity") or "").strip()
+                license_type = (row.get("license_type") or "").strip()
+
+        try:
+            from backend.services.cpv_commodity import (
+                BUCKET_LABELS,
+                license_commodity_to_cpv_bucket,
+                normalize_cpv_bucket,
+            )
+        except ImportError:
+            from services.cpv_commodity import (
+                BUCKET_LABELS,
+                license_commodity_to_cpv_bucket,
+                normalize_cpv_bucket,
+            )
+
+        resolved_bucket = normalize_cpv_bucket(cpv_bucket) or license_commodity_to_cpv_bucket(
+            commodity, license_type=license_type
+        )
 
         try:
             from backend.services.eu_procurement_intel import (
@@ -6437,8 +6466,11 @@ def read_entity_eu_procurement(
             company_name=company_name,
             country=country or None,
             limit=limit,
-            cpv_bucket=cpv_bucket,
+            cpv_bucket=resolved_bucket,
         )
+        payload["cpv_bucket"] = resolved_bucket
+        payload["cpv_bucket_label"] = BUCKET_LABELS.get(resolved_bucket or "", resolved_bucket)
+        payload["license_commodity"] = commodity or None
         return serialize_eu_procurement_response(payload)
     except Exception as exc:
         logger.exception("eu-procurement failed for %s: %s", entity_id, exc)

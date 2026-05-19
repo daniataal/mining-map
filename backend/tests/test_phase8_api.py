@@ -105,9 +105,13 @@ class Phase8ApiTests(unittest.TestCase):
             "markdown": "",
         }
         with patch("backend.main._load_deal_room_services", return_value=fake_services):
-            res = self.client.get("/api/deal-rooms/room-2/export.pdf")
+            with patch(
+                "backend.services.deal_room_export_pdf.render_deal_room_export_pdf",
+                return_value=(b"%PDF-1.4 test", "application/pdf"),
+            ):
+                res = self.client.get("/api/deal-rooms/room-2/export.pdf")
         self.assertEqual(res.status_code, 200)
-        self.assertIn(b"PDF Room", res.content)
+        self.assertIn("application/pdf", res.headers.get("content-type", ""))
 
     def test_petroleum_catalog_mapbox_disabled(self):
         from backend.services import petroleum_infrastructure as pi
