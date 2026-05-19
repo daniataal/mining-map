@@ -1179,6 +1179,48 @@ def infer_world_macro_region(country: str) -> str:
 
 # Non-African coverage notes (token walls, portal-only cadastres, etc.).
 WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "Kazakhstan": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": (
+                "Kazakhstan publishes solid-mineral licence registers on the national open-data portal "
+                "and the unified e-qazyna subsoil platform, but no stable open ArcGIS FeatureServer "
+                "for unattended sync was verified in this pass."
+            ),
+            "references": [
+                {
+                    "name": "Register of issued licences (solid minerals) — data.egov.kz",
+                    "url": "https://data.egov.kz/datasets/view?index=reestr_vydannyh_licenzii_na_ne1",
+                    "access": "open_data_download",
+                },
+                {
+                    "name": "Unified subsoil use e-service (e-qazyna)",
+                    "url": "https://minerals.e-qazyna.kz/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Hydrocarbon contract areas are published via national GIS portals, but Kazakhstan "
+                "is not in OPEN_DATA_SOURCES and is outside the OPEC/Gulf reference seed. "
+                "Megagiant global fallback may show major fields only — not licence polygons."
+            ),
+            "references": [
+                {
+                    "name": "Contract areas GIS (Committee of Geology / Terra)",
+                    "url": "https://gis-terra.kz/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "Kazakhstan GIS Center ArcGIS REST (research)",
+                    "url": "https://arcgis.gis-center.kz/server/rest/services",
+                    "access": "research",
+                },
+            ],
+        },
+    },
     "Philippines": {
         "mining": {
             "status": "official_api_restricted",
@@ -1360,7 +1402,8 @@ UPSERT_SQL = """
         source_record_url = EXCLUDED.source_record_url,
         source_updated_at = EXCLUDED.source_updated_at,
         raw_payload = EXCLUDED.raw_payload,
-        last_synced_at = CURRENT_TIMESTAMP;
+        last_synced_at = CURRENT_TIMESTAMP
+    WHERE licenses.manually_edited IS NOT TRUE;
 """
 
 
@@ -1544,33 +1587,68 @@ def sync_open_data_sources(
         "records_fetched": 0,
         "records_written": 0,
         "bundled_rows_marked": 0,
+        "sync_runs": [],
         "errors": [],
     }
 
     try:
+        try:
+            from backend.services.license_sync_store import (
+                finish_license_sync_run,
+                start_license_sync_run,
+            )
+        except ImportError:
+            from services.license_sync_store import (
+                finish_license_sync_run,
+                start_license_sync_run,
+            )
+
         summary["bundled_rows_marked"] = mark_existing_bundled_rows(conn)
         for source in OPEN_DATA_SOURCES:
             if requested and source.source_id not in requested:
                 continue
+            run_id: int | None = None
             try:
+                run_id = start_license_sync_run(conn, source_id=source.source_id)
                 features = fetch_arcgis_features(source)
                 records = _dedupe_by_id(normalize_feature(source, feature) for feature in features)
                 written = upsert_open_data_records(conn, records, sync_contacts=source.sync_contacts)
                 summary["records_fetched"] += len(features)
                 summary["records_written"] += written
-                summary["sources"].append(
-                    {
-                        "source_id": source.source_id,
-                        "source_name": source.source_name,
-                        "sector": source.sector,
-                        "country": source.country,
-                        "fetched": len(features),
-                        "written": written,
-                        "metadata": source.metadata,
-                    }
-                )
+                source_summary = {
+                    "source_id": source.source_id,
+                    "source_name": source.source_name,
+                    "sector": source.sector,
+                    "country": source.country,
+                    "fetched": len(features),
+                    "written": written,
+                    "metadata": source.metadata,
+                }
+                summary["sources"].append(source_summary)
+                if run_id is not None:
+                    finish_license_sync_run(
+                        conn,
+                        run_id,
+                        status="success",
+                        records_fetched=len(features),
+                        records_written=written,
+                    )
+                    summary["sync_runs"].append({"run_id": run_id, **source_summary, "status": "success"})
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
+                if run_id is not None:
+                    try:
+                        finish_license_sync_run(
+                            conn,
+                            run_id,
+                            status="error",
+                            error=str(exc),
+                        )
+                        summary["sync_runs"].append(
+                            {"run_id": run_id, "source_id": source.source_id, "status": "error"}
+                        )
+                    except Exception:
+                        pass
         return summary
     finally:
         if own_connection and conn is not None:

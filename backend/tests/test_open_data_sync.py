@@ -7,6 +7,7 @@ from backend.services.ingest.open_data_sync import (
     _build_syncable_africa_coverage,
     _normalize_date,
     AFRICA_COVERAGE_OVERRIDES,
+    WORLD_COVERAGE_OVERRIDES,
     arcgis_geometry_centroid,
     describe_license_source_record,
     get_source_registry_index,
@@ -135,7 +136,7 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(record["id"], "user_csv:licenses_export:15814")
         self.assertEqual(record["country"], "South Africa")
         self.assertEqual(record["sector"], "mining")
-        self.assertEqual(record["record_origin"], "open_data")
+        self.assertEqual(record["record_origin"], "user_import_csv")
         self.assertEqual(record["source_id"], "user_csv:licenses_export")
         self.assertEqual(record["source_name"], "User-provided CSV fallback (licenses_export.csv)")
         self.assertAlmostEqual(record["lat"], -26.3167)
@@ -200,6 +201,12 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(provenance["source_access"], "open_reference_dataset")
         self.assertEqual(provenance["coverage_state"], "global_fallback_only")
         self.assertIn("verify against official registry", provenance["provenance_note"])
+
+    def test_kazakhstan_documented_as_portal_only(self):
+        kz = WORLD_COVERAGE_OVERRIDES.get("Kazakhstan", {})
+        self.assertEqual(kz["mining"]["status"], "official_portal_only")
+        self.assertEqual(kz["oil_and_gas"]["status"], "official_portal_only")
+        self.assertTrue(any("egov.kz" in ref["url"] for ref in kz["mining"]["references"]))
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2 } from 'lucide-react';
+import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
 
@@ -28,6 +28,17 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
     const [logs, setLogs] = useState<ActivityLog[]>([]);
     const [meetingPoints, setMeetingPoints] = useState<MeetingPoint[]>([]);
     const [minerListings, setMinerListings] = useState<MinerListing[]>([]);
+    const [syncRuns, setSyncRuns] = useState<Array<{
+        id: number;
+        source_id?: string | null;
+        status: string;
+        records_written?: number;
+        records_fetched?: number;
+        started_at?: string;
+        finished_at?: string | null;
+        error?: string | null;
+    }>>([]);
+    const [loadingSyncRuns, setLoadingSyncRuns] = useState(false);
     
     // Activity Log per user
     const [selectedUserForLogs, setSelectedUserForLogs] = useState<User | null>(null);
@@ -163,14 +174,32 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
         }
     };
 
+    const fetchSyncRuns = async () => {
+        if (!token?.trim()) return;
+        setLoadingSyncRuns(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/open-data/sync-runs?per_source_latest=true&limit=100`, {
+                headers: authHeaders(),
+            });
+            const data = await res.json();
+            setSyncRuns(Array.isArray(data?.runs) ? data.runs : []);
+        } catch (err) {
+            console.error('Failed to fetch sync runs', err);
+            setSyncRuns([]);
+        } finally {
+            setLoadingSyncRuns(false);
+        }
+    };
+
     useEffect(() => {
         if (isOpen || isFullPage) {
             fetchData('/auth/users', setUsers);
             fetchData('/activity/logs?limit=100', setLogs);
             fetchData('/meeting-points', setMeetingPoints);
             fetchData('/miner-listings', setMinerListings);
+            fetchSyncRuns();
         }
-    }, [isOpen, isFullPage]);
+    }, [isOpen, isFullPage, token]);
 
     const fetchUserLogs = async (user: User) => {
         setSelectedUserForLogs(user);
@@ -212,6 +241,9 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                         </TabsTrigger>
                         <TabsTrigger value="miner-listings" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucidePickaxe className="w-4 h-4" /> {t("מודעות כורים", "Miner Listings")}
+                        </TabsTrigger>
+                        <TabsTrigger value="open-data" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
+                            <LucideDatabase className="w-4 h-4" /> {t("נתונים פתוחים", "Open Data")}
                         </TabsTrigger>
                     </TabsList>
                 </div>
@@ -267,6 +299,54 @@ export default function AdminPanel({ isOpen, onClose, token, isFullPage, current
                                                     >
                                                         <LucideTrash2 className="w-3 h-3 mr-1" /> {t('מחיקה', 'Delete')}
                                                     </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    <TabsContent value="open-data" className="h-full m-0 p-6 overflow-y-auto space-y-6">
+                        <Card className="bg-black/[0.02] dark:bg-white/[0.02] border-black/5 dark:border-white/5 shadow-2xl">
+                            <CardHeader className="flex flex-row items-center justify-between border-b border-black/5 dark:border-white/5 pb-6">
+                                <CardTitle className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                                    {t('סנכרון רישיונות', 'License sync health')}
+                                </CardTitle>
+                                <Button type="button" size="sm" variant="outline" onClick={fetchSyncRuns} disabled={loadingSyncRuns || !token}>
+                                    {loadingSyncRuns ? t('טוען...', 'Loading...') : t('רענן', 'Refresh')}
+                                </Button>
+                            </CardHeader>
+                            <CardContent className="pt-6 overflow-x-auto">
+                                <Table className="min-w-[640px]">
+                                    <TableHeader>
+                                        <TableRow className="border-black/5 dark:border-white/5 hover:bg-transparent">
+                                            <TableHead className="text-slate-500 dark:text-slate-400 font-black uppercase text-[9px] tracking-widest">Source</TableHead>
+                                            <TableHead className="text-slate-500 dark:text-slate-400 font-black uppercase text-[9px] tracking-widest">Status</TableHead>
+                                            <TableHead className="text-slate-500 dark:text-slate-400 font-black uppercase text-[9px] tracking-widest">Written</TableHead>
+                                            <TableHead className="text-slate-500 dark:text-slate-400 font-black uppercase text-[9px] tracking-widest">Finished</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {syncRuns.length === 0 && !loadingSyncRuns && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="text-slate-500 text-sm">
+                                                    {t('אין הרצות סנכרון עדיין', 'No sync runs logged yet. Trigger POST /api/admin/open-data/sync.')}
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                        {syncRuns.map((run) => (
+                                            <TableRow key={run.id} className="border-black/5 dark:border-white/5">
+                                                <TableCell className="font-mono text-[10px] text-slate-700 dark:text-slate-200">{run.source_id || '—'}</TableCell>
+                                                <TableCell>
+                                                    <Badge className={run.status === 'success' ? 'bg-emerald-500/10 text-emerald-600' : run.status === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-amber-500/10 text-amber-600'}>
+                                                        {run.status}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-[10px] font-bold">{run.records_written ?? 0} / {run.records_fetched ?? 0}</TableCell>
+                                                <TableCell className="text-[10px] text-slate-500">
+                                                    {run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}
                                                 </TableCell>
                                             </TableRow>
                                         ))}
