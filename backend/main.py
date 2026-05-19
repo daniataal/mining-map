@@ -866,7 +866,8 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def _admin_payload_from_authorization(authorization: Optional[str]):
+def _jwt_payload_from_authorization(authorization: Optional[str]):
+    """Decode Bearer JWT for any authenticated user."""
     if not authorization or not authorization.lower().startswith("bearer "):
         return None, Response("Unauthorized", status_code=401)
     token = authorization.split(" ", 1)[1].strip()
@@ -876,9 +877,29 @@ def _admin_payload_from_authorization(authorization: Optional[str]):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None, Response("Invalid or expired token", status_code=401)
+    return payload, None
+
+
+def _admin_payload_from_authorization(authorization: Optional[str]):
+    payload, err = _jwt_payload_from_authorization(authorization)
+    if err is not None:
+        return None, err
     if payload.get("role") != "admin":
         return None, Response("Forbidden", status_code=403)
     return payload, None
+
+
+def _require_authenticated_or_admin(
+    authorization: Optional[str] = None,
+    x_admin_token: Optional[str] = None,
+):
+    """Allow X-Admin-Token (when configured) or any valid Bearer JWT."""
+    if (os.getenv("ADMIN_TOKEN") or "").strip() and x_admin_token:
+        err = _check_admin_token(x_admin_token)
+        if err is not None:
+            return None, err
+        return {"role": "admin", "sub": "admin-token"}, None
+    return _jwt_payload_from_authorization(authorization)
 
 # Models
 class UserLogin(BaseModel):
@@ -1389,6 +1410,57 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_discovered_by ON entity_contacts(discovered_by);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_legal_events_discovered_by ON legal_events(discovered_by);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_discovered_by ON entity_relationships(discovered_by);")
+            # Manual override protection for license rows (sync + bulk import must not clobber).
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited BOOLEAN DEFAULT FALSE;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_at TIMESTAMP;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_by TEXT;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_fields JSONB;"
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS license_annotations (
+                    license_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (license_id, user_id)
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_license_annotations_user
+                ON license_annotations (user_id, updated_at DESC);
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS license_sync_runs (
+                    id SERIAL PRIMARY KEY,
+                    source_id TEXT,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ,
+                    status TEXT NOT NULL,
+                    records_fetched INTEGER DEFAULT 0,
+                    records_written INTEGER DEFAULT 0,
+                    records_skipped_manual INTEGER DEFAULT 0,
+                    error TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_license_sync_runs_source_started
+                ON license_sync_runs (source_id, started_at DESC);
+                """
+            )
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -3655,7 +3727,11 @@ def import_licenses_text(body: LicenseImportTextBody):
 
 
 @app.get("/licenses/export")
-def export_licenses():
+def export_licenses(authorization: Optional[str] = Header(None)):
+    _, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     c.execute(
@@ -5646,9 +5722,187 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
         if summary.get("records_written", 0) > 0 or summary.get("bundled_fallback_inserted", 0) > 0:
             cache.delete_pattern("licenses:*")
             
-        return {"status": "success", **summary}
+        sync_run_ids = [
+            int(entry["run_id"])
+            for entry in (summary.get("sync_runs") or [])
+            if entry.get("run_id") is not None
+        ]
+        return {"status": "success", "sync_run_ids": sync_run_ids, **summary}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/open-data/sync-runs")
+def get_open_data_sync_runs(
+    limit: int = 50,
+    source_id: Optional[str] = None,
+    per_source_latest: bool = False,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Recent license open-data sync runs (authenticated users or admin token)."""
+    _, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.license_sync_store import (
+                list_latest_sync_run_per_source,
+                list_license_sync_runs,
+            )
+        except ImportError:
+            from services.license_sync_store import (
+                list_latest_sync_run_per_source,
+                list_license_sync_runs,
+            )
+
+        conn = get_db_connection()
+        try:
+            if per_source_latest:
+                runs = list_latest_sync_run_per_source(conn)
+            else:
+                runs = list_license_sync_runs(conn, limit=limit, source_id=source_id)
+        finally:
+            conn.close()
+        return {"status": "success", "runs": runs, "count": len(runs)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+class LicenseManualEditRequest(BaseModel):
+    manually_edited: bool = True
+    manually_edited_fields: Optional[list[str]] = None
+
+
+@app.patch("/api/licenses/{license_id}/manual-edit")
+def patch_license_manual_edit(
+    license_id: str,
+    body: LicenseManualEditRequest,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark a license row as manually edited so automated sync/import will not overwrite it."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+
+    editor = str(payload.get("sub") or payload.get("id") or "unknown")
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute("SELECT id FROM licenses WHERE id = %s", (license_id,))
+        if not c.fetchone():
+            raise HTTPException(status_code=404, detail="License not found")
+
+        fields_json = _psycopg_json(body.manually_edited_fields) if body.manually_edited_fields else None
+        c.execute(
+            """
+            UPDATE licenses
+            SET manually_edited = %s,
+                manually_edited_at = CASE WHEN %s THEN NOW() ELSE manually_edited_at END,
+                manually_edited_by = CASE WHEN %s THEN %s ELSE manually_edited_by END,
+                manually_edited_fields = COALESCE(%s, manually_edited_fields)
+            WHERE id = %s
+            """,
+            (
+                body.manually_edited,
+                body.manually_edited,
+                body.manually_edited,
+                editor,
+                fields_json,
+                license_id,
+            ),
+        )
+        conn.commit()
+        cache.delete_pattern("licenses:*")
+        return {
+            "status": "success",
+            "id": license_id,
+            "manually_edited": body.manually_edited,
+            "manually_edited_fields": body.manually_edited_fields,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/licenses/{license_id}/annotations")
+def get_license_annotations(
+    license_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute(
+            """
+            SELECT payload, updated_at
+            FROM license_annotations
+            WHERE license_id = %s AND user_id = %s
+            """,
+            (license_id, user_id),
+        )
+        row = c.fetchone()
+        if not row:
+            return {"license_id": license_id, "annotation": {}, "updated_at": None}
+        updated = row.get("updated_at")
+        return {
+            "license_id": license_id,
+            "annotation": row.get("payload") or {},
+            "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
+        }
+    finally:
+        conn.close()
+
+
+class LicenseAnnotationPut(BaseModel):
+    annotation: dict[str, Any]
+
+
+@app.put("/api/licenses/{license_id}/annotations")
+def put_license_annotations(
+    license_id: str,
+    body: LicenseAnnotationPut,
+    authorization: Optional[str] = Header(None),
+):
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM licenses WHERE id = %s", (license_id,))
+        if not c.fetchone():
+            raise HTTPException(status_code=404, detail="License not found")
+
+        c.execute(
+            """
+            INSERT INTO license_annotations (license_id, user_id, payload, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (license_id, user_id) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                updated_at = NOW()
+            """,
+            (license_id, user_id, _psycopg_json(body.annotation or {})),
+        )
+        conn.commit()
+        return {"status": "success", "license_id": license_id}
+    finally:
+        conn.close()
 
 
 @app.get("/api/open-data/coverage/africa")
@@ -5685,6 +5939,198 @@ def get_world_open_data_coverage(region: Optional[str] = None):
             raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/admin/licenses/export")
+def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
+    """CSV export with provenance columns for admin backup and re-import."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute(
+        """
+        SELECT
+            id, company, country, region, commodity, license_type, status,
+            lat, lng, phone_number, contact_person, date_issued,
+            sector, record_origin, source_id, source_name, source_url,
+            source_record_url, source_updated_at, last_synced_at,
+            manually_edited, manually_edited_at, manually_edited_by
+        FROM licenses
+        ORDER BY country, sector, company
+        """
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    headers = [
+        "id",
+        "company",
+        "country",
+        "region",
+        "commodity",
+        "license_type",
+        "status",
+        "lat",
+        "lng",
+        "phone_number",
+        "contact_person",
+        "date_issued",
+        "sector",
+        "record_origin",
+        "source_id",
+        "source_name",
+        "source_url",
+        "source_record_url",
+        "source_updated_at",
+        "last_synced_at",
+        "manually_edited",
+        "manually_edited_at",
+        "manually_edited_by",
+    ]
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(col) for col in headers])
+    output.seek(0)
+    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=licenses_admin_export.csv"
+    return response
+
+
+@app.post("/api/admin/licenses/import")
+async def admin_import_licenses(
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """
+    Upsert licenses from admin CSV (same columns as GET /api/admin/licenses/export).
+    Rows with manually_edited=TRUE are not updated on conflict.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    content = await file.read()
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = content.decode("latin-1")
+
+    text = _strip_bom(decoded)
+    stream = io.StringIO(text)
+    reader = csv.DictReader(stream)
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="Missing header row")
+
+    required = {"id", "company", "country"}
+    missing = required - {h.strip().lower() for h in reader.fieldnames if h}
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required columns: {', '.join(sorted(missing))}",
+        )
+
+    conn = get_db_connection()
+    imported = 0
+    skipped_manual = 0
+    errors: list[str] = []
+    try:
+        c = conn.cursor()
+        for row_num, raw in enumerate(reader, start=2):
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+            row_id = row.get("id") or ""
+            if not row_id:
+                errors.append(f"row {row_num}: id is required")
+                continue
+            c.execute("SELECT manually_edited FROM licenses WHERE id = %s", (row_id,))
+            existing = c.fetchone()
+            if existing and existing[0] is True:
+                skipped_manual += 1
+                continue
+
+            lat = row.get("lat")
+            lng = row.get("lng")
+            lat_f = float(lat) if lat else None
+            lng_f = float(lng) if lng else None
+
+            c.execute(
+                """
+                INSERT INTO licenses (
+                    id, company, country, region, commodity, license_type, status,
+                    lat, lng, phone_number, contact_person, date_issued,
+                    sector, record_origin, source_id, source_name, source_url,
+                    source_record_url, source_updated_at, last_synced_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    company = EXCLUDED.company,
+                    country = EXCLUDED.country,
+                    region = EXCLUDED.region,
+                    commodity = EXCLUDED.commodity,
+                    license_type = EXCLUDED.license_type,
+                    status = EXCLUDED.status,
+                    lat = EXCLUDED.lat,
+                    lng = EXCLUDED.lng,
+                    phone_number = EXCLUDED.phone_number,
+                    contact_person = EXCLUDED.contact_person,
+                    date_issued = EXCLUDED.date_issued,
+                    sector = EXCLUDED.sector,
+                    record_origin = EXCLUDED.record_origin,
+                    source_id = EXCLUDED.source_id,
+                    source_name = EXCLUDED.source_name,
+                    source_url = EXCLUDED.source_url,
+                    source_record_url = EXCLUDED.source_record_url,
+                    source_updated_at = EXCLUDED.source_updated_at,
+                    last_synced_at = EXCLUDED.last_synced_at
+                WHERE licenses.manually_edited IS NOT TRUE
+                """,
+                (
+                    row_id,
+                    row.get("company") or "Unknown",
+                    row.get("country") or "Unknown",
+                    row.get("region") or "",
+                    row.get("commodity") or "",
+                    row.get("license_type") or "License",
+                    row.get("status") or "Active",
+                    lat_f,
+                    lng_f,
+                    row.get("phone_number") or None,
+                    row.get("contact_person") or None,
+                    row.get("date_issued") or None,
+                    row.get("sector") or "mining",
+                    row.get("record_origin") or "user_import_csv",
+                    row.get("source_id") or None,
+                    row.get("source_name") or None,
+                    row.get("source_url") or None,
+                    row.get("source_record_url") or None,
+                    row.get("source_updated_at") or None,
+                    row.get("last_synced_at") or None,
+                ),
+            )
+            imported += 1
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        conn.close()
+
+    cache.delete_pattern("licenses:*")
+    return {
+        "status": "success",
+        "imported_count": imported,
+        "skipped_manually_edited": skipped_manual,
+        "errors": errors[:50],
+    }
 
 
 @app.post("/api/admin/import/extracted-csv")

@@ -126,7 +126,7 @@ def normalize_csv_row(
         "phone_number": _clean_text(row.get("phone_number")),
         "contact_person": _clean_text(row.get("contact_person")),
         "sector": sector_override or _infer_sector(row),
-        "record_origin": "open_data",
+        "record_origin": "user_import_csv",
         "source_id": source_id,
         "source_name": source_name,
         "source_url": None,
@@ -167,7 +167,8 @@ UPSERT_SQL = """
         source_record_url = EXCLUDED.source_record_url,
         source_updated_at = EXCLUDED.source_updated_at,
         raw_payload = EXCLUDED.raw_payload,
-        last_synced_at = CURRENT_TIMESTAMP;
+        last_synced_at = CURRENT_TIMESTAMP
+    WHERE licenses.manually_edited IS NOT TRUE;
 """
 
 

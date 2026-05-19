@@ -2632,7 +2632,8 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                     Source provenance
                   </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <motion.div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <SpecItem label="Record origin" value={terminalDetails.recordOrigin || 'N/A'} />
                     <SpecItem label="Primary Source" value={terminalDetails.sourceName || 'Manual / local'} />
                     <SpecItem label="Source Class" value={sourceKindLabel || 'Unknown'} />
                     <SpecItem label="Source ID" value={terminalDetails.sourceId || 'N/A'} />
@@ -2641,6 +2642,34 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                     <SpecItem label="Record URL" value={terminalDetails.sourceRecordUrl || 'N/A'} />
                     <SpecItem label="Source Updated" value={terminalDetails.sourceUpdatedAt || 'N/A'} />
                     <SpecItem label="Last Synced" value={terminalDetails.lastSyncedAt || 'N/A'} />
+                  </motion.div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {terminalDetails.sourceRecordUrl && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 text-[10px] font-black uppercase tracking-widest"
+                        onClick={() => window.open(terminalDetails.sourceRecordUrl!, '_blank', 'noopener,noreferrer')}
+                      >
+                        {t('אמת במקור', 'Verify at source')}
+                      </Button>
+                    )}
+                    {item.country && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 text-[10px] font-black uppercase tracking-widest"
+                        onClick={() =>
+                          window.open(
+                            `${API_BASE}/api/open-data/coverage/world?region=all`,
+                            '_blank',
+                            'noopener,noreferrer'
+                          )
+                        }
+                      >
+                        {t('כיסוי מדינה', 'Country coverage')}
+                      </Button>
+                    )}
                   </div>
                   {terminalDetails.provenanceNote && (
                     <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
