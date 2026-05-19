@@ -27,6 +27,7 @@ export function markerIconSignature(
   isEsgRisk: boolean,
   refineryPin: boolean,
   oilFieldPin: boolean,
+  isDark = true,
 ): string {
-  return `${color}|${isEsgRisk ? 1 : 0}|${refineryPin ? 'r' : oilFieldPin ? 'o' : 'd'}`;
+  return `${color}|${isEsgRisk ? 1 : 0}|${refineryPin ? 'r' : oilFieldPin ? 'o' : 'd'}|${isDark ? 'd' : 'l'}`;
 }

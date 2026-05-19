@@ -8,7 +8,6 @@ import {
   Plus as LucidePlus, 
   LogOut as LucideLogOut, 
   MapPin as LucideMapPin,
-  LayoutGrid as LucideLayoutGrid,
   Layers as LucideLayers,
   Settings as LucideSettings,
   Pin as LucidePin,
@@ -28,8 +27,8 @@ interface SidebarProps {
   userAnnotations: Record<string, UserAnnotation>;
   selectedItem: MiningLicense | null;
   setSelectedItem: (item: MiningLicense) => void;
-  viewMode: 'map' | 'pipeline' | 'admin' | 'dashboard';
-  setViewMode: (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => void;
+  viewMode: 'map' | 'admin' | 'dashboard';
+  setViewMode: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
   isFilterOpen: boolean;
@@ -136,15 +135,6 @@ export default function Sidebar({
             : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
         >
           <LucidePieChart className="w-5 h-5" />
-        </button>
-        <button 
-          onClick={() => setViewMode('pipeline')}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
-          ${viewMode === 'pipeline' 
-            ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
-            : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
-        >
-          <LucideLayoutGrid className="w-5 h-5" />
         </button>
         <button 
           onClick={onToggleFilter}

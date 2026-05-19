@@ -20,6 +20,10 @@ export interface RouteLeg {
   hubLabel?: string;
   /** Backend geometry provider, e.g. osrm, searoute, corridor_fallback. */
   geometrySource?: string;
+  /** One-line routing engine label from the API (e.g. Real road (OSRM)). */
+  routingEngine?: string;
+  /** Per-leg limitation bullets for the results panel. */
+  limitations?: string[];
   /** Screening distance from backend when available. */
   distanceKm?: number;
 }
