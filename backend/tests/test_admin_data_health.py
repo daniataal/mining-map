@@ -29,6 +29,8 @@ class AdminDataHealthTests(unittest.TestCase):
             "status": "success",
             "manually_edited_count": 3,
             "license_counts_by_country": [{"country": "Kenya", "license_count": 10}],
+            "source_sync_sla": [{"source_id": "kenya_mining_cadastre", "sla_status": "green"}],
+            "philippines_mgb_arcgis_probe": {"status": "token_required"},
         }
 
         res = self.client.get(

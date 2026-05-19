@@ -217,7 +217,12 @@ def fetch_comtrade_keyed(
     limit: int = 100,
 ) -> dict:
     """Keyed Comtrade endpoint — used only when ``COMTRADE_API_KEY`` is set."""
-    key = api_key if api_key is not None else os.getenv("COMTRADE_API_KEY", "")
+    try:
+        from backend.services.comtrade_keys import get_json_with_key_failover, primary_key
+    except ImportError:
+        from services.comtrade_keys import get_json_with_key_failover, primary_key
+
+    key = primary_key(api_key)
     if not key:
         return {}
 
@@ -226,13 +231,15 @@ def fetch_comtrade_keyed(
     if cached is not None:
         return cached
 
-    url = (
-        f"{COMTRADE_KEYED_URL}"
-        f"?reporterCode={reporter_m49}&cmdCode={hs_code}"
-        f"&period={year}&flowCode={flow}&partnerCode={partner}"
-        f"&subscription-key={key}&limit={limit}"
-    )
-    payload = _http_get_json(url)
+    def build_url(subscription_key: str) -> str:
+        return (
+            f"{COMTRADE_KEYED_URL}"
+            f"?reporterCode={reporter_m49}&cmdCode={hs_code}"
+            f"&period={year}&flowCode={flow}&partnerCode={partner}"
+            f"&subscription-key={subscription_key}&limit={limit}"
+        )
+
+    payload, _status = get_json_with_key_failover(build_url, api_key=key)
     if not payload:
         return {}
     rows = payload.get("data") or []

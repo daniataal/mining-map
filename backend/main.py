@@ -5923,7 +5923,11 @@ def admin_oil_ingest(request: OilIngestRequest):
 
 
 @app.post("/api/admin/open-data/sync")
-def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_open_data_sync(
+    request: OpenDataSyncRequest,
+    x_admin_token: Optional[str] = Header(None),
+    source_id: Optional[str] = None,
+):
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
         return forbidden
@@ -5934,7 +5938,11 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
         except ImportError:
             from services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
 
-        summary = sync_open_data_sources(source_ids=request.source_ids)
+        source_ids = request.source_ids
+        single = (source_id or "").strip()
+        if single:
+            source_ids = [single]
+        summary = sync_open_data_sources(source_ids=source_ids)
         if request.include_bundled_fallback and not summary.get("records_written"):
             conn = get_db_connection()
             try:

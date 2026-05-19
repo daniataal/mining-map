@@ -24,8 +24,10 @@ SOURCE_NAME = "PGI MIDAS mining areas (Poland)"
 RECORD_ORIGIN = "open_data"
 PORTAL_URL = "https://mapy.pgi.gov.pl/"
 
-# Layer ids: 1 obszary górnicze, 2 tereny górnicze (active layers on MapServer).
-DEFAULT_LAYER_IDS: tuple[int, ...] = (1, 2)
+# Layer 0 = złoża (deposits); 1 obszary górnicze; 2 tereny górnicze.
+DEFAULT_LAYER_IDS: tuple[int, ...] = (0, 1, 2)
+DEPOSITS_LAYER_ID = 0
+DEPOSITS_SOURCE_ID = "poland_pgi_deposits"
 MAX_PER_LAYER = max(100, int(os.getenv("PGI_SYNC_MAX_PER_LAYER", "2000")))
 PAGE_SIZE = max(50, min(500, int(os.getenv("PGI_SYNC_PAGE_SIZE", "200"))))
 
@@ -41,6 +43,8 @@ def _user_agent() -> str:
 
 
 def layer_source_id(layer_id: int) -> str:
+    if layer_id == DEPOSITS_LAYER_ID:
+        return DEPOSITS_SOURCE_ID
     return f"poland_pgi_midas_layer{layer_id}"
 
 
@@ -121,7 +125,12 @@ def normalize_midas_feature(feature: dict[str, Any], *, layer_id: int) -> Option
     lat, lng = _geometry_centroid(feature.get("geometry"))
     company = str(props.get("NAZWA_OG") or props.get("WYD_WYZN") or props.get("NAZWA_ZLOZA") or external_ref).strip()
     commodity = str(props.get("KOPALINA") or props.get("NAZWA_ZLOZA") or "Minerals").strip()
-    license_type = "Mining area" if layer_id == 1 else "Mining territory"
+    if layer_id == DEPOSITS_LAYER_ID:
+        license_type = "Deposit (złoża)"
+    elif layer_id == 1:
+        license_type = "Mining area"
+    else:
+        license_type = "Mining territory"
     status = str(props.get("STATUS") or "Active").strip()
     region = str(props.get("NADZOR_OUG") or "").strip()
 

@@ -739,6 +739,95 @@ export default function AdminPanel({
                                                 </p>
                                             </div>
                                         )}
+                                        {dataHealth.philippines_mgb_arcgis_probe && (
+                                            <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3 text-[10px] text-slate-600 dark:text-slate-300">
+                                                <p className="font-black uppercase text-[9px] text-orange-700 dark:text-orange-400 mb-1">
+                                                    Philippines MGB probe
+                                                </p>
+                                                <p>
+                                                    {dataHealth.philippines_mgb_arcgis_probe.status === 'token_required'
+                                                        ? t('נדרש token', 'Token required')
+                                                        : dataHealth.philippines_mgb_arcgis_probe.reachable
+                                                          ? t('נגיש', 'Reachable')
+                                                          : t('לא נגיש', 'Unreachable')}
+                                                    {' — '}
+                                                    {dataHealth.philippines_mgb_arcgis_probe.message}
+                                                </p>
+                                            </div>
+                                        )}
+                                        {(dataHealth.nordic_source_admin_notes?.length ?? 0) > 0 && (
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                                    Norway / Finland (NPD / Tukes)
+                                                </p>
+                                                <div className="font-mono text-[10px] space-y-1">
+                                                    {dataHealth.nordic_source_admin_notes!.map((row) => (
+                                                        <div key={row.source_id} className="text-slate-600 dark:text-slate-300">
+                                                            <span className="text-amber-600">{row.source_id}</span>: {row.license_count} rows — {row.note}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {(dataHealth.source_sync_sla?.length ?? 0) > 0 && (
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                                    {t('SLA סנכרון לפי מקור', 'Per-source sync SLA')}
+                                                </p>
+                                                <div className="max-h-56 overflow-y-auto font-mono text-[10px] space-y-1">
+                                                    {dataHealth.source_sync_sla!.slice(0, 25).map((run) => (
+                                                        <div key={run.source_id || run.id} className="flex flex-wrap justify-between gap-2 items-center border-b border-black/5 dark:border-white/5 pb-1">
+                                                            <span className="truncate max-w-[45%]">{run.source_id || '—'}</span>
+                                                            <span
+                                                                className={
+                                                                    run.sla_status === 'green'
+                                                                        ? 'text-emerald-600'
+                                                                        : run.sla_status === 'yellow'
+                                                                          ? 'text-amber-600'
+                                                                          : run.sla_status === 'red'
+                                                                            ? 'text-red-600'
+                                                                            : 'text-slate-500'
+                                                                }
+                                                            >
+                                                                {run.sla_status}
+                                                                {run.hours_since_sync != null ? ` · ${run.hours_since_sync}h` : ''}
+                                                            </span>
+                                                            {run.source_id && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="text-[9px] uppercase text-amber-600 hover:underline"
+                                                                    onClick={async () => {
+                                                                        try {
+                                                                            const res = await fetch(
+                                                                                `${API_BASE}/api/admin/open-data/sync?source_id=${encodeURIComponent(run.source_id)}`,
+                                                                                {
+                                                                                    method: 'POST',
+                                                                                    headers: {
+                                                                                        ...adminHeaders(),
+                                                                                        'Content-Type': 'application/json',
+                                                                                    },
+                                                                                    body: '{}',
+                                                                                }
+                                                                            );
+                                                                            const body = await res.json();
+                                                                            if (!res.ok || body.status === 'error') {
+                                                                                throw new Error(body.message || res.statusText);
+                                                                            }
+                                                                            toast.success(t('סנכרון הושלם', 'Sync finished'));
+                                                                            await fetchDataHealth();
+                                                                        } catch (err) {
+                                                                            toast.error(err instanceof Error ? err.message : String(err));
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {t('סנכרן', 'Sync')}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                         {(dataHealth.petroleum_osm_sync_runs?.length ?? 0) > 0 && (
                                             <div>
                                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">OSM sync runs</p>

@@ -5,11 +5,14 @@ import { useI18n } from '../../lib/i18n';
 
 interface GleifLeiLinkProps {
   companyName: string;
+  /** compact = dossier header chip; default = Raw Evidence card */
+  variant?: 'default' | 'compact';
 }
 
-export default function GleifLeiLink({ companyName }: GleifLeiLinkProps) {
+export default function GleifLeiLink({ companyName, variant = 'default' }: GleifLeiLinkProps) {
   const { t } = useI18n();
   const query = companyName.trim();
+  const compact = variant === 'compact';
 
   const { data, isLoading } = useQuery({
     queryKey: ['gleif-lei', query],
@@ -34,6 +37,30 @@ export default function GleifLeiLink({ companyName }: GleifLeiLinkProps) {
   if (!query || query.length < 3) return null;
 
   const match = data?.matches?.[0];
+
+  if (compact) {
+    if (isLoading) {
+      return (
+        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest shrink-0">
+          {t('GLEIF…', 'GLEIF…')}
+        </span>
+      );
+    }
+    if (!match?.gleif_url) return null;
+    return (
+      <a
+        href={match.gleif_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 h-4 text-[9px] font-black uppercase text-emerald-700 dark:text-emerald-300 shrink-0 hover:bg-emerald-500/20"
+        title={match.legal_name || match.lei || 'GLEIF LEI'}
+      >
+        LEI
+        {match.lei ? ` ${match.lei.slice(0, 8)}…` : ''}
+      </a>
+    );
+  }
+
   if (!match?.gleif_url) {
     if (isLoading) {
       return (

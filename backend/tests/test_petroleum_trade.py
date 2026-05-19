@@ -21,12 +21,19 @@ class _BaseTrade(unittest.TestCase):
         pt.clear_cache()
         # Strip both keys — we are testing the *no-paid-key* path.
         self._prev_comtrade = os.environ.pop("COMTRADE_API_KEY", None)
+        self._prev_comtrade_secondary = os.environ.pop("COMTRADE_API_KEY_SECONDARY", None)
         self._prev_eia = os.environ.pop("EIA_API_KEY", None)
 
     def tearDown(self) -> None:
         pt.clear_cache()
         if self._prev_comtrade is not None:
             os.environ["COMTRADE_API_KEY"] = self._prev_comtrade
+        else:
+            os.environ.pop("COMTRADE_API_KEY", None)
+        if self._prev_comtrade_secondary is not None:
+            os.environ["COMTRADE_API_KEY_SECONDARY"] = self._prev_comtrade_secondary
+        else:
+            os.environ.pop("COMTRADE_API_KEY_SECONDARY", None)
         if self._prev_eia is not None:
             os.environ["EIA_API_KEY"] = self._prev_eia
 

@@ -159,6 +159,43 @@ def mark_all_alerts_read(conn: Any) -> int:
     return len(rows)
 
 
+def _admin_data_health_path() -> str:
+    return (os.getenv("ADMIN_DATA_HEALTH_PATH") or "/admin?tab=data-health").strip()
+
+
+def _admin_ui_url() -> Optional[str]:
+    base = (os.getenv("APP_PUBLIC_URL") or "").strip().rstrip("/")
+    if not base:
+        return None
+    path = _admin_data_health_path()
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{base}{path}"
+
+
+def _drift_alert_context(
+    *,
+    run_id: int,
+    source_id: Optional[str],
+    drift_warning: dict[str, Any],
+) -> dict[str, Any]:
+    drop_pct = drift_warning.get("drop_pct")
+    if drop_pct is None:
+        drop_pct = drift_warning.get("pct_drop")
+    admin_url = _admin_ui_url()
+    return {
+        "type": "license_sync_drift",
+        "run_id": run_id,
+        "source_id": source_id,
+        "alert_type": str(drift_warning.get("type") or "records_written_drop"),
+        "drop_pct": drop_pct,
+        "message": drift_warning.get("message"),
+        "drift_warning": drift_warning,
+        "admin_ui_path": _admin_data_health_path(),
+        "admin_ui_url": admin_url,
+    }
+
+
 def _maybe_notify_webhook(
     *,
     run_id: int,
@@ -168,14 +205,9 @@ def _maybe_notify_webhook(
     url = (os.getenv("SYNC_ALERT_WEBHOOK_URL") or "").strip()
     if not url:
         return
-    body = json.dumps(
-        {
-            "type": "license_sync_drift",
-            "run_id": run_id,
-            "source_id": source_id,
-            "drift_warning": drift_warning,
-        }
-    ).encode("utf-8")
+    body = json.dumps(_drift_alert_context(run_id=run_id, source_id=source_id, drift_warning=drift_warning)).encode(
+        "utf-8"
+    )
     try:
         req = urllib.request.Request(
             url,
@@ -205,12 +237,18 @@ def _maybe_notify_email_stub(
     if not recipients:
         return
 
-    subject = f"[Meridian] License sync drift: {source_id or 'unknown source'}"
+    ctx = _drift_alert_context(run_id=run_id, source_id=source_id, drift_warning=drift_warning)
+    drop_pct = ctx.get("drop_pct")
+    pct_label = f"{drop_pct}%" if drop_pct is not None else "n/a"
+    subject = f"[Meridian] Sync drift {source_id or 'unknown'} ({pct_label} drop)"
+    admin_line = f"Admin: {ctx['admin_ui_url']}\n" if ctx.get("admin_ui_url") else ""
     body = (
         f"License sync drift detected.\n\n"
-        f"run_id: {run_id}\n"
         f"source_id: {source_id}\n"
+        f"drop_pct: {pct_label}\n"
+        f"run_id: {run_id}\n"
         f"message: {drift_warning.get('message')}\n"
+        f"{admin_line}"
         f"details: {json.dumps(drift_warning, default=str)}\n"
     )
     msg = EmailMessage()
