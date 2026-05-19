@@ -691,6 +691,11 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
                           <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
                             {leg.label || (leg.fromName && leg.toName ? `${leg.fromName} → ${leg.toName}` : '')}
                           </p>
+                          {leg.routingEngine && (
+                            <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 leading-snug">
+                              {leg.routingEngine}
+                            </p>
+                          )}
                         </div>
                       </li>
                     );

@@ -15,6 +15,11 @@ from typing import Any, Callable, Optional, Protocol, Sequence
 
 import requests
 
+try:
+    from backend.services.rail_osm_overpass import fetch_rail_corridor_geometry
+except ImportError:
+    from services.rail_osm_overpass import fetch_rail_corridor_geometry  # type: ignore[no-redef]
+
 OSRM_BASE_URL = (os.getenv("OSRM_BASE_URL") or "https://router.project-osrm.org").rstrip("/")
 OSRM_TIMEOUT_SEC = float(os.getenv("OSRM_TIMEOUT_SEC", "8"))
 SEAROUTE_TIMEOUT_SEC = float(os.getenv("SEAROUTE_TIMEOUT_SEC", "15"))
@@ -319,6 +324,37 @@ def _segment_needs_gibraltar_guard(a: tuple[float, float], b: tuple[float, float
     return southwest and strait
 
 
+def _merge_paths(segments: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not segments:
+        return []
+    merged: list[tuple[float, float]] = [segments[0]]
+    for lat, lng in segments[1:]:
+        if haversine_km(merged[-1][0], merged[-1][1], lat, lng) < 0.5:
+            continue
+        merged.append((lat, lng))
+    return merged
+
+
+def _offshore_sea_endpoints(
+    a_lat: float,
+    a_lng: float,
+    b_lat: float,
+    b_lng: float,
+    corridor_path: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float], tuple[float, float], bool]:
+    """Pick open-water endpoints from a corridor when port coords sit on land."""
+
+    if len(corridor_path) < 3:
+        return (a_lat, a_lng), (b_lat, b_lng), False
+    sea_origin = corridor_path[1]
+    sea_dest = corridor_path[-2]
+    used = (
+        haversine_km(a_lat, a_lng, sea_origin[0], sea_origin[1]) > 8
+        or haversine_km(b_lat, b_lng, sea_dest[0], sea_dest[1]) > 8
+    )
+    return sea_origin, sea_dest, used
+
+
 def repair_known_sea_chokepoints(
     path: Sequence[tuple[float, float]],
 ) -> tuple[list[tuple[float, float]], bool]:
@@ -378,6 +414,15 @@ def fetch_sea_route(
     if not SEAROUTE_ENABLED:
         return fallback
 
+    sea_origin, sea_dest, used_offshore = _offshore_sea_endpoints(
+        a_lat, a_lng, b_lat, b_lng, fallback_path
+    )
+    offshore_notes: list[str] = []
+    if used_offshore:
+        offshore_notes.append(
+            "Port coordinates on land; searoute trunk anchored via offshore corridor waypoints."
+        )
+
     try:
         import searoute as sr  # type: ignore[import-untyped]
     except ImportError:
@@ -387,13 +432,15 @@ def fetch_sea_route(
             distance_km=fallback.distance_km,
             duration_hours=fallback.duration_hours,
             source="corridor_fallback",
-            notes=[note],
+            notes=[note, *offshore_notes],
         )
 
     try:
         searoute_started = time.monotonic()
         # searoute expects [longitude, latitude]
-        feature = sr.searoute([a_lng, a_lat], [b_lng, b_lat], units="km")
+        o_lat, o_lng = sea_origin
+        d_lat, d_lng = sea_dest
+        feature = sr.searoute([o_lng, o_lat], [d_lng, d_lat], units="km")
         if time.monotonic() - searoute_started > SEAROUTE_TIMEOUT_SEC:
             return ResolvedGeometry(
                 path=fallback.path,
@@ -402,16 +449,29 @@ def fetch_sea_route(
                 source="corridor_fallback",
                 notes=[*fallback.notes, "Searoute exceeded time budget; using corridor fallback."],
             )
-        path = _searoute_linestring_coords(feature)
-        if len(path) < 2:
+        trunk = _searoute_linestring_coords(feature)
+        if len(trunk) < 2:
             return fallback
+        trunk, trunk_repaired = repair_known_sea_chokepoints(trunk)
+
+        approach = great_circle_geometry(
+            a_lat, a_lng, o_lat, o_lng, method="sea", num_points=8, source="offshore_connector"
+        )
+        departure = great_circle_geometry(
+            d_lat, d_lng, b_lat, b_lng, method="sea", num_points=8, source="offshore_connector"
+        )
+        path = _merge_paths([*approach.path, *trunk[1:], *departure.path[1:]])
         path, repaired = repair_known_sea_chokepoints(path)
+        repaired = repaired or trunk_repaired
+
         props = feature.get("properties") if isinstance(feature, dict) else {}
         length_km = 0.0
         if isinstance(props, dict):
             length_km = float(props.get("length") or props.get("distance") or 0.0)
-        distance_km = path_distance_km(path) if repaired else (length_km if length_km > 0 else path_distance_km(path))
-        notes = ["Sea geometry from searoute marine network."]
+        distance_km = path_distance_km(path) if repaired or used_offshore else (
+            length_km if length_km > 0 else path_distance_km(path)
+        )
+        notes = ["Sea geometry from searoute marine network.", *offshore_notes]
         if repaired:
             notes.append("Gibraltar guard waypoints added to avoid clipping northern Morocco.")
         return ResolvedGeometry(
@@ -533,15 +593,61 @@ def rail_corridor_viable(
     return True, notes
 
 
-def _merge_paths(segments: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    if not segments:
-        return []
-    merged: list[tuple[float, float]] = [segments[0]]
-    for lat, lng in segments[1:]:
-        if haversine_km(merged[-1][0], merged[-1][1], lat, lng) < 0.5:
-            continue
-        merged.append((lat, lng))
-    return merged
+def _rail_trunk_geometry(
+    seg_a: tuple[float, float],
+    seg_b: tuple[float, float],
+    *,
+    http_get: Optional[Callable[..., Any]] = None,
+    deadline: Optional[float] = None,
+) -> tuple[ResolvedGeometry, bool]:
+    """Hub-to-hub rail trunk: OSM tracks when available, else OSRM driving approximation."""
+
+    a_lat, a_lng = seg_a
+    b_lat, b_lng = seg_b
+    seg_km = haversine_km(a_lat, a_lng, b_lat, b_lng)
+    if segment_likely_crosses_ocean(a_lat, a_lng, b_lat, b_lng):
+        raise ValueError("rail trunk crosses open water")
+
+    osm_path = fetch_rail_corridor_geometry(a_lat, a_lng, b_lat, b_lng)
+    if osm_path and len(osm_path) >= 2:
+        distance = path_distance_km(osm_path)
+        return (
+            ResolvedGeometry(
+                path=tuple(osm_path),
+                distance_km=distance,
+                duration_hours=distance / DEFAULT_SPEED_KMH["rail"],
+                source="rail_osm",
+                notes=["Rail trunk geometry from OpenStreetMap railway ways."],
+            ),
+            True,
+        )
+
+    seg = fetch_osrm_route(
+        a_lat,
+        a_lng,
+        b_lat,
+        b_lng,
+        method="rail",
+        http_get=http_get,
+        deadline=deadline,
+    )
+    if seg.source == "straight_line_fallback" and segment_likely_crosses_ocean(
+        a_lat, a_lng, b_lat, b_lng
+    ):
+        raise ValueError("rail trunk OSRM fallback crosses open water")
+    return (
+        ResolvedGeometry(
+            path=seg.path,
+            distance_km=seg.distance_km,
+            duration_hours=seg.duration_hours,
+            source="rail_approximation_road",
+            notes=[
+                "No OSM rail corridor in bbox; hub trunk uses OSRM driving (rail_approximation_road).",
+                *seg.notes,
+            ],
+        ),
+        False,
+    )
 
 
 def rail_hub_geometry(
@@ -585,10 +691,13 @@ def rail_hub_geometry(
 
     segments: list[tuple[float, float]] = []
     notes = [
-        "Rail leg uses OSRM driving network between hubs on land; validate gauge and border clearance.",
+        "Rail leg uses OSM track geometry between hubs when mapped; otherwise OSRM driving approximation.",
         *viability_notes,
     ]
-    used_osrm = False
+    used_osm = False
+    used_road_approx = False
+    export_tuple = export_hub
+    import_tuple = import_hub
 
     for idx in range(len(deduped) - 1):
         seg_a = deduped[idx]
@@ -596,6 +705,7 @@ def rail_hub_geometry(
         seg_km = haversine_km(seg_a[0], seg_a[1], seg_b[0], seg_b[1])
         if seg_km < 1.0:
             continue
+        is_hub_trunk = {seg_a, seg_b} == {export_tuple, import_tuple}
         if seg_km <= RAIL_SHORT_SEGMENT_KM:
             if segment_likely_crosses_ocean(seg_a[0], seg_a[1], seg_b[0], seg_b[1]):
                 return None
@@ -607,6 +717,15 @@ def rail_hub_geometry(
                 method="rail",
                 source="rail_short_haul",
             )
+        elif is_hub_trunk and seg_km > RAIL_SHORT_SEGMENT_KM:
+            try:
+                seg, osm_used = _rail_trunk_geometry(
+                    seg_a, seg_b, http_get=http_get, deadline=deadline
+                )
+            except ValueError:
+                return None
+            used_osm = used_osm or osm_used
+            used_road_approx = used_road_approx or seg.source == "rail_approximation_road"
         else:
             seg = fetch_osrm_route(
                 seg_a[0],
@@ -621,8 +740,6 @@ def rail_hub_geometry(
                 seg_a[0], seg_a[1], seg_b[0], seg_b[1]
             ):
                 return None
-            if seg.source == "osrm":
-                used_osrm = True
         if not segments:
             segments.extend(seg.path)
         else:
@@ -632,7 +749,12 @@ def rail_hub_geometry(
         return None
 
     distance = path_distance_km(segments)
-    source = "rail_osrm" if used_osrm else "rail_hub"
+    if used_osm:
+        source = "rail_osm"
+    elif used_road_approx:
+        source = "rail_approximation_road"
+    else:
+        source = "rail_hub"
     return ResolvedGeometry(
         path=tuple(segments),
         distance_km=distance,
@@ -669,7 +791,14 @@ def resolve_leg_geometry(
             deadline=deadline,
         )
     if method == "air":
-        return great_circle_geometry(a_lat, a_lng, b_lat, b_lng, method=method)
+        return great_circle_geometry(
+            a_lat,
+            a_lng,
+            b_lat,
+            b_lng,
+            method=method,
+            source="air_great_circle_trunk",
+        )
     if method == "sea":
         fallback = corridor_fallback or (lambda: [(a_lat, a_lng), (b_lat, b_lng)])
         return fetch_sea_route(

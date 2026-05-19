@@ -75,15 +75,15 @@ function IntelligenceSearchBox({
 
   return (
     <div className="relative w-80 shrink-0">
-      <div className="flex items-center bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl">
-        <LucideSearch className="w-5 h-5 shrink-0 text-slate-400 dark:text-slate-500 mr-3" />
+      <div className="flex items-center bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 rounded-2xl px-4 h-12 shadow-2xl">
+        <LucideSearch className="w-5 h-5 shrink-0 text-slate-500 dark:text-slate-500 mr-3" />
         <input
           type="text"
           placeholder={t(
             'חפש מודיעין… Enter לסינון · country:UAE',
             'Search intelligence hub… Enter to filter · country:UAE',
           )}
-          className="bg-transparent border-none outline-none text-sm font-bold text-slate-700 dark:text-slate-200 w-full min-w-0 placeholder:text-slate-400 dark:placeholder:text-slate-600 tracking-tight"
+          className="bg-transparent border-none outline-none text-sm font-bold text-slate-800 dark:text-slate-200 w-full min-w-0 placeholder:text-slate-500 dark:placeholder:text-slate-600 tracking-tight"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -93,7 +93,7 @@ function IntelligenceSearchBox({
       </div>
       {countryFocusSuggestions.length > 0 && !countryFocusCountry && (
         <ul
-          className="absolute left-0 right-0 top-[calc(100%+4px)] z-[1200] max-h-56 overflow-y-auto rounded-xl border border-black/10 bg-white/95 py-1 text-left shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95"
+          className="absolute left-0 right-0 top-[calc(100%+4px)] z-[1200] max-h-56 overflow-y-auto rounded-xl border border-stone-200/90 bg-stone-50/98 py-1 text-left shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95"
           role="listbox"
         >
           {countryFocusSuggestions.map((name) => (

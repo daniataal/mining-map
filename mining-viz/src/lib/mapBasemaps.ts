@@ -13,8 +13,9 @@ export const BASEMAP_TILES: Record<BasemapId, BasemapTileConfig> = {
     attribution: '&copy; OpenStreetMap &copy; CARTO',
     maxZoom: 20,
   },
+  /** Carto Voyager — stronger land/water contrast and readable labels vs Positron/light_all. */
   light: {
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap &copy; CARTO',
     maxZoom: 20,
   },

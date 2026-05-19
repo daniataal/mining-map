@@ -32,6 +32,8 @@ interface BackendRouteLeg {
   distance_km?: number;
   path?: [number, number][];
   geometry_source?: string;
+  routing_engine?: string;
+  limitations?: string[];
   hub_label?: string;
   map_label?: string;
 }
@@ -211,6 +213,8 @@ function routeMapFromBackend(data: BackendRouteResponse): RouteMapOverlay {
         toKind: to.kind,
         hubLabel,
         geometrySource: leg.geometry_source,
+        routingEngine: leg.routing_engine,
+        limitations: Array.isArray(leg.limitations) ? leg.limitations.filter(Boolean) : undefined,
         distanceKm: Number.isFinite(leg.distance_km) ? leg.distance_km : undefined,
         label: legDisplayLabel(leg.method, from.name, to.name, hubLabel),
       };
@@ -342,6 +346,12 @@ function degradedLegReason(leg: RouteLeg): string | null {
   }
   if (method === 'sea' && source !== 'searoute') {
     return `${leg.label || 'Sea leg'} used ${source || 'unknown'} geometry instead of searoute.`;
+  }
+  if (method === 'rail' && source === 'rail_approximation_road') {
+    return `${leg.label || 'Rail leg'} uses road approximation — no OSM track corridor.`;
+  }
+  if (method === 'air' && source !== 'air_great_circle_trunk' && source !== 'great_circle') {
+    return `${leg.label || 'Air leg'} used unexpected geometry source: ${source || 'unknown'}.`;
   }
   if ((method === 'road' || method === 'sea') && leg.path.length < 3) {
     return `${leg.label || titleCase(method)} returned too few route points for executable navigation.`;

@@ -51,6 +51,7 @@ import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
+import { createLicenseClusterIconFactory } from '../lib/mapClusterIcons';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
@@ -105,10 +106,18 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 export { ESG_CONSERVATION_ZONES, getEsgZoneIntersection };
 
-const createCustomIcon = (color: string, isHovered: boolean, isEsgRisk?: boolean) => {
+const createCustomIcon = (
+    color: string,
+    isHovered: boolean,
+    isEsgRisk: boolean | undefined,
+    isDark: boolean,
+) => {
     const isGold = color === '#FFD700';
     const size = isHovered ? 24 : (isGold ? 14 : 10);
-    let border = isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)');
+    const lightStroke = isHovered ? '#0f172a' : 'rgba(15, 23, 42, 0.72)';
+    let border = isDark
+        ? (isHovered ? '2px solid white' : (isGold ? '1px solid rgba(255, 255, 255, 0.9)' : '1px solid rgba(255, 255, 255, 0.7)'))
+        : (isHovered ? `2px solid ${lightStroke}` : `1.5px solid ${lightStroke}`);
 
     let boxShadow;
     if (isEsgRisk) {
@@ -167,7 +176,7 @@ const getMarkerColor = (
 
     if (sector) {
       const s = sector.toLowerCase();
-      if (s === 'oil_and_gas' || s === 'oil') return '#000000';
+      if (s === 'oil_and_gas' || s === 'oil') return '#1e40af';
       if (s === 'suppliers' || s === 'logistics') return '#6366f1';
       if (s === 'ports') return '#0ea5e9';
     }
@@ -179,7 +188,7 @@ const getMarkerColor = (
     if (c.includes('bauxite')) return '#f87171';
     if (c.includes('manganese')) return '#a78bfa';
     if (c.includes('lithium')) return '#34d399';
-    if (c.includes('oil') || c.includes('petroleum')) return '#000000';
+    if (c.includes('oil') || c.includes('petroleum')) return '#1e40af';
     if (c.includes('gas')) return '#94a3b8';
     return '#64748b';
 };
@@ -822,11 +831,11 @@ export default function MapComponent({
                   }
                 : {
                       className: 'map-country-border map-country-border--light',
-                      fillColor: '#06b6d4',
-                      color: '#06b6d4',
-                      weight: 1,
-                      opacity: 0.5,
-                      fillOpacity: 0.02,
+                      fillColor: '#0284c7',
+                      color: '#0369a1',
+                      weight: 2,
+                      opacity: 0.85,
+                      fillOpacity: 0.04,
                       lineCap: 'round' as const,
                       lineJoin: 'round' as const,
                   },
@@ -878,7 +887,7 @@ export default function MapComponent({
             const isEsgRisk = esgZone !== null;
             const refineryPin = isRefineryEntity(item);
             const oilFieldPin = !refineryPin && isOilFieldEntity(item);
-            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin);
+            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
             icons.set(
                 item.id,
                 cache.get(item.id, sig, () =>
@@ -886,13 +895,18 @@ export default function MapComponent({
                         ? createRefineryMapIcon()
                         : oilFieldPin
                           ? createOilFieldMapIcon()
-                          : createCustomIcon(color, false, isEsgRisk),
+                          : createCustomIcon(color, false, isEsgRisk, isDark),
                 ),
             );
         }
         cache.prune(validIds);
         return icons;
-    }, [mapDisplayData, userAnnotations]);
+    }, [mapDisplayData, userAnnotations, isDark]);
+
+    const licenseClusterIconCreate = useMemo(
+        () => createLicenseClusterIconFactory(isDark),
+        [isDark],
+    );
 
     const renderedMarkers = useMemo(() => {
         if (!onGroundVisible) return null;
@@ -1035,7 +1049,7 @@ export default function MapComponent({
                 </div>
             )}
             {isMaritimeMapView && (
-                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-black/10 dark:border-white/10 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
+                <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10">
@@ -1632,7 +1646,13 @@ export default function MapComponent({
                 {onGroundVisible && (
                 <MarkerClusterGroup
                     showCoverageOnHover={false}
-                    spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
+                    iconCreateFunction={licenseClusterIconCreate}
+                    spiderLegPolylineOptions={{
+                        weight: 1.5,
+                        color: isDark ? '#64748b' : '#334155',
+                        opacity: isDark ? 0.5 : 0.65,
+                        interactive: false,
+                    }}
                 >
                     <ClusterGroupRefBridge clusterGroupRef={clusterGroupRef} />
                     {renderedMarkers}

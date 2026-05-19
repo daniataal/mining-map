@@ -8,7 +8,7 @@ Geometry sources (env-configurable, all degrade gracefully):
   - road: OSRM driving network (``OSRM_BASE_URL``)
   - sea: searoute marine network when ``SEAROUTE_ENABLED``; else offshore corridors
   - air: great-circle trunk; road access via OSRM when possible
-  - rail: country-aware hub selection with OSRM land segments (not a track database)
+  - rail: hub selection with OSM railway geometry when mapped; OSRM driving fallback
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ try:
         select_nearest_trade_hub,
     )
     from backend.services.shipping_costs import estimate_route_cost, route_cost_to_dict
+    from backend.services.routing_leg_metadata import enrich_leg_payload, leg_limitations, routing_engine_label
     from backend.services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 except ImportError:
     from services.routing_geometry import (  # type: ignore[no-redef]
@@ -49,6 +50,7 @@ except ImportError:
         select_nearest_trade_hub,
     )
     from services.shipping_costs import estimate_route_cost, route_cost_to_dict
+    from services.routing_leg_metadata import enrich_leg_payload, leg_limitations, routing_engine_label  # type: ignore[no-redef]
     from services.vessel_ais import NAVIGATIONAL_STATUS_LABELS
 
 
@@ -96,6 +98,8 @@ class PlannedLeg:
     notes: list[str] = field(default_factory=list)
     path: list[tuple[float, float]] = field(default_factory=list)
     geometry_source: str = "straight_line"
+    routing_engine: str = ""
+    limitations: list[str] = field(default_factory=list)
     cost_overrides: dict[str, Any] = field(default_factory=dict)
 
 
@@ -698,7 +702,7 @@ def _leg_note(method: str, stage: str) -> str:
 
 
 def _distance_multiplier(method: str, geometry_source: str) -> float:
-    if geometry_source in {"osrm", "searoute"}:
+    if geometry_source in {"osrm", "searoute", "rail_osm"}:
         return 1.0
     if method == "sea" and geometry_source == "corridor_fallback":
         return METHOD_DISTANCE_MULTIPLIERS["sea"]
@@ -857,6 +861,12 @@ def _make_leg(
         notes=notes,
         path=route_path,
         geometry_source=resolved.source,
+        routing_engine=routing_engine_label(resolved.source, effective_method),
+        limitations=leg_limitations(
+            method=effective_method,
+            geometry_source=resolved.source,
+            notes=notes,
+        ),
         cost_overrides=cost_overrides or {},
     )
 
@@ -1102,21 +1112,31 @@ def _hub_label_for_point(point: RoutePoint) -> Optional[str]:
 
 def _legs_to_payload(legs: list[PlannedLeg]) -> list[dict[str, Any]]:
     return [
-        {
-            "leg_id": leg.leg_id,
-            "from": asdict(leg.from_point),
-            "to": asdict(leg.to_point),
-            "method": leg.method,
-            "distance_km": round(leg.distance_km, 3),
-            "duration_hours": round(leg.duration_hours, 3),
-            "method_score": round(leg.method_score, 3),
-            "geometry_source": leg.geometry_source,
-            "notes": leg.notes,
-            "path": [[round(lat, 5), round(lng, 5)] for lat, lng in leg.path],
-            "hub_label": _hub_label_for_point(leg.to_point),
-            "map_label": _hub_label_for_point(leg.to_point),
-            **leg.cost_overrides,
-        }
+        enrich_leg_payload(
+            {
+                "leg_id": leg.leg_id,
+                "from": asdict(leg.from_point),
+                "to": asdict(leg.to_point),
+                "method": leg.method,
+                "distance_km": round(leg.distance_km, 3),
+                "duration_hours": round(leg.duration_hours, 3),
+                "method_score": round(leg.method_score, 3),
+                "geometry_source": leg.geometry_source,
+                "routing_engine": leg.routing_engine
+                or routing_engine_label(leg.geometry_source, leg.method),
+                "limitations": leg.limitations
+                or leg_limitations(
+                    method=leg.method,
+                    geometry_source=leg.geometry_source,
+                    notes=leg.notes,
+                ),
+                "notes": leg.notes,
+                "path": [[round(lat, 5), round(lng, 5)] for lat, lng in leg.path],
+                "hub_label": _hub_label_for_point(leg.to_point),
+                "map_label": _hub_label_for_point(leg.to_point),
+                **leg.cost_overrides,
+            }
+        )
         for leg in legs
     ]
 
@@ -1342,8 +1362,8 @@ def plan_route(request_payload: dict[str, Any]) -> dict[str, Any]:
         "Road geometry uses OSRM when reachable; failures fall back to straight-line segments without failing the request.",
         "Sea geometry uses searoute when SEAROUTE_ENABLED and the package is installed; otherwise offshore corridor waypoints.",
         f"Route geometry resolved in {elapsed_sec:.1f}s (budget {ROUTE_PLAN_DEADLINE_SEC:.0f}s); OSRM hub pairs may be cached.",
-        "Rail is hub-to-hub screening only — not a track-level network graph.",
-        "Air trunk is great-circle; airport drayage uses OSRM when available.",
+        "Rail uses OpenStreetMap railway ways between hubs when mapped; otherwise OSRM driving approximation.",
+        "Air trunk is great-circle (not published airways); airport drayage uses OSRM when available.",
         "Freight cost is a screening estimate; obtain broker/carrier quotes before committing.",
     ]
     if offer_alternatives and len(candidate_plans) > 1:

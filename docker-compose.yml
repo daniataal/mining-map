@@ -83,6 +83,7 @@ services:
       - ROUTE_SERVICE_PORT=8001
       - ROUTE_PLAN_DEADLINE_SEC=${ROUTE_PLAN_DEADLINE_SEC:-120}
       - OSRM_GEOMETRY_CACHE_MAX=${OSRM_GEOMETRY_CACHE_MAX:-8192}
+      # Public OSRM demo by default; for production set OSRM_BASE_URL to a self-hosted router (optional compose profile: osrm)
       - OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
       - OSRM_TIMEOUT_SEC=${OSRM_TIMEOUT_SEC:-8}
       - SEAROUTE_ENABLED=${SEAROUTE_ENABLED:-1}
