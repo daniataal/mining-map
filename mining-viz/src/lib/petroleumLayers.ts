@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { apiClient } from './api';
+import { catalogMapboxDisabled, isPetroleumMapboxDisabledEnv } from './petroleumMapMode';
 
 export type PetroleumLayerId =
   | 'exploration'
@@ -23,7 +24,12 @@ export interface PetroleumLayerCatalog {
   data_as_of: string;
   source_labels: string[];
   limitations: string[];
+  mapbox_disabled?: boolean;
   env?: Record<string, string>;
+}
+
+export function isPetroleumMapboxDisabled(catalog?: PetroleumLayerCatalog | null): boolean {
+  return isPetroleumMapboxDisabledEnv() || catalogMapboxDisabled(catalog);
 }
 
 export interface PetroleumLayerGeoJson {

@@ -159,12 +159,16 @@ class OrchestratorTests(_BaseTrade):
                     }
                 ]
             }
-            with mock.patch.object(pt, "_http_get_json", return_value=sample) as http:
+            with mock.patch(
+                "backend.services.comtrade_keys.get_json_with_key_failover",
+                return_value=(sample, 200),
+            ) as failover:
                 out = pt.fetch_petroleum_trade("124", "CA", "2709", year=2023)
             self.assertEqual(out["source_key"], "comtrade_keyed")
             self.assertTrue(out["key_required"])
-            called_url = http.call_args[0][0]
-            self.assertIn("subscription-key=test-key", called_url)
+            failover.assert_called_once()
+            build_url = failover.call_args[0][0]
+            self.assertIn("subscription-key=test-key", build_url("test-key"))
         finally:
             os.environ.pop("COMTRADE_API_KEY", None)
 

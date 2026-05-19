@@ -37,7 +37,7 @@ def get_json_with_key_failover(
     GET a keyed Comtrade URL built by ``build_url(subscription_key)``.
 
     Tries ``COMTRADE_API_KEY`` (or ``api_key``); on HTTP 429/403 retries once
-  with ``COMTRADE_API_KEY_SECONDARY`` when set.
+    with ``COMTRADE_API_KEY_SECONDARY`` when set.
     """
     try:
         import requests

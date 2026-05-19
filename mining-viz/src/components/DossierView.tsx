@@ -60,6 +60,8 @@ import EntityRelationshipPanel from './EntityRelationshipPanel';
 import OperationsTab from './OperationsTab';
 import SecFilingsLink from './dossier/SecFilingsLink';
 import GleifLeiLink from './dossier/GleifLeiLink';
+import CompanyRegistryLinks from './dossier/CompanyRegistryLinks';
+import EntityTradeFlowsPanel from './dossier/EntityTradeFlowsPanel';
 import { CountryCoveragePanel } from './dossier/CountryCoveragePanel';
 import DealRoomPanel from './DealRoomPanel';
 import {
@@ -1226,6 +1228,13 @@ Output requirements:
                     {item.company}
                   </h2>
                   {item.company && <GleifLeiLink companyName={item.company} variant="compact" />}
+                  {item.company && (
+                    <CompanyRegistryLinks
+                      companyName={item.company}
+                      country={item.country}
+                      variant="compact"
+                    />
+                  )}
                 </motion.div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className="bg-amber-500/10 text-amber-500 border-none text-[9px] font-black h-4 px-1.5 uppercase shrink-0">
@@ -1511,9 +1520,14 @@ Output requirements:
 
             {/* EXPORTS / IMPORTS TAB */}
             {activeTab === 'exports-imports' && (
-              isOilAndGas
-                ? <OilTradeContext country={item.country} category={oilCategory} />
-                : <TradeContext item={item} />
+              <div className="space-y-4">
+                {(isOilAndGas || item.commodity) && item.id && (
+                  <EntityTradeFlowsPanel entityId={item.id} entityKind="license" />
+                )}
+                {isOilAndGas
+                  ? <OilTradeContext country={item.country} category={oilCategory} />
+                  : <TradeContext item={item} />}
+              </div>
             )}
 
             {/* OPERATIONS TAB */}
@@ -2798,6 +2812,9 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                   )}
                   {item?.company && <SecFilingsLink companyName={item.company} />}
                   {item?.company && <GleifLeiLink companyName={item.company} />}
+                  {item?.company && (
+                    <CompanyRegistryLinks companyName={item.company} country={item.country} />
+                  )}
                 </div>
                 {item.country && <CountryCoveragePanel country={item.country} />}
                 <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl space-y-3">

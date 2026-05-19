@@ -3267,11 +3267,33 @@ def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
         package = services.build_export_package(conn, deal_room_id)
         if package is None:
             raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
-        if format.lower() in {"md", "markdown"}:
+        fmt = format.lower()
+        if fmt in {"md", "markdown"}:
             return Response(package["markdown"], media_type="text/markdown")
+        if fmt in {"html", "pdf"}:
+            try:
+                from backend.services.deal_room_export_html import render_deal_room_export_html
+            except ImportError:
+                from services.deal_room_export_html import render_deal_room_export_html
+            body = render_deal_room_export_html(package)
+            media = "text/html"
+            filename = f"deal-room-{deal_room_id}.html"
+            if fmt == "pdf":
+                filename = f"deal-room-{deal_room_id}.html"
+            return Response(
+                content=body,
+                media_type=media,
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
         return package
     finally:
         conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}/export.pdf")
+def export_deal_room_pdf_endpoint(deal_room_id: str):
+    """Printable HTML attachment (no reportlab/weasyprint — use browser Print → PDF)."""
+    return export_deal_room_endpoint(deal_room_id, format="pdf")
 
 
 @app.get("/api/map/country-borders")
@@ -5175,12 +5197,35 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     company_q = _requests.utils.quote(company)
     commodity_q = _requests.utils.quote(commodity)
     country_q = _requests.utils.quote(country)
+    try:
+        try:
+            from backend.services.company_registry_links import (
+                OPENCORPORATES_DISCLAIMER,
+                collect_registry_links,
+            )
+        except ImportError:
+            from services.company_registry_links import (
+                OPENCORPORATES_DISCLAIMER,
+                collect_registry_links,
+            )
+        registry_bundle = collect_registry_links(company, country)
+        registry_links = registry_bundle.get("links") or []
+    except Exception:
+        registry_bundle = {}
+        registry_links = []
+        OPENCORPORATES_DISCLAIMER = (
+            "Manual verification via OpenCorporates web search — not API-backed."
+        )
+
     deep_links = [
         {
             "label": "OpenCorporates Search",
             "url": f"https://opencorporates.com/companies?q={company_q}",
-            "description": f"Search for '{company}' across 200+ registries",
+            "description": f"Search for '{company}' across 200+ registries (manual web check)",
             "icon": "building",
+            "manual_only": True,
+            "api_backed": False,
+            "disclaimer": OPENCORPORATES_DISCLAIMER,
         },
         {
             "label": "EITI Extractive Data",
@@ -5213,6 +5258,20 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
             "icon": "map",
         },
     ]
+    for link in registry_links:
+        if isinstance(link, dict) and link.get("url"):
+            entry = {
+                "label": link.get("label") or "National company register",
+                "url": link["url"],
+                "description": link.get("description") or "",
+                "icon": "building",
+                "manual_only": True,
+                "api_backed": False,
+            }
+            if link.get("disclaimer"):
+                entry["disclaimer"] = link["disclaimer"]
+            if not any(d.get("url") == entry["url"] for d in deep_links):
+                deep_links.append(entry)
 
     has_comtrade_key = bool(os.getenv("COMTRADE_API_KEY", ""))
     has_eia_key = bool(os.getenv("EIA_API_KEY", ""))
@@ -5274,7 +5333,22 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
         },
         "data_as_of": "2023 (most recent Comtrade/World Bank release)",
         "limitations": limitations,
+        "registry_links": registry_links,
+        "opencorporates_disclaimer": OPENCORPORATES_DISCLAIMER,
     }
+
+
+@app.get("/api/companies/{company_name}/registry-links")
+def get_company_registry_links(company_name: str, country: str = ""):
+    """Manual OpenCorporates + EU national register deep links (no paid APIs)."""
+    try:
+        try:
+            from backend.services.company_registry_links import collect_registry_links
+        except ImportError:
+            from services.company_registry_links import collect_registry_links
+        return collect_registry_links(company_name, country)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/health")
@@ -6288,6 +6362,38 @@ def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
         return {"status": result.get("status", "ok"), **result}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/entities/{entity_id:path}/trade-flows")
+def read_entity_trade_flows(
+    entity_id: str,
+    entity_kind: str = "license",
+    limit: int = 50,
+):
+    """Stored UN Comtrade rows (oil_trade_flows) for license country + HS mapping."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing trade flows schema")
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.entity_trade_flows import (
+                collect_entity_trade_flows,
+                serialize_entity_trade_flows_response,
+            )
+        except ImportError:
+            from services.entity_trade_flows import (
+                collect_entity_trade_flows,
+                serialize_entity_trade_flows_response,
+            )
+        payload = collect_entity_trade_flows(
+            conn, entity_id, entity_kind=entity_kind, limit=limit
+        )
+        return serialize_entity_trade_flows_response(payload)
+    except Exception as exc:
+        logger.exception("trade-flows failed for %s: %s", entity_id, exc)
+        return Response(str(exc), status_code=500)
+    finally:
+        conn.close()
 
 
 @app.get("/entities/{entity_id:path}/eu-procurement")

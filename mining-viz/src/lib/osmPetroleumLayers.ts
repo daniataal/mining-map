@@ -22,6 +22,12 @@ export const DEFAULT_OSM_LAYER_VISIBILITY: Record<OsmPetroleumLayerId, boolean> 
   refineries: false,
 };
 
+/** When Mapbox is off, default OSM pipelines on (refineries still opt-in). */
+export function defaultOsmLayerVisibility(mapboxDisabled: boolean): Record<OsmPetroleumLayerId, boolean> {
+  if (!mapboxDisabled) return { ...DEFAULT_OSM_LAYER_VISIBILITY };
+  return { pipelines: true, refineries: false };
+}
+
 export function useOsmPetroleumLayerGeoJson(
   layerId: OsmPetroleumLayerId,
   bbox: PetroleumViewportBounds | null,
