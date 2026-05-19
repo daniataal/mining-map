@@ -67,6 +67,15 @@ function IntelligenceSearchBox({
           return;
         }
       }
+      const resolved = resolveCountryFocusToken(raw, countries);
+      if (resolved) {
+        const suggestions = suggestCountriesForFocus(raw, countries, 2);
+        if (suggestions.length === 1 && suggestions[0] === resolved) {
+          e.preventDefault();
+          onApplyCountryFocus(resolved);
+          return;
+        }
+      }
       e.preventDefault();
       onCommitLicenseSearch(raw);
     },

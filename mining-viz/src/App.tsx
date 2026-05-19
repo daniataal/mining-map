@@ -310,7 +310,7 @@ export default function App() {
         }
         return name;
       });
-      miningData.setSelectedCountry([name]);
+      miningData.setSelectedCountryImmediate([name]);
       miningData.setFilter('');
       setCountryFocusBoundsTrigger((n) => n + 1);
     },

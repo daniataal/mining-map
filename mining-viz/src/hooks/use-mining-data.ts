@@ -354,6 +354,10 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const setSelectedCountryDeferred = (val: string[]) => {
     startTransition(() => setSelectedCountry(val));
   };
+  /** Apply country filter immediately (e.g. map focus) — avoids racing deferred updates. */
+  const setSelectedCountryImmediate = useCallback((val: string[]) => {
+    setSelectedCountry(val);
+  }, []);
   const setSelectedCommodityDeferred = (val: string[]) => {
     startTransition(() => setSelectedCommodity(val));
   };
@@ -392,6 +396,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setSortBy,
     selectedCountry,
     setSelectedCountry: setSelectedCountryDeferred,
+    setSelectedCountryImmediate,
     selectedCommodity,
     setSelectedCommodity: setSelectedCommodityDeferred,
     selectedLicenseType,
