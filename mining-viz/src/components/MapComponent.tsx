@@ -45,6 +45,7 @@ import {
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
+import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
@@ -1594,11 +1595,17 @@ export default function MapComponent({
                         </LayersControl.Overlay>
                     )}
                     {isOilAndGasView && onGroundVisible && (
-                        <PetroleumMapLayers
-                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
-                            mapZoom={petroleumDetailZoom}
-                            enabled={isOilAndGasView && onGroundVisible}
-                        />
+                        <>
+                            <PetroleumMapLayers
+                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                mapZoom={petroleumDetailZoom}
+                                enabled={isOilAndGasView && onGroundVisible}
+                            />
+                            <OsmPetroleumMapLayers
+                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                enabled={isOilAndGasView && onGroundVisible}
+                            />
+                        </>
                     )}
                     {vesselsVisible && isMaritimeLayerEnabled && (
                         <LayersControl.Overlay checked={isMaritimeLayerEnabled} name={vesselLayerLabel}>

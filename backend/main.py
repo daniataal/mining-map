@@ -1461,6 +1461,9 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 ON license_sync_runs (source_id, started_at DESC);
                 """
             )
+            cur.execute(
+                "ALTER TABLE license_sync_runs ADD COLUMN IF NOT EXISTS drift_warning JSONB;"
+            )
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -5417,6 +5420,72 @@ def get_petroleum_layer(
         }
 
 
+@app.get("/api/petroleum/osm-layers")
+def get_petroleum_osm_layers_catalog():
+    """Catalog of free OSM/Overpass petroleum layers (community data)."""
+    try:
+        try:
+            from backend.services.petroleum_osm_overpass import get_osm_layer_catalog
+        except ImportError:
+            from services.petroleum_osm_overpass import get_osm_layer_catalog
+        return get_osm_layer_catalog()
+    except Exception as exc:
+        return {
+            "layers": [],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "source_labels": ["OpenStreetMap"],
+            "limitations": [f"OSM petroleum catalog failed: {exc}"],
+        }
+
+
+@app.get("/api/petroleum/osm-layers/{layer_id}")
+def get_petroleum_osm_layer(
+    layer_id: str,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
+    """GeoJSON for OSM petroleum pipelines or refineries in the requested viewport."""
+    try:
+        try:
+            from backend.services.petroleum_osm_overpass import get_osm_layer_geojson
+        except ImportError:
+            from services.petroleum_osm_overpass import get_osm_layer_geojson
+
+        bbox = None
+        if south is not None and west is not None and north is not None and east is not None:
+            bbox = (south, west, north, east)
+        return get_osm_layer_geojson(layer_id, bbox=bbox)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown OSM petroleum layer: {layer_id}")
+    except Exception as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": layer_id,
+            "feature_count": 0,
+            "data_as_of": datetime.utcnow().isoformat(),
+            "limitations": [f"OSM petroleum layer fetch failed: {exc}"],
+        }
+
+
+@app.get("/api/companies/{company_name}/sec-filings")
+def get_company_sec_filings(company_name: str, limit: int = 5):
+    """Match a company name to SEC EDGAR CIK/ticker (US issuers, free JSON)."""
+    try:
+        try:
+            from backend.services.sec_edgar_lookup import lookup_sec_company
+        except ImportError:
+            from services.sec_edgar_lookup import lookup_sec_company
+        from urllib.parse import unquote
+
+        decoded = unquote(company_name or "").strip()
+        return lookup_sec_company(decoded, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "matches": []}
+
+
 @app.get("/api/logistics/ports")
 def get_port_logistics_entities(force_refresh: bool = False):
     """Global open/free port and logistics-node feed for the ports view."""
@@ -5771,6 +5840,69 @@ def get_open_data_sync_runs(
         return {"status": "error", "message": str(exc)}
 
 
+@app.get("/api/open-data/sync-alerts")
+def get_open_data_sync_alerts(
+    limit: int = 50,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Recent license sync drift warnings (admin token or authenticated admin role)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.license_sync_store import list_sync_drift_alerts
+        except ImportError:
+            from services.license_sync_store import list_sync_drift_alerts
+
+        conn = get_db_connection()
+        try:
+            alerts = list_sync_drift_alerts(conn, limit=limit)
+        finally:
+            conn.close()
+        return {"status": "success", "alerts": alerts, "count": len(alerts)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/kazakhstan-mining/sync")
+def admin_kazakhstan_mining_sync(
+    x_admin_token: Optional[str] = Header(None),
+    max_rows: int = 5000,
+):
+    """Pull Kazakhstan egov mining register when KZ_EGOV_API_KEY is configured."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.kazakhstan_mining_sync import sync_kazakhstan_mining_register
+        except ImportError:
+            from services.ingest.kazakhstan_mining_sync import sync_kazakhstan_mining_register
+
+        conn = get_db_connection()
+        try:
+            result = sync_kazakhstan_mining_register(conn, max_rows=max_rows)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0) or result.get("written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except RuntimeError as exc:
+        return {"status": "skipped", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 class LicenseManualEditRequest(BaseModel):
     manually_edited: bool = True
     manually_edited_fields: Optional[list[str]] = None
@@ -5822,6 +5954,47 @@ def patch_license_manual_edit(
             "id": license_id,
             "manually_edited": body.manually_edited,
             "manually_edited_fields": body.manually_edited_fields,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/licenses/annotations")
+def list_user_license_annotations(
+    authorization: Optional[str] = Header(None),
+):
+    """All annotation payloads for the authenticated user (for client hydration)."""
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute(
+            """
+            SELECT license_id, payload, updated_at
+            FROM license_annotations
+            WHERE user_id = %s
+            ORDER BY updated_at DESC
+            """,
+            (user_id,),
+        )
+        rows = c.fetchall() or []
+        annotations: dict[str, Any] = {}
+        for row in rows:
+            lic_id = str(row.get("license_id") or "")
+            if not lic_id:
+                continue
+            annotations[lic_id] = row.get("payload") or {}
+        return {
+            "status": "success",
+            "count": len(annotations),
+            "annotations": annotations,
         }
     finally:
         conn.close()
