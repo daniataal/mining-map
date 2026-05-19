@@ -15,6 +15,7 @@ import { useDealRooms } from './hooks/use-deal-rooms';
 import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
+import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
 import OilMaritimePanel from './components/OilMaritimePanel';
 import {
   DEFAULT_VESSEL_FILTERS,
@@ -227,13 +228,13 @@ export default function App() {
   const allLicenses = useMemo(
     () => {
       if (viewMode === 'ports') {
-        return portEntities;
+        return excludeHiddenFallbackPlaceholders(portEntities);
       }
-      return [
+      return excludeHiddenFallbackPlaceholders([
         ...rawData,
         ...visibleLocalLicenses,
         ...(viewMode === 'oil_and_gas' ? storageEntities : []),
-      ];
+      ]);
     },
     [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
   );
