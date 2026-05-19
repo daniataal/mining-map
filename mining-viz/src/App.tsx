@@ -409,6 +409,12 @@ export default function App() {
     setIsDossierOpen(false);
   }, []);
 
+  const handleOpenInvestigations = useCallback(() => {
+    setInvestigationsSubTab('due_diligence');
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
   const getDealRoomForLicense = useCallback(
     (licenseId: string, entityKind = 'license') => dealRooms.getRoomForEntity(licenseId, entityKind),
     [dealRooms],
@@ -1000,6 +1006,11 @@ export default function App() {
                   onDealRoomChange={dealRooms.upsertDealRoom}
                   onRefreshDealRooms={() => void dealRooms.refreshDealRooms()}
                   euProcurementCpvBucket={euProcurementCpvBucket}
+                  adminToken={
+                    (import.meta.env.VITE_ADMIN_API_TOKEN as string | undefined) ||
+                    sessionStorage.getItem('meridian_admin_api_token') ||
+                    undefined
+                  }
                 />
               </Suspense>
             )}
@@ -1121,6 +1132,7 @@ export default function App() {
               }
               onNavigateToDealRoom={handleNavigateToDealRoom}
               onNavigateToEuProcurement={handleNavigateToEuProcurement}
+              onOpenInvestigations={handleOpenInvestigations}
               onDealRoomLinked={dealRooms.upsertDealRoom}
             />
           </Suspense>

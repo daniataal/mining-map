@@ -14,6 +14,7 @@ import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, Lu
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
 import EuProcurementFacets from './EuProcurementFacets';
+import GovProcurementFacets from './GovProcurementFacets';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -67,6 +68,7 @@ type DataHealthPayload = {
   petroleum_osm_layers?: Record<string, { feature_count?: number; last_fetched_at?: string }>;
   petroleum_osm_sync_runs?: Array<{ id: number; status: string; features_upserted?: number; started_at?: string }>;
   eu_procurement_sync_runs?: Array<{ id: number; status: string; notices_upserted?: number; started_at?: string }>;
+  gov_procurement_sync_runs?: Array<{ id: number; status: string; records_upserted?: number; started_at?: string }>;
   sync_alert_unread_count?: number;
   kazakhstan_arcgis_probe?: { reachable?: boolean; status?: string; message?: string; checked_at?: string } | null;
 };
@@ -615,6 +617,10 @@ export default function AdminPanel({
                                 </CardContent>
                             </Card>
                         )}
+                        <GovProcurementFacets
+                            adminToken={resolvedAdminToken}
+                            authHeaders={authHeaders}
+                        />
                         <EuProcurementFacets
                             adminToken={resolvedAdminToken}
                             authHeaders={authHeaders}

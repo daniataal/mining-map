@@ -225,6 +225,28 @@ services:
       db:
         condition: service_healthy
 
+  gov-procurement-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-gov-procurement-sync-worker
+    restart: always
+    command: ["python", "gov_procurement_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - GOV_PROCUREMENT_SYNC_ENABLED=${GOV_PROCUREMENT_SYNC_ENABLED:-true}
+      - GOV_PROCUREMENT_SYNC_INTERVAL_SECONDS=${GOV_PROCUREMENT_SYNC_INTERVAL_SECONDS:-604800}
+      - GOV_PROCUREMENT_SYNC_BACKOFF_SECONDS=${GOV_PROCUREMENT_SYNC_BACKOFF_SECONDS:-3600}
+      - GOV_PROCUREMENT_SYNC_MAX_PAGES_PER_PROFILE=${GOV_PROCUREMENT_SYNC_MAX_PAGES_PER_PROFILE:-3}
+      - GOV_PROCUREMENT_SYNC_SLEEP_SECONDS=${GOV_PROCUREMENT_SYNC_SLEEP_SECONDS:-0.25}
+      - GOV_PROCUREMENT_DISABLED=${GOV_PROCUREMENT_DISABLED:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
   sweden-mining-worker:
     build:
       context: ./backend
