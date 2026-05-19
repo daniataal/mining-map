@@ -378,14 +378,18 @@ const CountryFocusBoundsFly = ({
     const map = useMap();
     useEffect(() => {
         if (!active || !geojson || trigger <= 0) return;
-        try {
-            const gjLayer = L.geoJSON(geojson as never);
-            const bounds = gjLayer.getBounds();
-            if (!bounds.isValid()) return;
-            map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
-        } catch {
-            /* ignore malformed GeoJSON during development */
-        }
+        const timer = window.setTimeout(() => {
+            try {
+                map.invalidateSize({ animate: false, pan: false });
+                const gjLayer = L.geoJSON(geojson as never);
+                const bounds = gjLayer.getBounds();
+                if (!bounds.isValid()) return;
+                map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
+            } catch {
+                /* ignore malformed GeoJSON during development */
+            }
+        }, 80);
+        return () => window.clearTimeout(timer);
     }, [active, geojson, trigger, map]);
     return null;
 };
