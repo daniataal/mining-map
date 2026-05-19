@@ -1338,6 +1338,8 @@
   flex-shrink: 0;
   pointer-events: none;
 }
+.refinery-marker.is-selected .refinery-marker-pin,
+.oil-field-marker.is-selected .oil-field-marker-pin,
 .refinery-marker-pin.is-selected,
 .oil-field-marker-pin.is-selected {
   transform: scale(1.12);
