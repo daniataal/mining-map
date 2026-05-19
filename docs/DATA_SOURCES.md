@@ -95,7 +95,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **US companies** | SEC EDGAR full-text search | https://www.sec.gov/edgar | US public | **Roadmap** `api` | CIK + filing accession |
 | **Companies** | OpenCorporates | https://opencorporates.com | **Paid API** | Do not use API | Manual web check only |
 | **Companies** | GLEIF LEI | https://www.gleif.org/en/lei-data | Open LEI | **Roadmap** | LEI record match |
-| **EU contracts** | TED / EU procurement | https://ted.europa.eu/ | EU open | **Gap** | Notice ID |
+| **EU contracts** | TED / EU procurement | https://ted.europa.eu/ | EU open | `api` (TED Search) | Notice ID (`ND`) |
 
 ---
 
@@ -161,6 +161,17 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Comtrade HS27** | Done | Daily worker + admin endpoints; 429/503 backoff in `ingest_oil_trades._fetch_comtrade_bulk`. |
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
 | **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
+
+### Weeks 17–20 (operations) — Phase 5 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Sweden SGU OGC mining** | Done | `sweden_sgu_mining_sync.py`; `POST /api/admin/sweden-mining/sync`; `source_id=sweden_sgu_*`, `record_origin=open_data`. |
+| **EU TED procurement** | Done | `ted_procurement_sync.py`, `eu_procurement_notices`; `GET /api/eu-procurement/notices`; weekly `ted-procurement-worker`. |
+| **OSM sync run logging** | Done | `petroleum_osm_sync_runs` + worker/admin sync logging; shown in data-health. |
+| **Dossier coverage panel** | Done | `CountryCoveragePanel` in Raw Evidence tab (world coverage, client-filtered). |
+| **Kazakhstan ArcGIS probe** | Done | `kazakhstan_arcgis_probe.py`; timeout logged in data-health; **not** added to `OPEN_DATA_SOURCES`. |
+| **Drift alert events** | Done | `sync_alert_events` on drift; `unread_count` on `GET /api/open-data/sync-alerts`; Admin Open Data badge; optional `SYNC_ALERT_WEBHOOK_URL`. |
 
 ### Weeks 13–16 (operations) — Phase 4 implemented (2026-05-19)
 
@@ -236,6 +247,16 @@ curl -X POST "http://localhost:8000/api/admin/petroleum-osm/sync" -H "X-Admin-To
 
 # User export with provenance (Bearer token)
 curl -s "http://localhost:8000/licenses/export?include_provenance=true" -H "Authorization: Bearer $JWT" -o licenses_provenance.csv
+
+# Sweden SGU OGC mining sync (admin token)
+curl -X POST "http://localhost:8000/api/admin/sweden-mining/sync" -H "X-Admin-Token: $ADMIN_TOKEN"
+
+# EU TED procurement (admin sync + public read)
+curl -X POST "http://localhost:8000/api/admin/eu-procurement/sync" -H "X-Admin-Token: $ADMIN_TOKEN"
+curl -s "http://localhost:8000/api/eu-procurement/notices?country=Sweden&limit=10" | jq .
+
+# Sync drift alerts (admin JWT or X-Admin-Token)
+curl -s "http://localhost:8000/api/open-data/sync-alerts" -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.unread_count'
 ```
 
 ---
@@ -254,6 +275,14 @@ curl -s "http://localhost:8000/licenses/export?include_provenance=true" -H "Auth
 | `backend/petroleum_osm_sync_worker.py` | Nightly Overpass → `petroleum_osm_features` |
 | `backend/services/admin_data_health.py` | Admin data-health aggregation |
 | `docs/eu_mining_import_template.csv` | Sweden/Poland manual import template |
+| `backend/services/ingest/sweden_sgu_mining_sync.py` | Sweden SGU OGC mineral permits |
+| `backend/services/ingest/ted_procurement_sync.py` | EU TED procurement (CPV 091*) |
+| `backend/services/eu_procurement_store.py` | `eu_procurement_notices` persistence |
+| `backend/services/ingest/kazakhstan_arcgis_probe.py` | KZ ArcGIS hub reachability probe |
+| `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
+| `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
+| `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |
+| `mining-viz/src/components/dossier/CountryCoveragePanel.tsx` | Per-country coverage in dossier |
 | `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |

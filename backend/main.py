@@ -1660,6 +1660,58 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("RELEASE SAVEPOINT petroleum_osm_schema")
             print(f"Petroleum OSM table init skipped: {osm_exc}")
 
+        try:
+            cur.execute("SAVEPOINT petroleum_osm_sync_runs_schema")
+            try:
+                from backend.services.petroleum_osm_sync_store import ensure_petroleum_osm_sync_tables
+            except ImportError:
+                from services.petroleum_osm_sync_store import ensure_petroleum_osm_sync_tables
+            ensure_petroleum_osm_sync_tables(conn)
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_sync_runs_schema")
+        except Exception as osm_run_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT petroleum_osm_sync_runs_schema")
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_sync_runs_schema")
+            print(f"Petroleum OSM sync runs init skipped: {osm_run_exc}")
+
+        try:
+            cur.execute("SAVEPOINT eu_procurement_schema")
+            try:
+                from backend.services.eu_procurement_store import ensure_eu_procurement_tables
+            except ImportError:
+                from services.eu_procurement_store import ensure_eu_procurement_tables
+            ensure_eu_procurement_tables(conn)
+            cur.execute("RELEASE SAVEPOINT eu_procurement_schema")
+        except Exception as eu_proc_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT eu_procurement_schema")
+            cur.execute("RELEASE SAVEPOINT eu_procurement_schema")
+            print(f"EU procurement table init skipped: {eu_proc_exc}")
+
+        try:
+            cur.execute("SAVEPOINT sync_alert_schema")
+            try:
+                from backend.services.sync_alert_store import ensure_sync_alert_tables
+            except ImportError:
+                from services.sync_alert_store import ensure_sync_alert_tables
+            ensure_sync_alert_tables(conn)
+            cur.execute("RELEASE SAVEPOINT sync_alert_schema")
+        except Exception as alert_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT sync_alert_schema")
+            cur.execute("RELEASE SAVEPOINT sync_alert_schema")
+            print(f"Sync alert table init skipped: {alert_exc}")
+
+        try:
+            cur.execute("SAVEPOINT open_data_probe_schema")
+            try:
+                from backend.services.ingest.kazakhstan_arcgis_probe import ensure_probe_tables
+            except ImportError:
+                from services.ingest.kazakhstan_arcgis_probe import ensure_probe_tables
+            ensure_probe_tables(conn)
+            cur.execute("RELEASE SAVEPOINT open_data_probe_schema")
+        except Exception as probe_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT open_data_probe_schema")
+            cur.execute("RELEASE SAVEPOINT open_data_probe_schema")
+            print(f"Open data probe table init skipped: {probe_exc}")
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -5967,9 +6019,24 @@ def get_open_data_sync_alerts(
         conn = get_db_connection()
         try:
             alerts = list_sync_drift_alerts(conn, limit=limit)
+            unread_count = 0
+            try:
+                try:
+                    from backend.services.sync_alert_store import count_unread_alerts, ensure_sync_alert_tables
+                except ImportError:
+                    from services.sync_alert_store import count_unread_alerts, ensure_sync_alert_tables
+                ensure_sync_alert_tables(conn)
+                unread_count = count_unread_alerts(conn)
+            except Exception:
+                unread_count = len(alerts)
         finally:
             conn.close()
-        return {"status": "success", "alerts": alerts, "count": len(alerts)}
+        return {
+            "status": "success",
+            "alerts": alerts,
+            "count": len(alerts),
+            "unread_count": unread_count,
+        }
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -6007,7 +6074,10 @@ def admin_comtrade_sync(
 
 
 @app.get("/api/admin/data-health")
-def admin_data_health(x_admin_token: Optional[str] = Header(None)):
+def admin_data_health(
+    x_admin_token: Optional[str] = Header(None),
+    refresh_probes: bool = False,
+):
     """Operational snapshot: sync runs, drift alerts, license counts, OSM cache stats."""
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
@@ -6019,7 +6089,10 @@ def admin_data_health(x_admin_token: Optional[str] = Header(None)):
             from backend.services.admin_data_health import get_data_health
         except ImportError:
             from services.admin_data_health import get_data_health
-        return get_data_health(conn)
+        result = get_data_health(conn, refresh_kz_probe=refresh_probes)
+        if refresh_probes:
+            conn.commit()
+        return result
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
     finally:
@@ -6078,6 +6151,83 @@ def admin_comtrade_sync_runs(
         return {"status": "success", "runs": runs, "count": len(runs)}
     except Exception as exc:
         return {"status": "error", "message": str(exc), "runs": []}
+
+
+@app.get("/api/eu-procurement/notices")
+def read_eu_procurement_notices(
+    commodity: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 100,
+):
+    """EU TED procurement notices (mining / petroleum CPV), synced from open TED Search API."""
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.eu_procurement_store import ensure_eu_procurement_tables, list_notices
+        except ImportError:
+            from services.eu_procurement_store import ensure_eu_procurement_tables, list_notices
+
+        conn = get_db_connection()
+        try:
+            ensure_eu_procurement_tables(conn)
+            notices = list_notices(conn, commodity=commodity, country=country, limit=limit)
+        finally:
+            conn.close()
+        return {"status": "success", "notices": notices, "count": len(notices)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "notices": []}
+
+
+@app.post("/api/admin/eu-procurement/sync")
+def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+    """Refresh eu_procurement_notices from TED Search API (free, no API key)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.ted_procurement_sync import sync_ted_procurement
+        except ImportError:
+            from services.ingest.ted_procurement_sync import sync_ted_procurement
+
+        conn = get_db_connection()
+        try:
+            result = sync_ted_procurement(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/sweden-mining/sync")
+def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None)):
+    """Pull Sweden SGU mineral permits via OGC API Features into licenses."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.sweden_sgu_mining_sync import sync_sweden_sgu_mining
+        except ImportError:
+            from services.ingest.sweden_sgu_mining_sync import sync_sweden_sgu_mining
+
+        conn = get_db_connection()
+        try:
+            result = sync_sweden_sgu_mining(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
 
 
 @app.post("/api/admin/kazakhstan-mining/sync")

@@ -169,6 +169,14 @@ def evaluate_sync_drift(
     print(
         f"[license-sync] DRIFT WARNING source={source_id!r} run_id={run_id}: {warning['message']}"
     )
+    try:
+        try:
+            from backend.services.sync_alert_store import record_drift_alert
+        except ImportError:
+            from services.sync_alert_store import record_drift_alert
+        record_drift_alert(conn, run_id=run_id, source_id=source_id, drift_warning=warning)
+    except Exception as alert_exc:
+        print(f"[license-sync] sync_alert_events write skipped: {alert_exc}")
     return warning
 
 

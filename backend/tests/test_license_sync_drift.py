@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from backend.services.license_sync_store import evaluate_sync_drift
 
@@ -23,7 +23,8 @@ class LicenseSyncDriftTests(unittest.TestCase):
         )
         self.assertIsNone(warning)
 
-    def test_warning_when_drop_exceeds_threshold(self):
+    @patch("backend.services.sync_alert_store.record_drift_alert")
+    def test_warning_when_drop_exceeds_threshold(self, _record_alert):
         conn = MagicMock()
         cursor = MagicMock()
         cursor.fetchone.return_value = (1000,)
