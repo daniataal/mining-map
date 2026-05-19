@@ -1342,9 +1342,8 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
         "mining": {
             "status": "official_portal_only",
             "note": (
-                "SGU publishes mineral permits via OGC API Features and WMS (INSPIRE-compliant), not "
-                "ArcGIS FeatureServer. Adapter not wired in open_data_sync — use portal or OGC for manual verify. "
-                "Admin CSV template: docs/eu_mining_import_template.csv"
+                "SGU mineral permits sync via OGC API Features (POST /api/admin/sweden-mining/sync). "
+                "source_id prefix sweden_sgu_*. Manual CSV fallback: docs/eu_mining_import_template.csv"
             ),
             "references": [
                 {

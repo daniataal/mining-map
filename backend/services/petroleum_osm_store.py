@@ -169,12 +169,65 @@ def sync_all_layers(
     *,
     layer_ids: Optional[list[str]] = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
+    log_run: bool = True,
 ) -> dict[str, Any]:
     targets = layer_ids or list(OSM_LAYERS.keys())
+    run_id: int | None = None
+    if log_run:
+        try:
+            try:
+                from backend.services.petroleum_osm_sync_store import (
+                    ensure_petroleum_osm_sync_tables,
+                    finish_sync_run,
+                    start_sync_run,
+                )
+            except ImportError:
+                from services.petroleum_osm_sync_store import (
+                    ensure_petroleum_osm_sync_tables,
+                    finish_sync_run,
+                    start_sync_run,
+                )
+            ensure_petroleum_osm_sync_tables(conn)
+            run_id = start_sync_run(conn)
+            conn.commit()
+        except Exception as exc:
+            print(f"[petroleum-osm] sync run log skipped: {exc}")
+            run_id = None
+
     results = []
+    total_written = 0
+    all_errors: list[str] = []
     for layer_id in targets:
-        results.append(sync_layer_tiles(conn, layer_id, sleep_fn=sleep_fn))
-    return {"layers": results, "status": "success"}
+        layer_result = sync_layer_tiles(conn, layer_id, sleep_fn=sleep_fn)
+        results.append(layer_result)
+        total_written += int(layer_result.get("features_upserted") or 0)
+        all_errors.extend(layer_result.get("errors") or [])
+
+    status = "success"
+    if all_errors:
+        status = "partial" if total_written else "error"
+
+    summary = {"layers": results, "status": status, "features_upserted": total_written, "errors": all_errors}
+
+    if run_id is not None:
+        try:
+            try:
+                from backend.services.petroleum_osm_sync_store import finish_sync_run
+            except ImportError:
+                from services.petroleum_osm_sync_store import finish_sync_run
+            finish_sync_run(
+                conn,
+                run_id,
+                status=status,
+                layers_processed=len(targets),
+                features_upserted=total_written,
+                errors=all_errors,
+            )
+            summary["run_id"] = run_id
+        except Exception as exc:
+            print(f"[petroleum-osm] finish sync run failed: {exc}")
+
+    return summary
 
 
 def get_layer_geojson_from_db(

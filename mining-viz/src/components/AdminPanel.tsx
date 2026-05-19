@@ -54,6 +54,10 @@ type DataHealthPayload = {
   license_counts_by_country?: Array<{ country: string; license_count: number }>;
   manually_edited_count?: number;
   petroleum_osm_layers?: Record<string, { feature_count?: number; last_fetched_at?: string }>;
+  petroleum_osm_sync_runs?: Array<{ id: number; status: string; features_upserted?: number; started_at?: string }>;
+  eu_procurement_sync_runs?: Array<{ id: number; status: string; notices_upserted?: number; started_at?: string }>;
+  sync_alert_unread_count?: number;
+  kazakhstan_arcgis_probe?: { reachable?: boolean; status?: string; message?: string; checked_at?: string } | null;
 };
 
 const DEFAULT_ADMIN_API_TOKEN =
@@ -75,6 +79,7 @@ export default function AdminPanel({
     const [minerListings, setMinerListings] = useState<MinerListing[]>([]);
     const [syncRuns, setSyncRuns] = useState<LicenseSyncRun[]>([]);
     const [syncAlerts, setSyncAlerts] = useState<LicenseSyncRun[]>([]);
+    const [syncAlertUnread, setSyncAlertUnread] = useState(0);
     const [loadingSyncRuns, setLoadingSyncRuns] = useState(false);
     const [adminTokenInput, setAdminTokenInput] = useState(
       () => adminApiToken || DEFAULT_ADMIN_API_TOKEN || sessionStorage.getItem('meridian_admin_api_token') || ''
@@ -274,7 +279,10 @@ export default function AdminPanel({
         if (!resolvedAdminToken) return;
         setLoadingDataHealth(true);
         try {
-            const res = await fetch(`${API_BASE}/api/admin/data-health`, { headers: adminHeaders() });
+            const res = await fetch(
+                `${API_BASE}/api/admin/data-health?refresh_probes=true`,
+                { headers: adminHeaders() }
+            );
             const data = await res.json();
             setDataHealth(data);
         } catch (err) {
@@ -298,6 +306,13 @@ export default function AdminPanel({
             const alertsData = await alertsRes.json();
             setSyncRuns(Array.isArray(runsData?.runs) ? runsData.runs : []);
             setSyncAlerts(Array.isArray(alertsData?.alerts) ? alertsData.alerts : []);
+            setSyncAlertUnread(
+              typeof alertsData?.unread_count === 'number'
+                ? alertsData.unread_count
+                : Array.isArray(alertsData?.alerts)
+                  ? alertsData.alerts.length
+                  : 0
+            );
         } catch (err) {
             console.error('Failed to fetch sync runs', err);
             setSyncRuns([]);
@@ -370,6 +385,11 @@ export default function AdminPanel({
                         </TabsTrigger>
                         <TabsTrigger value="open-data" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideDatabase className="w-4 h-4" /> {t("נתונים פתוחים", "Open Data")}
+                            {syncAlertUnread > 0 && (
+                                <Badge className="ml-1 bg-amber-500 text-slate-950 border-none text-[8px] px-1.5 py-0 min-w-[18px] justify-center">
+                                    {syncAlertUnread > 99 ? '99+' : syncAlertUnread}
+                                </Badge>
+                            )}
                         </TabsTrigger>
                         <TabsTrigger value="comtrade" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideShip className="w-4 h-4" /> Comtrade
@@ -615,18 +635,49 @@ export default function AdminPanel({
                                 ) : dataHealth ? (
                                     <>
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                            <motion.div className="rounded-xl border border-black/5 dark:border-white/5 p-3">
+                                            <div className="rounded-xl border border-black/5 dark:border-white/5 p-3">
                                                 <p className="text-[9px] uppercase text-slate-500 font-black">Manual edits</p>
                                                 <p className="text-lg font-black">{dataHealth.manually_edited_count ?? 0}</p>
-                                            </motion.div>
+                                            </div>
                                             {dataHealth.petroleum_osm_layers &&
                                                 Object.entries(dataHealth.petroleum_osm_layers).map(([layer, stats]) => (
-                                                    <motion.div key={layer} className="rounded-xl border border-black/5 dark:border-white/5 p-3">
+                                                    <div key={layer} className="rounded-xl border border-black/5 dark:border-white/5 p-3">
                                                         <p className="text-[9px] uppercase text-slate-500 font-black">OSM {layer}</p>
                                                         <p className="text-lg font-black">{stats.feature_count ?? 0}</p>
-                                                    </motion.div>
+                                                    </div>
                                                 ))}
-                                        </motion.div>
+                                            {typeof dataHealth.sync_alert_unread_count === 'number' && dataHealth.sync_alert_unread_count > 0 && (
+                                                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                                                    <p className="text-[9px] uppercase text-amber-700 dark:text-amber-400 font-black">Drift alerts</p>
+                                                    <p className="text-lg font-black">{dataHealth.sync_alert_unread_count}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                        {dataHealth.kazakhstan_arcgis_probe && (
+                                            <div className="rounded-xl border border-black/5 dark:border-white/5 p-3 text-[10px] text-slate-600 dark:text-slate-300">
+                                                <p className="font-black uppercase text-[9px] text-slate-500 mb-1">Kazakhstan ArcGIS hub probe</p>
+                                                <p>
+                                                    {dataHealth.kazakhstan_arcgis_probe.reachable
+                                                        ? t('נגיש', 'Reachable')
+                                                        : t('לא נגיש / לא מאומת', 'Unreachable / unverified')}
+                                                    {' — '}
+                                                    {dataHealth.kazakhstan_arcgis_probe.message}
+                                                </p>
+                                            </div>
+                                        )}
+                                        {(dataHealth.petroleum_osm_sync_runs?.length ?? 0) > 0 && (
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">OSM sync runs</p>
+                                                <div className="font-mono text-[10px] space-y-1">
+                                                    {dataHealth.petroleum_osm_sync_runs!.slice(0, 5).map((run) => (
+                                                        <div key={run.id} className="flex justify-between gap-4">
+                                                            <span>#{run.id} {run.status}</span>
+                                                            <span>{run.features_upserted ?? 0} features</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                         <div>
                                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
                                                 {t('רישיונות לפי מדינה (20 ראשונות)', 'Licenses by country (top 20)')}

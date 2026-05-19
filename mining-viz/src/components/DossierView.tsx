@@ -60,6 +60,7 @@ import EntityRelationshipPanel from './EntityRelationshipPanel';
 import OperationsTab from './OperationsTab';
 import SecFilingsLink from './dossier/SecFilingsLink';
 import GleifLeiLink from './dossier/GleifLeiLink';
+import { CountryCoveragePanel } from './dossier/CountryCoveragePanel';
 import DealRoomPanel from './DealRoomPanel';
 import {
   API_BASE,
@@ -2684,6 +2685,7 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                   {item?.company && <SecFilingsLink companyName={item.company} />}
                   {item?.company && <GleifLeiLink companyName={item.company} />}
                 </div>
+                {item.country && <CountryCoveragePanel country={item.country} />}
                 <div className="p-6 bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl space-y-3">
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                     Stored DD output
