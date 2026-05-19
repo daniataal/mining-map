@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
+import ssl
 import urllib.request
+from email.message import EmailMessage
 from typing import Any, Optional
 
 
@@ -123,6 +126,39 @@ def list_recent_alerts(conn: Any, *, limit: int = 50) -> list[dict[str, Any]]:
     return results
 
 
+def mark_alert_read(conn: Any, alert_id: int) -> bool:
+    """Mark a single sync alert as read. Returns True when a row was updated."""
+    ensure_sync_alert_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE sync_alert_events
+            SET read_at = NOW()
+            WHERE id = %s AND read_at IS NULL
+            RETURNING id;
+            """,
+            (int(alert_id),),
+        )
+        row = cur.fetchone()
+    return row is not None
+
+
+def mark_all_alerts_read(conn: Any) -> int:
+    """Mark all unread sync alerts as read. Returns count updated."""
+    ensure_sync_alert_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE sync_alert_events
+            SET read_at = NOW()
+            WHERE read_at IS NULL
+            RETURNING id;
+            """
+        )
+        rows = cur.fetchall()
+    return len(rows)
+
+
 def _maybe_notify_webhook(
     *,
     run_id: int,
@@ -160,12 +196,51 @@ def _maybe_notify_email_stub(
     drift_warning: dict[str, Any],
 ) -> None:
     smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    if not smtp_host:
+    smtp_from = (os.getenv("SMTP_FROM") or "").strip()
+    smtp_to_raw = (os.getenv("SMTP_TO") or "").strip()
+    if not smtp_host or not smtp_from or not smtp_to_raw:
         return
-    print(
-        f"[sync-alert] email stub (SMTP_HOST set): drift on source={source_id!r} "
-        f"run_id={run_id} — {drift_warning.get('message')}"
+
+    recipients = [addr.strip() for addr in smtp_to_raw.split(",") if addr.strip()]
+    if not recipients:
+        return
+
+    subject = f"[Meridian] License sync drift: {source_id or 'unknown source'}"
+    body = (
+        f"License sync drift detected.\n\n"
+        f"run_id: {run_id}\n"
+        f"source_id: {source_id}\n"
+        f"message: {drift_warning.get('message')}\n"
+        f"details: {json.dumps(drift_warning, default=str)}\n"
     )
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    port = int(os.getenv("SMTP_PORT", "587"))
+    use_tls = (os.getenv("SMTP_USE_TLS") or "true").strip().lower() not in {"0", "false", "no"}
+    user = (os.getenv("SMTP_USER") or "").strip()
+    password = (os.getenv("SMTP_PASSWORD") or "").strip()
+
+    try:
+        if use_tls:
+            with smtplib.SMTP(smtp_host, port, timeout=30) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=ssl.create_default_context())
+                smtp.ehlo()
+                if user and password:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, port, timeout=30) as smtp:
+                if user and password:
+                    smtp.login(user, password)
+                smtp.send_message(msg)
+        print(f"[sync-alert] drift email sent to {len(recipients)} recipient(s)")
+    except Exception as exc:
+        print(f"[sync-alert] email send failed: {exc}")
 
 
 def _user_agent() -> str:

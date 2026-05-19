@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useI18n } from '../lib/i18n';
 import type { DealRoom, MiningLicense, UserAnnotation } from '../types';
 import type { DdQueueEntry } from '../lib/dueDiligenceQueue';
 import DueDiligencePanel from './DueDiligencePanel';
 import DealRoomsListPanel from './DealRoomsListPanel';
+import EuProcurementFacets from './EuProcurementFacets';
 
 export type InvestigationsSubTab = 'due_diligence' | 'deal_rooms';
 
@@ -110,20 +112,27 @@ export default function InvestigationsPanel({
 
       <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'due_diligence' ? (
-          <DueDiligencePanel
-            allLicenses={allLicenses}
-            queue={queue}
-            queueIds={queueIds}
-            notesById={notesById}
-            userAnnotations={userAnnotations}
-            updateAnnotation={updateAnnotation}
-            updateNote={updateNote}
-            onRemoveFromQueue={onRemoveFromQueue}
-            onCardClick={onCardClick}
-            onOpenMap={onOpenMap}
-            isMobile={isMobile}
-            embedded
-          />
+          <motion.div className="h-full flex flex-col min-h-0">
+            <motion.div className="flex-1 min-h-0 overflow-hidden">
+              <DueDiligencePanel
+                allLicenses={allLicenses}
+                queue={queue}
+                queueIds={queueIds}
+                notesById={notesById}
+                userAnnotations={userAnnotations}
+                updateAnnotation={updateAnnotation}
+                updateNote={updateNote}
+                onRemoveFromQueue={onRemoveFromQueue}
+                onCardClick={onCardClick}
+                onOpenMap={onOpenMap}
+                isMobile={isMobile}
+                embedded
+              />
+            </motion.div>
+            <motion.div className="shrink-0 p-4 border-t border-black/5 dark:border-white/5 max-h-[40vh] overflow-y-auto">
+              <EuProcurementFacets />
+            </motion.div>
+          </motion.div>
         ) : (
           <DealRoomsListPanel
             rooms={dealRooms}

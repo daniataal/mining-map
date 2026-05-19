@@ -148,6 +148,7 @@ def list_notices(
     conn: Any,
     *,
     commodity: Optional[str] = None,
+    cpv_bucket: Optional[str] = None,
     country: Optional[str] = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
@@ -158,6 +159,14 @@ def list_notices(
     if country:
         clauses.append("UPPER(country) = UPPER(%s)")
         params.append(country.strip())
+    if cpv_bucket:
+        try:
+            from backend.services.cpv_commodity import sql_cpv_bucket_clause
+        except ImportError:
+            from services.cpv_commodity import sql_cpv_bucket_clause
+        bucket_clause, bucket_params = sql_cpv_bucket_clause(cpv_bucket)
+        clauses.append(bucket_clause)
+        params.extend(bucket_params)
     if commodity:
         clauses.append(
             "(UPPER(title) LIKE %s OR UPPER(cpv) LIKE %s OR UPPER(buyer) LIKE %s)"

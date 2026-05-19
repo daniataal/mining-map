@@ -220,6 +220,46 @@ services:
       db:
         condition: service_healthy
 
+  sweden-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-sweden-mining-worker
+    restart: always
+    command: ["python", "sweden_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - SGU_MINING_SYNC_ENABLED=${SGU_MINING_SYNC_ENABLED:-true}
+      - SGU_SYNC_INTERVAL_SECONDS=${SGU_SYNC_INTERVAL_SECONDS:-604800}
+      - SGU_SYNC_BACKOFF_SECONDS=${SGU_SYNC_BACKOFF_SECONDS:-3600}
+      - SGU_USER_AGENT=${SGU_USER_AGENT:-MeridianMiningMap/1.0 (SGU open data)}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kazakhstan-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-kazakhstan-mining-worker
+    restart: always
+    command: ["python", "kazakhstan_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - KZ_EGOV_API_KEY=${KZ_EGOV_API_KEY:-}
+      - KZ_EGOV_API_BASE=${KZ_EGOV_API_BASE:-https://data.egov.kz/api/v4}
+      - KZ_EGOV_SYNC_INTERVAL_SECONDS=${KZ_EGOV_SYNC_INTERVAL_SECONDS:-86400}
+      - KZ_EGOV_SYNC_BACKOFF_SECONDS=${KZ_EGOV_SYNC_BACKOFF_SECONDS:-3600}
+    depends_on:
+      db:
+        condition: service_healthy
+
   redis:
     image: redis:alpine
     container_name: mining-redis
