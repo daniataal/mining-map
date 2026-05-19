@@ -46,6 +46,10 @@ services:
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
       - ROUTE_SERVICE_URL=http://route-service:8001
+      - COMTRADE_API_KEY=${COMTRADE_API_KEY:-}
+      - COMTRADE_API_KEY_SECONDARY=${COMTRADE_API_KEY_SECONDARY:-}
+      - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
+      - PETROLEUM_DISABLE_MAPBOX=${PETROLEUM_DISABLE_MAPBOX:-}
     healthcheck:
       test:
         [
@@ -79,6 +83,7 @@ services:
       - ROUTE_SERVICE_PORT=8001
       - ROUTE_PLAN_DEADLINE_SEC=${ROUTE_PLAN_DEADLINE_SEC:-120}
       - OSRM_GEOMETRY_CACHE_MAX=${OSRM_GEOMETRY_CACHE_MAX:-8192}
+      # Public OSRM demo by default; for production set OSRM_BASE_URL to a self-hosted router (optional compose profile: osrm)
       - OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
       - OSRM_TIMEOUT_SEC=${OSRM_TIMEOUT_SEC:-8}
       - SEAROUTE_ENABLED=${SEAROUTE_ENABLED:-1}
@@ -157,6 +162,152 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+
+  comtrade-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-comtrade-sync-worker
+    restart: always
+    command: ["python", "comtrade_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - COMTRADE_API_KEY=${COMTRADE_API_KEY:-}
+      - COMTRADE_API_KEY_SECONDARY=${COMTRADE_API_KEY_SECONDARY:-}
+      - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
+      - COMTRADE_SYNC_INTERVAL_SECONDS=${COMTRADE_SYNC_INTERVAL_SECONDS:-86400}
+      - COMTRADE_SYNC_BACKOFF_SECONDS=${COMTRADE_SYNC_BACKOFF_SECONDS:-3600}
+      - COMTRADE_SYNC_YEAR=${COMTRADE_SYNC_YEAR:-}
+      - COMTRADE_SYNC_SLEEP_SECONDS=${COMTRADE_SYNC_SLEEP_SECONDS:-1.2}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  petroleum-osm-worker:
+    build:
+      context: ./backend
+    container_name: mining-petroleum-osm-worker
+    restart: always
+    command: ["python", "petroleum_osm_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - PETROLEUM_OSM_SYNC_ENABLED=${PETROLEUM_OSM_SYNC_ENABLED:-true}
+      - PETROLEUM_OSM_SYNC_INTERVAL_SECONDS=${PETROLEUM_OSM_SYNC_INTERVAL_SECONDS:-86400}
+      - PETROLEUM_OSM_SYNC_BACKOFF_SECONDS=${PETROLEUM_OSM_SYNC_BACKOFF_SECONDS:-3600}
+      - PETROLEUM_OSM_TILE_SLEEP_SECONDS=${PETROLEUM_OSM_TILE_SLEEP_SECONDS:-2.0}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ted-procurement-worker:
+    build:
+      context: ./backend
+    container_name: mining-ted-procurement-worker
+    restart: always
+    command: ["python", "ted_procurement_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - TED_PROCUREMENT_SYNC_ENABLED=${TED_PROCUREMENT_SYNC_ENABLED:-true}
+      - TED_PROCUREMENT_SYNC_INTERVAL_SECONDS=${TED_PROCUREMENT_SYNC_INTERVAL_SECONDS:-604800}
+      - TED_PROCUREMENT_SYNC_BACKOFF_SECONDS=${TED_PROCUREMENT_SYNC_BACKOFF_SECONDS:-3600}
+      - TED_USER_AGENT=${TED_USER_AGENT:-MeridianMiningMap/1.0 (EU TED open data)}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gov-procurement-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-gov-procurement-sync-worker
+    restart: always
+    command: ["python", "gov_procurement_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - GOV_PROCUREMENT_SYNC_ENABLED=${GOV_PROCUREMENT_SYNC_ENABLED:-true}
+      - GOV_PROCUREMENT_SYNC_INTERVAL_SECONDS=${GOV_PROCUREMENT_SYNC_INTERVAL_SECONDS:-604800}
+      - GOV_PROCUREMENT_SYNC_BACKOFF_SECONDS=${GOV_PROCUREMENT_SYNC_BACKOFF_SECONDS:-3600}
+      - GOV_PROCUREMENT_SYNC_MAX_PAGES_PER_PROFILE=${GOV_PROCUREMENT_SYNC_MAX_PAGES_PER_PROFILE:-3}
+      - GOV_PROCUREMENT_SYNC_SLEEP_SECONDS=${GOV_PROCUREMENT_SYNC_SLEEP_SECONDS:-0.25}
+      - GOV_PROCUREMENT_DISABLED=${GOV_PROCUREMENT_DISABLED:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  sweden-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-sweden-mining-worker
+    restart: always
+    command: ["python", "sweden_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - SGU_MINING_SYNC_ENABLED=${SGU_MINING_SYNC_ENABLED:-true}
+      - SGU_SYNC_INTERVAL_SECONDS=${SGU_SYNC_INTERVAL_SECONDS:-604800}
+      - SGU_SYNC_BACKOFF_SECONDS=${SGU_SYNC_BACKOFF_SECONDS:-3600}
+      - SGU_USER_AGENT=${SGU_USER_AGENT:-MeridianMiningMap/1.0 (SGU open data)}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  arcgis-probe-worker:
+    build:
+      context: ./backend
+    container_name: mining-arcgis-probe-worker
+    restart: always
+    command: ["python", "arcgis_probe_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - PROBE_SYNC_ENABLED=${PROBE_SYNC_ENABLED:-true}
+      - PROBE_SYNC_INTERVAL_SECONDS=${PROBE_SYNC_INTERVAL_SECONDS:-604800}
+      - PROBE_SYNC_BACKOFF_SECONDS=${PROBE_SYNC_BACKOFF_SECONDS:-3600}
+      - KZ_ARCGIS_PROBE_URL=${KZ_ARCGIS_PROBE_URL:-}
+      - PH_MGB_ARCGIS_TOKEN=${PH_MGB_ARCGIS_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kazakhstan-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-kazakhstan-mining-worker
+    restart: always
+    command: ["python", "kazakhstan_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - KZ_EGOV_API_KEY=${KZ_EGOV_API_KEY:-}
+      - KZ_EGOV_API_BASE=${KZ_EGOV_API_BASE:-https://data.egov.kz/api/v4}
+      - KZ_EGOV_SYNC_INTERVAL_SECONDS=${KZ_EGOV_SYNC_INTERVAL_SECONDS:-86400}
+      - KZ_EGOV_SYNC_BACKOFF_SECONDS=${KZ_EGOV_SYNC_BACKOFF_SECONDS:-3600}
+    depends_on:
+      db:
+        condition: service_healthy
 
   redis:
     image: redis:alpine

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, st
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
+import { useLicenseAnnotations } from './hooks/use-license-annotations';
 import { useDebouncedValue } from './hooks/use-debounced-value';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
@@ -15,6 +16,7 @@ import { useDealRooms } from './hooks/use-deal-rooms';
 import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
+import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
 import OilMaritimePanel from './components/OilMaritimePanel';
 import {
   DEFAULT_VESSEL_FILTERS,
@@ -37,7 +39,6 @@ import {
   LayoutGrid as LucideLayoutGrid,
   PieChart as LucidePieChart,
   LogOut as LucideLogOut,
-  Anchor as LucideAnchor,
   Droplets as LucideDroplets,
   Navigation2 as LucideNavigation,
   X as LucideX,
@@ -112,7 +113,7 @@ function TickerItem({ symbol, price, change, up }: { symbol: string, price: stri
 
 function LazySurfaceFallback({ label = 'Loading intelligence surface...' }: { label?: string }) {
   return (
-    <div className="flex h-full w-full items-center justify-center bg-white/70 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:bg-slate-950/70 dark:text-slate-400">
+    <div className="flex h-full w-full items-center justify-center bg-stone-100/80 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-950/70 dark:text-slate-400">
       {label}
     </div>
   );
@@ -123,9 +124,10 @@ export default function App() {
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
   const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'raw_evidence' | 'route_planner' | 'admin'
+    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
   >('global');
   const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
+  const [euProcurementCpvBucket, setEuProcurementCpvBucket] = useState<string | null>(null);
   const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
   const licenseSector =
     viewMode === 'mining'
@@ -190,15 +192,7 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
-  // User Annotations (Local storage for now, ideally backend)
-  const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() => {
-    try {
-      const saved = localStorage.getItem('mining_user_data');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
+  const { userAnnotations, updateAnnotation: persistAnnotation } = useLicenseAnnotations(token);
 
   // Locally-added licenses (persisted to localStorage)
   const [localLicenses, setLocalLicenses] = useState<MiningLicense[]>(() => {
@@ -227,13 +221,13 @@ export default function App() {
   const allLicenses = useMemo(
     () => {
       if (viewMode === 'ports') {
-        return portEntities;
+        return excludeHiddenFallbackPlaceholders(portEntities);
       }
-      return [
+      return excludeHiddenFallbackPlaceholders([
         ...rawData,
         ...visibleLocalLicenses,
         ...(viewMode === 'oil_and_gas' ? storageEntities : []),
-      ];
+      ]);
     },
     [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
   );
@@ -407,6 +401,19 @@ export default function App() {
     setIsDossierOpen(false);
   }, []);
 
+  const handleNavigateToEuProcurement = useCallback((cpvBucket: string) => {
+    setEuProcurementCpvBucket(cpvBucket);
+    setInvestigationsSubTab('due_diligence');
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
+  const handleOpenInvestigations = useCallback(() => {
+    setInvestigationsSubTab('due_diligence');
+    setViewMode('investigations');
+    setIsDossierOpen(false);
+  }, []);
+
   const getDealRoomForLicense = useCallback(
     (licenseId: string, entityKind = 'license') => dealRooms.getRoomForEntity(licenseId, entityKind),
     [dealRooms],
@@ -418,11 +425,7 @@ export default function App() {
   }, []);
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
-    setUserAnnotations(prev => {
-      const next = { ...prev, [id]: { ...(prev[id] || {}), ...updates } };
-      localStorage.setItem('mining_user_data', JSON.stringify(next));
-      return next;
-    });
+    persistAnnotation(id, updates);
 
     const targetEntity = entityIndex[id];
     if (targetEntity?.entityKind === 'storage_terminal') {
@@ -439,7 +442,7 @@ export default function App() {
     if (Object.keys(backendPayload).length > 0) {
       updateLicenseMutation.mutate({ id, updates: backendPayload });
     }
-  }, [updateLicenseMutation, entityIndex]);
+  }, [persistAnnotation, updateLicenseMutation, entityIndex]);
 
   const deleteLicense = useCallback((id: string) => {
     const targetEntity = entityIndex[id];
@@ -506,20 +509,14 @@ export default function App() {
       ? 'admin'
       : viewMode === 'investigations'
         ? 'dashboard'
-        : viewMode === 'raw_evidence'
-          ? 'pipeline'
-          : 'map';
-  const handleSidebarViewModeChange = (mode: 'map' | 'pipeline' | 'admin' | 'dashboard') => {
+        : 'map';
+  const handleSidebarViewModeChange = (mode: 'map' | 'admin' | 'dashboard') => {
     if (mode === 'admin') {
       setViewMode('admin');
       return;
     }
     if (mode === 'dashboard') {
       setViewMode('investigations');
-      return;
-    }
-    if (mode === 'pipeline') {
-      setViewMode('raw_evidence');
       return;
     }
     setViewMode('global');
@@ -640,7 +637,7 @@ export default function App() {
   }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
   return (
-    <div className={`h-screen w-screen flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
+    <div className={`h-screen w-screen flex flex-col bg-stone-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* 1. Global Market Ticker (Entrepreneur Desk) */}
       <div className="h-8 w-full bg-slate-50 dark:bg-slate-950 border-b border-black/5 dark:border-white/5 flex items-center overflow-hidden">
          <div className="flex items-center gap-2 px-4 border-r border-black/5 dark:border-white/5 bg-amber-500/10 h-full shrink-0">
@@ -715,7 +712,7 @@ export default function App() {
         
         {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
-          className={`hidden min-h-0 md:flex md:flex-col md:h-full transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-black/5 dark:border-white/5 bg-white/40 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
+          className={`hidden min-h-0 md:flex md:flex-col md:h-full transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-stone-200/80 dark:border-white/5 bg-stone-100/85 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
           ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
           onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
           onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
@@ -772,7 +769,6 @@ export default function App() {
             viewMode === 'suppliers' ||
             viewMode === 'ports' ||
             viewMode === 'investigations' ||
-            viewMode === 'raw_evidence' ||
             viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
@@ -799,7 +795,7 @@ export default function App() {
                     </button>
                   )}
                   {sectorCoverageSummary && viewMode !== 'route_planner' && (
-                    <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-white/60 dark:bg-slate-950/60 backdrop-blur-2xl border border-black/10 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-300">
+                    <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
                       {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
                     </div>
                   )}
@@ -818,48 +814,48 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
-                  <div className="flex gap-0.5 sm:gap-1.5 bg-white/60 sm:bg-white/40 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-black/10 sm:border-black/5 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
+                  <div className="flex gap-0.5 sm:gap-1.5 bg-stone-100/90 sm:bg-stone-100/80 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-stone-200/90 sm:border-stone-200/70 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
                       onClick={() => switchSectorView('global')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t("עולמי", "Global")}
                     </button>
                     <button
                       onClick={() => switchSectorView('mining')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'mining' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t("כרייה", "Mining")}
                     </button>
                     <button
                       onClick={() => switchSectorView('oil_and_gas')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'oil_and_gas' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
                       {t("נפט וגז", "Oil & Gas")}
                     </button>
                     <button
                       onClick={() => setViewMode('suppliers')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t("ספקים", "Suppliers")}
                     </button>
                     <button
                       onClick={() => setViewMode('ports')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'ports' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'ports' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t("נמלים", "Ports")}
                     </button>
                     <button
                       onClick={() => setViewMode('route_planner')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'route_planner' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'route_planner' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       <LucideNavigation className="w-3.5 h-3.5" aria-hidden />
                       {t('מסלול', 'Route')}
                     </button>
                     <button
                       onClick={() => setViewMode('investigations')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'investigations' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'investigations' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t('חקירות', 'Investigations')}
                       {(ddQueue.queue.length > 0 || dealRooms.count > 0) && (
@@ -868,19 +864,13 @@ export default function App() {
                         </span>
                       )}
                     </button>
-                    <button
-                      onClick={() => setViewMode('raw_evidence')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'raw_evidence' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'}`}
-                    >
-                      {t("ראיות גולמיות", "Raw Evidence")}
-                    </button>
                   </div>
 
                   {/* Filter button — hidden on mobile (available in bottom nav) */}
                   <ThemeToggle className="hidden sm:flex" />
                   <button
                     onClick={() => setIsFilterOpen(!isFilterOpen)}
-                    className={`hidden sm:flex p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-white/60 dark:bg-slate-950/60 border-black/10 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                    className={`hidden sm:flex p-3 rounded-2xl border transition-all active:scale-95 shadow-2xl backdrop-blur-2xl ${isFilterOpen ? 'bg-amber-500 border-amber-500 text-slate-950' : 'bg-stone-100/90 dark:bg-slate-950/60 border-stone-200/90 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
                   >
                     <LucideFilter className="w-5 h-5" />
                   </button>
@@ -1001,16 +991,14 @@ export default function App() {
                   onHighlightedDealRoomConsumed={() => setHighlightedDealRoomId(null)}
                   onDealRoomChange={dealRooms.upsertDealRoom}
                   onRefreshDealRooms={() => void dealRooms.refreshDealRooms()}
+                  euProcurementCpvBucket={euProcurementCpvBucket}
+                  adminToken={
+                    (import.meta.env.VITE_ADMIN_API_TOKEN as string | undefined) ||
+                    sessionStorage.getItem('meridian_admin_api_token') ||
+                    undefined
+                  }
                 />
               </Suspense>
-            )}
-            {viewMode === 'raw_evidence' && (
-              <div className="pt-20 sm:pt-24 h-full bg-white dark:bg-slate-950 overflow-hidden">
-                <div className="p-4 overflow-y-auto h-full text-sm font-mono text-slate-800 dark:text-slate-200">
-                  <h2 className="text-xl mb-4 font-sans font-bold">Raw Evidence Viewer</h2>
-                  <p className="text-slate-500 mb-4 font-sans">Select an entity on the map to see its raw evidence JSON payloads.</p>
-                </div>
-              </div>
             )}
             {viewMode === 'admin' && (
               <div className="h-full bg-white dark:bg-slate-950">
@@ -1121,6 +1109,8 @@ export default function App() {
                   : undefined
               }
               onNavigateToDealRoom={handleNavigateToDealRoom}
+              onNavigateToEuProcurement={handleNavigateToEuProcurement}
+              onOpenInvestigations={handleOpenInvestigations}
               onDealRoomLinked={dealRooms.upsertDealRoom}
             />
           </Suspense>
@@ -1161,52 +1151,45 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
-      <nav className="md:hidden h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-black/10 dark:border-white/10 flex items-center justify-start gap-1 overflow-x-auto z-50 shrink-0 px-1">
+      <nav className="md:hidden h-16 bg-stone-50/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-stone-200/90 dark:border-white/10 flex items-center justify-start gap-1 overflow-x-auto z-50 shrink-0 px-1">
         <button
           onClick={() => switchSectorView('global')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
         </button>
         <button
           onClick={() => switchSectorView('mining')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'mining' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideLayoutGrid className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("כרייה", "Mining")}</span>
         </button>
         <button
           onClick={() => switchSectorView('oil_and_gas')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'oil_and_gas' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideDroplets className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("נפט וגז", "Oil & Gas")}</span>
         </button>
         <button
           onClick={() => setViewMode('route_planner')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors shrink-0 ${viewMode === 'route_planner' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors shrink-0 ${viewMode === 'route_planner' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideNavigation className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("מסלול", "Route")}</span>
         </button>
         <button
           onClick={() => setViewMode('investigations')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'investigations' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'investigations' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucidePieChart className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t('חקירות', 'Investigate')}</span>
         </button>
         <button
-          onClick={() => setViewMode('raw_evidence')}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'raw_evidence' ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <LucideAnchor className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("ראיות", "Evidence")}</span>
-        </button>
-        <button
           onClick={() => setIsFilterOpen(!isFilterOpen)}
-          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${isFilterOpen ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}
+          className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${isFilterOpen ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideFilter className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t("סינון", "Filter")}</span>

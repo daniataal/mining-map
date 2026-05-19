@@ -66,7 +66,7 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
     Object.keys(vessel.ais_messages ?? {}).length > 0 || Object.keys(vessel.ais_metadata ?? {}).length > 0;
 
   return (
-    <Card className="w-[min(92vw,720px)] max-h-[calc(100vh-100px)] overflow-hidden bg-white/95 dark:bg-slate-950/95 border border-black/10 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
+    <Card className="w-[min(92vw,720px)] max-h-[calc(100vh-100px)] overflow-hidden bg-stone-50/98 dark:bg-slate-950/95 border border-stone-200/90 dark:border-white/10 rounded-3xl shadow-2xl backdrop-blur-2xl">
       <div className="flex items-start justify-between gap-3 p-5 border-b border-black/5 dark:border-white/5">
         <div className="min-w-0 flex-1">
           <PanelHeader vessel={vessel} t={t} />

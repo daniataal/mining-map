@@ -866,7 +866,8 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def _admin_payload_from_authorization(authorization: Optional[str]):
+def _jwt_payload_from_authorization(authorization: Optional[str]):
+    """Decode Bearer JWT for any authenticated user."""
     if not authorization or not authorization.lower().startswith("bearer "):
         return None, Response("Unauthorized", status_code=401)
     token = authorization.split(" ", 1)[1].strip()
@@ -876,9 +877,29 @@ def _admin_payload_from_authorization(authorization: Optional[str]):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None, Response("Invalid or expired token", status_code=401)
+    return payload, None
+
+
+def _admin_payload_from_authorization(authorization: Optional[str]):
+    payload, err = _jwt_payload_from_authorization(authorization)
+    if err is not None:
+        return None, err
     if payload.get("role") != "admin":
         return None, Response("Forbidden", status_code=403)
     return payload, None
+
+
+def _require_authenticated_or_admin(
+    authorization: Optional[str] = None,
+    x_admin_token: Optional[str] = None,
+):
+    """Allow X-Admin-Token (when configured) or any valid Bearer JWT."""
+    if (os.getenv("ADMIN_TOKEN") or "").strip() and x_admin_token:
+        err = _check_admin_token(x_admin_token)
+        if err is not None:
+            return None, err
+        return {"role": "admin", "sub": "admin-token"}, None
+    return _jwt_payload_from_authorization(authorization)
 
 # Models
 class UserLogin(BaseModel):
@@ -1389,6 +1410,60 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_contacts_discovered_by ON entity_contacts(discovered_by);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_legal_events_discovered_by ON legal_events(discovered_by);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_discovered_by ON entity_relationships(discovered_by);")
+            # Manual override protection for license rows (sync + bulk import must not clobber).
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited BOOLEAN DEFAULT FALSE;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_at TIMESTAMP;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_by TEXT;"
+            )
+            cur.execute(
+                "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS manually_edited_fields JSONB;"
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS license_annotations (
+                    license_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (license_id, user_id)
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_license_annotations_user
+                ON license_annotations (user_id, updated_at DESC);
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS license_sync_runs (
+                    id SERIAL PRIMARY KEY,
+                    source_id TEXT,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ,
+                    status TEXT NOT NULL,
+                    records_fetched INTEGER DEFAULT 0,
+                    records_written INTEGER DEFAULT 0,
+                    records_skipped_manual INTEGER DEFAULT 0,
+                    error TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_license_sync_runs_source_started
+                ON license_sync_runs (source_id, started_at DESC);
+                """
+            )
+            cur.execute(
+                "ALTER TABLE license_sync_runs ADD COLUMN IF NOT EXISTS drift_warning JSONB;"
+            )
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
         except Exception as e:
@@ -1558,6 +1633,84 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("ROLLBACK TO SAVEPOINT gov_procurement_schema")
             cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
             print(f"Gov procurement table init skipped: {gov_proc_exc}")
+
+        try:
+            cur.execute("SAVEPOINT comtrade_sync_schema")
+            try:
+                from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables
+            except ImportError:
+                from services.comtrade_sync_store import ensure_comtrade_sync_tables
+            ensure_comtrade_sync_tables(conn)
+            cur.execute("RELEASE SAVEPOINT comtrade_sync_schema")
+        except Exception as comtrade_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT comtrade_sync_schema")
+            cur.execute("RELEASE SAVEPOINT comtrade_sync_schema")
+            print(f"Comtrade sync table init skipped: {comtrade_exc}")
+
+        try:
+            cur.execute("SAVEPOINT petroleum_osm_schema")
+            try:
+                from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables
+            except ImportError:
+                from services.petroleum_osm_store import ensure_petroleum_osm_tables
+            ensure_petroleum_osm_tables(conn)
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_schema")
+        except Exception as osm_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT petroleum_osm_schema")
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_schema")
+            print(f"Petroleum OSM table init skipped: {osm_exc}")
+
+        try:
+            cur.execute("SAVEPOINT petroleum_osm_sync_runs_schema")
+            try:
+                from backend.services.petroleum_osm_sync_store import ensure_petroleum_osm_sync_tables
+            except ImportError:
+                from services.petroleum_osm_sync_store import ensure_petroleum_osm_sync_tables
+            ensure_petroleum_osm_sync_tables(conn)
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_sync_runs_schema")
+        except Exception as osm_run_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT petroleum_osm_sync_runs_schema")
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_sync_runs_schema")
+            print(f"Petroleum OSM sync runs init skipped: {osm_run_exc}")
+
+        try:
+            cur.execute("SAVEPOINT eu_procurement_schema")
+            try:
+                from backend.services.eu_procurement_store import ensure_eu_procurement_tables
+            except ImportError:
+                from services.eu_procurement_store import ensure_eu_procurement_tables
+            ensure_eu_procurement_tables(conn)
+            cur.execute("RELEASE SAVEPOINT eu_procurement_schema")
+        except Exception as eu_proc_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT eu_procurement_schema")
+            cur.execute("RELEASE SAVEPOINT eu_procurement_schema")
+            print(f"EU procurement table init skipped: {eu_proc_exc}")
+
+        try:
+            cur.execute("SAVEPOINT sync_alert_schema")
+            try:
+                from backend.services.sync_alert_store import ensure_sync_alert_tables
+            except ImportError:
+                from services.sync_alert_store import ensure_sync_alert_tables
+            ensure_sync_alert_tables(conn)
+            cur.execute("RELEASE SAVEPOINT sync_alert_schema")
+        except Exception as alert_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT sync_alert_schema")
+            cur.execute("RELEASE SAVEPOINT sync_alert_schema")
+            print(f"Sync alert table init skipped: {alert_exc}")
+
+        try:
+            cur.execute("SAVEPOINT open_data_probe_schema")
+            try:
+                from backend.services.ingest.kazakhstan_arcgis_probe import ensure_probe_tables
+            except ImportError:
+                from services.ingest.kazakhstan_arcgis_probe import ensure_probe_tables
+            ensure_probe_tables(conn)
+            cur.execute("RELEASE SAVEPOINT open_data_probe_schema")
+        except Exception as probe_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT open_data_probe_schema")
+            cur.execute("RELEASE SAVEPOINT open_data_probe_schema")
+            print(f"Open data probe table init skipped: {probe_exc}")
 
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
@@ -2552,7 +2705,14 @@ def read_gov_procurement(entity_id: str, entity_kind: str = "license", live: boo
         return serialize_gov_procurement_response(payload)
     except Exception as e:
         logger.exception("gov-procurement failed for %s: %s", entity_id, e)
-        return Response(str(e), status_code=500)
+        try:
+            collect_gov_procurement, serialize_gov_procurement_response = _load_gov_procurement_services()
+        except Exception:
+            return Response(str(e), status_code=500)
+        err_payload = collect_gov_procurement(company_name="", country=None)
+        err_payload["warnings"] = [f"Unable to load procurement data: {e}"]
+        err_payload["data_origin"] = "error"
+        return serialize_gov_procurement_response(err_payload)
     finally:
         conn.close()
 
@@ -3114,11 +3274,41 @@ def export_deal_room_endpoint(deal_room_id: str, format: str = "json"):
         package = services.build_export_package(conn, deal_room_id)
         if package is None:
             raise HTTPException(status_code=404, detail=f"Deal room {deal_room_id} not found")
-        if format.lower() in {"md", "markdown"}:
+        fmt = format.lower()
+        if fmt in {"md", "markdown"}:
             return Response(package["markdown"], media_type="text/markdown")
+        if fmt == "html":
+            try:
+                from backend.services.deal_room_export_html import render_deal_room_export_html
+            except ImportError:
+                from services.deal_room_export_html import render_deal_room_export_html
+            body = render_deal_room_export_html(package)
+            return Response(
+                content=body,
+                media_type="text/html",
+                headers={"Content-Disposition": f'attachment; filename="deal-room-{deal_room_id}.html"'},
+            )
+        if fmt == "pdf":
+            try:
+                from backend.services.deal_room_export_pdf import render_deal_room_export_pdf
+            except ImportError:
+                from services.deal_room_export_pdf import render_deal_room_export_pdf
+            body_bytes, media_type = render_deal_room_export_pdf(package)
+            ext = "pdf" if media_type.startswith("application/pdf") else "html"
+            return Response(
+                content=body_bytes,
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="deal-room-{deal_room_id}.{ext}"'},
+            )
         return package
     finally:
         conn.close()
+
+
+@app.get("/api/deal-rooms/{deal_room_id}/export.pdf")
+def export_deal_room_pdf_endpoint(deal_room_id: str):
+    """application/pdf when reportlab is installed; otherwise printable HTML fallback."""
+    return export_deal_room_endpoint(deal_room_id, format="pdf")
 
 
 @app.get("/api/map/country-borders")
@@ -3616,6 +3806,20 @@ def parse_license_import_csv(decoded: str) -> dict:
     return {"ok": True, "rows": rows_out, "errors": []}
 
 
+def _license_import_validation_detail(errors: list[dict]) -> dict:
+    summary = "; ".join(
+        f"row {e.get('row', '?')}: {e.get('message', '')}" for e in errors[:5]
+    )
+    if len(errors) > 5:
+        summary += f" (+{len(errors) - 5} more)"
+    return {
+        "status": "validation_error",
+        "message": summary or "CSV validation failed",
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
 def _insert_license_import_rows(rows: list[tuple]) -> int:
     conn = get_db_connection()
     c = conn.cursor()
@@ -3648,14 +3852,23 @@ def import_licenses_text(body: LicenseImportTextBody):
     if not result["ok"]:
         raise HTTPException(
             status_code=422,
-            detail={"status": "validation_error", "errors": result["errors"]},
+            detail=_license_import_validation_detail(result["errors"]),
         )
     imported = _insert_license_import_rows(result["rows"])
     return {"status": "success", "imported_count": imported}
 
 
 @app.get("/licenses/export")
-def export_licenses():
+def export_licenses(
+    authorization: Optional[str] = Header(None),
+    include_provenance: bool = False,
+):
+    _, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    with_provenance = bool(include_provenance)
+
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
     c.execute(
@@ -3694,8 +3907,7 @@ def export_licenses():
 
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    # Write Header
+
     headers = [
         "id",
         "company",
@@ -3713,21 +3925,60 @@ def export_licenses():
         "public_business_phone_source_type",
         "date_issued",
     ]
+    if with_provenance:
+        headers.extend(
+            [
+                "sector",
+                "record_origin",
+                "source_id",
+                "source_name",
+                "source_url",
+                "source_record_url",
+                "source_updated_at",
+                "last_synced_at",
+                "manually_edited",
+            ]
+        )
     writer.writerow(headers)
-    
-    # Write Data
+
     for row in rows:
-        writer.writerow([
-            row["id"], row["company"], row["country"], row["region"], row["commodity"], 
-            row["license_type"], row["status"], row["lat"], row["lng"], 
-            row["phone_number"], row["contact_person"], row["public_business_phone"],
-            row["public_business_phone_source"], row["public_business_phone_source_type"],
-            row["date_issued"]
-        ])
-    
+        base = [
+            row["id"],
+            row["company"],
+            row["country"],
+            row["region"],
+            row["commodity"],
+            row["license_type"],
+            row["status"],
+            row["lat"],
+            row["lng"],
+            row["phone_number"],
+            row["contact_person"],
+            row["public_business_phone"],
+            row["public_business_phone_source"],
+            row["public_business_phone_source_type"],
+            row["date_issued"],
+        ]
+        if with_provenance:
+            base.extend(
+                [
+                    row.get("sector"),
+                    row.get("record_origin"),
+                    row.get("source_id"),
+                    row.get("source_name"),
+                    row.get("source_url"),
+                    row.get("source_record_url"),
+                    row.get("source_updated_at"),
+                    row.get("last_synced_at"),
+                    row.get("manually_edited"),
+                ]
+            )
+        writer.writerow(base)
+
     output.seek(0)
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=licenses_export.csv"
+    filename = "licenses_export_provenance.csv" if with_provenance else "licenses_export.csv"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
 @app.get("/licenses/template")
@@ -3773,7 +4024,7 @@ async def import_licenses(file: UploadFile = File(...)):
     if not result["ok"]:
         raise HTTPException(
             status_code=422,
-            detail={"status": "validation_error", "errors": result["errors"]},
+            detail=_license_import_validation_detail(result["errors"]),
         )
     imported = _insert_license_import_rows(result["rows"])
     return {"status": "success", "imported_count": imported}
@@ -4961,12 +5212,35 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     company_q = _requests.utils.quote(company)
     commodity_q = _requests.utils.quote(commodity)
     country_q = _requests.utils.quote(country)
+    try:
+        try:
+            from backend.services.company_registry_links import (
+                OPENCORPORATES_DISCLAIMER,
+                collect_registry_links,
+            )
+        except ImportError:
+            from services.company_registry_links import (
+                OPENCORPORATES_DISCLAIMER,
+                collect_registry_links,
+            )
+        registry_bundle = collect_registry_links(company, country)
+        registry_links = registry_bundle.get("links") or []
+    except Exception:
+        registry_bundle = {}
+        registry_links = []
+        OPENCORPORATES_DISCLAIMER = (
+            "Manual verification via OpenCorporates web search — not API-backed."
+        )
+
     deep_links = [
         {
             "label": "OpenCorporates Search",
             "url": f"https://opencorporates.com/companies?q={company_q}",
-            "description": f"Search for '{company}' across 200+ registries",
+            "description": f"Search for '{company}' across 200+ registries (manual web check)",
             "icon": "building",
+            "manual_only": True,
+            "api_backed": False,
+            "disclaimer": OPENCORPORATES_DISCLAIMER,
         },
         {
             "label": "EITI Extractive Data",
@@ -4999,6 +5273,20 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
             "icon": "map",
         },
     ]
+    for link in registry_links:
+        if isinstance(link, dict) and link.get("url"):
+            entry = {
+                "label": link.get("label") or "National company register",
+                "url": link["url"],
+                "description": link.get("description") or "",
+                "icon": "building",
+                "manual_only": True,
+                "api_backed": False,
+            }
+            if link.get("disclaimer"):
+                entry["disclaimer"] = link["disclaimer"]
+            if not any(d.get("url") == entry["url"] for d in deep_links):
+                deep_links.append(entry)
 
     has_comtrade_key = bool(os.getenv("COMTRADE_API_KEY", ""))
     has_eia_key = bool(os.getenv("EIA_API_KEY", ""))
@@ -5060,7 +5348,22 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
         },
         "data_as_of": "2023 (most recent Comtrade/World Bank release)",
         "limitations": limitations,
+        "registry_links": registry_links,
+        "opencorporates_disclaimer": OPENCORPORATES_DISCLAIMER,
     }
+
+
+@app.get("/api/companies/{company_name}/registry-links")
+def get_company_registry_links(company_name: str, country: str = ""):
+    """Manual OpenCorporates + EU national register deep links (no paid APIs)."""
+    try:
+        try:
+            from backend.services.company_registry_links import collect_registry_links
+        except ImportError:
+            from services.company_registry_links import collect_registry_links
+        return collect_registry_links(company_name, country)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/health")
@@ -5339,6 +5642,92 @@ def get_petroleum_layer(
             "data_as_of": datetime.utcnow().isoformat(),
             "limitations": [f"Petroleum layer fetch failed: {exc}"],
         }
+
+
+@app.get("/api/petroleum/osm-layers")
+def get_petroleum_osm_layers_catalog():
+    """Catalog of free OSM/Overpass petroleum layers (community data)."""
+    try:
+        try:
+            from backend.services.petroleum_osm_overpass import get_osm_layer_catalog
+        except ImportError:
+            from services.petroleum_osm_overpass import get_osm_layer_catalog
+        return get_osm_layer_catalog()
+    except Exception as exc:
+        return {
+            "layers": [],
+            "data_as_of": datetime.utcnow().isoformat(),
+            "source_labels": ["OpenStreetMap"],
+            "limitations": [f"OSM petroleum catalog failed: {exc}"],
+        }
+
+
+@app.get("/api/petroleum/osm-layers/{layer_id}")
+def get_petroleum_osm_layer(
+    layer_id: str,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
+    """GeoJSON for OSM petroleum pipelines or refineries (DB snapshot first, Overpass fallback)."""
+    try:
+        try:
+            from backend.services.petroleum_osm_store import get_osm_layer_geojson_with_fallback
+        except ImportError:
+            from services.petroleum_osm_store import get_osm_layer_geojson_with_fallback
+
+        bbox = None
+        if south is not None and west is not None and north is not None and east is not None:
+            bbox = (south, west, north, east)
+        conn = get_db_connection()
+        try:
+            return get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox)
+        finally:
+            conn.close()
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown OSM petroleum layer: {layer_id}")
+    except Exception as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": layer_id,
+            "feature_count": 0,
+            "data_as_of": datetime.utcnow().isoformat(),
+            "limitations": [f"OSM petroleum layer fetch failed: {exc}"],
+        }
+
+
+@app.get("/api/companies/{company_name}/sec-filings")
+def get_company_sec_filings(company_name: str, limit: int = 5):
+    """Match a company name to SEC EDGAR CIK/ticker (US issuers, free JSON)."""
+    try:
+        try:
+            from backend.services.sec_edgar_lookup import lookup_sec_company
+        except ImportError:
+            from services.sec_edgar_lookup import lookup_sec_company
+        from urllib.parse import unquote
+
+        decoded = unquote(company_name or "").strip()
+        return lookup_sec_company(decoded, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "matches": []}
+
+
+@app.get("/api/companies/{company_name}/lei")
+def get_company_lei(company_name: str, limit: int = 5):
+    """Match a company name to GLEIF LEI records (global, free public API)."""
+    try:
+        try:
+            from backend.services.gleif_lookup import lookup_lei
+        except ImportError:
+            from services.gleif_lookup import lookup_lei
+        from urllib.parse import unquote
+
+        decoded = unquote(company_name or "").strip()
+        return lookup_lei(decoded, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "matches": []}
 
 
 @app.get("/api/logistics/ports")
@@ -5623,7 +6012,11 @@ def admin_oil_ingest(request: OilIngestRequest):
 
 
 @app.post("/api/admin/open-data/sync")
-def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_open_data_sync(
+    request: OpenDataSyncRequest,
+    x_admin_token: Optional[str] = Header(None),
+    source_id: Optional[str] = None,
+):
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
         return forbidden
@@ -5634,7 +6027,11 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
         except ImportError:
             from services.ingest.open_data_sync import sync_open_data_sources, seed_bundled_json_fallback
 
-        summary = sync_open_data_sources(source_ids=request.source_ids)
+        source_ids = request.source_ids
+        single = (source_id or "").strip()
+        if single:
+            source_ids = [single]
+        summary = sync_open_data_sources(source_ids=source_ids)
         if request.include_bundled_fallback and not summary.get("records_written"):
             conn = get_db_connection()
             try:
@@ -5646,9 +6043,708 @@ def admin_open_data_sync(request: OpenDataSyncRequest, x_admin_token: Optional[s
         if summary.get("records_written", 0) > 0 or summary.get("bundled_fallback_inserted", 0) > 0:
             cache.delete_pattern("licenses:*")
             
-        return {"status": "success", **summary}
+        sync_run_ids = [
+            int(entry["run_id"])
+            for entry in (summary.get("sync_runs") or [])
+            if entry.get("run_id") is not None
+        ]
+        return {"status": "success", "sync_run_ids": sync_run_ids, **summary}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/open-data/sync-runs")
+def get_open_data_sync_runs(
+    limit: int = 50,
+    source_id: Optional[str] = None,
+    per_source_latest: bool = False,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Recent license open-data sync runs (authenticated users or admin token)."""
+    _, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.license_sync_store import (
+                list_latest_sync_run_per_source,
+                list_license_sync_runs,
+            )
+        except ImportError:
+            from services.license_sync_store import (
+                list_latest_sync_run_per_source,
+                list_license_sync_runs,
+            )
+
+        conn = get_db_connection()
+        try:
+            if per_source_latest:
+                runs = list_latest_sync_run_per_source(conn)
+            else:
+                runs = list_license_sync_runs(conn, limit=limit, source_id=source_id)
+        finally:
+            conn.close()
+        return {"status": "success", "runs": runs, "count": len(runs)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/open-data/sync-alerts")
+def get_open_data_sync_alerts(
+    limit: int = 50,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Recent license sync drift warnings (admin token or authenticated admin role)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    try:
+        conn = get_db_connection()
+        try:
+            try:
+                from backend.services.sync_alert_store import (
+                    count_unread_alerts,
+                    ensure_sync_alert_tables,
+                    list_recent_alerts,
+                )
+            except ImportError:
+                from services.sync_alert_store import (
+                    count_unread_alerts,
+                    ensure_sync_alert_tables,
+                    list_recent_alerts,
+                )
+            ensure_sync_alert_tables(conn)
+            alerts = list_recent_alerts(conn, limit=limit)
+            unread_count = count_unread_alerts(conn)
+        finally:
+            conn.close()
+        return {
+            "status": "success",
+            "alerts": alerts,
+            "count": len(alerts),
+            "unread_count": unread_count,
+        }
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.patch("/api/open-data/sync-alerts/{alert_id}/read")
+def mark_sync_alert_read(
+    alert_id: int,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark one sync drift alert as read (admin)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.sync_alert_store import ensure_sync_alert_tables, mark_alert_read
+        except ImportError:
+            from services.sync_alert_store import ensure_sync_alert_tables, mark_alert_read
+        ensure_sync_alert_tables(conn)
+        updated = mark_alert_read(conn, alert_id)
+        conn.commit()
+    finally:
+        conn.close()
+    if not updated:
+        return {"status": "not_found", "message": "Alert not found or already read"}
+    return {"status": "success", "id": alert_id}
+
+
+@app.post("/api/open-data/sync-alerts/mark-all-read")
+def mark_all_sync_alerts_read(
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark all sync drift alerts as read (admin)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.sync_alert_store import ensure_sync_alert_tables, mark_all_alerts_read
+        except ImportError:
+            from services.sync_alert_store import ensure_sync_alert_tables, mark_all_alerts_read
+        ensure_sync_alert_tables(conn)
+        marked = mark_all_alerts_read(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success", "marked_count": marked}
+
+
+class ComtradeSyncRequest(BaseModel):
+    year: Optional[int] = None
+
+
+@app.post("/api/admin/comtrade/sync")
+def admin_comtrade_sync(
+    request: ComtradeSyncRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Refresh oil_trade_flows from UN Comtrade HS27 (requires COMTRADE_API_KEY)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.comtrade_scheduled_sync import sync_comtrade_hs27
+        except ImportError:
+            from services.ingest.comtrade_scheduled_sync import sync_comtrade_hs27
+
+        conn = get_db_connection()
+        try:
+            result = sync_comtrade_hs27(conn, year=request.year)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/admin/data-health")
+def admin_data_health(
+    x_admin_token: Optional[str] = Header(None),
+    refresh_probes: bool = False,
+):
+    """Operational snapshot: sync runs, drift alerts, license counts, OSM cache stats."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.admin_data_health import get_data_health
+        except ImportError:
+            from services.admin_data_health import get_data_health
+        result = get_data_health(conn, refresh_kz_probe=refresh_probes)
+        if refresh_probes:
+            conn.commit()
+        return result
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/petroleum-osm/sync")
+def admin_petroleum_osm_sync(x_admin_token: Optional[str] = Header(None)):
+    """Refresh petroleum_osm_features from Overpass world tiles."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+        except ImportError:
+            from services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+        ensure_petroleum_osm_tables(conn)
+        conn.commit()
+        summary = sync_all_layers(conn)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/admin/comtrade/sync-runs")
+def admin_comtrade_sync_runs(
+    x_admin_token: Optional[str] = Header(None),
+    limit: int = 50,
+):
+    """Recent scheduled Comtrade HS27 sync runs."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
+        except ImportError:
+            from services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
+
+        conn = get_db_connection()
+        try:
+            ensure_comtrade_sync_tables(conn)
+            conn.commit()
+            runs = list_sync_runs(conn, limit=limit)
+        finally:
+            conn.close()
+        return {"status": "success", "runs": runs, "count": len(runs)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "runs": []}
+
+
+@app.get("/api/eu-procurement/notices")
+def read_eu_procurement_notices(
+    commodity: Optional[str] = None,
+    cpv_bucket: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 100,
+):
+    """EU TED procurement notices (mining / petroleum CPV), synced from open TED Search API."""
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.eu_procurement_store import ensure_eu_procurement_tables, list_notices
+        except ImportError:
+            from services.eu_procurement_store import ensure_eu_procurement_tables, list_notices
+
+        conn = get_db_connection()
+        try:
+            ensure_eu_procurement_tables(conn)
+            notices = list_notices(
+                conn,
+                commodity=commodity,
+                cpv_bucket=cpv_bucket,
+                country=country,
+                limit=limit,
+            )
+        finally:
+            conn.close()
+        return {"status": "success", "notices": notices, "count": len(notices)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "notices": []}
+
+
+@app.get("/api/eu-procurement/cpv-buckets")
+def read_eu_procurement_cpv_buckets():
+    """CPV commodity bucket labels for EU procurement UI facets."""
+    try:
+        from backend.services.cpv_commodity import BUCKET_LABELS, CPV_COMMODITY_BUCKETS
+    except ImportError:
+        from services.cpv_commodity import BUCKET_LABELS, CPV_COMMODITY_BUCKETS
+    buckets = [
+        {"id": key, "label": BUCKET_LABELS.get(key, key), "prefix_count": len(prefixes)}
+        for key, prefixes in CPV_COMMODITY_BUCKETS.items()
+    ]
+    return {"status": "success", "buckets": buckets}
+
+
+@app.post("/api/admin/eu-procurement/sync")
+def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+    """Refresh eu_procurement_notices from TED Search API (free, no API key)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.ted_procurement_sync import sync_ted_procurement
+        except ImportError:
+            from services.ingest.ted_procurement_sync import sync_ted_procurement
+
+        conn = get_db_connection()
+        try:
+            result = sync_ted_procurement(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/entities/{entity_id:path}/trade-flows")
+def read_entity_trade_flows(
+    entity_id: str,
+    entity_kind: str = "license",
+    limit: int = 50,
+):
+    """Stored UN Comtrade rows (oil_trade_flows) for license country + HS mapping."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing trade flows schema")
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.entity_trade_flows import (
+                collect_entity_trade_flows,
+                serialize_entity_trade_flows_response,
+            )
+        except ImportError:
+            from services.entity_trade_flows import (
+                collect_entity_trade_flows,
+                serialize_entity_trade_flows_response,
+            )
+        payload = collect_entity_trade_flows(
+            conn, entity_id, entity_kind=entity_kind, limit=limit
+        )
+        return serialize_entity_trade_flows_response(payload)
+    except Exception as exc:
+        logger.exception("trade-flows failed for %s: %s", entity_id, exc)
+        return Response(str(exc), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/eu-procurement")
+def read_entity_eu_procurement(
+    entity_id: str,
+    entity_kind: str = "license",
+    cpv_bucket: Optional[str] = None,
+    limit: int = 50,
+):
+    """EU TED notices matched to the licensee company name (fuzzy buyer/title match)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing eu procurement schema")
+    conn = get_db_connection()
+    try:
+        company_name = ""
+        country = ""
+        commodity = ""
+        license_type = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country, commodity, license_type FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company_name = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+                commodity = (row.get("commodity") or "").strip()
+                license_type = (row.get("license_type") or "").strip()
+
+        try:
+            from backend.services.cpv_commodity import (
+                BUCKET_LABELS,
+                license_commodity_to_cpv_bucket,
+                normalize_cpv_bucket,
+            )
+        except ImportError:
+            from services.cpv_commodity import (
+                BUCKET_LABELS,
+                license_commodity_to_cpv_bucket,
+                normalize_cpv_bucket,
+            )
+
+        resolved_bucket = normalize_cpv_bucket(cpv_bucket) or license_commodity_to_cpv_bucket(
+            commodity, license_type=license_type
+        )
+
+        try:
+            from backend.services.eu_procurement_intel import (
+                collect_eu_procurement_for_company,
+                serialize_eu_procurement_response,
+            )
+        except ImportError:
+            from services.eu_procurement_intel import (
+                collect_eu_procurement_for_company,
+                serialize_eu_procurement_response,
+            )
+
+        payload = collect_eu_procurement_for_company(
+            conn,
+            company_name=company_name,
+            country=country or None,
+            limit=limit,
+            cpv_bucket=resolved_bucket,
+        )
+        payload["cpv_bucket"] = resolved_bucket
+        payload["cpv_bucket_label"] = BUCKET_LABELS.get(resolved_bucket or "", resolved_bucket)
+        payload["license_commodity"] = commodity or None
+        return serialize_eu_procurement_response(payload)
+    except Exception as exc:
+        logger.exception("eu-procurement failed for %s: %s", entity_id, exc)
+        return Response(str(exc), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/poland-mining/sync")
+def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
+    """Pull Poland PGI MIDAS mining areas via ArcGIS MapServer into licenses."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.poland_pgi_mining_sync import sync_poland_pgi_mining
+        except ImportError:
+            from services.ingest.poland_pgi_mining_sync import sync_poland_pgi_mining
+
+        conn = get_db_connection()
+        try:
+            result = sync_poland_pgi_mining(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/sweden-mining/sync")
+def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None)):
+    """Pull Sweden SGU mineral permits via OGC API Features into licenses."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.sweden_sgu_mining_sync import sync_sweden_sgu_mining
+        except ImportError:
+            from services.ingest.sweden_sgu_mining_sync import sync_sweden_sgu_mining
+
+        conn = get_db_connection()
+        try:
+            result = sync_sweden_sgu_mining(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/kazakhstan-mining/sync")
+def admin_kazakhstan_mining_sync(
+    x_admin_token: Optional[str] = Header(None),
+    max_rows: int = 5000,
+):
+    """Pull Kazakhstan egov mining register when KZ_EGOV_API_KEY is configured."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.kazakhstan_mining_sync import sync_kazakhstan_mining_register
+        except ImportError:
+            from services.ingest.kazakhstan_mining_sync import sync_kazakhstan_mining_register
+
+        conn = get_db_connection()
+        try:
+            result = sync_kazakhstan_mining_register(conn, max_rows=max_rows)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0) or result.get("written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except RuntimeError as exc:
+        return {"status": "skipped", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+class LicenseManualEditRequest(BaseModel):
+    manually_edited: bool = True
+    manually_edited_fields: Optional[list[str]] = None
+
+
+@app.patch("/api/licenses/{license_id}/manual-edit")
+def patch_license_manual_edit(
+    license_id: str,
+    body: LicenseManualEditRequest,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark a license row as manually edited so automated sync/import will not overwrite it."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+
+    editor = str(payload.get("sub") or payload.get("id") or "unknown")
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute("SELECT id FROM licenses WHERE id = %s", (license_id,))
+        if not c.fetchone():
+            raise HTTPException(status_code=404, detail="License not found")
+
+        fields_json = _psycopg_json(body.manually_edited_fields) if body.manually_edited_fields else None
+        c.execute(
+            """
+            UPDATE licenses
+            SET manually_edited = %s,
+                manually_edited_at = CASE WHEN %s THEN NOW() ELSE manually_edited_at END,
+                manually_edited_by = CASE WHEN %s THEN %s ELSE manually_edited_by END,
+                manually_edited_fields = COALESCE(%s, manually_edited_fields)
+            WHERE id = %s
+            """,
+            (
+                body.manually_edited,
+                body.manually_edited,
+                body.manually_edited,
+                editor,
+                fields_json,
+                license_id,
+            ),
+        )
+        conn.commit()
+        cache.delete_pattern("licenses:*")
+        return {
+            "status": "success",
+            "id": license_id,
+            "manually_edited": body.manually_edited,
+            "manually_edited_fields": body.manually_edited_fields,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/licenses/annotations")
+def list_user_license_annotations(
+    authorization: Optional[str] = Header(None),
+):
+    """All annotation payloads for the authenticated user (for client hydration)."""
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute(
+            """
+            SELECT license_id, payload, updated_at
+            FROM license_annotations
+            WHERE user_id = %s
+            ORDER BY updated_at DESC
+            """,
+            (user_id,),
+        )
+        rows = c.fetchall() or []
+        annotations: dict[str, Any] = {}
+        for row in rows:
+            lic_id = str(row.get("license_id") or "")
+            if not lic_id:
+                continue
+            annotations[lic_id] = row.get("payload") or {}
+        return {
+            "status": "success",
+            "count": len(annotations),
+            "annotations": annotations,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/licenses/{license_id}/annotations")
+def get_license_annotations(
+    license_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute(
+            """
+            SELECT payload, updated_at
+            FROM license_annotations
+            WHERE license_id = %s AND user_id = %s
+            """,
+            (license_id, user_id),
+        )
+        row = c.fetchone()
+        if not row:
+            return {"license_id": license_id, "annotation": {}, "updated_at": None}
+        updated = row.get("updated_at")
+        return {
+            "license_id": license_id,
+            "annotation": row.get("payload") or {},
+            "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
+        }
+    finally:
+        conn.close()
+
+
+class LicenseAnnotationPut(BaseModel):
+    annotation: dict[str, Any]
+
+
+@app.put("/api/licenses/{license_id}/annotations")
+def put_license_annotations(
+    license_id: str,
+    body: LicenseAnnotationPut,
+    authorization: Optional[str] = Header(None),
+):
+    payload, auth_err = _jwt_payload_from_authorization(authorization)
+    if auth_err is not None:
+        return auth_err
+
+    user_id = str(payload.get("id") or "")
+    if not user_id:
+        return Response("Invalid token payload", status_code=401)
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM licenses WHERE id = %s", (license_id,))
+        if not c.fetchone():
+            raise HTTPException(status_code=404, detail="License not found")
+
+        c.execute(
+            """
+            INSERT INTO license_annotations (license_id, user_id, payload, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (license_id, user_id) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                updated_at = NOW()
+            """,
+            (license_id, user_id, _psycopg_json(body.annotation or {})),
+        )
+        conn.commit()
+        return {"status": "success", "license_id": license_id}
+    finally:
+        conn.close()
 
 
 @app.get("/api/open-data/coverage/africa")
@@ -5670,7 +6766,10 @@ def get_africa_open_data_coverage():
 
 
 @app.get("/api/open-data/coverage/world")
-def get_world_open_data_coverage(region: Optional[str] = None):
+def get_world_open_data_coverage(
+    region: Optional[str] = None,
+    country: Optional[str] = None,
+):
     ensure_schema_initialized()
     try:
         try:
@@ -5678,13 +6777,205 @@ def get_world_open_data_coverage(region: Optional[str] = None):
         except ImportError:
             from services.ingest.open_data_sync import get_world_coverage
         try:
-            return get_world_coverage(region=region)
+            return get_world_coverage(region=region, country=country)
         except Exception as exc:
             if _is_missing_relation_error(exc, "licenses") and ensure_schema_initialized(force=True):
-                return get_world_coverage(region=region)
+                return get_world_coverage(region=region, country=country)
             raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/admin/licenses/export")
+def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
+    """CSV export with provenance columns for admin backup and re-import."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute(
+        """
+        SELECT
+            id, company, country, region, commodity, license_type, status,
+            lat, lng, phone_number, contact_person, date_issued,
+            sector, record_origin, source_id, source_name, source_url,
+            source_record_url, source_updated_at, last_synced_at,
+            manually_edited, manually_edited_at, manually_edited_by
+        FROM licenses
+        ORDER BY country, sector, company
+        """
+    )
+    rows = c.fetchall()
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    headers = [
+        "id",
+        "company",
+        "country",
+        "region",
+        "commodity",
+        "license_type",
+        "status",
+        "lat",
+        "lng",
+        "phone_number",
+        "contact_person",
+        "date_issued",
+        "sector",
+        "record_origin",
+        "source_id",
+        "source_name",
+        "source_url",
+        "source_record_url",
+        "source_updated_at",
+        "last_synced_at",
+        "manually_edited",
+        "manually_edited_at",
+        "manually_edited_by",
+    ]
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([row.get(col) for col in headers])
+    output.seek(0)
+    response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=licenses_admin_export.csv"
+    return response
+
+
+@app.post("/api/admin/licenses/import")
+async def admin_import_licenses(
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """
+    Upsert licenses from admin CSV (same columns as GET /api/admin/licenses/export).
+    Rows with manually_edited=TRUE are not updated on conflict.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    content = await file.read()
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = content.decode("latin-1")
+
+    text = _strip_bom(decoded)
+    stream = io.StringIO(text)
+    reader = csv.DictReader(stream)
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="Missing header row")
+
+    required = {"id", "company", "country"}
+    missing = required - {h.strip().lower() for h in reader.fieldnames if h}
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required columns: {', '.join(sorted(missing))}",
+        )
+
+    conn = get_db_connection()
+    imported = 0
+    skipped_manual = 0
+    errors: list[str] = []
+    try:
+        c = conn.cursor()
+        for row_num, raw in enumerate(reader, start=2):
+            row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+            row_id = row.get("id") or ""
+            if not row_id:
+                errors.append(f"row {row_num}: id is required")
+                continue
+            c.execute("SELECT manually_edited FROM licenses WHERE id = %s", (row_id,))
+            existing = c.fetchone()
+            if existing and existing[0] is True:
+                skipped_manual += 1
+                continue
+
+            lat = row.get("lat")
+            lng = row.get("lng")
+            lat_f = float(lat) if lat else None
+            lng_f = float(lng) if lng else None
+
+            c.execute(
+                """
+                INSERT INTO licenses (
+                    id, company, country, region, commodity, license_type, status,
+                    lat, lng, phone_number, contact_person, date_issued,
+                    sector, record_origin, source_id, source_name, source_url,
+                    source_record_url, source_updated_at, last_synced_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    company = EXCLUDED.company,
+                    country = EXCLUDED.country,
+                    region = EXCLUDED.region,
+                    commodity = EXCLUDED.commodity,
+                    license_type = EXCLUDED.license_type,
+                    status = EXCLUDED.status,
+                    lat = EXCLUDED.lat,
+                    lng = EXCLUDED.lng,
+                    phone_number = EXCLUDED.phone_number,
+                    contact_person = EXCLUDED.contact_person,
+                    date_issued = EXCLUDED.date_issued,
+                    sector = EXCLUDED.sector,
+                    record_origin = EXCLUDED.record_origin,
+                    source_id = EXCLUDED.source_id,
+                    source_name = EXCLUDED.source_name,
+                    source_url = EXCLUDED.source_url,
+                    source_record_url = EXCLUDED.source_record_url,
+                    source_updated_at = EXCLUDED.source_updated_at,
+                    last_synced_at = EXCLUDED.last_synced_at
+                WHERE licenses.manually_edited IS NOT TRUE
+                """,
+                (
+                    row_id,
+                    row.get("company") or "Unknown",
+                    row.get("country") or "Unknown",
+                    row.get("region") or "",
+                    row.get("commodity") or "",
+                    row.get("license_type") or "License",
+                    row.get("status") or "Active",
+                    lat_f,
+                    lng_f,
+                    row.get("phone_number") or None,
+                    row.get("contact_person") or None,
+                    row.get("date_issued") or None,
+                    row.get("sector") or "mining",
+                    row.get("record_origin") or "user_import_csv",
+                    row.get("source_id") or None,
+                    row.get("source_name") or None,
+                    row.get("source_url") or None,
+                    row.get("source_record_url") or None,
+                    row.get("source_updated_at") or None,
+                    row.get("last_synced_at") or None,
+                ),
+            )
+            imported += 1
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        conn.close()
+
+    cache.delete_pattern("licenses:*")
+    return {
+        "status": "success",
+        "imported_count": imported,
+        "skipped_manually_edited": skipped_manual,
+        "errors": errors[:50],
+    }
 
 
 @app.post("/api/admin/import/extracted-csv")

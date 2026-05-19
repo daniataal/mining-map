@@ -3,6 +3,14 @@ import type { MiningLicense, UserAnnotation } from '../types';
 /** Precomputed lowercase haystack per license id for O(1) lookup during search. */
 export type LicenseSearchIndex = Map<string, string>;
 
+const GENERIC_LICENSE_TYPE_FOR_SEARCH = new Set(['unknown', 'unknown license', 'license']);
+
+function licenseTypeForSearch(item: MiningLicense, annotation: UserAnnotation): string {
+  const raw = (annotation.licenseType || item.licenseType || '').trim();
+  const normalized = raw.toLowerCase();
+  return GENERIC_LICENSE_TYPE_FOR_SEARCH.has(normalized) ? '' : raw;
+}
+
 export function buildLicenseSearchIndex(
   items: MiningLicense[],
   userAnnotations: Record<string, UserAnnotation>,
@@ -13,7 +21,7 @@ export function buildLicenseSearchIndex(
     const commodity = annotation.commodity || item.commodity || '';
     const parts = [
       item.company,
-      item.licenseType,
+      licenseTypeForSearch(item, annotation),
       item.operatorName,
       item.nearbyPort?.name,
       item.entitySubtype,

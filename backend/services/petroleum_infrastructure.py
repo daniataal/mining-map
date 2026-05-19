@@ -56,7 +56,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _mapbox_disabled() -> bool:
+    return os.getenv("PETROLEUM_DISABLE_MAPBOX", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _mapbox_token() -> str:
+    if _mapbox_disabled():
+        return ""
     return (
         os.getenv("MAPBOX_ACCESS_TOKEN", "").strip()
         or os.getenv("OILMAP_MAPBOX_TOKEN", "").strip()
@@ -337,8 +348,23 @@ PETROLEUM_LAYER_DEFINITIONS: dict[str, CatalogLayer] = {
 
 
 def get_petroleum_layer_catalog() -> dict[str, Any]:
+    if _mapbox_disabled():
+        return {
+            "layers": [],
+            "mapbox_disabled": True,
+            "data_as_of": _now_iso(),
+            "source_labels": ["OpenStreetMap (use /api/petroleum/osm-layers)"],
+            "limitations": [
+                "PETROLEUM_DISABLE_MAPBOX=1 — Mapbox/oilmap vector layers are hidden.",
+                "Use OSM petroleum layers (pipelines, refineries) via /api/petroleum/osm-layers instead.",
+            ],
+            "env": {
+                "PETROLEUM_DISABLE_MAPBOX": "Set to 1 to hide Mapbox petroleum layers",
+            },
+        }
     return {
         "layers": list(PETROLEUM_LAYER_DEFINITIONS.values()),
+        "mapbox_disabled": False,
         "data_as_of": _now_iso(),
         "source_labels": [
             "oilmap.xyz Mapbox tilesets (public)",
@@ -350,10 +376,12 @@ def get_petroleum_layer_catalog() -> dict[str, Any]:
             "Exploration/production polygons are compiled global datasets (~2019) — not live government cadastre.",
             "Saudi Arabia, UAE, and other MENA coverage depend on these compiled tilesets plus license sync.",
             "Set MAPBOX_ACCESS_TOKEN to use your own Mapbox token instead of the oilmap public token.",
+            "Set PETROLEUM_DISABLE_MAPBOX=1 for OSM-only petroleum map mode.",
         ],
         "env": {
             "MAPBOX_ACCESS_TOKEN": "Optional — Mapbox token for tile fetches",
             "OILMAP_MAPBOX_TOKEN": "Optional alias for MAPBOX_ACCESS_TOKEN",
+            "PETROLEUM_DISABLE_MAPBOX": "Set to 1 to hide Mapbox layers (OSM-only mode)",
         },
     }
 
@@ -363,6 +391,19 @@ def get_petroleum_layer_geojson(
     bbox: Optional[tuple[float, float, float, float]] = None,
     zoom: Optional[int] = None,
 ) -> dict[str, Any]:
+    if _mapbox_disabled():
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": layer_id,
+            "feature_count": 0,
+            "data_as_of": _now_iso(),
+            "mapbox_disabled": True,
+            "limitations": [
+                "PETROLEUM_DISABLE_MAPBOX=1 — Mapbox petroleum layers are disabled.",
+                "Use GET /api/petroleum/osm-layers/{pipelines|refineries} for open OSM geometry.",
+            ],
+        }
     definition = PETROLEUM_LAYER_DEFINITIONS.get(layer_id)
     if not definition:
         raise KeyError(layer_id)

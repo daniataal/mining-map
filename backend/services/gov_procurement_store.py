@@ -163,6 +163,41 @@ def finish_sync_run(
         )
 
 
+def list_sync_runs(conn: Any, *, limit: int = 15) -> list[dict[str, Any]]:
+    ensure_gov_procurement_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, started_at, finished_at, status, records_upserted, error
+            FROM gov_procurement_sync_runs
+            ORDER BY started_at DESC
+            LIMIT %s;
+            """,
+            (max(1, min(limit, 100)),),
+        )
+        columns = [desc[0] for desc in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def count_recipients(conn: Any) -> int:
+    ensure_gov_procurement_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM gov_procurement_recipients;")
+        row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def empty_entity_warning(conn: Any, company_name: str) -> str:
+    total = count_recipients(conn)
+    if total == 0:
+        return (
+            "No U.S. federal procurement data in the database yet. "
+            "The scheduled USAspending sync worker will populate contractors automatically."
+        )
+    name = _clean_text(company_name) or "this company"
+    return f"No matching U.S. federal awards for {name} in the synced database ({total:,} contractors)."
+
+
 def upsert_award(
     cur: Any,
     award: dict[str, Any],
@@ -523,7 +558,7 @@ def collect_gov_procurement_from_db(
         "source_url": SOURCE_HOME,
         "scope": "U.S. federal awards (contracts, grants, loans)",
         "limitations": scope_notes,
-        "warnings": [] if awards else ["No matching awards in local database — run sync or use ?live=1."],
+        "warnings": [] if awards else [empty_entity_warning(conn, company_name)],
         "recipient_profile": recipient_profile,
         "summary": summary,
         "awards": awards,

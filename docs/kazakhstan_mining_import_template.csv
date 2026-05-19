@@ -1,0 +1,2 @@
+id,company,country,region,commodity,license_type,status,lat,lng,date_issued,phone_number,contact_person
+EXAMPLE-001,Example Minerals LLP,Kazakhstan,Akmola Region,Gold,Exploration,Active,51.1694,71.4491,2020-01-15,,

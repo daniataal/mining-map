@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useI18n } from '../lib/i18n';
 import { getLicenseHeroImageUrl } from '../lib/licenseHeroImage';
 import { MiningLicense, UserAnnotation } from '../types';
@@ -12,7 +13,6 @@ interface PopupFormProps {
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDelete: () => void;
   onOpenDossier?: () => void;
-  isOpen: boolean;
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
@@ -21,7 +21,7 @@ interface PopupFormProps {
   dealRoomTitle?: string;
 }
 
-export default function PopupForm({
+function PopupForm({
   item,
   annotation,
   onDelete,
@@ -52,9 +52,11 @@ export default function PopupForm({
           className={`flex flex-col ${isOilGas ? 'w-[360px]' : 'w-[320px]'} bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]`}
         >
             <div className="relative h-44 w-full overflow-hidden group">
-                <img 
-                  src={heroImage} 
+                <img
+                  src={heroImage}
                   alt="Commodity Visual"
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 dark:from-slate-950 via-transparent to-transparent opacity-80" />
@@ -289,6 +291,8 @@ function formatSourceKindLabel(sourceKind?: string | null): string | null {
       return null;
   }
 }
+
+export default memo(PopupForm);
 
 function getSourceKindBadgeClass(sourceKind?: string | null): string {
   switch ((sourceKind || '').toLowerCase()) {
