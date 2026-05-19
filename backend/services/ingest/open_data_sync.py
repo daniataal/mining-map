@@ -1343,7 +1343,8 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
             "status": "official_portal_only",
             "note": (
                 "SGU publishes mineral permits via OGC API Features and WMS (INSPIRE-compliant), not "
-                "ArcGIS FeatureServer. Adapter not wired in open_data_sync — use portal or OGC for manual verify."
+                "ArcGIS FeatureServer. Adapter not wired in open_data_sync — use portal or OGC for manual verify. "
+                "Admin CSV template: docs/eu_mining_import_template.csv"
             ),
             "references": [
                 {
@@ -1364,7 +1365,8 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
             "status": "official_portal_only",
             "note": (
                 "Polish Geological Institute (PGI) publishes mining areas via INSPIRE WMS/WFS and map "
-                "viewers; no stable public ArcGIS FeatureServer URL was verified for unattended sync."
+                "viewers; no stable public ArcGIS FeatureServer URL was verified for unattended sync. "
+                "Admin CSV template: docs/eu_mining_import_template.csv"
             ),
             "references": [
                 {

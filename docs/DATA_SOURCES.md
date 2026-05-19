@@ -118,7 +118,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 
 - **`license_sync_runs`** — one row per `open_data_sync` / source run: `source_id`, `started_at`, `finished_at`, `status`, `records_fetched`, `records_written`, `records_skipped_manual`, `error`.
 - **`comtrade_sync_runs`** — one row per scheduled HS27 Comtrade refresh: `year`, `requests_made`, `rows_upserted`, `errors`.
-- **`petroleum_osm_features`** — stub for future nightly OSM pipeline/refinery snapshots (geometry + tags); live layers still use Overpass.
+- **`petroleum_osm_features`** — nightly OSM pipeline/refinery snapshots (geometry + tags); `GET /api/petroleum/osm-layers/{id}` reads DB first, Overpass fallback.
 - **`licenses.manually_edited`** — when `TRUE`, automated upsert (ArcGIS sync, bulk CSV) must **not** overwrite the row (`UPSERT ... WHERE manually_edited IS NOT TRUE`).
 
 ### 5.2 Verification UI (roadmap)
@@ -132,7 +132,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 
 | Audience | Endpoint | Behavior |
 |----------|----------|----------|
-| User | `GET /licenses/export` | CSV without provenance columns |
+| User | `GET /licenses/export` | CSV without provenance; `?include_provenance=true` adds source columns (auth required) |
 | Admin | `GET /api/admin/licenses/export` | Full provenance + `manually_edited` |
 | Admin | `POST /api/admin/licenses/import` | Upsert by `id`; skip updates when `manually_edited=true` |
 | Admin | `POST /api/admin/import/extracted-csv` | Country-filtered fallback CSV |
@@ -160,7 +160,17 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `peru_ingemmet_derechos_mineros` (Peru capped ~2k, no offset pagination). |
 | **Comtrade HS27** | Done | Daily worker + admin endpoints; 429/503 backoff in `ingest_oil_trades._fetch_comtrade_bulk`. |
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
-| **OSM petroleum DB** | Stub | `petroleum_osm_features` table created on init; nightly worker not wired. |
+| **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
+
+### Weeks 13–16 (operations) — Phase 4 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **OSM petroleum persistence** | Done | `petroleum_osm_store.py`, `petroleum-osm-worker`, tile sleep + Overpass fallback. |
+| **Frontend Phase 2–3** | Done | `GleifLeiLink` in dossier; Admin Comtrade + Data health tabs; coverage link passes `country`. |
+| **EU mining ingest** | Doc + CSV | `docs/eu_mining_import_template.csv`; Sweden SGU OGC + Poland PGI portal refs (no broken ArcGIS). |
+| **Data health dashboard** | Done | `GET /api/admin/data-health`; Admin Panel tab. |
+| **Export / import UX** | Done | `GET /licenses/export?include_provenance=true`; import 422 includes `message` summary. |
 
 ### Weeks 5–8 (breadth) — Phase 2 implemented (2026-05-19)
 
@@ -217,6 +227,15 @@ curl -s "http://localhost:8000/api/admin/comtrade/sync-runs" -H "X-Admin-Token: 
 
 # GLEIF LEI lookup
 curl -s "http://localhost:8000/api/companies/Newmont/lei" | jq .
+
+# Data health (admin token)
+curl -s "http://localhost:8000/api/admin/data-health" -H "X-Admin-Token: $ADMIN_TOKEN" | jq .
+
+# OSM petroleum DB refresh (admin; or wait for petroleum-osm-worker)
+curl -X POST "http://localhost:8000/api/admin/petroleum-osm/sync" -H "X-Admin-Token: $ADMIN_TOKEN"
+
+# User export with provenance (Bearer token)
+curl -s "http://localhost:8000/licenses/export?include_provenance=true" -H "Authorization: Bearer $JWT" -o licenses_provenance.csv
 ```
 
 ---
@@ -231,7 +250,10 @@ curl -s "http://localhost:8000/api/companies/Newmont/lei" | jq .
 | `backend/services/ingest/gov_procurement_sync.py` | USAspending + `gov_procurement_sync_runs` |
 | `backend/services/ingest/comtrade_scheduled_sync.py` | Comtrade HS27 + `comtrade_sync_runs` |
 | `backend/services/gleif_lookup.py` | GLEIF LEI public API |
-| `backend/services/petroleum_osm_store.py` | `petroleum_osm_features` table stub |
+| `backend/services/petroleum_osm_store.py` | OSM petroleum DB read/write + tile sync |
+| `backend/petroleum_osm_sync_worker.py` | Nightly Overpass → `petroleum_osm_features` |
+| `backend/services/admin_data_health.py` | Admin data-health aggregation |
+| `docs/eu_mining_import_template.csv` | Sweden/Poland manual import template |
 | `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |

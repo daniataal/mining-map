@@ -3717,6 +3717,20 @@ def parse_license_import_csv(decoded: str) -> dict:
     return {"ok": True, "rows": rows_out, "errors": []}
 
 
+def _license_import_validation_detail(errors: list[dict]) -> dict:
+    summary = "; ".join(
+        f"row {e.get('row', '?')}: {e.get('message', '')}" for e in errors[:5]
+    )
+    if len(errors) > 5:
+        summary += f" (+{len(errors) - 5} more)"
+    return {
+        "status": "validation_error",
+        "message": summary or "CSV validation failed",
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
 def _insert_license_import_rows(rows: list[tuple]) -> int:
     conn = get_db_connection()
     c = conn.cursor()
@@ -3749,17 +3763,22 @@ def import_licenses_text(body: LicenseImportTextBody):
     if not result["ok"]:
         raise HTTPException(
             status_code=422,
-            detail={"status": "validation_error", "errors": result["errors"]},
+            detail=_license_import_validation_detail(result["errors"]),
         )
     imported = _insert_license_import_rows(result["rows"])
     return {"status": "success", "imported_count": imported}
 
 
 @app.get("/licenses/export")
-def export_licenses(authorization: Optional[str] = Header(None)):
+def export_licenses(
+    authorization: Optional[str] = Header(None),
+    include_provenance: bool = False,
+):
     _, auth_err = _jwt_payload_from_authorization(authorization)
     if auth_err is not None:
         return auth_err
+
+    with_provenance = bool(include_provenance)
 
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
@@ -3799,8 +3818,7 @@ def export_licenses(authorization: Optional[str] = Header(None)):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    # Write Header
+
     headers = [
         "id",
         "company",
@@ -3818,21 +3836,60 @@ def export_licenses(authorization: Optional[str] = Header(None)):
         "public_business_phone_source_type",
         "date_issued",
     ]
+    if with_provenance:
+        headers.extend(
+            [
+                "sector",
+                "record_origin",
+                "source_id",
+                "source_name",
+                "source_url",
+                "source_record_url",
+                "source_updated_at",
+                "last_synced_at",
+                "manually_edited",
+            ]
+        )
     writer.writerow(headers)
-    
-    # Write Data
+
     for row in rows:
-        writer.writerow([
-            row["id"], row["company"], row["country"], row["region"], row["commodity"], 
-            row["license_type"], row["status"], row["lat"], row["lng"], 
-            row["phone_number"], row["contact_person"], row["public_business_phone"],
-            row["public_business_phone_source"], row["public_business_phone_source_type"],
-            row["date_issued"]
-        ])
-    
+        base = [
+            row["id"],
+            row["company"],
+            row["country"],
+            row["region"],
+            row["commodity"],
+            row["license_type"],
+            row["status"],
+            row["lat"],
+            row["lng"],
+            row["phone_number"],
+            row["contact_person"],
+            row["public_business_phone"],
+            row["public_business_phone_source"],
+            row["public_business_phone_source_type"],
+            row["date_issued"],
+        ]
+        if with_provenance:
+            base.extend(
+                [
+                    row.get("sector"),
+                    row.get("record_origin"),
+                    row.get("source_id"),
+                    row.get("source_name"),
+                    row.get("source_url"),
+                    row.get("source_record_url"),
+                    row.get("source_updated_at"),
+                    row.get("last_synced_at"),
+                    row.get("manually_edited"),
+                ]
+            )
+        writer.writerow(base)
+
     output.seek(0)
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=licenses_export.csv"
+    filename = "licenses_export_provenance.csv" if with_provenance else "licenses_export.csv"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
     return response
 
 @app.get("/licenses/template")
@@ -3878,7 +3935,7 @@ async def import_licenses(file: UploadFile = File(...)):
     if not result["ok"]:
         raise HTTPException(
             status_code=422,
-            detail={"status": "validation_error", "errors": result["errors"]},
+            detail=_license_import_validation_detail(result["errors"]),
         )
     imported = _insert_license_import_rows(result["rows"])
     return {"status": "success", "imported_count": imported}
@@ -5472,17 +5529,21 @@ def get_petroleum_osm_layer(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """GeoJSON for OSM petroleum pipelines or refineries in the requested viewport."""
+    """GeoJSON for OSM petroleum pipelines or refineries (DB snapshot first, Overpass fallback)."""
     try:
         try:
-            from backend.services.petroleum_osm_overpass import get_osm_layer_geojson
+            from backend.services.petroleum_osm_store import get_osm_layer_geojson_with_fallback
         except ImportError:
-            from services.petroleum_osm_overpass import get_osm_layer_geojson
+            from services.petroleum_osm_store import get_osm_layer_geojson_with_fallback
 
         bbox = None
         if south is not None and west is not None and north is not None and east is not None:
             bbox = (south, west, north, east)
-        return get_osm_layer_geojson(layer_id, bbox=bbox)
+        conn = get_db_connection()
+        try:
+            return get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox)
+        finally:
+            conn.close()
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown OSM petroleum layer: {layer_id}")
     except Exception as exc:
@@ -5943,6 +6004,51 @@ def admin_comtrade_sync(
         return {"status": result.get("status", "ok"), **result}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/admin/data-health")
+def admin_data_health(x_admin_token: Optional[str] = Header(None)):
+    """Operational snapshot: sync runs, drift alerts, license counts, OSM cache stats."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.admin_data_health import get_data_health
+        except ImportError:
+            from services.admin_data_health import get_data_health
+        return get_data_health(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/petroleum-osm/sync")
+def admin_petroleum_osm_sync(x_admin_token: Optional[str] = Header(None)):
+    """Refresh petroleum_osm_features from Overpass world tiles."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+        except ImportError:
+            from services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+        ensure_petroleum_osm_tables(conn)
+        conn.commit()
+        summary = sync_all_layers(conn)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
 
 
 @app.get("/api/admin/comtrade/sync-runs")

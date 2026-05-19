@@ -1,0 +1,3 @@
+id,company,country,region,commodity,license_type,status,lat,lng,date_issued,phone_number,contact_person
+SE-EXAMPLE-001,Example Minerals AB,Sweden,Norrbotten,Gold,Exploration permit,Active,67.8558,20.2253,2021-06-01,,
+PL-EXAMPLE-001,Example Mining Sp. z o.o.,Poland,Lower Silesia,Copper,Concession,Active,50.8118,16.2852,2019-03-15,,
