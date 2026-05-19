@@ -207,6 +207,32 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(kz["mining"]["status"], "official_portal_only")
         self.assertEqual(kz["oil_and_gas"]["status"], "official_portal_only")
         self.assertTrue(any("egov.kz" in ref["url"] for ref in kz["mining"]["references"]))
+        self.assertIn("timed out", kz["oil_and_gas"]["note"].lower())
+
+    def test_central_asia_hydrocarbon_overrides(self):
+        tm = WORLD_COVERAGE_OVERRIDES.get("Turkmenistan", {}).get("oil_and_gas", {})
+        uz = WORLD_COVERAGE_OVERRIDES.get("Uzbekistan", {}).get("oil_and_gas", {})
+        self.assertEqual(tm["status"], "official_portal_only")
+        self.assertEqual(uz["status"], "official_portal_only")
+        self.assertTrue(any("oilgas.gov.tm" in r["url"] for r in tm["references"]))
+
+    def test_eu_mining_portal_overrides(self):
+        se = WORLD_COVERAGE_OVERRIDES.get("Sweden", {}).get("mining", {})
+        pl = WORLD_COVERAGE_OVERRIDES.get("Poland", {}).get("mining", {})
+        self.assertEqual(se["status"], "official_portal_only")
+        self.assertEqual(pl["status"], "official_portal_only")
+        self.assertTrue(any("api.sgu.se" in r["url"] for r in se["references"]))
+        self.assertTrue(any("pgi.gov.pl" in r["url"] for r in pl["references"]))
+
+    def test_latam_sources_in_open_data(self):
+        ids = {s.source_id for s in OPEN_DATA_SOURCES}
+        self.assertIn("colombia_anm_titulo_vigente", ids)
+        self.assertIn("peru_ingemmet_derechos_mineros", ids)
+
+    def test_peru_source_disables_offset_pagination(self):
+        peru = next(s for s in OPEN_DATA_SOURCES if s.source_id == "peru_ingemmet_derechos_mineros")
+        self.assertFalse(peru.supports_result_offset)
+        self.assertEqual(peru.max_records, 2000)
 
 
 if __name__ == "__main__":

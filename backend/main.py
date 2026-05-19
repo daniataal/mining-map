@@ -1634,6 +1634,32 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             cur.execute("RELEASE SAVEPOINT gov_procurement_schema")
             print(f"Gov procurement table init skipped: {gov_proc_exc}")
 
+        try:
+            cur.execute("SAVEPOINT comtrade_sync_schema")
+            try:
+                from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables
+            except ImportError:
+                from services.comtrade_sync_store import ensure_comtrade_sync_tables
+            ensure_comtrade_sync_tables(conn)
+            cur.execute("RELEASE SAVEPOINT comtrade_sync_schema")
+        except Exception as comtrade_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT comtrade_sync_schema")
+            cur.execute("RELEASE SAVEPOINT comtrade_sync_schema")
+            print(f"Comtrade sync table init skipped: {comtrade_exc}")
+
+        try:
+            cur.execute("SAVEPOINT petroleum_osm_schema")
+            try:
+                from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables
+            except ImportError:
+                from services.petroleum_osm_store import ensure_petroleum_osm_tables
+            ensure_petroleum_osm_tables(conn)
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_schema")
+        except Exception as osm_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT petroleum_osm_schema")
+            cur.execute("RELEASE SAVEPOINT petroleum_osm_schema")
+            print(f"Petroleum OSM table init skipped: {osm_exc}")
+
         # Create Default Admin if not exists
         cur.execute("SELECT * FROM users WHERE username = 'admin'")
         if not cur.fetchone():
@@ -5486,6 +5512,22 @@ def get_company_sec_filings(company_name: str, limit: int = 5):
         return {"status": "error", "message": str(exc), "matches": []}
 
 
+@app.get("/api/companies/{company_name}/lei")
+def get_company_lei(company_name: str, limit: int = 5):
+    """Match a company name to GLEIF LEI records (global, free public API)."""
+    try:
+        try:
+            from backend.services.gleif_lookup import lookup_lei
+        except ImportError:
+            from services.gleif_lookup import lookup_lei
+        from urllib.parse import unquote
+
+        decoded = unquote(company_name or "").strip()
+        return lookup_lei(decoded, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "matches": []}
+
+
 @app.get("/api/logistics/ports")
 def get_port_logistics_entities(force_refresh: bool = False):
     """Global open/free port and logistics-node feed for the ports view."""
@@ -5869,6 +5911,67 @@ def get_open_data_sync_alerts(
         return {"status": "success", "alerts": alerts, "count": len(alerts)}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+class ComtradeSyncRequest(BaseModel):
+    year: Optional[int] = None
+
+
+@app.post("/api/admin/comtrade/sync")
+def admin_comtrade_sync(
+    request: ComtradeSyncRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Refresh oil_trade_flows from UN Comtrade HS27 (requires COMTRADE_API_KEY)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.comtrade_scheduled_sync import sync_comtrade_hs27
+        except ImportError:
+            from services.ingest.comtrade_scheduled_sync import sync_comtrade_hs27
+
+        conn = get_db_connection()
+        try:
+            result = sync_comtrade_hs27(conn, year=request.year)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/admin/comtrade/sync-runs")
+def admin_comtrade_sync_runs(
+    x_admin_token: Optional[str] = Header(None),
+    limit: int = 50,
+):
+    """Recent scheduled Comtrade HS27 sync runs."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
+        except ImportError:
+            from services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
+
+        conn = get_db_connection()
+        try:
+            ensure_comtrade_sync_tables(conn)
+            conn.commit()
+            runs = list_sync_runs(conn, limit=limit)
+        finally:
+            conn.close()
+        return {"status": "success", "runs": runs, "count": len(runs)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "runs": []}
 
 
 @app.post("/api/admin/kazakhstan-mining/sync")

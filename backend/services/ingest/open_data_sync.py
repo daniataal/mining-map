@@ -237,6 +237,7 @@ class ArcGISOpenDataSource:
     max_records: Optional[int] = None
     page_size: int = 250
     request_pause_seconds: float = 0.0
+    supports_result_offset: bool = True
     sync_contacts: bool = True
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -492,6 +493,72 @@ def _finland_active_mining_areas_source() -> ArcGISOpenDataSource:
     )
 
 
+def _colombia_anm_titulo_vigente_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="colombia_anm_titulo_vigente",
+        source_name="Colombia ANM — Active mining titles (Titulo Vigente)",
+        layer_url="https://geo.anm.gov.co/webgis/rest/services/ANM/ServiciosANM/MapServer/4",
+        sector="mining",
+        country="Colombia",
+        external_id_fields=("CODIGO_EXPEDIENTE", "OBJECTID"),
+        company_fields=("NOMBRE_DE_TITULAR", "IDENTIFICACION_TITULARES"),
+        commodity_fields=("MINERALES",),
+        license_type_fields=("MODALIDAD", "ETAPA"),
+        status_fields=("ESTADO",),
+        issued_fields=("FECHA_DE_INSCRIPCION",),
+        updated_fields=("FECHA_TERMINACION",),
+        region_builder=_fixed_region("Colombia"),
+        default_commodity="Minerals",
+        default_license_type="Mining title",
+        default_status="Active",
+        order_by="OBJECTID DESC",
+        max_records=2000,
+        page_size=250,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "americas",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Colombia",
+            "summary_note": "ANM ServiciosANM MapServer layer 4 (Titulo Vigente); verified query 2026-05.",
+        },
+    )
+
+
+def _peru_ingemmet_derechos_mineros_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="peru_ingemmet_derechos_mineros",
+        source_name="Peru INGEMMET — Mining rights (Derechos Mineros)",
+        layer_url="https://geocatmin.ingemmet.gob.pe/arcgis/rest/services/WGS84/SERV_CATASTRO_MINERO_DERMIN/MapServer/0",
+        sector="mining",
+        country="Peru",
+        external_id_fields=("CG_CODIGO", "TI_CODTIT", "OBJECTID"),
+        company_fields=("NJ_NOMSOC", "PE_NOMDER"),
+        commodity_fields=("PE_METALI",),
+        license_type_fields=("TE_TIPOEX", "LEYENDA"),
+        status_fields=("EE_ESTAEX", "SE_SITUEX"),
+        issued_fields=("CG_FECREG",),
+        region_builder=_fixed_region("Peru"),
+        default_commodity="Minerals",
+        default_license_type="Mining right",
+        default_status="Active",
+        where="OBJECTID>0",
+        max_records=2000,
+        supports_result_offset=False,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "americas",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Peru",
+            "summary_note": (
+                "INGEMMET GeoCATMIN Derechos Mineros layer; service rejects resultOffset pagination "
+                "— sync capped at first transfer batch (~2000 features)."
+            ),
+        },
+    )
+
+
 def _queensland_mineral_tenement_source() -> ArcGISOpenDataSource:
     return ArcGISOpenDataSource(
         source_id="australia_queensland_mineral_tenement",
@@ -717,6 +784,8 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
     _canada_northern_oil_rights_source(),
     _norway_production_licences_current_source(),
     _finland_active_mining_areas_source(),
+    _colombia_anm_titulo_vigente_source(),
+    _peru_ingemmet_derechos_mineros_source(),
     _queensland_mineral_tenement_source(),
     _usgs_mrds_global_source(),
     _megagiant_oil_gas_fields_source(),
@@ -1203,8 +1272,9 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
         "oil_and_gas": {
             "status": "official_portal_only",
             "note": (
-                "Hydrocarbon contract areas are published via national GIS portals, but Kazakhstan "
-                "is not in OPEN_DATA_SOURCES and is outside the OPEC/Gulf reference seed. "
+                "Hydrocarbon contract areas are published via national GIS portals (gis-terra.kz, "
+                "arcgis.gis-center.kz), but no stable unattended ArcGIS query URL was verified — "
+                "arcgis.gis-center.kz timed out from the sync verifier (2026-05). "
                 "Megagiant global fallback may show major fields only — not licence polygons."
             ),
             "references": [
@@ -1214,9 +1284,98 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
                     "access": "official_portal_only",
                 },
                 {
-                    "name": "Kazakhstan GIS Center ArcGIS REST (research)",
+                    "name": "Kazakhstan GIS Center ArcGIS REST (unverified — connection timeout)",
                     "url": "https://arcgis.gis-center.kz/server/rest/services",
                     "access": "research",
+                },
+            ],
+        },
+    },
+    "Turkmenistan": {
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Turkmenistan publishes hydrocarbon sector information via state portals; no open "
+                "ArcGIS FeatureServer for licence polygons was verified for unattended sync."
+            ),
+            "references": [
+                {
+                    "name": "Turkmenistan Oil & Gas (official catalogs)",
+                    "url": "https://www.oilgas.gov.tm/en/catalogs",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "TURKMENGEOLOGY State Corporation",
+                    "url": "https://www.tmgeology.gov.tm/en",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Uzbekistan": {
+        "oil_and_gas": {
+            "status": "official_portal_only",
+            "note": (
+                "Subsoil-use licences and open-data registers are published on government portals; "
+                "no verified public ArcGIS layer for hydrocarbon contract polygons was found."
+            ),
+            "references": [
+                {
+                    "name": "Ministry of Mining Industry and Geology — open data",
+                    "url": "https://gov.uz/en/mingeo/pages/ochiq-ma-lumotlar",
+                    "access": "open_data_download",
+                },
+                {
+                    "name": "Center for Subsoil Use — Uzbekistan Geoportal",
+                    "url": "https://www.geoportal-uz.org/center-for-subsoil-use/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "State Committee for Geology — interactive services",
+                    "url": "http://uzgeocom.uz/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Sweden": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": (
+                "SGU publishes mineral permits via OGC API Features and WMS (INSPIRE-compliant), not "
+                "ArcGIS FeatureServer. Adapter not wired in open_data_sync — use portal or OGC for manual verify."
+            ),
+            "references": [
+                {
+                    "name": "SGU Mineral permits — OGC API Features",
+                    "url": "https://api.sgu.se/oppnadata/mineralrattigheter/ogc/features/v1",
+                    "access": "ogc_features_api",
+                },
+                {
+                    "name": "SGU Mineral permits map viewer",
+                    "url": "https://www.sgu.se/en/products/maps/map-viewer/bedrock-map-viewers/mineral-permits/",
+                    "access": "official_portal_only",
+                },
+            ],
+        },
+    },
+    "Poland": {
+        "mining": {
+            "status": "official_portal_only",
+            "note": (
+                "Polish Geological Institute (PGI) publishes mining areas via INSPIRE WMS/WFS and map "
+                "viewers; no stable public ArcGIS FeatureServer URL was verified for unattended sync."
+            ),
+            "references": [
+                {
+                    "name": "PGI map portal (concessions / mining areas)",
+                    "url": "https://mapy.pgi.gov.pl/",
+                    "access": "official_portal_only",
+                },
+                {
+                    "name": "Polish Geological Institute — open data",
+                    "url": "https://www.pgi.gov.pl/en/open-data",
+                    "access": "open_data_download",
                 },
             ],
         },
@@ -1264,6 +1423,25 @@ def _fetch_json(url: str, retries: int = 3, pause_seconds: float = 1.0) -> dict[
 
 
 def fetch_arcgis_features(source: ArcGISOpenDataSource) -> list[dict[str, Any]]:
+    if not source.supports_result_offset:
+        params: dict[str, Any] = {
+            "where": source.where,
+            "outFields": "*",
+            "returnGeometry": "true",
+            "f": "pjson",
+            "outSR": "4326",
+        }
+        if source.order_by:
+            params["orderByFields"] = source.order_by
+        query_url = f"{source.layer_url}/query?{urlencode(params)}"
+        payload = _fetch_json(query_url)
+        if payload.get("error"):
+            raise RuntimeError(f"{source.source_id} ArcGIS query failed: {payload['error']}")
+        features = list(payload.get("features") or [])
+        if source.max_records is not None:
+            features = features[: source.max_records]
+        return features
+
     all_features: list[dict[str, Any]] = []
     offset = 0
     while True:
