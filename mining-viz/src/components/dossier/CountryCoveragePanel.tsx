@@ -74,10 +74,11 @@ function SectorBlock({
 
 /** Data coverage for a single country (from world coverage API, client-filtered). */
 export function CountryCoveragePanel({ country }: { country: string }) {
-  const { data, isLoading, isError } = useWorldCoverage(Boolean(country), 'all');
+  const { data, isLoading, isError } = useWorldCoverage(Boolean(country), 'all', country);
 
   const countryRow = useMemo(() => {
     if (!data?.countries?.length || !country) return null;
+    if (data.countries.length === 1) return data.countries[0];
     const needle = country.trim().toLowerCase();
     return data.countries.find((c) => c.country?.trim().toLowerCase() === needle) ?? null;
   }, [data, country]);

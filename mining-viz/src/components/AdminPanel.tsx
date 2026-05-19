@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
+import EuProcurementFacets from './EuProcurementFacets';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -44,6 +45,16 @@ type LicenseSyncRun = {
   started_at?: string;
   finished_at?: string | null;
   drift_warning?: { drop_pct?: number; message?: string } | null;
+};
+
+type SyncAlertEvent = {
+  id: number;
+  source_id?: string | null;
+  alert_type?: string;
+  payload?: { drop_pct?: number; message?: string; type?: string };
+  drift_warning?: { drop_pct?: number; message?: string };
+  created_at?: string;
+  read_at?: string | null;
 };
 
 type DataHealthPayload = {
@@ -78,7 +89,7 @@ export default function AdminPanel({
     const [meetingPoints, setMeetingPoints] = useState<MeetingPoint[]>([]);
     const [minerListings, setMinerListings] = useState<MinerListing[]>([]);
     const [syncRuns, setSyncRuns] = useState<LicenseSyncRun[]>([]);
-    const [syncAlerts, setSyncAlerts] = useState<LicenseSyncRun[]>([]);
+    const [syncAlerts, setSyncAlerts] = useState<SyncAlertEvent[]>([]);
     const [syncAlertUnread, setSyncAlertUnread] = useState(0);
     const [loadingSyncRuns, setLoadingSyncRuns] = useState(false);
     const [adminTokenInput, setAdminTokenInput] = useState(
@@ -305,13 +316,17 @@ export default function AdminPanel({
             const runsData = await runsRes.json();
             const alertsData = await alertsRes.json();
             setSyncRuns(Array.isArray(runsData?.runs) ? runsData.runs : []);
-            setSyncAlerts(Array.isArray(alertsData?.alerts) ? alertsData.alerts : []);
+            const rawAlerts = Array.isArray(alertsData?.alerts) ? alertsData.alerts : [];
+            setSyncAlerts(
+              rawAlerts.map((a: SyncAlertEvent) => ({
+                ...a,
+                drift_warning: a.drift_warning ?? a.payload,
+              }))
+            );
             setSyncAlertUnread(
               typeof alertsData?.unread_count === 'number'
                 ? alertsData.unread_count
-                : Array.isArray(alertsData?.alerts)
-                  ? alertsData.alerts.length
-                  : 0
+                : rawAlerts.filter((a: SyncAlertEvent) => !a.read_at).length
             );
         } catch (err) {
             console.error('Failed to fetch sync runs', err);
@@ -319,6 +334,32 @@ export default function AdminPanel({
             setSyncAlerts([]);
         } finally {
             setLoadingSyncRuns(false);
+        }
+    };
+
+    const markSyncAlertRead = async (alertId: number) => {
+        const headers = authHeaders();
+        try {
+            await fetch(`${API_BASE}/api/open-data/sync-alerts/${alertId}/read`, {
+                method: 'PATCH',
+                headers,
+            });
+            await fetchSyncRuns();
+        } catch (err) {
+            console.error('Failed to mark alert read', err);
+        }
+    };
+
+    const markAllSyncAlertsRead = async () => {
+        const headers = authHeaders();
+        try {
+            await fetch(`${API_BASE}/api/open-data/sync-alerts/mark-all-read`, {
+                method: 'POST',
+                headers,
+            });
+            await fetchSyncRuns();
+        } catch (err) {
+            console.error('Failed to mark all alerts read', err);
         }
     };
 
@@ -529,22 +570,55 @@ export default function AdminPanel({
                         </Card>
                         {syncAlerts.length > 0 && (
                             <Card className="bg-amber-500/5 border-amber-500/20 shadow-xl">
-                                <CardHeader className="border-b border-amber-500/10 pb-4">
+                                <CardHeader className="flex flex-row items-center justify-between border-b border-amber-500/10 pb-4 gap-2 flex-wrap">
                                     <CardTitle className="text-xs font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">
                                         {t('התראות סטייה בסנכרון', 'Sync drift alerts')}
                                     </CardTitle>
+                                    {syncAlertUnread > 0 && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={markAllSyncAlertsRead}
+                                            className="text-[9px] font-black uppercase h-8"
+                                        >
+                                            {t('סמן הכל כנקרא', 'Mark all read')}
+                                        </Button>
+                                    )}
                                 </CardHeader>
                                 <CardContent className="pt-4 space-y-2">
-                                    {syncAlerts.slice(0, 8).map((alert) => (
-                                        <div key={alert.id} className="text-[10px] text-slate-600 dark:text-slate-300 font-mono">
-                                            <span className="font-bold text-amber-600">{alert.source_id}</span>
-                                            {' — '}
-                                            {alert.drift_warning?.message || t('ירידה בכמות רשומות', 'Record count drop')}
-                                        </div>
+                                    {syncAlerts.slice(0, 12).map((alert) => (
+                                        <motion.div
+                                            key={alert.id}
+                                            className={`flex items-start justify-between gap-2 text-[10px] font-mono rounded-lg p-2 ${
+                                              alert.read_at ? 'opacity-50' : ''
+                                            }`}
+                                        >
+                                            <div className="text-slate-600 dark:text-slate-300 min-w-0">
+                                                <span className="font-bold text-amber-600">{alert.source_id}</span>
+                                                {' — '}
+                                                {alert.drift_warning?.message || t('ירידה בכמות רשומות', 'Record count drop')}
+                                            </div>
+                                            {!alert.read_at && (
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-[8px] uppercase shrink-0"
+                                                    onClick={() => markSyncAlertRead(alert.id)}
+                                                >
+                                                    {t('סגור', 'Dismiss')}
+                                                </Button>
+                                            )}
+                                        </motion.div>
                                     ))}
                                 </CardContent>
                             </Card>
                         )}
+                        <EuProcurementFacets
+                            adminToken={resolvedAdminToken}
+                            authHeaders={authHeaders}
+                        />
                     </TabsContent>
 
                     <TabsContent value="comtrade" className="h-full m-0 p-6 overflow-y-auto space-y-6">

@@ -6011,24 +6011,23 @@ def get_open_data_sync_alerts(
 
     ensure_schema_initialized()
     try:
-        try:
-            from backend.services.license_sync_store import list_sync_drift_alerts
-        except ImportError:
-            from services.license_sync_store import list_sync_drift_alerts
-
         conn = get_db_connection()
         try:
-            alerts = list_sync_drift_alerts(conn, limit=limit)
-            unread_count = 0
             try:
-                try:
-                    from backend.services.sync_alert_store import count_unread_alerts, ensure_sync_alert_tables
-                except ImportError:
-                    from services.sync_alert_store import count_unread_alerts, ensure_sync_alert_tables
-                ensure_sync_alert_tables(conn)
-                unread_count = count_unread_alerts(conn)
-            except Exception:
-                unread_count = len(alerts)
+                from backend.services.sync_alert_store import (
+                    count_unread_alerts,
+                    ensure_sync_alert_tables,
+                    list_recent_alerts,
+                )
+            except ImportError:
+                from services.sync_alert_store import (
+                    count_unread_alerts,
+                    ensure_sync_alert_tables,
+                    list_recent_alerts,
+                )
+            ensure_sync_alert_tables(conn)
+            alerts = list_recent_alerts(conn, limit=limit)
+            unread_count = count_unread_alerts(conn)
         finally:
             conn.close()
         return {
@@ -6039,6 +6038,65 @@ def get_open_data_sync_alerts(
         }
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+@app.patch("/api/open-data/sync-alerts/{alert_id}/read")
+def mark_sync_alert_read(
+    alert_id: int,
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark one sync drift alert as read (admin)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.sync_alert_store import ensure_sync_alert_tables, mark_alert_read
+        except ImportError:
+            from services.sync_alert_store import ensure_sync_alert_tables, mark_alert_read
+        ensure_sync_alert_tables(conn)
+        updated = mark_alert_read(conn, alert_id)
+        conn.commit()
+    finally:
+        conn.close()
+    if not updated:
+        return {"status": "not_found", "message": "Alert not found or already read"}
+    return {"status": "success", "id": alert_id}
+
+
+@app.post("/api/open-data/sync-alerts/mark-all-read")
+def mark_all_sync_alerts_read(
+    authorization: Optional[str] = Header(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Mark all sync drift alerts as read (admin)."""
+    payload, auth_err = _require_authenticated_or_admin(authorization, x_admin_token)
+    if auth_err is not None:
+        return auth_err
+    role = str((payload or {}).get("role") or "").lower()
+    if not x_admin_token and role != "admin":
+        return Response("Admin role required", status_code=403)
+
+    ensure_schema_initialized()
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.sync_alert_store import ensure_sync_alert_tables, mark_all_alerts_read
+        except ImportError:
+            from services.sync_alert_store import ensure_sync_alert_tables, mark_all_alerts_read
+        ensure_sync_alert_tables(conn)
+        marked = mark_all_alerts_read(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success", "marked_count": marked}
 
 
 class ComtradeSyncRequest(BaseModel):
@@ -6156,6 +6214,7 @@ def admin_comtrade_sync_runs(
 @app.get("/api/eu-procurement/notices")
 def read_eu_procurement_notices(
     commodity: Optional[str] = None,
+    cpv_bucket: Optional[str] = None,
     country: Optional[str] = None,
     limit: int = 100,
 ):
@@ -6170,12 +6229,32 @@ def read_eu_procurement_notices(
         conn = get_db_connection()
         try:
             ensure_eu_procurement_tables(conn)
-            notices = list_notices(conn, commodity=commodity, country=country, limit=limit)
+            notices = list_notices(
+                conn,
+                commodity=commodity,
+                cpv_bucket=cpv_bucket,
+                country=country,
+                limit=limit,
+            )
         finally:
             conn.close()
         return {"status": "success", "notices": notices, "count": len(notices)}
     except Exception as exc:
         return {"status": "error", "message": str(exc), "notices": []}
+
+
+@app.get("/api/eu-procurement/cpv-buckets")
+def read_eu_procurement_cpv_buckets():
+    """CPV commodity bucket labels for EU procurement UI facets."""
+    try:
+        from backend.services.cpv_commodity import BUCKET_LABELS, CPV_COMMODITY_BUCKETS
+    except ImportError:
+        from services.cpv_commodity import BUCKET_LABELS, CPV_COMMODITY_BUCKETS
+    buckets = [
+        {"id": key, "label": BUCKET_LABELS.get(key, key), "prefix_count": len(prefixes)}
+        for key, prefixes in CPV_COMMODITY_BUCKETS.items()
+    ]
+    return {"status": "success", "buckets": buckets}
 
 
 @app.post("/api/admin/eu-procurement/sync")
@@ -6199,6 +6278,84 @@ def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
         finally:
             conn.close()
         return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/entities/{entity_id:path}/eu-procurement")
+def read_entity_eu_procurement(
+    entity_id: str,
+    entity_kind: str = "license",
+    cpv_bucket: Optional[str] = None,
+    limit: int = 50,
+):
+    """EU TED notices matched to the licensee company name (fuzzy buyer/title match)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing eu procurement schema")
+    conn = get_db_connection()
+    try:
+        company_name = ""
+        country = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company_name = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+
+        try:
+            from backend.services.eu_procurement_intel import (
+                collect_eu_procurement_for_company,
+                serialize_eu_procurement_response,
+            )
+        except ImportError:
+            from services.eu_procurement_intel import (
+                collect_eu_procurement_for_company,
+                serialize_eu_procurement_response,
+            )
+
+        payload = collect_eu_procurement_for_company(
+            conn,
+            company_name=company_name,
+            country=country or None,
+            limit=limit,
+            cpv_bucket=cpv_bucket,
+        )
+        return serialize_eu_procurement_response(payload)
+    except Exception as exc:
+        logger.exception("eu-procurement failed for %s: %s", entity_id, exc)
+        return Response(str(exc), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/poland-mining/sync")
+def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
+    """Pull Poland PGI MIDAS mining areas via ArcGIS MapServer into licenses."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.poland_pgi_mining_sync import sync_poland_pgi_mining
+        except ImportError:
+            from services.ingest.poland_pgi_mining_sync import sync_poland_pgi_mining
+
+        conn = get_db_connection()
+        try:
+            result = sync_poland_pgi_mining(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("records_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -6456,7 +6613,10 @@ def get_africa_open_data_coverage():
 
 
 @app.get("/api/open-data/coverage/world")
-def get_world_open_data_coverage(region: Optional[str] = None):
+def get_world_open_data_coverage(
+    region: Optional[str] = None,
+    country: Optional[str] = None,
+):
     ensure_schema_initialized()
     try:
         try:
@@ -6464,10 +6624,10 @@ def get_world_open_data_coverage(region: Optional[str] = None):
         except ImportError:
             from services.ingest.open_data_sync import get_world_coverage
         try:
-            return get_world_coverage(region=region)
+            return get_world_coverage(region=region, country=country)
         except Exception as exc:
             if _is_missing_relation_error(exc, "licenses") and ensure_schema_initialized(force=True):
-                return get_world_coverage(region=region)
+                return get_world_coverage(region=region, country=country)
             raise
     except Exception as exc:
         return {"status": "error", "message": str(exc)}

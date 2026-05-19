@@ -1361,12 +1361,12 @@ WORLD_COVERAGE_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
     },
     "Poland": {
         "mining": {
-            "status": "official_portal_only",
+            "status": "official_syncable",
             "note": (
-                "Polish Geological Institute (PGI) publishes mining areas via INSPIRE WMS/WFS and map "
-                "viewers; no stable public ArcGIS FeatureServer URL was verified for unattended sync. "
-                "Admin CSV template: docs/eu_mining_import_template.csv"
+                "PGI MIDAS mining areas via ArcGIS MapServer (cbdgmapa.pgi.gov.pl). "
+                "Sync: POST /api/admin/poland-mining/sync. CSV fallback: docs/eu_mining_import_template.csv"
             ),
+            "source_ids": ["poland_pgi_midas_layer1", "poland_pgi_midas_layer2"],
             "references": [
                 {
                     "name": "PGI map portal (concessions / mining areas)",
@@ -2074,7 +2074,11 @@ def _build_world_source_catalog(conn: Any) -> list[dict[str, Any]]:
     )
 
 
-def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) -> dict[str, Any]:
+def get_world_coverage(
+    conn: Any | None = None,
+    region: Optional[str] = None,
+    country: Optional[str] = None,
+) -> dict[str, Any]:
     own_connection = conn is None
     if conn is None:
         conn = _default_db_connection()
@@ -2220,11 +2224,24 @@ def get_world_coverage(conn: Any | None = None, region: Optional[str] = None) ->
                 item for item in all_countries if (item.get("macro_region") or "other") == normalized_region
             ]
 
+        country_filter: Optional[str] = None
+        country_needle = (country or "").strip()
+        if country_needle:
+            needle = country_needle.lower()
+            matched = [
+                item
+                for item in filtered_countries
+                if (item.get("country") or "").strip().lower() == needle
+            ]
+            filtered_countries = matched
+            country_filter = country_needle if matched else country_needle
+
         return {
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "summary": summary,
             "regional_summary": regional_summary,
             "region_filter": normalized_region or None,
+            "country_filter": country_filter,
             "countries": filtered_countries,
             "sources": _build_world_source_catalog(conn),
         }

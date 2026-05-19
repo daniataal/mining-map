@@ -220,7 +220,7 @@ class OpenDataSyncTests(unittest.TestCase):
         se = WORLD_COVERAGE_OVERRIDES.get("Sweden", {}).get("mining", {})
         pl = WORLD_COVERAGE_OVERRIDES.get("Poland", {}).get("mining", {})
         self.assertEqual(se["status"], "official_portal_only")
-        self.assertEqual(pl["status"], "official_portal_only")
+        self.assertEqual(pl["status"], "official_syncable")
         self.assertTrue(any("api.sgu.se" in r["url"] for r in se["references"]))
         self.assertTrue(any("pgi.gov.pl" in r["url"] for r in pl["references"]))
 

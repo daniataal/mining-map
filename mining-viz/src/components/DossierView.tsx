@@ -70,6 +70,8 @@ import {
   getLegalEvents,
   getGovProcurement,
   getGovProcurementCompanies,
+  getEuProcurement,
+  type EuProcurementResponse,
   createDealRoom,
   listDealRooms,
   runContactEnrichmentAgent,
@@ -221,6 +223,9 @@ export default function DossierView({
   const [govProcurement, setGovProcurement] = useState<GovProcurementResponse | null>(null);
   const [isLoadingGovProcurement, setIsLoadingGovProcurement] = useState(false);
   const [govProcurementError, setGovProcurementError] = useState<string | null>(null);
+  const [euProcurement, setEuProcurement] = useState<EuProcurementResponse | null>(null);
+  const [isLoadingEuProcurement, setIsLoadingEuProcurement] = useState(false);
+  const [euProcurementError, setEuProcurementError] = useState<string | null>(null);
   const [govCompaniesFeed, setGovCompaniesFeed] = useState<GovProcurementCompaniesResponse | null>(null);
   const [isLoadingGovCompaniesFeed, setIsLoadingGovCompaniesFeed] = useState(false);
   const [govCompaniesFeedError, setGovCompaniesFeedError] = useState<string | null>(null);
@@ -1016,6 +1021,36 @@ Output requirements:
         if (!isCancelled) {
           setIsLoadingGovProcurement(false);
         }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item?.id, item?.entityKind, activeTab]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!isOpen || !item || activeTab !== 'gov-tenders') {
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setIsLoadingEuProcurement(true);
+    setEuProcurementError(null);
+
+    getEuProcurement(item.id, item.entityKind || 'license')
+      .then((payload) => {
+        if (!isCancelled) setEuProcurement(payload);
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setEuProcurement(null);
+          setEuProcurementError('Unable to load EU TED procurement matches.');
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoadingEuProcurement(false);
       });
 
     return () => {
@@ -2232,6 +2267,82 @@ curl -X POST http://localhost:8000/api/admin/gov-procurement/sync \\
                       })}
                     </div>
                   )}
+                </div>
+
+                <div className="border-t border-black/10 dark:border-white/10 pt-8 space-y-4">
+                  <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-[10px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                    <p className="font-black uppercase tracking-widest text-sky-600 dark:text-sky-400 mb-1">
+                      {t('מקור נתונים', 'Data source')}: {euProcurement?.source || 'TED (EU procurement)'}
+                    </p>
+                    <p>
+                      {t(
+                        'מכרזי רכש ציבורי באיחוד האירופי (CPV מינרלים/נפט) עם התאמה היוריסטית לשם החברה.',
+                        'EU public tenders (mining / petroleum CPV) with heuristic company name matching.'
+                      )}
+                    </p>
+                    {euProcurement?.sourceUrl && (
+                      <a
+                        href={euProcurement.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block mt-1 font-bold text-sky-600 dark:text-sky-400 hover:underline"
+                      >
+                        ted.europa.eu
+                      </a>
+                    )}
+                  </div>
+                  <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
+                    {t('מכרזי EU (TED)', 'EU procurement (TED)')}
+                  </h3>
+                  {(euProcurementError || (euProcurement?.warnings?.length ?? 0) > 0) && (
+                    <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[10px] text-amber-700 dark:text-amber-300 space-y-1">
+                      {euProcurementError && <p className="font-bold">{euProcurementError}</p>}
+                      {euProcurement?.warnings?.map((w) => (
+                        <p key={w}>{w}</p>
+                      ))}
+                    </div>
+                  )}
+                  {isLoadingEuProcurement && (
+                    <p className="text-center text-xs font-bold text-slate-500 py-4">
+                      {t('טוען מכרזי EU…', 'Loading EU tenders…')}
+                    </p>
+                  )}
+                  {!isLoadingEuProcurement && (euProcurement?.notices?.length ?? 0) === 0 && (
+                    <p className="text-center text-xs text-slate-500 py-6 bg-black/5 dark:bg-white/5 rounded-2xl">
+                      {t('לא נמצאו מכרזי EU תואמים.', 'No matching EU TED notices for this company.')}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 gap-3">
+                    {(euProcurement?.notices ?? []).map((notice) => (
+                      <Card
+                        key={notice.notice_id}
+                        className="p-4 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-2xl"
+                      >
+                        <p className="text-sm font-bold text-slate-900 dark:text-white">{notice.title || notice.notice_id}</p>
+                        {notice.buyer && (
+                          <p className="text-[10px] text-slate-500 mt-1">{notice.buyer}</p>
+                        )}
+                        <motion.div className="flex flex-wrap gap-2 mt-2 items-center">
+                          {notice.country && (
+                            <Badge className="bg-sky-500/10 text-sky-600 border-none text-[8px]">{notice.country}</Badge>
+                          )}
+                          {notice.cpv && (
+                            <span className="text-[9px] font-mono text-slate-400">CPV {notice.cpv}</span>
+                          )}
+                          {notice.source_url && (
+                            <a
+                              href={notice.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[9px] font-bold text-amber-600 hover:underline ml-auto"
+                            >
+                              TED
+                            </a>
+                          )}
+                        </motion.div>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

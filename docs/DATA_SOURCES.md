@@ -162,6 +162,19 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
 | **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
 
+### Weeks 21–24 (operations) — Phase 6 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **Poland PGI mining** | Done | `poland_pgi_mining_sync.py` (MIDAS ArcGIS MapServer); `POST /api/admin/poland-mining/sync`; `source_id=poland_pgi_midas_layer*`. |
+| **Sync alert read/dismiss** | Done | `PATCH /api/open-data/sync-alerts/{id}/read`, `POST .../mark-all-read`; Admin Open Data dismiss + mark all. |
+| **TED → dossier linking** | Done | `GET /entities/{id}/eu-procurement`; fuzzy buyer/title match; Gov tenders tab shows EU + USAspending. |
+| **Coverage `?country=`** | Done | `GET /api/open-data/coverage/world?country=Ghana` returns server-filtered row(s). |
+| **Kazakhstan egov worker** | Done | `kazakhstan-mining-worker` in docker-compose; skips when `KZ_EGOV_API_KEY` unset. |
+| **Drift email alerts** | Done | `smtplib` when `SMTP_HOST`, `SMTP_FROM`, `SMTP_TO` set; log-only otherwise. |
+| **Sweden sync worker** | Done | `sweden-mining-worker` weekly default (`SGU_SYNC_INTERVAL_SECONDS=604800`). |
+| **EU procurement CPV facets** | Done | `cpv_commodity.py`; `?cpv_bucket=` on notices API; Admin + Investigations UI. |
+
 ### Weeks 17–20 (operations) — Phase 5 implemented (2026-05-19)
 
 | Workstream | Status | Notes |
@@ -257,6 +270,18 @@ curl -s "http://localhost:8000/api/eu-procurement/notices?country=Sweden&limit=1
 
 # Sync drift alerts (admin JWT or X-Admin-Token)
 curl -s "http://localhost:8000/api/open-data/sync-alerts" -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.unread_count'
+curl -X PATCH "http://localhost:8000/api/open-data/sync-alerts/1/read" -H "X-Admin-Token: $ADMIN_TOKEN"
+curl -X POST "http://localhost:8000/api/open-data/sync-alerts/mark-all-read" -H "X-Admin-Token: $ADMIN_TOKEN"
+
+# Poland PGI MIDAS mining sync
+curl -X POST "http://localhost:8000/api/admin/poland-mining/sync" -H "X-Admin-Token: $ADMIN_TOKEN"
+
+# Coverage single country (server-side filter)
+curl -s "http://localhost:8000/api/open-data/coverage/world?country=Ghana" | jq '.countries'
+
+# EU procurement for a license entity
+curl -s "http://localhost:8000/entities/YOUR_LICENSE_ID/eu-procurement?entity_kind=license" | jq .
+curl -s "http://localhost:8000/api/eu-procurement/notices?cpv_bucket=mining&limit=10" | jq .
 ```
 
 ---
@@ -282,6 +307,12 @@ curl -s "http://localhost:8000/api/open-data/sync-alerts" -H "X-Admin-Token: $AD
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |
+| `backend/services/ingest/poland_pgi_mining_sync.py` | Poland PGI MIDAS mining areas |
+| `backend/services/cpv_commodity.py` | CPV bucket facets (mining/metals/petroleum) |
+| `backend/services/eu_procurement_intel.py` | TED → entity fuzzy match |
+| `backend/kazakhstan_mining_sync_worker.py` | Daily KZ egov register (key required) |
+| `backend/sweden_mining_sync_worker.py` | Weekly SGU OGC sync |
+| `mining-viz/src/components/EuProcurementFacets.tsx` | EU TED browse + CPV filter UI |
 | `mining-viz/src/components/dossier/CountryCoveragePanel.tsx` | Per-country coverage in dossier |
 | `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
