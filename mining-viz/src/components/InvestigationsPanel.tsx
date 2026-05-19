@@ -6,6 +6,7 @@ import type { DdQueueEntry } from '../lib/dueDiligenceQueue';
 import DueDiligencePanel from './DueDiligencePanel';
 import DealRoomsListPanel from './DealRoomsListPanel';
 import EuProcurementFacets from './EuProcurementFacets';
+import GovProcurementFacets from './GovProcurementFacets';
 
 export type InvestigationsSubTab = 'due_diligence' | 'deal_rooms';
 
@@ -30,6 +31,8 @@ interface InvestigationsPanelProps {
   onDealRoomChange: (room: DealRoom) => void;
   onRefreshDealRooms: () => void;
   euProcurementCpvBucket?: string | null;
+  adminToken?: string;
+  authHeaders?: () => Record<string, string>;
 }
 
 export default function InvestigationsPanel({
@@ -53,6 +56,8 @@ export default function InvestigationsPanel({
   onDealRoomChange,
   onRefreshDealRooms,
   euProcurementCpvBucket,
+  adminToken,
+  authHeaders,
 }: InvestigationsPanelProps) {
   const { t } = useI18n();
   const [internalTab, setInternalTab] = useState<InvestigationsSubTab>(subTab);
@@ -131,8 +136,13 @@ export default function InvestigationsPanel({
                 embedded
               />
             </motion.div>
-            <motion.div className="shrink-0 p-4 border-t border-black/5 dark:border-white/5 max-h-[40vh] overflow-y-auto">
-              <EuProcurementFacets initialCpvBucket={euProcurementCpvBucket} />
+            <motion.div className="shrink-0 p-4 border-t border-black/5 dark:border-white/5 max-h-[50vh] overflow-y-auto space-y-4">
+              <GovProcurementFacets adminToken={adminToken} authHeaders={authHeaders} />
+              <EuProcurementFacets
+                initialCpvBucket={euProcurementCpvBucket}
+                adminToken={adminToken}
+                authHeaders={authHeaders}
+              />
             </motion.div>
           </motion.div>
         ) : (

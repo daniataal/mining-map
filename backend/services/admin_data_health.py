@@ -7,6 +7,7 @@ from typing import Any, Optional
 try:
     from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
     from backend.services.eu_procurement_store import ensure_eu_procurement_tables, list_sync_runs as list_ted_sync_runs
+    from backend.services.gov_procurement_store import ensure_gov_procurement_tables, list_sync_runs as list_gov_sync_runs
     from backend.services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
     from backend.services.ingest.philippines_mgb_arcgis_probe import (
         get_latest_probe as get_ph_probe,
@@ -24,6 +25,7 @@ try:
 except ImportError:
     from services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
     from services.eu_procurement_store import ensure_eu_procurement_tables, list_sync_runs as list_ted_sync_runs
+    from services.gov_procurement_store import ensure_gov_procurement_tables, list_sync_runs as list_gov_sync_runs
     from services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
     from services.ingest.philippines_mgb_arcgis_probe import (
         get_latest_probe as get_ph_probe,
@@ -149,6 +151,7 @@ def get_data_health(conn: Any, *, refresh_probes: bool = False) -> dict[str, Any
     ensure_petroleum_osm_sync_tables(conn)
     ensure_sync_alert_tables(conn)
     ensure_eu_procurement_tables(conn)
+    ensure_gov_procurement_tables(conn)
 
     if refresh_probes:
         for label, runner in (("kz", run_kz_probe), ("ph", run_ph_probe)):
@@ -178,6 +181,7 @@ def get_data_health(conn: Any, *, refresh_probes: bool = False) -> dict[str, Any
         "comtrade_sync_runs": list_sync_runs(conn, limit=15),
         "petroleum_osm_sync_runs": list_osm_sync_runs(conn, limit=15),
         "eu_procurement_sync_runs": list_ted_sync_runs(conn, limit=10),
+        "gov_procurement_sync_runs": list_gov_sync_runs(conn, limit=10),
         "license_counts_by_country": _license_counts_by_country(conn),
         "license_counts_by_source_id": license_by_source,
         "nordic_source_admin_notes": _nordic_admin_notes(license_by_source),

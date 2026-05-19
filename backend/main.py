@@ -2705,7 +2705,14 @@ def read_gov_procurement(entity_id: str, entity_kind: str = "license", live: boo
         return serialize_gov_procurement_response(payload)
     except Exception as e:
         logger.exception("gov-procurement failed for %s: %s", entity_id, e)
-        return Response(str(e), status_code=500)
+        try:
+            collect_gov_procurement, serialize_gov_procurement_response = _load_gov_procurement_services()
+        except Exception:
+            return Response(str(e), status_code=500)
+        err_payload = collect_gov_procurement(company_name="", country=None)
+        err_payload["warnings"] = [f"Unable to load procurement data: {e}"]
+        err_payload["data_origin"] = "error"
+        return serialize_gov_procurement_response(err_payload)
     finally:
         conn.close()
 
