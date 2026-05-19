@@ -20,7 +20,9 @@ import {
 } from 'react-leaflet';
 // @ts-ignore
 import MarkerClusterGroup from 'react-leaflet-cluster';
+import { useLeafletContext } from '@react-leaflet/core';
 import L from 'leaflet';
+import 'leaflet.markercluster';
 import 'leaflet/dist/leaflet.css';
 import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
@@ -64,9 +66,15 @@ import {
   countriesWithVisibleLicenses,
   countryLicenseCounts,
 } from '../lib/countriesWithVisibleLicenses';
-import { getLicenseRenderKey } from '../lib/licenseRenderKey';
-import { licensePopupOpenDelayMs } from '../lib/licensePopupOpenDelay';
-import PopupForm from './PopupForm';
+import {
+  createLicenseMarkerIconCache,
+  markerIconSignature,
+} from '../lib/licenseMarkerIconCache';
+import {
+  asLicenseMarkerClusterGroup,
+  type LicenseMarkerClusterGroup,
+} from '../lib/markerClusterTypes';
+import LicenseMapPopupController from './map/LicenseMapPopupController';
 import EsgProtectedZonePopup from './esg/EsgProtectedZonePopup';
 import {
   ESG_CONSERVATION_ZONES,
@@ -234,6 +242,25 @@ interface MapComponentProps {
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
   countryFocusBoundsTrigger?: number;
+}
+
+/** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
+function ClusterGroupRefBridge({
+    clusterGroupRef,
+}: {
+    clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
+}) {
+    const { layerContainer } = useLeafletContext();
+    useEffect(() => {
+        const group = asLicenseMarkerClusterGroup(layerContainer);
+        clusterGroupRef.current = group;
+        return () => {
+            if (clusterGroupRef.current === group) {
+                clusterGroupRef.current = null;
+            }
+        };
+    }, [layerContainer, clusterGroupRef]);
+    return null;
 }
 
 const MapEffect = ({
@@ -475,8 +502,9 @@ export default function MapComponent({
     const mapRef = useRef<L.Map | null>(null);
     const canvasVesselLayerRef = useRef<CanvasVesselLayer | null>(null);
     const markerRefs = useRef<Record<string, L.Marker>>({});
+    const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
+    const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
     const prevSelectedIdRef = useRef<string | null>(null);
-    const prevMapFlyTriggerForPopupRef = useRef(mapFlyTrigger);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
 
     const isMobileDevice = useMemo(() => {
@@ -736,11 +764,7 @@ export default function MapComponent({
         if (pin) pin.classList.toggle('is-selected', selected);
     }, []);
 
-    // Selection-driven side effects:
-    //   - toggle CSS on markers (never swap icons — setIcon replaces DOM and
-    //     closes/reopens the Leaflet popup);
-    //   - open the popup once after React commit. Sidebar picks defer 60ms so
-    //     flyTo can start; map marker clicks open on the next frame.
+    // Selection highlight only — popup open/close is handled by LicenseMapPopupController.
     useEffect(() => {
         const prevId = prevSelectedIdRef.current;
         if (prevId && prevId !== selectedItem?.id) {
@@ -752,34 +776,9 @@ export default function MapComponent({
             return;
         }
 
-        const marker = markerRefs.current[selectedItem.id];
-        setMarkerSelectedVisual(marker, true);
-
-        const sidebarDriven =
-            licensePopupOpenDelayMs(mapFlyTrigger, prevMapFlyTriggerForPopupRef.current) > 0;
-        prevMapFlyTriggerForPopupRef.current = mapFlyTrigger;
-
-        let timeoutId: number | undefined;
-        let rafId: number | undefined;
-
-        const openPopupOnce = () => {
-            const current = markerRefs.current[selectedItem.id];
-            if (!current || current.isPopupOpen?.()) return;
-            current.openPopup();
-        };
-
-        if (sidebarDriven) {
-            timeoutId = window.setTimeout(openPopupOnce, 60);
-        } else {
-            rafId = window.requestAnimationFrame(openPopupOnce);
-        }
-
+        setMarkerSelectedVisual(markerRefs.current[selectedItem.id], true);
         prevSelectedIdRef.current = selectedItem.id;
-        return () => {
-            if (timeoutId != null) window.clearTimeout(timeoutId);
-            if (rafId != null) window.cancelAnimationFrame(rafId);
-        };
-    }, [mapFlyTrigger, selectedItem?.id, setMarkerSelectedVisual]);
+    }, [selectedItem?.id, setMarkerSelectedVisual]);
 
     const borderCountries = useMemo(() => {
         if (isRoutePlannerView) {
@@ -861,9 +860,12 @@ export default function MapComponent({
     }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
     const licenseMarkerIcons = useMemo(() => {
+        const cache = markerIconCacheRef.current;
         const icons = new Map<string, L.DivIcon>();
+        const validIds = new Set<string>();
         for (const item of mapDisplayData) {
             if (item._displayLat == null || item._displayLng == null) continue;
+            validIds.add(item.id);
             const annotation = userAnnotations[item.id] || {};
             const color = getMarkerColor(
                 annotation.commodity || item.commodity,
@@ -875,32 +877,32 @@ export default function MapComponent({
             const isEsgRisk = esgZone !== null;
             const refineryPin = isRefineryEntity(item);
             const oilFieldPin = !refineryPin && isOilFieldEntity(item);
+            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin);
             icons.set(
                 item.id,
-                refineryPin
-                    ? createRefineryMapIcon()
-                    : oilFieldPin
-                      ? createOilFieldMapIcon()
-                      : createCustomIcon(color, false, isEsgRisk),
+                cache.get(item.id, sig, () =>
+                    refineryPin
+                        ? createRefineryMapIcon()
+                        : oilFieldPin
+                          ? createOilFieldMapIcon()
+                          : createCustomIcon(color, false, isEsgRisk),
+                ),
             );
         }
+        cache.prune(validIds);
         return icons;
     }, [mapDisplayData, userAnnotations]);
 
     const renderedMarkers = useMemo(() => {
         if (!onGroundVisible) return null;
-        return mapDisplayData.map((item, index) => {
+        return mapDisplayData.map((item) => {
             if (item._displayLat == null || item._displayLng == null) return null;
-            const annotation = userAnnotations[item.id] || {};
-            const esgZone = getEsgZoneIntersection(item._displayLat, item._displayLng);
-            const isEsgRisk = esgZone !== null;
-            const esgZoneName = esgZone?.name;
             const markerIcon = licenseMarkerIcons.get(item.id);
             if (!markerIcon) return null;
 
             return (
                 <Marker
-                    key={getLicenseRenderKey(item, index)}
+                    key={item.id}
                     position={[item._displayLat, item._displayLng]}
                     icon={markerIcon}
                     ref={(el) => {
@@ -931,31 +933,6 @@ export default function MapComponent({
                             )}
                         </div>
                     </Tooltip>
-                    <Popup className="custom-popup" minWidth={360} maxWidth={380}>
-                        <PopupForm 
-                          item={item}
-                          annotation={annotation}
-                          updateAnnotation={updateAnnotation}
-                          onDelete={() => deleteLicense(item.id)}
-                          onOpenDossier={() => handleOpenDossier(item)}
-                          isInDdQueue={isInDdQueue?.(item.id) ?? false}
-                          onAddToDueDiligence={
-                            onAddToDueDiligence
-                              ? () => onAddToDueDiligence(item.id)
-                              : undefined
-                          }
-                          onRemoveFromDueDiligence={
-                            onRemoveFromDueDiligence
-                              ? () => onRemoveFromDueDiligence(item.id)
-                              : undefined
-                          }
-                          isEsgRisk={isEsgRisk}
-                          esgZoneName={esgZoneName}
-                          dealRoomTitle={
-                            getDealRoomForLicense?.(item.id, item.entityKind || 'license')?.title
-                          }
-                        />
-                    </Popup>
                 </Marker>
             );
         });
@@ -965,13 +942,6 @@ export default function MapComponent({
         userAnnotations,
         onSelectMaritimeVessel,
         setSelectedItem,
-        updateAnnotation,
-        deleteLicense,
-        handleOpenDossier,
-        isInDdQueue,
-        onAddToDueDiligence,
-        onRemoveFromDueDiligence,
-        getDealRoomForLicense,
         onGroundVisible,
     ]);
 
@@ -1533,6 +1503,20 @@ export default function MapComponent({
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <LicenseMapPopupController
+                    selectedItem={selectedItem}
+                    mapFlyTrigger={mapFlyTrigger}
+                    markerRefs={markerRefs}
+                    clusterGroupRef={clusterGroupRef}
+                    userAnnotations={userAnnotations}
+                    updateAnnotation={updateAnnotation}
+                    deleteLicense={deleteLicense}
+                    handleOpenDossier={handleOpenDossier}
+                    isInDdQueue={isInDdQueue}
+                    onAddToDueDiligence={onAddToDueDiligence}
+                    onRemoveFromDueDiligence={onRemoveFromDueDiligence}
+                    getDealRoomForLicense={getDealRoomForLicense}
+                />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 <RoutePlannerFlyEffect
                   target={isRoutePlannerView ? routePlannerFlyTarget : null}
@@ -1643,6 +1627,7 @@ export default function MapComponent({
                     showCoverageOnHover={false}
                     spiderLegPolylineOptions={{ weight: 1.5, color: '#64748b', opacity: 0.5, interactive: false }}
                 >
+                    <ClusterGroupRefBridge clusterGroupRef={clusterGroupRef} />
                     {renderedMarkers}
                 </MarkerClusterGroup>
                 )}
