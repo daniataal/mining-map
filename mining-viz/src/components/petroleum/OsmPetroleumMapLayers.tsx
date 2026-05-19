@@ -3,11 +3,12 @@ import L from 'leaflet';
 import { GeoJSON, LayerGroup, LayersControl } from 'react-leaflet';
 import type { PathOptions } from 'leaflet';
 import {
-  DEFAULT_OSM_LAYER_VISIBILITY,
   OsmPetroleumLayerId,
+  defaultOsmLayerVisibility,
   useOsmPetroleumLayerGeoJson,
 } from '../../lib/osmPetroleumLayers';
 import type { PetroleumViewportBounds } from '../../lib/petroleumLayers';
+import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/petroleumLayers';
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import { createRefineryMapIcon } from './refineryMapIcon';
@@ -35,7 +36,13 @@ interface OsmLayerOverlayProps {
   enabled: boolean;
 }
 
-function OsmLayerOverlay({ layerId, label, bbox, enabled }: OsmLayerOverlayProps) {
+function OsmLayerOverlay({
+  layerId,
+  label,
+  bbox,
+  enabled,
+  defaultVisible,
+}: OsmLayerOverlayProps & { defaultVisible: boolean }) {
   const { data } = useOsmPetroleumLayerGeoJson(layerId, bbox, enabled);
   const style = OSM_STYLE[layerId];
   const geojson = useMemo(
@@ -46,7 +53,7 @@ function OsmLayerOverlay({ layerId, label, bbox, enabled }: OsmLayerOverlayProps
   const mapboxLayerId = layerId === 'refineries' ? 'refineries' : 'oil_pipelines';
 
   return (
-    <LayersControl.Overlay checked={DEFAULT_OSM_LAYER_VISIBILITY[layerId]} name={label}>
+    <LayersControl.Overlay checked={defaultVisible} name={label}>
       <LayerGroup>
         <GeoJSON
           key={`osm-${layerId}`}
@@ -75,6 +82,10 @@ interface OsmPetroleumMapLayersProps {
 
 export default function OsmPetroleumMapLayers({ bbox, enabled }: OsmPetroleumMapLayersProps) {
   const { t } = useI18n();
+  const { data: catalog } = usePetroleumLayerCatalog(enabled);
+  const mapboxOff = isPetroleumMapboxDisabled(catalog);
+  const osmDefaults = defaultOsmLayerVisibility(mapboxOff);
+
   if (!enabled) return null;
 
   return (
@@ -86,6 +97,7 @@ export default function OsmPetroleumMapLayers({ bbox, enabled }: OsmPetroleumMap
           label={t(OSM_LABELS[layerId][0], OSM_LABELS[layerId][1])}
           bbox={bbox}
           enabled={enabled}
+          defaultVisible={osmDefaults[layerId]}
         />
       ))}
     </>

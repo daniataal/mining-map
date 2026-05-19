@@ -6,6 +6,7 @@ import {
   DEFAULT_PETROLEUM_LAYER_VISIBILITY,
   PetroleumLayerId,
   PetroleumViewportBounds,
+  isPetroleumMapboxDisabled,
   usePetroleumLayerCatalog,
   usePetroleumLayerGeoJson,
 } from '../../lib/petroleumLayers';
@@ -82,9 +83,9 @@ interface PetroleumMapLayersProps {
 
 export default function PetroleumMapLayers({ bbox, mapZoom, enabled }: PetroleumMapLayersProps) {
   const { t } = useI18n();
-  usePetroleumLayerCatalog(enabled);
+  const { data: catalog } = usePetroleumLayerCatalog(enabled);
 
-  if (!enabled) return null;
+  if (!enabled || isPetroleumMapboxDisabled(catalog)) return null;
 
   return (
     <>

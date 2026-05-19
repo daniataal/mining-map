@@ -49,6 +49,7 @@ services:
       - COMTRADE_API_KEY=${COMTRADE_API_KEY:-}
       - COMTRADE_API_KEY_SECONDARY=${COMTRADE_API_KEY_SECONDARY:-}
       - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
+      - PETROLEUM_DISABLE_MAPBOX=${PETROLEUM_DISABLE_MAPBOX:-}
     healthcheck:
       test:
         [
@@ -240,6 +241,27 @@ services:
       - SGU_SYNC_INTERVAL_SECONDS=${SGU_SYNC_INTERVAL_SECONDS:-604800}
       - SGU_SYNC_BACKOFF_SECONDS=${SGU_SYNC_BACKOFF_SECONDS:-3600}
       - SGU_USER_AGENT=${SGU_USER_AGENT:-MeridianMiningMap/1.0 (SGU open data)}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  arcgis-probe-worker:
+    build:
+      context: ./backend
+    container_name: mining-arcgis-probe-worker
+    restart: always
+    command: ["python", "arcgis_probe_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - PROBE_SYNC_ENABLED=${PROBE_SYNC_ENABLED:-true}
+      - PROBE_SYNC_INTERVAL_SECONDS=${PROBE_SYNC_INTERVAL_SECONDS:-604800}
+      - PROBE_SYNC_BACKOFF_SECONDS=${PROBE_SYNC_BACKOFF_SECONDS:-3600}
+      - KZ_ARCGIS_PROBE_URL=${KZ_ARCGIS_PROBE_URL:-}
+      - PH_MGB_ARCGIS_TOKEN=${PH_MGB_ARCGIS_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy

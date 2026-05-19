@@ -174,7 +174,17 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Poland złoża layer** | Done | `poland_pgi_deposits` (MIDAS layer 0); capped via `PGI_SYNC_MAX_PER_LAYER`. |
 | **Drift alert deep links** | Done | Webhook/email include `source_id`, `drop_pct`, `admin_ui_url` from `APP_PUBLIC_URL`. |
 
-**Phase 8 ideas:** OpenCorporates manual-only UX; national company registers (EU MS); scheduled probe workers; deal-room export PDF; Comtrade ↔ license commodity linkage; Mapbox-off pipeline-only production mode.
+### Weeks 29–32 (operations) — Phase 8 implemented (2026-05-19)
+
+| Workstream | Status | Notes |
+|------------|--------|-------|
+| **OpenCorporates manual UX** | Done | `GET /api/companies/{name}/registry-links`; dossier `CompanyRegistryLinks` chip + disclaimer (not API-backed). |
+| **EU national registers** | Done | `eu_company_registers.py` — UK Companies House, DE Unternehmensregister, FR INPI, NL KVK, etc.; shown next to GLEIF. |
+| **Scheduled probe workers** | Done | `arcgis-probe-worker` weekly KZ + PH → `open_data_probe_results`; `PROBE_SYNC_INTERVAL_SECONDS` (default 604800). |
+| **Deal room export HTML/PDF** | Done | `GET /api/deal-rooms/{id}/export?format=html` and `/export.pdf` (printable HTML; includes Phase 7 USA + EU enrichment). |
+| **Comtrade ↔ license linkage** | Done | `GET /entities/{id}/trade-flows`; `EntityTradeFlowsPanel` on exports-imports tab (country + HS27 from commodity). |
+| **Mapbox-off OSM mode** | Done | `PETROLEUM_DISABLE_MAPBOX=1` + `VITE_PETROLEUM_DISABLE_MAPBOX=1`; catalog empty; OSM pipelines default on. |
+| **Comtrade deploy failover** | Done | `COMTRADE_API_KEY` + `COMTRADE_API_KEY_SECONDARY` in GitHub workflow + docker-compose (429/403 retry). |
 
 ### Weeks 21–24 (operations) — Phase 6 implemented (2026-05-19)
 
@@ -303,6 +313,18 @@ curl -s "http://localhost:8000/api/open-data/coverage/world?country=Ghana" | jq 
 # EU procurement for a license entity
 curl -s "http://localhost:8000/entities/YOUR_LICENSE_ID/eu-procurement?entity_kind=license" | jq .
 curl -s "http://localhost:8000/api/eu-procurement/notices?cpv_bucket=mining&limit=10" | jq .
+
+# Company registry links (manual OpenCorporates + EU MS register)
+curl -s "http://localhost:8000/api/companies/Newmont/registry-links?country=United%20Kingdom" | jq .
+
+# Stored Comtrade rows for a license (oil_trade_flows)
+curl -s "http://localhost:8000/entities/YOUR_LICENSE_ID/trade-flows?entity_kind=license" | jq .
+
+# Deal room printable export (HTML attachment; browser Print → PDF)
+curl -s "http://localhost:8000/api/deal-rooms/ROOM_ID/export.pdf" -o deal-room.html
+
+# Petroleum Mapbox-off catalog (OSM-only mode)
+PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" | jq '.mapbox_disabled,.layers'
 ```
 
 ---
@@ -328,6 +350,13 @@ curl -s "http://localhost:8000/api/eu-procurement/notices?cpv_bucket=mining&limi
 | `backend/services/ingest/philippines_mgb_arcgis_probe.py` | PH MGB ControlMap token probe |
 | `backend/services/sync_sla.py` | Per-source sync SLA (green/yellow/red) |
 | `backend/services/deal_room_export_enrichment.py` | Deal export USAspending + TED fuzzy match |
+| `backend/services/company_registry_links.py` | OpenCorporates + EU MS manual registry links |
+| `backend/services/eu_company_registers.py` | EU member-state register URL mapping |
+| `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27 linkage |
+| `backend/services/deal_room_export_html.py` | Printable HTML deal export |
+| `backend/arcgis_probe_sync_worker.py` | Weekly KZ + PH ArcGIS probes |
+| `mining-viz/src/components/dossier/CompanyRegistryLinks.tsx` | Dossier OC + national register chips |
+| `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored Comtrade rows in dossier |
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |
