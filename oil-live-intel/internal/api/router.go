@@ -35,6 +35,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Post("/alerts/{id}/read", s.MarkAlertRead)
 		api.Post("/alerts/mark-all-read", s.MarkAllAlertsRead)
 		api.Post("/alerts/{id}/assign", s.AssignAlert)
+		api.Get("/trade/flows", s.ListTradeFlows)
 		api.Get("/opportunities", s.ListOpportunities)
 		api.Get("/opportunities/{id}/economics", s.OpportunityEconomics)
 		api.Put("/opportunities/{id}/economics", s.OpportunityEconomics)
@@ -50,6 +51,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/suppliers/candidates", s.SupplierCandidates)
 		api.Get("/ws", s.WebSocket)
 		api.Post("/internal/broadcast", s.InternalBroadcast)
+		api.Post("/internal/trade-sync", s.TriggerTradeSync)
 	})
 	return r
 }

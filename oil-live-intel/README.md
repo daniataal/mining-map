@@ -40,6 +40,9 @@ curl -s http://localhost:8095/api/oil-live/health
 | `AISSTREAM_API_KEY` | for live AIS | — |
 | `ENABLE_AIS` | no | `true` (needs API key) |
 | `EIA_API_KEY` | optional | — |
+| `COMTRADE_API_KEY` | optional | Higher-quota Comtrade; public preview works without key |
+| `ENABLE_COMTRADE` | no | `true` — sync HS 2709/2710/2711 daily |
+| `ENABLE_EIA` | no | `true` — EIA volume supplement when key set |
 | `EXISTING_BACKEND_URL` | no | `http://backend:8000` |
 | `SUPPLIER_CREATE_ENDPOINT` | no | `/licenses` |
 

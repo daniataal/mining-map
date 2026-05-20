@@ -13,7 +13,69 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/services/contacts"
 	"github.com/mining-map/oil-live-intel/internal/services/economics"
 	"github.com/mining-map/oil-live-intel/internal/services/opportunity"
+	"github.com/mining-map/oil-live-intel/internal/services/trade"
 )
+
+func (s *Server) ListTradeFlows(w http.ResponseWriter, r *http.Request) {
+	country := r.URL.Query().Get("country")
+	hs := r.URL.Query().Get("hs_code")
+	limit := queryInt(r, "limit", 30)
+	q := `
+		SELECT data_source, reporter, partner, hs_code, year::text, flow_type,
+			trade_value_usd, net_weight_kg
+		FROM oil_trade_flows WHERE 1=1
+	`
+	args := []any{}
+	n := 1
+	if country != "" {
+		q += fmt.Sprintf(` AND (reporter ILIKE $%d OR partner ILIKE $%d)`, n, n)
+		args = append(args, "%"+country+"%")
+		n++
+	}
+	if hs != "" {
+		q += fmt.Sprintf(` AND hs_code = $%d`, n)
+		args = append(args, hs)
+		n++
+	}
+	q += fmt.Sprintf(` ORDER BY ingested_at DESC NULLS LAST LIMIT $%d`, n)
+	args = append(args, limit)
+
+	rows, err := s.Pool.Query(r.Context(), q, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	var flows []map[string]any
+	for rows.Next() {
+		var src, rep, partner, code, yr, flowType string
+		var val, wgt *float64
+		_ = rows.Scan(&src, &rep, &partner, &code, &yr, &flowType, &val, &wgt)
+		flow := "Import"
+		if flowType == "X" {
+			flow = "Export"
+		}
+		flows = append(flows, map[string]any{
+			"source": src, "reporter": rep, "partner": partner,
+			"hs_code": code, "period": yr, "flow": flow,
+			"trade_value_usd": val, "net_weight_kg": wgt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flows": flows, "disclaimer": "Macro trade data — not vessel-level transactions."})
+}
+
+func (s *Server) TriggerTradeSync(w http.ResponseWriter, r *http.Request) {
+	if s.Config.InternalBroadcastKey == "" || r.Header.Get("X-Oil-Intel-Internal") != s.Config.InternalBroadcastKey {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	res, err := trade.RunSync(r.Context(), s.Pool, s.Config, s.Log)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
 
 func (s *Server) OpportunityEconomics(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -144,20 +206,24 @@ func (s *Server) CounterpartyHints(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	rows, _ := s.Pool.Query(r.Context(), `
-		SELECT reporter_country, partner_country, hs_code, flow, trade_value_usd, period
-		FROM oil_trade_flows WHERE reporter_country ILIKE $1 OR partner_country ILIKE $1
-		ORDER BY created_at DESC LIMIT 5
-	`, country)
+		SELECT reporter, partner, hs_code, flow_type, trade_value_usd, year::text
+		FROM oil_trade_flows WHERE reporter ILIKE $1 OR partner ILIKE $1
+		ORDER BY ingested_at DESC LIMIT 5
+	`, "%"+country+"%")
 	var flows []map[string]any
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var rep, partner, hs, flow, period string
+			var rep, partner, hs, flowType, period string
 			var val *float64
-			_ = rows.Scan(&rep, &partner, &hs, &flow, &val, &period)
+			_ = rows.Scan(&rep, &partner, &hs, &flowType, &val, &period)
+			flowLabel := "Import"
+			if flowType == "X" {
+				flowLabel = "Export"
+			}
 			flows = append(flows, map[string]any{
 				"reporter": rep, "partner": partner, "hs_code": hs,
-				"flow": flow, "value_usd": val, "period": period,
+				"flow": flowLabel, "value_usd": val, "period": period,
 			})
 		}
 	}
