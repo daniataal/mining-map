@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Archive, ArchiveRestore } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -9,6 +10,7 @@ import {
   runDealRoomAgents,
   updateDealRoom,
 } from '../lib/api';
+import { DEAL_ROOM_ARCHIVED_STATUS, isDealRoomArchived } from '../lib/dealRoomIndex';
 
 const DEFAULT_AGENTS = ['dd', 'operator', 'contact', 'procurement', 'route'];
 
@@ -60,6 +62,7 @@ export default function DealRoomPanel({ dealRoom, entity, onDealRoomChange }: De
   const [notes, setNotes] = useState(dealRoom.notes ?? '');
   const [isRunning, setIsRunning] = useState(false);
   const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [exportText, setExportText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -105,6 +108,23 @@ export default function DealRoomPanel({ dealRoom, entity, onDealRoomChange }: De
       setMessage(error instanceof Error ? error.message : 'Could not queue deal room agents.');
     } finally {
       setIsRunning(false);
+    }
+  }
+
+  async function handleArchiveToggle() {
+    const reactivate = isDealRoomArchived(dealRoom);
+    setIsArchiving(true);
+    setMessage(null);
+    try {
+      const updated = await updateDealRoom(dealRoom.id, {
+        status: reactivate ? 'open' : DEAL_ROOM_ARCHIVED_STATUS,
+      });
+      onDealRoomChange(updated);
+      setMessage(reactivate ? 'Deal room reactivated.' : 'Deal room archived.');
+    } catch {
+      setMessage(reactivate ? 'Could not reactivate deal room.' : 'Could not archive deal room.');
+    } finally {
+      setIsArchiving(false);
     }
   }
 
@@ -167,11 +187,30 @@ export default function DealRoomPanel({ dealRoom, entity, onDealRoomChange }: De
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border-none bg-slate-500/10 text-[9px] font-black uppercase text-slate-600 dark:text-slate-300">
-              {dealRoom.status}
+              {isDealRoomArchived(dealRoom) ? 'archived' : dealRoom.status}
             </Badge>
             <Badge className={`border-none text-[9px] font-black uppercase ${hasRoute ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}`}>
               {hasRoute ? 'Route attached' : 'No route'}
             </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isArchiving}
+              onClick={() => void handleArchiveToggle()}
+              className="rounded-xl text-[9px] font-black uppercase tracking-widest"
+            >
+              {isDealRoomArchived(dealRoom) ? (
+                <>
+                  <ArchiveRestore className="w-3 h-3 mr-1" />
+                  Reactivate
+                </>
+              ) : (
+                <>
+                  <Archive className="w-3 h-3 mr-1" />
+                  Archive
+                </>
+              )}
+            </Button>
           </div>
         </div>
 

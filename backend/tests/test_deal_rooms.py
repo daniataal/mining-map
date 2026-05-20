@@ -52,7 +52,16 @@ class FakeDealRoomServices:
         return room
 
     def list_deal_rooms(self, conn, **kwargs):
-        return list(self.rooms.values())
+        rooms = list(self.rooms.values())
+        if not kwargs.get("include_archived"):
+            rooms = [room for room in rooms if room.get("status") != "archived"]
+        entity_id = kwargs.get("entity_id")
+        entity_kind = kwargs.get("entity_kind")
+        if entity_id:
+            rooms = [room for room in rooms if room.get("entityId") == entity_id]
+        if entity_kind:
+            rooms = [room for room in rooms if room.get("entityKind") == entity_kind]
+        return rooms
 
     def get_deal_room(self, conn, deal_room_id):
         return self.rooms.get(deal_room_id)
@@ -187,4 +196,21 @@ class DealRoomEndpointTests(unittest.TestCase):
 
             exported_md = main.export_deal_room_endpoint(room["id"], format="markdown")
             self.assertIn("Decision Package", exported_md.body.decode("utf-8"))
+
+    def test_archive_hides_room_from_default_list(self):
+        fake_services = FakeDealRoomServices()
+        with patch.object(main, "get_db_connection", return_value=FakeConnection()), patch.object(
+            main, "_load_deal_room_services", return_value=fake_services
+        ):
+            room = main.create_deal_room_endpoint(
+                main.DealRoomCreateRequest(entity_id="lic-1", entity_kind="license")
+            )
+            main.update_deal_room_endpoint(
+                room["id"],
+                main.DealRoomPatchRequest(status="archived"),
+            )
+            active_only = main.list_deal_rooms_endpoint()
+            self.assertEqual(active_only, [])
+            with_archived = main.list_deal_rooms_endpoint(include_archived=True)
+            self.assertEqual(with_archived[0]["status"], "archived")
 

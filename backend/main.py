@@ -3126,11 +3126,20 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
 
 
 @app.get("/api/deal-rooms")
-def list_deal_rooms_endpoint(entity_id: Optional[str] = None, entity_kind: Optional[str] = None):
+def list_deal_rooms_endpoint(
+    entity_id: Optional[str] = None,
+    entity_kind: Optional[str] = None,
+    include_archived: bool = False,
+):
     services = _load_deal_room_services()
     conn = get_db_connection()
     try:
-        rooms = services.list_deal_rooms(conn, entity_id=entity_id, entity_kind=entity_kind)
+        rooms = services.list_deal_rooms(
+            conn,
+            entity_id=entity_id,
+            entity_kind=entity_kind,
+            include_archived=include_archived,
+        )
         return [_decorate_deal_room(conn, room) for room in rooms]
     finally:
         conn.close()
