@@ -7,6 +7,10 @@ __pycache__/
 .env
 mining-viz/node_modules/
 mining-viz/dist/
+# Generated license backups (source of truth is Postgres; export via admin API)
+mining-viz/licenses_export.csv
+data/licenses_export.csv
+data/exports/
 .DS_Store
 .idea/
 .vscode/
