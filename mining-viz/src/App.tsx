@@ -968,10 +968,17 @@ export default function App() {
                             · {storageTerminalResponse.stats.with_owner} {t('עם בעלים', 'with owner')}
                           </>
                         )}
+                        {typeof storageTerminalResponse?.stats?.by_source?.curated_reference === 'number' && (
+                          <>
+                            {' '}
+                            · {storageTerminalResponse.stats.by_source.curated_reference}{' '}
+                            {t('מקור מעובד', 'curated ref')}
+                          </>
+                        )}
                         <span className="mt-1 block font-semibold normal-case tracking-normal text-cyan-800/80 dark:text-cyan-200/80">
                           {t(
-                            'שכבת OSM חופשית (Overpass) — לא רשומות רישיון מעובדות. «בתצוגה» לפי גבולות המפה.',
-                            'Free OSM layer (Overpass) — not curated license records. «In view» follows map bounds.',
+                            'OSM (Overpass) + מקור מעובד לעוגנים עולמיים — לא רשומות רישיון רשמיות. «בתצוגה» לפי גבולות המפה.',
+                            'OSM (Overpass) + curated global hubs — not official licence registries. «In view» follows map bounds.',
                           )}
                         </span>
                       </>

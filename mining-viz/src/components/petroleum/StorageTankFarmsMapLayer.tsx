@@ -6,6 +6,7 @@ import { useI18n } from '../../lib/i18n';
 import {
   formatStorageOperatorLabel,
   formatStorageOwnerLabel,
+  formatStorageSourceLabel,
   formatStorageSubstanceLabel,
   STORAGE_OPERATOR_UNTAGGED,
   storageTankFarmsLayerShouldMount,
@@ -33,7 +34,10 @@ export default function StorageTankFarmsMapLayer({
 
   if (!storageTankFarmsLayerShouldMount(enabled)) return null;
 
-  const layerLabel = t('מסופי אחסון / טנקים (OSM)', 'Storage / tank farms (OSM)');
+  const layerLabel = t(
+    'מסופי אחסון / טנקים (OSM + מקורות)',
+    'Storage / tank farms (OSM + reference)',
+  );
   const placemarks = entities.filter(
     (item): item is MiningLicense & { lat: number; lng: number } =>
       item.lat != null && item.lng != null,
@@ -94,6 +98,9 @@ export default function StorageTankFarmsMapLayer({
                       {t('קיבולת', 'Capacity')}: {item.capacityText}
                     </p>
                   )}
+                  <p className="text-[8px] text-cyan-400/90 break-words">
+                    {t('מקור', 'Source')}: {formatStorageSourceLabel(item)}
+                  </p>
                 </div>
               </Tooltip>
             </Marker>

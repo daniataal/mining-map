@@ -41,7 +41,7 @@ export interface MiningLicense {
   sourceRecordUrl?: string | null;
   sourceUpdatedAt?: string | null;
   lastSyncedAt?: string | null;
-  sourceKind?: 'official_registry' | 'global_open_fallback' | 'user_import_csv' | 'bundled_json' | 'unknown' | string | null;
+  sourceKind?: 'official_registry' | 'global_open_fallback' | 'user_import_csv' | 'bundled_json' | 'curated_reference' | 'unknown' | string | null;
   sourceAccess?: string | null;
   coverageState?: string | null;
   provenanceNote?: string | null;
@@ -646,6 +646,7 @@ export interface StorageTerminalStats {
   with_nearby_port: number;
   high_confidence: number;
   by_subtype: Record<string, number>;
+  by_source?: Record<string, number>;
   top_countries: Array<{ country: string; count: number }>;
 }
 

@@ -94,6 +94,17 @@ python3 -c "from backend.services.ingest.open_data_sync import sync_open_data_so
 
 - **Endpoint smoke checks** (no DB): confirm ArcGIS layers return counts, e.g. Norway NPD layer ~1809 features, Finland Tukes active mining areas ~30, Queensland mineral tenement ~5309.
 
+### Storage / tank farms (Oil & Gas view)
+
+`GET /api/storage/terminals` merges two free sources:
+
+1. **OpenStreetMap via Overpass** — 11 world tiles (`WORLD_TILES` in `backend/services/storage_terminals.py`), default mirror `https://overpass.kumi.systems/api/interpreter`. Queries `industrial=petroleum_terminal|tank_farm|fuel`, petroleum-tagged `man_made=storage_tank` / `silo`, and related name patterns. Results may also be persisted by `petroleum_osm_sync_worker` into `petroleum_osm_features` (`layer_id=storage_terminals`).
+2. **Curated reference seed** — `data/storage_terminals_seed.json` (~50 major global hubs: FOIZ, Ras Tanura, Jurong, US Gulf, Cushing, etc.) with `sourceKind=curated_reference` and approximate hub-centroid coordinates from public operator pages.
+
+If the map still shows only a small regional cluster (e.g. ~15 Rotterdam tanks), likely causes: **stale in-memory cache** (12 h TTL), **regional-only DB snapshot** (rejected when &lt;10 features or &lt;4 countries — live Overpass is used instead), or **old deployed bundle**. Refresh with `GET /api/storage/terminals?force_refresh=true` and redeploy after petroleum OSM sync changes.
+
+Optional env: `STORAGE_OVERPASS_URL`, `OVERPASS_URL`, `STORAGE_OVERPASS_TIMEOUT_SECONDS` (see `.env.example`).
+
 ### Deploy-time fallback CSV auto-import
 
 The GitHub Actions deploy workflow now supports automatic fallback CSV import for
