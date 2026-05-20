@@ -1379,7 +1379,8 @@
 
 .leaflet-canvas-vessel-layer {
   pointer-events: auto;
-  z-index: 450;
+  /* Above license MarkerClusterGroup (~600) so AIS chevrons stay visible in dense map areas. */
+  z-index: 650;
 }
 
 .leaflet-tooltip.vessel-canvas-tooltip {

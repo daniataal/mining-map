@@ -129,6 +129,10 @@ export interface MaritimeVesselFeedResponse {
   worker?: Record<string, unknown>;
   /** True when DB shows vessels in North Sea but none in Persian Gulf while worker is healthy (AISStream upstream gap). */
   aisstream_persian_gulf_coverage_gap?: boolean;
+  /** Live AIS rows in the requested viewport before demo merge (when bbox supplied). */
+  viewport_live_vessel_count?: number | null;
+  /** True when the global snapshot is healthy but the current viewport has no live AIS rows. */
+  viewport_ais_coverage_gap?: boolean;
   /** True when Hormuz-area demo rows were merged (synthetic or seed file). */
   persian_gulf_demo_synthetic?: boolean;
   /** Labels of regions that received demo/seed positions in this response (Gulf + Africa-adjacent when enabled). */
