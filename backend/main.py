@@ -1813,6 +1813,36 @@ def _sync_opec_gulf_reference() -> None:
         print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
 
 
+def _sync_oil_products_licenses_reference() -> None:
+    """Upsert curated downstream fuel / petroleum products marketing licensees."""
+    if not ensure_schema_initialized():
+        print("[OilProductsLic] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+        except ImportError:
+            from services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+
+        lic_conn = get_db_connection()
+        try:
+            summary = sync_oil_products_licenses(lic_conn)
+            print(
+                f"[OilProductsLic] Sync complete — "
+                f"{summary.get('entities_written', 0)} fuel/products marketers upserted "
+                f"(seed {summary.get('seed_count', 0)})."
+            )
+            if summary.get("entities_written", 0) > 0:
+                try:
+                    cache.delete_pattern("licenses:*")
+                except Exception:
+                    pass
+        finally:
+            lic_conn.close()
+    except Exception as exc:
+        print(f"[OilProductsLic] Sync skipped or failed: {exc}")
+
+
 def _bootstrap_open_data():
     """One-shot startup bootstrap for live official + fallback sources.
     
@@ -1925,6 +1955,7 @@ def startup_schema_bootstrap():
             print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
             return
         _sync_opec_gulf_reference()
+        _sync_oil_products_licenses_reference()
         _sync_gov_procurement_reference()
         _bootstrap_open_data()
 
@@ -6694,6 +6725,37 @@ def admin_kazakhstan_mining_sync(
         return {"status": "success", **result}
     except RuntimeError as exc:
         return {"status": "skipped", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/oil-products-licenses/sync")
+def admin_oil_products_licenses_sync(
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Upsert curated downstream fuel / petroleum products marketing licensees from seed JSON."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+        except ImportError:
+            from services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+
+        conn = get_db_connection()
+        try:
+            result = sync_oil_products_licenses(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("entities_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except FileNotFoundError as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

@@ -1,0 +1,306 @@
+{
+  "meta": {
+    "source_id": "oil_products_licenses_curated",
+    "source_name": "Curated downstream petroleum products marketing & fuel wholesale licensees",
+    "source_kind": "curated_reference",
+    "references": [
+      "https://npa.gov.gh/licensing/",
+      "https://www.nmdpra.gov.ng/",
+      "https://www.adnocdistribution.ae/",
+      "https://www.enoc.com/",
+      "https://www.woqod.com/",
+      "https://retail.nnpcgroup.com/",
+      "https://www.goil.com.gh/",
+      "https://www.eia.gov/opendata/"
+    ],
+    "notes": "Named operating companies with public websites or regulator categories. Not a complete national register — verify active licence status before commercial use."
+  },
+  "entities": [
+    {
+      "company": "ADNOC Distribution",
+      "country": "United Arab Emirates",
+      "region": "Abu Dhabi",
+      "lat": 24.4539,
+      "lng": 54.3773,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Fuel marketing & retail distribution",
+      "status": "Active",
+      "source_record_url": "https://www.adnocdistribution.ae/"
+    },
+    {
+      "company": "ENOC (Emirates National Oil Company)",
+      "country": "United Arab Emirates",
+      "region": "Dubai",
+      "lat": 25.067,
+      "lng": 55.171,
+      "commodity": "Gasoline, Diesel, Jet fuel",
+      "license_type": "Integrated fuel marketing & retail",
+      "status": "Active",
+      "source_record_url": "https://www.enoc.com/"
+    },
+    {
+      "company": "Emirates Petroleum Products Company (EPPCO)",
+      "country": "United Arab Emirates",
+      "region": "Dubai",
+      "lat": 25.065,
+      "lng": 55.138,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Petroleum products marketing",
+      "status": "Active",
+      "source_record_url": "https://www.enoc.com/en/eppco"
+    },
+    {
+      "company": "Emarat",
+      "country": "United Arab Emirates",
+      "region": "Dubai",
+      "lat": 25.2048,
+      "lng": 55.2708,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Fuel retail & wholesale marketing",
+      "status": "Active",
+      "source_record_url": "https://www.emarat.ae/"
+    },
+    {
+      "company": "WOQOD (Qatar Fuel)",
+      "country": "Qatar",
+      "region": "Doha",
+      "lat": 25.286,
+      "lng": 51.531,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "National fuel marketing company",
+      "status": "Active",
+      "source_record_url": "https://www.woqod.com/"
+    },
+    {
+      "company": "Oman Oil Marketing Company (OOMCO)",
+      "country": "Oman",
+      "region": "Muscat",
+      "lat": 23.588,
+      "lng": 58.3829,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Fuel marketing & distribution",
+      "status": "Active",
+      "source_record_url": "https://www.oomco.com/"
+    },
+    {
+      "company": "Kuwait Fuel Company",
+      "country": "Kuwait",
+      "region": "Kuwait City",
+      "lat": 29.3759,
+      "lng": 47.9774,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Fuel retail distribution",
+      "status": "Active",
+      "source_record_url": "https://www.kuwaitfuel.com.kw/"
+    },
+    {
+      "company": "Saudi Aramco — Fuels Retail (SASCO)",
+      "country": "Saudi Arabia",
+      "region": "Dhahran, Eastern Province",
+      "lat": 26.303,
+      "lng": 50.12,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Fuel retail & products marketing",
+      "status": "Active",
+      "source_record_url": "https://www.sasco.com.sa/"
+    },
+    {
+      "company": "Bapco Retail (Bahrain)",
+      "country": "Bahrain",
+      "region": "Awali",
+      "lat": 26.069,
+      "lng": 50.559,
+      "commodity": "Gasoline, Diesel, Refined Products",
+      "license_type": "Fuel marketing & retail",
+      "status": "Active",
+      "source_record_url": "https://www.bapco.net/"
+    },
+    {
+      "company": "GOIL Company Limited",
+      "country": "Ghana",
+      "region": "Accra",
+      "lat": 5.6037,
+      "lng": -0.187,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Oil Marketing Company (NPA OMC licence)",
+      "status": "Active",
+      "source_record_url": "https://www.goil.com.gh/"
+    },
+    {
+      "company": "TotalEnergies Marketing Ghana Limited",
+      "country": "Ghana",
+      "region": "Accra",
+      "lat": 5.56,
+      "lng": -0.2057,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Oil Marketing Company (NPA OMC licence)",
+      "status": "Active",
+      "source_record_url": "https://totalenergies.com/ghana"
+    },
+    {
+      "company": "Vivo Energy Ghana (Shell licensee)",
+      "country": "Ghana",
+      "region": "Accra",
+      "lat": 5.6145,
+      "lng": -0.205,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Oil Marketing Company (NPA OMC licence)",
+      "status": "Active",
+      "source_record_url": "https://vivoenergy.com/our-markets/ghana"
+    },
+    {
+      "company": "Bulk Oil Storage and Transportation Company (BOST)",
+      "country": "Ghana",
+      "region": "Accra",
+      "lat": 5.6037,
+      "lng": -0.187,
+      "commodity": "Diesel, Gasoline, Refined Products",
+      "license_type": "Bulk distribution company (NPA BDC licence)",
+      "status": "Active",
+      "source_record_url": "https://www.bostgh.com/"
+    },
+    {
+      "company": "NNPC Retail Limited",
+      "country": "Nigeria",
+      "region": "Abuja",
+      "lat": 9.0579,
+      "lng": 7.4951,
+      "commodity": "Gasoline, Diesel, Kerosene",
+      "license_type": "Petroleum products marketing (NMDPRA downstream)",
+      "status": "Active",
+      "source_record_url": "https://retail.nnpcgroup.com/"
+    },
+    {
+      "company": "11 PLC (Mobil Oil Nigeria Plc)",
+      "country": "Nigeria",
+      "region": "Lagos",
+      "lat": 6.5244,
+      "lng": 3.3792,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Petroleum products marketing licence",
+      "status": "Active",
+      "source_record_url": "https://www.11plc.com/"
+    },
+    {
+      "company": "Conoil PLC",
+      "country": "Nigeria",
+      "region": "Lagos",
+      "lat": 6.4474,
+      "lng": 3.3903,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Downstream petroleum marketing licence",
+      "status": "Active",
+      "source_record_url": "https://www.conoilplc.com/"
+    },
+    {
+      "company": "MRS Oil Nigeria PLC",
+      "country": "Nigeria",
+      "region": "Lagos",
+      "lat": 6.4281,
+      "lng": 3.4219,
+      "commodity": "Gasoline, Diesel",
+      "license_type": "Petroleum products marketing licence",
+      "status": "Active",
+      "source_record_url": "https://www.mrsoil.com/"
+    },
+    {
+      "company": "Ardova PLC",
+      "country": "Nigeria",
+      "region": "Lagos",
+      "lat": 6.4474,
+      "lng": 3.3903,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Downstream petroleum marketing licence",
+      "status": "Active",
+      "source_record_url": "https://ardovaplc.com/"
+    },
+    {
+      "company": "TotalEnergies Marketing Nigeria PLC",
+      "country": "Nigeria",
+      "region": "Lagos",
+      "lat": 6.5244,
+      "lng": 3.3792,
+      "commodity": "Gasoline, Diesel, LPG",
+      "license_type": "Petroleum products marketing licence",
+      "status": "Active",
+      "source_record_url": "https://totalenergies.com.ng/"
+    },
+    {
+      "company": "Valero Energy Corporation",
+      "country": "United States",
+      "region": "San Antonio, Texas",
+      "lat": 29.4241,
+      "lng": -98.4936,
+      "commodity": "Gasoline, Diesel, Jet fuel, Refined Products",
+      "license_type": "Petroleum products marketing & wholesale",
+      "status": "Active",
+      "source_record_url": "https://www.valero.com/"
+    },
+    {
+      "company": "Phillips 66 Company",
+      "country": "United States",
+      "region": "Houston, Texas",
+      "lat": 29.7604,
+      "lng": -95.3698,
+      "commodity": "Gasoline, Diesel, Jet fuel",
+      "license_type": "Fuel marketing & wholesale distribution",
+      "status": "Active",
+      "source_record_url": "https://www.phillips66.com/"
+    },
+    {
+      "company": "Marathon Petroleum Corporation",
+      "country": "United States",
+      "region": "Findlay, Ohio",
+      "lat": 41.0442,
+      "lng": -83.6499,
+      "commodity": "Gasoline, Diesel, Refined Products",
+      "license_type": "Petroleum products marketing",
+      "status": "Active",
+      "source_record_url": "https://www.marathonpetroleum.com/"
+    },
+    {
+      "company": "Motiva Enterprises LLC",
+      "country": "United States",
+      "region": "Houston, Texas",
+      "lat": 29.7499,
+      "lng": -95.3584,
+      "commodity": "Gasoline, Diesel, Refined Products",
+      "license_type": "Fuel marketing & terminal distribution",
+      "status": "Active",
+      "source_record_url": "https://www.motiva.com/"
+    },
+    {
+      "company": "Chevron U.S.A. Inc. (Products)",
+      "country": "United States",
+      "region": "San Ramon, California",
+      "lat": 37.7799,
+      "lng": -121.978,
+      "commodity": "Gasoline, Diesel, Lubricants",
+      "license_type": "Petroleum products marketing",
+      "status": "Active",
+      "source_record_url": "https://www.chevron.com/"
+    },
+    {
+      "company": "PMI Comercio Internacional (Pemex Trading)",
+      "country": "Mexico",
+      "region": "Mexico City",
+      "lat": 19.4326,
+      "lng": -99.1332,
+      "commodity": "Maya Crude, Refined Products",
+      "license_type": "Crude & products trading / marketing",
+      "status": "Active",
+      "source_record_url": "https://www.pemex.com/"
+    },
+    {
+      "company": "Kuwait National Petroleum Company (KNPC) — Marketing",
+      "country": "Kuwait",
+      "region": "Shuaiba",
+      "lat": 29.037,
+      "lng": 48.132,
+      "commodity": "Gasoline, Diesel, Refined Products",
+      "license_type": "National petroleum products marketing",
+      "status": "Active",
+      "source_record_url": "https://www.knpc.com/"
+    }
+  ]
+}

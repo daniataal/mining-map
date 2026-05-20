@@ -2,6 +2,22 @@ import type { MiningLicense } from '../types';
 import { isOilAndGasLicense } from './licenseHeroImage';
 
 /** Curated or ingested refinery rows (licenses table or petroleum layer). */
+export function isFuelMarketerEntity(
+  item: Pick<MiningLicense, 'entitySubtype' | 'licenseType' | 'sector' | 'commodity'>
+): boolean {
+  const sub = (item.entitySubtype || '').trim().toLowerCase();
+  if (sub === 'fuel_marketer' || sub === 'petroleum_products_license') return true;
+  if (!isOilAndGasLicense(item.sector, item.commodity)) return false;
+  const lt = (item.licenseType || '').trim().toLowerCase();
+  return (
+    lt.includes('fuel marketing') ||
+    lt.includes('products marketing') ||
+    lt.includes('oil marketing company') ||
+    lt.includes('petroleum products marketing')
+  );
+}
+
+/** Curated or ingested refinery rows (licenses table or petroleum layer). */
 export function isRefineryEntity(
   item: Pick<MiningLicense, 'entitySubtype' | 'licenseType' | 'sector' | 'commodity'>
 ): boolean {

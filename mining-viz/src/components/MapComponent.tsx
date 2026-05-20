@@ -46,9 +46,11 @@ import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
+import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
+import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
 import { createLicenseClusterIconFactory } from '../lib/mapClusterIcons';
@@ -252,6 +254,9 @@ interface MapComponentProps {
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
   countryFocusBoundsTrigger?: number;
+  /** Open-data storage terminals / tank farms (Oil & Gas view). */
+  storageEntities?: MiningLicense[];
+  onStorageInViewCountChange?: (count: number) => void;
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -506,6 +511,8 @@ export default function MapComponent({
   getDealRoomForLicense,
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
+  storageEntities = [],
+  onStorageInViewCountChange,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -520,6 +527,7 @@ export default function MapComponent({
     const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
     const prevSelectedIdRef = useRef<string | null>(null);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [oilGasMapViewport, setOilGasMapViewport] = useState<MaritimeViewportBounds | null>(null);
 
     const isMobileDevice = useMemo(() => {
         if (typeof window === 'undefined') return false;
@@ -648,6 +656,11 @@ export default function MapComponent({
     );
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
+
+    useEffect(() => {
+        if (!isOilAndGasView || !onStorageInViewCountChange) return;
+        onStorageInViewCountChange(countEntitiesInViewport(storageEntities, oilGasMapViewport));
+    }, [isOilAndGasView, storageEntities, oilGasMapViewport, onStorageInViewCountChange]);
     const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
@@ -1517,6 +1530,11 @@ export default function MapComponent({
                     onBoundsChange={setMaritimeViewport}
                 />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
+                <ViewportBoundsTracker
+                    active={isOilAndGasView}
+                    debounceMs={100}
+                    onBoundsChange={setOilGasMapViewport}
+                />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -1637,6 +1655,15 @@ export default function MapComponent({
                             <OsmPetroleumMapLayers
                                 bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
                                 enabled={isOilAndGasView && onGroundVisible}
+                            />
+                            <StorageTankFarmsMapLayer
+                                entities={storageEntities}
+                                enabled={isOilAndGasView && onGroundVisible}
+                                selectedId={selectedItem?.entityKind === 'storage_terminal' ? selectedItem.id : null}
+                                onSelect={(item) => {
+                                    onSelectMaritimeVessel(null);
+                                    setSelectedItem(item);
+                                }}
                             />
                         </>
                     )}
