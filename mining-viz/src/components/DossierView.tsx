@@ -2406,6 +2406,7 @@ Output requirements:
                   <p className="text-[10px] text-slate-500 leading-relaxed">
                     Public lawsuits, regulatory actions, and arbitration matters tied to this entity.
                     Configure <code className="font-mono">COURTLISTENER_API_KEY</code>,{' '}
+                    <code className="font-mono">OPENSANCTIONS_API_KEY</code>,{' '}
                     <code className="font-mono">PACER_API_TOKEN</code>, or a KYB provider key to replace the stub
                     feed with live data. AI-extracted events appear alongside adapter-sourced rows and are
                     re-fingerprinted so re-running DD does not duplicate cases.

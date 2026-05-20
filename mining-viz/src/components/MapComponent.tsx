@@ -1051,8 +1051,12 @@ export default function MapComponent({
                 </div>
             )}
             {!isRoutePlannerView &&
+              viewModeKey !== 'suppliers' &&
+              !licensesFetchPending &&
               ((onGroundVisible ? processedData.length : 0) === 0) &&
-              ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
+              (vesselsVisible && isMaritimeLayerEnabled
+                ? maritimeVessels.length === 0 && !(isMaritimeLoading && !maritimeFeed)
+                : true) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
@@ -1507,7 +1511,11 @@ export default function MapComponent({
                       onSelectMaritimeVessel(null);
                     }}
                 />
-                <ViewportBoundsTracker active={isMaritimeMapView} debounceMs={50} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker
+                    active={isMaritimeMapView && isMaritimeLayerEnabled}
+                    debounceMs={50}
+                    onBoundsChange={setMaritimeViewport}
+                />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
