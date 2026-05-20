@@ -20,24 +20,60 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _get(url: str, timeout: int = 15) -> Optional[dict]:
+_EIA_HTTP_WARNED: set[str] = set()
+
+# EIA international petroleum facets (align with petroleum_trade.fetch_eia_international).
+_EIA_PRODUCTION_PRODUCT_ID = "5"   # Crude oil including lease condensate
+_EIA_PRODUCTION_ACTIVITY_ID = "1"  # Production
+_EIA_PRODUCTION_UNIT = "TBPD"
+
+
+def _redact_api_key(url: str) -> str:
+    key = (os.getenv("EIA_API_KEY") or "").strip()
+    if key and key in url:
+        url = url.replace(key, "***")
+    return re.sub(r"([?&]api_key=)[^&]+", r"\1***", url)
+
+
+def _get(url: str, timeout: int = 15, *, context: str = "request") -> Optional[dict]:
     """Simple HTTP GET → parsed JSON.  Returns None on any failure."""
+    safe_url = _redact_api_key(url)
     try:
         req = Request(url, headers={"User-Agent": "mining-map-opec-sync/1.0"})
         with urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
+    except HTTPError as exc:
+        if exc.code == 400 and "eia_400" not in _EIA_HTTP_WARNED:
+            _EIA_HTTP_WARNED.add("eia_400")
+            print(
+                "[OPEC] EIA API returned HTTP 400 for production query "
+                "(invalid facets or parameters); skipping live enrichment."
+            )
+        elif exc.code not in (400,) and context not in _EIA_HTTP_WARNED:
+            _EIA_HTTP_WARNED.add(context)
+            print(f"[OPEC] HTTP {exc.code} for {safe_url}: {exc.reason}")
+        return None
+    except (URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        if context not in _EIA_HTTP_WARNED:
+            _EIA_HTTP_WARNED.add(context)
+            print(f"[OPEC] HTTP error for {safe_url}: {exc}")
+        return None
     except Exception as exc:
-        print(f"[OPEC] HTTP error for {url}: {exc}")
+        if context not in _EIA_HTTP_WARNED:
+            _EIA_HTTP_WARNED.add(context)
+            print(f"[OPEC] HTTP error for {safe_url}: {exc}")
         return None
 
 
@@ -65,6 +101,24 @@ _EIA_OPEC_COUNTRY_CODES = {
 }
 
 
+def _eia_production_url(country_iso3: str, *, api_key: str = EIA_API_KEY) -> str:
+    """Build EIA v2 international production query (monthly kb/d)."""
+    params = {
+        "api_key": api_key,
+        "frequency": "monthly",
+        "data[0]": "value",
+        "facets[countryRegionId][]": country_iso3,
+        "facets[productId][]": _EIA_PRODUCTION_PRODUCT_ID,
+        "facets[activityId][]": _EIA_PRODUCTION_ACTIVITY_ID,
+        "facets[unit][]": _EIA_PRODUCTION_UNIT,
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc",
+        "length": "1",
+        "offset": "0",
+    }
+    return f"https://api.eia.gov/v2/international/data/?{urlencode(params)}"
+
+
 def fetch_eia_production(country_iso3: str) -> Optional[float]:
     """
     Fetch the latest monthly crude-oil production (thousand barrels/day)
@@ -73,20 +127,8 @@ def fetch_eia_production(country_iso3: str) -> Optional[float]:
     """
     if not EIA_API_KEY:
         return None
-    url = (
-        f"https://api.eia.gov/v2/international/data/"
-        f"?api_key={EIA_API_KEY}"
-        f"&frequency=monthly"
-        f"&data[0]=value"
-        f"&facets[countryRegionCode][]={country_iso3}"
-        f"&facets[productId][]=53"          # Crude oil including lease condensate
-        f"&facets[activityId][]=1"          # Production
-        f"&facets[unit][]=TBPD"
-        f"&sort[0][column]=period&sort[0][direction]=desc"
-        f"&length=1"
-        f"&offset=0"
-    )
-    data = _get(url)
+    url = _eia_production_url(country_iso3)
+    data = _get(url, context=f"eia_prod:{country_iso3}")
     if not data:
         return None
     try:
@@ -146,6 +188,13 @@ def _resolve_entity_subtype(entity: GulfOilEntity) -> str:
     return entity.entity_subtype
 
 
+def _sector_for_entity(entity: GulfOilEntity) -> str:
+    """Oil & Gas map view filters on sector — mining industrial rows belong in mining."""
+    if _resolve_entity_subtype(entity) == "mining":
+        return "mining"
+    return "oil_and_gas"
+
+
 # Key Persian-Gulf / OPEC entities — national oil companies + major fields
 # Coordinates are field/HQ centroids from public domain sources.
 GULF_OIL_ENTITIES: list[GulfOilEntity] = [
@@ -169,9 +218,6 @@ GULF_OIL_ENTITIES: list[GulfOilEntity] = [
                   notes="Largest oil export terminal in the world."),
     GulfOilEntity("Shaybah Oil Field", "Saudi Arabia", "Rub al Khali",
                   22.500, 53.900, "Crude Oil", "Giant Oil Field", "Producing"),
-    GulfOilEntity("Ma'aden Mining Company", "Saudi Arabia", "Riyadh",
-                  24.688, 46.722, "Gold / Phosphate / Aluminium", "Mining Conglomerate", "Active",
-                  "https://www.maaden.com.sa/", entity_subtype="mining"),
 
     # ── United Arab Emirates ──────────────────────────────────────────────────
     GulfOilEntity("ADNOC (Abu Dhabi National Oil Company)", "United Arab Emirates", "Abu Dhabi",
@@ -196,9 +242,6 @@ GULF_OIL_ENTITIES: list[GulfOilEntity] = [
                   23.800, 53.750, "Crude Oil", "Giant Oil Field", "Producing"),
     GulfOilEntity("ADNOC Gas Processing (Habshan)", "United Arab Emirates", "Al Dhafra",
                   23.832, 53.535, "Natural Gas", "Gas Processing Plant", "Active"),
-    GulfOilEntity("Emirates Steel / EMIRATES GLOBAL ALUMINIUM", "United Arab Emirates", "Abu Dhabi",
-                  24.313, 54.601, "Steel / Aluminium", "Industrial Conglomerate", "Active",
-                  entity_subtype="mining"),
 
     # ── Kuwait ────────────────────────────────────────────────────────────────
     GulfOilEntity("Kuwait Petroleum Corporation (KPC)", "Kuwait", "Kuwait City",
@@ -357,6 +400,7 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
             if production_kbd:
                 commodity = f"{entity.commodity} ({production_kbd:,.0f} kb/d)"
 
+            sector = _sector_for_entity(entity)
             try:
                 cur.execute(
                     """
@@ -384,6 +428,7 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         commodity        = EXCLUDED.commodity,
                         license_type     = EXCLUDED.license_type,
                         status           = EXCLUDED.status,
+                        sector           = EXCLUDED.sector,
                         record_origin    = EXCLUDED.record_origin,
                         source_kind      = EXCLUDED.source_kind,
                         source_id        = EXCLUDED.source_id,
@@ -398,7 +443,7 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         entity.company, entity.country, entity.region,
                         entity.lat, entity.lng,
                         commodity, entity.license_type, entity.status,
-                        "oil_and_gas", "global_open_fallback", "global_open_fallback",
+                        sector, "global_open_fallback", "global_open_fallback",
                         "opec_gulf_reference",
                         "OPEC / Persian Gulf Reference Data",
                         external_id, entity.source_url,
@@ -412,6 +457,29 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                 print(f"[OPEC] Failed to upsert {entity.company}: {exc}")
                 conn.rollback()
                 continue
+
+        # Legacy rows: mining industrial companies were once seeded with oil_and_gas sector.
+        cur.execute(
+            """
+            UPDATE licenses
+            SET sector = 'mining'
+            WHERE external_id LIKE 'opec_gulf_%%'
+              AND entity_subtype = 'mining'
+              AND LOWER(TRIM(COALESCE(sector, ''))) = 'oil_and_gas'
+            """,
+            (),
+        )
+        removed_external_ids = (
+            "opec_gulf_ma'aden_mining_company",
+            "opec_gulf_emirates_steel_/_emirates_global_aluminium",
+        )
+        cur.execute(
+            """
+            DELETE FROM licenses
+            WHERE external_id = ANY(%s)
+            """,
+            (list(removed_external_ids),),
+        )
 
     conn.commit()
     return written

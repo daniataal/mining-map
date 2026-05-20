@@ -938,34 +938,114 @@ def run_contact_enrichment(
     source_entity = loaded or entity or {"id": entity_id, "entity_kind": entity_kind}
     input_json = build_contact_enrichment_input(entity_id, entity_kind, source_entity)
 
+    google_cse_key = os.environ.get("GOOGLE_CSE_API_KEY", "").strip()
+    google_cse_cx = os.environ.get("GOOGLE_CSE_CX", "").strip() or os.environ.get("GOOGLE_CSE_ID", "").strip()
+    serpapi_key = os.environ.get("SERPAPI_API_KEY", "").strip()
+    search_configured = bool((google_cse_key and google_cse_cx) or serpapi_key)
+
     def produce(input_hash: str) -> dict[str, Any]:
+        web_diag: dict[str, Any] = {}
         if entity_kind != "license" or loaded is None:
-            contacts: list[dict[str, Any]] = []
-        else:
-            contacts = build_license_contact_candidates(loaded)
-            for contact in contacts:
-                contact.setdefault("discovered_by", "open_data")
-            if contacts:
-                upsert_entity_contact_candidates(conn, contacts)
+            contacts = []
+            limitations = [
+                "Contact enrichment is implemented for license rows only.",
+            ]
+            if not search_configured:
+                limitations.append(
+                    "Optional web search is disabled until GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX (or GOOGLE_CSE_ID), "
+                    "or SERPAPI_API_KEY, is set.",
+                )
+            missing = ["phone", "email", "website"]
+            return {
+                "agent": "contact_enrichment",
+                "input_hash": input_hash,
+                "entity_id": entity_id,
+                "entity_kind": entity_kind,
+                "status": "completed",
+                "contacts": [],
+                "not_found": missing,
+                "limitations": limitations,
+                "web_discovery": {
+                    "configured": search_configured,
+                    "engine": "none",
+                    "query": None,
+                    "urls_tried": [],
+                    "skipped_robots": [],
+                },
+                "ai": {"status": "not_used", "reason": "no license row loaded for this entity"},
+                "token_saving": _token_saving_metadata(ai_enabled=False),
+            }
+
+        contacts = build_license_contact_candidates(loaded)
+        for contact in contacts:
+            contact.setdefault("discovered_by", "open_data")
+        if contacts:
+            upsert_entity_contact_candidates(conn, contacts)
+
+        missing = [kind for kind in ("phone", "email", "website") if kind not in {c.get("contact_type") for c in contacts}]
+
+        if missing and search_configured:
+            try:
+                from backend.services.contact_web_discovery import discover_web_contact_candidates
+            except ImportError:
+                from services.contact_web_discovery import discover_web_contact_candidates  # type: ignore[no-redef]
+
+            company = str(loaded.get("company") or loaded.get("name") or "").strip()
+            country = str(loaded.get("country") or "").strip()
+            if company:
+                web_contacts, web_diag = discover_web_contact_candidates(
+                    entity_id=entity_id,
+                    company=company,
+                    country=country,
+                    google_cse_key=google_cse_key,
+                    google_cse_cx=google_cse_cx,
+                    serpapi_key=serpapi_key,
+                )
+                existing_keys = {(c.get("contact_type"), c.get("normalized_value")) for c in contacts}
+                for wc in web_contacts:
+                    key = (wc.get("contact_type"), wc.get("normalized_value"))
+                    if key in existing_keys:
+                        continue
+                    existing_keys.add(key)
+                    upsert_entity_contact_candidates(conn, [wc])
+                    contacts.append(wc)
+
         found_types = {contact.get("contact_type") for contact in contacts}
         missing = [kind for kind in ("phone", "email", "website") if kind not in found_types]
+
+        limitations = [
+            "Only values present in cadastre fields or on HTML pages we fetched (mailto/tel/visible text) are returned; "
+            "nothing is invented.",
+        ]
+        if not search_configured:
+            limitations.append(
+                "Optional web search is disabled until GOOGLE_CSE_API_KEY + GOOGLE_CSE_CX (or GOOGLE_CSE_ID), "
+                "or SERPAPI_API_KEY, is set.",
+            )
+
         return {
             "agent": "contact_enrichment",
             "input_hash": input_hash,
             "entity_id": entity_id,
             "entity_kind": entity_kind,
             "status": "completed",
-            "contacts": [_serialize_contact_candidate(contact) for contact in sorted(
-                contacts,
-                key=lambda item: (CONTACT_TYPE_ORDER.get(item.get("contact_type"), 99), -(item.get("confidence_score") or 0)),
-            )],
-            "not_found": missing,
-            "limitations": [
-                "No backend web-search connector is configured for this agent.",
-                "Only explicit phone/email/website/address fields in known source data are returned.",
-                "Missing contacts are reported as not found rather than guessed.",
+            "contacts": [
+                _serialize_contact_candidate(contact)
+                for contact in sorted(
+                    contacts,
+                    key=lambda item: (CONTACT_TYPE_ORDER.get(item.get("contact_type"), 99), -(item.get("confidence_score") or 0)),
+                )
             ],
-            "ai": {"status": "not_used", "reason": "contact agent is source-extraction only until web search infra exists"},
+            "not_found": missing,
+            "limitations": limitations,
+            "web_discovery": {
+                "configured": search_configured,
+                "engine": web_diag.get("engine", "none"),
+                "query": web_diag.get("query"),
+                "urls_tried": web_diag.get("urls_tried", []),
+                "skipped_robots": web_diag.get("skipped_robots", []),
+            },
+            "ai": {"status": "not_used", "reason": "contact agent uses structured extraction and optional HTTP fetch (no LLM)"},
             "token_saving": _token_saving_metadata(ai_enabled=False),
         }
 
@@ -984,7 +1064,7 @@ def build_contact_enrichment_input(entity_id: str, entity_kind: str, source_enti
         "entity_id": entity_id,
         "entity_kind": entity_kind,
         "entity": _compact_entity_for_input(source_entity),
-        "agent_version": "contact_enrichment_v1",
+        "agent_version": "contact_enrichment_v2",
     }
 
 
