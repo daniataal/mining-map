@@ -29,6 +29,8 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/port-calls/{id}/explain", s.ExplainPortCall)
 		api.Get("/port-calls/{id}/confidence-breakdown", s.ConfidenceBreakdown)
 		api.Get("/opportunities", s.ListOpportunities)
+		api.Get("/opportunities/{id}/economics", s.OpportunityEconomics)
+		api.Put("/opportunities/{id}/economics", s.OpportunityEconomics)
 		api.Get("/intelligence", s.ListIntelligence)
 		api.Get("/intelligence/{id}", s.GetIntelligence)
 		api.Get("/companies", s.ListCompanies)

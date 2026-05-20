@@ -8,17 +8,21 @@ import {
   getIntelligenceCards,
   getOilCompanies,
   getOilOpportunities,
+  getOilOpportunityEconomics,
+  saveOilOpportunityEconomics,
   getOilCompanyContacts,
   addOilCompanyContact,
   saveOilCompanyToSuppliers,
   draftOilOutreach,
   type OilContact,
+  type OilDealEconomics,
   connectOilLiveWebSocket,
   type OilOpportunity,
   type OilIntelligenceCard,
   type OilCompany,
   type OilTerminal,
 } from '../../api/oilLiveApi';
+import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
 import { Radio, Building2, Ship, AlertTriangle } from 'lucide-react';
 
@@ -45,6 +49,16 @@ export default function LiveDataPanel() {
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   const [companyContacts, setCompanyContacts] = useState<Record<string, OilContact[]>>({});
   const [newContact, setNewContact] = useState({ type: 'phone', value: '' });
+  const [expandedOpp, setExpandedOpp] = useState<string | null>(null);
+  const [oppEconomics, setOppEconomics] = useState<Record<string, OilDealEconomics>>({});
+  const [dealSheet, setDealSheet] = useState({
+    volume_bbl: '',
+    buy_price_usd_per_bbl: '',
+    sell_price_usd_per_bbl: '',
+    freight_usd: '',
+    storage_usd: '',
+    other_costs_usd: '',
+  });
 
   const queryClient = useQueryClient();
 
@@ -234,27 +248,136 @@ export default function LiveDataPanel() {
             ))}
 
           {tab === 'opportunities' &&
-            opportunities.map((opp: OilOpportunity) => (
-              <article
-                key={opp.id}
-                className="rounded-2xl border border-emerald-500/20 bg-white dark:bg-slate-900 p-4"
-              >
-                <div className="flex justify-between gap-2">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{opp.title}</h3>
-                  <span className="text-[10px] font-black text-emerald-600">
-                    {Math.round((opp.confidence ?? 0) * 100)}%
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1">{opp.hypothesis}</p>
-                {opp.profit_checklist && opp.profit_checklist.length > 0 && (
-                  <ul className="mt-2 text-[10px] text-slate-500 list-disc pl-4">
-                    {opp.profit_checklist.slice(0, 4).map((line, i) => (
-                      <li key={i}>{line}</li>
-                    ))}
-                  </ul>
-                )}
-              </article>
-            ))}
+            opportunities.map((opp: OilOpportunity) => {
+              const econ = oppEconomics[opp.id];
+              const expanded = expandedOpp === opp.id;
+              return (
+                <article
+                  key={opp.id}
+                  className="rounded-2xl border border-emerald-500/20 bg-white dark:bg-slate-900 p-4"
+                >
+                  <div className="flex justify-between gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{opp.title}</h3>
+                    <span className="text-[10px] font-black text-emerald-600">
+                      {Math.round((opp.confidence ?? 0) * 100)}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">{opp.hypothesis}</p>
+                  {opp.profit_checklist && opp.profit_checklist.length > 0 && (
+                    <ul className="mt-2 text-[10px] text-slate-500 list-disc pl-4">
+                      {opp.profit_checklist.slice(0, 4).map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    className="mt-2 w-full py-1.5 text-[10px] font-bold uppercase text-emerald-700"
+                    onClick={async () => {
+                      if (expanded) {
+                        setExpandedOpp(null);
+                        return;
+                      }
+                      setExpandedOpp(opp.id);
+                      try {
+                        const data = await getOilOpportunityEconomics(opp.id);
+                        setOppEconomics((prev) => ({ ...prev, [opp.id]: data }));
+                        const s = data.sheet;
+                        setDealSheet({
+                          volume_bbl: s.volume_bbl != null ? String(s.volume_bbl) : '',
+                          buy_price_usd_per_bbl:
+                            s.buy_price_usd_per_bbl != null ? String(s.buy_price_usd_per_bbl) : '',
+                          sell_price_usd_per_bbl:
+                            s.sell_price_usd_per_bbl != null ? String(s.sell_price_usd_per_bbl) : '',
+                          freight_usd: s.freight_usd != null ? String(s.freight_usd) : '',
+                          storage_usd: s.storage_usd != null ? String(s.storage_usd) : '',
+                          other_costs_usd: s.other_costs_usd != null ? String(s.other_costs_usd) : '',
+                        });
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Failed');
+                      }
+                    }}
+                  >
+                    {expanded
+                      ? t('הסתר גיליון עסקה', 'Hide deal sheet')
+                      : t('גיליון עסקה / מרווח', 'Deal sheet / margin')}
+                  </button>
+                  {expanded && (
+                    <div className="mt-2 grid grid-cols-2 gap-1">
+                      {(
+                        [
+                          ['volume_bbl', t('נפח (חב)', 'Vol (bbl)')],
+                          ['buy_price_usd_per_bbl', t('קנייה $/חב', 'Buy $/bbl')],
+                          ['sell_price_usd_per_bbl', t('מכירה $/חב', 'Sell $/bbl')],
+                          ['freight_usd', t('הובלה $', 'Freight $')],
+                          ['storage_usd', t('אחסון $', 'Storage $')],
+                          ['other_costs_usd', t('אחר $', 'Other $')],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <label key={key} className="text-[9px] text-slate-500">
+                          {label}
+                          <input
+                            className="w-full text-[10px] border rounded px-1 py-0.5 mt-0.5"
+                            value={dealSheet[key]}
+                            onChange={(e) =>
+                              setDealSheet((s) => ({ ...s, [key]: e.target.value }))
+                            }
+                          />
+                        </label>
+                      ))}
+                      <button
+                        type="button"
+                        className="col-span-2 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-bold uppercase"
+                        onClick={async () => {
+                          const num = (k: keyof typeof dealSheet) => {
+                            const v = parseFloat(dealSheet[k]);
+                            return Number.isFinite(v) ? v : undefined;
+                          };
+                          try {
+                            const data = await saveOilOpportunityEconomics(opp.id, {
+                              volume_bbl: num('volume_bbl'),
+                              buy_price_usd_per_bbl: num('buy_price_usd_per_bbl'),
+                              sell_price_usd_per_bbl: num('sell_price_usd_per_bbl'),
+                              freight_usd: num('freight_usd'),
+                              storage_usd: num('storage_usd'),
+                              other_costs_usd: num('other_costs_usd'),
+                            });
+                            setOppEconomics((prev) => ({ ...prev, [opp.id]: data }));
+                            if (data.result.complete && data.result.indicative_margin_usd != null) {
+                              toast.success(
+                                t(
+                                  `מרווח משוער: $${Math.round(data.result.indicative_margin_usd).toLocaleString()}`,
+                                  `Indicative margin: $${Math.round(data.result.indicative_margin_usd).toLocaleString()}`,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Failed');
+                          }
+                        }}
+                      >
+                        {t('חשב מרווח', 'Calc margin')}
+                      </button>
+                      {econ?.result.complete && econ.result.indicative_margin_usd != null && (
+                        <p className="col-span-2 text-[10px] font-bold text-emerald-700">
+                          {t('מרווח משוער', 'Indicative margin')}: $
+                          {Math.round(econ.result.indicative_margin_usd).toLocaleString()}
+                          {econ.result.margin_per_bbl_usd != null &&
+                            ` · $${econ.result.margin_per_bbl_usd.toFixed(2)}/bbl`}
+                        </p>
+                      )}
+                      <p className="col-span-2 text-[9px] text-amber-700">
+                        {econ?.disclaimer ??
+                          t(
+                            'מרווח מהנחות שלך בלבד — לא הצעת שוק',
+                            'Margin from your inputs only — not a market offer',
+                          )}
+                      </p>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
 
           {tab === 'companies' &&
             companies.map((co) => {
@@ -301,6 +424,28 @@ export default function LiveDataPanel() {
                       {t('טיוטת פנייה', 'Draft outreach')}
                     </button>
                   </div>
+                  {co.supplier_id && (
+                    <button
+                      type="button"
+                      className="mt-2 w-full py-1.5 rounded-xl border border-violet-500/30 text-[10px] font-bold uppercase text-violet-700"
+                      onClick={async () => {
+                        try {
+                          const job = await runContactEnrichmentAgent(co.supplier_id!, 'license');
+                          toast.success(
+                            job.cached
+                              ? t('סוכן אנשי קשר (מטמון)', 'Contact agent (cached)')
+                              : t('סוכן אנשי קשר הושלם', 'Contact agent finished'),
+                          );
+                          const data = await getOilCompanyContacts(co.id);
+                          setCompanyContacts((prev) => ({ ...prev, [co.id]: data.contacts }));
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Agent failed');
+                        }
+                      }}
+                    >
+                      {t('הרץ סוכן אנשי קשר', 'Run contact agent (Groq → fallback)')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="mt-2 w-full py-1.5 text-[10px] font-bold uppercase text-sky-600"
