@@ -35,6 +35,7 @@ import {
 } from './features/route-planner/locationPresets';
 import {
   Filter as LucideFilter,
+  HelpCircle as LucideHelpCircle,
   MapPin as LucideMapPin,
   LayoutGrid as LucideLayoutGrid,
   PieChart as LucidePieChart,
@@ -46,6 +47,8 @@ import {
 import ThemeToggle from './components/ThemeToggle';
 import PlatformHealthBanner from './components/PlatformHealthBanner';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
+import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
+import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -289,7 +292,13 @@ export default function App() {
   );
 
   // Filtering Hook
-  const miningData = useMiningData(allLicenses, userAnnotations);
+  const miningData = useMiningData(allLicenses, userAnnotations, {
+    suppliersPipelineMode: viewMode === 'suppliers',
+  });
+  const suppliersCounts = useMemo(
+    () => countSuppliersPipeline(allLicenses.map((l) => l.id), userAnnotations),
+    [allLicenses, userAnnotations],
+  );
   const mapProcessedData = useDeferredValue(miningData.processedData);
 
   const selectedCountryBeforeFocusRef = useRef<string[]>([]);
@@ -349,7 +358,10 @@ export default function App() {
     } else {
       miningData.setSelectedSector(null);
     }
-  }, [viewMode, miningData.setSelectedSector]);
+    if (viewMode === 'suppliers') {
+      miningData.setSuppliersShowAll(false);
+    }
+  }, [viewMode, miningData.setSelectedSector, miningData.setSuppliersShowAll]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -632,6 +644,7 @@ export default function App() {
       maxVessels: Number(maritimeMaxVessels) || 15000,
       captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
+      allowWithoutViewport: true,
       includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
     });
   }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
@@ -795,8 +808,51 @@ export default function App() {
                     </button>
                   )}
                   {sectorCoverageSummary && viewMode !== 'route_planner' && (
-                    <div className="hidden lg:flex items-center px-3 h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
-                      {t("כיסוי עולמי", "World coverage")}: {sectorCoverageSummary.official_syncable || 0} {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0} {t("גיבוי גלובלי", "global fallback")} · {((sectorCoverageSummary.official_api_restricted || 0) + (sectorCoverageSummary.official_portal_only || 0) + (sectorCoverageSummary.decommissioned || 0))} {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0} {t("גיבוי CSV", "CSV fallback")} · {(sectorCoverageSummary.countries_with_global_fallback || 0)} {t("עם שכבת גיבוי", "with fallback layer")}
+                    <div
+                      className="hidden lg:flex flex-col justify-center px-3 min-h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300"
+                      title={WORLD_COVERAGE_BANNER_NOTE}
+                    >
+                      <span>
+                        {t("כיסוי רישיונות", "License coverage")}: {sectorCoverageSummary.official_syncable || 0}{' '}
+                        {t("רשמי פתוח", "official live")} · {sectorCoverageSummary.global_fallback_only || 0}{' '}
+                        {t("גיבוי גלובלי", "global fallback")} ·{' '}
+                        {((sectorCoverageSummary.official_api_restricted || 0) +
+                          (sectorCoverageSummary.official_portal_only || 0) +
+                          (sectorCoverageSummary.decommissioned || 0))}{' '}
+                        {t("רשמי חלקי", "official partial")} · {sectorCoverageSummary.fallback_imported || 0}{' '}
+                        {t("גיבוי CSV", "CSV fallback")}
+                      </span>
+                    </div>
+                  )}
+                  <div
+                    className="hidden lg:flex items-center gap-1.5 px-2 h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-slate-500 dark:text-slate-400"
+                    title={mapViewHelpBody(viewMode)}
+                  >
+                    <LucideHelpCircle className="h-4 w-4 shrink-0 text-amber-500" aria-hidden />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 max-w-[10rem] truncate">
+                      {t(mapViewHelpTitle(viewMode), mapViewHelpTitle(viewMode))}
+                    </span>
+                  </div>
+                  {viewMode === 'suppliers' && (
+                    <div className="hidden sm:flex items-center gap-2">
+                      <div className="flex items-center px-3 h-10 rounded-2xl bg-emerald-500/10 backdrop-blur-2xl border border-emerald-500/30 shadow-2xl text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                        {t('ספקים פעילים', 'Active suppliers')}: {suppliersCounts.active}
+                        <span className="mx-1 opacity-50">/</span>
+                        {suppliersCounts.total}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => miningData.setSuppliersShowAll((v) => !v)}
+                        className={`h-10 rounded-2xl border px-3 text-[9px] font-black uppercase tracking-widest shadow-2xl backdrop-blur-2xl ${
+                          miningData.suppliersShowAll
+                            ? 'border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-200'
+                            : 'border-stone-200/90 bg-stone-100/90 text-slate-600 dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-300'
+                        }`}
+                      >
+                        {miningData.suppliersShowAll
+                          ? t('הצג pipeline בלבד', 'Pipeline only')
+                          : t('הצג את כל הרישיונות', 'Show all licenses')}
+                      </button>
                     </div>
                   )}
                   {miningData.activeFilterCount > 0 && (
@@ -836,9 +892,14 @@ export default function App() {
                     </button>
                     <button
                       onClick={() => setViewMode('suppliers')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
                       {t("ספקים", "Suppliers")}
+                      {suppliersCounts.active > 0 && (
+                        <span className="inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-emerald-500/30 text-[9px] font-black px-1">
+                          {suppliersCounts.active}
+                        </span>
+                      )}
                     </button>
                     <button
                       onClick={() => setViewMode('ports')}
@@ -879,10 +940,35 @@ export default function App() {
           )}
 
           {viewMode === 'oil_and_gas' && (
-            <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
-              <OilGasOnboardingTip active />
-            </div>
+            <>
+              <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
+                <OilGasOnboardingTip active />
+              </div>
+              {storageTerminalResponse?.stats && (
+                <div className="absolute top-[4.5rem] right-3 z-[999] pointer-events-none hidden sm:block">
+                  <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-900 shadow-xl backdrop-blur-xl dark:text-cyan-100">
+                    {t('מסופי אחסון / טנקים', 'Storage / tank farms')}: {storageTerminalResponse.stats.total}{' '}
+                    {t('ברחבי העולם', 'worldwide')} · {storageTerminalResponse.stats.with_operator}{' '}
+                    {t('עם מפעיל', 'with operator')}
+                  </div>
+                </div>
+              )}
+            </>
           )}
+
+          {viewMode === 'suppliers' &&
+            !miningData.suppliersShowAll &&
+            mapProcessedData.length === 0 &&
+            !isLoading && (
+              <div className="absolute inset-x-0 top-28 z-[998] mx-auto max-w-md pointer-events-none px-4">
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-[11px] font-semibold text-emerald-900 shadow-xl backdrop-blur-xl dark:text-emerald-100">
+                  {t(
+                    'סמן אות עסקה (ירוק) בדוסייה → סקירה כדי להוסיף ספקים. או הצג את כל הרישיונות לגילוי.',
+                    'Mark Deal signal (green) on dossier Overview to add suppliers here. Or use Show all licenses for discovery.',
+                  )}
+                </div>
+              </div>
+            )}
 
           <div className="w-full h-full z-0">
             {(viewMode === 'global' ||

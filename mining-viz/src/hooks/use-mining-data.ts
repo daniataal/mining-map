@@ -5,6 +5,7 @@ import {
 } from '../lib/commodities';
 import { FilterResultCache } from '../lib/filterResultCache';
 import { buildLicenseSearchIndex, licenseHaystackMatches } from '../lib/licenseSearchIndex';
+import { matchesSuppliersPipeline } from '../lib/suppliersPipeline';
 import { MiningLicense, UserAnnotation } from '../types';
 
 function normalizeSubtypeLabel(value: string | null | undefined): string {
@@ -48,6 +49,8 @@ function buildProcessedDataCacheKey(
   selectedConfidenceBucket: string[],
   selectedSector: string | null,
   portLinkedOnly: boolean,
+  suppliersPipelineMode: boolean,
+  suppliersShowAll: boolean,
   annotationRevision: number,
 ): string {
   return [
@@ -63,11 +66,18 @@ function buildProcessedDataCacheKey(
     selectedConfidenceBucket.join('\u0001'),
     selectedSector ?? '',
     portLinkedOnly ? '1' : '0',
+    suppliersPipelineMode ? '1' : '0',
+    suppliersShowAll ? '1' : '0',
     String(annotationRevision),
   ].join('|');
 }
 
-export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<string, UserAnnotation>) => {
+export const useMiningData = (
+  rawData: MiningLicense[],
+  userAnnotations: Record<string, UserAnnotation>,
+  options?: { suppliersPipelineMode?: boolean },
+) => {
+  const suppliersPipelineMode = Boolean(options?.suppliersPipelineMode);
   const [filter, setFilter] = useState('');
   /** Drives license list + map; updated on Enter / clear, not on every keystroke. */
   const [appliedFilter, setAppliedFilter] = useState('');
@@ -95,6 +105,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
   const [selectedConfidenceBucket, setSelectedConfidenceBucket] = useState<string[]>([]);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [portLinkedOnly, setPortLinkedOnly] = useState(false);
+  const [suppliersShowAll, setSuppliersShowAll] = useState(false);
   const filterCacheRef = useRef(new FilterResultCache<MiningLicense[]>());
   const annotationRevisionRef = useRef(0);
 
@@ -130,6 +141,7 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       setSelectedConfidenceBucket([]);
       setSelectedSector(null);
       setPortLinkedOnly(false);
+      setSuppliersShowAll(false);
     });
   };
 
@@ -152,6 +164,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       selectedConfidenceBucket,
       selectedSector,
       portLinkedOnly,
+      suppliersPipelineMode,
+      suppliersShowAll,
       annotationRevisionRef.current,
     );
     const cached = filterCacheRef.current.get(cacheKey);
@@ -229,6 +243,12 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
       });
     }
 
+    if (suppliersPipelineMode) {
+      data = data.filter((item) =>
+        matchesSuppliersPipeline(userAnnotations[item.id], { showAll: suppliersShowAll }),
+      );
+    }
+
     const sorted = data.slice().sort((a, b) => {
       const valA = (a[sortBy] ?? '').toString().toLowerCase();
       const valB = (b[sortBy] ?? '').toString().toLowerCase();
@@ -251,6 +271,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     selectedConfidenceBucket,
     selectedSector,
     portLinkedOnly,
+    suppliersPipelineMode,
+    suppliersShowAll,
     searchIndex,
   ]);
 
@@ -413,6 +435,8 @@ export const useMiningData = (rawData: MiningLicense[], userAnnotations: Record<
     setSelectedSector,
     portLinkedOnly,
     setPortLinkedOnly: setPortLinkedOnlyDeferred,
+    suppliersShowAll,
+    setSuppliersShowAll,
     activeFilterCount,
     resetFilters,
     isFilterPending: filter.trim() !== appliedFilter,

@@ -22,6 +22,9 @@ export interface CanvasVesselLayerOptions extends L.LayerOptions {
 /** At or above this zoom, draw every in-bounds vessel (still viewport-clipped). */
 const LOD_FULL_DETAIL_ZOOM = 8;
 
+/** Below this map-bounds area (deg²), draw all in-view vessels (regional zoom). */
+const LOD_REGIONAL_BBOX_AREA_DEG2 = 28;
+
 /** Max chevrons to rasterize at low zoom (display LOD cap, not clustering). */
 const LOD_MAX_DRAW = 4500;
 
@@ -230,17 +233,22 @@ export class CanvasVesselLayer extends L.Layer {
       inView.push(i);
     }
 
-    const z = map.getZoom();
-    if (z >= LOD_FULL_DETAIL_ZOOM || inView.length <= LOD_MAX_DRAW) {
-      return inView;
-    }
-
     const south = bounds.getSouth();
     const west = bounds.getWest();
     const north = bounds.getNorth();
     const east = bounds.getEast();
     const latSpan = Math.max(1e-9, north - south);
     const lngSpan = Math.max(1e-9, east - west);
+    const bboxArea = latSpan * lngSpan;
+
+    const z = map.getZoom();
+    if (
+      z >= LOD_FULL_DETAIL_ZOOM ||
+      bboxArea <= LOD_REGIONAL_BBOX_AREA_DEG2 ||
+      inView.length <= LOD_MAX_DRAW
+    ) {
+      return inView;
+    }
 
     const cellBest = new Map<number, number>();
 

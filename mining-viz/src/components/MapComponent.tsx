@@ -618,15 +618,22 @@ export default function MapComponent({
         error: maritimeError,
         refetch: refetchMaritime,
     } = useMaritimeVessels({
-        enabled: isMaritimeMapView,
+        enabled: isMaritimeMapView && isMaritimeLayerEnabled,
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
+        viewport: maritimeViewport,
         includeCoastalDemo: includeCoastalDemoVessels,
     });
     const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
+    const maritimeBboxTotal =
+        maritimeFeed?.total_available ?? maritimeFeed?.effective_bbox_count ?? null;
     const maritimeSnapshotTotal =
-        maritimeFeed?.snapshot_vessel_count ?? maritimeFeed?.total_available ?? maritimeSnapshotVessels.length;
+        (maritimeViewport && maritimeBboxTotal != null
+            ? maritimeBboxTotal
+            : maritimeFeed?.snapshot_vessel_count) ??
+        maritimeFeed?.total_available ??
+        maritimeSnapshotVessels.length;
     const maritimeSparseSnapshot = isMaritimeLayerEnabled && maritimeSnapshotTotal < 100;
     const maritimeVesselsInViewport = useMemo(
         () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),

@@ -57,11 +57,17 @@ import {
   dealStageIndex,
   dealStageAtIndex,
   DD_CHECKLIST_IDS,
+  checklistStageWarning,
 } from '../lib/dealWorkflow';
 import {
   resolveChecklistItems,
   checklistProgress,
 } from '../lib/checklistDefaults';
+import {
+  sourceQualityLabel,
+  sourceQualityTier,
+  sourceQualityWarning,
+} from '../lib/sourceQuality';
 import { toast } from 'sonner';
 import { getEsgZoneIntersection } from '../lib/esgConservationZones';
 import MaritimeContextPanel from './MaritimeContextPanel';
@@ -465,6 +471,12 @@ export default function DossierView({
     [item?.id, annotation.checklist],
   );
   const checklistStats = useMemo(() => checklistProgress(checklistItems), [checklistItems]);
+  const sourceTier = useMemo(() => sourceQualityTier(item || {}), [item]);
+  const sourceQualityWarn = useMemo(() => sourceQualityWarning(sourceTier), [sourceTier]);
+  const stageChecklistWarn = useMemo(
+    () => checklistStageWarning(annotation.stage, checklistStats.pct),
+    [annotation.stage, checklistStats.pct],
+  );
 
   const ddChecklistComplete = useMemo(
     () =>
@@ -1236,6 +1248,24 @@ Output requirements:
                 </div>
               </div>
             </div>
+
+            {(sourceQualityWarn || stageChecklistWarn) && (
+              <div className="mb-6 space-y-2">
+                {sourceQualityWarn && (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[11px] font-semibold text-amber-900 dark:text-amber-100">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300 block mb-1">
+                      {t('איכות מקור', 'Source quality')}: {sourceQualityLabel(sourceTier)}
+                    </span>
+                    {sourceQualityWarn}
+                  </div>
+                )}
+                {stageChecklistWarn && (
+                  <div className="rounded-2xl border border-slate-400/30 bg-slate-500/10 px-4 py-3 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                    {stageChecklistWarn}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
@@ -2772,6 +2802,29 @@ Output requirements:
                       </div>
                     </div>
                   </Card>
+
+                  {(item.phoneNumber || publicPhoneContact || privateLeadPhone !== '—') && (
+                    <Card className="bg-emerald-500/10 border border-emerald-500/25 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/20">
+                        <LucidePhone className="h-6 w-6 text-emerald-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-300">
+                          {t('טלפון מפעיל / חברה', 'Operator / company phone')}
+                        </p>
+                        <p className="text-lg font-bold text-slate-900 dark:text-white break-all">
+                          {publicPhoneContact?.value || item.phoneNumber || privateLeadPhone}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {publicPhoneContact
+                            ? t('מאגר entity_contacts או רישום פתוח', 'From entity_contacts or open registry')
+                            : item.phoneNumber
+                              ? t('משדה הרישיון ב-Postgres', 'From license record in Postgres')
+                              : t('הערת ליד פנימית', 'Internal lead note')}
+                        </p>
+                      </div>
+                    </Card>
+                  )}
 
                   {isEsgRisk && esgZone && (
                     <Card className="bg-red-500/10 border-red-500/20 rounded-3xl p-6 mb-6 overflow-hidden relative shadow-[0_12px_40px_rgba(239,68,68,0.15)] flex flex-col md:flex-row gap-6 items-center">

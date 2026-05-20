@@ -348,6 +348,59 @@ def fetch_persisted_maritime_rows(conn) -> tuple[list[dict[str, Any]], Optional[
     return rows, status
 
 
+def fetch_persisted_maritime_rows_in_bbox(
+    conn,
+    bbox: tuple[float, float, float, float],
+    *,
+    max_rows: int,
+    vessel_scope: str = "all_vessels",
+) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Load vessels in viewport from Postgres (preferred path for map bbox queries)."""
+    from psycopg2.extras import RealDictCursor
+
+    ensure_maritime_tables(conn)
+    south, west, north, east = bbox
+    limit = max(1, min(int(max_rows), AIS_MAX_VESSELS * 2))
+    order_sql = _vessel_scope_order_sql(vessel_scope)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            SELECT
+                mmsi,
+                vessel_name,
+                lat,
+                lng,
+                observed_at,
+                source_label,
+                source_url,
+                ship_type_code,
+                ship_type_label,
+                payload,
+                last_seen_at
+            FROM maritime_vessel_snapshots
+            WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
+              AND lat BETWEEN %s AND %s
+              AND lng BETWEEN %s AND %s
+            ORDER BY {order_sql}
+            LIMIT %s
+            """,
+            (MARITIME_SNAPSHOT_RETENTION_SECONDS, south, north, west, east, limit),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT status, source, last_attempt_at, last_success_at, last_error, snapshot_count, metadata
+            FROM maritime_ingest_status
+            WHERE id = %s
+            """,
+            (MARITIME_WORKER_STATUS_ID,),
+        )
+        status_row = cur.fetchone()
+    conn.commit()
+    status = dict(status_row) if status_row else None
+    return rows, status
+
+
 def _refresh_maritime_memory_cache(conn) -> None:
     rows, status = fetch_persisted_maritime_rows(conn)
     _maritime_memory_cache["loaded_at"] = time.time()
@@ -1849,6 +1902,32 @@ def get_maritime_vessel_feed(
     plan = _build_ais_subscription_plan(normalized_bbox)
 
     try:
+        if normalized_bbox is not None:
+            conn = _db_connect()
+            try:
+                bbox_rows, bbox_status = fetch_persisted_maritime_rows_in_bbox(
+                    conn,
+                    normalized_bbox,
+                    max_rows=normalized_max_vessels * 2,
+                    vessel_scope=normalized_scope,
+                )
+            finally:
+                conn.close()
+            if bbox_rows:
+                return _build_maritime_vessel_feed_from_rows(
+                    all_rows=bbox_rows,
+                    status=bbox_status if isinstance(bbox_status, dict) else None,
+                    normalized_scope=normalized_scope,
+                    normalized_max_vessels=normalized_max_vessels,
+                    normalized_window=normalized_window,
+                    normalized_offset=normalized_offset,
+                    normalized_bbox=normalized_bbox,
+                    include_gulf_demo=include_gulf_demo,
+                    include_coastal_demo=include_coastal_demo,
+                    data_source="postgres_bbox",
+                    cache_age_seconds=None,
+                )
+
         all_rows, status, data_source, cache_age = _load_maritime_rows_for_feed()
     except Exception as exc:
         return _build_empty_ais_response(

@@ -7,6 +7,8 @@ import {
   advanceDealStage,
   retreatDealStage,
   normalizeAnnotationStage,
+  checklistStageWarning,
+  APPROVED_STAGE_MIN_CHECKLIST_PCT,
 } from './dealWorkflow';
 
 describe('dealWorkflow', () => {
@@ -46,5 +48,10 @@ describe('dealWorkflow', () => {
       stage: 'Investigating',
     });
     expect(normalizeAnnotationStage({ stage: 'New' })).toEqual({ stage: 'New' });
+  });
+
+  it('warns on Approved with low checklist completion', () => {
+    expect(checklistStageWarning('Approved', APPROVED_STAGE_MIN_CHECKLIST_PCT - 1)).toContain('Checklist');
+    expect(checklistStageWarning('Approved', 100)).toBeNull();
   });
 });
