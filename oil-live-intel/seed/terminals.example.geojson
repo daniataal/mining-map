@@ -1,0 +1,14 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Example Terminal",
+        "country": "Netherlands",
+        "products": ["diesel", "gasoline"]
+      },
+      "geometry": { "type": "Point", "coordinates": [4.05, 51.95] }
+    }
+  ]
+}

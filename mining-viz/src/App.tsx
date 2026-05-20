@@ -42,6 +42,7 @@ import {
   LogOut as LucideLogOut,
   Droplets as LucideDroplets,
   Navigation2 as LucideNavigation,
+  Radio as LucideRadio,
   X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
@@ -58,6 +59,7 @@ const DossierView = lazy(() => import('./components/DossierView'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
+const LiveDataPanel = lazy(() => import('./features/live-data/LiveDataPanel'));
 
 const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 
@@ -127,7 +129,7 @@ export default function App() {
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
   const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
+    'global' | 'mining' | 'oil_and_gas' | 'live_data' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
   >('global');
   const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
   const [euProcurementCpvBucket, setEuProcurementCpvBucket] = useState<string | null>(null);
@@ -785,7 +787,8 @@ export default function App() {
             viewMode === 'suppliers' ||
             viewMode === 'ports' ||
             viewMode === 'investigations' ||
-            viewMode === 'route_planner') && (
+            viewMode === 'route_planner' ||
+            viewMode === 'live_data') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
@@ -890,6 +893,13 @@ export default function App() {
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
                       {t("נפט וגז", "Oil & Gas")}
+                    </button>
+                    <button
+                      onClick={() => setViewMode('live_data')}
+                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'live_data' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
+                    >
+                      <LucideRadio className="w-3.5 h-3.5" />
+                      {t('נתונים חיים', 'Live Data')}
                     </button>
                     <button
                       onClick={() => setViewMode('suppliers')}
@@ -1092,6 +1102,11 @@ export default function App() {
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
+            )}
+            {viewMode === 'live_data' && (
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
+                <LiveDataPanel />
+              </Suspense>
             )}
             {viewMode === 'investigations' && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען חקירות...', 'Loading investigations...')} />}>
