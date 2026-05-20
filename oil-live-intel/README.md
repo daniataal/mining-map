@@ -11,6 +11,17 @@ Free, explainable oil **live intelligence** service for the mining-map platform.
 
 **Not confirmed transactions.** All cargo activity is labeled possible/likely/inferred.
 
+## Live AIS pipeline (Phases 6–8)
+
+When `AISSTREAM_API_KEY` is set and `ENABLE_AIS=true`:
+
+1. Worker subscribes to AISStream bounding boxes around seeded terminals
+2. Filters oil/product tankers (AIS types 80–89 + name heuristics; bulk near sulfur terminals)
+3. Geofence match (~1.2 km) opens `oil_port_calls`
+4. After 2+ hours outside terminal, closes visit, classifies load/discharge from draft delta
+5. Generates `oil_intelligence_cards` with confidence + evidence
+6. Worker POSTs events to API `/api/oil-live/internal/broadcast` → WebSocket clients
+
 ## Run with Docker Compose
 
 From repo root:

@@ -31,6 +31,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	go workers.RunPortCallMaintainer(ctx, pool, log)
+	go workers.RunPositionCleanup(ctx, pool, cfg.AISPositionRetainHours, log)
+	go workers.RunTradeSync(ctx, pool, cfg, log)
+	go workers.RunOpportunityScanner(ctx, pool, log)
 	if cfg.EnableAIS {
 		go workers.RunAISIngestor(ctx, pool, cfg, log)
 	}

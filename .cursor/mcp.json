@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "oil-live-intel": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "DATABASE_URL=postgresql://postgres:password@db:5432/mining_db?sslmode=disable",
+        "--network",
+        "mining-map_default",
+        "mining-map-oil-live-intel:latest",
+        "/app/mcp"
+      ]
+    }
+  }
+}

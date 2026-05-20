@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -7,7 +7,14 @@ import {
   getOilLiveMap,
   getIntelligenceCards,
   getOilCompanies,
+  getOilOpportunities,
+  getOilCompanyContacts,
+  addOilCompanyContact,
   saveOilCompanyToSuppliers,
+  draftOilOutreach,
+  type OilContact,
+  connectOilLiveWebSocket,
+  type OilOpportunity,
   type OilIntelligenceCard,
   type OilCompany,
   type OilTerminal,
@@ -28,25 +35,46 @@ const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
 const DISCLAIMER_HE = 'מסקנות מנתונים ציבוריים בלבד — לא עסקה, קונה, מוכר או סוג מוצר מאומתים.';
 
-type Tab = 'feed' | 'companies';
+type Tab = 'feed' | 'companies' | 'opportunities';
 
 export default function LiveDataPanel() {
   const { t } = useI18n();
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('feed');
   const [productFilter, setProductFilter] = useState<string>('all');
   const [selectedCard, setSelectedCard] = useState<OilIntelligenceCard | null>(null);
+  const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
+  const [companyContacts, setCompanyContacts] = useState<Record<string, OilContact[]>>({});
+  const [newContact, setNewContact] = useState({ type: 'phone', value: '' });
+
+  const queryClient = useQueryClient();
 
   const { data: mapData, isLoading } = useQuery({
     queryKey: ['oil-live-map'],
     queryFn: () => getOilLiveMap(),
-    staleTime: 30_000,
+    staleTime: 15_000,
+    refetchInterval: 20_000,
   });
+
+  useEffect(() => {
+    const disconnect = connectOilLiveWebSocket((msg) => {
+      if (msg.type === 'intelligence_card_created' || msg.type === 'vessel_position') {
+        void queryClient.invalidateQueries({ queryKey: ['oil-live-map'] });
+        void queryClient.invalidateQueries({ queryKey: ['oil-live-intelligence'] });
+      }
+    });
+    return disconnect;
+  }, [queryClient]);
 
   const { data: cardsData } = useQuery({
     queryKey: ['oil-live-intelligence'],
     queryFn: async () => (await getIntelligenceCards()).cards,
     staleTime: 30_000,
+  });
+
+  const { data: opportunitiesData } = useQuery({
+    queryKey: ['oil-live-opportunities'],
+    queryFn: async () => (await getOilOpportunities(0.55)).opportunities,
+    staleTime: 60_000,
   });
 
   const { data: companiesData } = useQuery({
@@ -64,6 +92,7 @@ export default function LiveDataPanel() {
   const terminals = mapData?.terminals ?? [];
   const cards = cardsData ?? mapData?.cards ?? [];
   const companies = companiesData ?? mapData?.companies ?? [];
+  const opportunities = opportunitiesData ?? [];
 
   const filteredCards = useMemo(() => {
     if (productFilter === 'all') return cards;
@@ -84,8 +113,8 @@ export default function LiveDataPanel() {
       const result = await saveOilCompanyToSuppliers(company.id);
       if (result.status === 'saved') {
         toast.success(t('נשמר בספקים', 'Saved to Suppliers'));
-        void qc.invalidateQueries({ queryKey: ['oil-live-companies'] });
-        void qc.invalidateQueries({ queryKey: ['licenses'] });
+        void queryClient.invalidateQueries({ queryKey: ['oil-live-companies'] });
+        void queryClient.invalidateQueries({ queryKey: ['licenses'] });
       } else {
         toast.warning(
           t('ייצוא נכשל — ניתן ליצור ידנית', 'Export failed — use returned payload manually'),
@@ -129,6 +158,13 @@ export default function LiveDataPanel() {
             className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase ${tab === 'feed' ? 'bg-amber-500 text-slate-950' : 'bg-white dark:bg-slate-900 border'}`}
           >
             {t('מודיעין', 'Intelligence')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('opportunities')}
+            className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase ${tab === 'opportunities' ? 'bg-amber-500 text-slate-950' : 'bg-white dark:bg-slate-900 border'}`}
+          >
+            {t('הזדמנויות', 'Opportunities')}
           </button>
           <button
             type="button"
@@ -197,33 +233,156 @@ export default function LiveDataPanel() {
               </article>
             ))}
 
-          {tab === 'companies' &&
-            companies.map((co) => (
+          {tab === 'opportunities' &&
+            opportunities.map((opp: OilOpportunity) => (
               <article
-                key={co.id}
-                className="rounded-2xl border border-black/5 dark:border-white/10 bg-white dark:bg-slate-900 p-4"
+                key={opp.id}
+                className="rounded-2xl border border-emerald-500/20 bg-white dark:bg-slate-900 p-4"
               >
-                <div className="flex justify-between items-start gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold flex items-center gap-1">
-                      <Building2 className="w-4 h-4 text-slate-400" />
-                      {co.name}
-                    </h3>
-                    <p className="text-[10px] text-slate-500 uppercase">
-                      {co.company_type} · {co.country}
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-bold text-emerald-600">{co.supplier_status}</span>
+                <div className="flex justify-between gap-2">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{opp.title}</h3>
+                  <span className="text-[10px] font-black text-emerald-600">
+                    {Math.round((opp.confidence ?? 0) * 100)}%
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleSave(co)}
-                  className="mt-3 w-full py-2 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black uppercase"
-                >
-                  {t('שמור לספקים', 'Save to Suppliers')}
-                </button>
+                <p className="text-[11px] text-slate-500 mt-1">{opp.hypothesis}</p>
+                {opp.profit_checklist && opp.profit_checklist.length > 0 && (
+                  <ul className="mt-2 text-[10px] text-slate-500 list-disc pl-4">
+                    {opp.profit_checklist.slice(0, 4).map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                )}
               </article>
             ))}
+
+          {tab === 'companies' &&
+            companies.map((co) => {
+              const expanded = expandedCompany === co.id;
+              const contacts = companyContacts[co.id] ?? [];
+              return (
+                <article
+                  key={co.id}
+                  className="rounded-2xl border border-black/5 dark:border-white/10 bg-white dark:bg-slate-900 p-4"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold flex items-center gap-1">
+                        <Building2 className="w-4 h-4 text-slate-400" />
+                        {co.name}
+                      </h3>
+                      <p className="text-[10px] text-slate-500 uppercase">
+                        {co.company_type} · {co.country}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-600">{co.supplier_status}</span>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleSave(co)}
+                      className="flex-1 py-2 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black uppercase"
+                    >
+                      {t('שמור לספקים', 'Save to Suppliers')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const { draft } = await draftOilOutreach(co.id);
+                          await navigator.clipboard.writeText(draft);
+                          toast.success(t('טיוטה הועתקה', 'Draft copied'));
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Failed');
+                        }
+                      }}
+                      className="flex-1 py-2 rounded-xl border text-[10px] font-black uppercase"
+                    >
+                      {t('טיוטת פנייה', 'Draft outreach')}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 w-full py-1.5 text-[10px] font-bold uppercase text-sky-600"
+                    onClick={async () => {
+                      if (expanded) {
+                        setExpandedCompany(null);
+                        return;
+                      }
+                      setExpandedCompany(co.id);
+                      try {
+                        const data = await getOilCompanyContacts(co.id);
+                        setCompanyContacts((prev) => ({ ...prev, [co.id]: data.contacts }));
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Failed');
+                      }
+                    }}
+                  >
+                    {expanded
+                      ? t('הסתר אנשי קשר', 'Hide contacts')
+                      : t('אנשי קשר ורכש', 'Contacts & procurement')}
+                  </button>
+                  {expanded && (
+                    <div className="mt-2 space-y-2">
+                      {contacts.length === 0 && (
+                        <p className="text-[10px] text-slate-500">
+                          {t(
+                            'אין אנשי קשר — שמור לספקים לסנכרון מרישיון',
+                            'No contacts — save to Suppliers to sync from license',
+                          )}
+                        </p>
+                      )}
+                      {contacts.map((c, i) => (
+                        <div key={c.id ?? i} className="text-[10px] text-slate-600 dark:text-slate-400">
+                          <span className="font-bold uppercase">{c.contact_type}</span>: {c.value}
+                          {c.origin && (
+                            <span className="text-slate-400 ml-1">({c.origin})</span>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex gap-1">
+                        <select
+                          className="text-[10px] border rounded-lg px-1"
+                          value={newContact.type}
+                          onChange={(e) => setNewContact((s) => ({ ...s, type: e.target.value }))}
+                        >
+                          <option value="phone">phone</option>
+                          <option value="email">email</option>
+                          <option value="website">website</option>
+                        </select>
+                        <input
+                          className="flex-1 text-[10px] border rounded-lg px-2"
+                          placeholder={t('טלפון / אימייל', 'Phone / email')}
+                          value={newContact.value}
+                          onChange={(e) => setNewContact((s) => ({ ...s, value: e.target.value }))}
+                        />
+                        <button
+                          type="button"
+                          className="text-[10px] font-bold px-2 rounded-lg bg-slate-800 text-white"
+                          onClick={async () => {
+                            if (!newContact.value.trim()) return;
+                            try {
+                              await addOilCompanyContact(co.id, {
+                                contact_type: newContact.type,
+                                value: newContact.value.trim(),
+                              });
+                              const data = await getOilCompanyContacts(co.id);
+                              setCompanyContacts((prev) => ({ ...prev, [co.id]: data.contacts }));
+                              setNewContact({ type: 'phone', value: '' });
+                              toast.success(t('נוסף', 'Added'));
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Failed');
+                            }
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
 
           {tab === 'feed' && filteredCards.length === 0 && !isLoading && (
             <p className="text-sm text-slate-500">{t('אין כרטיסי מודיעין', 'No intelligence cards yet')}</p>

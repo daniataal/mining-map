@@ -272,6 +272,23 @@ func (s *Server) SaveToSuppliers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) InternalBroadcast(w http.ResponseWriter, r *http.Request) {
+	if s.Config.InternalBroadcastKey == "" || r.Header.Get("X-Oil-Intel-Internal") != s.Config.InternalBroadcastKey {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		Type string         `json:"type"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Type == "" {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	s.Hub.Broadcast(body.Type, body.Data)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "broadcast"})
+}
+
 func (s *Server) WebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
