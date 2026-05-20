@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import type { MaritimeVessel } from './types';
 import { getVesselChevronDim, type VesselDrawRecord } from './vesselMarkerStyle';
+import { planVesselLodDraw } from './vesselDisplayLod';
 
 export interface CanvasVesselLayerOptions extends L.LayerOptions {
   mapZoom: number;
@@ -18,19 +19,6 @@ export interface CanvasVesselLayerOptions extends L.LayerOptions {
  * OffscreenCanvas is intentionally not used: Leaflet owns an HTMLCanvasElement in the overlay
  * pane; moving rasterization to a worker would duplicate feed sync and complicate hit-testing.
  */
-
-/** At or above this zoom, draw every in-bounds vessel (still viewport-clipped). */
-const LOD_FULL_DETAIL_ZOOM = 8;
-
-/** Below this map-bounds area (deg²), draw all in-view vessels (regional zoom). */
-const LOD_REGIONAL_BBOX_AREA_DEG2 = 28;
-
-/** Max chevrons to rasterize at low zoom (display LOD cap, not clustering). */
-const LOD_MAX_DRAW = 4500;
-
-/** Geographic grid dimensions for low-zoom cell winners (roughly caps candidates ≈ cols×rows). */
-const LOD_GRID_COLS = 72;
-const LOD_GRID_ROWS = 45;
 
 /** Hit-test spatial hash cell size in CSS pixels. */
 const HIT_CELL_PX = 44;
@@ -103,6 +91,8 @@ export class CanvasVesselLayer extends L.Layer {
   private _lastCssH = 0;
   private _lastDpr = 0;
   private _dataEpoch = 0;
+  private _lastDrawCount = 0;
+  private _lastLodSubsampling = false;
 
   constructor(options: CanvasVesselLayerOptions = { mapZoom: 5, selectedId: null }) {
     super(options);
@@ -223,66 +213,33 @@ export class CanvasVesselLayer extends L.Layer {
    */
   private _computeDrawIndices(map: L.Map, records: VesselDrawRecord[]): number[] {
     const bounds = map.getBounds();
-    if (!bounds.isValid()) return [];
-
-    const inView: number[] = [];
-    const n = records.length;
-    for (let i = 0; i < n; i += 1) {
-      const r = records[i];
-      if (!bounds.contains([r.lat, r.lng])) continue;
-      inView.push(i);
+    if (!bounds.isValid()) {
+      this._lastLodSubsampling = false;
+      return [];
     }
 
-    const south = bounds.getSouth();
-    const west = bounds.getWest();
-    const north = bounds.getNorth();
-    const east = bounds.getEast();
-    const latSpan = Math.max(1e-9, north - south);
-    const lngSpan = Math.max(1e-9, east - west);
-    const bboxArea = latSpan * lngSpan;
+    const plan = planVesselLodDraw(
+      records,
+      {
+        south: bounds.getSouth(),
+        west: bounds.getWest(),
+        north: bounds.getNorth(),
+        east: bounds.getEast(),
+      },
+      map.getZoom(),
+      (lat, lng) => bounds.contains([lat, lng]),
+    );
+    this._lastLodSubsampling = plan.lodSubsampling;
+    return plan.drawIndices;
+  }
 
-    const z = map.getZoom();
-    if (
-      z >= LOD_FULL_DETAIL_ZOOM ||
-      bboxArea <= LOD_REGIONAL_BBOX_AREA_DEG2 ||
-      inView.length <= LOD_MAX_DRAW
-    ) {
-      return inView;
-    }
+  /** Last frame: how many chevrons were rasterized (for parent UI). */
+  getLastDrawCount(): number {
+    return this._lastDrawCount;
+  }
 
-    const cellBest = new Map<number, number>();
-
-    for (let k = 0; k < inView.length; k += 1) {
-      const i = inView[k];
-      const r = records[i];
-      let cx = Math.floor(((r.lng - west) / lngSpan) * LOD_GRID_COLS);
-      let cy = Math.floor(((r.lat - south) / latSpan) * LOD_GRID_ROWS);
-      cx = Math.max(0, Math.min(LOD_GRID_COLS - 1, cx));
-      cy = Math.max(0, Math.min(LOD_GRID_ROWS - 1, cy));
-      const cid = cy * LOD_GRID_COLS + cx;
-      const prev = cellBest.get(cid);
-      if (prev === undefined) {
-        cellBest.set(cid, i);
-        continue;
-      }
-      if (r.lodPriority < records[prev].lodPriority) {
-        cellBest.set(cid, i);
-      } else if (r.lodPriority === records[prev].lodPriority && r.id < records[prev].id) {
-        cellBest.set(cid, i);
-      }
-    }
-
-    let out = Array.from(cellBest.values());
-    if (out.length > LOD_MAX_DRAW) {
-      out.sort((a, b) => {
-        const pa = records[a].lodPriority;
-        const pb = records[b].lodPriority;
-        if (pa !== pb) return pa - pb;
-        return records[a].id.localeCompare(records[b].id);
-      });
-      out = out.slice(0, LOD_MAX_DRAW);
-    }
-    return out;
+  getLastLodSubsampling(): boolean {
+    return this._lastLodSubsampling;
   }
 
   private _ensureSelectedInDraw(draw: number[], records: VesselDrawRecord[]): number[] {
@@ -377,6 +334,7 @@ export class CanvasVesselLayer extends L.Layer {
 
     let draw = this._computeDrawIndices(map, records);
     draw = this._ensureSelectedInDraw(draw, records);
+    this._lastDrawCount = draw.length;
 
     if (paintKey === this._lastPaintKey && this._pixelXY.length === n * 2) {
       return;

@@ -45,7 +45,7 @@ export function canonicalShipTypeChipFromVessel(vessel: MaritimeVessel): VesselS
  * Manual regression checklist (ship-type chips + canvas LOD):
  * - Enable Vessels (AIS), zoom to an area with mixed types; pick "Tanker" only — map count and chevrons drop.
  * - Select a vessel with only ship_type_code set (label empty) — "Cargo" chip still filters correctly.
- * - Zoom out past LOD_FULL_DETAIL_ZOOM — filtered subset still redraws (no stale full feed on canvas).
+ * - Zoom out past LOD_FULL_DETAIL_ZOOM (7) — filtered subset still redraws (no stale full feed on canvas).
  */
 
 /** Higher = more relevant for oil/gas maritime context (sort only, not exclusion). */

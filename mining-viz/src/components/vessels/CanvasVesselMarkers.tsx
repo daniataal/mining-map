@@ -11,6 +11,8 @@ export interface CanvasVesselMarkersProps {
   formatTooltip: (vessel: MaritimeVessel) => HTMLElement | string;
   /** Filled when the Leaflet layer is constructed; parent pushes AIS rows via `setVessels` to avoid React diffing huge arrays. */
   layerApiRef?: MutableRefObject<CanvasVesselLayer | null>;
+  /** Called when the canvas layer is mounted so the parent can flush pending AIS rows. */
+  onLayerReady?: () => void;
 }
 
 function createCanvasVesselLayer(
@@ -29,6 +31,7 @@ function createCanvasVesselLayer(
       if (props.layerApiRef?.current === layer) props.layerApiRef.current = null;
     });
   }
+  queueMicrotask(() => props.onLayerReady?.());
   return createElementObject(layer, context);
 }
 

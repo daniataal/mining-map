@@ -36,6 +36,8 @@ import {
   MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
   sortVesselsForDisplay,
   toVesselDrawRecords,
+  planVesselLodDraw,
+  LOD_FULL_DETAIL_ZOOM,
   VESSEL_SHIP_TYPE_OPTIONS,
   MARITIME_LEGEND_KEYS,
   VESSEL_CATEGORY_COLORS,
@@ -664,21 +666,33 @@ export default function MapComponent({
     const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
-    useLayoutEffect(() => {
+    const maritimeDrawRecords = useMemo(
+        () => toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
+        [maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id],
+    );
+
+    const maritimeLodEstimate = useMemo(() => {
+        if (!maritimeViewport || maritimeDrawRecords.length === 0) {
+            return { drawn: maritimeDrawRecords.length, subsampling: false };
+        }
+        const plan = planVesselLodDraw(maritimeDrawRecords, maritimeViewport, maritimeMapZoom);
+        return { drawn: plan.drawIndices.length, subsampling: plan.lodSubsampling };
+    }, [maritimeDrawRecords, maritimeViewport, maritimeMapZoom]);
+
+    const pushVesselsToCanvas = useCallback(() => {
         if (!vesselsVisible || !isMaritimeLayerEnabled) return;
         const layer = canvasVesselLayerRef.current;
         if (!layer) return;
-        layer.setVessels(
-            maritimeVessels,
-            toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
-        );
-    }, [
-        vesselsVisible,
-        isMaritimeLayerEnabled,
-        maritimeVessels,
-        maritimeMapZoom,
-        selectedMaritimeVessel?.id,
-    ]);
+        layer.setVessels(maritimeVessels, maritimeDrawRecords);
+    }, [vesselsVisible, isMaritimeLayerEnabled, maritimeVessels, maritimeDrawRecords]);
+
+    useLayoutEffect(() => {
+        pushVesselsToCanvas();
+    }, [pushVesselsToCanvas]);
+
+    const handleCanvasVesselLayerReady = useCallback(() => {
+        pushVesselsToCanvas();
+    }, [pushVesselsToCanvas]);
 
     const prevCoastalDemoToggleMount = useRef(true);
     useEffect(() => {
@@ -782,6 +796,29 @@ export default function MapComponent({
               'Sparse vessel feed. Run docker compose up -d maritime-worker and set AISSTREAM_API_KEY in .env.'
           )
         : null;
+    const maritimeViewportAisGap =
+        isMaritimeLayerEnabled &&
+        maritimeVessels.length === 0 &&
+        Boolean(maritimeFeed?.viewport_ais_coverage_gap) &&
+        !maritimeFeed?.coastal_demo_synthetic &&
+        !includeCoastalDemoVessels;
+    const maritimeLodUiNote =
+        isMaritimeLayerEnabled &&
+        maritimeVessels.length > 0 &&
+        maritimeLodEstimate.subsampling &&
+        maritimeLodEstimate.drawn < maritimeVessels.length
+            ? t(
+                  `בזום עולמי מוצגים ~${maritimeLodEstimate.drawn.toLocaleString()} סימני כלי שיט מתוך ${maritimeVessels.length.toLocaleString()} בתצוגה (דגימת LOD, לא קיבוץ). התקרבו לזום ≥${LOD_FULL_DETAIL_ZOOM} לכל הסימנים.`,
+                  `At this zoom only ~${maritimeLodEstimate.drawn.toLocaleString()} ship icons are drawn from ${maritimeVessels.length.toLocaleString()} in view (display LOD, not clustering). Zoom to ≥${LOD_FULL_DETAIL_ZOOM} to show every vessel.`
+              )
+            : null;
+    const maritimeClusterClarification =
+        isMaritimeLayerEnabled && onGroundVisible && mapDisplayData.length > 0
+            ? t(
+                  'מספרים גדולים על המפה (למשל 1943) הם קיבוץ רישיונות/נכסים — לא כלי שיט. כלי שיט מוצגים כסימני משולש צבעוניים.',
+                  'Large numbered map bubbles (e.g. 1943) are license/asset clusters—not vessels. Ships appear as small colored chevrons.'
+              )
+            : null;
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
@@ -1200,6 +1237,27 @@ export default function MapComponent({
                                     </p>
                                 )}
 
+                                {maritimeViewportAisGap && (
+                                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
+                                        {t(
+                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את maritime-worker, או סמן «מיקומי הדגמה» לתצוגה סינתטית.',
+                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand maritime-worker watches or enable demo positions in the checkbox above.',
+                                        )}
+                                    </p>
+                                )}
+
+                                {maritimeLodUiNote && (
+                                    <p className="rounded-lg border border-slate-500/25 bg-slate-500/10 px-2.5 py-2 text-[9px] leading-snug text-slate-700 dark:text-slate-200">
+                                        {maritimeLodUiNote}
+                                    </p>
+                                )}
+
+                                {maritimeClusterClarification && (
+                                    <p className="text-[9px] leading-snug text-slate-500 dark:text-slate-400">
+                                        {maritimeClusterClarification}
+                                    </p>
+                                )}
+
                                 {(((maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0) ||
                                     maritimeFeed?.persian_gulf_demo_synthetic) && (
                                     <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
@@ -1410,7 +1468,7 @@ export default function MapComponent({
                                             <p className="mb-1 text-[9px] leading-snug text-slate-500">
                                                 {t(
                                                     'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. בזום עולמי מוצגת דגימת LOD (מכליות מועדפות) — לא קיבוץ; בזום אזורי מוצגים כל כלי השיט בתצוגה.',
-                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. At world zoom the map uses display LOD (tankers preferred)—not clustering; at regional zoom every in-view vessel is drawn.'
+                                                    `Chevron points along heading (north up). Fill color follows AIS ship-type category. Below zoom ${LOD_FULL_DETAIL_ZOOM} the map may subsample icons for performance (tankers preferred)—not clustering; zoom in for every in-view vessel.`
                                                 )}
                                             </p>
                                             <div className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -1676,6 +1734,7 @@ export default function MapComponent({
                                     selectedId={selectedMaritimeVessel?.id ?? null}
                                     onVesselClick={handleMaritimeVesselClick}
                                     formatTooltip={formatMaritimeVesselTooltip}
+                                    onLayerReady={handleCanvasVesselLayerReady}
                                 />
                             </LayerGroup>
                         </LayersControl.Overlay>

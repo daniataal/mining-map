@@ -17,6 +17,22 @@ from urllib.request import Request, urlopen
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 AISSTREAM_PERSIAN_GULF_ISSUE_URL = "https://github.com/aisstream/aisstream/issues/17"
+
+# --- Maritime AIS provider notes (ADR) ---
+# Current production ingest: AISStream WebSocket (maritime-worker), snapshots in Postgres/Redis.
+# API path never opens live sockets; /api/maritime/vessels serves persisted rows + optional bbox filter.
+#
+# Alternatives (not wired unless MARITIME_AIS_PROVIDER changes from default):
+#   aisstream     — WebSocket, global satellite+terrestrial mix; free dev key; known Hormuz gap (#17).
+#   myshiptracking — REST, terrestrial-heavy; paid tiers (trial only); good for EU/US coast POC.
+#   marinesia     — REST, free key but ~1 req/hr; per-MMSI lookups only (poor global map feed).
+#   vessel_finder — REST credits; commercial; similar to MyShipTracking.
+#   aishub        — REST/WebSocket; free if you share an AIS antenna feed (ops burden).
+#   noaa_cadastre — US historic bulk GeoJSON; not live AIS (enrichment layer only).
+#
+# Env stubs for future adapters (see .env.example): MYSHIPTRACKING_API_KEY, MARINESIA_API_KEY,
+# MARITIME_AIS_PROVIDER=aisstream|myshiptracking|marinesia (default aisstream).
+MARITIME_AIS_PROVIDER = os.getenv("MARITIME_AIS_PROVIDER", "aisstream").strip().lower() or "aisstream"
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 UNLOCODE_CSV_URL = "https://raw.githubusercontent.com/datasets/un-locode/main/data/code-list.csv"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -49,6 +65,14 @@ MARITIME_GULF_SUPPLEMENT_MAX_VESSELS = max(
 MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS = max(
     AIS_MIN_CAPTURE_WINDOW_SECONDS,
     int(os.getenv("MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS", "18")),
+)
+MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS = max(
+    250,
+    int(os.getenv("MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS", "2500")),
+)
+MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS = max(
+    AIS_MIN_CAPTURE_WINDOW_SECONDS,
+    int(os.getenv("MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS", "18")),
 )
 MARITIME_ALWAYS_ON_REGION_IDS = tuple(
     item.strip()
@@ -151,6 +175,7 @@ AISSTREAM_WATCH_REGIONS = [
     },
     {"id": "red_sea_suez", "label": "Red Sea and Suez", "bbox": (12.0, 29.0, 32.5, 44.0)},
     {"id": "east_mediterranean", "label": "Mediterranean", "bbox": (30.0, -7.0, 46.0, 37.0)},
+    {"id": "gulf_of_guinea", "label": "Gulf of Guinea", "bbox": GULF_OF_GUINEA_DEMO_BBOX},
     {"id": "west_africa", "label": "West Africa offshore", "bbox": (-30.0, -20.0, 14.0, 20.0)},
     {"id": "south_africa_indian", "label": "South and East Africa coast", "bbox": (-40.0, 15.0, -5.0, 55.0)},
     {"id": "gulf_of_mexico", "label": "Gulf of Mexico and Caribbean", "bbox": (18.0, -98.0, 31.0, -79.0)},
@@ -278,6 +303,62 @@ def count_maritime_rows_in_bbox(
     bbox: tuple[float, float, float, float],
 ) -> int:
     return len(filter_maritime_rows_by_bbox(rows, bbox))
+
+
+def viewport_ais_coverage_gap(
+    rows: list[dict[str, Any]],
+    bbox: Optional[tuple[float, float, float, float]],
+    *,
+    worker_ok: bool,
+    min_global_rows: int = 100,
+) -> bool:
+    """True when the global feed is healthy but the requested viewport has no live AIS rows."""
+    normalized_bbox = _normalize_requested_bbox(bbox)
+    if normalized_bbox is None or not worker_ok:
+        return False
+    if count_maritime_rows_in_bbox(rows, normalized_bbox) > 0:
+        return False
+    return len(rows) >= max(1, int(min_global_rows))
+
+
+# Dedicated worker supplemental watches so sparse regions are not crowded out by the global cap.
+MARITIME_WORKER_SUPPLEMENT_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "persian_gulf",
+        "label": "Persian Gulf and Strait of Hormuz (supplemental)",
+        "bbox": PERSIAN_GULF_CORE_BBOX,
+        "max_vessels": MARITIME_GULF_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "gulf_of_guinea",
+        "label": "Gulf of Guinea (supplemental)",
+        "bbox": GULF_OF_GUINEA_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "horn_of_africa",
+        "label": "Horn of Africa / Gulf of Aden (supplemental)",
+        "bbox": HORN_OF_AFRICA_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "red_sea_south",
+        "label": "Red Sea south (supplemental)",
+        "bbox": RED_SEA_SOUTH_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "east_africa_indian",
+        "label": "East Africa / Indian Ocean approaches (supplemental)",
+        "bbox": EAST_AFRICA_INDIAN_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+)
 
 
 def _north_sea_reference_bbox() -> tuple[float, float, float, float]:
@@ -1834,6 +1915,14 @@ def _build_maritime_vessel_feed_from_rows(
         response["memory_cache_age_seconds"] = round(float(cache_age_seconds), 2)
     response["snapshot_vessel_count"] = len(all_rows)
     response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
+    response["viewport_live_vessel_count"] = (
+        count_maritime_rows_in_bbox(all_rows, normalized_bbox) if normalized_bbox else None
+    )
+    response["viewport_ais_coverage_gap"] = viewport_ais_coverage_gap(
+        all_rows,
+        normalized_bbox,
+        worker_ok=worker_ok,
+    )
     response["persian_gulf_demo_synthetic"] = bool(gulf_demo_rows)
     response["coastal_demo_regions"] = coastal_demo_regions
     response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
@@ -2051,48 +2140,52 @@ def collect_worker_maritime_vessel_feed(
     vessel_scope: str = "all_vessels",
 ) -> dict[str, Any]:
     """
-    Worker ingest: multi-region watch plus a dedicated Persian Gulf / Hormuz capture so
-    high-traffic chokepoints are not crowded out by the global vessel cap.
+    Worker ingest: multi-region watch plus dedicated supplemental captures for sparse
+    chokepoints (Persian Gulf, Gulf of Guinea, Horn/Red Sea, East Africa) so high-traffic
+    European boxes do not crowd them out of the global vessel cap.
     """
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
     normalized_window = max(
         AIS_MIN_CAPTURE_WINDOW_SECONDS,
         min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
     )
-    gulf_max = min(MARITIME_GULF_SUPPLEMENT_MAX_VESSELS, normalized_max_vessels)
-    gulf_feed = collect_live_maritime_vessel_feed(
-        max_vessels=gulf_max,
-        capture_window_seconds=min(
-            normalized_window,
-            MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS,
-        ),
-        vessel_scope=vessel_scope,
-        bbox=PERSIAN_GULF_CORE_BBOX,
-    )
+    supplemental_feeds: list[dict[str, Any]] = []
+    supplemental_labels: list[str] = []
+    for spec in MARITIME_WORKER_SUPPLEMENT_SPECS:
+        supplement_max = min(int(spec["max_vessels"]), normalized_max_vessels)
+        supplement_window = min(int(spec["window_seconds"]), normalized_window)
+        supplemental_feeds.append(
+            collect_live_maritime_vessel_feed(
+                max_vessels=supplement_max,
+                capture_window_seconds=supplement_window,
+                vessel_scope=vessel_scope,
+                bbox=spec["bbox"],
+            )
+        )
+        supplemental_labels.append(str(spec["label"]))
     main_feed = collect_live_maritime_vessel_feed(
         max_vessels=normalized_max_vessels,
         capture_window_seconds=normalized_window,
         vessel_scope=vessel_scope,
     )
     merged = merge_maritime_vessel_feeds(
-        [gulf_feed, main_feed],
+        supplemental_feeds + [main_feed],
         max_vessels=normalized_max_vessels,
         vessel_scope=vessel_scope,
     )
     merged["geography_mode"] = main_feed.get("geography_mode")
     merged["geography_note"] = main_feed.get("geography_note")
     merged["region_labels"] = list(
-        dict.fromkeys(
-            (gulf_feed.get("region_labels") or [])
-            + (main_feed.get("region_labels") or [])
-            + ["Persian Gulf and Strait of Hormuz (supplemental)"]
-        )
+        dict.fromkeys((main_feed.get("region_labels") or []) + supplemental_labels)
     )
-    merged["effective_bbox_count"] = int(main_feed.get("effective_bbox_count") or 0) + 1
+    merged["effective_bbox_count"] = int(main_feed.get("effective_bbox_count") or 0) + len(
+        MARITIME_WORKER_SUPPLEMENT_SPECS
+    )
     merged["source"] = main_feed.get("source") or "AISStream multi-region watch"
     merged_limitations = list(merged.get("limitations") or [])
     supplement_note = (
-        "Persian Gulf / Strait of Hormuz supplemental watch runs every worker cycle."
+        "Supplemental watches run every worker cycle for Persian Gulf, Gulf of Guinea, "
+        "Horn of Africa / Gulf of Aden, Red Sea south, and East Africa approaches."
     )
     if supplement_note not in merged_limitations:
         merged_limitations.append(supplement_note)

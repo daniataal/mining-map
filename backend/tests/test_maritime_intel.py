@@ -30,8 +30,10 @@ from backend.services.maritime_intel import (
     match_destination_to_port,
     merge_maritime_vessel_feeds,
     maritime_coastal_demo_merge_decision,
+    MARITIME_WORKER_SUPPLEMENT_SPECS,
     parse_unlocode_coordinates,
     petroleum_vessel_priority,
+    viewport_ais_coverage_gap,
 )
 
 
@@ -88,8 +90,29 @@ class MaritimeIntelTests(unittest.TestCase):
         regions = _regions_for_worker_watch_mode("all_regions")
         region_ids = {region["id"] for region in regions}
         self.assertIn("west_africa", region_ids)
+        self.assertIn("gulf_of_guinea", region_ids)
         self.assertIn("south_africa_indian", region_ids)
         self.assertIn("east_africa_arabian_sea", region_ids)
+
+    def test_worker_supplement_specs_cover_gulf_and_africa(self):
+        supplement_ids = {spec["id"] for spec in MARITIME_WORKER_SUPPLEMENT_SPECS}
+        self.assertIn("persian_gulf", supplement_ids)
+        self.assertIn("gulf_of_guinea", supplement_ids)
+        self.assertIn("horn_of_africa", supplement_ids)
+        self.assertIn("red_sea_south", supplement_ids)
+        self.assertIn("east_africa_indian", supplement_ids)
+
+    def test_viewport_ais_coverage_gap_when_feed_healthy_but_view_empty(self):
+        rows = [{"mmsi": str(i), "lat": 55.0, "lng": 3.0} for i in range(150)]
+        self.assertTrue(
+            viewport_ais_coverage_gap(rows, PERSIAN_GULF_CORE_BBOX, worker_ok=True),
+        )
+        self.assertFalse(
+            viewport_ais_coverage_gap(rows, (50.0, -5.0, 62.0, 12.0), worker_ok=True),
+        )
+        self.assertFalse(
+            viewport_ais_coverage_gap(rows, PERSIAN_GULF_CORE_BBOX, worker_ok=False),
+        )
 
     def test_regions_for_worker_watch_mode_always_includes_persian_gulf(self):
         regions = _regions_for_worker_watch_mode("rotating")
