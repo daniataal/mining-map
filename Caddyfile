@@ -2,6 +2,8 @@
 :80 {
 	encode gzip zstd
 
+	reverse_proxy /api/oil-live/* oil-live-intel:8095
+
 	@backend {
 		path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
 	}

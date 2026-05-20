@@ -362,6 +362,63 @@ services:
       route-service:
         condition: service_healthy
 
+  oil-live-intel:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-intel
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      OIL_INTEL_PORT: "8095"
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
+      ENABLE_AIS: ${OIL_INTEL_ENABLE_AIS:-true}
+      ENABLE_EIA: ${OIL_INTEL_ENABLE_EIA:-true}
+      ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
+      ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
+      EXISTING_BACKEND_URL: "http://backend:8000"
+      SUPPLIER_CREATE_ENDPOINT: "/licenses"
+      OIL_INTEL_SEED_ON_STARTUP: "true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:8095/api/oil-live/health",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  oil-live-intel-worker:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-intel-worker
+    restart: unless-stopped
+    entrypoint: ["/app/worker"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
+      ENABLE_AIS: ${OIL_INTEL_ENABLE_AIS:-true}
+      ENABLE_EIA: ${OIL_INTEL_ENABLE_EIA:-true}
+      ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
+      ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      oil-live-intel:
+        condition: service_healthy
+
   db:
     build:
       context: ./db

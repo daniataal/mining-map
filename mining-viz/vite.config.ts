@@ -20,6 +20,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api/oil-live': {
+        target: 'http://oil-live-intel:8095',
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+        ws: true,
+      },
       '/licenses': {
         target: 'http://backend:8000',
         changeOrigin: true,
