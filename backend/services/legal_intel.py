@@ -13,13 +13,18 @@ This module is intentionally side-effect-free for unit tests: every
 external HTTP call is encapsulated in a single helper that can be
 monkey-patched, and the DB writer accepts any DB-API 2.0 connection.
 
-Env vars (all optional; module falls back to stubs when missing):
-    COURTLISTENER_API_KEY    free-tier US courts (https://www.courtlistener.com/help/api/)
-    PACER_API_TOKEN          paid US federal docket access (commercial extension point)
-    OPENCORPORATES_API_KEY   company KYB enrichment (https://api.opencorporates.com/)
-    KYB_PROVIDER_API_KEY     generic commercial KYB / litigation provider hook
-    OPENSANCTIONS_API_KEY    sanctions + PEP + adverse media (https://www.opensanctions.org)
-    LEGAL_INTEL_DISABLED     set to 1/true/yes to skip all live providers
+Env vars (all optional; see collect_legal_events for stub fallback):
+    COURTLISTENER_API_KEY    U.S. court search (live when set; else skipped)
+    OPENSANCTIONS_API_KEY    sanctions / PEP match API (live when set; else skipped)
+    OPENCORPORATES_API_KEY   regulatory filings overlay (stub until wired)
+    PACER_API_TOKEN          paid US federal dockets (stub until wired)
+    KYB_PROVIDER_API_KEY     commercial KYB hook (stub until wired)
+    LEGAL_INTEL_DISABLED     set to 1/true/yes to skip all live adapters (stubs only)
+
+Without any keys: adapters return [] and collect_legal_events emits labelled
+stub_fixture rows so the dossier UI keeps a stable contract. With keys set,
+CourtListener and OpenSanctions populate real rows; stubs are omitted whenever
+any adapter or AI extraction returns data.
 """
 
 from __future__ import annotations
@@ -375,13 +380,123 @@ def fetch_kyb_provider_events(*, company_name: str, country: Optional[str] = Non
 
 
 def fetch_opensanctions_adverse_events(
-    *, company_name: str, country: Optional[str] = None
+    *,
+    company_name: str,
+    country: Optional[str] = None,
+    api_key: Optional[str] = None,
+    http_post: Any = None,
 ) -> list[dict[str, Any]]:
-    """OpenSanctions adverse media + PEP litigation overlay."""
-    if not (os.getenv("OPENSANCTIONS_API_KEY") and _live_providers_enabled()):
+    """OpenSanctions sanctions / PEP / debarment overlay via the match API.
+
+    Real API (when ``OPENSANCTIONS_API_KEY`` is set): POST
+    https://api.opensanctions.org/match/default with a Company query-by-example.
+    Returns [] when the key is missing, providers are disabled, or the call fails.
+    """
+
+    api_key = api_key or os.getenv("OPENSANCTIONS_API_KEY")
+    if not api_key:
         return []
-    logger.info("OpenSanctions adapter is documented but not implemented.")
-    return []
+    if not _live_providers_enabled():
+        return []
+    if http_post is None:
+        try:
+            import requests  # pylint: disable=import-outside-toplevel
+
+            http_post = requests.post
+        except ImportError:  # pragma: no cover
+            logger.warning("requests not installed; OpenSanctions adapter inactive")
+            return []
+
+    query: dict[str, Any] = {
+        "schema": "Company",
+        "properties": {"name": [company_name]},
+    }
+    if country:
+        query["properties"]["country"] = [country]
+
+    try:
+        response = http_post(
+            "https://api.opensanctions.org/match/default",
+            json={"queries": {"q": query}},
+            headers={"Authorization": f"ApiKey {api_key}"},
+            timeout=25,
+        )
+        if getattr(response, "status_code", 0) != 200:
+            logger.info(
+                "OpenSanctions returned status=%s for %s",
+                getattr(response, "status_code", "?"),
+                company_name,
+            )
+            return []
+        payload = response.json() if callable(getattr(response, "json", None)) else {}
+    except Exception as exc:  # pragma: no cover - network-dependent
+        logger.warning("OpenSanctions adapter failed for %s: %s", company_name, exc)
+        return []
+
+    responses = payload.get("responses") if isinstance(payload, dict) else None
+    if not isinstance(responses, dict):
+        return []
+    bucket = responses.get("q")
+    if not isinstance(bucket, dict):
+        return []
+    results = bucket.get("results")
+    if not isinstance(results, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for hit in results[:15]:
+        if not isinstance(hit, dict):
+            continue
+        entity_id = _clean_text(hit.get("id"))
+        caption = _clean_text(hit.get("caption")) or company_name
+        props = hit.get("properties") if isinstance(hit.get("properties"), dict) else {}
+        topics_raw = props.get("topics") if isinstance(props.get("topics"), list) else []
+        topics = [_clean_text(t) for t in topics_raw if _clean_text(t)]
+        datasets_raw = hit.get("datasets") if isinstance(hit.get("datasets"), list) else []
+        datasets = [_clean_text(d) for d in datasets_raw if _clean_text(d)]
+        try:
+            score = float(hit.get("score") or 0.5)
+        except (TypeError, ValueError):
+            score = 0.5
+        score = max(0.0, min(1.0, score))
+
+        topic_blob = ", ".join(topics) if topics else "risk signal"
+        dataset_blob = ", ".join(datasets[:5]) if datasets else "OpenSanctions"
+        summary_parts = [f"OpenSanctions match ({topic_blob})."]
+        if datasets:
+            summary_parts.append(f"Sources: {dataset_blob}.")
+        if country:
+            summary_parts.append(f"Screened jurisdiction context: {country}.")
+
+        role = "regulatory_target" if any(
+            (t or "").lower() in {"sanction", "debarment", "corp.disqual", "export.control"}
+            for t in topics
+        ) else "subject"
+
+        source_url = (
+            f"https://www.opensanctions.org/entities/{entity_id}"
+            if entity_id
+            else "https://www.opensanctions.org/"
+        )
+
+        normalized.append(
+            {
+                "case_title": f"Sanctions / PEP screening — {caption}",
+                "parties": [company_name, caption],
+                "role": role,
+                "court": "OpenSanctions consolidated watchlists",
+                "jurisdiction": country,
+                "filed_date": _clean_text(hit.get("first_seen") or hit.get("last_seen")),
+                "status": "open" if hit.get("target") else "unknown",
+                "summary": " ".join(summary_parts),
+                "source_name": "OpenSanctions",
+                "source_url": source_url,
+                "source_type": "opensanctions",
+                "discovered_by": "opensanctions",
+                "confidence": round(score, 3),
+            }
+        )
+    return normalized
 
 
 def fetch_opencorporates_filings(
