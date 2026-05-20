@@ -88,25 +88,29 @@ func publicContext(ctx context.Context, pool *pgxpool.Pool, oppID uuid.UUID) []m
 		}}
 	}
 	rows, err := pool.Query(ctx, `
-		SELECT reporter_country, partner_country, hs_code, flow, trade_value_usd, period
+		SELECT reporter, partner, hs_code, flow_type, trade_value_usd, year::text
 		FROM oil_trade_flows
-		WHERE reporter_country ILIKE $1 OR partner_country ILIKE $1
-		ORDER BY created_at DESC LIMIT 3
-	`, *country)
+		WHERE reporter ILIKE $1 OR partner ILIKE $1
+		ORDER BY ingested_at DESC LIMIT 3
+	`, "%"+*country+"%")
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 	var out []map[string]any
 	for rows.Next() {
-		var rep, partner, hs, flow, period string
+		var rep, partner, hs, flowType, period string
 		var val *float64
-		if err := rows.Scan(&rep, &partner, &hs, &flow, &val, &period); err != nil {
+		if err := rows.Scan(&rep, &partner, &hs, &flowType, &val, &period); err != nil {
 			continue
+		}
+		flowLabel := "Import"
+		if flowType == "X" {
+			flowLabel = "Export"
 		}
 		out = append(out, map[string]any{
 			"source": "oil_trade_flows", "reporter": rep, "partner": partner,
-			"hs_code": hs, "flow": flow, "value_usd": val, "period": period,
+			"hs_code": hs, "flow": flowLabel, "value_usd": val, "period": period,
 		})
 	}
 	if len(out) == 0 {
