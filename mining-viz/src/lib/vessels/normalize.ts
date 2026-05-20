@@ -1,8 +1,10 @@
 import type { MaritimeVessel } from './types';
+import { parseAisShipTypeCode } from './filters';
 
-function inferShipTypeLabelFromCode(code: number | null | undefined): string | null {
-  if (code == null || !Number.isFinite(code)) return null;
-  const c = Math.floor(Number(code));
+function inferShipTypeLabelFromCode(code: unknown): string | null {
+  const parsed = parseAisShipTypeCode(code);
+  if (parsed == null) return null;
+  const c = parsed;
   if (c >= 80 && c <= 89) return 'Tanker';
   if (c >= 70 && c <= 79) return 'Cargo';
   if (c >= 60 && c <= 69) return 'Passenger';
@@ -13,9 +15,11 @@ function inferShipTypeLabelFromCode(code: number | null | undefined): string | n
 /** Ensure API payloads include nested AIS fields even when served from older snapshots. */
 export function normalizeMaritimeVessel(raw: MaritimeVessel): MaritimeVessel {
   const trimmedLabel = (raw.ship_type_label || '').trim();
-  const inferred = trimmedLabel ? null : inferShipTypeLabelFromCode(raw.ship_type_code ?? null);
+  const parsedCode = parseAisShipTypeCode(raw.ship_type_code);
+  const inferred = trimmedLabel ? null : inferShipTypeLabelFromCode(parsedCode);
   return {
     ...raw,
+    ship_type_code: parsedCode ?? raw.ship_type_code,
     ship_type_label: trimmedLabel || inferred || raw.ship_type_label,
     ais_metadata: raw.ais_metadata ?? {},
     ais_messages: raw.ais_messages ?? {},

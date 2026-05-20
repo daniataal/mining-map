@@ -4,8 +4,11 @@ from unittest.mock import patch
 from backend.services.storage_terminals import (
     WORLD_TILES,
     _commodity_hints_from_tags,
+    _db_snapshot_is_globally_complete,
+    _extract_operator_owner,
     _overpass_urls,
     _should_cache_storage_response,
+    build_overpass_query,
     infer_terminal_subtype,
     normalize_storage_terminal,
 )
@@ -37,6 +40,52 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertEqual(subtype, "tank_farm")
         self.assertGreaterEqual(confidence, 0.75)
         self.assertIn("tank farm", note.lower())
+
+    def test_infer_terminal_subtype_fuel_depot(self):
+        subtype, confidence, note = infer_terminal_subtype({"industrial": "fuel", "name": "Antwerp Depot"})
+        self.assertEqual(subtype, "fuel_depot")
+        self.assertGreaterEqual(confidence, 0.8)
+        self.assertIn("fuel depot", note.lower())
+
+    def test_infer_terminal_subtype_petroleum_storage_tank(self):
+        subtype, confidence, note = infer_terminal_subtype(
+            {
+                "man_made": "storage_tank",
+                "substance": "diesel",
+                "operator": "Vopak",
+            }
+        )
+        self.assertEqual(subtype, "storage_tank")
+        self.assertGreaterEqual(confidence, 0.7)
+        self.assertIn("storage tank", note.lower())
+
+    def test_infer_terminal_subtype_oil_silo(self):
+        subtype, confidence, note = infer_terminal_subtype(
+            {"man_made": "silo", "product": "soybean oil"}
+        )
+        self.assertEqual(subtype, "storage_tank")
+        self.assertGreaterEqual(confidence, 0.55)
+
+    def test_extract_operator_owner_prefers_explicit_tags(self):
+        operator, owner = _extract_operator_owner(
+            {"operator": "ADNOC", "owner": "Abu Dhabi"}
+        )
+        self.assertEqual(operator, "ADNOC")
+        self.assertEqual(owner, "Abu Dhabi")
+
+    def test_build_overpass_query_includes_broader_storage_tags(self):
+        query = build_overpass_query((50.0, 3.0, 52.0, 5.0))
+        self.assertIn('industrial"="fuel"', query)
+        self.assertIn('man_made"="storage_tank"', query)
+        self.assertIn('man_made"="silo"', query)
+        self.assertIn('substance', query)
+
+    def test_db_snapshot_rejects_regional_only_cache(self):
+        regional = [
+            {"lat": 51.9, "lon": 4.4},
+            {"lat": 51.95, "lon": 4.45},
+        ]
+        self.assertFalse(_db_snapshot_is_globally_complete(regional))
 
     def test_commodity_hints_extracts_refined_and_lpg(self):
         hints = _commodity_hints_from_tags(
@@ -87,11 +136,43 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertEqual(entity["company"], "Ruwais Oil Terminal")
         self.assertEqual(entity["country"], "United Arab Emirates")
         self.assertEqual(entity["operatorName"], "ADNOC")
+        self.assertIsNone(entity.get("ownerName"))
         self.assertEqual(entity["sourceName"], "OpenStreetMap via Overpass")
         self.assertEqual(entity["nearbyPort"]["name"], "Ruwais")
         self.assertIn("OpenStreetMap", entity["sourceLabels"])
         self.assertIn("petroleum", entity["commodityHints"])
         self.assertEqual(entity["evidenceCount"], 2)
+
+    @patch("backend.services.storage_terminals.find_nearest_ports")
+    @patch("backend.services.storage_terminals.resolve_country")
+    def test_normalize_storage_terminal_uses_owner_when_operator_missing(
+        self,
+        mock_resolve_country,
+        mock_find_nearest_ports,
+    ):
+        mock_resolve_country.return_value = ("Netherlands", "NL")
+        mock_find_nearest_ports.return_value = []
+
+        entity = normalize_storage_terminal(
+            {
+                "type": "node",
+                "id": 99,
+                "lat": 51.9,
+                "lon": 4.4,
+                "tags": {
+                    "man_made": "storage_tank",
+                    "substance": "diesel",
+                    "owner": "Vopak",
+                },
+            },
+            "2026-05-12T21:00:00Z",
+        )
+
+        assert entity is not None
+        self.assertEqual(entity["entitySubtype"], "storage_tank")
+        self.assertIsNone(entity["operatorName"])
+        self.assertEqual(entity["ownerName"], "Vopak")
+        self.assertEqual(entity["company"], "Vopak")
 
 
 if __name__ == "__main__":

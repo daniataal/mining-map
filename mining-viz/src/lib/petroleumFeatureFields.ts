@@ -1,9 +1,16 @@
 import type { PetroleumLayerId } from './petroleumLayers';
+import {
+  classifyPipelineSubstance,
+  pipelineSubstanceDisplayLabel,
+  type PipelineSubstance,
+} from './pipelineSubstance';
 
 export interface PetroleumFeatureViewModel {
   title: string | null;
   subtitle: string | null;
   facilityType: string | null;
+  pipelineSubstance: PipelineSubstance | null;
+  pipelineBadgeLabel: string | null;
   operator: string | null;
   owner: string | null;
   operatorMissing: boolean;
@@ -153,6 +160,8 @@ const CONSUMED_PROPERTY_KEYS = new Set([
   'persisted',
   'man_made',
   'substance',
+  'pipeline_substance',
+  'pipelineSubstance',
   'diameter',
   'ref',
   'network',
@@ -257,6 +266,25 @@ export function collectOsmPipelineDetails(
 
 export function petroleumLayerTypeLabel(layerId: PetroleumLayerId): string {
   return LAYER_TYPE_LABEL[layerId] ?? 'Infrastructure';
+}
+
+/** Popup badge for pipelines: substance from OSM tags, not the map layer id alone. */
+export function resolvePipelineBadgeLabel(
+  props: Record<string, unknown>,
+  layerId: PetroleumLayerId
+): string {
+  const substance = classifyPipelineSubstance(props);
+  const isOsmPipe =
+    isOsmInfrastructureFeature(props) ||
+    props.man_made === 'pipeline' ||
+    props.layer_id === 'pipelines';
+  if (isOsmPipe || substance === 'water' || substance === 'oil' || substance === 'gas') {
+    return pipelineSubstanceDisplayLabel(substance);
+  }
+  if (PIPELINE_LAYER_IDS.has(layerId)) {
+    return petroleumLayerTypeLabel(layerId);
+  }
+  return pipelineSubstanceDisplayLabel(substance);
 }
 
 function firstString(props: Record<string, unknown>, keys: string[]): string | null {
@@ -375,6 +403,17 @@ export function buildPetroleumFeatureViewModel(
 ): PetroleumFeatureViewModel {
   const isOsmFeature = isOsmInfrastructureFeature(props);
   const isPipelineLayer = PIPELINE_LAYER_IDS.has(layerId);
+  const isOsmPipeline =
+    isOsmFeature &&
+    (isPipelineLayer ||
+      props.man_made === 'pipeline' ||
+      props.layer_id === 'pipelines');
+  const pipelineSubstance = isOsmPipeline ? classifyPipelineSubstance(props) : null;
+  const pipelineBadgeLabel = isOsmPipeline
+    ? resolvePipelineBadgeLabel(props, layerId)
+    : isPipelineLayer
+      ? petroleumLayerTypeLabel(layerId)
+      : null;
   const name = firstString(props, ['Name', 'NAME', 'name', 'title', 'Title']);
   const owner = firstString(props, ['owner', 'Owner', 'OWNER']);
   const exploringCompanies = collectExploringCompanies(props);
@@ -385,11 +424,14 @@ export function buildPetroleumFeatureViewModel(
   const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation']);
   const country = resolvePetroleumCountry(countryRaw);
   const facilityType =
+    (isOsmPipeline && pipelineSubstance
+      ? pipelineSubstanceDisplayLabel(pipelineSubstance)
+      : null) ??
     firstString(props, ['Type', 'TYPE', 'type', 'category', 'Category']) ??
     (isOsmFeature && props.man_made
       ? `OSM ${String(props.man_made).replace(/_/g, ' ')}`
       : null) ??
-    petroleumLayerTypeLabel(layerId);
+    (isPipelineLayer ? petroleumLayerTypeLabel(layerId) : null);
   const status = firstString(props, ['STATUS', 'Status', 'status', 'State']);
   const sector =
     firstString(props, ['Sector', 'sector', 'Commodity', 'commodity']) ??
@@ -419,18 +461,17 @@ export function buildPetroleumFeatureViewModel(
     sourceText = null;
   }
 
-  const pipelineDetails =
-    isOsmFeature && isPipelineLayer ? collectOsmPipelineDetails(props) : [];
+  const pipelineDetails = isOsmPipeline ? collectOsmPipelineDetails(props) : [];
 
   const operatorMissing =
-    isOsmFeature && isPipelineLayer && !operator && !owner && exploringCompanies.length === 0;
+    isOsmPipeline && !operator && !owner && exploringCompanies.length === 0;
 
   const extraRows: { label: string; value: string }[] = [];
   for (const [key, raw] of Object.entries(props)) {
     if (CONSUMED_PROPERTY_KEYS.has(key) || raw == null) continue;
     const value = String(raw).trim();
     if (!value) continue;
-    if (isOsmFeature && isPipelineLayer) {
+    if (isOsmPipeline) {
       const lower = key.toLowerCase();
       if (
         lower === 'source' ||
@@ -452,9 +493,7 @@ export function buildPetroleumFeatureViewModel(
     name ??
     operator ??
     (exploringCompanies[0] ?? null) ??
-    (isOsmFeature && isPipelineLayer && props.osm_id != null
-      ? `OSM pipeline ${props.osm_id}`
-      : null) ??
+    (isOsmPipeline && props.osm_id != null ? `OSM pipeline ${props.osm_id}` : null) ??
     facilityType ??
     'Unnamed feature';
 
@@ -469,6 +508,8 @@ export function buildPetroleumFeatureViewModel(
     title,
     subtitle,
     facilityType,
+    pipelineSubstance,
+    pipelineBadgeLabel,
     operator: operator ?? (exploringCompanies.length === 1 ? exploringCompanies[0] : null),
     owner,
     operatorMissing,
@@ -486,7 +527,7 @@ export function buildPetroleumFeatureViewModel(
     wikidataUrl,
     isOsmFeature,
     pipelineDetails,
-    extraRows: extraRows.slice(0, isOsmFeature && isPipelineLayer ? 2 : 4),
+    extraRows: extraRows.slice(0, isOsmPipeline ? 2 : 4),
   };
 }
 

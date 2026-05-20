@@ -156,6 +156,22 @@ describe('buildPetroleumFeatureViewModel', () => {
     expect(model.extraRows.some((r) => r.label.toLowerCase() === 'source')).toBe(false);
   });
 
+  it('shows water pipeline badge for Arabic water project name', () => {
+    const props = {
+      name: 'مشروع المياه القطري',
+      'name:ar': 'مشروع المياه القطري',
+      source: 'openstreetmap',
+      osm_type: 'way',
+      osm_id: 296661798,
+      man_made: 'pipeline',
+      layer_id: 'pipelines',
+    };
+    const model = buildPetroleumFeatureViewModel(props, 'oil_pipelines');
+    expect(model.pipelineSubstance).toBe('water');
+    expect(model.pipelineBadgeLabel).toBe('Water pipeline');
+    expect(model.facilityType).toBe('Water pipeline');
+  });
+
   it('marks operator missing for untagged OSM pipelines', () => {
     const model = buildPetroleumFeatureViewModel(
       {
@@ -169,6 +185,7 @@ describe('buildPetroleumFeatureViewModel', () => {
     expect(model.operatorMissing).toBe(true);
     expect(model.operator).toBeNull();
     expect(model.title).toContain('123');
+    expect(model.pipelineBadgeLabel).toBe('Pipeline (substance not tagged)');
   });
 
   it('uses owner when operator is absent', () => {

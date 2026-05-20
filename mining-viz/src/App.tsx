@@ -962,10 +962,16 @@ export default function App() {
                         )}{' '}
                         · {storageTerminalResponse?.stats?.with_operator ?? 0}{' '}
                         {t('עם מפעיל', 'with operator')}
+                        {typeof storageTerminalResponse?.stats?.with_owner === 'number' && (
+                          <>
+                            {' '}
+                            · {storageTerminalResponse.stats.with_owner} {t('עם בעלים', 'with owner')}
+                          </>
+                        )}
                         <span className="mt-1 block font-semibold normal-case tracking-normal text-cyan-800/80 dark:text-cyan-200/80">
                           {t(
-                            'הפעל/כבה בשכבות המפה (למטה מימין). ספירת «בתצוגה» לפי גבולות המפה — לא כל 15 העולמיים.',
-                            'Toggle in map layers (bottom-right). «In view» follows map bounds — not all worldwide sites.',
+                            'שכבת OSM חופשית (Overpass) — לא רשומות רישיון מעובדות. «בתצוגה» לפי גבולות המפה.',
+                            'Free OSM layer (Overpass) — not curated license records. «In view» follows map bounds.',
                           )}
                         </span>
                       </>

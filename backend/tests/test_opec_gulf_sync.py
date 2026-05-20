@@ -48,6 +48,7 @@ class OpecGulfSyncTests(unittest.TestCase):
             "National Oil Company",
             "Active",
             "https://example.test",
+            notes="World's largest oil producer by output.",
         )
 
         with mock.patch.object(sync, "GULF_OIL_ENTITIES", [entity]):
@@ -60,7 +61,9 @@ class OpecGulfSyncTests(unittest.TestCase):
         self.assertIn("record_origin", sql)
         self.assertIn("source_kind", sql)
         self.assertIn("entity_subtype", sql)
+        self.assertIn("raw_payload", sql)
         self.assertIn("confidence_score", sql)
+        self.assertIn('{"notes": "World\'s largest oil producer by output."}', params)
         self.assertIn("ON CONFLICT (external_id)", sql)
         self.assertNotIn("gen_random_uuid", sql)
         self.assertIn("global_open_fallback", params)

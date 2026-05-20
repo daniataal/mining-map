@@ -8,6 +8,13 @@ services:
       context: ./backend
     container_name: mining-backend
     restart: always
+    # Secrets: prefer backend.env (production) or repo-root .env (local). Do not pass empty
+    # AISSTREAM_API_KEY=${AISSTREAM_API_KEY} here — that overrides env_file with a blank value.
+    env_file:
+      - path: .env
+        required: false
+      - path: backend.env
+        required: false
     ports:
       - "8000:8000"
     environment:
@@ -28,7 +35,6 @@ services:
       - POLLINATIONS_HTTP_MAX_RETRIES=${POLLINATIONS_HTTP_MAX_RETRIES:-0}
       - DISABLE_POLLINATIONS_FALLBACK=${DISABLE_POLLINATIONS_FALLBACK:-}
       - SECRET_KEY=${SECRET_KEY}
-      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
       # Petroleum Mapbox tiles (oil/gas pipelines). GitHub Actions secret: MAPBOX_ACCESS_TOKEN
       - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN:-}
       - OILMAP_MAPBOX_TOKEN=${OILMAP_MAPBOX_TOKEN:-}
@@ -110,13 +116,17 @@ services:
     restart: always
     command: ["python", "maritime_worker.py"]
     mem_limit: ${MARITIME_WORKER_MEM_LIMIT:-1g}
+    env_file:
+      - path: .env
+        required: false
+      - path: backend.env
+        required: false
     environment:
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=mining_db
       - DB_USER=postgres
       - DB_PASSWORD=password
-      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
       - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-30}
       - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-25}
       - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-15000}

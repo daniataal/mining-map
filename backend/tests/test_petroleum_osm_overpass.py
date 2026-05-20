@@ -64,6 +64,27 @@ class PetroleumOsmOverpassTests(unittest.TestCase):
         self.assertEqual(props["ref"], "LINE-1")
         self.assertEqual(props["wikipedia"], "en:Example")
         self.assertEqual(props["osm_id"], 98483828)
+        self.assertEqual(props["pipeline_substance"], "oil")
+
+    def test_element_to_feature_classifies_water_by_name(self):
+        feat = osm._element_to_feature(
+            "pipelines",
+            {
+                "type": "way",
+                "id": 296661798,
+                "tags": {
+                    "man_made": "pipeline",
+                    "name": "مشروع المياه القطري",
+                    "name:ar": "مشروع المياه القطري",
+                },
+                "geometry": [
+                    {"lat": 32.788, "lon": 35.284},
+                    {"lat": 32.787, "lon": 35.283},
+                ],
+            },
+        )
+        self.assertIsNotNone(feat)
+        self.assertEqual(feat["properties"]["pipeline_substance"], "water")
 
     @patch("backend.services.petroleum_osm_overpass.urlopen")
     def test_fetch_overpass_parses_elements(self, mock_urlopen):

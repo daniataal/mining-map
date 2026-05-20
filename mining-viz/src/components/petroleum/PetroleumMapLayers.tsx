@@ -13,6 +13,7 @@ import {
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import { createRefineryMapIcon } from './refineryMapIcon';
+import { shouldIncludeInOilGasPipelineLayer } from '../../lib/pipelineSubstance';
 
 const LAYER_STYLE: Record<PetroleumLayerId, PathOptions> = {
   exploration: { color: '#f59e0b', weight: 1.8, fillColor: '#fbbf24', fillOpacity: 0.28 },
@@ -43,10 +44,19 @@ interface PetroleumLayerOverlayProps {
 function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: PetroleumLayerOverlayProps) {
   const { data } = usePetroleumLayerGeoJson(layerId, bbox, enabled, mapZoom);
   const style = LAYER_STYLE[layerId];
-  const geojson = useMemo(
-    () => data ?? { type: 'FeatureCollection' as const, features: [] },
-    [data],
-  );
+  const geojson = useMemo(() => {
+    const raw = data ?? { type: 'FeatureCollection' as const, features: [] };
+    if (layerId !== 'oil_pipelines' && layerId !== 'gas_pipelines') {
+      return raw;
+    }
+    return {
+      ...raw,
+      features: raw.features.filter((feature) => {
+        const props = (feature.properties || {}) as Record<string, unknown>;
+        return shouldIncludeInOilGasPipelineLayer(props, layerId);
+      }),
+    };
+  }, [data, layerId]);
   const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
 
   return (

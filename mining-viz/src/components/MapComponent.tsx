@@ -44,6 +44,7 @@ import {
   VESSEL_LEGEND_T,
   type VesselFilters,
 } from '../lib/vessels';
+import { buildMaritimeStatusMessages } from '../lib/vessels/maritimeFeedStatus';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
@@ -548,7 +549,14 @@ export default function MapComponent({
         () => ({ ...vesselFilters, search: debouncedVesselSearch }),
         [vesselFilters, debouncedVesselSearch],
     );
-    const setVesselFilters = onVesselFiltersChange ?? (() => {});
+    const setVesselFilters = useCallback(
+        (update: VesselFilters | ((prev: VesselFilters) => VesselFilters)) => {
+            if (!onVesselFiltersChange) return;
+            const next = typeof update === 'function' ? update(vesselFilters) : update;
+            onVesselFiltersChange(next);
+        },
+        [onVesselFiltersChange, vesselFilters],
+    );
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
@@ -644,7 +652,6 @@ export default function MapComponent({
             : maritimeFeed?.snapshot_vessel_count) ??
         maritimeFeed?.total_available ??
         maritimeSnapshotVessels.length;
-    const maritimeSparseSnapshot = isMaritimeLayerEnabled && maritimeSnapshotTotal < 100;
     const maritimeVesselsInViewport = useMemo(
         () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
         [maritimeSnapshotVessels, maritimeViewport],
@@ -653,6 +660,24 @@ export default function MapComponent({
         const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
         return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
     }, [maritimeVesselsInViewport, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
+    const maritimeStatusMessages = useMemo(
+        () =>
+            buildMaritimeStatusMessages(maritimeFeed, {
+                layerEnabled: isMaritimeLayerEnabled,
+                vesselsInView: maritimeVessels.length,
+                snapshotTotal: maritimeSnapshotTotal,
+                isLoading: isMaritimeLoading,
+                hasError: Boolean(maritimeError),
+            }),
+        [
+            maritimeFeed,
+            isMaritimeLayerEnabled,
+            maritimeVessels.length,
+            maritimeSnapshotTotal,
+            isMaritimeLoading,
+            maritimeError,
+        ],
+    );
     const maritimeServedFromCache = Boolean(
         maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
     );
@@ -745,57 +770,18 @@ export default function MapComponent({
         'הפעל את שכבת «כלי שיט (AIS)» במסננים (אייקון שכבות) או בבקרת השכבות למטה מימין.',
         'Enable «Vessels (AIS)» in the filter panel (layers icon) or the layer control (bottom-right).'
     );
-    const maritimeHeadlineStatus = !isMaritimeLayerEnabled
-        ? ''
-        : isMaritimeLoading && !maritimeFeed
-            ? t('טוען מעקב כלי שיט…', 'Loading vessel watch…')
-            : maritimeError
-                ? t('טעינה נכשלה', 'Load failed')
-                : !maritimeFeed?.live_positions_enabled
-                    ? t(
-                          `${maritimeSnapshotTotal.toLocaleString()} כלי שיט (AIS לא חי)`,
-                          `${maritimeSnapshotTotal.toLocaleString()} vessels (live AIS unavailable)`
-                      )
-                    : maritimeVessels.length === 0
-                        ? t(
-                              `0 בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
-                              `0 in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
-                          )
-                        : t(
-                              `${maritimeVessels.length.toLocaleString()} בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
-                              `${maritimeVessels.length.toLocaleString()} in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
-                          );
-    const maritimeDetailNote = !isMaritimeLayerEnabled
-        ? t(
-              'כלי השיט כבויים כברירת מחדל. הפעל כדי להציג מיקומי AIS — הנתונים נטענים ברקע מראש.',
-              'Vessels stay off until you enable the layer. AIS data is prefetched in the background for instant display.'
-          )
-        : isMaritimeLoading && !maritimeFeed
-            ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
-            : maritimeError
-                ? t('טעינת כלי השיט נכשלה. נסה רענון או שנה היקף/תצוגה.', 'Vessel loading failed. Try refresh or adjust the view/scope.')
-                : !maritimeFeed?.live_positions_enabled
-                    ? t(
-                          'AIS חי אינו זמין כרגע. ההקשר הימי בתיק עדיין פעיל גם בלי שכבת כלי שיט.',
-                          'Live AIS is not available right now. Maritime dossier context still works without the vessel layer.'
-                      )
-                    : maritimeVessels.length === 0
-                        ? t(
-                              'לא נמצאו כלי שיט בתצוגה ובחלון הלכידה הנוכחיים. נסה להזיז מפה, להגדיל חלון או לעבור לכל כלי השיט.',
-                              'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
-                          )
-                        : t(
-                              `נצפו ${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels observed in the current watch.`
-                          );
+    const maritimeHeadlineStatus = maritimeStatusMessages
+        ? t(maritimeStatusMessages.headlineHe, maritimeStatusMessages.headlineEn)
+        : '';
+    const maritimeDetailNote = maritimeStatusMessages
+        ? t(maritimeStatusMessages.detailHe, maritimeStatusMessages.detailEn)
+        : '';
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
-    const maritimeSparseWarning = maritimeSparseSnapshot
-        ? t(
-              'מעט כלי שיט במאגר. הפעל docker compose up -d maritime-worker והגדר AISSTREAM_API_KEY בקובץ .env.',
-              'Sparse vessel feed. Run docker compose up -d maritime-worker and set AISSTREAM_API_KEY in .env.'
-          )
-        : null;
+    const maritimeSparseWarning =
+        maritimeStatusMessages?.sparseWarningHe && maritimeStatusMessages.sparseWarningEn
+            ? t(maritimeStatusMessages.sparseWarningHe, maritimeStatusMessages.sparseWarningEn)
+            : null;
     const maritimeViewportAisGap =
         isMaritimeLayerEnabled &&
         maritimeVessels.length === 0 &&

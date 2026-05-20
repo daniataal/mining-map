@@ -1390,24 +1390,34 @@
   padding: 0;
 }
 .refinery-marker,
-.oil-field-marker {
+.oil-field-marker,
+.storage-terminal-marker,
+.tank-farm-marker {
   background: transparent !important;
   border: none !important;
 }
 .refinery-marker-pin,
-.oil-field-marker-pin {
+.oil-field-marker-pin,
+.storage-terminal-marker-pin,
+.tank-farm-marker-pin {
   line-height: 0;
 }
 .refinery-marker-pin svg,
-.oil-field-marker-pin svg {
+.oil-field-marker-pin svg,
+.storage-terminal-marker-pin svg,
+.tank-farm-marker-pin svg {
   display: block;
   flex-shrink: 0;
   pointer-events: none;
 }
 .refinery-marker.is-selected .refinery-marker-pin,
 .oil-field-marker.is-selected .oil-field-marker-pin,
+.storage-terminal-marker.is-selected .storage-terminal-marker-pin,
+.tank-farm-marker.is-selected .tank-farm-marker-pin,
 .refinery-marker-pin.is-selected,
-.oil-field-marker-pin.is-selected {
+.oil-field-marker-pin.is-selected,
+.storage-terminal-marker-pin.is-selected,
+.tank-farm-marker-pin.is-selected {
   transform: scale(1.12);
   z-index: 1100;
 }

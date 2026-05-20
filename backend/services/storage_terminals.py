@@ -45,6 +45,12 @@ WORLD_TILES: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
 )
 
 KEYWORD_RE = re.compile(r"(terminal|tank\s*farm|tankfarm|depot|storage)", re.I)
+PETROLEUM_SUBSTANCE_RE = re.compile(
+    r"(oil|petroleum|diesel|gasoline|petrol|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)",
+    re.I,
+)
+MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT = 4
+MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT = 10
 
 
 def _now_iso() -> str:
@@ -127,12 +133,47 @@ def _commodity_hints_from_tags(tags: dict[str, Any]) -> list[str]:
     return hints
 
 
+def _petroleum_tag_haystack(tags: dict[str, Any]) -> str:
+    return " | ".join(
+        _clean_text(tags.get(key))
+        for key in (
+            "substance",
+            "content",
+            "product",
+            "products",
+            "storage_tank",
+            "industrial",
+            "description",
+        )
+    ).lower()
+
+
+def _has_petroleum_substance(tags: dict[str, Any]) -> bool:
+    return bool(PETROLEUM_SUBSTANCE_RE.search(_petroleum_tag_haystack(tags)))
+
+
+def _extract_operator_owner(tags: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    operator = _clean_text(tags.get("operator")) or None
+    owner = _clean_text(tags.get("owner")) or None
+    return operator, owner
+
+
+def _substance_from_tags(tags: dict[str, Any]) -> Optional[str]:
+    for key in ("substance", "content", "product", "products"):
+        value = _clean_text(tags.get(key))
+        if value:
+            return value
+    return None
+
+
 def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
     industrial = _normalize_token(tags.get("industrial"))
+    man_made = _normalize_token(tags.get("man_made"))
     name = _clean_text(tags.get("name"))
     operator = _clean_text(tags.get("operator"))
+    owner = _clean_text(tags.get("owner"))
     description = _clean_text(tags.get("description"))
-    haystack = " ".join(part for part in (name, operator, description) if part).lower()
+    haystack = " ".join(part for part in (name, operator, owner, description) if part).lower()
 
     if industrial == "petroleum terminal":
         return (
@@ -146,11 +187,48 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
             0.9,
             "Explicit OSM facility tag industrial=tank_farm.",
         )
+    if industrial == "fuel":
+        return (
+            "fuel_depot",
+            0.82,
+            "Explicit OSM fuel depot (industrial=fuel).",
+        )
+    if man_made == "storage tank":
+        if _has_petroleum_substance(tags):
+            if operator or owner or name:
+                return (
+                    "storage_tank",
+                    0.72,
+                    "Mapped petroleum storage tank with operator, owner, or site name context.",
+                )
+            return (
+                "storage_tank",
+                0.58,
+                "Mapped petroleum storage tank; may be one tank within a larger site.",
+            )
+        if KEYWORD_RE.search(haystack):
+            return (
+                "storage_tank",
+                0.62,
+                "Storage tank name/description suggests petroleum storage, but substance tags are missing.",
+            )
+    if man_made == "silo" and _has_petroleum_substance(tags):
+        return (
+            "storage_tank",
+            0.6,
+            "Oil/petroleum silo mapped in OpenStreetMap.",
+        )
     if "tank farm" in haystack or "tankfarm" in haystack:
         return (
             "tank_farm",
             0.78,
             "Facility name/description suggests a tank farm, but the terminal tag is not explicit.",
+        )
+    if "fuel depot" in haystack or "petroleum depot" in haystack:
+        return (
+            "fuel_depot",
+            0.7,
+            "Facility name/description suggests a fuel depot, but industrial=fuel is not explicit.",
         )
     if industrial in {"oil", "gas"} and KEYWORD_RE.search(haystack):
         return (
@@ -168,6 +246,10 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
 def _format_license_type(subtype: str) -> str:
     if subtype == "tank_farm":
         return "Tank Farm"
+    if subtype == "fuel_depot":
+        return "Fuel Depot"
+    if subtype == "storage_tank":
+        return "Storage Tank"
     return "Storage Terminal"
 
 
@@ -386,12 +468,19 @@ def _db_connect():
 def build_overpass_query(bbox: tuple[float, float, float, float]) -> str:
     south, west, north, east = bbox
     bbox_text = f"{south},{west},{north},{east}"
+    petroleum_substance = "^(oil|petroleum|diesel|gasoline|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)"
     return f"""
 [out:json][timeout:45];
 (
   nwr["industrial"="petroleum_terminal"]({bbox_text});
   nwr["industrial"="tank_farm"]({bbox_text});
+  nwr["industrial"="fuel"]({bbox_text});
   nwr["industrial"~"^(oil|gas)$"]["name"~"(terminal|tank\\s*farm|tankfarm|depot|storage)",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["substance"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["product"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["content"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="silo"]["substance"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="silo"]["product"~"{petroleum_substance}",i]({bbox_text});
 );
 out center tags qt;
 """.strip()
@@ -488,6 +577,22 @@ def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: lis
     return True
 
 
+def _db_snapshot_is_globally_complete(elements: list[dict[str, Any]]) -> bool:
+    """Reject tiny regional DB snapshots that would hide live global Overpass coverage."""
+    if len(elements) < MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT:
+        return False
+    countries: set[str] = set()
+    for element in elements:
+        lat = _safe_float(element.get("lat"))
+        lng = _safe_float(element.get("lon"))
+        if lat is None or lng is None:
+            continue
+        country, _ = resolve_country(lat, lng)
+        if country != "Unknown":
+            countries.add(country)
+    return len(countries) >= MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT
+
+
 def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Optional[dict[str, Any]]:
     tags = element.get("tags") or {}
     subtype, confidence, confidence_note = infer_terminal_subtype(tags)
@@ -505,11 +610,13 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
 
     display_name = _display_name(tags, subtype)
     capacity_text = _parse_capacity_text(tags)
-    operator = _clean_text(tags.get("operator")) or None
+    operator, owner = _extract_operator_owner(tags)
+    substance_text = _substance_from_tags(tags)
     commodity_hints = _commodity_hints_from_tags(tags)
 
-    if not display_name and not operator and not capacity_text:
-        return None
+    if not display_name and not operator and not owner and not capacity_text:
+        if subtype not in {"storage_tank", "fuel_depot"} or confidence < 0.55:
+            return None
 
     country, country_iso2 = resolve_country(lat, lng)
     region = _region_from_tags(tags)
@@ -531,12 +638,14 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         confidence = min(0.98, confidence + 0.01)
     if operator:
         confidence = min(0.98, confidence + 0.01)
+    if owner and not operator:
+        confidence = min(0.96, confidence + 0.005)
 
-    facility_name = display_name or "Unnamed Storage Terminal"
+    facility_name = display_name or operator or owner or "Unnamed Storage Terminal"
     evidence = [
         {
             "id": f"osm:{element.get('type')}:{element.get('id')}:facility",
-            "title": f"OSM mapped as {tags.get('industrial') or subtype}",
+            "title": f"OSM mapped as {tags.get('industrial') or tags.get('man_made') or subtype}",
             "url": _build_osm_object_url(str(element.get("type")), int(element.get("id"))),
             "source_label": "OpenStreetMap",
             "evidence_type": "osm_tag",
@@ -565,7 +674,7 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         "id": f"osm:{element.get('type')}:{element.get('id')}",
         "company": facility_name,
         "licenseType": _format_license_type(subtype),
-        "commodity": ", ".join(commodity_hints) if commodity_hints else "petroleum",
+        "commodity": ", ".join(commodity_hints) if commodity_hints else (substance_text or "petroleum"),
         "status": "Mapped open infrastructure",
         "date": None,
         "country": country,
@@ -583,6 +692,8 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         "entityKind": "storage_terminal",
         "entitySubtype": subtype,
         "operatorName": operator,
+        "ownerName": owner,
+        "substanceText": substance_text,
         "commodityHints": commodity_hints,
         "capacityText": capacity_text,
         "confidenceScore": round(confidence, 2),
@@ -621,6 +732,7 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
     by_country: dict[str, int] = {}
     high_confidence = 0
     with_operator = 0
+    with_owner = 0
     with_capacity = 0
     with_nearby_port = 0
     for entity in entities:
@@ -632,6 +744,8 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
             high_confidence += 1
         if entity.get("operatorName"):
             with_operator += 1
+        if entity.get("ownerName"):
+            with_owner += 1
         if entity.get("capacityText"):
             with_capacity += 1
         if entity.get("nearbyPort"):
@@ -645,6 +759,7 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(entities),
         "countries": len(countries),
         "with_operator": with_operator,
+        "with_owner": with_owner,
         "with_capacity": with_capacity,
         "with_nearby_port": with_nearby_port,
         "high_confidence": high_confidence,
@@ -677,20 +792,28 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     warnings: list[str] = []
     all_entities: list[dict[str, Any]] = []
     data_source = "overpass"
+    db_elements: list[dict[str, Any]] = []
+    db_fetched_at: Optional[str] = None
 
     if not force_refresh:
         db_elements, db_fetched_at = _load_storage_terminals_from_db()
-        if db_elements:
-            data_source = "database"
-            fetched_at = db_fetched_at or fetched_at
-            for element in db_elements:
-                normalized = normalize_storage_terminal(element, fetched_at)
-                if normalized:
-                    normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
-                    normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
-                    all_entities.append(normalized)
 
-    if not all_entities:
+    use_db_only = (
+        not force_refresh
+        and bool(db_elements)
+        and _db_snapshot_is_globally_complete(db_elements)
+    )
+
+    if use_db_only:
+        data_source = "database"
+        fetched_at = db_fetched_at or fetched_at
+        for element in db_elements:
+            normalized = normalize_storage_terminal(element, fetched_at)
+            if normalized:
+                normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+                normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+                all_entities.append(normalized)
+    else:
         with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
             futures = {
                 executor.submit(fetch_overpass_elements, bbox): tile_name
@@ -707,6 +830,23 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
                 except Exception as exc:
                     warnings.append(f"{tile_name}: {exc}")
 
+        if not all_entities and db_elements:
+            data_source = "database"
+            fetched_at = db_fetched_at or fetched_at
+            warnings.append(
+                "Live Overpass returned no normalized storage entities; using persisted petroleum_osm_features snapshot."
+            )
+            for element in db_elements:
+                normalized = normalize_storage_terminal(element, fetched_at)
+                if normalized:
+                    normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+                    normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+                    all_entities.append(normalized)
+        elif db_elements and not use_db_only:
+            warnings.append(
+                "Persisted petroleum_osm_features snapshot was regional/incomplete; refreshed from live Overpass world tiles."
+            )
+
     entities = _dedupe_entities(all_entities)
     entities.sort(
         key=lambda item: (
@@ -722,12 +862,14 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
         "data_source": data_source,
         "data_as_of": fetched_at,
         "coverage_note": (
-            "Global coverage is live from OpenStreetMap/Overpass, but only where mappers explicitly tag petroleum terminals, tank farms, "
-            "or clearly named oil/gas storage facilities. This is useful open infrastructure context, not an official global storage registry."
+            "Global coverage is live from OpenStreetMap/Overpass across 11 world tiles. Includes petroleum terminals, "
+            "tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry. "
+            "Curated license records are separate; this layer is community-mapped OSM only."
         ),
         "limitations": [
             "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
-            "Individual man_made=storage_tank objects are intentionally not treated as standalone terminals unless the site itself is mapped as a facility.",
+            "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
+            "Operator and owner values come only from OSM tags — missing tags are shown as untagged, never inferred.",
             "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
             "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
         ]

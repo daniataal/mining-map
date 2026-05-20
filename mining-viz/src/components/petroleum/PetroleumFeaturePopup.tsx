@@ -4,6 +4,7 @@ import {
   petroleumLayerTypeLabel,
 } from '../../lib/petroleumFeatureFields';
 import type { PetroleumLayerId } from '../../lib/petroleumLayers';
+import { pipelineSubstancePopupLayerId } from '../../lib/pipelineSubstance';
 import { useI18n } from '../../lib/i18n';
 import { ExternalLink, MapPin } from 'lucide-react';
 
@@ -41,6 +42,12 @@ const LAYER_ACCENT: Record<
     border: 'border-sky-500/25',
     dot: 'bg-sky-400',
   },
+};
+
+const WATER_PIPELINE_ACCENT = {
+  badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+  border: 'border-cyan-500/25',
+  dot: 'bg-cyan-400',
 };
 
 interface PetroleumFeaturePopupProps {
@@ -99,8 +106,15 @@ export default function PetroleumFeaturePopup({
 }: PetroleumFeaturePopupProps) {
   const { t } = useI18n();
   const model = buildPetroleumFeatureViewModel(properties, layerId);
-  const accent = LAYER_ACCENT[layerId];
-  const layerLabel = petroleumLayerTypeLabel(layerId);
+  const accent =
+    model.pipelineSubstance === 'water'
+      ? WATER_PIPELINE_ACCENT
+      : LAYER_ACCENT[
+          model.pipelineSubstance != null
+            ? pipelineSubstancePopupLayerId(model.pipelineSubstance)
+            : layerId
+        ] ?? LAYER_ACCENT[layerId];
+  const layerLabel = model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(layerId);
   const showExploringSection =
     layerId === 'exploration' || layerId === 'production' || layerId === 'bid_rounds';
   const isOsmPipeline =

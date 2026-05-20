@@ -41,9 +41,6 @@ import {
   AlertTriangle as LucideAlertTriangle,
   CheckCircle2 as LucideCheckCircle2,
   Ship as LucideShip,
-  Radio as LucideRadio,
-  Compass as LucideCompass,
-  Clock as LucideClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -98,12 +95,28 @@ import {
   useStorageTerminalDetails,
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
+import {
+  formatStorageOperatorLabel,
+  formatStorageOwnerLabel,
+  formatStorageSubstanceLabel,
+  storageTerminalOsmTagSummary,
+  STORAGE_OPERATOR_UNTAGGED,
+} from '../lib/storageTankFarmsLayer';
 import { getCommodityMarketSnapshot } from '../lib/commodityMarket';
 import {
   getLicenseHeroImageUrl,
   getLicenseVolumeUnit,
   isOilAndGasLicense,
 } from '../lib/licenseHeroImage';
+import {
+  buildMaritimeStatusMessages,
+  buildVesselAlerts,
+  findNearbyVessels,
+  licenseViewportBounds,
+  resolveMaritimeFeedIssue,
+  useMaritimeVessels,
+  type VesselAlert,
+} from '../lib/vessels';
 
 /** Client-side cap — slightly above server AI_ANALYSIS_DEADLINE_SECONDS + enrichment budget. */
 const AI_ANALYZE_CLIENT_TIMEOUT_MS = 70_000;
@@ -125,16 +138,17 @@ function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string
   return 'Intelligence request failed.';
 }
 
-function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+function fmtAlertTimestamp(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
+function vesselAlertSeverityClass(severity: VesselAlert['severity']): string {
+  if (severity === 'critical') return 'bg-red-500/10 text-red-400 border-red-500/20';
+  if (severity === 'warning') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
 }
 
 interface DossierViewProps {
@@ -229,30 +243,95 @@ export default function DossierView({
   }, [item]);
   const isEsgRisk = esgZone !== null;
 
-  const [radarSweeping, setRadarSweeping] = useState(true);
-  const [dispatchedVessels, setDispatchedVessels] = useState<string[]>([]);
+  const vesselAlertsViewport = useMemo(() => {
+    if (item?.lat == null || item?.lng == null) return null;
+    return licenseViewportBounds(item.lat, item.lng);
+  }, [item?.lat, item?.lng]);
 
-  const mockAISVessels = useMemo(() => {
-    if (!item) return [];
-    const fleet = [
-      { name: 'Golden Horizon', type: 'Bulk Carrier', flag: 'Panama', speed: '12.4 kn', baseOffsetLat: 0.15, baseOffsetLng: -0.12 },
-      { name: 'Sea Sovereign', type: 'Crude Oil Tanker', flag: 'Marshall Islands', speed: '14.1 kn', baseOffsetLat: -0.08, baseOffsetLng: 0.22 },
-      { name: 'Star Orion', type: 'LNG Carrier', flag: 'Singapore', speed: '16.8 kn', baseOffsetLat: 0.28, baseOffsetLng: 0.05 },
-      { name: 'Atlantic Pioneer', type: 'General Cargo', flag: 'Liberia', speed: '10.2 kn', baseOffsetLat: -0.32, baseOffsetLng: -0.25 }
-    ];
+  const vesselAlertsTabActive = activeTab === 'vessel-alerts';
 
-    return fleet.map(v => {
-      const vLat = (item.lat || 0) + v.baseOffsetLat;
-      const vLng = (item.lng || 0) + v.baseOffsetLng;
-      const distance = calculateDistanceKm(item.lat || 0, item.lng || 0, vLat, vLng);
-      return {
-        ...v,
-        lat: vLat,
-        lng: vLng,
-        distance
-      };
-    }).sort((a, b) => a.distance - b.distance);
-  }, [item]);
+  const {
+    data: maritimeFeedForAlerts,
+    isLoading: maritimeAlertsLoading,
+    error: maritimeAlertsError,
+  } = useMaritimeVessels({
+    enabled: vesselAlertsTabActive && item?.lat != null && item?.lng != null,
+    viewport: vesselAlertsViewport,
+    scope: 'all_vessels',
+    maxVessels: 5000,
+    captureWindowSeconds: 25,
+  });
+
+  const nearbyVesselSignals = useMemo(() => {
+    if (item?.lat == null || item?.lng == null) return [];
+    return findNearbyVessels(maritimeFeedForAlerts?.vessels ?? [], item.lat, item.lng);
+  }, [item?.lat, item?.lng, maritimeFeedForAlerts?.vessels]);
+
+  const maritimeSnapshotTotal =
+    maritimeFeedForAlerts?.snapshot_vessel_count ??
+    maritimeFeedForAlerts?.total_available ??
+    maritimeFeedForAlerts?.vessels?.length ??
+    0;
+
+  const maritimeFeedIssue = useMemo(
+    () =>
+      resolveMaritimeFeedIssue(maritimeFeedForAlerts, {
+        layerEnabled: true,
+        vesselsInView: nearbyVesselSignals.length,
+        snapshotTotal: maritimeSnapshotTotal,
+      }),
+    [maritimeFeedForAlerts, nearbyVesselSignals.length, maritimeSnapshotTotal],
+  );
+
+  const vesselAlerts = useMemo(
+    () =>
+      buildVesselAlerts({
+        feed: maritimeFeedForAlerts,
+        feedIssue: maritimeFeedIssue,
+        licenseLat: item?.lat,
+        licenseLng: item?.lng,
+        nearbySignals: nearbyVesselSignals,
+        esgZone,
+        legalEvents,
+      }),
+    [
+      maritimeFeedForAlerts,
+      maritimeFeedIssue,
+      item?.lat,
+      item?.lng,
+      nearbyVesselSignals,
+      esgZone,
+      legalEvents,
+    ],
+  );
+
+  const proximityAlerts = useMemo(
+    () => vesselAlerts.filter((alert) => alert.kind === 'vessel_proximity'),
+    [vesselAlerts],
+  );
+
+  const systemAlerts = useMemo(
+    () => vesselAlerts.filter((alert) => alert.kind !== 'vessel_proximity'),
+    [vesselAlerts],
+  );
+
+  const maritimeStatusForAlerts = useMemo(
+    () =>
+      buildMaritimeStatusMessages(maritimeFeedForAlerts, {
+        layerEnabled: true,
+        vesselsInView: nearbyVesselSignals.length,
+        snapshotTotal: maritimeSnapshotTotal,
+        isLoading: maritimeAlertsLoading,
+        hasError: Boolean(maritimeAlertsError),
+      }),
+    [
+      maritimeFeedForAlerts,
+      nearbyVesselSignals.length,
+      maritimeSnapshotTotal,
+      maritimeAlertsLoading,
+      maritimeAlertsError,
+    ],
+  );
 
   const defaultLogs = useMemo(() => {
     if (!item) return [];
@@ -269,12 +348,6 @@ export default function DossierView({
         username: 'Sentinel Sat GIS',
         timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString()
       }] : []),
-      {
-        action: 'LOGISTICS_DESK_LOAD',
-        details: `Vessel proximity alerts initialized for concession locator bounds (${item.lat?.toFixed(4)}, ${item.lng?.toFixed(4)}).`,
-        username: 'System Router',
-        timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString()
-      }
     ];
   }, [item, isEsgRisk, esgZone]);
 
@@ -1389,176 +1462,216 @@ Output requirements:
 
             {/* VESSEL ALERTS TAB (PILLAR C) */}
             {activeTab === 'vessel-alerts' && item && (
-              <div className="space-y-8 max-w-4xl mx-auto">
-                {/* Radar Sweep & Congestion Index HUD */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Radar sweep indicator */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] shadow-lg">
-                    {radarSweeping && (
-                      <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none animate-pulse" />
-                    )}
-                    <div className="relative w-24 h-24 rounded-full border border-cyan-500/20 flex items-center justify-center overflow-hidden">
-                      {/* Sweep sweep line */}
-                      {radarSweeping && (
-                        <div className="absolute inset-0 origin-center bg-gradient-to-tr from-cyan-500/10 to-transparent rounded-full animate-[spin_4s_linear_infinite]" />
-                      )}
-                      <div className="w-16 h-16 rounded-full border border-cyan-500/30 flex items-center justify-center">
-                        <div className="w-8 h-8 rounded-full border border-cyan-500/40 flex items-center justify-center">
-                          <LucideRadio className="w-4 h-4 text-cyan-400 animate-pulse" />
-                        </div>
-                      </div>
-                      <div className="absolute bottom-2 w-2 h-2 bg-red-500 rounded-full animate-ping" style={{ left: '30%', top: '25%' }} />
-                      <div className="absolute bottom-2 w-2 h-2 bg-yellow-500 rounded-full animate-ping" style={{ right: '25%', bottom: '30%' }} />
-                    </div>
-                    
-                    <div className="text-center mt-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        {t('מכ״ם הגנה פעיל', 'Active Radar Sweep')}
-                      </h4>
-                      <Button
-                        onClick={() => setRadarSweeping(!radarSweeping)}
-                        variant="ghost"
-                        className="h-6 mt-1 px-3 text-[9px] text-cyan-400 hover:text-cyan-300 font-bold uppercase tracking-wider bg-cyan-500/10 hover:bg-cyan-500/20 rounded-full"
-                      >
-                        {radarSweeping ? t('כבה סריקה', 'PAUSE RADAR') : t('הפעל סריקה', 'START RADAR')}
-                      </Button>
-                    </div>
-                  </Card>
-
-                  {/* Congestion Index HUD */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 flex flex-col justify-between md:col-span-2 shadow-lg relative overflow-hidden">
-                    <div className="absolute -top-12 -right-12 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+              <div className="space-y-6 max-w-4xl mx-auto">
+                <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <Badge className="bg-amber-500 text-slate-950 border-none font-black text-[9px] px-2.5 h-5 mb-3">
-                        {t('מדד צפיפות ימית', 'AIS LOGISTICS TRAFFIC SATURATION')}
+                      <Badge className="bg-cyan-500/10 text-cyan-400 border-none font-black text-[9px] px-2.5 h-5 mb-3">
+                        {t('מקור AIS', 'AIS source')}
                       </Badge>
-                      <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight">
-                        {t('עומס בנמל: בינוני-גבוה', 'Port Congestion: MEDIUM-HIGH')}
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                        {maritimeStatusForAlerts
+                          ? t(maritimeStatusForAlerts.headlineHe, maritimeStatusForAlerts.headlineEn)
+                          : t('מעקב כלי שיט', 'Vessel watch')}
                       </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-md">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-2xl">
+                        {maritimeStatusForAlerts
+                          ? t(maritimeStatusForAlerts.detailHe, maritimeStatusForAlerts.detailEn)
+                          : t(
+                              'טוען מצב מאגר AIS סביב הרישיון…',
+                              'Loading AIS feed status around this license…',
+                            )}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">
+                        {t('עודכן', 'Updated')}
+                      </p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        {fmtAlertTimestamp(
+                          maritimeFeedForAlerts?.data_as_of,
+                          t('לא זמין', 'Unavailable'),
+                        )}
+                      </p>
+                      <p className="text-[9px] text-slate-500 mt-1">
+                        {maritimeFeedForAlerts?.source || 'maritime_intel'}
+                      </p>
+                    </div>
+                  </div>
+                  {maritimeAlertsError && (
+                    <p className="mt-4 text-[10px] text-red-500 font-bold">
+                      {String((maritimeAlertsError as Error)?.message || maritimeAlertsError)}
+                    </p>
+                  )}
+                  {maritimeStatusForAlerts?.sparseWarningHe && maritimeStatusForAlerts.sparseWarningEn && (
+                    <p className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] text-amber-700 dark:text-amber-300">
+                      {t(maritimeStatusForAlerts.sparseWarningHe, maritimeStatusForAlerts.sparseWarningEn)}
+                    </p>
+                  )}
+                </Card>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                        {t('התרעות מבוססות נתונים', 'Data-driven alerts')}
+                      </h4>
+                      <p className="text-[9px] text-slate-400">
                         {t(
-                          'זמן ההמתנה הממוצע לפריקה במעגני הקונססיה עומד כעת על 3.4 ימים עקב תנאי מזג אוויר ופעילות מוגברת.',
-                          'The average unloading delay at the nearest marine concession locator terminals is currently 3.4 days due to localized bulk carrier queues.'
+                          'רק אותות מ-AIS, כיסוי, ESG ו-OpenSanctions — ללא אירועי הדגמה',
+                          'Only AIS coverage, proximity, ESG, and OpenSanctions signals — no demo events',
                         )}
                       </p>
                     </div>
+                    <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
+                      {vesselAlerts.length} {t('התרעות', 'Alerts')}
+                    </Badge>
+                  </div>
 
-                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-6">
-                      <div className="flex-1">
-                        <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1">
-                          <span>{t('עומס', 'Saturation')}</span>
-                          <span className="text-amber-500 font-black">74%</span>
-                        </div>
-                        <div className="w-full h-2.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 rounded-full" style={{ width: '74%' }} />
+                  {maritimeAlertsLoading && !maritimeFeedForAlerts ? (
+                    <Card className="p-8 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
+                          {t('טוען התרעות ימיות…', 'Loading maritime alerts…')}
+                        </p>
+                      </div>
+                    </Card>
+                  ) : vesselAlerts.length === 0 ? (
+                    <Card className="p-8 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <div className="flex items-start gap-3">
+                        <LucideShip className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">
+                            {t('אין התרעות פעילות', 'No active alerts')}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                            {t(
+                              'לא נמצאו כלי שיט AIS בטווח 150 ק"מ, דגלים מסנקציות, או בעיות כיסוי מעבר לסטטוס המאגר למעלה.',
+                              'No AIS vessels within 150 km, sanctions flags, or coverage issues beyond the feed status above.',
+                            )}
+                          </p>
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">{t('זמן פריקה', 'Avg Queue Time')}</p>
-                        <p className="text-xl font-black text-slate-900 dark:text-white">~78 hrs</p>
-                      </div>
+                    </Card>
+                  ) : (
+                    <div className="space-y-3">
+                      {systemAlerts.map((alert) => (
+                        <Card
+                          key={alert.id}
+                          className={`p-5 rounded-3xl border ${vesselAlertSeverityClass(alert.severity)}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <LucideAlertTriangle className="w-4 h-4 shrink-0" />
+                                <h4 className="text-sm font-black uppercase tracking-wide">
+                                  {t(alert.titleHe, alert.titleEn)}
+                                </h4>
+                              </div>
+                              <p className="text-[10px] leading-relaxed opacity-90">
+                                {t(alert.messageHe, alert.messageEn)}
+                              </p>
+                            </div>
+                            <Badge className="font-black text-[8px] px-2 h-5 border-none shrink-0 uppercase">
+                              {alert.severity}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-500">
+                            <span>
+                              {t('מקור', 'Source')}: {alert.sourceLabel}
+                            </span>
+                            <span>
+                              {t('נצפה', 'Observed')}:{' '}
+                              {fmtAlertTimestamp(alert.observedAt, t('לא זמין', 'Unavailable'))}
+                            </span>
+                          </div>
+                        </Card>
+                      ))}
                     </div>
-                  </Card>
+                  )}
                 </div>
 
-                {/* Spatial Proximity Signals */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
-                        {t('אותות קרבה ימיים פעילים', 'Active AIS Proximity Signals')}
+                        {t('קרבת AIS לרישיון', 'AIS proximity to license')}
                       </h4>
                       <p className="text-[9px] text-slate-400">
-                        {t('חישוב מרחק גיאוגרפי ישיר (האברסין) ממיקום הרישיון', 'Direct Haversine geographical distance from concession bounds')}
+                        {t(
+                          'כלי שיט אמיתיים בטווח 150 ק"מ (Haversine) — ללא מיקומי הדגמה',
+                          'Real AIS vessels within 150 km (Haversine) — demo positions excluded',
+                        )}
                       </p>
                     </div>
                     <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
-                      {mockAISVessels.length} {t('כלי שיט בטווח', 'Active Vessels')}
+                      {proximityAlerts.length} {t('קרובים', 'Nearby')}
                     </Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {mockAISVessels.map((vessel) => {
-                      const isDispatched = dispatchedVessels.includes(vessel.name);
-                      const isHighRisk = vessel.distance < 120;
-                      
-                      return (
-                        <Card
-                          key={vessel.name}
-                          className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[220px] shadow-sm hover:shadow-md
-                            ${isHighRisk 
-                              ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/30' 
-                              : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 hover:border-black/10 dark:hover:border-white/10'}`}
-                        >
-                          {isHighRisk && (
-                            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-lg pointer-events-none" />
-                          )}
-                          
-                          <div>
+                  {proximityAlerts.length === 0 ? (
+                    <Card className="p-6 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <p className="text-[10px] text-slate-500">
+                        {t(
+                          'אין כלי שיט AIS שמורים בטווח. נסו להרחיב את maritime-worker או לבדוק כיסוי המפרץ.',
+                          'No persisted AIS vessels in range. Expand maritime-worker watches or check Gulf coverage.',
+                        )}
+                      </p>
+                    </Card>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {proximityAlerts.map((alert) => {
+                        const signal = nearbyVesselSignals.find((entry) => entry.vessel.id === alert.vesselId);
+                        const vessel = signal?.vessel;
+                        const isCritical = alert.severity === 'critical';
+                        return (
+                          <Card
+                            key={alert.id}
+                            className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[180px] shadow-sm
+                              ${isCritical
+                                ? 'bg-red-500/5 border-red-500/20'
+                                : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5'}`}
+                          >
                             <div className="flex items-start justify-between gap-3 mb-3">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
-                                  ${isHighRisk ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                  ${isCritical ? 'bg-red-500/20 text-red-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
                                   <LucideShip className="w-4 h-4" />
                                 </div>
-                                <div>
-                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate max-w-[140px] uppercase">
-                                    {vessel.name}
+                                <div className="min-w-0">
+                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate uppercase">
+                                    {alert.vesselName || vessel?.mmsi || t('לא ידוע', 'Unknown')}
                                   </h4>
-                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
-                                    {vessel.type} • {vessel.flag}
+                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider truncate">
+                                    {[vessel?.ship_type_label, vessel?.mmsi ? `MMSI ${vessel.mmsi}` : null]
+                                      .filter(Boolean)
+                                      .join(' · ')}
                                   </p>
                                 </div>
                               </div>
                               <Badge className={`font-black text-[9px] px-2 h-5 border-none shrink-0
-                                ${isHighRisk ? 'bg-red-500 text-white animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                                {vessel.distance.toFixed(1)} km
+                                ${isCritical ? 'bg-red-500 text-white' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                {alert.distanceKm?.toFixed(1)} km
                               </Badge>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-black/5 dark:border-white/5">
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                <LucideCompass className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{t('מהירות: ', 'Speed: ') + vessel.speed}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                <LucideClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{t('זמן הגעה: ', 'ETA: ') + (isHighRisk ? 'Immediate' : '1.2 days')}</span>
-                              </div>
+                            <p className="text-[10px] text-slate-500 leading-relaxed">
+                              {t(alert.messageHe, alert.messageEn)}
+                            </p>
+                            <div className="mt-4 pt-3 border-t border-black/5 dark:border-white/5 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-500">
+                              <span>
+                                {t('מקור', 'Source')}: {alert.sourceLabel}
+                              </span>
+                              <span>
+                                {t('נצפה', 'Observed')}:{' '}
+                                {fmtAlertTimestamp(alert.observedAt, t('לא זמין', 'Unavailable'))}
+                              </span>
                             </div>
-                          </div>
-
-                          <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
-                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">
-                              {isHighRisk ? t('חריגת גבול אקטיבית', 'CRITICAL BOUNDARY INTRUSION') : t('גישה שגרתית', 'ROUTINE TRANSIT')}
-                            </span>
-                            <Button
-                              onClick={() => {
-                                if (isDispatched) return;
-                                const newLog = {
-                                  action: 'VESSEL_PROXIMITY_ALARM',
-                                  details: `Logistics alert dispatched: Vessel '${vessel.name}' (${vessel.type}, Flag: ${vessel.flag}) flagged idling near concession buffer range at ${vessel.distance.toFixed(1)}km distance. Speed: ${vessel.speed}.`,
-                                  username: 'AIS Watcher',
-                                  timestamp: new Date().toISOString()
-                                };
-                                setActivityLogs(prev => [newLog, ...prev]);
-                                setDispatchedVessels(prev => [...prev, vessel.name]);
-                              }}
-                              disabled={isDispatched}
-                              className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
-                                ${isDispatched 
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                                  : isHighRisk
-                                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md shadow-red-500/20'
-                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
-                            >
-                              {isDispatched ? t('שוגר בהצלחה', 'ALERTED ✔') : t('שגר התרעה', 'DISPATCH WARNING')}
-                            </Button>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2545,7 +2658,28 @@ Output requirements:
                           value={terminalDetails.entitySubtype.replace(/_/g, ' ')}
                         />
                       )}
-                      {terminalDetails.operatorName && (
+                      {isStorageTerminal && (
+                        <SpecItem
+                          label={t('מפעיל', 'Operator')}
+                          value={formatStorageOperatorLabel(
+                            terminalDetails.operatorName,
+                            t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                          )}
+                        />
+                      )}
+                      {isStorageTerminal && formatStorageOwnerLabel(terminalDetails.ownerName) && (
+                        <SpecItem
+                          label={t('בעלים', 'Owner')}
+                          value={terminalDetails.ownerName || '—'}
+                        />
+                      )}
+                      {isStorageTerminal && formatStorageSubstanceLabel(terminalDetails) && (
+                        <SpecItem
+                          label={t('חומר', 'Substance')}
+                          value={formatStorageSubstanceLabel(terminalDetails) || '—'}
+                        />
+                      )}
+                      {!isStorageTerminal && terminalDetails.operatorName && (
                         <SpecItem
                           label={t('מפעיל', 'Operator')}
                           value={terminalDetails.operatorName}
@@ -2960,12 +3094,42 @@ Output requirements:
                         <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
                           <div className="space-y-2">
                             <ReadRow label={t('תת-סוג', 'Subtype')} value={terminalDetails.entitySubtype?.replace(/_/g, ' ') || '—'} />
-                            <ReadRow label={t('מפעיל', 'Operator')} value={terminalDetails.operatorName || '—'} />
+                            <ReadRow
+                              label={t('מפעיל', 'Operator')}
+                              value={formatStorageOperatorLabel(
+                                terminalDetails.operatorName,
+                                t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                              )}
+                            />
+                            <ReadRow
+                              label={t('בעלים', 'Owner')}
+                              value={formatStorageOwnerLabel(terminalDetails.ownerName) || '—'}
+                            />
+                            <ReadRow
+                              label={t('חומר', 'Substance')}
+                              value={formatStorageSubstanceLabel(terminalDetails) || '—'}
+                            />
                             <ReadRow label={t('נמל קרוב', 'Nearby Port')} value={terminalDetails.nearbyPort?.name || '—'} />
                             <ReadRow label={t('מרחק לנמל', 'Port Distance')} value={terminalDetails.nearbyPort?.distance_km != null ? `${terminalDetails.nearbyPort.distance_km} km` : '—'} />
                             <ReadRow label={t('קיבולת מסומנת', 'Tagged Capacity')} value={terminalDetails.capacityText || '—'} />
                             <ReadRow label={t('הסבר ביטחון', 'Confidence Note')} value={terminalDetails.confidenceNote || '—'} wide />
                           </div>
+                          {storageTerminalOsmTagSummary(storageTerminalDetails?.rawPayload).length > 0 && (
+                            <div className="mt-4 border-t border-black/5 dark:border-white/5 pt-4">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                {t('תגי OSM', 'OSM tags')}
+                              </p>
+                              <div className="space-y-1">
+                                {storageTerminalOsmTagSummary(storageTerminalDetails?.rawPayload).map((tag) => (
+                                  <p key={tag.key} className="text-[10px] text-slate-500 break-words">
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">{tag.key}</span>
+                                    {': '}
+                                    {tag.value}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {isLoadingStorageTerminal && (
                             <p className="mt-3 text-[10px] text-slate-500">
                               {t('טוען פרטי ראיות מלאים...', 'Loading full evidence details...')}

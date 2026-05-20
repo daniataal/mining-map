@@ -9,6 +9,11 @@ from __future__ import annotations
 import json
 import os
 import time
+
+try:
+    from backend.services.pipeline_substance import classify_pipeline_substance
+except ImportError:
+    from services.pipeline_substance import classify_pipeline_substance  # type: ignore
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -232,6 +237,9 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
         return None
 
     pipeline_tags = _pipeline_tags_for_properties(tags) if layer_id == "pipelines" else {}
+    pipeline_substance = (
+        classify_pipeline_substance(tags) if layer_id == "pipelines" else None
+    )
     properties: dict[str, Any] = {
         "name": name,
         "layer_id": layer_id,
@@ -241,6 +249,8 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
         "attribution": "© OpenStreetMap contributors (ODbL)",
         **pipeline_tags,
     }
+    if pipeline_substance is not None:
+        properties["pipeline_substance"] = pipeline_substance
     if layer_id == "refineries":
         for key in ("operator", "owner", "industrial", "description", "wikipedia", "wikidata"):
             value = tags.get(key)
