@@ -19,6 +19,10 @@ type Config struct {
 	ExistingBackendURL     string
 	SupplierCreateEndpoint string
 	SeedOnStartup          bool
+	APIBaseURL             string
+	InternalBroadcastKey   string
+	AISPositionRetainHours int
+	AISInsecureTLS         bool
 }
 
 func Load() Config {
@@ -37,7 +41,23 @@ func Load() Config {
 		ExistingBackendURL:     strings.TrimRight(env("EXISTING_BACKEND_URL", "http://backend:8000"), "/"),
 		SupplierCreateEndpoint: env("SUPPLIER_CREATE_ENDPOINT", "/licenses"),
 		SeedOnStartup:          envBool("OIL_INTEL_SEED_ON_STARTUP", true),
+		APIBaseURL:             strings.TrimRight(env("OIL_INTEL_API_URL", "http://oil-live-intel:8095"), "/"),
+		InternalBroadcastKey:   env("OIL_INTEL_INTERNAL_KEY", "oil-intel-dev"),
+		AISPositionRetainHours: envInt("AIS_POSITION_RETAIN_HOURS", 72),
+		AISInsecureTLS:         envBool("OIL_INTEL_AIS_INSECURE_TLS", false),
 	}
+}
+
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 func env(key, fallback string) string {

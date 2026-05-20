@@ -150,6 +150,75 @@ export async function saveOilCompanyToSuppliers(companyId: string): Promise<{
   return data;
 }
 
+export type OilOpportunity = {
+  id: string;
+  opportunity_type: string;
+  title?: string;
+  hypothesis?: string;
+  confidence?: number;
+  evidence?: string[];
+  profit_checklist?: string[];
+  terminal_name?: string;
+  disclaimer?: string;
+};
+
+export async function getOilOpportunities(minConfidence = 0.55): Promise<{ opportunities: OilOpportunity[] }> {
+  const res = await fetch(oilUrl(`/api/oil-live/opportunities?min_confidence=${minConfidence}`));
+  if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
+  return res.json();
+}
+
+export type OilContact = {
+  id?: string;
+  contact_type: string;
+  value: string;
+  label?: string;
+  source_type?: string;
+  origin?: string;
+};
+
+export type OilCompanyContactsResponse = {
+  company_id: string;
+  company_name: string;
+  supplier_id?: string;
+  contacts: OilContact[];
+  procurement_notices?: Array<{
+    notice_id: string;
+    title?: string;
+    buyer?: string;
+    country?: string;
+    source_url?: string;
+  }>;
+  procurement_note?: string;
+  disclaimer?: string;
+};
+
+export async function getOilCompanyContacts(companyId: string): Promise<OilCompanyContactsResponse> {
+  const res = await fetch(oilUrl(`/api/oil-live/companies/${companyId}/contacts`));
+  if (!res.ok) throw new Error(`oil-live contacts ${res.status}`);
+  return res.json();
+}
+
+export async function addOilCompanyContact(
+  companyId: string,
+  body: { contact_type: string; value: string; label?: string },
+): Promise<{ contact: OilContact }> {
+  const res = await fetch(oilUrl(`/api/oil-live/companies/${companyId}/contacts`), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `add contact ${res.status}`);
+  return data;
+}
+
+export async function draftOilOutreach(companyId: string): Promise<{ draft: string; disclaimer?: string }> {
+  const res = await fetch(oilUrl(`/api/oil-live/companies/${companyId}/draft-outreach`), { method: 'POST' });
+  if (!res.ok) throw new Error(`draft outreach ${res.status}`);
+  return res.json();
+}
+
 export function connectOilLiveWebSocket(onMessage: (msg: { type: string; data: unknown }) => void): () => void {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = OIL_INTEL_BASE
