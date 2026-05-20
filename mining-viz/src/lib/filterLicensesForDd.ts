@@ -3,6 +3,7 @@ import {
   licenseMatchesSelectedCommodities,
 } from './commodities';
 import { buildLicenseSearchIndex, licenseHaystackMatches } from './licenseSearchIndex';
+import { normalizeDealStage } from './dealWorkflow';
 import { MiningLicense, UserAnnotation } from '../types';
 
 export type DdListMode = 'queue' | 'browse';
@@ -83,7 +84,7 @@ export function applyDdFilters(
 
   if (filters.stages.length > 0) {
     data = data.filter((item) => {
-      const stage = (userAnnotations[item.id]?.stage as string) || 'New';
+      const stage = normalizeDealStage(userAnnotations[item.id]?.stage);
       return filters.stages.includes(stage);
     });
   }
@@ -131,7 +132,7 @@ export function buildDdFacetOptions(items: MiningLicense[], userAnnotations: Rec
       commodities.add(label);
     }
     statuses.add((item.status || 'Unknown').trim());
-    stages.add((annotation.stage as string) || 'New');
+    stages.add(normalizeDealStage(annotation.stage));
   }
 
   return {

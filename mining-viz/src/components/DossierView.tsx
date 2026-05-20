@@ -51,6 +51,18 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import {
+  LIFECYCLE_STEPS,
+  normalizeDealStage,
+  dealStageIndex,
+  dealStageAtIndex,
+  DD_CHECKLIST_IDS,
+} from '../lib/dealWorkflow';
+import {
+  resolveChecklistItems,
+  checklistProgress,
+} from '../lib/checklistDefaults';
+import { toast } from 'sonner';
 import { getEsgZoneIntersection } from '../lib/esgConservationZones';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
@@ -133,35 +145,6 @@ interface DossierViewProps {
   onOpenInvestigations?: () => void;
   onDealRoomLinked?: (room: DealRoom) => void;
 }
-
-const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
-
-const LIFECYCLE_STEPS = [
-  { id: 'New', label: 'New' },
-  { id: 'Needs Review', label: 'Needs Review' },
-  { id: 'Investigating', label: 'Investigating' },
-  { id: 'Escalated', label: 'Escalated' },
-  { id: 'Approved', label: 'Approved' },
-  { id: 'Rejected', label: 'Rejected' },
-] as const;
-
-const STAGE_TO_LIFECYCLE: Record<string, number> = {
-  'New': 0,
-  'Needs Review': 1,
-  'Investigating': 2,
-  'Escalated': 3,
-  'Approved': 4,
-  'Rejected': 5,
-};
-
-const LIFECYCLE_TO_STAGE: Record<number, string> = {
-  0: 'New',
-  1: 'Needs Review',
-  2: 'Investigating',
-  3: 'Escalated',
-  4: 'Approved',
-  5: 'Rejected',
-};
 
 function inferOilCategory(commodity?: string | null): OilHsCategory {
   const normalized = (commodity || '').toLowerCase();
@@ -474,9 +457,40 @@ export default function DossierView({
     [activeCommodityLabel, marketPrices]
   );
 
-  // Current pipeline stage
-  const currentStage = annotation.stage || 'New';
-  const lifecycleStep = STAGE_TO_LIFECYCLE[currentStage] ?? 0;
+  const currentStage = normalizeDealStage(annotation.stage);
+  const lifecycleStep = dealStageIndex(currentStage);
+
+  const checklistItems = useMemo(
+    () => (item ? resolveChecklistItems(item.id, annotation.checklist) : []),
+    [item?.id, annotation.checklist],
+  );
+  const checklistStats = useMemo(() => checklistProgress(checklistItems), [checklistItems]);
+
+  const ddChecklistComplete = useMemo(
+    () =>
+      DD_CHECKLIST_IDS.every((id) => checklistItems.find((it) => it.id === id)?.checked),
+    [checklistItems],
+  );
+
+  const handleChecklistChange = (items: typeof checklistItems) => {
+    if (!item) return;
+    updateAnnotation(item.id, {
+      checklist: items,
+      checklistUpdatedAt: new Date().toISOString(),
+    });
+  };
+
+  const suggestInvestigatingStage = () => {
+    if (!item || currentStage === 'Investigating' || !ddChecklistComplete) return;
+    toast.message(t('השלמת בדיקת נאותות', 'Due diligence items complete'), {
+      description: t('לסמן כעסקה בחקירה?', 'Mark deal as Investigating?'),
+      action: {
+        label: t('חקירה', 'Investigating'),
+        onClick: () => updateAnnotation(item.id, { stage: 'Investigating' }),
+      },
+      duration: 8000,
+    });
+  };
   const isOilAndGas = isOilAndGasLicense(item?.sector, commodityListLabel);
   const volumeUnit = getLicenseVolumeUnit(item?.sector, commodityListLabel);
   const heroImageUrl = item ? getLicenseHeroImageUrl(item) : '/assets/commodities/mining.png';
@@ -963,7 +977,6 @@ Output requirements:
       phoneNumber: annotation.phoneNumber || item?.phoneNumber || '',
       quantity: annotation.quantity ?? item?.capacity ?? 0,
       price: annotation.price ?? item?.pricePerKg ?? 0,
-      stage: annotation.stage || 'New',
     });
     setIsEditing(true);
   };
@@ -1170,30 +1183,40 @@ Output requirements:
                 />
               </div>
             )}
-            {/* Deal Lifecycle Strip — driven by annotation.stage */}
+            {/* Deal stage strip — single source: annotation.stage (6 canonical stages) */}
             <div className="mb-6 md:mb-10 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                    {t('סטטוס עסקה', 'Deal Lifecycle')}
+                    {t('שלב עסקה', 'Deal stage')}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
-                      {LIFECYCLE_STEPS[lifecycleStep]?.label}
-                    </span>
-                    <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-none text-[9px] font-black ml-1">
                       {currentStage}
-                    </Badge>
+                    </span>
+                    {checklistStats.total > 0 && (
+                      <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-none text-[9px] font-black">
+                        {t('רשימת ביצוע', 'Checklist')}: {checklistStats.done}/{checklistStats.total}
+                      </Badge>
+                    )}
                   </div>
+                  {ddChecklistComplete && currentStage !== 'Investigating' && (
+                    <button
+                      type="button"
+                      onClick={() => updateAnnotation(item.id, { stage: 'Investigating' })}
+                      className="mt-2 text-left text-[9px] font-black uppercase tracking-widest text-amber-500 hover:text-amber-400"
+                    >
+                      {t('DD הושלם — סמן כחקירה', 'DD complete — mark as Investigating')}
+                    </button>
+                  )}
                 </div>
-                {/* Steps: horizontal scroll on mobile */}
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                   {LIFECYCLE_STEPS.map((step, i) => (
                     <div key={step.id} className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() =>
-                          updateAnnotation(item.id, { stage: LIFECYCLE_TO_STAGE[i] })
+                          updateAnnotation(item.id, { stage: dealStageAtIndex(i) })
                         }
                         className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer min-h-[44px] whitespace-nowrap
                           ${i === lifecycleStep
@@ -1287,7 +1310,23 @@ Output requirements:
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                       <LucideShieldCheck className="w-4 h-4 text-emerald-500" /> Execution Checklist
                     </h4>
-                    <ExecutionChecklist dealId={item.id} dealLabel={item.company} />
+                    <ExecutionChecklist
+                      dealId={item.id}
+                      dealLabel={item.company}
+                      items={checklistItems}
+                      onItemsChange={(next) => {
+                        handleChecklistChange(next);
+                        const ddDone = DD_CHECKLIST_IDS.every((id) =>
+                          next.find((it) => it.id === id)?.checked,
+                        );
+                        if (
+                          ddDone &&
+                          normalizeDealStage(annotation.stage) !== 'Investigating'
+                        ) {
+                          suggestInvestigatingStage();
+                        }
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -1296,10 +1335,13 @@ Output requirements:
                   {/* Lead Value Score */}
                   <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 md:p-8">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-5 flex items-center gap-3">
-                      <LucideZap className="w-4 h-4 text-amber-500" /> Lead Value
+                      <LucideZap className="w-4 h-4 text-amber-500" /> {t('עדיפות ליד', 'Lead priority')}
                     </h4>
                     <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
-                      Internal priority tag for pipeline ranking. Not shared externally.
+                      {t(
+                        'תג עדיפות פנימי לדירוג בתור — לא קשור לשלב העסקה.',
+                        'Internal priority for queue ranking — separate from deal stage.',
+                      )}
                     </p>
                     <div className="grid grid-cols-3 gap-2 mb-4">
                       {(['high', 'medium', 'low'] as LeadValue[]).map(v => {
@@ -1367,7 +1409,7 @@ Output requirements:
                 terminalDetails={terminalDetails}
                 commodityListLabel={commodityListLabel}
                 volumeUnit={volumeUnit}
-                pipelineStageLabel={LIFECYCLE_STEPS[lifecycleStep]?.label || currentStage}
+                pipelineStageLabel={currentStage}
                 isOilAndGas={isOilAndGas}
                 isPortLogistics={isPortLogistics}
                 isStorageTerminal={isStorageTerminal}
@@ -3318,13 +3360,19 @@ Output requirements:
                     </div>
                   </Card>
 
-                  {/* Tactical Pipeline Status */}
+                  {/* Deal signal (qualification heat — not workflow stage) */}
                   <Card className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-3xl p-8">
-                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-3">
                       <LucideZap className="w-4 h-4 text-emerald-500" />{' '}
-                      {t('מצב צנרת', 'Pipeline State')}
+                      {t('אות עסקה', 'Deal signal')}
                     </h4>
-                    <div className="grid grid-cols-3 gap-3">
+                    <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
+                      {t(
+                        'חום ההזדמנות (עסקה / בדיקה / ליד) — נפרד משלב העסקה למעלה.',
+                        'Opportunity heat (Deal / Assay / Lead) — separate from deal stage above.',
+                      )}
+                    </p>
+                    <div className="grid grid-cols-3 gap-3 mb-4">
                       {[
                         { id: 'good', label: t('עסקה', 'Deal'), color: 'bg-emerald-500' },
                         { id: 'maybe', label: t('בדיקה', 'Assay'), color: 'bg-amber-500' },
@@ -3354,6 +3402,33 @@ Output requirements:
                           </button>
                         );
                       })}
+                    </div>
+                    <div className="pt-4 border-t border-black/5 dark:border-white/5">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2">
+                        {t('עדיפות ליד', 'Lead priority')}
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['high', 'medium', 'low'] as LeadValue[]).map((v) => {
+                          const isActive = (annotation.leadValue || 'medium') === v;
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateAnnotation(item.id, { leadValue: v });
+                              }}
+                              className={`py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all ${
+                                isActive
+                                  ? 'bg-amber-500 text-slate-950 border-amber-500'
+                                  : 'bg-black/5 dark:bg-white/5 text-slate-500 border-black/10 dark:border-white/10'
+                              }`}
+                            >
+                              {v}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </Card>
 
@@ -3387,8 +3462,8 @@ Output requirements:
                     {!isEditing ? (
                       <div className="space-y-3">
                         <ReadRow
-                          label={t('שלב', 'Stage')}
-                          value={annotation.stage || 'New'}
+                          label={t('שלב עסקה', 'Deal stage')}
+                          value={currentStage}
                         />
                         <ReadRow
                           label={t('איש קשר', 'Contact')}
@@ -3414,26 +3489,13 @@ Output requirements:
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div>
-                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">
-                            {t('שלב בצנרת', 'Pipeline Stage')}
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const).map(s => (
-                              <button
-                                key={s}
-                                type="button"
-                                onClick={() => setEditDraft(d => ({ ...d, stage: s }))}
-                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all
-                                  ${editDraft.stage === s
-                                    ? 'bg-amber-500 text-slate-950 border-amber-500'
-                                    : 'bg-black/5 dark:bg-white/5 text-slate-500 dark:text-slate-400 border-black/10 dark:border-white/10 hover:bg-black/10 dark:hover:bg-white/10'}`}
-                              >
-                                {s}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          {t(
+                            'שלב העסקה נערך בשורת השלבים למעלה.',
+                            'Deal stage is edited in the strip at the top of the dossier.',
+                          )}{' '}
+                          <span className="font-bold text-slate-600 dark:text-slate-300">{currentStage}</span>
+                        </p>
                         <EditField
                           label={t('איש קשר', 'Contact Person')}
                           value={editDraft.contactPerson || ''}

@@ -7,6 +7,16 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { ScrollArea } from './ui/scroll-area';
 import { ChevronRight, ChevronLeft, X } from 'lucide-react';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
+import {
+  DEAL_STAGES,
+  type DealStage,
+  STAGE_COLORS,
+  STAGE_BADGE_COLORS,
+  normalizeDealStage,
+  advanceDealStage,
+  retreatDealStage,
+  dealStageIndex,
+} from '../lib/dealWorkflow';
 
 interface KanbanBoardProps {
   processedData: MiningLicense[];
@@ -20,27 +30,6 @@ interface KanbanBoardProps {
   onRemoveFromQueue?: (id: string) => void;
 }
 
-const STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
-type Stage = typeof STAGES[number];
-
-const STAGE_COLORS: Record<Stage, string> = {
-  'New': 'bg-slate-500',
-  'Needs Review': 'bg-blue-500',
-  'Investigating': 'bg-amber-500',
-  'Escalated': 'bg-red-500',
-  'Approved': 'bg-emerald-500',
-  'Rejected': 'bg-slate-700',
-};
-
-const STAGE_BADGE_COLORS: Record<Stage, string> = {
-  'New': 'bg-slate-500/20 text-slate-400',
-  'Needs Review': 'bg-blue-500/20 text-blue-400',
-  'Investigating': 'bg-amber-500/20 text-amber-400',
-  'Escalated': 'bg-red-500/20 text-red-400',
-  'Approved': 'bg-emerald-500/20 text-emerald-400',
-  'Rejected': 'bg-slate-700/40 text-slate-500',
-};
-
 export default function KanbanBoard({
   processedData,
   userAnnotations,
@@ -53,35 +42,29 @@ export default function KanbanBoard({
   onRemoveFromQueue,
 }: KanbanBoardProps) {
   const { t } = useI18n();
-  const [activeStage, setActiveStage] = useState<Stage>('New');
+  const [activeStage, setActiveStage] = useState<DealStage>('New');
 
-  const getStage = (id: string): Stage =>
-    (userAnnotations[id]?.stage as Stage) || 'New';
+  const getStage = (id: string): DealStage =>
+    normalizeDealStage(userAnnotations[id]?.stage);
 
-  const columns = STAGES.reduce((acc, stage) => {
+  const columns = DEAL_STAGES.reduce((acc, stage) => {
     acc[stage] = processedData.filter(item => getStage(item.id) === stage);
     return acc;
-  }, {} as Record<Stage, MiningLicense[]>);
+  }, {} as Record<DealStage, MiningLicense[]>);
 
   const advanceStage = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const current = getStage(id);
-    const idx = STAGES.indexOf(current);
-    if (idx < STAGES.length - 1) {
-      updateAnnotation(id, { stage: STAGES[idx + 1] });
-    }
+    const next = advanceDealStage(getStage(id));
+    if (next) updateAnnotation(id, { stage: next });
   };
 
   const retreatStage = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const current = getStage(id);
-    const idx = STAGES.indexOf(current);
-    if (idx > 0) {
-      updateAnnotation(id, { stage: STAGES[idx - 1] });
-    }
+    const prev = retreatDealStage(getStage(id));
+    if (prev) updateAnnotation(id, { stage: prev });
   };
 
-  const renderColumn = (stage: Stage) => (
+  const renderColumn = (stage: DealStage) => (
     <div key={stage} className="flex flex-col h-full min-w-[280px] bg-slate-100/40 dark:bg-slate-900/40 rounded-xl border border-slate-200/50 dark:border-slate-800/50">
       <div className="p-4 flex items-center justify-between border-b border-slate-200/50 dark:border-slate-800/50">
         <div className="flex items-center gap-2">
@@ -103,7 +86,7 @@ export default function KanbanBoard({
               item.commodity?.toLowerCase().includes('gold') ||
               annotation.commodity?.toLowerCase().includes('gold');
             const currentStage = getStage(item.id);
-            const stageIdx = STAGES.indexOf(currentStage);
+            const stageIdx = dealStageIndex(currentStage);
 
             return (
               <Card
@@ -180,7 +163,7 @@ export default function KanbanBoard({
                     </span>
                     <button
                       onClick={e => advanceStage(e, item.id)}
-                      disabled={stageIdx === STAGES.length - 1}
+                      disabled={stageIdx === DEAL_STAGES.length - 1}
                       className="p-1 rounded text-slate-600 hover:text-amber-400 disabled:opacity-20 transition-colors"
                       title="Advance to next stage"
                     >
@@ -205,9 +188,9 @@ export default function KanbanBoard({
   return (
     <div className="h-full p-4 bg-white dark:bg-slate-950 overflow-hidden">
       {isMobile ? (
-        <Tabs value={activeStage} onValueChange={v => setActiveStage(v as Stage)} className="h-full flex flex-col">
+        <Tabs value={activeStage} onValueChange={v => setActiveStage(v as DealStage)} className="h-full flex flex-col">
           <TabsList className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 h-12">
-            {STAGES.map(stage => (
+            {DEAL_STAGES.map(stage => (
               <TabsTrigger
                 key={stage}
                 value={stage}
@@ -218,7 +201,7 @@ export default function KanbanBoard({
             ))}
           </TabsList>
           <div className="flex-1 mt-4 overflow-hidden">
-            {STAGES.map(stage => (
+            {DEAL_STAGES.map(stage => (
               <TabsContent key={stage} value={stage} className="h-full m-0">
                 {renderColumn(stage)}
               </TabsContent>
@@ -227,7 +210,7 @@ export default function KanbanBoard({
         </Tabs>
       ) : (
         <div className="flex gap-4 h-full overflow-x-auto pb-4 custom-scrollbar">
-          {STAGES.map(stage => renderColumn(stage))}
+          {DEAL_STAGES.map(stage => renderColumn(stage))}
         </div>
       )}
     </div>

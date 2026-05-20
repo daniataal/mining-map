@@ -438,6 +438,8 @@ export interface UserAnnotation {
   phoneNumber?: string;
   leadValue?: LeadValue;
   feeNote?: string;
+  checklist?: ChecklistItem[];
+  checklistUpdatedAt?: string;
   [key: string]: any;
 }
 
