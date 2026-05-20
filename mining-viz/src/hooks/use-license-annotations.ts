@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../lib/api';
+import { normalizeAnnotationStage } from '../lib/dealWorkflow';
 import type { UserAnnotation } from '../types';
 
 const LOCAL_STORAGE_KEY = 'mining_user_data';
@@ -14,13 +15,24 @@ function readLocalAnnotations(): Record<string, UserAnnotation> {
   }
 }
 
+function normalizeRecord(record: Record<string, UserAnnotation>): Record<string, UserAnnotation> {
+  const out: Record<string, UserAnnotation> = {};
+  for (const [id, ann] of Object.entries(record)) {
+    out[id] = normalizeAnnotationStage(ann);
+  }
+  return out;
+}
+
 function mergeAnnotations(
   local: Record<string, UserAnnotation>,
   server: Record<string, UserAnnotation>,
 ): Record<string, UserAnnotation> {
-  const merged: Record<string, UserAnnotation> = { ...local };
+  const merged: Record<string, UserAnnotation> = { ...normalizeRecord(local) };
   for (const [licenseId, serverAnn] of Object.entries(server)) {
-    merged[licenseId] = { ...(local[licenseId] || {}), ...serverAnn };
+    merged[licenseId] = normalizeAnnotationStage({
+      ...(merged[licenseId] || {}),
+      ...serverAnn,
+    });
   }
   return merged;
 }
@@ -31,7 +43,7 @@ function mergeAnnotations(
  */
 export function useLicenseAnnotations(token: string | null | undefined) {
   const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() =>
-    readLocalAnnotations(),
+    normalizeRecord(readLocalAnnotations()),
   );
   const [hydrated, setHydrated] = useState(false);
   const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -109,7 +121,7 @@ export function useLicenseAnnotations(token: string | null | undefined) {
   const updateAnnotation = useCallback(
     (id: string, updates: Partial<UserAnnotation>) => {
       setUserAnnotations((prev) => {
-        const nextAnn = { ...(prev[id] || {}), ...updates };
+        const nextAnn = normalizeAnnotationStage({ ...(prev[id] || {}), ...updates });
         const next = { ...prev, [id]: nextAnn };
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
         if (token?.trim()) {

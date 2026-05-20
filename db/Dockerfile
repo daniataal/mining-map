@@ -4,6 +4,7 @@ LABEL maintainer="Danny Atalla"
 LABEL description="Source-built PostGIS for Mining Map Platform (AMD64/ARM64)"
 
 # 1. Install build dependencies and mathematical libraries
+# postgresql-server-dev-15 provides postgres.h (required for libpgcommon)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -12,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     automake \
     libtool \
     pkg-config \
+    postgresql-server-dev-15 \
+    libpcre2-dev \
     libxml2-dev \
     libgeos-dev \
     libproj-dev \
@@ -28,7 +31,7 @@ RUN git clone --depth 1 https://github.com/postgis/postgis.git /usr/src/postgis
 # 3. Build and Install
 WORKDIR /usr/src/postgis
 RUN ./autogen.sh && \
-    ./configure --with-pcredir="$(pcre-config --prefix)" && \
+    ./configure && \
     make -j$(nproc) && \
     make install
 

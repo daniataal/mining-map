@@ -254,12 +254,14 @@ export default function FilterPanel({
           )}
 
           <section className="space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Operation Status</label>
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {t('אות עסקה', 'Deal signal')}
+            </label>
             <MultiSelect
               options={['Good', 'Maybe', 'Bad', 'Unmarked']}
               selected={userStatusFilter}
               onChange={setUserStatusFilter}
-              placeholder="All Pipeline States"
+              placeholder={t('כל אותות עסקה', 'All deal signals')}
             />
           </section>
 
