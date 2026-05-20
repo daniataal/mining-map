@@ -202,8 +202,8 @@ jobs:
                 - DB_NAME=mining_db
                 - DB_USER=postgres
                 - DB_PASSWORD=password
-                - GROQ_API_KEY
-                - OPENROUTER_API_KEY
+                # AI keys come from env_file (backend.env); do not passthrough bare VAR
+                # here — empty host env would override backend.env and show MISSING at startup.
                 - AI_HTTP_TIMEOUT_SECONDS
                 - AI_HTTP_MAX_RETRIES
                 - AI_ANALYSIS_DEADLINE_SECONDS

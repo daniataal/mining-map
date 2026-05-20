@@ -18,8 +18,8 @@ services:
       - DB_PASSWORD=password
       # AI provider runtime config from .env. Keep secrets out of this file.
       # Safe check: docker compose exec backend python -c "import os; print({k: bool(os.getenv(k)) for k in ('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK')})"
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-${GROQ_AI_API_KEY:-}}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-${OPENROUTER_AI_API_KEY:-}}
       - AI_HTTP_TIMEOUT_SECONDS=${AI_HTTP_TIMEOUT_SECONDS:-18}
       - AI_HTTP_MAX_RETRIES=${AI_HTTP_MAX_RETRIES:-1}
       - AI_ANALYSIS_DEADLINE_SECONDS=${AI_ANALYSIS_DEADLINE_SECONDS:-45}

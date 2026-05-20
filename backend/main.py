@@ -6420,6 +6420,123 @@ def read_entity_trade_flows(
         conn.close()
 
 
+@app.get("/entities/{entity_id:path}/satellite-site")
+def read_entity_satellite_site(
+    entity_id: str,
+    entity_kind: str = "license",
+):
+    """Site coordinates and external satellite imagery links (no mock scene ingest)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing satellite site schema")
+    conn = get_db_connection()
+    try:
+        lat = None
+        lng = None
+        company = ""
+        country = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country, lat, lng FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+                lat = row.get("lat")
+                lng = row.get("lng")
+        try:
+            from backend.services.satellite_site import build_satellite_site_payload
+        except ImportError:
+            from services.satellite_site import build_satellite_site_payload
+        return build_satellite_site_payload(
+            entity_id=entity_id,
+            company=company,
+            country=country,
+            lat=float(lat) if lat is not None else None,
+            lng=float(lng) if lng is not None else None,
+            esg_zone=None,
+        )
+    except Exception as exc:
+        logger.exception("satellite-site failed for %s: %s", entity_id, exc)
+        return {"entity_id": entity_id, "has_coordinates": False, "limitations": [str(exc)], "links": []}
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/goldbod-license")
+def read_entity_goldbod_license(
+    entity_id: str,
+    entity_kind: str = "license",
+    license_number: Optional[str] = None,
+):
+    """Ghana Gold Board (GoldBod) license verification for gold-sector entities."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing goldbod schema")
+    conn = get_db_connection()
+    try:
+        company = ""
+        country = ""
+        commodity = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country, commodity FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+                commodity = (row.get("commodity") or "").strip()
+        try:
+            from backend.services.goldbod import build_entity_goldbod_payload
+        except ImportError:
+            from services.goldbod import build_entity_goldbod_payload
+        return build_entity_goldbod_payload(
+            entity_id=entity_id,
+            company=company,
+            country=country,
+            commodity=commodity,
+            license_number=(license_number or "").strip(),
+        )
+    except Exception as exc:
+        logger.exception("goldbod-license failed for %s: %s", entity_id, exc)
+        return {
+            "entity_id": entity_id,
+            "status": "api_unavailable",
+            "eligible": False,
+            "limitations": [str(exc)],
+            "links": [],
+            "matches": [],
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/ghana/goldbod/search")
+def search_goldbod_license(
+    q: str = "",
+    license_number: Optional[str] = None,
+    business_id: Optional[str] = None,
+    country: str = "Ghana",
+    commodity: str = "Gold",
+):
+    """Search GoldBod public registry / optional partner API by company or certificate."""
+    try:
+        from backend.services.goldbod import verify_goldbod_license
+    except ImportError:
+        from services.goldbod import verify_goldbod_license
+    return verify_goldbod_license(
+        company_name=(q or "").strip(),
+        license_number=(license_number or "").strip(),
+        business_id=(business_id or "").strip(),
+        country=country,
+        commodity=commodity,
+    )
+
+
 @app.get("/entities/{entity_id:path}/eu-procurement")
 def read_entity_eu_procurement(
     entity_id: str,
