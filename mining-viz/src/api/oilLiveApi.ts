@@ -261,6 +261,102 @@ export async function draftOilOutreach(companyId: string): Promise<{ draft: stri
   return res.json();
 }
 
+export function oilLiveUserId(): string {
+  let id = localStorage.getItem('oil_live_user_id');
+  if (!id) {
+    id = typeof localStorage.getItem('username') === 'string' ? localStorage.getItem('username')! : 'default';
+    localStorage.setItem('oil_live_user_id', id);
+  }
+  return id;
+}
+
+export type OilWatchlistItem = {
+  id: string;
+  user_id: string;
+  watch_type: string;
+  watch_ref: string;
+  label?: string;
+  min_confidence: number;
+};
+
+export type OilAlert = {
+  id: string;
+  alert_type: string;
+  title: string;
+  body?: string;
+  severity?: string;
+  ref_type?: string;
+  ref_id?: string;
+  read_at?: string | null;
+  assigned_to?: string;
+  status?: string;
+};
+
+export async function getOilWatchlists(): Promise<{ watchlists: OilWatchlistItem[] }> {
+  const uid = oilLiveUserId();
+  const res = await fetch(oilUrl(`/api/oil-live/watchlists?user_id=${encodeURIComponent(uid)}`));
+  if (!res.ok) throw new Error(`watchlists ${res.status}`);
+  return res.json();
+}
+
+export async function addOilWatchlist(body: {
+  watch_type: string;
+  watch_ref: string;
+  label?: string;
+  min_confidence?: number;
+}): Promise<{ watchlist: OilWatchlistItem }> {
+  const res = await fetch(oilUrl('/api/oil-live/watchlists'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ ...body, user_id: oilLiveUserId() }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `add watchlist ${res.status}`);
+  return data;
+}
+
+export async function deleteOilWatchlist(id: string): Promise<void> {
+  const uid = oilLiveUserId();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/watchlists/${id}?user_id=${encodeURIComponent(uid)}`),
+    { method: 'DELETE', headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error(`delete watchlist ${res.status}`);
+}
+
+export async function getOilAlerts(unreadOnly = false): Promise<{ alerts: OilAlert[] }> {
+  const uid = oilLiveUserId();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/alerts?user_id=${encodeURIComponent(uid)}&unread_only=${unreadOnly}`),
+  );
+  if (!res.ok) throw new Error(`alerts ${res.status}`);
+  return res.json();
+}
+
+export async function markOilAlertRead(alertId: string): Promise<void> {
+  const uid = oilLiveUserId();
+  await fetch(
+    oilUrl(`/api/oil-live/alerts/${alertId}/read?user_id=${encodeURIComponent(uid)}`),
+    { method: 'POST', headers: authHeaders() },
+  );
+}
+
+export async function markAllOilAlertsRead(): Promise<void> {
+  await fetch(oilUrl('/api/oil-live/alerts/mark-all-read'), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ user_id: oilLiveUserId() }),
+  });
+}
+
+export async function assignOilAlert(alertId: string, assignee: string): Promise<void> {
+  await fetch(oilUrl(`/api/oil-live/alerts/${alertId}/assign`), {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ user_id: oilLiveUserId(), assignee }),
+  });
+}
+
 export function connectOilLiveWebSocket(onMessage: (msg: { type: string; data: unknown }) => void): () => void {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = OIL_INTEL_BASE

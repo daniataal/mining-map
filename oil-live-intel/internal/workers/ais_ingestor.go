@@ -1,16 +1,13 @@
 package workers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/mining-map/oil-live-intel/internal/broadcast"
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/services/ais"
 	"github.com/mining-map/oil-live-intel/internal/services/geofence"
@@ -81,7 +78,7 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 		if inserted, err := ais.PersistPosition(ctx, pool, u, positionMinInterval); err != nil {
 			return err
 		} else if inserted {
-			broadcast(cfg, "vessel_position", map[string]any{
+			broadcast.Post(cfg, "vessel_position", map[string]any{
 				"mmsi": u.MMSI, "lat": u.Lat, "lng": u.Lon, "name": u.Name, "tanker_class": tclass, "ts": u.Timestamp,
 			})
 		}
@@ -96,7 +93,7 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 		}
 		if card != nil {
 			log.Info().Str("title", card.Title).Str("id", card.ID.String()).Msg("intelligence card created")
-			broadcast(cfg, "intelligence_card_created", map[string]any{
+			broadcast.Post(cfg, "intelligence_card_created", map[string]any{
 				"id": card.ID.String(), "title": card.Title, "event_type": card.EventType,
 			})
 		}
@@ -119,22 +116,6 @@ func loadTerminalCoords(ctx context.Context, pool *pgxpool.Pool) (lats, lons []f
 		lons = append(lons, lon)
 	}
 	return lats, lons, rows.Err()
-}
-
-func broadcast(cfg config.Config, eventType string, data map[string]any) {
-	if cfg.InternalBroadcastKey == "" || cfg.APIBaseURL == "" {
-		return
-	}
-	body, _ := json.Marshal(map[string]any{"type": eventType, "data": data})
-	url := strings.TrimRight(cfg.APIBaseURL, "/") + "/api/oil-live/internal/broadcast"
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Oil-Intel-Internal", cfg.InternalBroadcastKey)
-	client := &http.Client{Timeout: 3 * time.Second}
-	_, _ = client.Do(req)
 }
 
 // RunPortCallMaintainer periodically closes stale open port calls.
