@@ -126,6 +126,13 @@ export interface ContactEnrichmentOutput {
   contacts: EntityContact[];
   not_found: string[];
   limitations: string[];
+  web_discovery?: {
+    configured?: boolean;
+    engine?: string | null;
+    query?: string | null;
+    urls_tried?: Array<{ url?: string; status?: number }>;
+    skipped_robots?: string[];
+  };
   ai?: {
     status?: string | null;
     reason?: string | null;

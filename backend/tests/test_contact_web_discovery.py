@@ -48,11 +48,11 @@ class HtmlExtractionTests(unittest.TestCase):
 
 class DiscoverWebContactsTests(unittest.TestCase):
     @patch.object(cwd, "_http_get")
-    @patch.object(cwd, "_google_cse_search_urls")
-    def test_end_to_end_merge_extracts(self, mock_cse, mock_http):
-        mock_cse.return_value = ["https://mnclogisticsandtrading.com/"]
+    @patch.object(cwd, "discover_search_result_urls")
+    def test_end_to_end_merge_extracts(self, mock_discover_urls, mock_http):
+        mock_discover_urls.return_value = (["https://mnclogisticsandtrading.com/"], "google_cse")
         mock_http.side_effect = [
-            (404, "text/plain", ""),  # robots.txt missing → allow
+            (404, "text/plain", ""),  # robots.txt missing → allow fetch
             (
                 200,
                 "text/html",

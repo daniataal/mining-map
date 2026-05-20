@@ -294,7 +294,7 @@ def _extract_contact_hrefs(html: str, base_url: str) -> tuple[set[str], set[str]
     html = unescape(html or "")
 
     for match in _MAILTO_HREF_RE.finditer(html):
-        raw = unescape(match.group(1).split("?", 1)[0].strip())
+        raw = match.group(1).split("?", 1)[0].strip()
         addr = unquote_safe(raw)
         if addr and _is_valid_contact_value("email", addr):
             emails.add(addr)
