@@ -3,15 +3,24 @@ import { VESSEL_SHIP_TYPE_OPTIONS } from './types';
 
 export type VesselShipTypeChip = (typeof VESSEL_SHIP_TYPE_OPTIONS)[number];
 
+/** Coerce API/Redis values (number, numeric string, null) to AIS type code or null. */
+export function parseAisShipTypeCode(code: unknown): number | null {
+  if (code == null || code === '') return null;
+  const n = typeof code === 'number' ? code : Number(code);
+  if (!Number.isFinite(n)) return null;
+  const c = Math.floor(n);
+  return c >= 0 && c <= 99 ? c : null;
+}
+
 /**
  * Maps a vessel to the same coarse AIS buckets as the filter chips (Tanker / Cargo / …).
  * Uses ship_type_code first (ITU-R M.1371 buckets) so filters work when ship_type_label is null
  * or a non-exact variant (e.g. "Oil Tanker", "LNG Carrier").
  */
 export function canonicalShipTypeChipFromVessel(vessel: MaritimeVessel): VesselShipTypeChip {
-  const code = vessel.ship_type_code;
-  if (code != null && Number.isFinite(code)) {
-    const c = Math.floor(Number(code));
+  const code = parseAisShipTypeCode(vessel.ship_type_code);
+  if (code != null) {
+    const c = code;
     if (c >= 80 && c <= 89) return 'Tanker';
     if (c >= 70 && c <= 79) return 'Cargo';
     if (c >= 60 && c <= 69) return 'Passenger';
@@ -50,8 +59,8 @@ export function canonicalShipTypeChipFromVessel(vessel: MaritimeVessel): VesselS
 
 /** Higher = more relevant for oil/gas maritime context (sort only, not exclusion). */
 export function petroleumVesselPriority(vessel: MaritimeVessel): number {
-  const code = vessel.ship_type_code;
-  if (code != null && Number.isFinite(code) && code >= 80 && code <= 89) {
+  const code = parseAisShipTypeCode(vessel.ship_type_code);
+  if (code != null && code >= 80 && code <= 89) {
     return 100;
   }
   const label = (vessel.ship_type_label || '').toLowerCase();

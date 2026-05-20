@@ -400,6 +400,40 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(response["worker"]["status"], "ok")
         self.assertEqual(response["vessels"][0]["last_seen_at"], now.isoformat())
 
+    def test_stored_feed_response_keeps_ship_type_from_payload_when_row_column_null(self):
+        now = datetime.now(timezone.utc)
+        response = _build_stored_feed_response(
+            rows=[
+                {
+                    "mmsi": "987654321",
+                    "vessel_name": "Payload Tanker",
+                    "lat": 25.0,
+                    "lng": 52.0,
+                    "observed_at": now,
+                    "source_label": "AISStream",
+                    "source_url": "https://aisstream.io/documentation",
+                    "ship_type_code": None,
+                    "ship_type_label": None,
+                    "payload": {
+                        "id": "ais:987654321",
+                        "ship_type_code": 82,
+                        "ship_type_label": "Tanker",
+                    },
+                    "last_seen_at": now,
+                }
+            ],
+            status={"status": "ok", "last_success_at": now, "metadata": {}},
+            max_vessels=10,
+            offset=0,
+            total_available=1,
+            capture_window_seconds=10,
+            vessel_scope="all_vessels",
+            bbox=None,
+        )
+        vessel = response["vessels"][0]
+        self.assertEqual(vessel["ship_type_code"], 82)
+        self.assertEqual(vessel["ship_type_label"], "Tanker")
+
     def test_stored_feed_response_exposes_stale_worker_snapshots(self):
         old_seen = datetime.now(timezone.utc) - timedelta(hours=2)
         response = _build_stored_feed_response(
@@ -422,6 +456,7 @@ class MaritimeIntelTests(unittest.TestCase):
         )
 
         self.assertFalse(response["live_positions_enabled"])
+        self.assertIn("aisstream_configured", response)
         self.assertTrue(response["stale"])
         self.assertEqual(response["total_available"], 0)
         self.assertEqual(response["returned_count"], 0)

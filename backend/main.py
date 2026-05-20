@@ -643,6 +643,7 @@ def _build_license_api_results(
                 "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
                 "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
                 "confidenceNote": row["confidence_note"] if "confidence_note" in keys else None,
+                "enrichmentNote": _extract_enrichment_note(row),
                 "geoSource": display_geo_source if "geo_source" in keys else None,
                 "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
                 "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
@@ -2171,14 +2172,38 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 
+def _extract_enrichment_note(row: dict) -> Optional[str]:
+    """Parse short curated notes from a compact raw_payload JSON blob (OPEC Gulf, etc.)."""
+    keys = row.keys()
+    raw = None
+    for key in ("raw_payload_lite", "raw_payload"):
+        if key in keys and row[key]:
+            raw = row[key]
+            break
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    for field in ("notes", "enrichment_note", "description"):
+        value = data.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 def _license_api_columns_sql() -> str:
-    # We explicitly omit 'raw_payload' because it can be multiple megabytes per row and crashes the API response time
+    # Omit full raw_payload (can be huge). Include a capped slice for curated enrichment notes only.
     return (
         "id, company, license_type, commodity, status, date_issued, country, region, "
         "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
         "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
         "source_kind, entity_kind, entity_subtype, confidence_score, confidence_note, "
-        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng, "
+        "CASE WHEN char_length(COALESCE(raw_payload, '')) <= 2048 THEN raw_payload END AS raw_payload_lite"
     )
 
 
@@ -5605,6 +5630,7 @@ def get_storage_terminals(force_refresh: bool = False):
                 "total": 0,
                 "countries": 0,
                 "with_operator": 0,
+                "with_owner": 0,
                 "with_capacity": 0,
                 "with_nearby_port": 0,
                 "high_confidence": 0,

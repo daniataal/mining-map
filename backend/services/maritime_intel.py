@@ -728,8 +728,15 @@ def _build_stored_feed_response(
                 "observed_at": _iso_datetime(row.get("observed_at") or payload.get("observed_at")),
                 "source_label": row.get("source_label") or payload.get("source_label") or "AISStream",
                 "source_url": row.get("source_url") or payload.get("source_url"),
-                "ship_type_code": row.get("ship_type_code"),
-                "ship_type_label": row.get("ship_type_label") or payload.get("ship_type_label"),
+                "ship_type_code": (
+                    row.get("ship_type_code")
+                    if row.get("ship_type_code") is not None
+                    else payload.get("ship_type_code")
+                ),
+                "ship_type_label": (
+                    row.get("ship_type_label")
+                    or payload.get("ship_type_label")
+                ),
                 "last_seen_at": _iso_datetime(row.get("last_seen_at")),
             }
         )
@@ -779,6 +786,7 @@ def _build_stored_feed_response(
         "source": "AISStream persisted snapshot",
         "data_as_of": (freshness_anchor.isoformat() if freshness_anchor else _now_iso()),
         "live_positions_enabled": not is_stale,
+        "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
         "limitations": limitations,
         "scope": normalized_scope,
         "capture_window_seconds": capture_window_seconds,
@@ -960,6 +968,7 @@ def _build_empty_ais_response(
         "source": source,
         "data_as_of": _now_iso(),
         "live_positions_enabled": live_positions_enabled,
+        "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
         "limitations": limitations,
         "scope": _normalize_vessel_scope(vessel_scope),
         "capture_window_seconds": capture_window_seconds,

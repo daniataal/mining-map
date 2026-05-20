@@ -12,6 +12,11 @@ import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/p
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import { createRefineryMapIcon } from './refineryMapIcon';
+import {
+  pipelineSubstancePopupLayerId,
+  splitOsmPipelineFeatures,
+  classifyPipelineSubstance,
+} from '../../lib/pipelineSubstance';
 
 const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries'];
 
@@ -27,16 +32,104 @@ const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
   storage_terminals: { color: '#06b6d4', weight: 1, fillColor: '#22d3ee', fillOpacity: 0.85 },
 };
 
+const OSM_WATER_PIPELINE_STYLE: PathOptions = {
+  color: '#0891b2',
+  weight: 2.5,
+  opacity: 0.8,
+  dashArray: '2 6',
+  lineCap: 'round',
+};
+
 const OSM_LABELS: Record<'pipelines' | 'refineries', [string, string]> = {
-  pipelines: ['צינורות OSM (קהילה)', 'Pipelines — OpenStreetMap (community)'],
+  pipelines: ['צינורות נפט/גז OSM', 'Oil/gas pipelines — OpenStreetMap'],
   refineries: ['זיקוק OSM (קהילה)', 'Refineries — OpenStreetMap (community)'],
 };
+
+const OSM_WATER_PIPELINE_LABEL: [string, string] = [
+  'צינורות מים OSM',
+  'Water pipelines — OpenStreetMap',
+];
 
 interface OsmLayerOverlayProps {
   layerId: 'pipelines' | 'refineries';
   label: string;
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
+}
+
+interface OsmPipelineGeoJsonProps {
+  label: string;
+  features: GeoJSON.Feature[];
+  style: PathOptions;
+  defaultVisible: boolean;
+}
+
+function OsmPipelineGeoJson({
+  label,
+  features,
+  style,
+  defaultVisible,
+}: OsmPipelineGeoJsonProps) {
+  const geojson = useMemo(
+    () => ({ type: 'FeatureCollection' as const, features }),
+    [features],
+  );
+
+  return (
+    <LayersControl.Overlay checked={defaultVisible} name={label}>
+      <LayerGroup>
+        <GeoJSON
+          key={label}
+          data={geojson}
+          style={style}
+          onEachFeature={(feature, layer) => {
+            const props = (feature.properties || {}) as Record<string, unknown>;
+            const substance = classifyPipelineSubstance(props);
+            const popupLayerId = pipelineSubstancePopupLayerId(substance);
+            bindPetroleumFeaturePopup(layer, popupLayerId, props, feature.geometry ?? null);
+          }}
+        />
+      </LayerGroup>
+    </LayersControl.Overlay>
+  );
+}
+
+function OsmPipelinesOverlays({
+  label,
+  bbox,
+  enabled,
+  defaultOilGasVisible,
+}: {
+  label: string;
+  bbox: PetroleumViewportBounds | null;
+  enabled: boolean;
+  defaultOilGasVisible: boolean;
+}) {
+  const { t } = useI18n();
+  const { data } = useOsmPetroleumLayerGeoJson('pipelines', bbox, enabled);
+  const { oilGas, water } = useMemo(() => {
+    const features = data?.features ?? [];
+    return splitOsmPipelineFeatures(features);
+  }, [data]);
+
+  return (
+    <>
+      <OsmPipelineGeoJson
+        label={label}
+        features={oilGas}
+        style={OSM_STYLE.pipelines}
+        defaultVisible={defaultOilGasVisible}
+      />
+      {water.length > 0 && (
+        <OsmPipelineGeoJson
+          label={t(OSM_WATER_PIPELINE_LABEL[0], OSM_WATER_PIPELINE_LABEL[1])}
+          features={water}
+          style={OSM_WATER_PIPELINE_STYLE}
+          defaultVisible={false}
+        />
+      )}
+    </>
+  );
 }
 
 function OsmLayerOverlay({
@@ -53,7 +146,17 @@ function OsmLayerOverlay({
     [data],
   );
   const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
-  const mapboxLayerId = layerId === 'refineries' ? 'refineries' : 'oil_pipelines';
+
+  if (layerId === 'pipelines') {
+    return (
+      <OsmPipelinesOverlays
+        label={label}
+        bbox={bbox}
+        enabled={enabled}
+        defaultOilGasVisible={defaultVisible}
+      />
+    );
+  }
 
   return (
     <LayersControl.Overlay checked={defaultVisible} name={label}>
@@ -62,15 +165,12 @@ function OsmLayerOverlay({
           key={`osm-${layerId}`}
           data={geojson}
           style={style}
-          pointToLayer={(feature, latlng) => {
-            if (layerId === 'refineries') {
-              return L.marker(latlng, { icon: refineryIcon });
-            }
-            return L.circleMarker(latlng, { radius: 3, ...style });
-          }}
+          pointToLayer={(_feature, latlng) =>
+            L.marker(latlng, { icon: refineryIcon })
+          }
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
-            bindPetroleumFeaturePopup(layer, mapboxLayerId, props, feature.geometry ?? null);
+            bindPetroleumFeaturePopup(layer, 'refineries', props, feature.geometry ?? null);
           }}
         />
       </LayerGroup>

@@ -23,3 +23,5 @@ export {
   readMaritimeIncludeCoastalDemoPreference,
 } from './useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './useVessels';
+export * from './vesselAlerts';
+export { buildMaritimeStatusMessages, resolveMaritimeFeedIssue } from './maritimeFeedStatus';

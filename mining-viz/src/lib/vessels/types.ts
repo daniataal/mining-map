@@ -106,6 +106,8 @@ export interface MaritimeVesselFeedResponse {
   source: string;
   data_as_of: string;
   live_positions_enabled: boolean;
+  /** Backend has AISSTREAM_API_KEY (does not prove worker is ingesting). */
+  aisstream_configured?: boolean;
   limitations: string[];
   scope: MaritimeVesselScope;
   capture_window_seconds: number;

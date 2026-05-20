@@ -401,6 +401,7 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                 commodity = f"{entity.commodity} ({production_kbd:,.0f} kb/d)"
 
             sector = _sector_for_entity(entity)
+            raw_payload = json.dumps({"notes": entity.notes}) if entity.notes else None
             try:
                 cur.execute(
                     """
@@ -408,14 +409,14 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         id, company, country, region, lat, lng,
                         commodity, license_type, status,
                         sector, record_origin, source_kind, source_id, source_name,
-                        external_id, source_record_url,
+                        external_id, source_record_url, raw_payload,
                         last_synced_at, entity_kind, entity_subtype,
                         confidence_score, confidence_note
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s,
                         %s, %s, %s,
                         %s, %s, %s, %s, %s,
-                        %s, %s,
+                        %s, %s, %s,
                         NOW(), %s, %s,
                         %s, %s
                     )
@@ -433,6 +434,8 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         source_kind      = EXCLUDED.source_kind,
                         source_id        = EXCLUDED.source_id,
                         source_name      = EXCLUDED.source_name,
+                        source_record_url = EXCLUDED.source_record_url,
+                        raw_payload      = EXCLUDED.raw_payload,
                         last_synced_at   = NOW(),
                         entity_subtype   = EXCLUDED.entity_subtype,
                         confidence_score = EXCLUDED.confidence_score,
@@ -446,7 +449,7 @@ def seed_gulf_oil_entities(conn: Any, production_data: Optional[dict[str, float]
                         sector, "global_open_fallback", "global_open_fallback",
                         "opec_gulf_reference",
                         "OPEC / Persian Gulf Reference Data",
-                        external_id, entity.source_url,
+                        external_id, entity.source_url, raw_payload,
                         "license", _resolve_entity_subtype(entity),
                         0.72,
                         "Curated OPEC/Persian Gulf reference row; verify against official registry before execution.",

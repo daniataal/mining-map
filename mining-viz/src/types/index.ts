@@ -19,6 +19,8 @@ export interface MiningLicense {
     | 'rail_terminal'
     | 'logistics_hub'
     | 'depot'
+    | 'fuel_depot'
+    | 'storage_tank'
     | string
     | null;
   recordOrigin?: 'open_data' | 'global_open_fallback' | 'bundled_json' | 'manual' | 'csv_import' | 'user_import_csv' | string | null;
@@ -51,11 +53,15 @@ export interface MiningLicense {
   originalLat?: number | null;
   originalLng?: number | null;
   operatorName?: string | null;
+  ownerName?: string | null;
+  substanceText?: string | null;
   sourceLabels?: string[];
   commodityHints?: string[];
   capacityText?: string | null;
   confidenceScore?: number | null;
   confidenceNote?: string | null;
+  /** Curated ingest notes (OPEC Gulf, etc.) — short text, not full raw_payload. */
+  enrichmentNote?: string | null;
   nearbyPort?: MaritimePortReference | null;
   evidenceCount?: number | null;
   locode?: string | null;
@@ -635,6 +641,7 @@ export interface StorageTerminalStats {
   total: number;
   countries: number;
   with_operator: number;
+  with_owner?: number;
   with_capacity: number;
   with_nearby_port: number;
   high_confidence: number;
