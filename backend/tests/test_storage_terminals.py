@@ -2,13 +2,26 @@ import unittest
 from unittest.mock import patch
 
 from backend.services.storage_terminals import (
+    WORLD_TILES,
     _commodity_hints_from_tags,
+    _overpass_urls,
+    _should_cache_storage_response,
     infer_terminal_subtype,
     normalize_storage_terminal,
 )
 
 
 class StorageTerminalTests(unittest.TestCase):
+    def test_overpass_urls_prefers_configured_endpoint(self):
+        with patch.dict("os.environ", {"STORAGE_OVERPASS_URL": "https://example.test/interpreter"}, clear=False):
+            urls = _overpass_urls()
+        self.assertEqual(urls[0], "https://example.test/interpreter")
+
+    def test_should_not_cache_when_all_tiles_failed(self):
+        warnings = [f"{name}: timeout" for name, _ in WORLD_TILES]
+        self.assertFalse(_should_cache_storage_response([], warnings))
+        self.assertTrue(_should_cache_storage_response([{"id": "x"}], warnings))
+
     def test_infer_terminal_subtype_explicit_petroleum_terminal(self):
         subtype, confidence, note = infer_terminal_subtype(
             {"industrial": "petroleum_terminal", "name": "Ruwais Terminal"}

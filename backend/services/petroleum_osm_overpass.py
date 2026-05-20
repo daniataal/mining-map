@@ -7,6 +7,7 @@ Respects Overpass rate limits via tile chunking and in-memory TTL cache.
 from __future__ import annotations
 
 import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -14,7 +15,6 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_TIMEOUT_SECONDS = 45
 CACHE_TTL_SECONDS = 60 * 60 * 12
 MAX_TILE_WORKERS = 4
@@ -45,6 +45,11 @@ OSM_LAYERS: dict[str, dict[str, Any]] = {
         "geometry": "point",
         "overpass_filter": 'nwr["industrial"="refinery"]',
     },
+    "storage_terminals": {
+        "label": "Petroleum storage terminals (OSM)",
+        "geometry": "point",
+        "overpass_filter": "",
+    },
 }
 
 _layer_cache: dict[str, dict[str, Any]] = {}
@@ -58,7 +63,25 @@ def _bbox_key(bbox: tuple[float, float, float, float]) -> str:
     return ",".join(f"{v:.4f}" for v in bbox)
 
 
+def _overpass_urls() -> tuple[str, ...]:
+    candidates = [
+        os.getenv("OVERPASS_URL", "").strip(),
+        os.getenv("STORAGE_OVERPASS_URL", "").strip(),
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    if os.getenv("OVERPASS_INCLUDE_DE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}:
+        candidates.append("https://overpass-api.de/api/interpreter")
+    return tuple(dict.fromkeys(url for url in candidates if url))
+
+
 def build_overpass_query(layer_id: str, bbox: tuple[float, float, float, float]) -> str:
+    if layer_id == "storage_terminals":
+        try:
+            from backend.services.storage_terminals import build_overpass_query as build_storage_query
+        except ImportError:
+            from services.storage_terminals import build_overpass_query as build_storage_query
+        return build_storage_query(bbox)
+
     meta = OSM_LAYERS[layer_id]
     south, west, north, east = bbox
     bbox_text = f"{south},{west},{north},{east}"
@@ -73,18 +96,30 @@ out geom qt;
 
 
 def fetch_overpass_elements(layer_id: str, bbox: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+    if layer_id == "storage_terminals":
+        try:
+            from backend.services.storage_terminals import fetch_overpass_elements as fetch_storage_elements
+        except ImportError:
+            from services.storage_terminals import fetch_overpass_elements as fetch_storage_elements
+        return fetch_storage_elements(bbox)
+
     body = urlencode({"data": build_overpass_query(layer_id, bbox)}).encode("utf-8")
-    req = Request(
-        OVERPASS_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
-        payload = json.load(response)
-    return payload.get("elements", []) if isinstance(payload, dict) else []
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "User-Agent": USER_AGENT,
+    }
+    errors: list[str] = []
+    for overpass_url in _overpass_urls():
+        req = Request(overpass_url, data=body, headers=headers)
+        try:
+            with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
+                payload = json.load(response)
+            return payload.get("elements", []) if isinstance(payload, dict) else []
+        except Exception as exc:
+            errors.append(f"{overpass_url}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return []
 
 
 def _element_center(element: dict[str, Any]) -> Optional[tuple[float, float]]:
@@ -148,7 +183,7 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
         if len(coordinates) < 2:
             return None
         geom = {"type": "LineString", "coordinates": coordinates}
-    elif layer_id == "refineries":
+    elif layer_id in {"refineries", "storage_terminals"}:
         center = _element_center(element)
         if not center:
             return None
