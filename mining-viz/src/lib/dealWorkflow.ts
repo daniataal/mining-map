@@ -83,3 +83,20 @@ export function normalizeAnnotationStage<T extends { stage?: string }>(annotatio
   if (annotation.stage === normalized) return annotation;
   return { ...annotation, stage: normalized };
 }
+
+/** Minimum checklist completion before soft-warning on Approved stage. */
+export const APPROVED_STAGE_MIN_CHECKLIST_PCT = 60;
+
+export function checklistStageWarning(
+  stage: string | undefined | null,
+  checklistPct: number,
+): string | null {
+  const normalized = normalizeDealStage(stage);
+  if (normalized === 'Approved' && checklistPct < APPROVED_STAGE_MIN_CHECKLIST_PCT) {
+    return `Checklist is ${checklistPct}% complete — consider finishing DD items before marking Approved.`;
+  }
+  if (normalized === 'Investigating' && checklistPct < 25) {
+    return 'Start the DD checklist (license + site) before deep investigation.';
+  }
+  return null;
+}

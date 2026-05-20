@@ -121,13 +121,18 @@ jobs:
         MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
         COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
         COMTRADE_API_KEY_SECONDARY: ${{ secrets.COMTRADE_API_KEY_SECONDARY }}
+        EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        KZ_EGOV_API_KEY: ${{ secrets.KZ_EGOV_API_KEY }}
+        OPENSANCTIONS_API_KEY: ${{ secrets.OPENSANCTIONS_API_KEY }}
+        COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
+        SYNC_ALERT_WEBHOOK_URL: ${{ secrets.SYNC_ALERT_WEBHOOK_URL }}
         VERSION_TAG: v${{ needs.build.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -153,6 +158,17 @@ jobs:
               printf 'COMTRADE_API_KEY_SECONDARY=%s\n' "$COMTRADE_API_KEY_SECONDARY"
             fi
             printf 'COMTRADE_SYNC_ENABLED=true\n'
+            printf 'EIA_API_KEY=%s\n' "${EIA_API_KEY:-}"
+            printf 'KZ_EGOV_API_KEY=%s\n' "${KZ_EGOV_API_KEY:-}"
+            printf 'OPENSANCTIONS_API_KEY=%s\n' "${OPENSANCTIONS_API_KEY:-}"
+            printf 'COURTLISTENER_API_KEY=%s\n' "${COURTLISTENER_API_KEY:-}"
+            if [ -n "${SYNC_ALERT_WEBHOOK_URL:-}" ]; then
+              printf 'SYNC_ALERT_WEBHOOK_URL=%s\n' "$SYNC_ALERT_WEBHOOK_URL"
+            fi
+            printf 'MARITIME_GULF_DEMO_SEED=0\n'
+            printf 'MARITIME_COASTAL_DEMO_SEED=0\n'
+            printf 'SEC_EDGAR_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
+            printf 'GLEIF_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -231,6 +247,8 @@ jobs:
                 - MARITIME_WORKER_MAX_VESSELS=15000
                 - MARITIME_WORKER_WATCH_MODE=all_regions
                 - MARITIME_WORKER_SCOPE=all_vessels
+                - MARITIME_GULF_DEMO_SEED=0
+                - MARITIME_COASTAL_DEMO_SEED=0
                 - MARITIME_SNAPSHOT_TTL_SECONDS=300
                 - REDIS_HOST=redis
                 - REDIS_PORT=6379
@@ -407,6 +425,13 @@ jobs:
           done
 
           sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','COMTRADE_API_KEY','COMTRADE_API_KEY_SECONDARY','COMTRADE_SYNC_ENABLED','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+
+          if [ "$BACKEND_READY" = "true" ] && [ -n "${ADMIN_TOKEN}" ]; then
+            EXPORT_STATUS=$(curl -sS -o /opt/mining-map/data/licenses_export.csv -w "%{http_code}" \
+              -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              "http://localhost:8000/api/admin/licenses/export?format=csv")
+            echo "DB license export status: $EXPORT_STATUS"
+          fi
 
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \

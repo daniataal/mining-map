@@ -6796,16 +6796,20 @@ def get_world_open_data_coverage(
 
 
 @app.get("/api/admin/licenses/export")
-def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
-    """CSV export with provenance columns for admin backup and re-import."""
+def admin_export_licenses(
+    format: str = Query("csv", description="csv or json"),
+    sector: Optional[str] = None,
+    country: Optional[str] = None,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Export licenses from Postgres for backup and re-import (source of truth)."""
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
         return forbidden
 
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute(
-        """
+    query = """
         SELECT
             id, company, country, region, commodity, license_type, status,
             lat, lng, phone_number, contact_person, date_issued,
@@ -6813,14 +6817,20 @@ def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
             source_record_url, source_updated_at, last_synced_at,
             manually_edited, manually_edited_at, manually_edited_by
         FROM licenses
-        ORDER BY country, sector, company
-        """
-    )
+        WHERE 1=1
+    """
+    params: list[Any] = []
+    if sector:
+        query += " AND lower(coalesce(sector, 'mining')) = lower(%s)"
+        params.append(sector.strip())
+    if country:
+        query += " AND lower(country) = lower(%s)"
+        params.append(country.strip())
+    query += " ORDER BY country, sector, company"
+    c.execute(query, tuple(params))
     rows = c.fetchall()
     conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
     headers = [
         "id",
         "company",
@@ -6846,6 +6856,16 @@ def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
         "manually_edited_at",
         "manually_edited_by",
     ]
+    normalized_format = (format or "csv").strip().lower()
+    if normalized_format == "json":
+        payload = [{col: row.get(col) for col in headers} for row in rows]
+        return JSONResponse(
+            content={"count": len(payload), "licenses": payload},
+            headers={"Content-Disposition": "attachment; filename=licenses_admin_export.json"},
+        )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
     writer.writerow(headers)
     for row in rows:
         writer.writerow([row.get(col) for col in headers])

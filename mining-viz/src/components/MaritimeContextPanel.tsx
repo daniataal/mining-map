@@ -114,10 +114,39 @@ export default function MaritimeContextPanel({
         <Card className="bg-white/5 border-white/5 rounded-3xl p-5">
           <div className="flex items-center gap-3 mb-4">
             <IconBuilding className="w-4 h-4 text-cyan-400" />
-            <h4 className="text-[11px] font-black uppercase tracking-widest text-cyan-400">
-              {t('בעלות ורישום', 'Ownership & Registry')}
-            </h4>
+            <div>
+              <h4 className="text-[11px] font-black uppercase tracking-widest text-cyan-400">
+                {t('בעלות ורישום', 'Ownership & Registry')}
+              </h4>
+              <p className="text-[9px] text-slate-500 mt-0.5">
+                {t(
+                  'הצלבה אוטומטית: MMSI/IMO → Wikidata → קישורי חברה',
+                  'Auto cross-check: MMSI/IMO → Wikidata → company profile links',
+                )}
+              </p>
+            </div>
           </div>
+
+          {data.identity && (data.identity.owner || data.identity.operator) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              {data.identity.operator && (
+                <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4 md:col-span-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-cyan-400 mb-1">
+                    {t('מפעיל (מאומת פתוח)', 'Operator (open match)')}
+                  </p>
+                  <p className="text-sm font-bold text-slate-100">{data.identity.operator}</p>
+                </div>
+              )}
+              {data.identity.owner && (
+                <div className="rounded-2xl border border-white/5 bg-black/10 p-4 md:col-span-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                    {t('בעלים', 'Owner')}
+                  </p>
+                  <p className="text-sm font-bold text-slate-100">{data.identity.owner}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {normalizedRelationships.length > 0 ? (
             <div className="mb-4">

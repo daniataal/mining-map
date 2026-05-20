@@ -3,6 +3,7 @@ import { API_BASE } from '../api';
 import type {
   MaritimeVesselFeedResponse,
   MaritimeVesselScope,
+  MaritimeViewportBounds,
 } from './types';
 import { normalizeMaritimeVessels } from './normalize';
 import {
@@ -37,18 +38,32 @@ export interface MaritimeVesselQueryOptions {
   maxVessels?: number;
   captureWindowSeconds?: number;
   scope?: MaritimeVesselScope;
+  viewport?: MaritimeViewportBounds | null;
   /** Passes include_gulf_demo=1 (Hormuz-only forced merge; legacy). */
   includeGulfDemo?: boolean;
   /** Passes include_coastal_demo=1 (Gulf + Africa-adjacent demo merge when server allows). */
   includeCoastalDemo?: boolean;
+  /** When false (default), queries wait until viewport bounds are set. */
+  allowWithoutViewport?: boolean;
 }
 
 export interface MaritimeSnapshotFetchOptions {
   maxVessels: number;
   captureWindowSeconds: number;
   scope: MaritimeVesselScope;
+  viewport?: MaritimeViewportBounds | null;
   includeGulfDemo?: boolean;
   includeCoastalDemo?: boolean;
+}
+
+function viewportQueryKey(viewport?: MaritimeViewportBounds | null): string {
+  if (!viewport) return 'global';
+  return [
+    viewport.south.toFixed(3),
+    viewport.west.toFixed(3),
+    viewport.north.toFixed(3),
+    viewport.east.toFixed(3),
+  ].join(',');
 }
 
 export function maritimeVesselSnapshotQueryKey(options: MaritimeSnapshotFetchOptions) {
@@ -57,6 +72,7 @@ export function maritimeVesselSnapshotQueryKey(options: MaritimeSnapshotFetchOpt
     options.scope,
     options.maxVessels,
     options.captureWindowSeconds,
+    viewportQueryKey(options.viewport),
     Boolean(options.includeGulfDemo),
     Boolean(options.includeCoastalDemo),
   ] as const;
@@ -77,6 +93,13 @@ export async function fetchMaritimeVesselSnapshot(
   }
   if (options.includeCoastalDemo) {
     params.set('include_coastal_demo', 'true');
+  }
+  const vp = options.viewport;
+  if (vp) {
+    params.set('south', String(vp.south));
+    params.set('west', String(vp.west));
+    params.set('north', String(vp.north));
+    params.set('east', String(vp.east));
   }
 
   const response = await fetch(`${API_BASE}/api/maritime/vessels?${params.toString()}`);
@@ -111,13 +134,16 @@ export function useMaritimeVessels({
   maxVessels = 15000,
   captureWindowSeconds = 10,
   scope = 'all_vessels',
+  viewport = null,
   includeGulfDemo = false,
   includeCoastalDemo = false,
+  allowWithoutViewport = false,
 }: MaritimeVesselQueryOptions = {}) {
   const snapshotOptions: MaritimeSnapshotFetchOptions = {
     maxVessels,
     captureWindowSeconds,
     scope,
+    viewport,
     includeGulfDemo,
     includeCoastalDemo,
   };
@@ -125,7 +151,7 @@ export function useMaritimeVessels({
   return useQuery<MaritimeVesselFeedResponse>({
     queryKey: maritimeVesselSnapshotQueryKey(snapshotOptions),
     queryFn: () => fetchMaritimeVesselSnapshot(snapshotOptions),
-    enabled,
+    enabled: enabled && (allowWithoutViewport || viewport != null),
     staleTime: 120_000,
     gcTime: 30 * 60_000,
     refetchInterval: enabled ? 90_000 : false,
