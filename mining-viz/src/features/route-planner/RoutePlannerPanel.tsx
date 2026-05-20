@@ -183,7 +183,7 @@ function RoutePlannerPanel({ rp, portEntities }: RoutePlannerPanelProps) {
       attachedAt: new Date().toISOString(),
     } as Record<string, unknown>;
     try {
-      const existing = await listDealRooms({ entityId, entityKind });
+      const existing = await listDealRooms({ entityId, entityKind, includeArchived: true });
       const room = existing[0] ?? (await createDealRoom({
         entityId,
         entityKind,

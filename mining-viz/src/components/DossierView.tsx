@@ -744,7 +744,7 @@ Output requirements:
     }
     setIsLoadingDealRoom(true);
     setDealRoomError(null);
-    listDealRooms({ entityId: item.id, entityKind: item.entityKind || 'license' })
+    listDealRooms({ entityId: item.id, entityKind: item.entityKind || 'license', includeArchived: true })
       .then((rooms) => {
         if (!isCancelled) setDealRoom(rooms[0] ?? null);
       })

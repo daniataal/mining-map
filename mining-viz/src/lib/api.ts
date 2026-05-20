@@ -496,11 +496,13 @@ export async function getAgentJob<TOutput = Record<string, unknown>>(
 export async function listDealRooms(options: {
   entityId?: string;
   entityKind?: string;
+  includeArchived?: boolean;
 } = {}): Promise<DealRoom[]> {
   const { data } = await apiClient.get<DealRoom[]>('/api/deal-rooms', {
     params: {
       ...(options.entityId ? { entity_id: options.entityId } : {}),
       ...(options.entityKind ? { entity_kind: options.entityKind } : {}),
+      ...(options.includeArchived ? { include_archived: true } : {}),
     },
   });
   return Array.isArray(data) ? data : [];

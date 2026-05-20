@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listDealRooms } from '../lib/api';
-import { buildDealRoomByEntityKey } from '../lib/dealRoomIndex';
+import { buildDealRoomByEntityKey, isDealRoomArchived } from '../lib/dealRoomIndex';
 import type { DealRoom } from '../types';
 
 const DEAL_ROOMS_QUERY_KEY = ['deal-rooms'] as const;
@@ -11,12 +11,13 @@ export function useDealRooms(enabled = true) {
 
   const query = useQuery({
     queryKey: DEAL_ROOMS_QUERY_KEY,
-    queryFn: () => listDealRooms(),
+    queryFn: () => listDealRooms({ includeArchived: true }),
     enabled,
     staleTime: 30_000,
   });
 
   const rooms = query.data ?? [];
+  const activeRooms = useMemo(() => rooms.filter((room) => !isDealRoomArchived(room)), [rooms]);
 
   const roomsByEntityKey = useMemo(() => buildDealRoomByEntityKey(rooms), [rooms]);
 
@@ -48,9 +49,10 @@ export function useDealRooms(enabled = true) {
 
   return {
     rooms,
+    activeRooms,
     roomsByEntityKey,
     getRoomForEntity,
-    count: rooms.length,
+    count: activeRooms.length,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,

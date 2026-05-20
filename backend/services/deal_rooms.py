@@ -66,6 +66,9 @@ def _safe_json(value: Any, default: Any) -> Any:
     return default
 
 
+ARCHIVED_STATUS = "archived"
+
+
 def ensure_deal_rooms_table(conn: Any) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -197,10 +200,19 @@ def create_deal_room(
     return serialize_deal_room(_row_to_dict(row))
 
 
-def list_deal_rooms(conn: Any, *, entity_id: Optional[str] = None, entity_kind: Optional[str] = None) -> list[dict[str, Any]]:
+def list_deal_rooms(
+    conn: Any,
+    *,
+    entity_id: Optional[str] = None,
+    entity_kind: Optional[str] = None,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     ensure_deal_rooms_table(conn)
     where = []
     params: list[Any] = []
+    if not include_archived:
+        where.append("status <> %s")
+        params.append(ARCHIVED_STATUS)
     if entity_id:
         where.append("entity_id = %s")
         params.append(entity_id)
