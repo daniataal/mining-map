@@ -946,7 +946,6 @@ def run_contact_enrichment(
     def produce(input_hash: str) -> dict[str, Any]:
         web_diag: dict[str, Any] = {}
         if entity_kind != "license" or loaded is None:
-            contacts = []
             limitations = [
                 "Contact enrichment is implemented for license rows only.",
             ]

@@ -857,11 +857,14 @@ Output requirements:
   const publicBusinessContacts = entityContacts.filter(
     (contact) => (contact.contactScope || 'public_business') === 'public_business'
   );
+  const isAiOrWebDiscoveredPhone = (discoveredBy?: string | null) =>
+    discoveredBy === 'ai' || discoveredBy === 'web';
   const sourceBackedPhoneContact = publicBusinessContacts.find(
-    (contact) => contact.contactType === 'phone' && (contact.discoveredBy || 'open_data') !== 'ai'
+    (contact) =>
+      contact.contactType === 'phone' && !isAiOrWebDiscoveredPhone(contact.discoveredBy || 'open_data')
   );
   const aiDiscoveredPhoneContacts = publicBusinessContacts.filter(
-    (contact) => contact.contactType === 'phone' && contact.discoveredBy === 'ai'
+    (contact) => contact.contactType === 'phone' && isAiOrWebDiscoveredPhone(contact.discoveredBy)
   );
   const publicPhoneContact = sourceBackedPhoneContact || aiDiscoveredPhoneContacts[0];
   const publicWebsiteContact = publicBusinessContacts.find((contact) => contact.contactType === 'website');
@@ -2112,7 +2115,7 @@ Output requirements:
                 <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-4">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <LucidePhone className="w-4 h-4 text-emerald-500" /> Phones discovered by AI
+                      <LucidePhone className="w-4 h-4 text-emerald-500" /> Phones from AI / web fetch
                     </h4>
                     {(ddDiscoveredPhones.length > 0 || aiDiscoveredPhoneContacts.length > 0) && (
                       <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
@@ -2121,11 +2124,12 @@ Output requirements:
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 leading-relaxed">
-                    These numbers were located by the AI during a DD run and persisted to{' '}
-                    <code className="font-mono">entity_contacts</code> with{' '}
-                    <code className="font-mono">discovered_by='ai'</code> and confidence capped at 0.7.
+                    These numbers were located by the AI during a DD run, or by the contact agent’s optional web fetch,
+                    and persisted to <code className="font-mono">entity_contacts</code> with{' '}
+                    <code className="font-mono">discovered_by='ai'</code> or{' '}
+                    <code className="font-mono">discovered_by='web'</code>.
                     They show up everywhere a public business phone is rendered — including the dossier card
-                    and the map popup — but stay clearly distinguishable from source-backed numbers so an
+                    and the map popup — but stay clearly distinguishable from cadastre-backed numbers so an
                     analyst can verify them before promoting.
                   </p>
 
@@ -2582,8 +2586,8 @@ Output requirements:
                       {publicPhoneContact && (
                         <SpecItem
                           label={
-                            publicPhoneContact.discoveredBy === 'ai'
-                              ? t('טלפון (גילוי AI)', 'Public Phone (AI-found)')
+                            isAiOrWebDiscoveredPhone(publicPhoneContact.discoveredBy)
+                              ? t('טלפון (גילוי AI / רשת)', 'Public Phone (AI / web)')
                               : t('טלפון ציבורי', 'Public Phone')
                           }
                           value={publicPhoneContact.value}
@@ -2908,7 +2912,11 @@ Output requirements:
                               Company Contact Agent
                             </p>
                             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                              Searches only known source fields and saved source URLs. Missing phones/emails/sites stay “not found.”
+                              Reads structured fields from the cadastre row first. When phone, email, or website is still
+                              missing and <code className="font-mono text-[9px]">GOOGLE_CSE_API_KEY</code> +{' '}
+                              <code className="font-mono text-[9px]">GOOGLE_CSE_CX</code> (or{' '}
+                              <code className="font-mono text-[9px]">SERPAPI_API_KEY</code>) is set, the backend runs a
+                              bounded search + HTML fetch (mailto/tel/text only — no guessing).
                             </p>
                           </div>
                           <Button
@@ -2932,6 +2940,12 @@ Output requirements:
                                 {kind} not found
                               </Badge>
                             ))}
+                            {contactAgentJob.output.web_discovery?.engine &&
+                              contactAgentJob.output.web_discovery.engine !== 'none' && (
+                                <Badge className="border-none bg-violet-500/10 text-violet-600 dark:text-violet-300 text-[9px] font-black uppercase">
+                                  Web: {contactAgentJob.output.web_discovery.engine}
+                                </Badge>
+                              )}
                             {contactAgentJob.cached && (
                               <Badge className="border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 text-[9px] font-black uppercase">
                                 Cached
