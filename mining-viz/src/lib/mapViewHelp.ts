@@ -29,7 +29,7 @@ export function mapViewHelpBody(viewMode: MapViewModeKey): string {
     case 'mining':
       return 'Mining-sector licenses and tenements only. Oil & gas-only rows are hidden.';
     case 'oil_and_gas':
-      return 'Petroleum licenses plus open-data storage terminals and tank farms (OSM). Enable the vessel layer for AIS in the current map bounds.';
+      return 'Petroleum licenses on the map — upstream blocks, refineries, and Fuel / Products marketers (downstream marketing & wholesale). Plus a dedicated Storage / tank farms layer (open OSM, worldwide count in the banner). Toggle tank farms in the map control (bottom-right); «in view» follows your map bounds. Enable Vessels (AIS) separately for live ship positions.';
     case 'suppliers':
       return 'Your active deal pipeline on the map: green Deal signal on a dossier (any stage except Rejected). Mark Deal signal on dossier Overview to add a supplier here. Toggle “Show all licenses” for discovery.';
     default:

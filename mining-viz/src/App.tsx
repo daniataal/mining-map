@@ -226,13 +226,9 @@ export default function App() {
       if (viewMode === 'ports') {
         return excludeHiddenFallbackPlaceholders(portEntities);
       }
-      return excludeHiddenFallbackPlaceholders([
-        ...rawData,
-        ...visibleLocalLicenses,
-        ...(viewMode === 'oil_and_gas' ? storageEntities : []),
-      ]);
+      return excludeHiddenFallbackPlaceholders([...rawData, ...visibleLocalLicenses]);
     },
-    [rawData, visibleLocalLicenses, viewMode, storageEntities, portEntities]
+    [rawData, visibleLocalLicenses, viewMode, portEntities]
   );
   const debouncedRouteSupplierCountry = useDebouncedValue(routePlanner.supplier.country);
   const debouncedRouteBuyerCountry = useDebouncedValue(routePlanner.buyer.country);
@@ -286,10 +282,13 @@ export default function App() {
     [handleRoutePlannerMapPick],
   );
 
-  const entityIndex = useMemo(
-    () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
-    [allLicenses]
-  );
+  const entityIndex = useMemo(() => {
+    const searchable =
+      viewMode === 'oil_and_gas' ? [...allLicenses, ...storageEntities] : allLicenses;
+    return Object.fromEntries(searchable.map((item) => [item.id, item]));
+  }, [allLicenses, storageEntities, viewMode]);
+
+  const [storageInViewCount, setStorageInViewCount] = useState<number | null>(null);
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations, {
@@ -350,6 +349,12 @@ export default function App() {
       setCountryFocusCountry(null);
     }
   }, [miningData.selectedCountry, countryFocusCountry]);
+
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas') {
+      setStorageInViewCount(null);
+    }
+  }, [viewMode]);
 
   useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
@@ -948,8 +953,21 @@ export default function App() {
                     ) : (
                       <>
                         {t('מסופי אחסון / טנקים', 'Storage / tank farms')}:{' '}
-                        {storageTerminalResponse?.stats?.total ?? 0} {t('ברחבי העולם', 'worldwide')} ·{' '}
-                        {storageTerminalResponse?.stats?.with_operator ?? 0} {t('עם מפעיל', 'with operator')}
+                        {storageTerminalResponse?.stats?.total ?? 0} {t('ברחבי העולם', 'worldwide')}
+                        {storageInViewCount != null && (
+                          <>
+                            {' '}
+                            · {storageInViewCount} {t('בתצוגה', 'in view')}
+                          </>
+                        )}{' '}
+                        · {storageTerminalResponse?.stats?.with_operator ?? 0}{' '}
+                        {t('עם מפעיל', 'with operator')}
+                        <span className="mt-1 block font-semibold normal-case tracking-normal text-cyan-800/80 dark:text-cyan-200/80">
+                          {t(
+                            'הפעל/כבה בשכבות המפה (למטה מימין). ספירת «בתצוגה» לפי גבולות המפה — לא כל 15 העולמיים.',
+                            'Toggle in map layers (bottom-right). «In view» follows map bounds — not all worldwide sites.',
+                          )}
+                        </span>
                       </>
                     )}
                   </div>
@@ -1038,6 +1056,10 @@ export default function App() {
                   getDealRoomForLicense={getDealRoomForLicense}
                   countryFocusCountry={countryFocusCountry}
                   countryFocusBoundsTrigger={countryFocusBoundsTrigger}
+                  storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
+                  onStorageInViewCountChange={
+                    viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
+                  }
                 />
               </Suspense>
             )}

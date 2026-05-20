@@ -13,6 +13,8 @@ import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import { createRefineryMapIcon } from './refineryMapIcon';
 
+const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries'];
+
 const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
   pipelines: {
     color: '#64748b',
@@ -22,15 +24,16 @@ const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
     lineCap: 'round',
   },
   refineries: { color: '#c2410c', weight: 1, fillColor: '#fb923c', fillOpacity: 0.85 },
+  storage_terminals: { color: '#06b6d4', weight: 1, fillColor: '#22d3ee', fillOpacity: 0.85 },
 };
 
-const OSM_LABELS: Record<OsmPetroleumLayerId, [string, string]> = {
+const OSM_LABELS: Record<'pipelines' | 'refineries', [string, string]> = {
   pipelines: ['צינורות OSM (קהילה)', 'Pipelines — OpenStreetMap (community)'],
   refineries: ['זיקוק OSM (קהילה)', 'Refineries — OpenStreetMap (community)'],
 };
 
 interface OsmLayerOverlayProps {
-  layerId: OsmPetroleumLayerId;
+  layerId: 'pipelines' | 'refineries';
   label: string;
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
@@ -90,7 +93,7 @@ export default function OsmPetroleumMapLayers({ bbox, enabled }: OsmPetroleumMap
 
   return (
     <>
-      {(Object.keys(OSM_LABELS) as OsmPetroleumLayerId[]).map((layerId) => (
+      {OSM_MAP_LAYER_IDS.map((layerId) => (
         <OsmLayerOverlay
           key={layerId}
           layerId={layerId}

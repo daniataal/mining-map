@@ -287,6 +287,8 @@ function formatSourceKindLabel(sourceKind?: string | null): string | null {
       return 'User CSV';
     case 'bundled_json':
       return 'Bundled fallback';
+    case 'curated_reference':
+      return 'Curated reference';
     default:
       return null;
   }

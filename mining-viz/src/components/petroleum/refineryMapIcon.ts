@@ -48,6 +48,50 @@ export function createRefineryMapIcon(selected = false): L.DivIcon {
   );
 }
 
+const STORAGE_TERMINAL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false" style="display:block;flex-shrink:0;">
+  <ellipse cx="5" cy="11.5" rx="2.6" ry="1.2" fill="#06b6d4" opacity="0.35"/>
+  <ellipse cx="11" cy="11.5" rx="2.6" ry="1.2" fill="#06b6d4" opacity="0.35"/>
+  <rect x="2.2" y="5.5" width="5.6" height="6" rx="1.2" fill="#06b6d4"/>
+  <rect x="8.2" y="4" width="5.6" height="7.5" rx="1.2" fill="#22d3ee"/>
+  <rect x="3.4" y="3" width="3.2" height="2.5" rx="0.6" fill="#67e8f9"/>
+  <rect x="9.4" y="1.8" width="3.2" height="2.5" rx="0.6" fill="#67e8f9"/>
+</svg>`;
+
+const TANK_FARM_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false" style="display:block;flex-shrink:0;">
+  <ellipse cx="4" cy="11.5" rx="2.4" ry="1.1" fill="#f97316" opacity="0.35"/>
+  <ellipse cx="8" cy="11.5" rx="2.4" ry="1.1" fill="#f97316" opacity="0.35"/>
+  <ellipse cx="12" cy="11.5" rx="2.4" ry="1.1" fill="#f97316" opacity="0.35"/>
+  <rect x="1.4" y="5" width="5.2" height="6" rx="1.1" fill="#f97316"/>
+  <rect x="5.4" y="5" width="5.2" height="6" rx="1.1" fill="#fb923c"/>
+  <rect x="9.4" y="5" width="5.2" height="6" rx="1.1" fill="#fdba74"/>
+</svg>`;
+
+/** Petroleum storage terminal (OSM / open-data layer). */
+export function createStorageTerminalMapIcon(selected = false): L.DivIcon {
+  const size = selected ? 28 : 22;
+  return buildPetroleumPinIcon(
+    STORAGE_TERMINAL_SVG,
+    'storage-terminal-marker',
+    '#06b6d4',
+    'rgba(6,182,212,0.55)',
+    selected,
+    size,
+  );
+}
+
+/** Tank farm cluster pin. */
+export function createTankFarmMapIcon(selected = false): L.DivIcon {
+  const size = selected ? 28 : 22;
+  return buildPetroleumPinIcon(
+    TANK_FARM_SVG,
+    'tank-farm-marker',
+    '#f97316',
+    'rgba(249,115,22,0.55)',
+    selected,
+    size,
+  );
+}
+
 /** Oil field / producing asset pin — distinct from refinery (e.g. Zakum). */
 export function createOilFieldMapIcon(selected = false): L.DivIcon {
   const size = selected ? 28 : 22;
