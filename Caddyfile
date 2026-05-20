@@ -1,13 +1,11 @@
-:80, :443 {
-    auto_https disable_redirects
-    encode gzip zstd
+# HTTP only (host :8080 → container :80). No TLS / auto_https globals needed.
+:80 {
+	encode gzip zstd
 
-    # Proxy all API and Auth requests to the backend container
-    @backend {
-        path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
-    }
-    reverse_proxy @backend backend:8000
+	@backend {
+		path /auth/* /licenses* /activity/* /files/* /docs /openapi.json /api/*
+	}
+	reverse_proxy @backend backend:8000
 
-    # Everything else goes to the frontend
-    reverse_proxy * frontend:5173
+	reverse_proxy * frontend:5173
 }
