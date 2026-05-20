@@ -16,6 +16,15 @@ import {
   draftOilOutreach,
   type OilContact,
   type OilDealEconomics,
+  getOilWatchlists,
+  addOilWatchlist,
+  deleteOilWatchlist,
+  getOilAlerts,
+  markOilAlertRead,
+  markAllOilAlertsRead,
+  assignOilAlert,
+  type OilWatchlistItem,
+  type OilAlert,
   connectOilLiveWebSocket,
   type OilOpportunity,
   type OilIntelligenceCard,
@@ -24,7 +33,7 @@ import {
 } from '../../api/oilLiveApi';
 import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
-import { Radio, Building2, Ship, AlertTriangle } from 'lucide-react';
+import { Radio, Building2, Ship, AlertTriangle, Bell, Eye } from 'lucide-react';
 
 import 'leaflet/dist/leaflet.css';
 
@@ -39,7 +48,7 @@ const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
 const DISCLAIMER_HE = 'מסקנות מנתונים ציבוריים בלבד — לא עסקה, קונה, מוכר או סוג מוצר מאומתים.';
 
-type Tab = 'feed' | 'companies' | 'opportunities';
+type Tab = 'feed' | 'companies' | 'opportunities' | 'alerts';
 
 export default function LiveDataPanel() {
   const { t } = useI18n();
@@ -51,6 +60,7 @@ export default function LiveDataPanel() {
   const [newContact, setNewContact] = useState({ type: 'phone', value: '' });
   const [expandedOpp, setExpandedOpp] = useState<string | null>(null);
   const [oppEconomics, setOppEconomics] = useState<Record<string, OilDealEconomics>>({});
+  const [assignee, setAssignee] = useState('');
   const [dealSheet, setDealSheet] = useState({
     volume_bbl: '',
     buy_price_usd_per_bbl: '',
@@ -69,15 +79,34 @@ export default function LiveDataPanel() {
     refetchInterval: 20_000,
   });
 
+  const { data: watchlistsData } = useQuery({
+    queryKey: ['oil-live-watchlists'],
+    queryFn: async () => (await getOilWatchlists()).watchlists,
+    staleTime: 30_000,
+  });
+
+  const { data: alertsData, refetch: refetchAlerts } = useQuery({
+    queryKey: ['oil-live-alerts'],
+    queryFn: async () => (await getOilAlerts(false)).alerts,
+    staleTime: 20_000,
+    refetchInterval: 60_000,
+  });
+
+  const unreadCount = (alertsData ?? []).filter((a) => !a.read_at).length;
+
   useEffect(() => {
     const disconnect = connectOilLiveWebSocket((msg) => {
       if (msg.type === 'intelligence_card_created' || msg.type === 'vessel_position') {
         void queryClient.invalidateQueries({ queryKey: ['oil-live-map'] });
         void queryClient.invalidateQueries({ queryKey: ['oil-live-intelligence'] });
       }
+      if (msg.type === 'oil_alert') {
+        void refetchAlerts();
+        toast.info(t('התראה חדשה', 'New watchlist alert'));
+      }
     });
     return disconnect;
-  }, [queryClient]);
+  }, [queryClient, refetchAlerts, t]);
 
   const { data: cardsData } = useQuery({
     queryKey: ['oil-live-intelligence'],
@@ -187,6 +216,17 @@ export default function LiveDataPanel() {
           >
             {t('חברות', 'Companies')}
           </button>
+          <button
+            type="button"
+            onClick={() => setTab('alerts')}
+            className={`px-3 py-1 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1 ${tab === 'alerts' ? 'bg-amber-500 text-slate-950' : 'bg-white dark:bg-slate-900 border'}`}
+          >
+            <Bell className="w-3 h-3" />
+            {t('התראות', 'Alerts')}
+            {unreadCount > 0 && (
+              <span className="bg-red-500 text-white rounded-full px-1.5 text-[9px]">{unreadCount}</span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -211,6 +251,27 @@ export default function LiveDataPanel() {
                       {term.operator_name}
                       <br />
                       {(term.products || []).join(', ')}
+                      <br />
+                      <button
+                        type="button"
+                        className="mt-2 text-[10px] font-bold text-sky-600 uppercase"
+                        onClick={async () => {
+                          try {
+                            await addOilWatchlist({
+                              watch_type: 'terminal',
+                              watch_ref: term.id,
+                              label: term.name,
+                            });
+                            toast.success(t('נוסף למעקב', 'Added to watchlist'));
+                            void queryClient.invalidateQueries({ queryKey: ['oil-live-watchlists'] });
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Failed');
+                          }
+                        }}
+                      >
+                        <Eye className="w-3 h-3 inline mr-1" />
+                        {t('עקוב אחרי מסוף', 'Watch terminal')}
+                      </button>
                     </Popup>
                   </Marker>
                 ) : null,
@@ -378,6 +439,95 @@ export default function LiveDataPanel() {
                 </article>
               );
             })}
+
+          {tab === 'alerts' && (
+            <>
+              <div className="flex gap-2 mb-2">
+                <button
+                  type="button"
+                  className="text-[10px] font-bold uppercase text-sky-600"
+                  onClick={async () => {
+                    await markAllOilAlertsRead();
+                    void refetchAlerts();
+                  }}
+                >
+                  {t('סמן הכל כנקרא', 'Mark all read')}
+                </button>
+              </div>
+              <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">
+                {t('רשימות מעקב', 'Watchlists')} ({(watchlistsData ?? []).length})
+              </p>
+              {(watchlistsData ?? []).map((w: OilWatchlistItem) => (
+                <div
+                  key={w.id}
+                  className="flex justify-between items-center text-[10px] text-slate-500 border-b py-1"
+                >
+                  <span>
+                    {w.label || w.watch_ref} · {w.watch_type}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-red-600 font-bold"
+                    onClick={async () => {
+                      await deleteOilWatchlist(w.id);
+                      void queryClient.invalidateQueries({ queryKey: ['oil-live-watchlists'] });
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {(alertsData ?? []).map((a: OilAlert) => (
+                <article
+                  key={a.id}
+                  className={`rounded-2xl border p-4 ${a.read_at ? 'opacity-60' : 'border-violet-500/30 bg-violet-500/5'}`}
+                >
+                  <h3 className="text-sm font-bold">{a.title}</h3>
+                  <p className="text-[11px] text-slate-500 mt-1">{a.body}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {!a.read_at && (
+                      <button
+                        type="button"
+                        className="text-[10px] font-bold uppercase text-sky-600"
+                        onClick={async () => {
+                          await markOilAlertRead(a.id);
+                          void refetchAlerts();
+                        }}
+                      >
+                        {t('נקרא', 'Mark read')}
+                      </button>
+                    )}
+                    <input
+                      className="text-[10px] border rounded px-1 flex-1 min-w-[80px]"
+                      placeholder={t('הקצה ל', 'Assign to')}
+                      value={assignee}
+                      onChange={(e) => setAssignee(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="text-[10px] font-bold uppercase"
+                      onClick={async () => {
+                        if (!assignee.trim()) return;
+                        await assignOilAlert(a.id, assignee.trim());
+                        toast.success(t('הוקצה', 'Assigned'));
+                        void refetchAlerts();
+                      }}
+                    >
+                      {t('הקצה', 'Assign')}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {(alertsData ?? []).length === 0 && (
+                <p className="text-sm text-slate-500">
+                  {t(
+                    'אין התראות — הוסף מעקב ממפה או ממתין להזדמנויות חדשות',
+                    'No alerts — watch a terminal on the map or wait for new opportunities',
+                  )}
+                </p>
+              )}
+            </>
+          )}
 
           {tab === 'companies' &&
             companies.map((co) => {
