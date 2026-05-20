@@ -644,7 +644,6 @@ export default function App() {
       maxVessels: Number(maritimeMaxVessels) || 15000,
       captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
-      allowWithoutViewport: true,
       includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
     });
   }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
@@ -944,12 +943,18 @@ export default function App() {
               <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
                 <OilGasOnboardingTip active />
               </div>
-              {storageTerminalResponse?.stats && (
+              {(isStorageLoading || storageTerminalResponse?.stats) && (
                 <div className="absolute top-[4.5rem] right-3 z-[999] pointer-events-none hidden sm:block">
                   <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-900 shadow-xl backdrop-blur-xl dark:text-cyan-100">
-                    {t('מסופי אחסון / טנקים', 'Storage / tank farms')}: {storageTerminalResponse.stats.total}{' '}
-                    {t('ברחבי העולם', 'worldwide')} · {storageTerminalResponse.stats.with_operator}{' '}
-                    {t('עם מפעיל', 'with operator')}
+                    {isStorageLoading ? (
+                      t('טוען מסופי אחסון / טנקים…', 'Loading storage / tank farms…')
+                    ) : (
+                      <>
+                        {t('מסופי אחסון / טנקים', 'Storage / tank farms')}:{' '}
+                        {storageTerminalResponse?.stats?.total ?? 0} {t('ברחבי העולם', 'worldwide')} ·{' '}
+                        {storageTerminalResponse?.stats?.with_operator ?? 0} {t('עם מפעיל', 'with operator')}
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -989,8 +994,9 @@ export default function App() {
                   licensesFetchPending={
                     viewMode !== 'route_planner' &&
                     (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                    isLoading &&
-                    !fetchError
+                    (isLoading || (viewMode === 'oil_and_gas' && isStorageLoading)) &&
+                    !fetchError &&
+                    !(viewMode === 'oil_and_gas' && storageError)
                   }
                   licensesRefetching={
                     viewMode !== 'route_planner' &&
