@@ -1763,6 +1763,11 @@ def _gov_procurement_sync_on_startup_enabled() -> bool:
     return flag in {"1", "true", "yes", "on"}
 
 
+def _oil_graph_sync_on_startup_enabled() -> bool:
+    flag = (os.getenv("OIL_GRAPH_SYNC_ON_STARTUP") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
 def _sync_gov_procurement_reference() -> None:
     if not _gov_procurement_sync_on_startup_enabled():
         return
@@ -1782,6 +1787,32 @@ def _sync_gov_procurement_reference() -> None:
             conn.close()
     except Exception as exc:
         print(f"[GovProcurement] Sync skipped or failed: {exc}")
+
+
+def _sync_oil_live_graph_reference() -> None:
+    """Merge OSM terminals, licenses, trade, port calls, TED, USAspending into oil_commercial_events."""
+    if not _oil_graph_sync_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[OilGraph] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import run_full_graph_sync
+        except ImportError:
+            from services.oil_live_graph_sync import run_full_graph_sync
+
+        conn = get_db_connection()
+        try:
+            summary = run_full_graph_sync(conn, rebuild_synthetic_bol=False)
+            print(
+                f"[OilGraph] Commercial graph sync complete — status={summary.get('status')}, "
+                f"steps={list((summary.get('steps') or {}).keys())}"
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[OilGraph] Sync skipped or failed: {exc}")
 
 
 def _sync_opec_gulf_reference() -> None:
@@ -1958,6 +1989,7 @@ def startup_schema_bootstrap():
         _sync_opec_gulf_reference()
         _sync_oil_products_licenses_reference()
         _sync_gov_procurement_reference()
+        _sync_oil_live_graph_reference()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
@@ -6418,6 +6450,32 @@ def read_eu_procurement_cpv_buckets():
         for key, prefixes in CPV_COMMODITY_BUCKETS.items()
     ]
     return {"status": "success", "buckets": buckets}
+
+
+@app.post("/api/admin/oil-live/graph-sync")
+def admin_oil_live_graph_sync(
+    x_admin_token: Optional[str] = Header(None),
+    rebuild_synthetic_bol: bool = True,
+):
+    """Merge free sources into oil commercial graph + trigger synthetic BOL rebuild."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import run_full_graph_sync
+        except ImportError:
+            from services.oil_live_graph_sync import run_full_graph_sync
+        conn = get_db_connection()
+        try:
+            result = run_full_graph_sync(conn, rebuild_synthetic_bol=rebuild_synthetic_bol)
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        logger.exception("oil-live graph-sync failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
 
 
 @app.post("/api/admin/eu-procurement/sync")

@@ -30,6 +30,7 @@ export type OilLiveVessel = {
   lat: number;
   lng: number;
   speed?: number;
+  course?: number;
   draft_m?: number;
   tanker_class?: string;
   crude_capable?: boolean;
@@ -39,7 +40,11 @@ export type OilPortCall = {
   id: string;
   mmsi?: number;
   vessel_name?: string;
+  terminal_id?: string;
   terminal_name?: string;
+  arrival_ts?: string;
+  departure_ts?: string;
+  status?: string;
   event_type?: string;
   product_family_inferred?: string;
   confidence?: number;
@@ -70,14 +75,32 @@ export type OilCompany = {
   confidence?: number;
   supplier_status?: string;
   supplier_id?: string | null;
+  mcr_count?: number;
+  event_count?: number;
+  contact_count?: number;
+  roles?: string[];
+  sources?: string[];
+  source?: string;
 };
 
 export type OilCompanyFilters = {
   q?: string;
   type?: string;
+  role?: string;
   country?: string;
   supplier_status?: string;
   min_confidence?: number;
+  min_events?: number;
+  limit?: number;
+  offset?: number;
+};
+
+export type OilCompaniesResponse = {
+  companies: OilCompany[];
+  count: number;
+  total: number;
+  offset: number;
+  limit: number;
 };
 
 function oilUrl(path: string) {
@@ -94,6 +117,21 @@ function authHeaders(): HeadersInit {
 export async function getOilLiveHealth(): Promise<{ status: string; service: string }> {
   const res = await fetch(oilUrl('/api/oil-live/health'));
   if (!res.ok) throw new Error(`oil-live health ${res.status}`);
+  return res.json();
+}
+
+export type OilLiveSyncStatus = {
+  last_graph_sync_at?: string | null;
+  terminal_count: number;
+  cargo_record_count: number;
+  port_call_count: number;
+  last_cargo_at?: string | null;
+  disclaimer?: string;
+};
+
+export async function getOilLiveSyncStatus(): Promise<OilLiveSyncStatus> {
+  const res = await fetch(oilUrl('/api/oil-live/sync-status'));
+  if (!res.ok) throw new Error(`oil-live sync-status ${res.status}`);
   return res.json();
 }
 
@@ -122,13 +160,17 @@ export async function getIntelligenceCards(): Promise<{ cards: OilIntelligenceCa
   return res.json();
 }
 
-export async function getOilCompanies(filters: OilCompanyFilters = {}): Promise<{ companies: OilCompany[] }> {
+export async function getOilCompanies(filters: OilCompanyFilters = {}): Promise<OilCompaniesResponse> {
   const params = new URLSearchParams();
   if (filters.q) params.set('q', filters.q);
   if (filters.type) params.set('type', filters.type);
+  if (filters.role) params.set('role', filters.role);
   if (filters.country) params.set('country', filters.country);
   if (filters.supplier_status) params.set('supplier_status', filters.supplier_status);
   if (filters.min_confidence != null) params.set('min_confidence', String(filters.min_confidence));
+  if (filters.min_events != null) params.set('min_events', String(filters.min_events));
+  if (filters.limit != null) params.set('limit', String(filters.limit));
+  if (filters.offset != null) params.set('offset', String(filters.offset));
   const qs = params.toString();
   const res = await fetch(oilUrl(`/api/oil-live/companies${qs ? `?${qs}` : ''}`));
   if (!res.ok) throw new Error(`oil-live companies ${res.status}`);
@@ -158,8 +200,22 @@ export type OilOpportunity = {
   confidence?: number;
   evidence?: string[];
   profit_checklist?: string[];
+  terminal_id?: string;
   terminal_name?: string;
   disclaimer?: string;
+};
+
+export type CargoRecordsFilters = {
+  commodity?: string;
+  country?: string;
+  mmsi?: string | number;
+  min_confidence?: number;
+  limit?: number;
+};
+
+export type CargoRecordsResponse = {
+  cargo_records: MeridianCargoRecord[];
+  count: number;
 };
 
 export type OilDealEconomics = {
@@ -207,6 +263,186 @@ export async function saveOilOpportunityEconomics(
 export async function getOilOpportunities(minConfidence = 0.55): Promise<{ opportunities: OilOpportunity[] }> {
   const res = await fetch(oilUrl(`/api/oil-live/opportunities?min_confidence=${minConfidence}`));
   if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
+  return res.json();
+}
+
+export type DealReadinessStatus = 'complete' | 'partial' | 'missing';
+
+export type DealReadinessItem = {
+  id: string;
+  label: string;
+  status: DealReadinessStatus;
+  weight?: number;
+  detail?: string;
+};
+
+export type MeridianCargoRecord = {
+  id: string;
+  synthetic_bol_id?: string;
+  recipe?: string;
+  commodity_family?: string;
+  confidence?: number;
+  triangulation_score?: number;
+  bol_tier?: string;
+  shipper_name?: string;
+  consignee_name?: string;
+  shipper_company_id?: string;
+  consignee_company_id?: string;
+  vessel_name?: string;
+  mmsi?: number;
+  load_port_name?: string;
+  load_country?: string;
+  discharge_hint?: string;
+  discharge_country?: string;
+  commodity_description?: string;
+  volume_low?: number;
+  volume_high?: number;
+  volume_best_estimate?: number;
+  volume_method?: string;
+  volume_unit?: string;
+  event_date?: string;
+  created_at?: string;
+  opportunity_id?: string;
+  corridor_load_lat?: number;
+  corridor_load_lng?: number;
+  corridor_discharge_lat?: number;
+  corridor_discharge_lng?: number;
+  evidence_chain?: string[];
+  sources?: Array<{ name?: string; url?: string; fetched_at?: string }>;
+  disclaimer?: string;
+};
+
+/** Deal pack shape returned by GET /opportunities/{id}/deal-pack */
+export type DealExecutionPack = {
+  opportunity_id: string;
+  title?: string;
+  hypothesis?: string;
+  readiness_score?: number;
+  readiness_pct?: number;
+  checklist?: Array<{
+    id: string;
+    label: string;
+    status: string;
+    weight?: number;
+    detail?: string;
+    action?: string;
+  }>;
+  cargo_records?: MeridianCargoRecord[];
+  port_call?: Record<string, unknown>;
+  terminal?: Record<string, unknown>;
+  economics?: Record<string, unknown>;
+  profit_checklist?: string[];
+  disclaimer?: string;
+};
+
+export type OilDealPackMovement = {
+  port_call_id?: string;
+  vessel_name?: string;
+  mmsi?: number;
+  terminal_id?: string;
+  terminal_name?: string;
+  event_type?: string;
+  product_family_inferred?: string;
+  confidence?: number;
+  estimated_volume_barrels?: number;
+  evidence?: string[];
+  explain?: Record<string, unknown>;
+};
+
+export type OilDealPackCounterparty = {
+  companies?: OilCompany[];
+  hints?: Array<{
+    source?: string;
+    confidence?: number;
+    label?: string;
+    description?: string;
+  }>;
+  trade_flows?: Array<{
+    reporter?: string;
+    partner?: string;
+    hs_code?: string;
+    flow?: string;
+    value_usd?: number;
+    period?: string;
+  }>;
+  disclaimer?: string;
+};
+
+export type OilDealPackLogistics = {
+  terminal_id?: string;
+  terminal_name?: string;
+  country?: string;
+  port?: string;
+  products?: string[];
+  hints?: Record<string, unknown>;
+};
+
+export type OilDealPackContacts = {
+  shipper?: OilContact[];
+  consignee?: OilContact[];
+  primary?: OilContact[];
+  procurement_notices?: OilCompanyContactsResponse['procurement_notices'];
+  procurement_note?: string;
+  disclaimer?: string;
+};
+
+export type OilDealPackWorkflow = {
+  can_watch?: boolean;
+  watch_type?: string;
+  watch_ref?: string;
+  watch_label?: string;
+  supplier_saved?: boolean;
+  supplier_id?: string;
+  deal_room_hint?: string;
+};
+
+export type OilDealPack = {
+  opportunity_id: string;
+  opportunity?: OilOpportunity;
+  readiness_score?: number;
+  readiness_items?: DealReadinessItem[];
+  synthetic_cargo?: MeridianCargoRecord[];
+  movement?: OilDealPackMovement;
+  counterparty?: OilDealPackCounterparty;
+  economics?: OilDealEconomics;
+  logistics?: OilDealPackLogistics;
+  contacts?: OilDealPackContacts;
+  workflow?: OilDealPackWorkflow;
+  disclaimer?: string;
+};
+
+export async function getOilOpportunityDealPack(opportunityId: string): Promise<OilDealPack> {
+  const res = await fetch(oilUrl(`/api/oil-live/opportunities/${opportunityId}/deal-pack`));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || `oil-live deal-pack ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Alias used by DealExecutionPack UI */
+export const getOpportunityDealPack = getOilOpportunityDealPack;
+
+export async function getCargoRecords(
+  filters: CargoRecordsFilters = {},
+): Promise<CargoRecordsResponse> {
+  const params = new URLSearchParams();
+  if (filters.commodity) params.set('commodity', filters.commodity);
+  if (filters.country) params.set('country', filters.country);
+  if (filters.mmsi != null) params.set('mmsi', String(filters.mmsi));
+  if (filters.min_confidence != null) {
+    params.set('min_confidence', String(filters.min_confidence));
+  }
+  if (filters.limit != null) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  const res = await fetch(oilUrl(`/api/oil-live/cargo-records${qs ? `?${qs}` : ''}`));
+  if (!res.ok) throw new Error(`oil-live cargo-records ${res.status}`);
+  return res.json();
+}
+
+export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
+  const res = await fetch(oilUrl(`/api/oil-live/cargo-records/${encodeURIComponent(id)}`));
+  if (!res.ok) throw new Error(`oil-live cargo-record ${res.status}`);
   return res.json();
 }
 

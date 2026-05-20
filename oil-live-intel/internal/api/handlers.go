@@ -44,7 +44,7 @@ func (s *Server) Map(w http.ResponseWriter, r *http.Request) {
 	vessels, _ := s.listLiveVessels(r, bbox, bboxOK, limit)
 	events, _ := s.listRecentPortCalls(r, limit/2)
 	cards, _ := s.listIntelligence(r, limit/2)
-	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4)
+	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4, 0)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"terminals": terminals,
 		"vessels":   vessels,
@@ -213,15 +213,29 @@ func (s *Server) ListCompanies(w http.ResponseWriter, r *http.Request) {
 		Type:           r.URL.Query().Get("type"),
 		Country:        r.URL.Query().Get("country"),
 		SupplierStatus: r.URL.Query().Get("supplier_status"),
+		Role:           firstNonEmpty(r.URL.Query().Get("role"), r.URL.Query().Get("company_type")),
 		MinConfidence:  queryFloat(r, "min_confidence", 0),
+		MinEvents:      queryOffset(r, "min_events"),
 	}
 	limit := queryInt(r, "limit", 100)
-	items, err := s.listCompanies(r, f, limit)
+	offset := queryOffset(r, "offset")
+	total, err := s.countCompanies(r, f)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"companies": items})
+	items, err := s.listCompanies(r, f, limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"companies": items,
+		"count":     len(items),
+		"total":     total,
+		"offset":    offset,
+		"limit":     limit,
+	})
 }
 
 func (s *Server) GetCompany(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +250,7 @@ func (s *Server) GetCompany(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) SupplierCandidates(w http.ResponseWriter, r *http.Request) {
 	f := companyFilters{SupplierStatus: "candidate", MinConfidence: 0.55}
-	items, err := s.listCompanies(r, f, 100)
+	items, err := s.listCompanies(r, f, 100, 0)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -329,6 +343,24 @@ func queryFloat(r *http.Request, key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+func queryOffset(r *http.Request, key string) int {
+	if v := r.URL.Query().Get(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func parseBBox(raw string) (minLon, minLat, maxLon, maxLat float64, ok bool) {

@@ -122,7 +122,44 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 		VALUES (636012345,$1,26.65,50.10,0.2,14.8, ST_SetSRID(ST_MakePoint(50.10,26.65),4326))
 	`, now.Add(-1*time.Hour))
 
+	oppEvidence, _ := json.Marshal([]string{
+		"Demo seed — MT DEMO STAR possible loading at Ras Tanura",
+		"Inferred from public-style demo data — not a confirmed transaction",
+	})
+	oppChecklist, _ := json.Marshal(defaultProfitChecklist())
+	_, err = pool.Exec(ctx, `
+		INSERT INTO oil_opportunities (
+			opportunity_type, mmsi, terminal_id, port_call_id, title, hypothesis,
+			confidence, evidence, profit_checklist, status, expires_at
+		)
+		SELECT
+			'possible_cargo_flip', 636012345, $1, $2,
+			'Possible crude flip at Ras Tanura export terminal',
+			'Demo: MT DEMO STAR may have loaded crude at Ras Tanura — click terminal on map for Deal Execution Pack.',
+			0.78, $3, $4, 'open', now() + interval '30 days'
+		WHERE NOT EXISTS (
+			SELECT 1 FROM oil_opportunities
+			WHERE opportunity_type = 'possible_cargo_flip'
+			  AND mmsi = 636012345
+			  AND terminal_id = $1
+			  AND status = 'open'
+		)
+	`, rtID, portCallID, oppEvidence, oppChecklist)
+	if err != nil {
+		return fmt.Errorf("insert demo opportunity: %w", err)
+	}
+
 	return nil
+}
+
+func defaultProfitChecklist() []string {
+	return []string{
+		"Confirm cargo grade and volume with operator (not inferred AIS alone)",
+		"Obtain indicative buy and sell prices",
+		"Quote freight or demurrage if relevant",
+		"Validate storage or terminal slot availability and tariff",
+		"Run counterparty credit and sanctions screening",
+	}
 }
 
 type terminalSeed struct {

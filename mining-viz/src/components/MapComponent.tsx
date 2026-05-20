@@ -50,6 +50,10 @@ import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
+import OilLiveMapOverlays, {
+  type OilLiveEntityClickPayload,
+  type OilLiveLayerVisibility,
+} from './petroleum/OilLiveMapOverlays';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
@@ -260,6 +264,13 @@ interface MapComponentProps {
   /** Open-data storage terminals / tank farms (Oil & Gas view). */
   storageEntities?: MiningLicense[];
   onStorageInViewCountChange?: (count: number) => void;
+  /** Live Data mode — oil-live-intel map overlays. */
+  oilLiveOverlaysEnabled?: boolean;
+  oilLiveProductFilter?: string;
+  oilLiveLayers?: OilLiveLayerVisibility;
+  onOilLiveStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
+  onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
+  onOilLiveDismiss?: () => void;
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -516,11 +527,18 @@ export default function MapComponent({
   countryFocusBoundsTrigger = 0,
   storageEntities = [],
   onStorageInViewCountChange,
+  oilLiveOverlaysEnabled = false,
+  oilLiveProductFilter = 'all',
+  oilLiveLayers = { terminals: true, vessels: true, corridors: true, opportunities: true },
+  onOilLiveStatsChange,
+  onOilLiveEntityClick,
+  onOilLiveDismiss,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isLiveDataView = viewModeKey === 'live_data';
     const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
@@ -531,6 +549,7 @@ export default function MapComponent({
     const prevSelectedIdRef = useRef<string | null>(null);
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
     const [oilGasMapViewport, setOilGasMapViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [liveDataMapViewport, setLiveDataMapViewport] = useState<MaritimeViewportBounds | null>(null);
 
     const isMobileDevice = useMemo(() => {
         if (typeof window === 'undefined') return false;
@@ -682,7 +701,9 @@ export default function MapComponent({
         maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
     );
     const onGroundVisible =
-      (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
+      (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') &&
+      !isRoutePlannerView &&
+      !isLiveDataView;
 
     useEffect(() => {
         if (!isOilAndGasView || !onStorageInViewCountChange) return;
@@ -1552,7 +1573,13 @@ export default function MapComponent({
             )}
             <MapContainer 
               center={mapCenter} 
-              zoom={viewModeKey === 'ports' ? 3 : viewModeKey === 'route_planner' ? 4 : 7} 
+              zoom={
+                viewModeKey === 'ports' || viewModeKey === 'live_data'
+                  ? 3
+                  : viewModeKey === 'route_planner'
+                    ? 4
+                    : 7
+              } 
               className="w-full h-full"
               zoomControl={false}
               preferCanvas
@@ -1566,6 +1593,7 @@ export default function MapComponent({
                     onMapClick={() => {
                       setSelectedItem(null);
                       onSelectMaritimeVessel(null);
+                      if (isLiveDataView) onOilLiveDismiss?.();
                     }}
                 />
                 <ViewportBoundsTracker
@@ -1578,6 +1606,11 @@ export default function MapComponent({
                     active={isOilAndGasView}
                     debounceMs={100}
                     onBoundsChange={setOilGasMapViewport}
+                />
+                <ViewportBoundsTracker
+                    active={isLiveDataView && oilLiveOverlaysEnabled}
+                    debounceMs={100}
+                    onBoundsChange={setLiveDataMapViewport}
                 />
                 {isMobileDevice && mobileFilteredData.capped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1688,6 +1721,16 @@ export default function MapComponent({
                                 style={countryBorderLayerStyle}
                             />
                         </LayersControl.Overlay>
+                    )}
+                    {isLiveDataView && oilLiveOverlaysEnabled && (
+                        <OilLiveMapOverlays
+                            enabled
+                            productFilter={oilLiveProductFilter}
+                            layers={oilLiveLayers}
+                            viewport={liveDataMapViewport}
+                            onStatsChange={onOilLiveStatsChange}
+                            onEntityClick={onOilLiveEntityClick}
+                        />
                     )}
                     {isOilAndGasView && onGroundVisible && (
                         <>

@@ -17,6 +17,7 @@ func NewRouter(s *Server) http.Handler {
 
 	r.Route("/api/oil-live", func(api chi.Router) {
 		api.Get("/health", s.Health)
+		api.Get("/sync-status", s.SyncStatus)
 		api.Get("/map", s.Map)
 		api.Get("/terminals", s.ListTerminals)
 		api.Get("/terminals/{id}/logistics-hints", s.LogisticsHints)
@@ -37,8 +38,12 @@ func NewRouter(s *Server) http.Handler {
 		api.Post("/alerts/{id}/assign", s.AssignAlert)
 		api.Get("/trade/flows", s.ListTradeFlows)
 		api.Get("/opportunities", s.ListOpportunities)
+		api.Get("/opportunities/{id}/deal-pack", s.OpportunityDealPack)
 		api.Get("/opportunities/{id}/economics", s.OpportunityEconomics)
 		api.Put("/opportunities/{id}/economics", s.OpportunityEconomics)
+		api.Get("/cargo-records", s.ListCargoRecords)
+		api.Get("/cargo-records/{id}", s.GetCargoRecord)
+		api.Get("/commercial-events", s.ListCommercialEvents)
 		api.Get("/intelligence", s.ListIntelligence)
 		api.Get("/intelligence/{id}", s.GetIntelligence)
 		api.Get("/companies", s.ListCompanies)
@@ -52,6 +57,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/ws", s.WebSocket)
 		api.Post("/internal/broadcast", s.InternalBroadcast)
 		api.Post("/internal/trade-sync", s.TriggerTradeSync)
+		api.Post("/internal/synthetic-bol-rebuild", s.TriggerSyntheticBolRebuild)
 	})
 	return r
 }

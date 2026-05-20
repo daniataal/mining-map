@@ -49,6 +49,7 @@ import ThemeToggle from './components/ThemeToggle';
 import PlatformHealthBanner from './components/PlatformHealthBanner';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
+import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
 import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
@@ -60,8 +61,9 @@ const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
 const LiveDataPanel = lazy(() => import('./features/live-data/LiveDataPanel'));
+const OilLiveEntityDrawer = lazy(() => import('./features/live-data/OilLiveEntityDrawer'));
 
-const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
+const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas', 'live_data']);
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -191,6 +193,19 @@ export default function App() {
   const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('15000');
   const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('25');
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
+  const [oilLiveProductFilter, setOilLiveProductFilter] = useState('all');
+  const [oilLiveLayers, setOilLiveLayers] = useState({
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+  });
+  const [oilLiveCoverageStats, setOilLiveCoverageStats] = useState<{
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+  } | null>(null);
+  const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -359,6 +374,12 @@ export default function App() {
   }, [viewMode]);
 
   useEffect(() => {
+    if (viewMode !== 'live_data') {
+      setOilLiveEntity(null);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
       miningData.setSelectedSector(viewMode);
     } else {
@@ -439,7 +460,29 @@ export default function App() {
 
   const handleSelectItem = useCallback((item: MiningLicense | null) => {
     setSelectedMaritimeVessel(null);
+    setOilLiveEntity(null);
     setSelectedItem(item);
+  }, []);
+
+  const handleOilLiveEntityClick = useCallback((payload: OilLiveEntityClickPayload) => {
+    setSelectedItem(null);
+    setSelectedMaritimeVessel(null);
+    setOilLiveEntity(payload);
+  }, []);
+
+  const handleOilLiveDismiss = useCallback(() => {
+    setOilLiveEntity(null);
+  }, []);
+
+  const handleOpenOilLiveOpportunity = useCallback((opportunityId: string, title?: string) => {
+    setSelectedItem(null);
+    setSelectedMaritimeVessel(null);
+    setOilLiveEntity({
+      entityKind: 'opportunity',
+      entityId: opportunityId,
+      opportunityId,
+      title,
+    });
   }, []);
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
@@ -631,8 +674,14 @@ export default function App() {
   const maritimeMapViewActive = MARITIME_MAP_VIEWS.has(viewMode);
 
   useEffect(() => {
-    if (viewMode === 'oil_and_gas') {
+    if (viewMode === 'oil_and_gas' || viewMode === 'live_data') {
       setPrioritizePetroleumVessels(true);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode === 'live_data') {
+      setIsMaritimeLayerEnabled(true);
     }
   }, [viewMode]);
 
@@ -1019,6 +1068,7 @@ export default function App() {
               viewMode === 'suppliers' ||
               viewMode === 'ports' ||
               viewMode === 'oil_and_gas' ||
+              viewMode === 'live_data' ||
               viewMode === 'route_planner') && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
                 <MapComponent
@@ -1083,6 +1133,12 @@ export default function App() {
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
                   }
+                  oilLiveOverlaysEnabled={viewMode === 'live_data'}
+                  oilLiveProductFilter={oilLiveProductFilter}
+                  oilLiveLayers={oilLiveLayers}
+                  onOilLiveStatsChange={viewMode === 'live_data' ? setOilLiveCoverageStats : undefined}
+                  onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
+                  onOilLiveDismiss={viewMode === 'live_data' ? handleOilLiveDismiss : undefined}
                 />
               </Suspense>
             )}
@@ -1103,10 +1159,38 @@ export default function App() {
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
             )}
+            {viewMode === 'live_data' && oilLiveEntity && !isDossierOpen && (
+              <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1150] flex justify-start sm:inset-x-auto sm:left-4 sm:bottom-4 sm:top-24 sm:right-auto">
+                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(400px,calc(100vw-2rem))]">
+                  <Suspense fallback={<LazySurfaceFallback label={t('טוען ישות…', 'Loading entity…')} />}>
+                    <OilLiveEntityDrawer
+                      entityKind={oilLiveEntity.entityKind}
+                      entityId={oilLiveEntity.entityId}
+                      opportunityId={oilLiveEntity.opportunityId}
+                      title={oilLiveEntity.title}
+                      subtitle={oilLiveEntity.subtitle}
+                      onClose={handleOilLiveDismiss}
+                      onOpenRoutePlanner={() => setViewMode('route_planner')}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            )}
             {viewMode === 'live_data' && (
-              <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
-                <LiveDataPanel />
-              </Suspense>
+              <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
+                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(420px,calc(100vw-2rem))]">
+                  <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
+                    <LiveDataPanel
+                      productFilter={oilLiveProductFilter}
+                      onProductFilterChange={setOilLiveProductFilter}
+                      layers={oilLiveLayers}
+                      onLayersChange={setOilLiveLayers}
+                      coverageStats={oilLiveCoverageStats}
+                      onOpenOpportunity={handleOpenOilLiveOpportunity}
+                    />
+                  </Suspense>
+                </div>
+              </div>
             )}
             {viewMode === 'investigations' && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען חקירות...', 'Loading investigations...')} />}>
