@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Update and install system dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     curl \
     wget \
     python3 \
@@ -15,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
     git \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x

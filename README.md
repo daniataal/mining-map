@@ -71,6 +71,8 @@ curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east
 
 If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
 
+If worker logs mention `stream.aisstream.io` and `certificate has expired`, the AISStream TLS certificate needs renewal on their side (not a local CA bundle issue). Until then, dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`. Production: wait for upstream renewal or contact AISStream.
+
 ### Remote PostGIS Recovery
 
 Remote deployments use `postgis/postgis:15-3.3-alpine` for the `db` service. After the workflow deploys this image, recreate the stack with `sudo docker compose pull && sudo docker compose up -d --remove-orphans`; only delete the `postgres_data` volume if the existing remote database is disposable, because that reset permanently removes DB data.
