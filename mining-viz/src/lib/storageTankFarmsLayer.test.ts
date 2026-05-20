@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatStorageOperatorLabel,
   formatStorageOwnerLabel,
+  formatStorageSourceLabel,
   formatStorageSubstanceLabel,
   storageTankFarmsLayerShouldMount,
   storageTerminalOsmTagSummary,
@@ -46,5 +47,21 @@ describe('storage terminal popup helpers', () => {
       { key: 'operator', value: 'ADNOC' },
       { key: 'substance', value: 'crude oil' },
     ]);
+  });
+
+  it('labels curated reference vs OSM source names', () => {
+    expect(
+      formatStorageSourceLabel({
+        sourceKind: 'curated_reference',
+        sourceName: 'Curated major global petroleum storage terminals',
+      }),
+    ).toBe('Curated reference');
+    expect(
+      formatStorageSourceLabel({
+        sourceKind: null,
+        sourceName: 'OpenStreetMap via Overpass',
+      }),
+    ).toBe('OpenStreetMap via Overpass');
+    expect(formatStorageSourceLabel({})).toBe('OpenStreetMap');
   });
 });

@@ -7,6 +7,18 @@ export function storageTankFarmsLayerShouldMount(enabled: boolean): boolean {
 
 export const STORAGE_OPERATOR_UNTAGGED = 'Operator not tagged';
 
+export function formatStorageSourceLabel(
+  item: Pick<MiningLicense, 'sourceKind' | 'sourceName'>,
+): string {
+  if (item.sourceKind === 'curated_reference') {
+    return 'Curated reference';
+  }
+  if (item.sourceName?.trim()) {
+    return item.sourceName.trim();
+  }
+  return 'OpenStreetMap';
+}
+
 export function formatStorageOperatorLabel(
   operatorName?: string | null,
   untaggedLabel: string = STORAGE_OPERATOR_UNTAGGED,

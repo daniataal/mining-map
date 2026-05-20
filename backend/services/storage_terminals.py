@@ -726,10 +726,19 @@ def _summary_entity(entity: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _source_bucket(entity: dict[str, Any]) -> str:
+    if entity.get("sourceKind") == "curated_reference" or str(entity.get("id", "")).startswith("curated_storage_"):
+        return "curated_reference"
+    if str(entity.get("id", "")).startswith("osm:"):
+        return "osm"
+    return "other"
+
+
 def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
     countries = {entity["country"] for entity in entities if _clean_text(entity.get("country")) and entity["country"] != "Unknown"}
     by_subtype: dict[str, int] = {}
     by_country: dict[str, int] = {}
+    by_source: dict[str, int] = {}
     high_confidence = 0
     with_operator = 0
     with_owner = 0
@@ -740,6 +749,8 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         by_subtype[subtype] = by_subtype.get(subtype, 0) + 1
         country = entity.get("country") or "Unknown"
         by_country[country] = by_country.get(country, 0) + 1
+        source_bucket = _source_bucket(entity)
+        by_source[source_bucket] = by_source.get(source_bucket, 0) + 1
         if float(entity.get("confidenceScore") or 0.0) >= 0.8:
             high_confidence += 1
         if entity.get("operatorName"):
@@ -764,6 +775,7 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         "with_nearby_port": with_nearby_port,
         "high_confidence": high_confidence,
         "by_subtype": by_subtype,
+        "by_source": by_source,
         "top_countries": top_countries,
     }
 
@@ -847,7 +859,26 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
                 "Persisted petroleum_osm_features snapshot was regional/incomplete; refreshed from live Overpass world tiles."
             )
 
-    entities = _dedupe_entities(all_entities)
+    try:
+        from backend.services.storage_terminals_seed import (
+            drop_curated_near_osm_duplicates,
+            load_curated_storage_terminals,
+        )
+    except ImportError:
+        from services.storage_terminals_seed import (  # type: ignore
+            drop_curated_near_osm_duplicates,
+            load_curated_storage_terminals,
+        )
+
+    curated_entities = load_curated_storage_terminals(fetched_at)
+    if curated_entities:
+        all_entities.extend(curated_entities)
+        if data_source == "database":
+            data_source = "database+curated"
+        elif data_source == "overpass":
+            data_source = "overpass+curated"
+
+    entities = drop_curated_near_osm_duplicates(_dedupe_entities(all_entities))
     entities.sort(
         key=lambda item: (
             -(float(item.get("confidenceScore") or 0.0)),
@@ -858,20 +889,22 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
 
     response = {
         "entities": entities,
-        "source_labels": ["OpenStreetMap", "Overpass", "UN/LOCODE"],
+        "source_labels": ["OpenStreetMap", "Overpass", "Curated reference", "UN/LOCODE"],
         "data_source": data_source,
         "data_as_of": fetched_at,
         "coverage_note": (
-            "Global coverage is live from OpenStreetMap/Overpass across 11 world tiles. Includes petroleum terminals, "
-            "tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry. "
-            "Curated license records are separate; this layer is community-mapped OSM only."
+            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of major "
+            "petroleum storage hubs (FOIZ, Ras Tanura, Jurong, US Gulf, Cushing, etc.). Includes petroleum terminals, "
+            "tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
         ),
         "limitations": [
             "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
+            "Curated reference rows (sourceKind=curated_reference) are approximate hub centroids from public operator pages — not audited tank counts or capacities.",
             "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
-            "Operator and owner values come only from OSM tags — missing tags are shown as untagged, never inferred.",
+            "Operator and owner values on OSM rows come only from OSM tags — missing tags are shown as untagged, never inferred.",
             "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
             "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
+            "If you still see only a small regional cluster (e.g. Rotterdam-only), the backend may be serving a stale in-memory cache or an old regional petroleum_osm DB snapshot — call GET /api/storage/terminals?force_refresh=true or redeploy after petroleum_osm_sync.",
         ]
         + warnings,
         "stats": _build_stats(entities),
