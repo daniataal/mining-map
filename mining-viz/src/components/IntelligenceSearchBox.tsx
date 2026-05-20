@@ -15,8 +15,6 @@ type IntelligenceSearchBoxProps = {
   countries: readonly string[];
   externalFilter: string;
   countryFocusCountry: string | null;
-  autoFocusCountryOnEnter: boolean;
-  onAutoFocusCountryOnEnterChange: (checked: boolean) => void;
   onApplyCountryFocus: (name: string) => void;
   onCommitLicenseSearch: (query: string) => void;
 };
@@ -25,8 +23,6 @@ function IntelligenceSearchBox({
   countries,
   externalFilter,
   countryFocusCountry,
-  autoFocusCountryOnEnter,
-  onAutoFocusCountryOnEnterChange,
   onApplyCountryFocus,
   onCommitLicenseSearch,
 }: IntelligenceSearchBoxProps) {
@@ -87,13 +83,11 @@ function IntelligenceSearchBox({
         }
         return;
       }
-      if (autoFocusCountryOnEnter) {
-        const exact = matchExactCountryFocusQuery(raw, countries);
-        if (exact) {
-          e.preventDefault();
-          applyCountryFocusAndClose(exact);
-          return;
-        }
+      const exact = matchExactCountryFocusQuery(raw, countries);
+      if (exact) {
+        e.preventDefault();
+        applyCountryFocusAndClose(exact);
+        return;
       }
       const resolved = resolveCountryFocusToken(raw, countries);
       if (resolved) {
@@ -108,7 +102,7 @@ function IntelligenceSearchBox({
       setSuggestionsDismissed(true);
       onCommitLicenseSearch(raw);
     },
-    [draft, countries, autoFocusCountryOnEnter, applyCountryFocusAndClose, onCommitLicenseSearch],
+    [draft, countries, applyCountryFocusAndClose, onCommitLicenseSearch],
   );
 
   const showCountrySuggestions =
@@ -156,18 +150,6 @@ function IntelligenceSearchBox({
           ))}
         </ul>
       )}
-      <label className="mt-1.5 flex cursor-pointer items-center gap-2 px-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-        <input
-          type="checkbox"
-          className="h-3.5 w-3.5 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
-          checked={autoFocusCountryOnEnter}
-          onChange={(e) => onAutoFocusCountryOnEnterChange(e.target.checked)}
-        />
-        {t(
-          'מיקוד מפה במדינה בלחיצת Enter כשהשם תואם',
-          'Focus map on country with Enter when the name matches exactly',
-        )}
-      </label>
     </div>
   );
 }

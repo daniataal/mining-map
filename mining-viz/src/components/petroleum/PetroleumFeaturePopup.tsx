@@ -103,16 +103,27 @@ export default function PetroleumFeaturePopup({
   const layerLabel = petroleumLayerTypeLabel(layerId);
   const showExploringSection =
     layerId === 'exploration' || layerId === 'production' || layerId === 'bid_rounds';
+  const isOsmPipeline =
+    model.isOsmFeature &&
+    (layerId === 'oil_pipelines' || layerId === 'gas_pipelines');
+  const showOperatorSection = isOsmPipeline || (model.operator && !showExploringSection);
   const companiesUnknownHint = model.sourceUrl
     ? t('לא ידוע — ראה מקור', 'Unknown — see source')
     : t('לא ידוע', 'Unknown');
+  const operatorMissingHint = t(
+    'מפעיל לא מתויג ב-OSM',
+    'Operator not tagged in OSM'
+  );
 
   const detailRows: { label: string; value: string }[] = [];
   if (model.facilityType && model.facilityType !== layerLabel) {
     detailRows.push({ label: t('סוג', 'Type'), value: model.facilityType });
   }
-  if (model.operator && !showExploringSection) {
-    detailRows.push({ label: t('מפעיל', 'Operator'), value: model.operator });
+  if (model.owner && model.owner !== model.operator) {
+    detailRows.push({ label: t('בעלים', 'Owner'), value: model.owner });
+  }
+  for (const row of model.pipelineDetails) {
+    detailRows.push(row);
   }
   if (model.country) {
     detailRows.push({ label: t('מדינה', 'Country'), value: model.country });
@@ -176,6 +187,20 @@ export default function PetroleumFeaturePopup({
         />
       )}
 
+      {showOperatorSection && !showExploringSection && (
+        <ExploringCompaniesSection
+          label={t('מפעיל', 'Operator')}
+          companies={
+            model.operator
+              ? [model.operator]
+              : model.exploringCompanies.length > 0
+                ? model.exploringCompanies
+                : []
+          }
+          unknownHint={isOsmPipeline ? operatorMissingHint : companiesUnknownHint}
+        />
+      )}
+
       {detailRows.length > 0 && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
           {detailRows.map((row) => (
@@ -204,8 +229,32 @@ export default function PetroleumFeaturePopup({
             {sourceLinkLabel}
           </a>
         )}
+        {model.wikipediaUrl && (
+          <a
+            href={model.wikipediaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 break-all"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('ויקיפדיה', 'Wikipedia')}
+          </a>
+        )}
+        {model.wikidataUrl && (
+          <a
+            href={model.wikidataUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 break-all"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Wikidata
+          </a>
+        )}
         <p className="text-[9px] uppercase tracking-wide text-slate-600">
-          {t('נתוני שכבה', 'Compiled layer')} · oilmap tileset
+          {model.isOsmFeature
+            ? t('נתוני קהילה', 'Community layer') + ' · OpenStreetMap'
+            : t('נתוני שכבה', 'Compiled layer') + ' · oilmap tileset'}
         </p>
       </footer>
     </article>

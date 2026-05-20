@@ -5,6 +5,8 @@ export interface PetroleumFeatureViewModel {
   subtitle: string | null;
   facilityType: string | null;
   operator: string | null;
+  owner: string | null;
+  operatorMissing: boolean;
   exploringCompanies: string[];
   country: string | null;
   status: string | null;
@@ -14,6 +16,11 @@ export interface PetroleumFeatureViewModel {
   sourceUrl: string | null;
   sourceLabel: string | null;
   description: string | null;
+  osmUrl: string | null;
+  wikipediaUrl: string | null;
+  wikidataUrl: string | null;
+  isOsmFeature: boolean;
+  pipelineDetails: { label: string; value: string }[];
   extraRows: { label: string; value: string }[];
 }
 
@@ -73,6 +80,9 @@ const COMPANY_PROPERTY_KEYS = [
   'OPERATOR',
   'Operator',
   'operator',
+  'owner',
+  'Owner',
+  'OWNER',
   'licensee',
   'Licensee',
   'LICENSEE',
@@ -136,7 +146,114 @@ const CONSUMED_PROPERTY_KEYS = new Set([
   'url',
   'source_layer',
   ...COMPANY_PROPERTY_KEYS,
+  'osm_type',
+  'osm_id',
+  'layer_id',
+  'attribution',
+  'persisted',
+  'man_made',
+  'substance',
+  'diameter',
+  'ref',
+  'network',
+  'location',
+  'voltage',
+  'wikipedia',
+  'wikidata',
+  'start_date',
+  'end_date',
+  'usage',
+  'owner',
+  'Owner',
+  'OWNER',
 ]);
+
+const PIPELINE_LAYER_IDS = new Set<PetroleumLayerId>(['oil_pipelines', 'gas_pipelines']);
+
+const OSM_PIPELINE_DETAIL_SPECS: { label: string; keys: string[] }[] = [
+  { label: 'Substance', keys: ['substance', 'Substance'] },
+  { label: 'Diameter', keys: ['diameter', 'Diameter'] },
+  { label: 'Capacity', keys: ['capacity', 'Capacity'] },
+  { label: 'Voltage', keys: ['voltage', 'Voltage'] },
+  { label: 'Reference', keys: ['ref', 'Ref', 'REF'] },
+  { label: 'Network', keys: ['network', 'Network'] },
+  { label: 'Location', keys: ['location', 'Location'] },
+  { label: 'In service from', keys: ['start_date', 'Start_date'] },
+  { label: 'Usage', keys: ['usage', 'Usage'] },
+];
+
+export function isOsmInfrastructureFeature(props: Record<string, unknown>): boolean {
+  const source = firstString(props, ['source', 'Source', 'SOURCE']);
+  if (source?.toLowerCase() === 'openstreetmap') return true;
+  return props.osm_id != null || props.osm_type != null;
+}
+
+export function buildOsmObjectUrl(
+  osmType: string | null | undefined,
+  osmId: string | number | null | undefined
+): string | null {
+  if (!osmType || osmId == null) return null;
+  const type = String(osmType).trim();
+  const id = String(osmId).trim();
+  if (!type || !id) return null;
+  return `https://www.openstreetmap.org/${type}/${id}`;
+}
+
+/** Parse OSM wikipedia tag (e.g. en:Article) into a URL. */
+export function parseOsmWikipediaUrl(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const colon = trimmed.indexOf(':');
+  if (colon > 0) {
+    const lang = trimmed.slice(0, colon).trim().toLowerCase();
+    const article = trimmed.slice(colon + 1).trim().replace(/ /g, '_');
+    if (lang && article) {
+      return `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(article)}`;
+    }
+  }
+  return `https://en.wikipedia.org/wiki/${encodeURIComponent(trimmed.replace(/ /g, '_'))}`;
+}
+
+export function parseOsmWikidataUrl(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const qid = trimmed.startsWith('Q') ? trimmed : `Q${trimmed}`;
+  return `https://www.wikidata.org/wiki/${encodeURIComponent(qid)}`;
+}
+
+export function collectOsmPipelineDetails(
+  props: Record<string, unknown>
+): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = [];
+  const seen = new Set<string>();
+
+  const addRow = (label: string, value: string) => {
+    const key = `${label}:${value}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ label, value });
+  };
+
+  for (const spec of OSM_PIPELINE_DETAIL_SPECS) {
+    const value = firstString(props, spec.keys);
+    if (value) addRow(spec.label, value);
+  }
+
+  for (const [key, raw] of Object.entries(props)) {
+    if (!key.startsWith('diameter') || raw == null) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    const suffix = key.slice('diameter'.length).replace(/^:/, '').replace(/_/g, ' ').trim();
+    const label = suffix ? `Diameter ${suffix.toLowerCase()}` : 'Diameter';
+    addRow(label, value);
+  }
+
+  return rows;
+}
 
 export function petroleumLayerTypeLabel(layerId: PetroleumLayerId): string {
   return LAYER_TYPE_LABEL[layerId] ?? 'Infrastructure';
@@ -256,16 +373,27 @@ export function buildPetroleumFeatureViewModel(
   props: Record<string, unknown>,
   layerId: PetroleumLayerId
 ): PetroleumFeatureViewModel {
+  const isOsmFeature = isOsmInfrastructureFeature(props);
+  const isPipelineLayer = PIPELINE_LAYER_IDS.has(layerId);
   const name = firstString(props, ['Name', 'NAME', 'name', 'title', 'Title']);
+  const owner = firstString(props, ['owner', 'Owner', 'OWNER']);
   const exploringCompanies = collectExploringCompanies(props);
-  const operator = exploringCompanies.length === 1 ? exploringCompanies[0] : null;
+  const operatorFromTags =
+    firstString(props, ['operator', 'Operator', 'OPERATOR']) ??
+    (exploringCompanies.length === 1 ? exploringCompanies[0] : null);
+  const operator = operatorFromTags ?? owner ?? null;
   const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation']);
   const country = resolvePetroleumCountry(countryRaw);
   const facilityType =
     firstString(props, ['Type', 'TYPE', 'type', 'category', 'Category']) ??
+    (isOsmFeature && props.man_made
+      ? `OSM ${String(props.man_made).replace(/_/g, ' ')}`
+      : null) ??
     petroleumLayerTypeLabel(layerId);
   const status = firstString(props, ['STATUS', 'Status', 'status', 'State']);
-  const sector = firstString(props, ['Sector', 'sector', 'Commodity', 'commodity']);
+  const sector =
+    firstString(props, ['Sector', 'sector', 'Commodity', 'commodity']) ??
+    (isPipelineLayer ? firstString(props, ['substance', 'Substance']) : null);
   const capacity = firstString(props, [
     'Capacity',
     'capacity',
@@ -276,36 +404,89 @@ export function buildPetroleumFeatureViewModel(
   ]);
   const description = firstString(props, ['description', 'Description', 'notes', 'Notes']);
   const sourceRaw = firstString(props, ['Source', 'SOURCE', 'source', 'link', 'Link', 'URL', 'url']);
-  const { sourceUrl, sourceLabel, sourceText } = parsePetroleumSource(sourceRaw);
+  let { sourceUrl, sourceLabel, sourceText } = parsePetroleumSource(sourceRaw);
+
+  const osmUrl = buildOsmObjectUrl(
+    firstString(props, ['osm_type', 'Osm_type']),
+    props.osm_id as string | number | undefined
+  );
+  const wikipediaUrl = parseOsmWikipediaUrl(firstString(props, ['wikipedia', 'Wikipedia']));
+  const wikidataUrl = parseOsmWikidataUrl(firstString(props, ['wikidata', 'Wikidata']));
+
+  if (!sourceUrl && osmUrl) {
+    sourceUrl = osmUrl;
+    sourceLabel = 'OpenStreetMap';
+    sourceText = null;
+  }
+
+  const pipelineDetails =
+    isOsmFeature && isPipelineLayer ? collectOsmPipelineDetails(props) : [];
+
+  const operatorMissing =
+    isOsmFeature && isPipelineLayer && !operator && !owner && exploringCompanies.length === 0;
 
   const extraRows: { label: string; value: string }[] = [];
   for (const [key, raw] of Object.entries(props)) {
     if (CONSUMED_PROPERTY_KEYS.has(key) || raw == null) continue;
     const value = String(raw).trim();
     if (!value) continue;
+    if (isOsmFeature && isPipelineLayer) {
+      const lower = key.toLowerCase();
+      if (
+        lower === 'source' ||
+        lower === 'osm_id' ||
+        lower === 'osm_type' ||
+        lower === 'layer_id' ||
+        lower === 'attribution' ||
+        lower === 'persisted' ||
+        lower.startsWith('diameter')
+      ) {
+        continue;
+      }
+    }
     extraRows.push({ label: humanizeKey(key), value });
   }
   extraRows.sort((a, b) => a.label.localeCompare(b.label));
 
-  const title = name ?? (exploringCompanies[0] ?? null) ?? facilityType ?? 'Unnamed feature';
+  const title =
+    name ??
+    operator ??
+    (exploringCompanies[0] ?? null) ??
+    (isOsmFeature && isPipelineLayer && props.osm_id != null
+      ? `OSM pipeline ${props.osm_id}`
+      : null) ??
+    facilityType ??
+    'Unnamed feature';
 
-  const subtitle = country && title !== country ? country : null;
+  const subtitle =
+    country && title !== country
+      ? country
+      : isOsmFeature && props.osm_id
+        ? `OSM way ${props.osm_id}`
+        : null;
 
   return {
     title,
     subtitle,
     facilityType,
-    operator: exploringCompanies.length === 1 ? operator : null,
+    operator: operator ?? (exploringCompanies.length === 1 ? exploringCompanies[0] : null),
+    owner,
+    operatorMissing,
     exploringCompanies,
     country,
     status,
     sector,
     capacity,
-    source: sourceText,
+    source: isOsmFeature ? 'OpenStreetMap (community)' : sourceText,
     sourceUrl,
     sourceLabel,
     description,
-    extraRows: extraRows.slice(0, 4),
+    osmUrl,
+    wikipediaUrl,
+    wikidataUrl,
+    isOsmFeature,
+    pipelineDetails,
+    extraRows: extraRows.slice(0, isOsmFeature && isPipelineLayer ? 2 : 4),
   };
 }
 
