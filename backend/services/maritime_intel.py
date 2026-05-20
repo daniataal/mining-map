@@ -1519,6 +1519,17 @@ async def _collect_ais_snapshot(
             plan=plan,
         )
 
+    try:
+        from backend.services.maritime_ssl import (
+            format_maritime_connection_error,
+            websockets_ssl_argument,
+        )
+    except ImportError:
+        from services.maritime_ssl import (
+            format_maritime_connection_error,
+            websockets_ssl_argument,
+        )
+
     vessels: dict[str, dict[str, Any]] = {}
     subscription = {
         "APIKey": api_key,
@@ -1533,7 +1544,12 @@ async def _collect_ais_snapshot(
     }
 
     try:
-        async with websockets.connect(AISSTREAM_URL, ping_interval=None, close_timeout=1) as websocket:
+        async with websockets.connect(
+            AISSTREAM_URL,
+            ping_interval=None,
+            close_timeout=1,
+            ssl=websockets_ssl_argument(AISSTREAM_URL),
+        ) as websocket:
             await websocket.send(json.dumps(subscription))
             started = time.monotonic()
             raw_target_count = min(
@@ -1576,7 +1592,7 @@ async def _collect_ais_snapshot(
     except Exception as exc:
         return _build_empty_ais_response(
             source="AISStream",
-            limitations=[f"AIS watch failed: {exc}"],
+            limitations=[format_maritime_connection_error(AISSTREAM_URL, exc)],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
