@@ -11,8 +11,41 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/mcp"
 	"github.com/mining-map/oil-live-intel/internal/services/confidence"
 	"github.com/mining-map/oil-live-intel/internal/services/contacts"
+	"github.com/mining-map/oil-live-intel/internal/services/economics"
 	"github.com/mining-map/oil-live-intel/internal/services/opportunity"
 )
+
+func (s *Server) OpportunityEconomics(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	oid, err := uuid.Parse(id)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid opportunity id")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		bundle, err := economics.Get(r.Context(), s.Pool, oid)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, bundle)
+	case http.MethodPut:
+		var sheet economics.Sheet
+		if err := json.NewDecoder(r.Body).Decode(&sheet); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		bundle, err := economics.Save(r.Context(), s.Pool, oid, sheet)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, bundle)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "GET or PUT only")
+	}
+}
 
 func (s *Server) ListOpportunities(w http.ResponseWriter, r *http.Request) {
 	minConf := queryFloat(r, "min_confidence", 0.55)

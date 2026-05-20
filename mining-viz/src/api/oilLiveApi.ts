@@ -162,6 +162,48 @@ export type OilOpportunity = {
   disclaimer?: string;
 };
 
+export type OilDealEconomics = {
+  opportunity_id: string;
+  sheet: {
+    volume_bbl?: number;
+    buy_price_usd_per_bbl?: number;
+    sell_price_usd_per_bbl?: number;
+    freight_usd?: number;
+    storage_usd?: number;
+    other_costs_usd?: number;
+    notes?: string;
+  };
+  result: {
+    indicative_margin_usd?: number;
+    margin_per_bbl_usd?: number;
+    margin_pct?: number;
+    complete: boolean;
+    missing_fields?: string[];
+  };
+  public_context?: Array<Record<string, unknown>>;
+  disclaimer?: string;
+};
+
+export async function getOilOpportunityEconomics(opportunityId: string): Promise<OilDealEconomics> {
+  const res = await fetch(oilUrl(`/api/oil-live/opportunities/${opportunityId}/economics`));
+  if (!res.ok) throw new Error(`oil-live economics ${res.status}`);
+  return res.json();
+}
+
+export async function saveOilOpportunityEconomics(
+  opportunityId: string,
+  sheet: OilDealEconomics['sheet'],
+): Promise<OilDealEconomics> {
+  const res = await fetch(oilUrl(`/api/oil-live/opportunities/${opportunityId}/economics`), {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(sheet),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `save economics ${res.status}`);
+  return data;
+}
+
 export async function getOilOpportunities(minConfidence = 0.55): Promise<{ opportunities: OilOpportunity[] }> {
   const res = await fetch(oilUrl(`/api/oil-live/opportunities?min_confidence=${minConfidence}`));
   if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
