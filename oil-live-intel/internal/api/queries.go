@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,8 +14,9 @@ import (
 )
 
 type companyFilters struct {
-	Q, Type, Country, SupplierStatus string
-	MinConfidence                    float64
+	Q, Type, Country, SupplierStatus, Role string
+	MinConfidence                          float64
+	MinEvents                              int
 }
 
 func (s *Server) listTerminals(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
@@ -249,32 +251,97 @@ func (s *Server) getIntelligence(r *http.Request, id string) (map[string]any, er
 	return nil, fmt.Errorf("not found")
 }
 
-func (s *Server) listCompanies(r *http.Request, f companyFilters, limit int) ([]map[string]any, error) {
-	q := `SELECT id, name, company_type, country, website, confidence, supplier_status, supplier_id, metadata
-		FROM oil_companies WHERE confidence >= $1`
-	args := []any{f.MinConfidence}
+func (s *Server) companyListWhere(f companyFilters) (where string, args []any) {
+	where = ` WHERE c.confidence >= $1`
+	args = []any{f.MinConfidence}
 	n := 2
 	if f.Q != "" {
-		q += fmt.Sprintf(` AND (name ILIKE $%d OR normalized_name ILIKE $%d)`, n, n)
+		where += fmt.Sprintf(` AND (c.name ILIKE $%d OR c.normalized_name ILIKE $%d)`, n, n)
 		args = append(args, "%"+f.Q+"%")
 		n++
 	}
 	if f.Type != "" {
-		q += fmt.Sprintf(` AND company_type = $%d`, n)
+		where += fmt.Sprintf(` AND c.company_type = $%d`, n)
 		args = append(args, f.Type)
 		n++
 	}
 	if f.Country != "" {
-		q += fmt.Sprintf(` AND country ILIKE $%d`, n)
-		args = append(args, f.Country)
+		where += fmt.Sprintf(` AND c.country ILIKE $%d`, n)
+		args = append(args, "%"+f.Country+"%")
 		n++
 	}
 	if f.SupplierStatus != "" {
-		q += fmt.Sprintf(` AND supplier_status = $%d`, n)
+		where += fmt.Sprintf(` AND c.supplier_status = $%d`, n)
 		args = append(args, f.SupplierStatus)
 		n++
 	}
-	q += fmt.Sprintf(` ORDER BY confidence DESC, name LIMIT %d`, limit)
+	if f.Role != "" {
+		where += fmt.Sprintf(` AND (
+			c.company_type = $%d OR
+			COALESCE(c.metadata->'roles', '[]'::jsonb) ? $%d OR
+			EXISTS (
+				SELECT 1 FROM jsonb_array_elements_text(COALESCE(c.metadata->'roles', '[]'::jsonb)) r
+				WHERE r = $%d
+			)
+		)`, n, n, n)
+		args = append(args, f.Role)
+		n++
+	}
+	if f.MinEvents > 0 {
+		where += fmt.Sprintf(` AND (
+			SELECT COUNT(*)::int FROM oil_commercial_events e WHERE e.company_id = c.id
+		) >= $%d`, n)
+		args = append(args, f.MinEvents)
+		n++
+	}
+	return where, args
+}
+
+func companySourcesFromMeta(sourceCol string, metaMap map[string]any) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	add(sourceCol)
+	if raw, ok := metaMap["sources"].([]any); ok {
+		for _, item := range raw {
+			if m, ok := item.(map[string]any); ok {
+				if name, ok := m["name"].(string); ok {
+					add(name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func (s *Server) countCompanies(r *http.Request, f companyFilters) (int, error) {
+	where, args := s.companyListWhere(f)
+	var total int
+	err := s.Pool.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM oil_companies c`+where, args...).Scan(&total)
+	return total, err
+}
+
+func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset int) ([]map[string]any, error) {
+	where, args := s.companyListWhere(f)
+	q := `SELECT c.id, c.name, c.company_type, c.country, c.website, c.confidence, c.supplier_status, c.supplier_id, c.source, c.metadata,
+			COALESCE((SELECT COUNT(*)::int FROM meridian_cargo_records m WHERE m.shipper_company_id = c.id OR m.consignee_company_id = c.id), 0) AS mcr_count,
+			COALESCE((SELECT COUNT(*)::int FROM oil_commercial_events e WHERE e.company_id = c.id), 0) AS event_count,
+			COALESCE((SELECT COUNT(*)::int FROM oil_company_contacts cc WHERE cc.company_id = c.id), 0) AS contact_count,
+			COALESCE(c.metadata->'roles', '[]'::jsonb) AS roles
+		FROM oil_companies c` + where
+	n := len(args) + 1
+	q += fmt.Sprintf(` ORDER BY c.confidence DESC, c.name LIMIT $%d OFFSET $%d`, n, n+1)
+	args = append(args, limit, offset)
 	rows, err := s.Pool.Query(r.Context(), q, args...)
 	if err != nil {
 		return nil, err
@@ -283,26 +350,36 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit int) ([]
 	var out []map[string]any
 	for rows.Next() {
 		var id uuid.UUID
-		var name, ctype, country, status string
+		var name, ctype, country, status, sourceCol string
 		var website, supplierID *string
 		var conf float64
 		var meta []byte
-		if err := rows.Scan(&id, &name, &ctype, &country, &website, &conf, &status, &supplierID, &meta); err != nil {
+		var mcrCount, eventCount, contactCount int
+		var roles []byte
+		if err := rows.Scan(&id, &name, &ctype, &country, &website, &conf, &status, &supplierID, &sourceCol, &meta,
+			&mcrCount, &eventCount, &contactCount, &roles); err != nil {
 			return nil, err
 		}
 		var metaMap map[string]any
+		var rolesList []any
 		_ = json.Unmarshal(meta, &metaMap)
+		_ = json.Unmarshal(roles, &rolesList)
+		if rolesList == nil {
+			rolesList = []any{ctype}
+		}
 		out = append(out, map[string]any{
 			"id": id.String(), "name": name, "company_type": ctype, "country": country,
 			"website": website, "confidence": conf, "supplier_status": status,
-			"supplier_id": supplierID, "metadata": metaMap,
+			"supplier_id": supplierID, "metadata": metaMap, "source": sourceCol,
+			"mcr_count": mcrCount, "event_count": eventCount, "contact_count": contactCount,
+			"roles": rolesList, "sources": companySourcesFromMeta(sourceCol, metaMap),
 		})
 	}
 	return out, rows.Err()
 }
 
 func (s *Server) getCompany(r *http.Request, id string) (map[string]any, error) {
-	items, err := s.listCompanies(r, companyFilters{}, 1000)
+	items, err := s.listCompanies(r, companyFilters{}, 1000, 0)
 	if err != nil {
 		return nil, err
 	}

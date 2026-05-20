@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,6 +39,12 @@ func (h *ToolHandler) Call(ctx context.Context, name string, args map[string]any
 		return h.logisticsHint(ctx, args)
 	case "oil_live_company_contacts":
 		return h.companyContacts(ctx, args)
+	case "oil_live_list_cargo_records":
+		return h.listCargoRecords(ctx, args)
+	case "oil_live_get_cargo_record":
+		return h.getCargoRecord(ctx, args)
+	case "oil_live_get_sync_status":
+		return h.getSyncStatus(ctx, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -239,6 +246,179 @@ func (h *ToolHandler) companyContacts(ctx context.Context, args map[string]any) 
 	return string(b), nil
 }
 
+func (h *ToolHandler) listCargoRecords(ctx context.Context, args map[string]any) (string, error) {
+	minConf := 0.55
+	if v, ok := args["min_confidence"].(float64); ok {
+		minConf = v
+	}
+	limit := 50
+	if v, ok := args["limit"].(float64); ok && int(v) > 0 {
+		limit = int(v)
+	}
+	commodity := strVal(args, "commodity")
+	country := strVal(args, "country")
+	mmsi := strVal(args, "mmsi")
+
+	q := `
+		SELECT id, synthetic_bol_id, recipe, commodity_family, confidence, triangulation_score,
+			shipper_name, consignee_name, vessel_name, mmsi, load_port_name, load_country,
+			discharge_hint, volume_best_estimate, volume_unit, event_date,
+			corridor_load_lat, corridor_load_lng, corridor_discharge_lat, corridor_discharge_lng
+		FROM meridian_cargo_records WHERE confidence >= $1`
+	qArgs := []any{minConf}
+	n := 2
+	if commodity != "" {
+		q += fmt.Sprintf(` AND commodity_family = $%d`, n)
+		qArgs = append(qArgs, commodity)
+		n++
+	}
+	if country != "" {
+		q += fmt.Sprintf(` AND (load_country ILIKE $%d OR discharge_country ILIKE $%d)`, n, n)
+		qArgs = append(qArgs, "%"+country+"%")
+		n++
+	}
+	if mmsi != "" {
+		q += fmt.Sprintf(` AND mmsi::text = $%d`, n)
+		qArgs = append(qArgs, mmsi)
+		n++
+	}
+	q += fmt.Sprintf(` ORDER BY event_date DESC NULLS LAST, confidence DESC LIMIT $%d`, n)
+	qArgs = append(qArgs, limit)
+
+	rows, err := h.Pool.Query(ctx, q, qArgs...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var items []map[string]any
+	for rows.Next() {
+		var id uuid.UUID
+		var bolID, recipe, family string
+		var shipper, consignee, vessel, loadPort, loadCountry, discharge *string
+		var mmsiVal *int64
+		var conf float64
+		var tri int
+		var vol *float64
+		var volUnit *string
+		var eventDate *time.Time
+		var loadLat, loadLng, discLat, discLng *float64
+		if err := rows.Scan(&id, &bolID, &recipe, &family, &conf, &tri,
+			&shipper, &consignee, &vessel, &mmsiVal, &loadPort, &loadCountry, &discharge, &vol, &volUnit, &eventDate,
+			&loadLat, &loadLng, &discLat, &discLng); err != nil {
+			return "", err
+		}
+		items = append(items, map[string]any{
+			"id": id.String(), "synthetic_bol_id": bolID, "recipe": recipe,
+			"commodity_family": family, "confidence": conf, "triangulation_score": tri,
+			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
+			"mmsi": mmsiVal, "load_port_name": loadPort, "load_country": loadCountry,
+			"discharge_hint": discharge, "volume_best_estimate": vol, "volume_unit": volUnit,
+			"event_date": formatTimePtr(eventDate),
+			"corridor_load_lat": loadLat, "corridor_load_lng": loadLng,
+			"corridor_discharge_lat": discLat, "corridor_discharge_lng": discLng,
+		})
+	}
+	out := map[string]any{"cargo_records": items, "count": len(items)}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return string(b), nil
+}
+
+func (h *ToolHandler) getCargoRecord(ctx context.Context, args map[string]any) (string, error) {
+	id := strVal(args, "id")
+	if id == "" {
+		id = strVal(args, "cargo_record_id")
+	}
+	if id == "" {
+		return "", fmt.Errorf("id or cargo_record_id required")
+	}
+	rows, err := h.Pool.Query(ctx, `
+		SELECT id, synthetic_bol_id, fingerprint, recipe, commodity_family, confidence, triangulation_score,
+			bol_tier, shipper_name, consignee_name, vessel_name, mmsi, load_port_name, load_country,
+			discharge_hint, discharge_country, commodity_description,
+			volume_low, volume_high, volume_best_estimate, volume_method, volume_unit,
+			event_date, evidence_chain, sources
+		FROM meridian_cargo_records WHERE id::text = $1 OR synthetic_bol_id = $1
+		LIMIT 1
+	`, id)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return "", fmt.Errorf("cargo record not found")
+	}
+	var rid, bolID, fingerprint, recipe, family, tier string
+	var shipper, consignee, vessel, loadPort, loadCountry, discharge, dischargeCountry, desc, volMethod, volUnit *string
+	var mmsi *int64
+	var conf float64
+	var tri int
+	var volLo, volHi, volBest *float64
+	var eventDate *time.Time
+	var evidence, sources []byte
+	if err := rows.Scan(&rid, &bolID, &fingerprint, &recipe, &family, &conf, &tri, &tier,
+		&shipper, &consignee, &vessel, &mmsi, &loadPort, &loadCountry, &discharge, &dischargeCountry, &desc,
+		&volLo, &volHi, &volBest, &volMethod, &volUnit, &eventDate, &evidence, &sources); err != nil {
+		return "", err
+	}
+	var evChain, srcList any
+	_ = json.Unmarshal(evidence, &evChain)
+	_ = json.Unmarshal(sources, &srcList)
+	out := map[string]any{
+		"id": rid, "synthetic_bol_id": bolID, "fingerprint": fingerprint,
+		"recipe": recipe, "commodity_family": family, "confidence": conf,
+		"triangulation_score": tri, "bol_tier": tier,
+		"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel, "mmsi": mmsi,
+		"load_port_name": loadPort, "load_country": loadCountry,
+		"discharge_hint": discharge, "discharge_country": dischargeCountry,
+		"commodity_description": desc,
+		"volume_low": volLo, "volume_high": volHi, "volume_best_estimate": volBest,
+		"volume_method": volMethod, "volume_unit": volUnit, "event_date": formatTimePtr(eventDate),
+		"evidence_chain": evChain, "sources": srcList,
+		"disclaimer": "Synthetic cargo record — inferred from public sources, not a legal Bill of Lading.",
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return string(b), nil
+}
+
+func (h *ToolHandler) getSyncStatus(ctx context.Context, _ map[string]any) (string, error) {
+	var terminalCount, cargoCount, portCallCount int
+	var lastGraphSync, lastCargoAt *time.Time
+	_ = h.Pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_terminals`).Scan(&terminalCount)
+	_ = h.Pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_port_calls`).Scan(&portCallCount)
+	_ = h.Pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM meridian_cargo_records`).Scan(&cargoCount)
+	_ = h.Pool.QueryRow(ctx, `
+		SELECT MAX(GREATEST(created_at, COALESCE(event_date, created_at)))
+		FROM meridian_cargo_records
+	`).Scan(&lastCargoAt)
+	_ = h.Pool.QueryRow(ctx, `
+		SELECT value FROM oil_live_sync_state WHERE key = 'last_graph_sync_at'
+	`).Scan(&lastGraphSync)
+
+	formatTime := func(t *time.Time) any {
+		if t == nil || t.IsZero() {
+			return nil
+		}
+		return t.UTC().Format(time.RFC3339)
+	}
+	out := map[string]any{
+		"terminal_count":     terminalCount,
+		"cargo_record_count": cargoCount,
+		"port_call_count":    portCallCount,
+		"last_graph_sync_at": formatTime(lastGraphSync),
+		"last_cargo_at":      formatTime(lastCargoAt),
+		"disclaimer":         "Counts from Meridian DB — inferred tiers where noted.",
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return string(b), nil
+}
+
+func formatTimePtr(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
 // ListToolDefs returns MCP tool metadata.
 func ListToolDefs() []map[string]any {
 	names := []struct{ name, desc string }{
@@ -249,6 +429,9 @@ func ListToolDefs() []map[string]any {
 		{"oil_live_company_contacts", "Contacts + TED procurement matches (company_id)"},
 		{"oil_live_draft_outreach", "Draft outreach email from public facts (company_id)"},
 		{"oil_live_logistics_hint", "Logistics / route planner prefill for terminal (terminal_id)"},
+		{"oil_live_list_cargo_records", "Synthetic Meridian cargo records (commodity, country, min_confidence, limit)"},
+		{"oil_live_get_cargo_record", "Full synthetic cargo record with evidence (id or cargo_record_id)"},
+		{"oil_live_get_sync_status", "Meridian DB coverage counts and last graph-sync timestamp"},
 		{"oil_live_save_to_suppliers", "Save company to Suppliers map via license+annotation (company_id, auth_token)"},
 	}
 	var tools []map[string]any

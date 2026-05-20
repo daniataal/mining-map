@@ -35,6 +35,7 @@ func main() {
 	go workers.RunPositionCleanup(ctx, pool, cfg.AISPositionRetainHours, log)
 	go workers.RunTradeSync(ctx, pool, cfg, log)
 	go workers.RunOpportunityScanner(ctx, pool, cfg, log)
+	go workers.RunSyntheticBolBuilder(ctx, pool, log)
 	if cfg.EnableAIS {
 		go workers.RunAISIngestor(ctx, pool, cfg, log)
 	}

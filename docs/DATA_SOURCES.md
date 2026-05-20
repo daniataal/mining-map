@@ -55,6 +55,8 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
 | `comtrade_scheduled_sync.py` | Scheduled HS27 refresh | UN Comtrade keyed API | `comtrade_sync_runs`; worker + admin sync |
+| `census_trade.py` | U.S. bilateral HS 2709/2710/2711 (Census timeseries API) | Free API key ([signup](https://api.census.gov/data/key_signup.html)) | `oil_trade_flows.data_source=census_api`; macro tier; runs on graph sync |
+| `usitc_dataweb.py` | U.S. HS flows / tariff context (DataWeb) | Free account + API token | `USITC_DATAWEB_API_KEY`; `data_source=usitc_dataweb` on graph sync |
 | Bundled `licenses.json` | Legacy snapshot | Deprecated for prod UX | `bundled_json`; excluded when `prefer_open_data=true` |
 
 ### 2.3 Company / deal signals (in app today)
