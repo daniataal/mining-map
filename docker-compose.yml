@@ -50,6 +50,8 @@ services:
       - COMTRADE_API_KEY_SECONDARY=${COMTRADE_API_KEY_SECONDARY:-}
       - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
       - PETROLEUM_DISABLE_MAPBOX=${PETROLEUM_DISABLE_MAPBOX:-}
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
     healthcheck:
       test:
         [
@@ -202,6 +204,8 @@ services:
       - PETROLEUM_OSM_SYNC_INTERVAL_SECONDS=${PETROLEUM_OSM_SYNC_INTERVAL_SECONDS:-86400}
       - PETROLEUM_OSM_SYNC_BACKOFF_SECONDS=${PETROLEUM_OSM_SYNC_BACKOFF_SECONDS:-3600}
       - PETROLEUM_OSM_TILE_SLEEP_SECONDS=${PETROLEUM_OSM_TILE_SLEEP_SECONDS:-2.0}
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
     depends_on:
       db:
         condition: service_healthy

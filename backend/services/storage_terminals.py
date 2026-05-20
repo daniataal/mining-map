@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,8 +24,8 @@ except ImportError:
     from services.maritime_intel import find_nearest_ports
 
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OVERPASS_TIMEOUT_SECONDS = 20
+STORAGE_TERMINALS_LAYER_ID = "storage_terminals"
+OVERPASS_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_TIMEOUT_SECONDS", "90"))
 STORAGE_CACHE_TTL_SECONDS = 60 * 60 * 12
 MAX_NEARBY_PORT_DISTANCE_KM = 250.0
 MAX_TILE_WORKERS = 5
@@ -355,6 +356,33 @@ def resolve_country(lat: float, lng: float) -> tuple[str, str]:
     return "Unknown", ""
 
 
+def _overpass_urls() -> tuple[str, ...]:
+    candidates = [
+        os.getenv("STORAGE_OVERPASS_URL", "").strip(),
+        os.getenv("OVERPASS_URL", "").strip(),
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    if os.getenv("OVERPASS_INCLUDE_DE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}:
+        candidates.append("https://overpass-api.de/api/interpreter")
+    return tuple(dict.fromkeys(url for url in candidates if url))
+
+
+def _db_connect():
+    import psycopg2
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return psycopg2.connect(database_url, connect_timeout=5)
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "mining_db"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD", "password"),
+        connect_timeout=5,
+    )
+
+
 def build_overpass_query(bbox: tuple[float, float, float, float]) -> str:
     south, west, north, east = bbox
     bbox_text = f"{south},{west},{north},{east}"
@@ -371,17 +399,93 @@ out center tags qt;
 
 def fetch_overpass_elements(bbox: tuple[float, float, float, float]) -> list[dict[str, Any]]:
     body = urlencode({"data": build_overpass_query(bbox)}).encode("utf-8")
-    req = Request(
-        OVERPASS_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": "mining-map-storage-terminals/1.0",
-        },
-    )
-    with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
-        payload = json.load(response)
-    return payload.get("elements", []) if isinstance(payload, dict) else []
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "User-Agent": "mining-map-storage-terminals/1.0",
+    }
+    errors: list[str] = []
+    for overpass_url in _overpass_urls():
+        req = Request(overpass_url, data=body, headers=headers)
+        try:
+            with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
+                payload = json.load(response)
+            return payload.get("elements", []) if isinstance(payload, dict) else []
+        except Exception as exc:
+            errors.append(f"{overpass_url}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return []
+
+
+def _element_from_db_row(
+    osm_type: str,
+    osm_id: int,
+    tags: dict[str, Any],
+    geom_json: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    geom_type = geom_json.get("type")
+    coords = geom_json.get("coordinates")
+    lat = lng = None
+    if geom_type == "Point" and isinstance(coords, list) and len(coords) >= 2:
+        lng, lat = float(coords[0]), float(coords[1])
+    if lat is None or lng is None:
+        return None
+    return {
+        "type": osm_type,
+        "id": osm_id,
+        "tags": tags,
+        "lat": lat,
+        "lon": lng,
+    }
+
+
+def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[str]]:
+    try:
+        from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+    except ImportError:
+        from services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+
+    conn = _db_connect()
+    try:
+        ensure_petroleum_osm_tables(conn)
+        stats = layer_feature_stats(conn, STORAGE_TERMINALS_LAYER_ID)
+        if int(stats.get("feature_count") or 0) <= 0:
+            return [], None
+        fetched_at = stats.get("last_fetched_at")
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json
+                FROM petroleum_osm_features
+                WHERE layer_id = %s
+                ORDER BY osm_id;
+                """,
+                (STORAGE_TERMINALS_LAYER_ID,),
+            )
+            rows = cur.fetchall()
+        elements: list[dict[str, Any]] = []
+        for osm_type, osm_id, tags_raw, geom_json in rows:
+            tags = tags_raw if isinstance(tags_raw, dict) else {}
+            if isinstance(tags_raw, str):
+                try:
+                    tags = json.loads(tags_raw)
+                except json.JSONDecodeError:
+                    tags = {}
+            geom = geom_json if isinstance(geom_json, dict) else json.loads(geom_json or "{}")
+            element = _element_from_db_row(str(osm_type), int(osm_id), tags, geom)
+            if element:
+                elements.append(element)
+        return elements, fetched_at if isinstance(fetched_at, str) else None
+    finally:
+        conn.close()
+
+
+def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: list[str]) -> bool:
+    if entities:
+        return True
+    if warnings and len(warnings) >= len(WORLD_TILES):
+        return False
+    return True
 
 
 def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Optional[dict[str, Any]]:
@@ -472,7 +576,7 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         "recordOrigin": "open_data",
         "sourceId": "osm_overpass_storage_terminals",
         "sourceName": "OpenStreetMap via Overpass",
-        "sourceUrl": OVERPASS_URL,
+        "sourceUrl": _overpass_urls()[0] if _overpass_urls() else "",
         "sourceRecordUrl": _build_osm_object_url(str(element.get("type")), int(element.get("id"))),
         "sourceUpdatedAt": fetched_at,
         "lastSyncedAt": fetched_at,
@@ -557,7 +661,10 @@ def _fresh_cache() -> Optional[dict[str, Any]]:
 
 
 def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
-    if not force_refresh:
+    if force_refresh:
+        _storage_cache["loaded_at"] = 0.0
+        _storage_cache["response"] = None
+    else:
         cached = _fresh_cache()
         if cached is not None:
             return {
@@ -569,22 +676,36 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     fetched_at = _now_iso()
     warnings: list[str] = []
     all_entities: list[dict[str, Any]] = []
+    data_source = "overpass"
 
-    with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
-        futures = {
-            executor.submit(fetch_overpass_elements, bbox): tile_name
-            for tile_name, bbox in WORLD_TILES
-        }
-        for future in as_completed(futures):
-            tile_name = futures[future]
-            try:
-                elements = future.result()
-                for element in elements:
-                    normalized = normalize_storage_terminal(element, fetched_at)
-                    if normalized:
-                        all_entities.append(normalized)
-            except Exception as exc:
-                warnings.append(f"{tile_name}: {exc}")
+    if not force_refresh:
+        db_elements, db_fetched_at = _load_storage_terminals_from_db()
+        if db_elements:
+            data_source = "database"
+            fetched_at = db_fetched_at or fetched_at
+            for element in db_elements:
+                normalized = normalize_storage_terminal(element, fetched_at)
+                if normalized:
+                    normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+                    normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+                    all_entities.append(normalized)
+
+    if not all_entities:
+        with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
+            futures = {
+                executor.submit(fetch_overpass_elements, bbox): tile_name
+                for tile_name, bbox in WORLD_TILES
+            }
+            for future in as_completed(futures):
+                tile_name = futures[future]
+                try:
+                    elements = future.result()
+                    for element in elements:
+                        normalized = normalize_storage_terminal(element, fetched_at)
+                        if normalized:
+                            all_entities.append(normalized)
+                except Exception as exc:
+                    warnings.append(f"{tile_name}: {exc}")
 
     entities = _dedupe_entities(all_entities)
     entities.sort(
@@ -598,6 +719,7 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     response = {
         "entities": entities,
         "source_labels": ["OpenStreetMap", "Overpass", "UN/LOCODE"],
+        "data_source": data_source,
         "data_as_of": fetched_at,
         "coverage_note": (
             "Global coverage is live from OpenStreetMap/Overpass, but only where mappers explicitly tag petroleum terminals, tank farms, "
@@ -613,8 +735,9 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
         "stats": _build_stats(entities),
     }
 
-    _storage_cache["loaded_at"] = time.time()
-    _storage_cache["response"] = response
+    if _should_cache_storage_response(entities, warnings):
+        _storage_cache["loaded_at"] = time.time()
+        _storage_cache["response"] = response
     return {
         **response,
         "entities": [_summary_entity(entity) for entity in entities],
