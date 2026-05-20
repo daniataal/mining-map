@@ -31,7 +31,7 @@ export function mapViewHelpBody(viewMode: MapViewModeKey): string {
     case 'oil_and_gas':
       return 'Petroleum licenses plus open-data storage terminals and tank farms (OSM). Enable the vessel layer for AIS in the current map bounds.';
     case 'suppliers':
-      return 'Your active deal pipeline on the map: Deal signal (green) in Investigating, Escalated, or Approved. Mark Deal signal on a dossier Overview to add a supplier here. Toggle “Show all licenses” for discovery.';
+      return 'Your active deal pipeline on the map: green Deal signal on a dossier (any stage except Rejected). Mark Deal signal on dossier Overview to add a supplier here. Toggle “Show all licenses” for discovery.';
     default:
       return '';
   }

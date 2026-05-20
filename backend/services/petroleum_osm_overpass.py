@@ -169,11 +169,50 @@ def _feature_in_bbox(feature: dict[str, Any], bbox: tuple[float, float, float, f
     return True
 
 
+# OSM tags surfaced on map popups and persisted in petroleum_osm_features.
+_PIPELINE_POPUP_TAG_KEYS: tuple[str, ...] = (
+    "name",
+    "operator",
+    "owner",
+    "substance",
+    "diameter",
+    "capacity",
+    "voltage",
+    "ref",
+    "network",
+    "location",
+    "start_date",
+    "end_date",
+    "usage",
+    "type",
+    "description",
+    "wikipedia",
+    "wikidata",
+    "man_made",
+    "industrial",
+)
+
+
+def _pipeline_tags_for_properties(tags: dict[str, Any]) -> dict[str, Any]:
+    """Copy operational OSM tags (and diameter:* variants) into GeoJSON properties."""
+    out: dict[str, Any] = {}
+    for key in _PIPELINE_POPUP_TAG_KEYS:
+        value = tags.get(key)
+        if value is not None and str(value).strip():
+            out[key] = value
+    for key, value in tags.items():
+        if not key.startswith("diameter"):
+            continue
+        if value is not None and str(value).strip():
+            out[key] = value
+    return out
+
+
 def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict[str, Any]]:
     tags = element.get("tags") or {}
     etype = element.get("type")
     osm_id = element.get("id")
-    name = tags.get("name") or tags.get("operator") or f"OSM {etype} {osm_id}"
+    name = tags.get("name") or tags.get("operator") or tags.get("owner") or f"OSM {etype} {osm_id}"
 
     if layer_id == "pipelines" and etype == "way":
         geometry = element.get("geometry") or []
@@ -192,22 +231,27 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
     else:
         return None
 
+    pipeline_tags = _pipeline_tags_for_properties(tags) if layer_id == "pipelines" else {}
+    properties: dict[str, Any] = {
+        "name": name,
+        "layer_id": layer_id,
+        "osm_type": etype,
+        "osm_id": osm_id,
+        "source": "openstreetmap",
+        "attribution": "© OpenStreetMap contributors (ODbL)",
+        **pipeline_tags,
+    }
+    if layer_id == "refineries":
+        for key in ("operator", "owner", "industrial", "description", "wikipedia", "wikidata"):
+            value = tags.get(key)
+            if value is not None and str(value).strip():
+                properties[key] = value
+
     return {
         "type": "Feature",
         "id": f"osm/{etype}/{osm_id}",
         "geometry": geom,
-        "properties": {
-            "name": name,
-            "layer_id": layer_id,
-            "osm_type": etype,
-            "osm_id": osm_id,
-            "substance": tags.get("substance"),
-            "operator": tags.get("operator"),
-            "industrial": tags.get("industrial"),
-            "man_made": tags.get("man_made"),
-            "source": "openstreetmap",
-            "attribution": "© OpenStreetMap contributors (ODbL)",
-        },
+        "properties": properties,
     }
 
 

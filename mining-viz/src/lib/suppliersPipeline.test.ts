@@ -11,10 +11,12 @@ describe('suppliersPipeline', () => {
     expect(isSupplierDealSignal({ status: 'Approved' })).toBe(false);
   });
 
-  it('filters to active pipeline stages by default', () => {
+  it('filters to green deal signal (excludes Rejected stage)', () => {
     expect(matchesSuppliersPipeline({ status: 'good', stage: 'Investigating' }, { showAll: false })).toBe(
       true,
     );
+    expect(matchesSuppliersPipeline({ status: 'good', stage: 'New' }, { showAll: false })).toBe(true);
+    expect(matchesSuppliersPipeline({ status: 'good' }, { showAll: false })).toBe(true);
     expect(matchesSuppliersPipeline({ status: 'good', stage: 'Rejected' }, { showAll: false })).toBe(
       false,
     );

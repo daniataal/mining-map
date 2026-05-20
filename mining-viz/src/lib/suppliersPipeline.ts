@@ -4,8 +4,10 @@ import { normalizeDealStage, type DealStage } from './dealWorkflow';
 /** Deal-signal heat map status — green / active supplier marker. */
 export const SUPPLIER_DEAL_SIGNAL_STATUS = 'good' as const;
 
-/** Active pipeline stages shown on Suppliers map by default (excludes Rejected). */
+/** Stages that remain visible on Suppliers map once Deal signal is green (Rejected is excluded). */
 export const SUPPLIER_ACTIVE_STAGES: readonly DealStage[] = [
+  'New',
+  'Needs Review',
   'Investigating',
   'Escalated',
   'Approved',
@@ -22,8 +24,7 @@ export function matchesSuppliersPipeline(
   if (options.showAll) return true;
   if (!isSupplierDealSignal(annotation)) return false;
   const stage = normalizeDealStage(annotation?.stage);
-  if (stage === 'Rejected') return false;
-  return (SUPPLIER_ACTIVE_STAGES as readonly string[]).includes(stage);
+  return stage !== 'Rejected';
 }
 
 export function countSuppliersPipeline(

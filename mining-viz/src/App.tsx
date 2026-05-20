@@ -309,7 +309,6 @@ export default function App() {
 
   const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
   const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
-  const [autoFocusCountryOnEnter, setAutoFocusCountryOnEnter] = useState(false);
 
   const applyCountryFocus = useCallback(
     (name: string) => {
@@ -789,8 +788,6 @@ export default function App() {
                     countries={miningData.countries}
                     externalFilter={miningData.filter}
                     countryFocusCountry={countryFocusCountry}
-                    autoFocusCountryOnEnter={autoFocusCountryOnEnter}
-                    onAutoFocusCountryOnEnterChange={setAutoFocusCountryOnEnter}
                     onApplyCountryFocus={applyCountryFocus}
                     onCommitLicenseSearch={handleCommitLicenseSearch}
                   />
