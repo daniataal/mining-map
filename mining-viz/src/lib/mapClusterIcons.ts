@@ -15,3 +15,16 @@ export function createLicenseClusterIconFactory(isDark: boolean): ClusterIconFac
     });
   };
 }
+
+/** Blue terminal clusters for oil-live map overlays. */
+export function createOilTerminalClusterIconFactory(): ClusterIconFactory {
+  return (cluster) => {
+    const count = cluster.getChildCount();
+    const size = count < 10 ? 32 : count < 50 ? 38 : 44;
+    return L.divIcon({
+      html: `<span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:11px;font-weight:900;color:#fff">${count}</span>`,
+      className: 'oil-terminal-cluster-icon',
+      iconSize: L.point(size, size),
+    });
+  };
+}

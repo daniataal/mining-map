@@ -36,6 +36,7 @@ import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
 import { Radio, Building2, Ship, AlertTriangle, Bell, Package, Loader2 } from 'lucide-react';
 import DealExecutionPack from './DealExecutionPack';
+import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -466,6 +467,9 @@ export default function LiveDataIntelPanel({
                 >
                   <div className="flex justify-between gap-2 items-start">
                     <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1 mb-0.5">
+                        <OilLiveProvenanceBadge kind={record.data_provenance ?? 'synthetic'} />
+                      </div>
                       <p className="text-[9px] font-mono text-amber-700 dark:text-amber-300 truncate">
                         {record.synthetic_bol_id ?? record.id.slice(0, 8)}
                       </p>

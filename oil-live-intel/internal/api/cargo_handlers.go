@@ -22,7 +22,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 
 	q := `
 		SELECT id, synthetic_bol_id, recipe, commodity_family, confidence, triangulation_score,
-			shipper_name, consignee_name, vessel_name, mmsi, load_port_name, load_country,
+			bol_tier, shipper_name, consignee_name, vessel_name, mmsi, load_port_name, load_country,
 			discharge_hint, volume_best_estimate, volume_unit, event_date,
 			corridor_load_lat, corridor_load_lng, corridor_discharge_lat, corridor_discharge_lng
 		FROM meridian_cargo_records WHERE confidence >= $1
@@ -56,7 +56,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 	var items []map[string]any
 	for rows.Next() {
 		var id uuid.UUID
-		var bolID, recipe, family string
+		var bolID, recipe, family, tier string
 		var shipper, consignee, vessel, loadPort, loadCountry, discharge *string
 		var mmsiVal *int64
 		var conf float64
@@ -65,7 +65,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 		var volUnit *string
 		var eventDate *time.Time
 		var loadLat, loadLng, discLat, discLng *float64
-		if err := rows.Scan(&id, &bolID, &recipe, &family, &conf, &tri,
+		if err := rows.Scan(&id, &bolID, &recipe, &family, &conf, &tri, &tier,
 			&shipper, &consignee, &vessel, &mmsiVal, &loadPort, &loadCountry, &discharge, &vol, &volUnit, &eventDate,
 			&loadLat, &loadLng, &discLat, &discLng); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -74,6 +74,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"id": id.String(), "synthetic_bol_id": bolID, "recipe": recipe,
 			"commodity_family": family, "confidence": conf, "triangulation_score": tri,
+			"bol_tier": tier, "data_provenance": inferCargoProvenance(tier),
 			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
 			"mmsi": mmsiVal, "load_port_name": loadPort, "load_country": loadCountry,
 			"discharge_hint": discharge, "volume_best_estimate": vol, "volume_unit": volUnit,
@@ -220,7 +221,7 @@ func scanCargoRecord(rows interface {
 	out := map[string]any{
 		"id": id.String(), "synthetic_bol_id": bolID, "fingerprint": fingerprint,
 		"recipe": recipe, "commodity_family": family, "confidence": conf,
-		"triangulation_score": tri, "bol_tier": tier,
+		"triangulation_score": tri, "bol_tier": tier, "data_provenance": inferCargoProvenance(tier),
 		"shipper_name": shipper, "consignee_name": consignee,
 		"vessel_name": vessel, "mmsi": mmsi, "imo": imo,
 		"load_port_name": loadPort, "load_country": loadCountry,

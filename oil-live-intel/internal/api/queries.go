@@ -122,7 +122,8 @@ func (s *Server) listRecentPortCalls(r *http.Request, limit int) ([]map[string]a
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, t.name AS terminal_name,
 			pc.arrival_ts, pc.departure_ts, pc.duration_hours, pc.event_type,
-			pc.product_family_inferred, pc.estimated_volume_barrels, pc.confidence, pc.status, pc.evidence
+			pc.product_family_inferred, pc.estimated_volume_barrels, pc.confidence, pc.status, pc.evidence,
+			pc.metadata
 		FROM oil_port_calls pc
 		LEFT JOIN oil_terminals t ON t.id = pc.terminal_id
 		ORDER BY COALESCE(pc.departure_ts, pc.arrival_ts) DESC NULLS LAST
@@ -140,7 +141,7 @@ func (s *Server) getPortCall(r *http.Request, id string) (map[string]any, error)
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, t.name,
 			pc.arrival_ts, pc.departure_ts, pc.duration_hours, pc.draft_in, pc.draft_out, pc.draft_delta,
 			pc.event_type, pc.product_family_inferred, pc.estimated_volume_barrels, pc.confidence,
-			pc.status, pc.evidence, t.operator_name, t.country
+			pc.status, pc.evidence, pc.metadata, t.operator_name, t.country
 		FROM oil_port_calls pc
 		LEFT JOIN oil_terminals t ON t.id = pc.terminal_id
 		WHERE pc.id::text = $1
@@ -157,13 +158,15 @@ func (s *Server) getPortCall(r *http.Request, id string) (map[string]any, error)
 	var vessel, tname, event, family, status, op, country *string
 	var arrival, departure *time.Time
 	var dur, din, dout, ddelta, vol, conf *float64
-	var evidence []byte
+	var evidence, metadata []byte
 	if err := rows.Scan(&pid, &mmsi, &vessel, &tid, &tname, &arrival, &departure, &dur, &din, &dout, &ddelta,
-		&event, &family, &vol, &conf, &status, &evidence, &op, &country); err != nil {
+		&event, &family, &vol, &conf, &status, &evidence, &metadata, &op, &country); err != nil {
 		return nil, err
 	}
 	var ev []any
+	var metaMap map[string]any
 	_ = json.Unmarshal(evidence, &ev)
+	_ = json.Unmarshal(metadata, &metaMap)
 	return map[string]any{
 		"id": pid.String(), "mmsi": mmsi, "vessel_name": vessel, "terminal_id": tid.String(),
 		"terminal_name": tname, "operator_name": op, "country": country,
@@ -171,7 +174,8 @@ func (s *Server) getPortCall(r *http.Request, id string) (map[string]any, error)
 		"draft_in": din, "draft_out": dout, "draft_delta": ddelta,
 		"event_type": event, "product_family_inferred": family,
 		"estimated_volume_barrels": vol, "confidence": conf, "status": status,
-		"evidence": ev,
+		"evidence": ev, "metadata": metaMap,
+		"data_provenance": inferPortCallProvenance(evidence, metadata),
 		"disclaimer": "Inferred from public/free data. Not a confirmed private transaction.",
 	}, nil
 }
@@ -184,18 +188,22 @@ func scanPortCalls(rows pgx.Rows) ([]map[string]any, error) {
 		var vessel, tname, event, family, status *string
 		var arrival, departure *time.Time
 		var dur, vol, conf *float64
-		var evidence []byte
-		if err := rows.Scan(&pid, &mmsi, &vessel, &tid, &tname, &arrival, &departure, &dur, &event, &family, &vol, &conf, &status, &evidence); err != nil {
+		var evidence, metadata []byte
+		if err := rows.Scan(&pid, &mmsi, &vessel, &tid, &tname, &arrival, &departure, &dur, &event, &family, &vol, &conf, &status, &evidence, &metadata); err != nil {
 			return nil, err
 		}
 		var ev []any
+		var metaMap map[string]any
 		_ = json.Unmarshal(evidence, &ev)
+		_ = json.Unmarshal(metadata, &metaMap)
 		out = append(out, map[string]any{
 			"id": pid.String(), "mmsi": mmsi, "vessel_name": vessel,
 			"terminal_id": tid.String(), "terminal_name": tname,
 			"arrival_ts": arrival, "departure_ts": departure, "duration_hours": dur,
 			"event_type": event, "product_family_inferred": family,
-			"estimated_volume_barrels": vol, "confidence": conf, "status": status, "evidence": ev,
+			"estimated_volume_barrels": vol, "confidence": conf, "status": status,
+			"evidence": ev, "metadata": metaMap,
+			"data_provenance": inferPortCallProvenance(evidence, metadata),
 		})
 	}
 	return out, rows.Err()

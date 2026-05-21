@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Marker, Popup, Polyline, LayerGroup } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
+import 'leaflet.markercluster';
+import { createOilTerminalClusterIconFactory } from '../../lib/mapClusterIcons';
+import OilLiveProvenanceBadge from '../../features/live-data/OilLiveProvenanceBadge';
 import {
   connectOilLiveWebSocket,
   getCargoRecords,
@@ -107,12 +111,14 @@ export default function OilLiveMapOverlays({
     ? `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`
     : undefined;
 
+  const viewportReady = Boolean(bbox);
+
   const { data: mapData } = useQuery({
     queryKey: ['oil-live-map', bbox],
     queryFn: () => getOilLiveMap(bbox),
-    enabled,
+    enabled: enabled && viewportReady,
     staleTime: 15_000,
-    refetchInterval: enabled ? 20_000 : false,
+    refetchInterval: enabled && viewportReady ? 20_000 : false,
   });
 
   const { data: cargoData } = useQuery({
@@ -244,39 +250,51 @@ export default function OilLiveMapOverlays({
     });
   }, [terminals.length, vessels.length, opportunityMarkers.length, onStatsChange]);
 
+  const terminalClusterIcon = useMemo(() => createOilTerminalClusterIconFactory(), []);
+
   if (!enabled) return null;
 
   return (
     <LayerGroup>
-      {layers.terminals &&
-        terminals.map((term) => (
-          <Marker
-            key={term.id}
-            position={[term.lat!, term.lng!]}
-            icon={terminalIcon}
-            eventHandlers={{
-              click: (e) => {
-                L.DomEvent.stopPropagation(e);
-                const linked = opportunityByTerminalId.get(term.id);
-                onEntityClick?.({
-                  entityKind: 'terminal',
-                  entityId: term.id,
-                  opportunityId: linked?.id,
-                  title: term.name,
-                  subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
-                });
-              },
-            }}
-          >
-            <Popup>
-              <strong>{term.name}</strong>
-              <br />
-              {term.operator_name}
-              <br />
-              {(term.products ?? []).join(', ')}
-            </Popup>
-          </Marker>
-        ))}
+      {layers.terminals && terminals.length > 0 && (
+        <MarkerClusterGroup
+          showCoverageOnHover={false}
+          chunkedLoading
+          maxClusterRadius={48}
+          disableClusteringAtZoom={14}
+          iconCreateFunction={terminalClusterIcon}
+          spiderLegPolylineOptions={{ interactive: false }}
+        >
+          {terminals.map((term) => (
+            <Marker
+              key={term.id}
+              position={[term.lat!, term.lng!]}
+              icon={terminalIcon}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  const linked = opportunityByTerminalId.get(term.id);
+                  onEntityClick?.({
+                    entityKind: 'terminal',
+                    entityId: term.id,
+                    opportunityId: linked?.id,
+                    title: term.name,
+                    subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
+                  });
+                },
+              }}
+            >
+              <Popup>
+                <strong>{term.name}</strong>
+                <br />
+                {term.operator_name}
+                <br />
+                {(term.products ?? []).join(', ')}
+              </Popup>
+            </Marker>
+          ))}
+        </MarkerClusterGroup>
+      )}
       {layers.vessels &&
         vessels.map((v) => (
           <Marker
@@ -296,6 +314,7 @@ export default function OilLiveMapOverlays({
             }}
           >
             <Popup>
+              <OilLiveProvenanceBadge kind="live_ais" className="mb-1" />
               <strong>{v.name ?? `MMSI ${v.mmsi}`}</strong>
               <br />
               {v.tanker_class}
@@ -371,6 +390,7 @@ export default function OilLiveMapOverlays({
             }}
           >
             <Popup>
+              <OilLiveProvenanceBadge kind={c.record.data_provenance ?? 'synthetic'} className="mb-1" />
               <strong>{c.record.commodity_family ?? 'Cargo corridor'}</strong>
               <br />
               {c.record.shipper_name && <>Shipper: {c.record.shipper_name}<br /></>}

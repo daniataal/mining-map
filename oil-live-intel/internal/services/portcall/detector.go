@@ -146,17 +146,19 @@ func (t *Tracker) closePortCall(ctx context.Context, mmsi int64, st *visitState)
 
 	evidence := buildEvidence(st, durationH, draftIn, draftOut, eventType, family)
 	evJSON, _ := json.Marshal(evidence)
+	metaJSON, _ := json.Marshal(map[string]any{"source": "live_ais"})
 
 	_, err := t.pool.Exec(ctx, `
 		UPDATE oil_port_calls SET
 			departure_ts=$2, duration_hours=$3, draft_out=$4, draft_delta=$5,
 			destination_out=$6, event_type=$7, product_family_inferred=$8,
-			estimated_volume_barrels=$9, confidence=$10, status='closed', evidence=$11, updated_at=now()
+			estimated_volume_barrels=$9, confidence=$10, status='closed', evidence=$11,
+			metadata=$12, updated_at=now()
 		WHERE id=$1
 	`, st.PortCallID, departure, durationH,
 		nullableFloat(st.HasDraftOut, draftOut), draftDelta,
 		st.DestinationOut, eventType, family,
-		nullableFloat(hasVol, estVol), conf, evJSON)
+		nullableFloat(hasVol, estVol), conf, evJSON, metaJSON)
 	if err != nil {
 		return nil, err
 	}

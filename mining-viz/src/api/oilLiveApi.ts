@@ -36,6 +36,8 @@ export type OilLiveVessel = {
   crude_capable?: boolean;
 };
 
+export type OilLiveProvenance = 'seed_port_calls' | 'synthetic' | 'live_ais' | string;
+
 export type OilPortCall = {
   id: string;
   mmsi?: number;
@@ -50,6 +52,8 @@ export type OilPortCall = {
   confidence?: number;
   estimated_volume_barrels?: number;
   evidence?: string[];
+  data_provenance?: OilLiveProvenance;
+  metadata?: Record<string, unknown>;
 };
 
 export type OilIntelligenceCard = {
@@ -287,6 +291,7 @@ export type MeridianCargoRecord = {
   confidence?: number;
   triangulation_score?: number;
   bol_tier?: string;
+  data_provenance?: OilLiveProvenance;
   shipper_name?: string;
   consignee_name?: string;
   shipper_company_id?: string;

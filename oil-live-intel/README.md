@@ -18,7 +18,9 @@ Free, explainable oil **live intelligence** service for the mining-map platform.
 | Service | Role | Map layer |
 |---------|------|-----------|
 | `maritime-worker` (Python) | Global AIS snapshot → Redis | Canvas vessel layer (Oil & Gas + Live Data when enabled) |
-| `oil-live-intel-worker` (Go) | Terminal geofence port calls + WebSocket | Oil Live overlay markers + port-call intel |
+| `oil-live-intel-worker` (Go) | Terminal geofence port calls + `oil_ais_positions` + WebSocket | Oil Live overlay markers + port-call intel |
+
+**No duplicate DB writes:** `maritime-worker` stores snapshots in **Redis** only (Python `/api/maritime/vessels`). `oil-live-intel-worker` is the sole writer to `oil_ais_positions` and live `oil_port_calls` (metadata `source=live_ais`). Graph-sync seed port calls use `source=seed_port_calls`.
 
 Live Data auto-enables the maritime canvas layer and oil-live overlay vessels when you open the tab. For live positions you need `AISSTREAM_API_KEY` in repo-root `.env` (or `backend.env`) **and** both workers running:
 
@@ -166,7 +168,9 @@ cd oil-live-intel && go test ./...
 
 All routes under `/api/oil-live/` — see plan doc for full list.
 
-Notable routes: `GET /sync-status`, `GET /cargo-records`, `GET /opportunities/{id}/deal-pack`, `POST /internal/synthetic-bol-rebuild`.
+Notable routes: `GET /sync-status`, `GET /map?bbox=west,south,east,north&limit=500`, `GET /cargo-records`, `GET /opportunities/{id}/deal-pack`, `POST /internal/synthetic-bol-rebuild`.
+
+Admin (Python backend): `POST /api/admin/oil-live/graph-sync`, `POST /api/admin/oil-live/enrich-contacts?limit=50` (batch contact agent for companies with `supplier_id`).
 
 ## Product families
 
