@@ -27,6 +27,15 @@ import {
 import IntelligenceSearchBox from './components/IntelligenceSearchBox';
 import { useRoutePlanner } from './features/route-planner';
 import {
+  applyLiveDataRouteHints,
+  routeProductFromCommodityFamily,
+  type LiveDataRouteHints,
+} from './features/live-data/liveDataRoutePrefill';
+import {
+  fetchOilCompanyForDossier,
+  findDossierLicenseForOilCompany,
+} from './features/live-data/liveDataDossier';
+import {
   buildRoutePlannerAirportMarkers,
   buildRoutePlannerPortMarkers,
   canonicalRouteHubCountry,
@@ -195,12 +204,17 @@ export default function App() {
   const [maritimeCaptureWindow, setMaritimeCaptureWindow] = useState('25');
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [oilLiveProductFilter, setOilLiveProductFilter] = useState('all');
+  const [oilLiveTerminalSearch, setOilLiveTerminalSearch] = useState('');
   const [oilLiveLayers, setOilLiveLayers] = useState({
     terminals: true,
     vessels: true,
     corridors: true,
     opportunities: true,
+    tradeFlows: false,
   });
+  const [oilLiveTradeFlowGroup, setOilLiveTradeFlowGroup] = useState<
+    'company_pair' | 'country_pair'
+  >('company_pair');
   const [oilLiveCoverageStats, setOilLiveCoverageStats] = useState<{
     terminals: number;
     vessels: number;
@@ -512,6 +526,70 @@ export default function App() {
       subtitle: [record.load_port_name, record.discharge_hint].filter(Boolean).join(' → '),
     });
   }, []);
+
+  const handleOpenRoutePlannerFromLiveData = useCallback(
+    (hints: LiveDataRouteHints) => {
+      const filled = applyLiveDataRouteHints(
+        hints,
+        routePlanner.prefillSupplier,
+        routePlanner.prefillBuyer,
+      );
+      const product = routeProductFromCommodityFamily(hints.commodity_family);
+      if (product) routePlanner.setProductType(product);
+      setOilLiveEntity(null);
+      setViewMode('route_planner');
+      if (!filled.supplier && !filled.buyer) {
+        toast.info(
+          t(
+            'לא נמצאו נמלי MCR — בחרו ידנית בתכנון מסלול',
+            'Could not match MCR port names — pick load/discharge manually in Route Planner',
+          ),
+        );
+      } else if (!filled.buyer) {
+        toast.info(
+          t('נמל פריקה לא זוהה — השלימו ידנית', 'Discharge port not matched — complete buyer side manually'),
+        );
+      }
+    },
+    [routePlanner, t],
+  );
+
+  const handleOpenOilLiveCompanyDossier = useCallback(
+    async (companyId: string) => {
+      try {
+        let company = { id: companyId, name: '', supplier_id: null as string | null };
+        const cached = queryClient.getQueryData<{ companies: Array<{ id: string; name: string; supplier_id?: string | null }> }>(
+          ['oil-live-companies'],
+        );
+        const fromList = cached?.companies?.find((c) => c.id === companyId);
+        if (fromList) {
+          company = { id: fromList.id, name: fromList.name, supplier_id: fromList.supplier_id ?? null };
+        } else {
+          const fetched = await fetchOilCompanyForDossier(companyId);
+          company = {
+            id: fetched.id,
+            name: fetched.name,
+            supplier_id: fetched.supplier_id ?? null,
+          };
+        }
+        const lic = findDossierLicenseForOilCompany(company, entityIndex, allLicenses);
+        if (lic) {
+          setOilLiveEntity(null);
+          handleOpenDossier(lic);
+          return;
+        }
+        toast.info(
+          t(
+            'אין דוסייה — שמרו לספקים תחילה',
+            'No dossier yet — Save to Suppliers first to create a license record',
+          ),
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to open dossier');
+      }
+    },
+    [queryClient, entityIndex, allLicenses, handleOpenDossier, t],
+  );
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
     persistAnnotation(id, updates);
@@ -1164,8 +1242,13 @@ export default function App() {
                   }
                   oilLiveOverlaysEnabled={viewMode === 'live_data'}
                   oilLiveProductFilter={oilLiveProductFilter}
+                  oilLiveTerminalSearch={oilLiveTerminalSearch}
                   oilLiveLayers={oilLiveLayers}
                   onOilLiveLayersChange={viewMode === 'live_data' ? setOilLiveLayers : undefined}
+                  oilLiveTradeFlowGroup={oilLiveTradeFlowGroup}
+                  onOilLiveTradeFlowGroupChange={
+                    viewMode === 'live_data' ? setOilLiveTradeFlowGroup : undefined
+                  }
                   oilLiveCoverageStats={viewMode === 'live_data' ? oilLiveCoverageStats : undefined}
                   onOilLiveStatsChange={viewMode === 'live_data' ? setOilLiveCoverageStats : undefined}
                   onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
@@ -1202,7 +1285,25 @@ export default function App() {
                       title={oilLiveEntity.title}
                       subtitle={oilLiveEntity.subtitle}
                       onClose={handleOilLiveDismiss}
-                      onOpenRoutePlanner={() => setViewMode('route_planner')}
+                      onOpenRoutePlanner={handleOpenRoutePlannerFromLiveData}
+                      onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
+                      onHighlightOnMap={(_selection) => {
+                        // Keep the drawer open so the user can cross-reference
+                        // the newly visible trade-flow arcs with the I/E table
+                        // they were just inspecting; closing would feel like
+                        // losing context.
+                        setOilLiveLayers((prev) => ({ ...prev, tradeFlows: true }));
+                        setOilLiveTradeFlowGroup('company_pair');
+                        // TODO: no corridor-specific fly-to helper exists yet —
+                        // once liveDataMapDefaults exposes one, use
+                        // _selection.corridor (load/discharge) to zoom.
+                      }}
+                      onOpenCargo={(cargoId) => {
+                        setOilLiveEntity({
+                          entityKind: 'cargo',
+                          entityId: cargoId,
+                        });
+                      }}
                     />
                   </Suspense>
                 </div>
@@ -1215,9 +1316,13 @@ export default function App() {
                     <LiveDataPanel
                       productFilter={oilLiveProductFilter}
                       onProductFilterChange={setOilLiveProductFilter}
+                      terminalSearch={oilLiveTerminalSearch}
+                      onTerminalSearchChange={setOilLiveTerminalSearch}
                       coverageStats={oilLiveCoverageStats}
                       onOpenOpportunity={handleOpenOilLiveOpportunity}
                       onOpenCargoRecord={handleOpenOilLiveCargo}
+                      onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
+                      onOpenLiveEntity={handleOilLiveEntityClick}
                     />
                   </Suspense>
                 </div>

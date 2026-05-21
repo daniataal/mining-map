@@ -99,8 +99,10 @@ export interface RoutePlannerHook {
   error: string | null;
   computeRoute: () => Promise<boolean>;
   sourceLabel: 'live' | 'simulation' | null;
-  /** Pre-fill supplier from a license/asset — call before switching to route_planner view */
+  /** Pre-fill supplier (load port) — call before switching to route_planner view */
   prefillSupplier: (lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => void;
+  /** Pre-fill buyer (discharge port) */
+  prefillBuyer: (lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => void;
   hasResult: boolean;
 }
 
@@ -159,13 +161,21 @@ export function useRoutePlanner(): RoutePlannerHook {
     startTransition(() => setShowAirportsOnMap(value));
   }, []);
 
-  const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
-    setSupplier({ lat, lng, label, ...meta });
-    // Reset previous result so the user knows they need to compute with the new supplier
+  const resetRouteAfterPrefill = useCallback(() => {
     setResult(null);
     setSelectedPlanId(null);
     setError(null);
   }, []);
+
+  const prefillSupplier = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
+    setSupplier({ lat, lng, label, ...meta });
+    resetRouteAfterPrefill();
+  }, [resetRouteAfterPrefill]);
+
+  const prefillBuyer = useCallback((lat: number, lng: number, label: string, meta?: Partial<RoutePartyLocation>) => {
+    setBuyer({ lat, lng, label, ...meta });
+    resetRouteAfterPrefill();
+  }, [resetRouteAfterPrefill]);
 
   const toggleShippingMethod = useCallback((id: string, checked: boolean) => {
     startTransition(() => {
@@ -331,6 +341,7 @@ export function useRoutePlanner(): RoutePlannerHook {
     computeRoute,
     sourceLabel,
     prefillSupplier,
+    prefillBuyer,
     hasResult: result !== null,
   };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../../lib/i18n';
 import {
@@ -9,7 +9,6 @@ import {
   saveOilOpportunityEconomics,
   getOilCompanyContacts,
   addOilCompanyContact,
-  saveOilCompanyToSuppliers,
   draftOilOutreach,
   getCargoRecords,
   getOilTerminals,
@@ -43,11 +42,20 @@ import {
   Loader2,
   Download,
   CircleHelp,
+  Search,
 } from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
+import LiveDataSearchBar, { type LiveDataSearchHitClick } from './LiveDataSearchBar';
 import { dedupeOpportunities } from './dedupeOpportunities';
 import { downloadCsv } from '../../lib/csvExport';
+import {
+  isOnWatchlist,
+  opportunityWatchTarget,
+  saveCompanyToSuppliers,
+  terminalMatchesSearch,
+  watchOpportunity,
+} from './liveDataWorkflow';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -109,17 +117,37 @@ type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts';
 export type LiveDataIntelPanelProps = {
   productFilter: string;
   onProductFilterChange: (value: string) => void;
+  terminalSearch: string;
+  onTerminalSearchChange: (value: string) => void;
   coverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
   onOpenOpportunity?: (opportunityId: string, title?: string) => void;
   onOpenCargoRecord?: (record: MeridianCargoRecord) => void;
+  onOpenCompanyDossier?: (companyId: string) => void;
+  /**
+   * Dispatched when a user clicks a hit in the Elasticsearch-backed search
+   * dropdown. The parent app reuses this for the existing entity-drawer
+   * open flow (cargo → cargo drawer, terminal → terminal drawer, etc.).
+   * When absent, the search bar falls back to the per-kind callbacks
+   * above (cargo → onOpenCargoRecord, company → onOpenCompanyDossier).
+   */
+  onOpenLiveEntity?: (entity: {
+    entityKind: 'cargo' | 'company' | 'terminal' | 'vessel';
+    entityId: string;
+    title?: string;
+    subtitle?: string;
+  }) => void;
 };
 
 export default function LiveDataIntelPanel({
   productFilter,
   onProductFilterChange,
+  terminalSearch,
+  onTerminalSearchChange,
   coverageStats,
   onOpenOpportunity,
   onOpenCargoRecord,
+  onOpenCompanyDossier,
+  onOpenLiveEntity,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('feed');
@@ -134,6 +162,8 @@ export default function LiveDataIntelPanel({
   const [cargoMinConfidence, setCargoMinConfidence] = useState('0.5');
   const [includeSeedData, setIncludeSeedData] = useState(false);
   const [cargoExporting, setCargoExporting] = useState(false);
+  const [oppExporting, setOppExporting] = useState(false);
+  const [watchingOppId, setWatchingOppId] = useState<string | null>(null);
   const [enrichContactsLoading, setEnrichContactsLoading] = useState(false);
   const [companyRoleFilter, setCompanyRoleFilter] = useState('');
   const [companyCountryFilter, setCompanyCountryFilter] = useState('');
@@ -264,6 +294,12 @@ export default function LiveDataIntelPanel({
     () => dedupeOpportunities(opportunitiesData ?? []),
     [opportunitiesData],
   );
+
+  const terminalSearchMatches = useMemo(() => {
+    const q = terminalSearch.trim();
+    if (!q || !terminalsIndex?.length) return [];
+    return terminalsIndex.filter((t) => terminalMatchesSearch(t, q)).slice(0, 8);
+  }, [terminalsIndex, terminalSearch]);
 
   const filteredCards = useMemo(() => {
     if (productFilter === 'all') return cards;
@@ -431,9 +467,91 @@ export default function LiveDataIntelPanel({
     }
   }
 
+  async function handleWatchOpp(opp: OilOpportunity) {
+    setWatchingOppId(opp.id);
+    try {
+      const { already } = await watchOpportunity(opp, watchlistsData ?? []);
+      if (already) {
+        toast.info(t('כבר ברשימת מעקב', 'Already on watchlist'));
+      } else {
+        toast.success(t('נוסף לרשימת מעקב', 'Added to watchlist'));
+        void queryClient.invalidateQueries({ queryKey: ['oil-live-watchlists'] });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Watch failed');
+    } finally {
+      setWatchingOppId(null);
+    }
+  }
+
+  async function exportOpportunitiesCsv() {
+    setOppExporting(true);
+    try {
+      if (opportunities.length === 0) {
+        toast.info(t('אין הזדמנויות לייצוא', 'No opportunities to export'));
+        return;
+      }
+      const headers = [
+        'id',
+        'title',
+        'opportunity_type',
+        'confidence',
+        'hypothesis',
+        'terminal_id',
+        'terminal_name',
+        'terminal_country',
+      ];
+      const rows = opportunities.map((o) => [
+        o.id,
+        o.title ?? '',
+        o.opportunity_type ?? '',
+        o.confidence != null ? String(o.confidence) : '',
+        o.hypothesis ?? '',
+        o.terminal_id ?? '',
+        o.terminal_name ?? '',
+        o.terminal_country ?? '',
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadCsv(`meridian-opportunities-${stamp}.csv`, headers, rows);
+      toast.success(t('יוצא CSV', 'CSV exported'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setOppExporting(false);
+    }
+  }
+
+  const handleSearchHit = useCallback(
+    (hit: LiveDataSearchHitClick) => {
+      if (onOpenLiveEntity) {
+        onOpenLiveEntity({
+          entityKind: hit.type,
+          entityId: hit.id,
+          title: hit.title,
+          subtitle: hit.subtitle,
+        });
+        return;
+      }
+      // Fallback to per-kind callbacks when the parent doesn't pass the
+      // unified handler. cargo / company are the two we have today.
+      if (hit.type === 'cargo' && onOpenCargoRecord) {
+        onOpenCargoRecord({ id: hit.id } as MeridianCargoRecord);
+        return;
+      }
+      if (hit.type === 'company' && onOpenCompanyDossier) {
+        onOpenCompanyDossier(hit.id);
+        return;
+      }
+      // Terminal / vessel without a parent handler: surface a tip so the
+      // user knows the click registered but the drawer isn't wired here.
+      toast.info(t('פתחו את המגירה מהמפה', 'Open the drawer from the map'));
+    },
+    [onOpenLiveEntity, onOpenCargoRecord, onOpenCompanyDossier, t],
+  );
+
   async function handleSave(company: OilCompany) {
     try {
-      const result = await saveOilCompanyToSuppliers(company.id);
+      const result = await saveCompanyToSuppliers(company.id);
       if (result.status === 'saved') {
         toast.success(t('נשמר בספקים', 'Saved to Suppliers'));
         void queryClient.invalidateQueries({ queryKey: ['oil-live-companies'] });
@@ -571,6 +689,24 @@ export default function LiveDataIntelPanel({
           {t(DISCLAIMER_HE, DISCLAIMER_EN)}
         </p>
 
+        <div className="mt-3 relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+          <input
+            type="search"
+            value={terminalSearch}
+            onChange={(e) => onTerminalSearchChange(e.target.value)}
+            placeholder={t('חיפוש מסוף (שם / מדינה)', 'Search terminals (name / country)')}
+            className="w-full pl-8 pr-2 py-2 rounded-lg border border-black/10 dark:border-white/10 text-xs bg-white dark:bg-slate-900"
+          />
+          {terminalSearch.trim() && (
+            <p className="mt-1 text-[10px] text-slate-500">
+              {t('מסנן מסופים על המפה', 'Filtering terminals on map')}
+              {terminalSearchMatches.length > 0 &&
+                ` · ${terminalSearchMatches.length} ${t('התאמות במאגר', 'index matches')}`}
+            </p>
+          )}
+        </div>
+
         <div className="flex gap-2 mt-3 flex-wrap">
           {(['all', 'crude', 'refined', 'gas', 'sulfur'] as const).map((p) => (
             <button
@@ -591,6 +727,7 @@ export default function LiveDataIntelPanel({
       </div>
 
       <div className="shrink-0 sticky top-0 z-10 border-b border-black/5 bg-slate-50/98 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/98">
+        <LiveDataSearchBar onHitClick={handleSearchHit} className="mb-3" />
         <p className={`${LABEL} text-slate-600 dark:text-slate-400 mb-2`}>
           {t('לשכבות מפה — השתמשו בפאנל שכבות בפינה השמאלית', 'Map layers — use the panel at bottom-left of the map')}
         </p>
@@ -789,6 +926,24 @@ export default function LiveDataIntelPanel({
           </>
         )}
 
+        {tab === 'opportunities' && (
+          <div className="flex flex-wrap gap-2 mb-2 items-center">
+            <button
+              type="button"
+              disabled={oppExporting}
+              onClick={() => void exportOpportunitiesCsv()}
+              className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-2 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+            >
+              {oppExporting ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Download className="w-3 h-3" />
+              )}
+              {t('ייצוא CSV', 'Export CSV')}
+            </button>
+          </div>
+        )}
+
         {tab === 'opportunities' && opportunities.length === 0 && (
           <GraphSyncEmptyCta context="cargo" />
         )}
@@ -797,6 +952,10 @@ export default function LiveDataIntelPanel({
           opportunities.map((opp: OilOpportunity) => {
             const econ = oppEconomics[opp.id];
             const expanded = expandedOpp === opp.id;
+            const watchTarget = opportunityWatchTarget(opp);
+            const onWatchlist =
+              watchTarget != null &&
+              isOnWatchlist(watchlistsData ?? [], watchTarget.watch_type, watchTarget.watch_ref);
             return (
               <article
                 key={opp.id}
@@ -822,9 +981,38 @@ export default function LiveDataIntelPanel({
                     <ExpandableBulletList items={opp.evidence} limit={3} />
                   </div>
                 )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {watchTarget && (
+                    <button
+                      type="button"
+                      disabled={watchingOppId === opp.id || onWatchlist}
+                      onClick={() => void handleWatchOpp(opp)}
+                      className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-2 rounded-lg border border-violet-500/40 text-[10px] font-bold uppercase text-violet-800 dark:text-violet-200 hover:bg-violet-500/10 disabled:opacity-50"
+                    >
+                      {watchingOppId === opp.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Bell className={`w-3.5 h-3.5 ${onWatchlist ? 'fill-current' : ''}`} />
+                      )}
+                      {onWatchlist
+                        ? t('ברשימת מעקב', 'Watching')
+                        : t('עקוב', 'Watch')}
+                    </button>
+                  )}
+                  {onOpenOpportunity && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenOpportunity(opp.id, opp.title)}
+                      className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-bold uppercase hover:bg-emerald-500"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      {t('חבילת עסקה', 'Deal pack')}
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
-                  className="mt-4 w-full min-h-[44px] py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold uppercase tracking-wide hover:bg-emerald-500 transition-colors"
+                  className="mt-3 w-full min-h-[44px] py-2.5 rounded-xl bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 text-sm font-bold uppercase tracking-wide hover:opacity-90 transition-colors"
                   onClick={async () => {
                     if (onOpenOpportunity) {
                       onOpenOpportunity(opp.id, opp.title);
@@ -934,10 +1122,10 @@ export default function LiveDataIntelPanel({
 
         {tab === 'alerts' && (
           <>
-            <div className="flex gap-2 mb-2">
+            <div className="flex flex-wrap gap-2 mb-3 items-center">
               <button
                 type="button"
-                className="text-[9px] font-bold uppercase text-sky-600"
+                className={`${BTN} border border-sky-500/40 text-sky-700 dark:text-sky-300`}
                 onClick={async () => {
                   await markAllOilAlertsRead();
                   void refetchAlerts();
@@ -945,73 +1133,116 @@ export default function LiveDataIntelPanel({
               >
                 {t('סמן הכל כנקרא', 'Mark all read')}
               </button>
+              <span className={`${LABEL}`}>
+                {(alertsData ?? []).filter((a) => !a.read_at).length} {t('לא נקראו', 'unread')}
+              </span>
             </div>
-            <p className="text-[9px] font-bold text-slate-500 uppercase mb-2">
-              {t('רשימות מעקב', 'Watchlists')} ({(watchlistsData ?? []).length})
-            </p>
-            {(watchlistsData ?? []).map((w: OilWatchlistItem) => (
-              <div
-                key={w.id}
-                className="flex justify-between items-center text-[9px] text-slate-500 border-b py-1"
-              >
-                <span>
-                  {w.label || w.watch_ref} · {w.watch_type}
-                </span>
-                <button
-                  type="button"
-                  className="text-red-600 font-bold"
-                  onClick={async () => {
-                    await deleteOilWatchlist(w.id);
-                    void queryClient.invalidateQueries({ queryKey: ['oil-live-watchlists'] });
-                  }}
+
+            <section className={`${CARD} mb-3`}>
+              <h3 className={`${LABEL} mb-2`}>
+                {t('רשימות מעקב', 'Watchlists')} ({(watchlistsData ?? []).length})
+              </h3>
+              {(watchlistsData ?? []).length === 0 ? (
+                <p className={MUTED}>{t('אין מעקבים פעילים', 'No active watches')}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(watchlistsData ?? []).map((w: OilWatchlistItem) => (
+                    <li
+                      key={w.id}
+                      className="flex justify-between items-center gap-2 text-sm text-slate-700 dark:text-slate-300 border-b border-black/5 dark:border-white/10 pb-2 last:border-0"
+                    >
+                      <span>
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {w.label || w.watch_ref}
+                        </span>
+                        <span className={`${LABEL} ml-2`}>{w.watch_type}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="text-red-600 font-bold text-xs"
+                        onClick={async () => {
+                          await deleteOilWatchlist(w.id);
+                          void queryClient.invalidateQueries({ queryKey: ['oil-live-watchlists'] });
+                        }}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {(alertsData ?? []).map((a: OilAlert) => {
+              const severity = (a.severity ?? 'info').toLowerCase();
+              const severityClass =
+                severity === 'high' || severity === 'critical'
+                  ? 'border-red-500/40 bg-red-500/5'
+                  : severity === 'medium' || severity === 'warn'
+                    ? 'border-amber-500/40 bg-amber-500/5'
+                    : 'border-violet-500/30 bg-violet-500/5';
+              return (
+                <article
+                  key={a.id}
+                  className={`${CARD} mb-3 ${a.read_at ? 'opacity-60' : severityClass}`}
                 >
-                  ×
-                </button>
-              </div>
-            ))}
-            {(alertsData ?? []).map((a: OilAlert) => (
-              <article
-                key={a.id}
-                className={`rounded-xl border p-3 ${a.read_at ? 'opacity-60' : 'border-violet-500/30 bg-violet-500/5'}`}
-              >
-                <h3 className="text-xs font-bold">{a.title}</h3>
-                <p className="text-[10px] text-slate-500 mt-1">{a.body}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {!a.read_at && (
+                  <div className="flex justify-between gap-2 items-start">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                      {a.title}
+                    </h3>
+                    {!a.read_at && (
+                      <span className="shrink-0 text-xs font-black px-2 py-0.5 rounded-full bg-violet-600/15 text-violet-900 dark:text-violet-200 uppercase">
+                        {a.alert_type.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </div>
+                  {a.body && <p className={`${MUTED} mt-2`}>{a.body}</p>}
+                  <div className={`flex flex-wrap gap-2 mt-3 ${LABEL}`}>
+                    {a.severity && <span>{a.severity}</span>}
+                    {a.status && <span>{a.status}</span>}
+                    {a.assigned_to && (
+                      <span>
+                        {t('מוקצה ל', 'Assigned')}: {a.assigned_to}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 items-center">
+                    {!a.read_at && (
+                      <button
+                        type="button"
+                        className={`${BTN} border border-sky-500/40 text-sky-700 dark:text-sky-300`}
+                        onClick={async () => {
+                          await markOilAlertRead(a.id);
+                          void refetchAlerts();
+                        }}
+                      >
+                        {t('נקרא', 'Mark read')}
+                      </button>
+                    )}
+                    <input
+                      className="flex-1 min-w-[120px] text-sm border rounded-lg px-2 py-1.5 dark:bg-slate-900"
+                      placeholder={t('הקצה ל', 'Assign to')}
+                      value={assignee}
+                      onChange={(e) => setAssignee(e.target.value)}
+                    />
                     <button
                       type="button"
-                      className="text-[9px] font-bold uppercase text-sky-600"
+                      className={`${BTN} bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900`}
                       onClick={async () => {
-                        await markOilAlertRead(a.id);
+                        if (!assignee.trim()) return;
+                        await assignOilAlert(a.id, assignee.trim());
+                        toast.success(t('הוקצה', 'Assigned'));
                         void refetchAlerts();
                       }}
                     >
-                      {t('נקרא', 'Mark read')}
+                      {t('הקצה', 'Assign')}
                     </button>
-                  )}
-                  <input
-                    className="text-[9px] border rounded px-1 flex-1 min-w-[80px]"
-                    placeholder={t('הקצה ל', 'Assign to')}
-                    value={assignee}
-                    onChange={(e) => setAssignee(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="text-[9px] font-bold uppercase"
-                    onClick={async () => {
-                      if (!assignee.trim()) return;
-                      await assignOilAlert(a.id, assignee.trim());
-                      toast.success(t('הוקצה', 'Assigned'));
-                      void refetchAlerts();
-                    }}
-                  >
-                    {t('הקצה', 'Assign')}
-                  </button>
-                </div>
-              </article>
-            ))}
+                  </div>
+                </article>
+              );
+            })}
             {(alertsData ?? []).length === 0 && (
-              <p className="text-xs text-slate-500">
+              <p className={MUTED}>
                 {t(
                   'אין התראות — הוסף מעקב מהמפה או המתן להזדמנויות חדשות',
                   'No alerts — watch a terminal on the map or wait for new opportunities',
@@ -1104,11 +1335,20 @@ export default function LiveDataIntelPanel({
                   </div>
                   <span className="text-[9px] font-bold text-emerald-600">{co.supplier_status}</span>
                 </div>
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  {co.supplier_id && onOpenCompanyDossier && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCompanyDossier(co.id)}
+                      className="flex-1 min-w-[120px] py-1.5 rounded-lg border border-sky-500/40 text-xs font-bold uppercase text-sky-700 dark:text-sky-300"
+                    >
+                      {t('פתח דוסייה', 'Open dossier')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleSave(co)}
-                    className="flex-1 py-1.5 rounded-lg bg-amber-500 text-slate-950 text-[9px] font-black uppercase"
+                    className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-black uppercase"
                   >
                     {t('שמור לספקים', 'Save to Suppliers')}
                   </button>

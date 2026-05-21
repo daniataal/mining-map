@@ -1,6 +1,8 @@
-import { Anchor, Layers, Route, Ship, Sparkles } from 'lucide-react';
+import { Anchor, ArrowRightLeft, Layers, Route, Ship, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
+
+export type TradeFlowGroup = 'company_pair' | 'country_pair';
 
 export type LiveDataMapLayersPanelProps = {
   layers: OilLiveLayerVisibility;
@@ -9,6 +11,9 @@ export type LiveDataMapLayersPanelProps = {
   allMaritimeEnabled: boolean;
   onAllMaritimeChange: (enabled: boolean) => void;
   globalMaritimeCount?: number | null;
+  /** Aggregated Trade Flow layer group selector (company_pair vs country_pair). */
+  tradeFlowGroup?: TradeFlowGroup;
+  onTradeFlowGroupChange?: (group: TradeFlowGroup) => void;
 };
 
 const LAYER_META = [
@@ -53,12 +58,16 @@ export default function LiveDataMapLayersPanel({
   allMaritimeEnabled,
   onAllMaritimeChange,
   globalMaritimeCount,
+  tradeFlowGroup = 'company_pair',
+  onTradeFlowGroupChange,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
 
   function toggleLayer(key: keyof OilLiveLayerVisibility) {
     onLayersChange({ ...layers, [key]: !layers[key] });
   }
+
+  const tradeFlowsOn = Boolean(layers.tradeFlows);
 
   return (
     <div className="w-[min(100vw-2rem,420px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
@@ -120,6 +129,60 @@ export default function LiveDataMapLayersPanel({
               </button>
             );
           })}
+        </div>
+
+        <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={tradeFlowsOn}
+              onChange={(e) => onLayersChange({ ...layers, tradeFlows: e.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-slate-300"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                <ArrowRightLeft className="h-4 w-4 shrink-0" />
+                {t('זרימת סחר (מצרפי)', 'Trade Flow (aggregated)')}
+              </span>
+              <span className="mt-0.5 block text-xs leading-snug text-slate-600 dark:text-slate-400">
+                {t(
+                  'קשתות מצרפיות לפי זוג חברות או זוג מדינות, מצויירות מ-MCR.',
+                  'Aggregated arcs by company pair or country pair, drawn from MCR.',
+                )}
+              </span>
+              <div
+                className={`mt-2 flex gap-1.5 transition-opacity ${
+                  tradeFlowsOn ? 'opacity-100' : 'opacity-40 pointer-events-none'
+                }`}
+                role="group"
+                aria-label={t('קיבוץ זרימות סחר', 'Trade Flow grouping')}
+              >
+                {(
+                  [
+                    { key: 'company_pair' as const, en: 'Company', he: 'חברה' },
+                    { key: 'country_pair' as const, en: 'Country', he: 'מדינה' },
+                  ]
+                ).map((opt) => {
+                  const active = tradeFlowGroup === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={!tradeFlowsOn || !onTradeFlowGroupChange}
+                      onClick={() => onTradeFlowGroupChange?.(opt.key)}
+                      className={`flex-1 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wide transition-colors ${
+                        active
+                          ? 'bg-violet-500 text-white'
+                          : 'border border-violet-500/30 text-violet-700 hover:bg-violet-500/10 dark:text-violet-200'
+                      }`}
+                    >
+                      {t(opt.he, opt.en)}
+                    </button>
+                  );
+                })}
+              </div>
+            </span>
+          </label>
         </div>
 
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">

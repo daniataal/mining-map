@@ -1,13 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Package, Ship, Users, Calculator, Route, CheckCircle2 } from 'lucide-react';
-import { getOpportunityDealPack, type DealExecutionPack as DealPack } from '../../api/oilLiveApi';
+import {
+  Loader2,
+  Package,
+  Ship,
+  ShieldAlert,
+  Users,
+  Calculator,
+  Route,
+  CheckCircle2,
+} from 'lucide-react';
+import {
+  getOpportunityDealPack,
+  type DealExecutionPack as DealPack,
+  type MeridianCargoRecord,
+} from '../../api/oilLiveApi';
 import { useI18n } from '../../lib/i18n';
+import {
+  buildRoutePlannerHintsFromCargo,
+  type LiveDataRouteHints,
+} from './liveDataRoutePrefill';
 
 export type DealExecutionPackProps = {
   opportunityId: string;
   onClose?: () => void;
   onOpenRoutePlanner?: (hints: Record<string, unknown>) => void;
-  onOpenCompany?: (companyId: string) => void;
+  onOpenCompanyDossier?: (companyId: string) => void;
   onCreateDealRoom?: () => void;
 };
 
@@ -17,11 +34,64 @@ const statusColor: Record<string, string> = {
   red: 'text-red-500',
 };
 
+type SanctionsTone = 'clear' | 'flagged' | 'review' | 'unknown';
+
+function sanctionsTone(value?: string | null): SanctionsTone {
+  if (!value) return 'unknown';
+  const v = value.toLowerCase();
+  if (v === 'clear') return 'clear';
+  if (v === 'flagged' || v === 'sanctioned' || v === 'match') return 'flagged';
+  if (v === 'review' || v === 'pep') return 'review';
+  return 'unknown';
+}
+
+const SANCTIONS_BADGE: Record<SanctionsTone, string> = {
+  clear: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200',
+  flagged: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200',
+  review: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
+  unknown: 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200',
+};
+
+function SanctionsChip({ status }: { status?: string | null }) {
+  const tone = sanctionsTone(status);
+  const label = tone === 'unknown' ? 'unscreened' : tone;
+  return (
+    <span
+      className={`inline-block px-1.5 py-[1px] rounded text-[8px] font-black uppercase tracking-wide ${SANCTIONS_BADGE[tone]}`}
+      title={`Sanctions: ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function LeiChip({ lei }: { lei?: string | null }) {
+  if (!lei) return null;
+  return (
+    <span
+      className="inline-block px-1.5 py-[1px] rounded text-[8px] font-black uppercase tracking-wide bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"
+      title={`LEI ${lei}`}
+    >
+      LEI {lei.slice(0, 8)}…
+    </span>
+  );
+}
+
+function hasCounterpartyRisk(mcr?: MeridianCargoRecord | null): boolean {
+  if (!mcr) return false;
+  return Boolean(
+    mcr.shipper_lei ||
+      mcr.consignee_lei ||
+      mcr.shipper_sanctions_status ||
+      mcr.consignee_sanctions_status,
+  );
+}
+
 export default function DealExecutionPack({
   opportunityId,
   onClose,
   onOpenRoutePlanner,
-  onOpenCompany,
+  onOpenCompanyDossier,
   onCreateDealRoom,
 }: DealExecutionPackProps) {
   const { t } = useI18n();
@@ -48,6 +118,21 @@ export default function DealExecutionPack({
   }
 
   const pack = data as DealPack;
+
+  const routeHints: LiveDataRouteHints = (() => {
+    const mcr = pack.cargo_records?.[0];
+    if (mcr) return buildRoutePlannerHintsFromCargo(mcr);
+    const terminal = pack.terminal as { name?: string; port?: string; country?: string } | undefined;
+    const logistics = (pack as { logistics?: { terminal_name?: string; port?: string; country?: string } })
+      .logistics;
+    return {
+      opportunity_id: opportunityId,
+      load_port_name: logistics?.port ?? logistics?.terminal_name ?? terminal?.port ?? terminal?.name,
+      load_country: logistics?.country ?? (terminal?.country as string | undefined),
+      commodity_family: (pack.port_call as { product_family_inferred?: string } | undefined)
+        ?.product_family_inferred,
+    };
+  })();
 
   return (
     <div className="rounded-2xl border border-amber-500/30 bg-white dark:bg-slate-900 shadow-xl p-4 max-w-md space-y-4">
@@ -102,6 +187,48 @@ export default function DealExecutionPack({
         </section>
       )}
 
+      {pack.cargo_records && pack.cargo_records.length > 0 && hasCounterpartyRisk(pack.cargo_records[0]) && (
+        <section className="text-[11px] rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1.5">
+          <h4 className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-300 flex items-center gap-1">
+            <ShieldAlert className="w-3 h-3" />
+            {t('סיכון צד נגדי', 'Counterparty risk')}
+          </h4>
+          {(() => {
+            const mcr = pack.cargo_records![0];
+            return (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[9px] font-black uppercase text-slate-500 min-w-[58px]">
+                    {t('שולח', 'Shipper')}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-800 dark:text-slate-100">
+                    {mcr.shipper_name ?? '—'}
+                  </span>
+                  <LeiChip lei={mcr.shipper_lei} />
+                  <SanctionsChip status={mcr.shipper_sanctions_status} />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[9px] font-black uppercase text-slate-500 min-w-[58px]">
+                    {t('נמען', 'Consignee')}
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-800 dark:text-slate-100">
+                    {mcr.consignee_name ?? '—'}
+                  </span>
+                  <LeiChip lei={mcr.consignee_lei} />
+                  <SanctionsChip status={mcr.consignee_sanctions_status} />
+                </div>
+                <p className="text-[9px] text-amber-700 dark:text-amber-300">
+                  {t(
+                    'מידע משלים — אינו חוסם עסקה אוטומטית. בדוק ב-OpenSanctions / GLEIF.',
+                    'Info-only — does not auto-block deal. Verify in OpenSanctions / GLEIF.',
+                  )}
+                </p>
+              </>
+            );
+          })()}
+        </section>
+      )}
+
       {pack.port_call && (
         <section className="text-[11px] flex gap-2 items-start">
           <Ship className="w-4 h-4 text-sky-500 shrink-0" />
@@ -126,20 +253,21 @@ export default function DealExecutionPack({
           <button
             type="button"
             className="text-[10px] font-bold uppercase text-sky-600 flex items-center gap-1"
-            onClick={() => onOpenRoutePlanner({ opportunity_id: opportunityId })}
+            onClick={() => onOpenRoutePlanner(routeHints)}
           >
-            <Route className="w-3 h-3" /> {t('תכנון מסלול', 'Route planner')}
+            <Route className="w-3 h-3" /> {t('פתח בתכנון מסלול', 'Open in Route Planner')}
           </button>
         )}
-        {onOpenCompany && pack.terminal && (
-          <button
-            type="button"
-            className="text-[10px] font-bold uppercase text-slate-600 flex items-center gap-1"
-            onClick={() => onOpenCompany(String((pack.terminal as { id?: string }).id ?? ''))}
-          >
-            <Users className="w-3 h-3" /> {t('דוסייה', 'Dossier')}
-          </button>
-        )}
+        {onOpenCompanyDossier &&
+          pack.cargo_records?.[0]?.shipper_company_id && (
+            <button
+              type="button"
+              className="text-[10px] font-bold uppercase text-slate-600 flex items-center gap-1"
+              onClick={() => onOpenCompanyDossier(pack.cargo_records![0].shipper_company_id!)}
+            >
+              <Users className="w-3 h-3" /> {t('דוסיית שולח', 'Shipper dossier')}
+            </button>
+          )}
         {onCreateDealRoom && (
           <button
             type="button"

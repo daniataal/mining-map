@@ -1067,6 +1067,78 @@ def _sync_usitc_trade_flows(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_eia_crude_imports(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.eia_imports import sync_eia_crude_imports
+    except ImportError:
+        from services.eia_imports import sync_eia_crude_imports
+    try:
+        return sync_eia_crude_imports(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_eia_refinery_throughput(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.eia_imports import sync_eia_refinery_throughput
+    except ImportError:
+        from services.eia_imports import sync_eia_refinery_throughput
+    try:
+        return sync_eia_refinery_throughput(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _run_gleif_batch(conn: Any, *, limit: int) -> dict[str, Any]:
+    try:
+        from backend.services.gleif_batch import enrich_companies_with_lei
+    except ImportError:
+        from services.gleif_batch import enrich_companies_with_lei
+    try:
+        return enrich_companies_with_lei(conn, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _run_wikidata_batch(conn: Any, *, limit: int) -> dict[str, Any]:
+    try:
+        from backend.services.wikidata_company_enrichment import (
+            enrich_companies_with_wikidata,
+        )
+    except ImportError:
+        from services.wikidata_company_enrichment import enrich_companies_with_wikidata
+    try:
+        return enrich_companies_with_wikidata(conn, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _run_opensanctions_batch(conn: Any, *, limit: int) -> dict[str, Any]:
+    try:
+        from backend.services.opensanctions_screening import (
+            screen_companies_for_sanctions,
+        )
+    except ImportError:
+        from services.opensanctions_screening import screen_companies_for_sanctions
+    try:
+        return screen_companies_for_sanctions(conn, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _denormalize_mcr_party_enrichment(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.oil_live_mcr_denormalize import (
+            denormalize_mcr_party_enrichment,
+        )
+    except ImportError:
+        from services.oil_live_mcr_denormalize import denormalize_mcr_party_enrichment
+    try:
+        return denormalize_mcr_party_enrichment(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _trigger_synthetic_bol_rebuild() -> dict[str, Any]:
     url = f"{OIL_INTEL_API_URL}/api/oil-live/internal/synthetic-bol-rebuild"
     req = urllib.request.Request(
@@ -1103,11 +1175,19 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         return {"status": "skipped", "reason": str(exc)}
     started = _now_iso()
     census_key = (os.getenv("CENSUS_API_KEY") or "").strip()
+    eia_key = (os.getenv("EIA_API_KEY") or "").strip()
     summary: dict[str, Any] = {
         "started_at": started,
         "census_api_key_configured": bool(census_key),
+        "eia_api_key_configured": bool(eia_key),
+        "opensanctions_api_key_configured": bool(
+            (os.getenv("OPENSANCTIONS_API_KEY") or "").strip()
+        ),
         "steps": {},
     }
+    gleif_limit = int(os.getenv("GLEIF_BATCH_LIMIT", "100") or "100")
+    wikidata_limit = int(os.getenv("WIKIDATA_BATCH_LIMIT", "50") or "50")
+    opensanctions_limit = int(os.getenv("OPENSANCTIONS_BATCH_LIMIT", "50") or "50")
     with conn.cursor() as cur:
         if not _table_exists(cur, "oil_terminals"):
             summary["steps"]["storage_terminals"] = {
@@ -1122,6 +1202,18 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["trade_flows"] = {"events": _mirror_trade_flows(cur)}
         summary["steps"]["census_trade"] = _sync_census_trade_flows(conn)
         summary["steps"]["usitc_trade"] = _sync_usitc_trade_flows(conn)
+        # Phase 4b — EIA crude imports + refinery throughput (macro tier, country-level).
+        summary["steps"]["eia_crude_imports"] = _sync_eia_crude_imports(conn)
+        summary["steps"]["eia_refinery_throughput"] = _sync_eia_refinery_throughput(conn)
+        # Phase 4c — LEI + Wikidata batch enrichment for oil_companies.
+        summary["steps"]["gleif_batch"] = _run_gleif_batch(conn, limit=gleif_limit)
+        summary["steps"]["wikidata_enrich"] = _run_wikidata_batch(
+            conn, limit=wikidata_limit
+        )
+        # Phase 4a — OpenSanctions screening for oil_companies.
+        summary["steps"]["opensanctions_screening"] = _run_opensanctions_batch(
+            conn, limit=opensanctions_limit
+        )
         summary["steps"]["port_calls"] = {"events": _mirror_port_calls(cur)}
         summary["steps"]["ted"] = {"events": _mirror_ted_notices(cur)}
         summary["steps"]["gov_awards"] = {"events": _mirror_gov_awards(cur)}
@@ -1129,6 +1221,11 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
     conn.commit()
     if rebuild_synthetic_bol:
         summary["synthetic_bol"] = _trigger_synthetic_bol_rebuild()
+        # Post-rebuild: copy lei + sanctions from oil_companies → meridian_cargo_records
+        # so the cargo popup / drawer can render chips without extra JOINs.
+        summary["steps"]["mcr_party_denormalize"] = _denormalize_mcr_party_enrichment(
+            conn
+        )
     summary["finished_at"] = _now_iso()
     _record_graph_sync_at(conn, summary["finished_at"])
     conn.commit()

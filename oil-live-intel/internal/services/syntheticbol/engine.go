@@ -17,12 +17,13 @@ import (
 )
 
 const (
-	RecipeLikelyLoad   = "A_likely_load"
-	RecipeCorridor     = "B_corridor_trade"
-	RecipeTenderBuyer  = "C_tender_buyer"
-	RecipeSulfurBulk   = "D_sulfur_bulk"
-	RecipeGovOfftake   = "E_gov_offtake"
-	RecipeRepeatDealer = "F_repeat_dealer"
+	RecipeLikelyLoad     = "A_likely_load"
+	RecipeCorridor       = "B_corridor_trade"
+	RecipeTenderBuyer    = "C_tender_buyer"
+	RecipeSulfurBulk     = "D_sulfur_bulk"
+	RecipeGovOfftake     = "E_gov_offtake"
+	RecipeRepeatDealer   = "F_repeat_dealer"
+	RecipeRefineryDriven = "G_refinery_driven"
 )
 
 type BuildResult struct {
@@ -85,6 +86,7 @@ func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (Bu
 		{RecipeSulfurBulk, recipeSulfurBulk},
 		{RecipeGovOfftake, recipeGovOfftake},
 		{RecipeRepeatDealer, recipeRepeatDealer},
+		{RecipeRefineryDriven, recipeRefineryDriven},
 	}
 	for _, rf := range recipes {
 		drafts, err := rf.run(ctx, pool)
@@ -316,7 +318,7 @@ func recipeCorridorTrade(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, e
 			volBest = &est
 		}
 		out = append(out, mcrDraft{
-			Fingerprint:        fp,
+			Fingerprint:          fp,
 			Recipe:               RecipeCorridor,
 			CommodityFamily:      family,
 			Confidence:           conf,
@@ -411,7 +413,7 @@ func recipeTenderBuyer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, err
 		}
 		fp := fingerprint(RecipeTenderBuyer, id.String())
 		out = append(out, mcrDraft{
-			Fingerprint:        fp,
+			Fingerprint:          fp,
 			Recipe:               RecipeTenderBuyer,
 			CommodityFamily:      fam,
 			Confidence:           0.58,
@@ -754,6 +756,135 @@ func recipeRepeatDealer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, er
 		})
 	}
 	return out, rows.Err()
+}
+
+// recipeRefineryDriven (Recipe G) infers crude feedstock cargoes flowing into
+// refinery terminals when macro trade (HS 2709) confirms the country imports crude.
+// The discharge end is anchored at the refinery; the load end is intentionally
+// left blank (corridor-only on the discharge side) — that mirrors the "macro
+// refinery throughput" signal we can support without a confirmed loading port.
+//
+// Trigger:
+//   - terminal looks like a refinery (products tag, name or operator)
+//   - country imports crude (HS 2709) via Comtrade/Census or macro_trade_flow
+//   - optional: a port call at the refinery in the last 90 days (+1 score)
+//
+// Volume estimate: 350k bbl/d × 7d (`refinery_throughput_estimate`).
+func recipeRefineryDriven(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT t.id,
+			t.name,
+			COALESCE(t.operator_name, '') AS operator_name,
+			COALESCE(t.country, '')       AS country,
+			COALESCE(t.products, '{}')    AS products,
+			ST_Y(t.geom::geometry)        AS lat,
+			ST_X(t.geom::geometry)        AS lon
+		FROM oil_terminals t
+		WHERE t.geom IS NOT NULL
+		  AND (
+		    'refined_products' = ANY(COALESCE(t.products, '{}'))
+		    OR t.name ILIKE '%refinery%'
+		    OR COALESCE(t.operator_name, '') ILIKE '%refining%'
+		  )
+		ORDER BY t.confidence DESC NULLS LAST
+		LIMIT 150
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []mcrDraft
+	for rows.Next() {
+		var tid uuid.UUID
+		var tname, operator, country string
+		var products []string
+		var lat, lon float64
+		if err := rows.Scan(&tid, &tname, &operator, &country, &products, &lat, &lon); err != nil {
+			return out, err
+		}
+		if country == "" {
+			continue
+		}
+		// Feedstock evidence: the refinery's country must show crude imports (HS 2709)
+		// in Comtrade/Census or in the macro_trade_flow rollup.
+		hasFeedstock := countryHasHSImport(ctx, pool, country, "2709") ||
+			countryHasMacroTrade(ctx, pool, country, "2709")
+		if !hasFeedstock {
+			continue
+		}
+
+		score := 2
+		evidence := []any{
+			fmt.Sprintf("Refinery terminal: %s (%s)", tname, country),
+			fmt.Sprintf("Country %s imports crude (HS 2709)", country),
+		}
+		sources := []any{
+			map[string]string{"name": "oil_terminals", "field": "refinery_match"},
+			map[string]string{"name": "oil_trade_flows", "hs_code": "2709"},
+		}
+		// +1 if a recent port call lands at the refinery — concrete vessel touch.
+		if refineryHasRecentPortCall(ctx, pool, tid) {
+			score++
+			evidence = append(evidence, fmt.Sprintf("Port call at %s in last 90 days", tname))
+			sources = append(sources, map[string]string{"name": "oil_port_calls", "field": "refinery_visit"})
+		}
+
+		consigneeName := strings.TrimSpace(operator)
+		if consigneeName == "" {
+			consigneeName = tname
+		}
+		consigneeID, _ := resolveCompany(ctx, pool, consigneeName, country)
+
+		// Throughput heuristic: 350k bbl/d × 7d = 2.45m bbl (one weekly feedstock slug).
+		const dailyThroughputBbl = 350000.0
+		const windowDays = 7.0
+		vol := dailyThroughputBbl * windowDays
+		volLow := vol * 0.7
+		volHigh := vol * 1.3
+		eventDate := time.Now().UTC().Add(-24 * time.Hour)
+		fp := fingerprint(RecipeRefineryDriven, tid.String())
+
+		out = append(out, mcrDraft{
+			Fingerprint:          fp,
+			Recipe:               RecipeRefineryDriven,
+			CommodityFamily:      "crude_oil",
+			Confidence:           0.7,
+			TriangulationScore:   score,
+			ConsigneeName:        strPtr(consigneeName),
+			ConsigneeCompanyID:   consigneeID,
+			DischargeHint:        strPtr(tname),
+			DischargeCountry:     strPtr(country),
+			CommodityDescription: strPtr(fmt.Sprintf("Refinery feedstock crude (inferred) — %s", tname)),
+			VolumeLow:            &volLow,
+			VolumeHigh:           &volHigh,
+			VolumeBestEstimate:   &vol,
+			VolumeMethod:         strPtr("refinery_throughput_estimate"),
+			VolumeUnit:           "bbl",
+			EventDate:            &eventDate,
+			CorridorDischargeLat: &lat,
+			CorridorDischargeLng: &lon,
+			EvidenceChain:        evidence,
+			Sources:              sources,
+			Metadata: map[string]any{
+				"refinery_terminal_id":              tid.String(),
+				"throughput_assumption_bbl_per_day": dailyThroughputBbl,
+				"throughput_window_days":            windowDays,
+				"refinery_products":                 products,
+			},
+		})
+	}
+	return out, rows.Err()
+}
+
+// refineryHasRecentPortCall returns true if the terminal saw a vessel in the last 90 days.
+func refineryHasRecentPortCall(ctx context.Context, pool *pgxpool.Pool, tid uuid.UUID) bool {
+	var n int
+	_ = pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int FROM oil_port_calls
+		WHERE terminal_id = $1 AND arrival_ts > now() - interval '90 days'
+	`, tid).Scan(&n)
+	return n > 0
 }
 
 func upsertMCR(ctx context.Context, pool *pgxpool.Pool, d mcrDraft) (bool, error) {

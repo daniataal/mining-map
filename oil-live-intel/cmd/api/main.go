@@ -12,6 +12,7 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/db"
 	"github.com/mining-map/oil-live-intel/internal/seed"
+	"github.com/mining-map/oil-live-intel/internal/services/search"
 	"github.com/mining-map/oil-live-intel/internal/utils"
 )
 
@@ -35,11 +36,26 @@ func main() {
 		}
 	}
 
+	// Elasticsearch is optional — the search endpoint degrades to
+	// {"error":"search_unavailable"} (HTTP 503) when the client cannot be
+	// built (e.g. empty URL) or when the cluster is unreachable. We
+	// instantiate the client lazily without blocking startup.
+	var searchClient search.Client
+	if cfg.ElasticsearchURL != "" {
+		c, err := search.NewClient(cfg.ElasticsearchURL)
+		if err != nil {
+			log.Warn().Err(err).Str("url", cfg.ElasticsearchURL).Msg("search client init failed; /api/oil-live/search will return 503")
+		} else {
+			searchClient = c
+		}
+	}
+
 	srv := &api.Server{
-		Pool:   pool,
-		Log:    log,
-		Config: cfg,
-		Hub:    api.NewHub(),
+		Pool:         pool,
+		Log:          log,
+		Config:       cfg,
+		Hub:          api.NewHub(),
+		SearchClient: searchClient,
 	}
 	router := api.NewRouter(srv)
 

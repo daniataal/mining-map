@@ -49,6 +49,7 @@ def test_merge_company_metadata_roles_and_sources():
 
 def test_graph_sync_summary_includes_census_step(monkeypatch):
     """Census trade step appears in graph-sync summary when key is configured."""
+    from contextlib import ExitStack
     from unittest.mock import MagicMock, patch
 
     monkeypatch.setenv("CENSUS_API_KEY", "test-census-key")
@@ -75,42 +76,58 @@ def test_graph_sync_summary_includes_census_step(monkeypatch):
 
     monkeypatch.setattr(graph_sync_mod, "GRAPH_SYNC_ENABLED", True)
 
-    with patch(f"{mod}.ensure_commercial_graph_tables", return_value=None), patch(
-        f"{mod}._import_storage_terminals",
-        return_value={"terminals_imported": 0},
-    ), patch(f"{mod}._index_licenses", return_value={"license_events": 0}), patch(
-        f"{mod}._index_terminal_operators",
-        return_value={"operators_indexed": 0},
-    ), patch(
-        f"{mod}._seed_port_calls_if_sparse",
-        return_value={"status": "skipped"},
-    ), patch(
-        f"{mod}._mirror_trade_flows",
-        return_value=0,
-    ), patch(
-        f"{mod}._sync_census_trade_flows",
-        return_value={"status": "ok", "rows_upserted": 42, "data_source": "census_api"},
-    ), patch(
-        f"{mod}._sync_usitc_trade_flows",
-        return_value={"status": "skipped"},
-    ), patch(f"{mod}._mirror_port_calls", return_value=0), patch(
-        f"{mod}._mirror_ted_notices",
-        return_value=0,
-    ), patch(
-        f"{mod}._mirror_gov_awards",
-        return_value=0,
-    ), patch(
-        f"{mod}._ensure_demo_opportunities",
-        return_value={"open_opportunities": 0},
-    ), patch(
-        f"{mod}._trigger_synthetic_bol_rebuild",
-        return_value={"status": "ok"},
-    ), patch(f"{mod}._table_exists", return_value=True), patch(
-        f"{mod}._record_graph_sync_at",
-        return_value=None,
-    ):
+    patches = {
+        "ensure_commercial_graph_tables": None,
+        "_import_storage_terminals": {"terminals_imported": 0},
+        "_index_licenses": {"license_events": 0},
+        "_index_terminal_operators": {"operators_indexed": 0},
+        "_seed_port_calls_if_sparse": {"status": "skipped"},
+        "_mirror_trade_flows": 0,
+        "_sync_census_trade_flows": {
+            "status": "ok",
+            "rows_upserted": 42,
+            "data_source": "census_api",
+        },
+        "_sync_usitc_trade_flows": {"status": "skipped"},
+        "_sync_eia_crude_imports": {
+            "status": "skipped",
+            "reason": "EIA_API_KEY unset",
+        },
+        "_sync_eia_refinery_throughput": {"status": "skipped"},
+        "_run_gleif_batch": {"status": "skipped", "skipped_missing_columns": True},
+        "_run_wikidata_batch": {"status": "skipped", "skipped_missing_columns": True},
+        "_run_opensanctions_batch": {
+            "status": "skipped",
+            "skipped_missing_columns": True,
+        },
+        "_denormalize_mcr_party_enrichment": {
+            "status": "skipped",
+            "skipped_missing_columns": True,
+        },
+        "_mirror_port_calls": 0,
+        "_mirror_ted_notices": 0,
+        "_mirror_gov_awards": 0,
+        "_ensure_demo_opportunities": {"open_opportunities": 0},
+        "_trigger_synthetic_bol_rebuild": {"status": "ok"},
+        "_table_exists": True,
+        "_record_graph_sync_at": None,
+    }
+
+    with ExitStack() as stack:
+        for attr, return_value in patches.items():
+            stack.enter_context(patch(f"{mod}.{attr}", return_value=return_value))
         summary = graph_sync_mod.run_full_graph_sync(conn, rebuild_synthetic_bol=True)
 
     assert summary["census_api_key_configured"] is True
     assert summary["steps"]["census_trade"]["rows_upserted"] == 42
+    # Phase 4a/4b/4c hook surface area
+    for key in (
+        "eia_crude_imports",
+        "eia_refinery_throughput",
+        "gleif_batch",
+        "wikidata_enrich",
+        "opensanctions_screening",
+        "mcr_party_denormalize",
+    ):
+        assert key in summary["steps"], f"missing step: {key}"
     assert summary["status"] == "ok"

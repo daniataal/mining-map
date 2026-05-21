@@ -137,11 +137,11 @@ function normalizeCountryBordersParam(countries: string[]): string[] {
   ).sort((a, b) => a.localeCompare(b));
 }
 
-// Request interceptor for auth
+// Request interceptor for auth (mining_token from login UI; token alias for legacy scripts)
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('mining_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const token = localStorage.getItem('mining_token') || localStorage.getItem('token');
+  if (token?.trim()) {
+    config.headers.Authorization = `Bearer ${token.trim()}`;
   }
   return config;
 });

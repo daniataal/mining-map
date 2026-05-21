@@ -15,6 +15,13 @@
 | **Performance** | Done | Debounced map bbox (450ms, keepPreviousData). Shared opportunities cache; no refetch on pan for opps list. |
 | **Live AIS** | Done | WebSocket positions; optional workers. |
 | **Dedup** | Done | Client + server opportunity dedup/diversify. |
+| **Trader workflows** | Done | Save to Suppliers (cargo/entity drawers), watch opportunity → `oil_watchlists` / `oil_alerts`, terminal search, commodity map filter, CSV export (cargo + opportunities). |
+| **Route planner deep link** | Done | Deal pack + cargo drawer → **Open in Route Planner** pre-fills load/discharge from MCR port names. |
+| **Company dossier link** | Done | Shipper/consignee + saved companies → opens existing license dossier when `supplier_id` is set. |
+| **USITC macro trade** | Done | `backend/services/usitc_dataweb.py` on graph-sync (`USITC_DATAWEB_API_KEY`). |
+| **EIA crude imports + refinery throughput** | Done | `backend/services/eia_imports.py` on graph-sync; new `oil_refinery_throughput` table; `EIA_API_KEY` optional (step skipped if unset). |
+| **OpenSanctions screening** | Done | `backend/services/opensanctions_screening.py` on graph-sync; non-blocking UI chip; key optional. |
+| **GLEIF LEI batch + Wikidata enrichment** | Done | `backend/services/gleif_batch.py` + `backend/services/wikidata_company_enrichment.py` populate `oil_companies.lei` + `wikidata_qid`. LEI/sanctions denormalised onto `meridian_cargo_records` post-rebuild via `oil_live_mcr_denormalize.py`. |
 
 **Not yet / optional:** paid BOL ingestion, automated deal-room from opportunities, MCP CI smoke.
 
@@ -81,7 +88,7 @@ Optional query param: `rebuild_synthetic_bol=false` to skip the hourly MCR rebui
 **What graph-sync does:**
 
 1. Import OSM storage terminals (up to `OIL_GRAPH_STORAGE_IMPORT_CAP`, default 15k)
-2. Index petroleum licenses → companies + events
+2. Index petroleum licenses → companies + events ([LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md) for CSV bulk ingest)
 3. Mirror Comtrade/EIA/Census trade → commercial events
 4. Mirror port calls, TED notices, USAspending awards
 5. Seed demo corridors if port-call data is sparse
@@ -139,7 +146,12 @@ docker compose up -d oil-live-intel-worker
 | Variable | Purpose |
 |----------|---------|
 | `COMTRADE_API_KEY` | Higher Comtrade quota |
-| `EIA_API_KEY` | U.S. EIA petroleum volumes |
+| `EIA_API_KEY` | U.S. EIA petroleum volumes; also drives the new **EIA crude imports** + **refinery throughput** graph-sync steps (`backend/services/eia_imports.py`). Both skip cleanly when unset. |
+| `OPENSANCTIONS_API_KEY` | Optional — higher-rate-limit OpenSanctions tier. Public API works without it. The graph-sync screening step (`backend/services/opensanctions_screening.py`) writes `oil_companies.sanctions_status` + `sanctions_matches` and never auto-blocks the UI. |
+| `OPENSANCTIONS_BATCH_LIMIT` | Rows screened per graph-sync run (default 50). |
+| `GLEIF_BATCH_LIMIT` | Rows enriched per graph-sync run by `backend/services/gleif_batch.py` (default 100); writes `oil_companies.lei` + `lei_record_id`. |
+| `WIKIDATA_BATCH_LIMIT` | Rows enriched per graph-sync run by `backend/services/wikidata_company_enrichment.py` (default 50); writes `oil_companies.wikidata_qid` + `wikidata_facts`. |
+| `WIKIDATA_USER_AGENT` | Override the polite contact string sent to Wikimedia per their User-Agent policy. |
 | `OIL_GRAPH_SYNC_ENABLED` | `false` disables graph sync |
 | `OIL_GRAPH_STORAGE_IMPORT_CAP` | Max OSM terminals per sync (default 15000) |
 | `CENSUS_TRADE_SYNC_YEAR` | Census year (default: current year − 2) |
@@ -172,6 +184,26 @@ Expect `terminal_count` ≫ 6 after graph-sync; `cargo_record_count` > 0 when po
 
 ---
 
+## Trader workflows
+
+Actions available in the Live Data intel drawer and left entity drawer (no separate admin step).
+
+| Action | Where | API / behavior |
+|--------|--------|----------------|
+| **Save to Suppliers** | Cargo drawer (MCR tab): shipper/consignee when `shipper_company_id` / `consignee_company_id` exist. Companies tab: per-row button. | `POST /api/oil-live/companies/{id}/save-to-suppliers` → Python license + Deal-signal annotation |
+| **Watch opportunity** | Opportunities tab card + entity drawer header (bell). Watches terminal ID if linked, else `opportunity_type`. | `POST /api/oil-live/watchlists` → matcher fills `oil_alerts` on new opps/cards |
+| **Terminal search** | Intel drawer search box (name / country / port / operator). | Client filter on map bbox terminals + index hint count |
+| **Commodity filter** | Product chips (crude / refined / gas / sulfur / all). | Map: terminal `products[]` + corridor `commodity_family`; Cargo tab uses same filter on API |
+| **Export CSV** | Cargo tab and Opportunities tab **Export CSV**. | Client download (`meridian-cargo-records-*.csv`, `meridian-opportunities-*.csv`) |
+| **Open in Route Planner** | Deal pack + cargo drawer (MCR). | Pre-fills supplier (load) and buyer (discharge) from MCR port names + corridor coords |
+| **Open dossier** | Cargo shipper/consignee links; Companies tab when saved. | Resolves `supplier_id` → map license dossier (`DossierView`) |
+
+**License-driven suppliers:** Bulk CSV import format and API are documented in [LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md). Graph-sync step 2 indexes those licenses into `oil_companies`; **Save to Suppliers** creates a Deal-signal license for outreach.
+
+**Alerts tab:** lists `oil_alerts` as readable cards (same typography as Intelligence/Opportunities), watchlist section, mark-read / assign. Requires graph-sync + watch actions for meaningful matches.
+
+---
+
 ## End-to-end test checklist
 
 1. Start stack: `docker compose up -d db backend oil-live-intel`
@@ -181,6 +213,11 @@ Expect `terminal_count` ≫ 6 after graph-sync; `cargo_record_count` > 0 when po
 5. Click terminal or vessel → **Deal Execution Pack** drawer
 6. (With AIS) Vessel markers update; intelligence feed gets new cards
 7. Export CSV from Cargo tab → opens download with current filters
+8. Opportunities tab → **Watch** → row appears under Alerts → Watchlists
+9. Open cargo record on map → **Save shipper/consignee to Suppliers** when company IDs present
+10. Terminal search (e.g. `Rotterdam`) → map terminal markers filter in view
+11. Commodity chip **crude** → corridors and terminals narrow to crude family
+12. Opportunities **Export CSV** → `meridian-opportunities-YYYY-MM-DD.csv`
 
 ---
 

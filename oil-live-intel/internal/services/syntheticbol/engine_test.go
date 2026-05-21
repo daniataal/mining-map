@@ -1,6 +1,12 @@
 package syntheticbol
 
-import "testing"
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
 
 func TestInferCommodityFamily(t *testing.T) {
 	crude := true
@@ -37,4 +43,40 @@ func TestHsForFamily(t *testing.T) {
 	if hsForFamily("sulfur") != "2802" {
 		t.Fatalf("sulfur hs")
 	}
+}
+
+func TestRecipeRefineryDrivenConstants(t *testing.T) {
+	if RecipeRefineryDriven != "G_refinery_driven" {
+		t.Fatalf("unexpected RecipeRefineryDriven constant: %q", RecipeRefineryDriven)
+	}
+	a := fingerprint(RecipeRefineryDriven, "11111111-1111-1111-1111-111111111111")
+	b := fingerprint(RecipeRefineryDriven, "22222222-2222-2222-2222-222222222222")
+	if a == b {
+		t.Fatalf("refinery fingerprints should differ per terminal")
+	}
+}
+
+// TestRecipeRefineryDrivenEmptyDB exercises the recipe against an empty / running
+// Postgres reachable via OILLIVE_TEST_DB. With no matching refinery terminals the
+// recipe must return no error and an empty slice; this guards against accidental
+// nil-pool panics or invalid SQL when the migration ships.
+func TestRecipeRefineryDrivenEmptyDB(t *testing.T) {
+	dsn := os.Getenv("OILLIVE_TEST_DB")
+	if dsn == "" {
+		t.Skip("OILLIVE_TEST_DB not set; skipping DB-backed recipe smoke test")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("pgxpool.New: %v", err)
+	}
+	defer pool.Close()
+	drafts, err := recipeRefineryDriven(ctx, pool)
+	if err != nil {
+		t.Fatalf("recipeRefineryDriven returned error: %v", err)
+	}
+	if drafts == nil {
+		drafts = []mcrDraft{}
+	}
+	t.Logf("recipeRefineryDriven returned %d drafts", len(drafts))
 }

@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../lib/api';
 import { normalizeAnnotationStage } from '../lib/dealWorkflow';
@@ -5,6 +6,10 @@ import type { UserAnnotation } from '../types';
 
 const LOCAL_STORAGE_KEY = 'mining_user_data';
 const MIGRATION_FLAG_KEY = 'mining_annotations_migrated_v1';
+
+function isAnnotationsAuthError(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 401;
+}
 
 function readLocalAnnotations(): Record<string, UserAnnotation> {
   try {
@@ -87,7 +92,9 @@ export function useLicenseAnnotations(token: string | null | undefined) {
           localStorage.setItem(MIGRATION_FLAG_KEY, '1');
         }
       } catch (err) {
-        console.warn('[annotations] server hydration failed, using local cache', err);
+        if (!isAnnotationsAuthError(err)) {
+          console.warn('[annotations] server hydration failed, using local cache', err);
+        }
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -110,7 +117,9 @@ export function useLicenseAnnotations(token: string | null | undefined) {
             annotation,
           });
         } catch (err) {
-          console.warn(`[annotations] failed to save ${licenseId}`, err);
+          if (!isAnnotationsAuthError(err)) {
+            console.warn(`[annotations] failed to save ${licenseId}`, err);
+          }
         }
       }, 400);
       pendingWrites.current.set(licenseId, timer);

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDebouncedValue } from '../../hooks/use-debounced-value';
-import { Marker, Popup, Polyline, LayerGroup } from 'react-leaflet';
+import { Marker, Popup, Polyline, LayerGroup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet.markercluster';
+import 'leaflet-polylinedecorator';
 import { createOilTerminalClusterIconFactory } from '../../lib/mapClusterIcons';
 import OilLiveProvenanceBadge from '../../features/live-data/OilLiveProvenanceBadge';
 import {
@@ -12,14 +13,29 @@ import {
   getCargoRecords,
   getOilLiveMap,
   getOilOpportunities,
+  getTradeFlows,
   type MeridianCargoRecord,
   type OilLiveVessel,
   type OilOpportunity,
   type OilTerminal,
+  type TradeFlowArc,
 } from '../../api/oilLiveApi';
 import type { MaritimeViewportBounds } from '../../types';
 import type { OilLiveEntityKind } from '../../features/live-data/OilLiveEntityDrawer';
 import { dedupeOpportunities } from '../../features/live-data/dedupeOpportunities';
+import {
+  commodityMatchesFilter,
+  terminalMatchesSearch,
+} from '../../features/live-data/liveDataWorkflow';
+import {
+  bezierMidpoint,
+  commodityColor,
+  recencyOpacity,
+  tierDashArray,
+  tierDoubleStroke,
+  volumeToWeight,
+  type LatLngTuple,
+} from '../../lib/corridorGeometry';
 
 export type OilLiveEntityClickPayload = {
   entityKind: OilLiveEntityKind;
@@ -34,7 +50,14 @@ export type OilLiveLayerVisibility = {
   vessels: boolean;
   corridors: boolean;
   opportunities: boolean;
+  /** Aggregated company-pair / country-pair "Trade Flow" arcs. Off by default. */
+  tradeFlows: boolean;
 };
+
+/** Cap of per-MCR arrows kept on the map at once (Phase 1 constraint). */
+const MAX_PER_MCR_ARROWS = 200;
+/** Cap of aggregated Trade Flow arcs (Phase 2 constraint). */
+const MAX_TRADE_FLOW_ARROWS = 80;
 
 const terminalIcon = new L.DivIcon({
   className: '',
@@ -92,16 +115,183 @@ const partialCorridorIcon = new L.DivIcon({
 type Props = {
   enabled: boolean;
   productFilter?: string;
+  terminalSearch?: string;
   layers?: OilLiveLayerVisibility;
+  tradeFlowGroup?: 'company_pair' | 'country_pair';
   viewport?: MaritimeViewportBounds | null;
   onStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
   onEntityClick?: (payload: OilLiveEntityClickPayload) => void;
 };
 
+type SanctionsTone = 'clear' | 'flagged' | 'review' | 'unknown';
+
+function sanctionsTone(value?: string | null): SanctionsTone {
+  if (!value) return 'unknown';
+  const v = value.toLowerCase();
+  if (v === 'clear') return 'clear';
+  if (v === 'flagged' || v === 'sanctioned' || v === 'match') return 'flagged';
+  if (v === 'review' || v === 'pep') return 'review';
+  return 'unknown';
+}
+
+const SANCTIONS_STYLE: Record<SanctionsTone, { bg: string; color: string; label: string }> = {
+  clear: { bg: '#dcfce7', color: '#166534', label: 'Sanctions: clear' },
+  flagged: { bg: '#fee2e2', color: '#991b1b', label: 'Sanctions: flagged' },
+  review: { bg: '#fef3c7', color: '#92400e', label: 'Sanctions: review' },
+  unknown: { bg: '#e2e8f0', color: '#475569', label: 'Sanctions: unknown' },
+};
+
+function chipStyle(bg: string, color: string): React.CSSProperties {
+  return {
+    display: 'inline-block',
+    padding: '1px 6px',
+    borderRadius: 999,
+    background: bg,
+    color,
+    fontSize: 9,
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginRight: 4,
+    marginBottom: 2,
+  };
+}
+
+function LeiChip({ lei }: { lei?: string | null }) {
+  if (!lei) return null;
+  return (
+    <span style={chipStyle('#dbeafe', '#1e3a8a')} title={`LEI ${lei}`}>
+      LEI {lei.slice(0, 8)}…
+    </span>
+  );
+}
+
+function SanctionsChip({ status }: { status?: string | null }) {
+  const tone = sanctionsTone(status);
+  const style = SANCTIONS_STYLE[tone];
+  return (
+    <span style={chipStyle(style.bg, style.color)} title={style.label}>
+      {tone === 'unknown' ? 'unscreened' : tone}
+    </span>
+  );
+}
+
+const RECIPE_TITLES: Record<string, string> = {
+  A: 'Sanctions-pivot corridor (commodity x recent port-call switch)',
+  B: 'Storage-build inferred lift (terminal level changes)',
+  C: 'Tender-driven (USAspending / TED contract win + lift)',
+  D: 'Refiner stock draw → import pull',
+  E: 'Pipeline outage / disruption substitution',
+  F: 'Export-quota window (Comtrade / Census signal)',
+  G: 'Refinery-driven (EIA throughput + Comtrade feedstock)',
+};
+
+function recipeLabel(recipe?: string | null): { code: string; title: string } | null {
+  if (!recipe) return null;
+  const match = /[A-G]/i.exec(recipe);
+  const code = match ? match[0].toUpperCase() : recipe;
+  const title = RECIPE_TITLES[code] ?? recipe;
+  return { code, title };
+}
+
+function formatVolumeBand(record: MeridianCargoRecord): string | null {
+  const unit = record.volume_unit ?? 'bbl';
+  const low = record.volume_low;
+  const mid = record.volume_best_estimate;
+  const high = record.volume_high;
+  const parts: string[] = [];
+  if (low != null) parts.push(Math.round(low).toLocaleString());
+  if (mid != null) parts.push(mid != null ? `≈${Math.round(mid).toLocaleString()}` : '—');
+  if (high != null) parts.push(Math.round(high).toLocaleString());
+  if (parts.length === 0) return null;
+  return `${parts.join(' – ')} ${unit}`;
+}
+
+/**
+ * Renders a curved 3-point Polyline with an arrowhead near the discharge end.
+ * Uses leaflet-polylinedecorator under the hood; if the decorator fails to
+ * register (e.g. SSR/test), the polyline still renders without the arrow.
+ */
+type ArrowPolylineProps = {
+  positions: LatLngTuple[];
+  pathOptions: L.PathOptions;
+  arrowColor: string;
+  arrowSize: number;
+  children?: React.ReactNode;
+  eventHandlers?: L.LeafletEventHandlerFnMap;
+};
+
+function ArrowPolyline({
+  positions,
+  pathOptions,
+  arrowColor,
+  arrowSize,
+  children,
+  eventHandlers,
+}: ArrowPolylineProps) {
+  const map = useMap();
+  const [polyline, setPolyline] = useState<L.Polyline | null>(null);
+
+  useEffect(() => {
+    if (!polyline) return;
+    const decoratorFactory = (L as unknown as { polylineDecorator?: typeof L.polylineDecorator })
+      .polylineDecorator;
+    if (typeof decoratorFactory !== 'function') return;
+    let decorator: L.PolylineDecorator;
+    try {
+      decorator = decoratorFactory(polyline, {
+        patterns: [
+          {
+            offset: '100%',
+            repeat: 0,
+            symbol: L.Symbol.arrowHead({
+              pixelSize: arrowSize,
+              polygon: false,
+              pathOptions: {
+                stroke: true,
+                color: arrowColor,
+                weight: Math.max(2, Math.min(4, (pathOptions.weight ?? 2))),
+                opacity: pathOptions.opacity ?? 1,
+              },
+            }),
+          },
+        ],
+      });
+    } catch {
+      return;
+    }
+    decorator.addTo(map);
+    return () => {
+      decorator.remove();
+    };
+  }, [map, polyline, arrowColor, arrowSize, pathOptions.opacity, pathOptions.weight, positions]);
+
+  return (
+    <Polyline
+      positions={positions}
+      pathOptions={pathOptions}
+      eventHandlers={eventHandlers}
+      ref={(instance) => {
+        setPolyline((current) => (current === instance ? current : instance ?? null));
+      }}
+    >
+      {children}
+    </Polyline>
+  );
+}
+
 export default function OilLiveMapOverlays({
   enabled,
   productFilter = 'all',
-  layers = { terminals: true, vessels: true, corridors: true, opportunities: true },
+  terminalSearch = '',
+  layers = {
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+    tradeFlows: false,
+  },
+  tradeFlowGroup = 'company_pair',
   viewport,
   onStatsChange,
   onEntityClick,
@@ -138,6 +328,19 @@ export default function OilLiveMapOverlays({
     staleTime: 60_000,
   });
 
+  const { data: tradeFlowsData } = useQuery({
+    queryKey: ['oil-live-trade-flows', tradeFlowGroup, productFilter],
+    queryFn: () =>
+      getTradeFlows({
+        group: tradeFlowGroup,
+        commodity: productFilter === 'all' ? undefined : productFilter,
+        min_confidence: 0.55,
+        limit: 200,
+      }),
+    enabled: enabled && layers.tradeFlows,
+    staleTime: 120_000,
+  });
+
   const { data: oppsData } = useQuery({
     queryKey: oppQueryKey,
     queryFn: () => getOilOpportunities(0.55),
@@ -169,10 +372,13 @@ export default function OilLiveMapOverlays({
         (t.products ?? []).some((p) => p.toLowerCase().includes(productFilter)),
       );
     }
+    if (terminalSearch.trim()) {
+      list = list.filter((t) => terminalMatchesSearch(t, terminalSearch));
+    }
     return list.filter(
       (t) => t.lat != null && t.lng != null && inViewport(t.lat!, t.lng!, viewport),
     );
-  }, [mapData?.terminals, productFilter, viewport]);
+  }, [mapData?.terminals, productFilter, terminalSearch, viewport]);
 
   const vessels = useMemo(() => {
     const base = mapData?.vessels ?? [];
@@ -185,31 +391,87 @@ export default function OilLiveMapOverlays({
     );
   }, [mapData?.vessels, liveVessels, viewport]);
 
-  const corridors = useMemo(() => {
-    return (cargoData?.cargo_records ?? [])
-      .filter((r) => hasCorridorCoords(r))
-      .map((r) => ({
+  const filteredCargoRecords = useMemo(() => {
+    return (cargoData?.cargo_records ?? []).filter((r) =>
+      commodityMatchesFilter(r.commodity_family, productFilter),
+    );
+  }, [cargoData?.cargo_records, productFilter]);
+
+  type Corridor = {
+    record: MeridianCargoRecord;
+    id: string;
+    load: LatLngTuple;
+    discharge: LatLngTuple;
+    offsetIdx: number;
+    positions: LatLngTuple[];
+  };
+
+  const corridors: Corridor[] = useMemo(() => {
+    const filtered = filteredCargoRecords
+      .filter(hasCorridorCoords)
+      .filter((r) => {
+        const load: LatLngTuple = [r.corridor_load_lat!, r.corridor_load_lng!];
+        const disc: LatLngTuple = [r.corridor_discharge_lat!, r.corridor_discharge_lng!];
+        return inViewport(load[0], load[1], viewport) || inViewport(disc[0], disc[1], viewport);
+      });
+
+    // Stagger arrows that share the same load/discharge pair so they don't stack.
+    const seen = new Map<string, number>();
+    const out: Corridor[] = [];
+    for (const r of filtered) {
+      const load: LatLngTuple = [r.corridor_load_lat!, r.corridor_load_lng!];
+      const disc: LatLngTuple = [r.corridor_discharge_lat!, r.corridor_discharge_lng!];
+      const key = `${load[0].toFixed(2)},${load[1].toFixed(2)}|${disc[0].toFixed(2)},${disc[1].toFixed(2)}`;
+      const offsetIdx = seen.get(key) ?? 0;
+      seen.set(key, offsetIdx + 1);
+      out.push({
         record: r,
         id: r.id,
-        positions: [
-          [r.corridor_load_lat!, r.corridor_load_lng!] as [number, number],
-          [r.corridor_discharge_lat!, r.corridor_discharge_lng!] as [number, number],
-        ],
-      }))
-      .filter(({ positions }) => {
-        const [load, disc] = positions;
-        return (
-          inViewport(load[0], load[1], viewport) ||
-          inViewport(disc[0], disc[1], viewport)
-        );
+        load,
+        discharge: disc,
+        offsetIdx,
+        positions: bezierMidpoint(load, disc, offsetIdx),
       });
-  }, [cargoData?.cargo_records, viewport]);
+      if (out.length >= MAX_PER_MCR_ARROWS) break;
+    }
+    return out;
+  }, [filteredCargoRecords, viewport]);
 
   const partialCorridors = useMemo(() => {
-    return (cargoData?.cargo_records ?? [])
+    return filteredCargoRecords
       .filter((r) => isPartialCorridor(r))
       .filter((r) => inViewport(r.corridor_load_lat!, r.corridor_load_lng!, viewport));
-  }, [cargoData?.cargo_records, viewport]);
+  }, [filteredCargoRecords, viewport]);
+
+  const tradeFlowArcs = useMemo(() => {
+    const arcs = tradeFlowsData?.arcs ?? [];
+    const seen = new Map<string, number>();
+    const out: Array<TradeFlowArc & { offsetIdx: number; positions: LatLngTuple[] }> = [];
+    for (const arc of arcs) {
+      if (
+        arc.origin_lat == null ||
+        arc.origin_lng == null ||
+        arc.dest_lat == null ||
+        arc.dest_lng == null
+      ) {
+        continue;
+      }
+      if (
+        !inViewport(arc.origin_lat, arc.origin_lng, viewport) &&
+        !inViewport(arc.dest_lat, arc.dest_lng, viewport)
+      ) {
+        continue;
+      }
+      const load: LatLngTuple = [arc.origin_lat, arc.origin_lng];
+      const disc: LatLngTuple = [arc.dest_lat, arc.dest_lng];
+      const key = `${load[0].toFixed(2)},${load[1].toFixed(2)}|${disc[0].toFixed(2)},${disc[1].toFixed(2)}`;
+      const offsetIdx = seen.get(key) ?? 0;
+      seen.set(key, offsetIdx + 1);
+      out.push({ ...arc, offsetIdx, positions: bezierMidpoint(load, disc, offsetIdx) });
+      if (out.length >= MAX_TRADE_FLOW_ARROWS) break;
+    }
+    return out;
+  }, [tradeFlowsData?.arcs, viewport]);
 
   const terminalById = useMemo(() => {
     const m = new Map<string, OilTerminal>();
@@ -401,39 +663,298 @@ export default function OilLiveMapOverlays({
           </Marker>
         ))}
       {layers.corridors &&
-        corridors.map((c) => (
-          <Polyline
-            key={c.id}
-            positions={c.positions}
-            pathOptions={{ color: '#f59e0b', weight: 2, dashArray: '8 6', opacity: 0.85 }}
-            eventHandlers={{
-              click: (e) => {
-                L.DomEvent.stopPropagation(e);
-                onEntityClick?.({
-                  entityKind: 'cargo',
-                  entityId: c.id,
-                  title: c.record.vessel_name ?? `Cargo ${c.record.commodity_family ?? ''}`,
-                  subtitle: [c.record.load_port_name, c.record.discharge_hint]
-                    .filter(Boolean)
-                    .join(' → '),
-                });
-              },
-            }}
-          >
-            <Popup>
-              <OilLiveProvenanceBadge kind={c.record.data_provenance ?? 'synthetic'} className="mb-1" />
-              <strong>{c.record.commodity_family ?? 'Cargo corridor'}</strong>
-              <br />
-              {c.record.shipper_name && <>Shipper: {c.record.shipper_name}<br /></>}
-              {c.record.consignee_name && <>Consignee: {c.record.consignee_name}<br /></>}
-              {c.record.load_port_name && <>Load: {c.record.load_port_name}<br /></>}
-              {c.record.discharge_hint && <>Discharge: {c.record.discharge_hint}<br /></>}
-              {c.record.confidence != null && (
-                <>Confidence: {(c.record.confidence * 100).toFixed(0)}%</>
+        corridors.map((c) => {
+          const color = commodityColor(c.record.commodity_family);
+          const weight = volumeToWeight(c.record.volume_best_estimate);
+          const opacity = recencyOpacity(c.record.event_date ?? c.record.created_at);
+          const dash = tierDashArray(
+            c.record.bol_tier,
+            c.record.data_provenance,
+            c.record.triangulation_score,
+          );
+          const doubleStroke = tierDoubleStroke(c.record.triangulation_score);
+          const arrowSize = Math.max(8, Math.min(14, Math.round(weight + 6)));
+          const volumeBand = formatVolumeBand(c.record);
+          const recipe = recipeLabel(c.record.recipe);
+          const evidenceTop = (c.record.evidence_chain ?? []).slice(0, 2);
+          const sources = c.record.sources ?? [];
+          const onClickPopup = (e: L.LeafletMouseEvent) => {
+            L.DomEvent.stopPropagation(e);
+            onEntityClick?.({
+              entityKind: 'cargo',
+              entityId: c.id,
+              title: c.record.vessel_name ?? `Cargo ${c.record.commodity_family ?? ''}`,
+              subtitle: [c.record.load_port_name, c.record.discharge_hint]
+                .filter(Boolean)
+                .join(' → '),
+            });
+          };
+
+          return (
+            <LayerGroup key={c.id}>
+              {doubleStroke && (
+                <Polyline
+                  positions={c.positions}
+                  pathOptions={{
+                    color,
+                    weight: weight + 4,
+                    opacity: opacity * 0.35,
+                    dashArray: undefined,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                  interactive={false}
+                />
               )}
-            </Popup>
-          </Polyline>
-        ))}
+              <ArrowPolyline
+                positions={c.positions}
+                arrowColor={color}
+                arrowSize={arrowSize}
+                pathOptions={{
+                  color,
+                  weight,
+                  opacity,
+                  dashArray: dash,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+                eventHandlers={{ click: onClickPopup }}
+              >
+                <Popup>
+                  <div style={{ minWidth: 220, maxWidth: 280 }}>
+                    <div style={{ marginBottom: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      <OilLiveProvenanceBadge kind={c.record.data_provenance ?? 'synthetic'} />
+                      {c.record.bol_tier && (
+                        <span style={chipStyle('#f1f5f9', '#0f172a')}>{c.record.bol_tier}</span>
+                      )}
+                      {recipe && (
+                        <span
+                          style={chipStyle('#ede9fe', '#5b21b6')}
+                          title={recipe.title}
+                        >
+                          Recipe {recipe.code}
+                        </span>
+                      )}
+                    </div>
+                    <strong>{c.record.commodity_family ?? 'Cargo corridor'}</strong>
+                    <br />
+                    {c.record.shipper_name && (
+                      <>
+                        Shipper: {c.record.shipper_name}
+                        <br />
+                      </>
+                    )}
+                    {c.record.consignee_name && (
+                      <>
+                        Consignee: {c.record.consignee_name}
+                        <br />
+                      </>
+                    )}
+                    {c.record.load_port_name && (
+                      <>
+                        Load: {c.record.load_port_name}
+                        <br />
+                      </>
+                    )}
+                    {(c.record.discharge_hint || c.record.discharge_country) && (
+                      <>
+                        Discharge: {c.record.discharge_hint ?? c.record.discharge_country}
+                        <br />
+                      </>
+                    )}
+                    {volumeBand && (
+                      <>
+                        Volume: {volumeBand}
+                        {c.record.volume_method && (
+                          <span
+                            style={{
+                              ...chipStyle('#e0f2fe', '#075985'),
+                              marginLeft: 4,
+                            }}
+                          >
+                            {c.record.volume_method}
+                          </span>
+                        )}
+                        <br />
+                      </>
+                    )}
+                    {c.record.confidence != null && (
+                      <>
+                        Confidence: {(c.record.confidence * 100).toFixed(0)}%
+                        <br />
+                      </>
+                    )}
+
+                    {(c.record.shipper_lei ||
+                      c.record.consignee_lei ||
+                      c.record.shipper_sanctions_status ||
+                      c.record.consignee_sanctions_status) && (
+                      <div style={{ marginTop: 6 }}>
+                        {(c.record.shipper_lei || c.record.shipper_sanctions_status) && (
+                          <div style={{ fontSize: 9, color: '#475569', marginBottom: 2 }}>
+                            <span style={{ fontWeight: 800 }}>Shipper: </span>
+                            <LeiChip lei={c.record.shipper_lei} />
+                            <SanctionsChip status={c.record.shipper_sanctions_status} />
+                          </div>
+                        )}
+                        {(c.record.consignee_lei || c.record.consignee_sanctions_status) && (
+                          <div style={{ fontSize: 9, color: '#475569' }}>
+                            <span style={{ fontWeight: 800 }}>Consignee: </span>
+                            <LeiChip lei={c.record.consignee_lei} />
+                            <SanctionsChip status={c.record.consignee_sanctions_status} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {evidenceTop.length > 0 && (
+                      <div style={{ marginTop: 6 }}>
+                        <p
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 800,
+                            color: '#475569',
+                            textTransform: 'uppercase',
+                            margin: '0 0 2px',
+                          }}
+                        >
+                          Evidence
+                        </p>
+                        <ul
+                          style={{
+                            margin: 0,
+                            paddingLeft: 14,
+                            fontSize: 10,
+                            color: '#334155',
+                          }}
+                        >
+                          {evidenceTop.map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {sources.length > 0 && (
+                      <div style={{ marginTop: 6, fontSize: 10 }}>
+                        <span style={{ fontWeight: 800, color: '#475569' }}>Verify source: </span>
+                        {sources
+                          .filter((s) => s?.url)
+                          .slice(0, 3)
+                          .map((s, i) => (
+                            <a
+                              key={i}
+                              href={s.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                color: '#0369a1',
+                                marginRight: 6,
+                                textDecoration: 'underline',
+                              }}
+                            >
+                              {s.name ?? `#${i + 1}`}
+                            </a>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              </ArrowPolyline>
+            </LayerGroup>
+          );
+        })}
+      {layers.tradeFlows &&
+        tradeFlowArcs.map((arc) => {
+          const color = commodityColor(arc.commodity_family);
+          const weight = Math.max(
+            2,
+            Math.min(10, 2 + 2.5 * Math.log10(Math.max(1, arc.cargo_count))),
+          );
+          const opacity = Math.max(0.45, Math.min(0.95, 0.45 + arc.avg_confidence * 0.5));
+          const arrowSize = Math.max(10, Math.min(16, Math.round(weight + 6)));
+          return (
+            <ArrowPolyline
+              key={`tf-${arc.key}`}
+              positions={arc.positions}
+              arrowColor={color}
+              arrowSize={arrowSize}
+              pathOptions={{
+                color,
+                weight,
+                opacity,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            >
+              <Popup>
+                <div style={{ minWidth: 220, maxWidth: 280 }}>
+                  <div style={{ marginBottom: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    <span style={chipStyle('#fef3c7', '#92400e')}>Trade flow</span>
+                    <span style={chipStyle('#e0f2fe', '#075985')}>
+                      {arc.group === 'company_pair' ? 'Company pair' : 'Country pair'}
+                    </span>
+                    <span style={chipStyle('#ede9fe', '#5b21b6')}>{arc.commodity_family}</span>
+                  </div>
+                  <strong>
+                    {arc.shipper} → {arc.consignee}
+                  </strong>
+                  <br />
+                  <span style={{ fontSize: 11 }}>
+                    {arc.cargo_count.toLocaleString()} cargo{arc.cargo_count === 1 ? '' : 'es'} ·{' '}
+                    {Math.round(arc.volume_total).toLocaleString()} {arc.volume_unit || ''}
+                  </span>
+                  <br />
+                  <span style={{ fontSize: 11 }}>
+                    Confidence avg {(arc.avg_confidence * 100).toFixed(0)}%
+                  </span>
+                  {arc.sample_mcr_ids.length > 0 && onEntityClick && (
+                    <div style={{ marginTop: 6 }}>
+                      <p
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 800,
+                          color: '#475569',
+                          textTransform: 'uppercase',
+                          margin: '0 0 2px',
+                        }}
+                      >
+                        Contributing cargoes
+                      </p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {arc.sample_mcr_ids.slice(0, 5).map((mcrId) => (
+                          <button
+                            key={mcrId}
+                            type="button"
+                            onClick={() =>
+                              onEntityClick({
+                                entityKind: 'cargo',
+                                entityId: mcrId,
+                                title: `MCR ${mcrId.slice(0, 8)}`,
+                                subtitle: `${arc.shipper} → ${arc.consignee}`,
+                              })
+                            }
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              borderRadius: 4,
+                              background: '#f8fafc',
+                              padding: '2px 6px',
+                              fontSize: 9,
+                              fontFamily: 'monospace',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {mcrId.slice(0, 8)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Popup>
+            </ArrowPolyline>
+          );
+        })}
       {layers.opportunities &&
         opportunityMarkers.map((o) => (
           <Marker

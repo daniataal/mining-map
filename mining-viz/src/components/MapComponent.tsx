@@ -269,8 +269,11 @@ interface MapComponentProps {
   /** Live Data mode — oil-live-intel map overlays. */
   oilLiveOverlaysEnabled?: boolean;
   oilLiveProductFilter?: string;
+  oilLiveTerminalSearch?: string;
   oilLiveLayers?: OilLiveLayerVisibility;
   onOilLiveLayersChange?: (layers: OilLiveLayerVisibility) => void;
+  oilLiveTradeFlowGroup?: 'company_pair' | 'country_pair';
+  onOilLiveTradeFlowGroupChange?: (group: 'company_pair' | 'country_pair') => void;
   oilLiveCoverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
   onOilLiveStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
@@ -550,8 +553,17 @@ export default function MapComponent({
   onStorageInViewCountChange,
   oilLiveOverlaysEnabled = false,
   oilLiveProductFilter = 'all',
-  oilLiveLayers = { terminals: true, vessels: true, corridors: true, opportunities: true },
+  oilLiveTerminalSearch = '',
+  oilLiveLayers = {
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+    tradeFlows: false,
+  },
   onOilLiveLayersChange,
+  oilLiveTradeFlowGroup = 'company_pair',
+  onOilLiveTradeFlowGroupChange,
   oilLiveCoverageStats = null,
   onOilLiveStatsChange,
   onOilLiveEntityClick,
@@ -1156,6 +1168,8 @@ export default function MapComponent({
                         allMaritimeEnabled={isMaritimeLayerEnabled}
                         onAllMaritimeChange={setIsMaritimeLayerEnabled}
                         globalMaritimeCount={maritimeSnapshotTotal}
+                        tradeFlowGroup={oilLiveTradeFlowGroup}
+                        onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
                     />
                 </div>
             )}
@@ -1768,7 +1782,9 @@ export default function MapComponent({
                         <OilLiveMapOverlays
                             enabled
                             productFilter={oilLiveProductFilter}
+                            terminalSearch={oilLiveTerminalSearch}
                             layers={oilLiveLayers}
+                            tradeFlowGroup={oilLiveTradeFlowGroup}
                             viewport={liveDataMapViewport}
                             onStatsChange={onOilLiveStatsChange}
                             onEntityClick={onOilLiveEntityClick}

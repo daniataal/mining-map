@@ -393,6 +393,7 @@ services:
     environment:
       VITE_API_BASE: ${VITE_API_BASE:-}
       VITE_ROUTE_SERVICE_URL: ${VITE_ROUTE_SERVICE_URL:-}
+      OIL_INTEL_PROXY_TARGET: http://oil-live-intel:8095
     depends_on:
       backend:
         condition: service_healthy
@@ -421,6 +422,7 @@ services:
       OIL_INTEL_SEED_ON_STARTUP: "true"
       OIL_INTEL_INTERNAL_KEY: ${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
       OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-true}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
     healthcheck:
       test:
         [
@@ -456,11 +458,63 @@ services:
       ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
       ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
       OIL_INTEL_SEED_ON_STARTUP: "false"
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
     depends_on:
       db:
         condition: service_healthy
       oil-live-intel:
         condition: service_healthy
+
+  # oil-live-search-indexer: maintains the Elasticsearch indices used by
+  # /api/oil-live/search. Full sync on startup; incremental sync every
+  # SEARCH_INDEXER_INTERVAL_SECONDS (default 300s).
+  oil-live-search-indexer:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-search-indexer
+    restart: unless-stopped
+    entrypoint: ["/app/search-indexer"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      SEARCH_INDEXER_INTERVAL_SECONDS: ${SEARCH_INDEXER_INTERVAL_SECONDS:-300}
+      OIL_INTEL_SEED_ON_STARTUP: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  # elasticsearch: search index layer for MCRs, companies, terminals, vessels.
+  # Single-node, security disabled — local dev only. Use a managed cluster or
+  # full xpack security in production.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: mining-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - meridian_elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9200/_cluster/health | grep -E '\"status\":\"(green|yellow)\"' >/dev/null"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   db:
     build:
@@ -502,3 +556,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  meridian_elasticsearch_data:
