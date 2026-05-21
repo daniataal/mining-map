@@ -48,7 +48,7 @@ func Load() Config {
 		APIBaseURL:             strings.TrimRight(env("OIL_INTEL_API_URL", "http://oil-live-intel:8095"), "/"),
 		InternalBroadcastKey:   env("OIL_INTEL_INTERNAL_KEY", "oil-intel-dev"),
 		AISPositionRetainHours: envInt("AIS_POSITION_RETAIN_HOURS", 72),
-		AISInsecureTLS:         envBool("OIL_INTEL_AIS_INSECURE_TLS", false),
+		AISInsecureTLS:         aisInsecureTLS(),
 		ElasticsearchURL:       strings.TrimRight(env("ELASTICSEARCH_URL", "http://elasticsearch:9200"), "/"),
 		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
 	}
@@ -86,6 +86,15 @@ func envBool(key string, fallback bool) bool {
 }
 
 // envDisableDemoSeed returns true when demo seeds should be skipped (default true).
+// aisInsecureTLS mirrors Python MARITIME_SSL_VERIFY=0 for expired upstream AISStream certs.
+func aisInsecureTLS() bool {
+	if envBool("OIL_INTEL_AIS_INSECURE_TLS", false) {
+		return true
+	}
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("MARITIME_SSL_VERIFY")))
+	return raw == "0" || raw == "false" || raw == "no" || raw == "off"
+}
+
 func envDisableDemoSeed(key string) bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	if v == "" {

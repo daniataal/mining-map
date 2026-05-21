@@ -7,7 +7,9 @@ from services.maritime_ssl import (
     aisstream_hostname,
     build_maritime_ssl_context,
     format_maritime_connection_error,
+    is_certificate_expired_error,
     maritime_ssl_verify_enabled,
+    should_retry_aisstream_without_tls_verify,
     websockets_ssl_argument,
 )
 
@@ -60,6 +62,17 @@ class MaritimeSslTests(unittest.TestCase):
     def test_websockets_ssl_argument_returns_context(self):
         arg = websockets_ssl_argument("wss://stream.aisstream.io/v0/stream")
         self.assertIsInstance(arg, ssl.SSLContext)
+
+    def test_should_retry_on_expired_cert(self):
+        exc = ssl.SSLError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate has expired")
+        self.assertTrue(is_certificate_expired_error(exc))
+        with mock.patch.dict(os.environ, {"MARITIME_SSL_AUTO_FALLBACK": "1"}, clear=False):
+            self.assertTrue(should_retry_aisstream_without_tls_verify(exc))
+
+    def test_no_retry_when_auto_fallback_off(self):
+        exc = Exception("certificate has expired")
+        with mock.patch.dict(os.environ, {"MARITIME_SSL_AUTO_FALLBACK": "0"}, clear=False):
+            self.assertFalse(should_retry_aisstream_without_tls_verify(exc))
 
 
 if __name__ == "__main__":

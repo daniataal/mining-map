@@ -57,6 +57,8 @@ import {
   terminalMatchesSearch,
   watchOpportunity,
 } from './liveDataWorkflow';
+import { usePlatformHealth } from '../../lib/platformHealth';
+import { resolveLiveAisBanner } from './liveAisBanner';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -315,18 +317,16 @@ export default function LiveDataIntelPanel({
     [opportunitiesData],
   );
 
-  const showNoLiveAisBanner = useMemo(() => {
-    if (!syncStatus) return false;
-    const vesselsInView = coverageStats?.vessels ?? 0;
-    const vesselsLow =
-      syncStatus.live_vessel_count != null
-        ? syncStatus.live_vessel_count === 0
-        : vesselsInView === 0;
-    const livePortCalls = syncStatus.live_ais_port_call_count;
-    const portCallsLow =
-      livePortCalls != null ? livePortCalls < 3 : syncStatus.port_call_count === 0;
-    return vesselsLow || portCallsLow;
-  }, [syncStatus, coverageStats?.vessels]);
+  const { data: platformHealth } = usePlatformHealth(true);
+
+  const liveAisBanner = useMemo(
+    () =>
+      resolveLiveAisBanner(syncStatus, {
+        vesselsInView: coverageStats?.vessels ?? 0,
+        platformHealth,
+      }),
+    [syncStatus, coverageStats?.vessels, platformHealth],
+  );
 
   const terminalSearchMatches = useMemo(() => {
     const q = terminalSearch.trim();
@@ -680,15 +680,16 @@ export default function LiveDataIntelPanel({
             </ul>
           </div>
         )}
-        {showNoLiveAisBanner && (
+        {liveAisBanner.kind !== 'none' && (
           <div
-            className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-2.5 text-sm leading-relaxed text-amber-950 dark:text-amber-100"
+            className={`mt-3 rounded-xl border px-3 py-2.5 text-sm leading-relaxed ${
+              liveAisBanner.kind === 'tls_expired'
+                ? 'border-orange-500/50 bg-orange-500/15 text-orange-950 dark:text-orange-100'
+                : 'border-amber-500/40 bg-amber-500/15 text-amber-950 dark:text-amber-100'
+            }`}
             role="status"
           >
-            {t(
-              'אין AIS חי — הגדירו AISSTREAM_API_KEY והפעילו maritime-worker + oil-live-intel-worker. נתוני הדגמה מושבתים.',
-              'No live AIS — set AISSTREAM_API_KEY and start maritime-worker + oil-live-intel-worker. Demo data is disabled.',
-            )}
+            {t(liveAisBanner.messageHe, liveAisBanner.messageEn)}
           </div>
         )}
         <div className="mt-3 rounded-xl border border-cyan-600/30 bg-cyan-500/10 px-3 py-3">
