@@ -119,7 +119,12 @@ type Props = {
   layers?: OilLiveLayerVisibility;
   tradeFlowGroup?: 'company_pair' | 'country_pair';
   viewport?: MaritimeViewportBounds | null;
-  onStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
+  onStatsChange?: (stats: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  }) => void;
   onEntityClick?: (payload: OilLiveEntityClickPayload) => void;
 };
 
@@ -521,8 +526,9 @@ export default function OilLiveMapOverlays({
       terminals: terminals.length,
       vessels: vessels.length,
       opportunities: opportunityMarkers.length,
+      corridors: corridors.length,
     });
-  }, [terminals.length, vessels.length, opportunityMarkers.length, onStatsChange]);
+  }, [terminals.length, vessels.length, opportunityMarkers.length, corridors.length, onStatsChange]);
 
   const terminalClusterIcon = useMemo(() => createOilTerminalClusterIconFactory(), []);
 

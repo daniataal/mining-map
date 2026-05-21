@@ -47,6 +47,7 @@ import {
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
 import EiaHistoricImportsPanel from './EiaHistoricImportsPanel';
+import TradeManifestUploadPanel from './TradeManifestUploadPanel';
 import LiveDataSearchBar, { type LiveDataSearchHitClick } from './LiveDataSearchBar';
 import { dedupeOpportunities } from './dedupeOpportunities';
 import { downloadCsv } from '../../lib/csvExport';
@@ -59,6 +60,7 @@ import {
 } from './liveDataWorkflow';
 import { usePlatformHealth } from '../../lib/platformHealth';
 import { resolveLiveAisBanner } from './liveAisBanner';
+import { firstVerifyUrl } from '../../lib/verifySourceUrl';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -122,7 +124,12 @@ export type LiveDataIntelPanelProps = {
   onProductFilterChange: (value: string) => void;
   terminalSearch: string;
   onTerminalSearchChange: (value: string) => void;
-  coverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
+  coverageStats?: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  } | null;
   onOpenOpportunity?: (opportunityId: string, title?: string) => void;
   onOpenCargoRecord?: (record: MeridianCargoRecord) => void;
   onOpenCompanyDossier?: (companyId: string) => void;
@@ -346,6 +353,11 @@ export default function LiveDataIntelPanel({
       key: 'opportunities',
       label: t('הזדמנויות', 'Opportunities'),
       value: coverageStats?.opportunities ?? 0,
+    },
+    {
+      key: 'corridors',
+      label: t('מסדרונות', 'Corridors'),
+      value: coverageStats?.corridors ?? 0,
     },
   ] as const;
 
@@ -710,7 +722,7 @@ export default function LiveDataIntelPanel({
           <p className="mt-2 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
             {t('בתצוגת המפה', 'In current map view')}
           </p>
-          <div className="mt-1.5 grid grid-cols-3 gap-2">
+          <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2">
             {coverageInView.map(({ key, label, value }) => (
               <div
                 key={key}
@@ -1004,6 +1016,17 @@ export default function LiveDataIntelPanel({
                     {record.load_port_name && ` · ${record.load_port_name}`}
                     {record.load_country && ` (${record.load_country})`}
                   </p>
+                  {firstVerifyUrl(record) && (
+                    <a
+                      href={firstVerifyUrl(record)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-[9px] font-bold uppercase text-violet-600 dark:text-violet-400"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {t('אמת במקור', 'Verify at source')}
+                    </a>
+                  )}
                   {record.opportunity_id && onOpenOpportunity && (
                     <button
                       type="button"
@@ -1597,7 +1620,10 @@ export default function LiveDataIntelPanel({
         )}
 
         {tab === 'eia_historic' && (
-          <EiaHistoricImportsPanel onMapArcsChange={onEiaHistoricMapChange} />
+          <div className="space-y-4">
+            <EiaHistoricImportsPanel onMapArcsChange={onEiaHistoricMapChange} />
+            <TradeManifestUploadPanel />
+          </div>
         )}
 
         {tab === 'feed' && filteredCards.length === 0 && !isLoading && (

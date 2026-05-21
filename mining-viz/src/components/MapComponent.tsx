@@ -56,7 +56,11 @@ import OilLiveMapOverlays, {
 } from './petroleum/OilLiveMapOverlays';
 import LiveDataMapLayersPanel from '../features/live-data/LiveDataMapLayersPanel';
 import EiaHistoricMapLayer from '../features/live-data/EiaHistoricMapLayer';
+import MacroTradeFlowsMapLayer from '../features/live-data/MacroTradeFlowsMapLayer';
 import type { EiaHistoricMapArc } from '../api/eiaHistoricApi';
+import type { MacroTradeFlow } from '../api/oilLiveApi';
+import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
+import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
 import { LIVE_DATA_HUB_BOUNDS } from '../features/live-data/liveDataMapDefaults';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
@@ -276,8 +280,22 @@ interface MapComponentProps {
   onOilLiveLayersChange?: (layers: OilLiveLayerVisibility) => void;
   oilLiveTradeFlowGroup?: 'company_pair' | 'country_pair';
   onOilLiveTradeFlowGroupChange?: (group: 'company_pair' | 'country_pair') => void;
-  oilLiveCoverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
-  onOilLiveStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
+  oilLiveCoverageStats?: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  } | null;
+  onOilLiveStatsChange?: (stats: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  }) => void;
+  liveDataEiaHistoricOn?: boolean;
+  onLiveDataEiaHistoricChange?: (on: boolean) => void;
+  liveDataMacroTradeOn?: boolean;
+  onLiveDataMacroTradeChange?: (on: boolean) => void;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
   /** Increment when entering Live Data to fly map to Gulf hub bbox. */
@@ -289,6 +307,11 @@ interface MapComponentProps {
   eiaHistoricMapArcs?: EiaHistoricMapArc[];
   /** Show OSM petroleum infrastructure on mining/global/oil views. */
   showInfrastructureLayers?: boolean;
+  infrastructureLayerVisibility?: Record<OsmPetroleumLayerId, boolean>;
+  onInfrastructureLayerChange?: (layerId: OsmPetroleumLayerId, visible: boolean) => void;
+  /** Comtrade/Census macro country-pair arcs (gray). */
+  macroTradeFlowsEnabled?: boolean;
+  macroTradeFlows?: MacroTradeFlow[];
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -592,6 +615,14 @@ export default function MapComponent({
   eiaHistoricMapEnabled = false,
   eiaHistoricMapArcs = [],
   showInfrastructureLayers = false,
+  infrastructureLayerVisibility,
+  onInfrastructureLayerChange,
+  macroTradeFlowsEnabled = false,
+  macroTradeFlows = [],
+  liveDataEiaHistoricOn = false,
+  onLiveDataEiaHistoricChange,
+  liveDataMacroTradeOn = true,
+  onLiveDataMacroTradeChange,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -1193,6 +1224,22 @@ export default function MapComponent({
                         globalMaritimeCount={maritimeSnapshotTotal}
                         tradeFlowGroup={oilLiveTradeFlowGroup}
                         onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
+                        eiaHistoricEnabled={liveDataEiaHistoricOn}
+                        onEiaHistoricChange={onLiveDataEiaHistoricChange}
+                        macroTradeEnabled={liveDataMacroTradeOn}
+                        onMacroTradeChange={onLiveDataMacroTradeChange}
+                    />
+                </div>
+            )}
+            {showInfrastructureLayers &&
+                !isLiveDataView &&
+                !isOilAndGasView &&
+                infrastructureLayerVisibility &&
+                onInfrastructureLayerChange && (
+                <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">
+                    <InfrastructureLayersPanel
+                        visibility={infrastructureLayerVisibility}
+                        onChange={onInfrastructureLayerChange}
                     />
                 </div>
             )}
@@ -1819,10 +1866,17 @@ export default function MapComponent({
                             arcs={eiaHistoricMapArcs}
                         />
                     )}
+                    {macroTradeFlowsEnabled && macroTradeFlows.length > 0 && (
+                        <MacroTradeFlowsMapLayer
+                            enabled={macroTradeFlowsEnabled}
+                            flows={macroTradeFlows}
+                        />
+                    )}
                     {showInfrastructureLayers && onGroundVisible && !isLiveDataView && (
                         <OsmPetroleumMapLayers
                             bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
                             enabled
+                            layerVisibility={infrastructureLayerVisibility}
                         />
                     )}
                     {isOilAndGasView && onGroundVisible && (

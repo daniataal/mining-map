@@ -1,4 +1,4 @@
-import { Anchor, ArrowRightLeft, Layers, Route, Ship, Sparkles } from 'lucide-react';
+import { Anchor, ArrowRightLeft, Globe2, History, Layers, Route, Ship, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
@@ -7,7 +7,16 @@ export type TradeFlowGroup = 'company_pair' | 'country_pair';
 export type LiveDataMapLayersPanelProps = {
   layers: OilLiveLayerVisibility;
   onLayersChange: (layers: OilLiveLayerVisibility) => void;
-  coverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
+  coverageStats?: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  } | null;
+  eiaHistoricEnabled?: boolean;
+  onEiaHistoricChange?: (on: boolean) => void;
+  macroTradeEnabled?: boolean;
+  onMacroTradeChange?: (on: boolean) => void;
   allMaritimeEnabled: boolean;
   onAllMaritimeChange: (enabled: boolean) => void;
   globalMaritimeCount?: number | null;
@@ -60,6 +69,10 @@ export default function LiveDataMapLayersPanel({
   globalMaritimeCount,
   tradeFlowGroup = 'company_pair',
   onTradeFlowGroupChange,
+  eiaHistoricEnabled = false,
+  onEiaHistoricChange,
+  macroTradeEnabled = true,
+  onMacroTradeChange,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
 
@@ -103,7 +116,17 @@ export default function LiveDataMapLayersPanel({
             <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.vessels}</span>{' '}
             {t('מכליות', 'tankers')} ·{' '}
             <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.opportunities}</span>{' '}
-            {t('הזדמנויות', 'opportunities')}
+            {t('הזדמנויות', 'opportunities')} ·{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.corridors}</span>{' '}
+            {t('מסדרונות', 'corridors')}
+          </p>
+        )}
+        {layers.corridors && coverageStats != null && coverageStats.corridors === 0 && (
+          <p className="text-xs leading-relaxed text-violet-800 dark:text-violet-200">
+            {t(
+              'מסדרונות = קשתות MCR (מטען סינתטי) בתצוגה. התקרבו למפרץ/ים פנימיים או הפעילו graph-sync אם אין רשומות.',
+              'Corridors = per-shipment MCR arcs in view. Zoom to a hub (e.g. Gulf) or run graph-sync if the ledger is empty.',
+            )}
           </p>
         )}
         {coverageStats != null && coverageStats.vessels === 0 && (
@@ -138,6 +161,39 @@ export default function LiveDataMapLayersPanel({
             );
           })}
         </div>
+
+        {(onEiaHistoricChange || onMacroTradeChange) && (
+          <div className="grid grid-cols-1 gap-2">
+            {onEiaHistoricChange && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/5 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={eiaHistoricEnabled}
+                  onChange={(e) => onEiaHistoricChange(e.target.checked)}
+                  className="h-4 w-4 rounded"
+                />
+                <span className="flex items-center gap-1.5 text-xs font-black uppercase text-purple-800 dark:text-purple-200">
+                  <History className="h-3.5 w-3.5" />
+                  {t('EIA היסטורי (מאקרו)', 'EIA historic (macro)')}
+                </span>
+              </label>
+            )}
+            {onMacroTradeChange && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-500/30 bg-slate-500/5 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={macroTradeEnabled}
+                  onChange={(e) => onMacroTradeChange(e.target.checked)}
+                  className="h-4 w-4 rounded"
+                />
+                <span className="flex items-center gap-1.5 text-xs font-black uppercase text-slate-700 dark:text-slate-200">
+                  <Globe2 className="h-3.5 w-3.5" />
+                  {t('מסדרונות מאקרו (Comtrade)', 'Macro trade corridors')}
+                </span>
+              </label>
+            )}
+          </div>
+        )}
 
         <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">

@@ -18,7 +18,7 @@ import {
   classifyPipelineSubstance,
 } from '../../lib/pipelineSubstance';
 
-const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries'];
+const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
 
 const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
   pipelines: {
@@ -40,9 +40,10 @@ const OSM_WATER_PIPELINE_STYLE: PathOptions = {
   lineCap: 'round',
 };
 
-const OSM_LABELS: Record<'pipelines' | 'refineries', [string, string]> = {
+const OSM_LABELS: Record<OsmPetroleumLayerId, [string, string]> = {
   pipelines: ['צינורות נפט/גז OSM', 'Oil/gas pipelines — OpenStreetMap'],
   refineries: ['זיקוק OSM (קהילה)', 'Refineries — OpenStreetMap (community)'],
+  storage_terminals: ['מאגרי אחסון OSM', 'Tank storage — OpenStreetMap'],
 };
 
 const OSM_WATER_PIPELINE_LABEL: [string, string] = [
@@ -181,28 +182,42 @@ function OsmLayerOverlay({
 interface OsmPetroleumMapLayersProps {
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
+  /** Subset of layers to mount (default: pipelines + refineries + storage). */
+  layerIds?: OsmPetroleumLayerId[];
+  /** Per-layer visibility when using external toggles (mining/global panel). */
+  layerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
 }
 
-export default function OsmPetroleumMapLayers({ bbox, enabled }: OsmPetroleumMapLayersProps) {
+export default function OsmPetroleumMapLayers({
+  bbox,
+  enabled,
+  layerIds,
+  layerVisibility,
+}: OsmPetroleumMapLayersProps) {
   const { t } = useI18n();
   const { data: catalog } = usePetroleumLayerCatalog(enabled);
   const mapboxOff = isPetroleumMapboxDisabled(catalog);
   const osmDefaults = defaultOsmLayerVisibility(mapboxOff);
+  const activeIds = layerIds ?? OSM_MAP_LAYER_IDS;
 
   if (!enabled) return null;
 
   return (
     <>
-      {OSM_MAP_LAYER_IDS.map((layerId) => (
-        <OsmLayerOverlay
-          key={layerId}
-          layerId={layerId}
-          label={t(OSM_LABELS[layerId][0], OSM_LABELS[layerId][1])}
-          bbox={bbox}
-          enabled={enabled}
-          defaultVisible={osmDefaults[layerId]}
-        />
-      ))}
+      {activeIds.map((layerId) => {
+        const visible = layerVisibility?.[layerId] ?? osmDefaults[layerId];
+        if (layerVisibility && !visible) return null;
+        return (
+          <OsmLayerOverlay
+            key={layerId}
+            layerId={layerId}
+            label={t(OSM_LABELS[layerId][0], OSM_LABELS[layerId][1])}
+            bbox={bbox}
+            enabled={enabled}
+            defaultVisible={visible}
+          />
+        );
+      })}
     </>
   );
 }

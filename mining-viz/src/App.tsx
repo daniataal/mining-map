@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense } from 'react';
 import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, createDealRoom } from './lib/api';
 import { getEiaHistoricMap } from './api/eiaHistoricApi';
+import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
+import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
+import { DEFAULT_OSM_LAYER_VISIBILITY } from './lib/osmPetroleumLayers';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useLicenseAnnotations } from './hooks/use-license-annotations';
@@ -220,7 +223,10 @@ export default function App() {
     terminals: number;
     vessels: number;
     opportunities: number;
+    corridors: number;
   } | null>(null);
+  const [liveDataEiaHistoricOn, setLiveDataEiaHistoricOn] = useState(false);
+  const [liveDataMacroTradeOn, setLiveDataMacroTradeOn] = useState(true);
   const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
   const [eiaHistoricMap, setEiaHistoricMap] = useState<{
     enabled: boolean;
@@ -236,6 +242,10 @@ export default function App() {
     arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
     year: number;
   }>({ enabled: true, arcs: [], year: 2020 });
+  const [macroTradeFlows, setMacroTradeFlows] = useState<MacroTradeFlow[]>([]);
+  const [infrastructureLayerVisibility, setInfrastructureLayerVisibility] = useState<
+    Record<OsmPetroleumLayerId, boolean>
+  >(() => ({ ...DEFAULT_OSM_LAYER_VISIBILITY, pipelines: true }));
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -417,16 +427,16 @@ export default function App() {
   }, [viewMode]);
 
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas') return;
+    if (viewMode !== 'oil_and_gas' && viewMode !== 'live_data') return;
     let cancelled = false;
     getEiaHistoricMap({ year: 2020, limit: 400 })
       .then((res) => {
-        if (!cancelled) {
+        if (!cancelled && viewMode === 'oil_and_gas') {
           setOilGasEiaHistoric({ enabled: true, arcs: res.arcs ?? [], year: 2020 });
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && viewMode === 'oil_and_gas') {
           setOilGasEiaHistoric((prev) => ({ ...prev, enabled: true, arcs: [] }));
         }
       });
@@ -434,6 +444,28 @@ export default function App() {
       cancelled = true;
     };
   }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas' && viewMode !== 'live_data') return;
+    let cancelled = false;
+    getMacroTradeFlows({ limit: 150 })
+      .then((res) => {
+        if (!cancelled) setMacroTradeFlows(res.flows ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMacroTradeFlows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode]);
+
+  const handleInfrastructureLayerChange = useCallback(
+    (layerId: OsmPetroleumLayerId, visible: boolean) => {
+      setInfrastructureLayerVisibility((prev) => ({ ...prev, [layerId]: visible }));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
@@ -1311,14 +1343,37 @@ export default function App() {
                   liveDataFlyTrigger={viewMode === 'live_data' ? liveDataFlyTrigger : 0}
                   liveDataFlyTarget={viewMode === 'live_data' ? liveDataFlyTarget : null}
                   eiaHistoricMapEnabled={
-                    (viewMode === 'live_data' && eiaHistoricMap.enabled) ||
-                    viewMode === 'oil_and_gas'
+                    viewMode === 'oil_and_gas' ||
+                    (viewMode === 'live_data' && (liveDataEiaHistoricOn || eiaHistoricMap.enabled))
                   }
                   eiaHistoricMapArcs={
                     viewMode === 'oil_and_gas' ? oilGasEiaHistoric.arcs : eiaHistoricMap.arcs
                   }
+                  macroTradeFlowsEnabled={
+                    viewMode === 'oil_and_gas' ||
+                    (viewMode === 'live_data' && liveDataMacroTradeOn)
+                  }
                   showInfrastructureLayers={
                     viewMode === 'mining' || viewMode === 'global' || viewMode === 'oil_and_gas'
+                  }
+                  infrastructureLayerVisibility={
+                    viewMode === 'mining' || viewMode === 'global'
+                      ? infrastructureLayerVisibility
+                      : undefined
+                  }
+                  onInfrastructureLayerChange={
+                    viewMode === 'mining' || viewMode === 'global'
+                      ? handleInfrastructureLayerChange
+                      : undefined
+                  }
+                  macroTradeFlows={macroTradeFlows}
+                  liveDataEiaHistoricOn={viewMode === 'live_data' ? liveDataEiaHistoricOn : undefined}
+                  onLiveDataEiaHistoricChange={
+                    viewMode === 'live_data' ? setLiveDataEiaHistoricOn : undefined
+                  }
+                  liveDataMacroTradeOn={viewMode === 'live_data' ? liveDataMacroTradeOn : undefined}
+                  onLiveDataMacroTradeChange={
+                    viewMode === 'live_data' ? setLiveDataMacroTradeOn : undefined
                   }
                 />
               </Suspense>

@@ -1,10 +1,13 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, ArrowRightLeft, Crosshair, Inbox, Send } from 'lucide-react';
+import { Loader2, ArrowRightLeft, Crosshair, ExternalLink, Inbox, Send } from 'lucide-react';
 import {
   getCargoRecords,
+  getCompanyShipments,
   type MeridianCargoRecord,
 } from '../../api/oilLiveApi';
+import { getEiaHistoricSummary } from '../../api/eiaHistoricApi';
+import { firstVerifyUrl } from '../../lib/verifySourceUrl';
 import {
   bezierMidpoint,
   commodityColor,
@@ -99,20 +102,37 @@ export default function CompanyImportsExportsTab({
 }: CompanyImportsExportsTabProps) {
   const { t } = useI18n();
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['oil-live-company-cargo', entityKind, entityId, entityName ?? ''],
-    queryFn: () => getCargoRecords({ limit: 200, min_confidence: 0.4 }),
-    enabled: Boolean(entityId),
+  const { data: shipmentData, isLoading: shipmentsLoading, error: shipmentsError } = useQuery({
+    queryKey: ['oil-live-company-shipments', entityId],
+    queryFn: () => getCompanyShipments(entityId, { limit: 100 }),
+    enabled: entityKind === 'company' && Boolean(entityId),
     staleTime: 60_000,
   });
 
+  const { data: terminalCargo, isLoading: terminalLoading, error: terminalError } = useQuery({
+    queryKey: ['oil-live-terminal-cargo', entityId, entityName ?? ''],
+    queryFn: () => getCargoRecords({ limit: 200, min_confidence: 0.4 }),
+    enabled: entityKind === 'terminal' && Boolean(entityId),
+    staleTime: 60_000,
+  });
+
+  const { data: eiaSummary } = useQuery({
+    queryKey: ['eia-historic-company', entityName ?? ''],
+    queryFn: () => getEiaHistoricSummary({ importer: entityName!.trim(), year_from: 2015 }),
+    enabled: entityKind === 'company' && Boolean(entityName?.trim()),
+    staleTime: 120_000,
+  });
+
+  const isLoading = entityKind === 'company' ? shipmentsLoading : terminalLoading;
+  const error = entityKind === 'company' ? shipmentsError : terminalError;
+
   const rows = useMemo<MeridianCargoRecord[]>(() => {
-    const all = data?.cargo_records ?? [];
     if (entityKind === 'company') {
-      return all.filter((r) => matchesCompany(r, entityId, entityName));
+      return shipmentData?.shipments ?? [];
     }
+    const all = terminalCargo?.cargo_records ?? [];
     return all.filter((r) => matchesTerminal(r, entityName));
-  }, [data?.cargo_records, entityKind, entityId, entityName]);
+  }, [entityKind, shipmentData?.shipments, terminalCargo?.cargo_records, entityName]);
 
   const counterparties = useMemo<CounterpartyRow[]>(() => {
     if (entityKind !== 'company') return [];
@@ -264,6 +284,87 @@ export default function CompanyImportsExportsTab({
           </button>
         )}
       </header>
+
+      {entityKind === 'company' && eiaSummary && eiaSummary.row_count > 0 && (
+        <section className="rounded-lg border border-purple-500/25 bg-purple-500/5 px-2.5 py-2">
+          <p className="text-[9px] font-black uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-1">
+            {t('היסטוריית EIA (מאקרו)', 'EIA historic imports (macro)')}
+          </p>
+          <p className="text-[10px] text-slate-600 dark:text-slate-300">
+            {eiaSummary.row_count} {t('שורות', 'rows')} ·{' '}
+            {eiaSummary.year_min ?? '—'}–{eiaSummary.year_max ?? '—'}
+          </p>
+          {eiaSummary.top_origins.length > 0 && (
+            <ul className="mt-1 text-[10px] text-slate-700 dark:text-slate-200 space-y-0.5">
+              {eiaSummary.top_origins.slice(0, 4).map((o) => (
+                <li key={o.origin_country}>
+                  {o.origin_country}: {(o.volume_bbl / 1e6).toFixed(1)}M bbl
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-[9px] text-slate-500 mt-1">{eiaSummary.provenance ?? 'EIA impa — historic tier'}</p>
+        </section>
+      )}
+
+      {rows.length > 0 && (
+        <section>
+          <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1.5">
+            {t('פנקס משלוחים', 'Shipment ledger')}
+            {entityKind === 'company' && shipmentData?.total != null && (
+              <span className="font-normal normal-case text-slate-400">
+                {' '}
+                ({rows.length}/{shipmentData.total})
+              </span>
+            )}
+          </p>
+          <ul className="max-h-48 overflow-y-auto space-y-1 pr-0.5">
+            {rows.slice(0, 25).map((r) => {
+              const verify = firstVerifyUrl(r);
+              return (
+                <li
+                  key={r.id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-black/5 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 px-2 py-1"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-slate-800 dark:text-slate-100 text-[10px]">
+                      {r.shipper_name ?? '—'} → {r.consignee_name ?? '—'}
+                    </p>
+                    <p className="text-[9px] text-slate-500">
+                      {r.commodity_family ?? '—'} · {r.event_date?.slice(0, 10) ?? '—'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="rounded px-1 py-0.5 text-[8px] font-black uppercase bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                      {r.bol_tier ?? 'inferred'}
+                    </span>
+                    {verify && (
+                      <a
+                        href={verify}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-violet-600 dark:text-violet-400"
+                        title={t('אמת במקור', 'Verify at source')}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                    {onCargoClick && (
+                      <button
+                        type="button"
+                        onClick={() => onCargoClick(r.id)}
+                        className="text-[9px] font-black uppercase text-amber-700 dark:text-amber-300"
+                      >
+                        {t('פתח', 'Open')}
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       {rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-black/10 dark:border-white/10 bg-stone-100/40 dark:bg-slate-900/30 p-3 text-[10px] text-slate-500">

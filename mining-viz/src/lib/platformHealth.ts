@@ -64,6 +64,23 @@ export function usePlatformHealth(enabled = true) {
   });
 }
 
+/** Keep top banner readable — never dump full TLS stack traces. */
+export function shortenMaritimeWorkerError(raw: string | undefined | null): string {
+  const err = (raw ?? '').trim();
+  if (!err) return '';
+  if (
+    err.includes('CERTIFICATE_VERIFY_FAILED') ||
+    err.includes('certificate has expired') ||
+    err.includes('stream.aisstream.io')
+  ) {
+    return (
+      'AISStream TLS certificate expired (stream.aisstream.io). ' +
+      'Set MARITIME_SSL_AUTO_FALLBACK=1 and recreate maritime-worker + oil-live-intel-worker.'
+    );
+  }
+  return err.length > 160 ? `${err.slice(0, 160)}…` : err;
+}
+
 export function platformHealthIssues(payload: PlatformHealthResponse | undefined): string[] {
   if (!payload) return [];
   const issues: string[] = [];
@@ -78,9 +95,10 @@ export function platformHealthIssues(payload: PlatformHealthResponse | undefined
   }
   const workerStatus = payload.maritime_worker?.status;
   if (workerStatus && !['ok', 'running', 'idle'].includes(workerStatus)) {
+    const shortErr = shortenMaritimeWorkerError(payload.maritime_worker?.last_error);
     issues.push(
-      payload.maritime_worker?.last_error
-        ? `Maritime worker: ${workerStatus} (${payload.maritime_worker.last_error})`
+      shortErr
+        ? `Maritime worker: ${workerStatus} — ${shortErr}`
         : `Maritime worker: ${workerStatus}`,
     );
   }
