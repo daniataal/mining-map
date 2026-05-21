@@ -6653,6 +6653,47 @@ def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
         return {"status": "error", "message": str(exc)}
 
 
+@app.post("/api/trade-manifests/upload")
+async def trade_manifest_upload(
+    file: UploadFile = File(...),
+    consent: bool = True,
+):
+    """User CSV manifest upload (tier=user_upload). Requires explicit consent flag."""
+    if not consent:
+        return {"status": "error", "message": "consent required"}
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        return {"status": "error", "message": "CSV file required"}
+    import tempfile
+
+    ensure_schema_initialized()
+    tmp_path = None
+    try:
+        try:
+            from backend.services.trade_manifest_ingest import ingest_user_manifest_csv
+        except ImportError:
+            from services.trade_manifest_ingest import ingest_user_manifest_csv
+        suffix = os.path.splitext(file.filename)[1] or ".csv"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        conn = get_db_connection()
+        try:
+            result = ingest_user_manifest_csv(conn, tmp_path, consent=consent)
+            conn.commit()
+        finally:
+            conn.close()
+        return result
+    except Exception as exc:
+        logger.exception("trade manifest upload failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+    finally:
+        if tmp_path and os.path.isfile(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
 @app.post("/api/admin/trade-manifests/upload")
 def admin_trade_manifest_upload(
     x_admin_token: Optional[str] = Header(None),

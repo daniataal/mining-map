@@ -29,17 +29,19 @@ export function resolveLiveAisBanner(
     return {
       kind: 'tls_expired',
       messageHe:
-        'תעודת TLS של AISStream (stream.aisstream.io) פגה. המערכת מנסה חיבור מחדש אוטומטית (MARITIME_SSL_AUTO_FALLBACK). הפעל מחדש: docker compose up -d --force-recreate maritime-worker oil-live-intel-worker',
+        'אין AIS חי — תעודת TLS של AISStream פגה. פרטים בשורת מצב הפלטפורמה למעלה; הפעילו מחדש maritime-worker.',
       messageEn:
-        'AISStream TLS certificate (stream.aisstream.io) has expired. Meridian auto-retries with MARITIME_SSL_AUTO_FALLBACK. Recreate workers: docker compose up -d --force-recreate maritime-worker oil-live-intel-worker',
+        'No live AIS — AISStream TLS certificate expired. See the platform status bar above; recreate maritime-worker when ready.',
     };
   }
 
   if (workerStatus === 'error' && workerErr) {
+    const short =
+      workerErr.length > 140 ? `${workerErr.slice(0, 140)}…` : workerErr;
     return {
       kind: 'worker_error',
-      messageHe: `maritime-worker: ${workerErr.slice(0, 220)}`,
-      messageEn: `maritime-worker: ${workerErr.slice(0, 220)}`,
+      messageHe: `maritime-worker: ${short}`,
+      messageEn: `maritime-worker: ${short}`,
     };
   }
 

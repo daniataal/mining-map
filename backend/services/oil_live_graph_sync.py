@@ -456,6 +456,29 @@ def _upsert_commercial_event(
     return cur.rowcount > 0
 
 
+def _ensure_petroleum_osm_storage_layer(conn: Any) -> dict[str, Any]:
+    """Materialize OSM storage tanks into petroleum_osm_features when cache is empty."""
+    try:
+        try:
+            from backend.services.petroleum_osm_store import (
+                ensure_petroleum_osm_tables,
+                layer_has_cached_features,
+                sync_layer_tiles,
+            )
+        except ImportError:
+            from services.petroleum_osm_store import (
+                ensure_petroleum_osm_tables,
+                layer_has_cached_features,
+                sync_layer_tiles,
+            )
+        ensure_petroleum_osm_tables(conn)
+        if layer_has_cached_features(conn, "storage_terminals"):
+            return {"status": "skipped", "reason": "storage_terminals already cached"}
+        return sync_layer_tiles(conn, "storage_terminals")
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)[:500]}
+
+
 def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[str, Any]:
     cur.execute("SELECT COUNT(*)::int FROM oil_terminals")
     existing_count = int(cur.fetchone()[0] or 0)
@@ -1302,6 +1325,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
             }
         else:
             summary["steps"]["storage_terminals"] = _import_storage_terminals(cur)
+        summary["steps"]["petroleum_osm_storage"] = _ensure_petroleum_osm_storage_layer(conn)
         summary["steps"]["licenses"] = _index_licenses(cur)
         summary["steps"]["terminal_operators"] = _index_terminal_operators(cur)
         summary["steps"]["seed_port_calls"] = _seed_port_calls_if_sparse(cur)

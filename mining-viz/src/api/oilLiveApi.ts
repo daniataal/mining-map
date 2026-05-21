@@ -674,6 +674,32 @@ export async function getCompanyShipments(
   return res.json();
 }
 
+/** UN Comtrade / Census / USITC macro rows (country-pair, not vessel-level). */
+export type MacroTradeFlow = {
+  source?: string;
+  reporter?: string;
+  partner?: string;
+  hs_code?: string;
+  period?: string;
+  flow?: string;
+  trade_value_usd?: number;
+  net_weight_kg?: number;
+};
+
+export async function getMacroTradeFlows(opts: {
+  country?: string;
+  hs_code?: string;
+  limit?: number;
+} = {}): Promise<{ flows: MacroTradeFlow[]; disclaimer?: string }> {
+  const params = new URLSearchParams();
+  if (opts.country) params.set('country', opts.country);
+  if (opts.hs_code) params.set('hs_code', opts.hs_code);
+  params.set('limit', String(opts.limit ?? 120));
+  const res = await fetch(oilUrl(`/api/oil-live/trade/flows?${params}`));
+  if (!res.ok) throw new Error(`oil-live trade/flows ${res.status}`);
+  return res.json();
+}
+
 export type OilContact = {
   id?: string;
   contact_type: string;
