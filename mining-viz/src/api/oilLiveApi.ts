@@ -112,10 +112,47 @@ function oilUrl(path: string) {
 }
 
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('mining_token') || localStorage.getItem('token');
   const h: HeadersInit = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = `Bearer ${token}`;
   return h;
+}
+
+function adminTokenHeaders(): HeadersInit {
+  const adminToken =
+    (import.meta.env.VITE_ADMIN_API_TOKEN as string | undefined)?.trim() ||
+    sessionStorage.getItem('meridian_admin_api_token')?.trim() ||
+    '';
+  const h: HeadersInit = { 'Content-Type': 'application/json', ...authHeaders() };
+  if (adminToken) h['X-Admin-Token'] = adminToken;
+  return h;
+}
+
+export type OilLiveContactEnrichmentBatchResult = {
+  status: string;
+  requested_limit?: number;
+  candidates?: number;
+  enriched?: number;
+  skipped?: number;
+  results?: Array<Record<string, unknown>>;
+  note?: string;
+  message?: string;
+};
+
+/** POST /api/admin/oil-live/enrich-contacts (Python backend). */
+export async function enrichOilLiveContactsBatch(
+  limit = 20,
+): Promise<OilLiveContactEnrichmentBatchResult> {
+  const backendBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
+  const res = await fetch(
+    `${backendBase}/api/admin/oil-live/enrich-contacts?limit=${encodeURIComponent(String(limit))}`,
+    { method: 'POST', headers: adminTokenHeaders() },
+  );
+  const data = (await res.json()) as OilLiveContactEnrichmentBatchResult;
+  if (!res.ok) {
+    throw new Error(data.message || `enrich-contacts ${res.status}`);
+  }
+  return data;
 }
 
 export type OilLiveHealth = {
@@ -216,6 +253,7 @@ export type OilOpportunity = {
   profit_checklist?: string[];
   terminal_id?: string;
   terminal_name?: string;
+  terminal_country?: string;
   disclaimer?: string;
 };
 

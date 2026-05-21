@@ -2,6 +2,24 @@
 
 **Last reviewed:** 2026-05-21
 
+## What's implemented (2026-05)
+
+| Area | Status | Notes |
+|------|--------|-------|
+| **Unified map** | Done | Terminals, vessels, corridors, opportunity markers on main map. Default fly-to Gulf hub bbox (24–55°E, 12–32°N) on tab entry. |
+| **Intel drawer** | Done | Tabs: Intelligence, Opportunities, Cargo, Companies, Alerts. Product filter. Coverage health banner. |
+| **Meridian Cargo Records (MCR)** | Done | Cargo ledger; row click opens left drawer with full MCR + evidence. CSV export. Seed-data toggle. |
+| **Deal Execution Pack** | Done | Left drawer from map/opportunity/cargo. Deal-pack API + inline economics/margin sheet. |
+| **Companies + contacts** | Done | Save to Suppliers, per-company agent, batch enrich via `POST /api/admin/oil-live/enrich-contacts?limit=20`. |
+| **Graph sync CTA** | Done | Empty states link to admin graph-sync. |
+| **Performance** | Done | Debounced map bbox (450ms, keepPreviousData). Shared opportunities cache; no refetch on pan for opps list. |
+| **Live AIS** | Done | WebSocket positions; optional workers. |
+| **Dedup** | Done | Client + server opportunity dedup/diversify. |
+
+**Not yet / optional:** paid BOL ingestion, automated deal-room from opportunities, MCP CI smoke.
+
+---
+
 Live Data is Meridian’s **commercial intelligence mode**: a unified map plus intel drawer that fuses public AIS movement, OSM storage terminals, macro trade (Comtrade, Census, EIA), EU/US procurement, licenses, and a **synthetic cargo ledger** (BOL-shaped records built from triangulation — not paid Bill of Lading documents).
 
 ---

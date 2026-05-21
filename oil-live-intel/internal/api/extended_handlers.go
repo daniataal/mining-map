@@ -112,11 +112,19 @@ func (s *Server) OpportunityEconomics(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListOpportunities(w http.ResponseWriter, r *http.Request) {
 	minConf := queryFloat(r, "min_confidence", 0.55)
 	limit := queryInt(r, "limit", 50)
-	items, err := opportunity.List(r.Context(), s.Pool, minConf, limit)
+	fetchLimit := limit * 4
+	if fetchLimit < 120 {
+		fetchLimit = 120
+	}
+	if fetchLimit > 500 {
+		fetchLimit = 500
+	}
+	items, err := opportunity.List(r.Context(), s.Pool, minConf, fetchLimit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	items = opportunity.DedupeAndDiversify(items, limit)
 	writeJSON(w, http.StatusOK, map[string]any{"opportunities": items})
 }
 

@@ -1033,6 +1033,50 @@
   border: 2px solid #fff;
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(30, 64, 175, 0.45);
+  font-size: 12px !important;
+}
+
+.leaflet-popup.oil-live-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 12px 14px;
+  min-width: 200px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.leaflet-popup.oil-live-leaflet-popup .leaflet-popup-content strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.oil-live-popup-body p {
+  margin: 4px 0 0;
+}
+
+.oil-live-popup-muted {
+  font-size: 11px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.oil-live-popup-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.oil-live-popup-btn:hover {
+  background: #1d4ed8;
 }
 
 @keyframes pulse-glow {

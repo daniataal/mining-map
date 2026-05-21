@@ -50,6 +50,7 @@ import PlatformHealthBanner from './components/PlatformHealthBanner';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
+import { LIVE_DATA_HUB_CENTER } from './features/live-data/liveDataMapDefaults';
 import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
@@ -206,6 +207,7 @@ export default function App() {
     opportunities: number;
   } | null>(null);
   const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
+  const [liveDataFlyTrigger, setLiveDataFlyTrigger] = useState(0);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -380,6 +382,12 @@ export default function App() {
   }, [viewMode]);
 
   useEffect(() => {
+    if (viewMode === 'live_data') {
+      setLiveDataFlyTrigger((n) => n + 1);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
     if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
       miningData.setSelectedSector(viewMode);
     } else {
@@ -485,6 +493,26 @@ export default function App() {
     });
   }, []);
 
+  const handleOpenOilLiveCargo = useCallback((record: {
+    id: string;
+    opportunity_id?: string;
+    vessel_name?: string;
+    synthetic_bol_id?: string;
+    commodity_family?: string;
+    load_port_name?: string;
+    discharge_hint?: string;
+  }) => {
+    setSelectedItem(null);
+    setSelectedMaritimeVessel(null);
+    setOilLiveEntity({
+      entityKind: 'cargo',
+      entityId: record.id,
+      opportunityId: record.opportunity_id,
+      title: record.vessel_name ?? record.synthetic_bol_id ?? record.commodity_family ?? record.id.slice(0, 8),
+      subtitle: [record.load_port_name, record.discharge_hint].filter(Boolean).join(' → '),
+    });
+  }, []);
+
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
     persistAnnotation(id, updates);
 
@@ -559,7 +587,8 @@ export default function App() {
     });
   }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
-  const mapCenter: [number, number] = viewMode === 'ports' ? [20, 0] : [7.9465, -1.0232];
+  const mapCenter: [number, number] =
+    viewMode === 'ports' ? [20, 0] : viewMode === 'live_data' ? LIVE_DATA_HUB_CENTER : [7.9465, -1.0232];
   
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
@@ -681,7 +710,7 @@ export default function App() {
 
   useEffect(() => {
     if (viewMode === 'live_data') {
-      setIsMaritimeLayerEnabled(true);
+      setIsMaritimeLayerEnabled(false);
     }
   }, [viewMode]);
 
@@ -693,7 +722,7 @@ export default function App() {
   }, [maritimeMapViewActive]);
 
   useEffect(() => {
-    if (!username || !maritimeMapViewActive) return;
+    if (!username || !maritimeMapViewActive || viewMode === 'live_data') return;
     const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
     void prefetchMaritimeVesselSnapshot(queryClient, {
       maxVessels: Number(maritimeMaxVessels) || 15000,
@@ -1136,9 +1165,12 @@ export default function App() {
                   oilLiveOverlaysEnabled={viewMode === 'live_data'}
                   oilLiveProductFilter={oilLiveProductFilter}
                   oilLiveLayers={oilLiveLayers}
+                  onOilLiveLayersChange={viewMode === 'live_data' ? setOilLiveLayers : undefined}
+                  oilLiveCoverageStats={viewMode === 'live_data' ? oilLiveCoverageStats : undefined}
                   onOilLiveStatsChange={viewMode === 'live_data' ? setOilLiveCoverageStats : undefined}
                   onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
                   onOilLiveDismiss={viewMode === 'live_data' ? handleOilLiveDismiss : undefined}
+                  liveDataFlyTrigger={viewMode === 'live_data' ? liveDataFlyTrigger : 0}
                 />
               </Suspense>
             )}
@@ -1178,15 +1210,14 @@ export default function App() {
             )}
             {viewMode === 'live_data' && (
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
-                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(420px,calc(100vw-2rem))]">
+                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:min-w-[420px] sm:w-[min(480px,calc(100vw-2rem))]">
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
                     <LiveDataPanel
                       productFilter={oilLiveProductFilter}
                       onProductFilterChange={setOilLiveProductFilter}
-                      layers={oilLiveLayers}
-                      onLayersChange={setOilLiveLayers}
                       coverageStats={oilLiveCoverageStats}
                       onOpenOpportunity={handleOpenOilLiveOpportunity}
+                      onOpenCargoRecord={handleOpenOilLiveCargo}
                     />
                   </Suspense>
                 </div>
