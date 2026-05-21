@@ -7,10 +7,21 @@ function fingerprint(opp: OilOpportunity): string {
   return `${otype}|title:${title}`;
 }
 
+/** Coerce API / React Query payloads to an array (guards null, object wrappers, bad shapes). */
+export function coerceOpportunityList(raw: unknown): OilOpportunity[] {
+  if (Array.isArray(raw)) return raw as OilOpportunity[];
+  if (raw && typeof raw === 'object') {
+    const nested = (raw as { opportunities?: unknown }).opportunities;
+    if (Array.isArray(nested)) return nested as OilOpportunity[];
+  }
+  return [];
+}
+
 /** Client-side dedup when API returns duplicate terminal/title rows. */
-export function dedupeOpportunities(opportunities: OilOpportunity[], maxOut = 40): OilOpportunity[] {
+export function dedupeOpportunities(opportunities: unknown, maxOut = 40): OilOpportunity[] {
+  const list = coerceOpportunityList(opportunities);
   const best = new Map<string, OilOpportunity>();
-  for (const opp of opportunities) {
+  for (const opp of list) {
     const fp = fingerprint(opp);
     const prev = best.get(fp);
     if (!prev || (opp.confidence ?? 0) > (prev.confidence ?? 0)) {

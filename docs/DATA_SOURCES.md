@@ -2,7 +2,7 @@
 
 This document is the operational source-of-truth for **what** Meridian ingests, **why** gaps exist (e.g. Kazakhstan), and **how** to verify rows in production. Paid APIs (Mapbox tilesets, commercial company registries) are called out explicitly so we do not mistake them for official cadastre data.
 
-**Last reviewed:** 2026-05-19
+**Last reviewed:** 2026-05-21
 
 ---
 
@@ -69,6 +69,38 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Company intel | `GET /company-intel` | Heuristic aggregation | No OpenCorporates API (paid) wired |
 | SEC EDGAR | `GET /api/companies/{name}/sec-filings` | Free (US issuers) | CIK + browse-edgar link (US listed cos only) |
 | EU beneficial ownership | Not wired | Varies by MS | **Thin** open API coverage |
+
+### 2.4 Oil Live / Live Data (unified commercial graph)
+
+Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin/oil-live/graph-sync` (`backend/services/oil_live_graph_sync.py`) and the Go **synthetic BOL** rebuild. Operational onboarding: **[LIVE_DATA.md](./LIVE_DATA.md)**.
+
+| Source | Module / worker | Env / tier | In `oil_trade_flows` / graph |
+|--------|-----------------|------------|------------------------------|
+| **UN Comtrade** | `comtrade_scheduled_sync.py`, graph-sync trade mirror | `COMTRADE_API_KEY` (free tier) | `data_source=comtrade`; macro HS 2709/2710/2711 |
+| **EIA** | `opec_gulf_sync.py` + graph-sync enrichment | `EIA_API_KEY` (optional) | Production / reference context; not row-level BOL |
+| **U.S. Census** | `census_trade.py` | `CENSUS_API_KEY` | `data_source=census_api`; macro bilateral HS27 |
+| **USITC DataWeb** | `usitc_dataweb.py` | `USITC_DATAWEB_API_KEY` | `data_source=usitc_dataweb`; U.S. import/export HS flows |
+| **EIA crude imports** | `eia_imports.sync_eia_crude_imports` (graph-sync step) | `EIA_API_KEY` | `oil_trade_flows.data_source='eia'`, HS 2709, partner=origin country; aggregated last-12-months macro tier |
+| **EIA refinery throughput (PADD)** | `eia_imports.sync_eia_refinery_throughput` | `EIA_API_KEY` | `oil_refinery_throughput` (PADD, week_ending, utilization_pct, crude_input_mbbl_d); feeds **Recipe G** in `engine.go` |
+| **AIS (live)** | `maritime-worker` + `oil-live-intel-worker` | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_port_calls`; WebSocket map layer |
+| **OSM storage** | Overpass + `petroleum_osm_features` + bulk seed | ODbL | `oil_terminals` (~12k after dedup); map bbox API |
+| **EU TED** | `ted_procurement_sync.py` | EU open | `eu_procurement_notices`; Recipe C tender signals |
+| **USAspending** | `gov_procurement_sync.py` | US open | Awards → Recipe E government offtake hints |
+| **OpenSanctions** | `opensanctions_screening.py` (graph-sync step) | Public API; `OPENSANCTIONS_API_KEY` optional for higher quota | `oil_companies.sanctions_status` + `sanctions_matches`; non-blocking UI chip only |
+| **GLEIF LEI batch** | `gleif_batch.enrich_companies_with_lei` (graph-sync step) | Public API, no key | `oil_companies.lei` + `lei_record_id`; denormalised onto `meridian_cargo_records.shipper_lei` / `consignee_lei` |
+| **Wikidata company facts** | `wikidata_company_enrichment.py` (graph-sync step) | Public MediaWiki API; polite `User-Agent` | `oil_companies.wikidata_qid` + `wikidata_facts` JSONB (industries, hq, country, website, freebase id) |
+| **Licenses / suppliers** | App licenses + [LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md) | User / admin CSV | `oil_companies` index on graph-sync step 2 |
+
+**Synthetic Meridian Cargo Records (MCR)** — not paid Bill of Lading data. Triangulation recipes **A–F** in `oil-live-intel/internal/services/syntheticbol/engine.go`.
+
+| `bol_tier` / UI label | Meaning |
+|-----------------------|---------|
+| `synthetic` (default DB) | MCR built from public signals; amber **Synthetic cargo** badge |
+| `inferred` | Shown when tier omitted in API/UI; same honesty — no confirmed private deal |
+| Provenance `seed_port_calls` | Demo AIS-style port calls when live AIS sparse; **Include seed data** toggle |
+| Provenance `live_ais` | Geofenced port calls from AISStream worker |
+
+Paid BOL vendors (e.g. ImportYeti) are **explicitly excluded** — see roadmap in [LIVE_DATA.md](./LIVE_DATA.md) and `.cursor/plans/live_data_unification_1ae1516a.plan.md`.
 
 ---
 
@@ -392,3 +424,8 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |
+| `backend/services/oil_live_graph_sync.py` | Live Data graph-sync orchestrator |
+| `backend/services/census_trade.py` | U.S. Census HS27 macro flows |
+| `backend/services/usitc_dataweb.py` | USITC DataWeb macro flows |
+| `oil-live-intel/internal/services/syntheticbol/` | MCR recipes A–F + rebuild |
+| `docs/LIVE_DATA.md` | Live Data onboarding, env keys, trader workflows |

@@ -2,6 +2,16 @@
 
 The route planner is a **screening** tool for supplier→buyer corridors. It uses free/open data where possible and degrades gracefully when external services are slow or unavailable.
 
+## Live Data → Route Planner deep link
+
+From **Live Data**, the **Deal Execution Pack** and **cargo (MCR) drawer** expose **Open in Route Planner**. That action switches to Route Planner view and pre-fills:
+
+- **Supplier (load)** — `load_port_name` / `load_country` and corridor coordinates from the MCR
+- **Buyer (discharge)** — `discharge_hint` / `discharge_country` and discharge corridor coords
+- **Product** — crude/refined/gas/sulfur families map to `petroleum_products` or `sulfur` when recognized
+
+Implementation: `mining-viz/src/features/live-data/liveDataRoutePrefill.ts` (`applyLiveDataRouteHints`, hub preset matching). If port names do not match a catalog hub, the UI toast asks the user to complete load/discharge manually. See [LIVE_DATA.md](./LIVE_DATA.md) trader workflows.
+
 ## What is “real” vs approximate
 
 | Mode | When it is real | What is still approximate |

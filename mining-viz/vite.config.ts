@@ -3,6 +3,12 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
+/** oil-live-intel upstream for Vite dev proxy (Docker: oil-live-intel:8095; host dev: localhost:8095). */
+const oilIntelProxyTarget =
+  process.env.OIL_INTEL_PROXY_TARGET ||
+  process.env.VITE_OIL_INTEL_PROXY ||
+  'http://localhost:8095';
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -20,8 +26,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api/oil-live/ws': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        ws: true,
+      },
       '/api/oil-live': {
-        target: 'http://oil-live-intel:8095',
+        target: oilIntelProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,

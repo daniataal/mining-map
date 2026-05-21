@@ -7,22 +7,24 @@ import (
 )
 
 type Config struct {
-	Port                   string
-	DatabaseURL            string
-	AISStreamAPIKey        string
-	EIAAPIKey              string
-	ComtradeAPIKey         string
-	EnableAIS              bool
-	EnableEIA              bool
-	EnableComtrade         bool
-	EnableOSMImport        bool
-	ExistingBackendURL     string
-	SupplierCreateEndpoint string
-	SeedOnStartup          bool
-	APIBaseURL             string
-	InternalBroadcastKey   string
-	AISPositionRetainHours int
-	AISInsecureTLS         bool
+	Port                    string
+	DatabaseURL             string
+	AISStreamAPIKey         string
+	EIAAPIKey               string
+	ComtradeAPIKey          string
+	EnableAIS               bool
+	EnableEIA               bool
+	EnableComtrade          bool
+	EnableOSMImport         bool
+	ExistingBackendURL      string
+	SupplierCreateEndpoint  string
+	SeedOnStartup           bool
+	APIBaseURL              string
+	InternalBroadcastKey    string
+	AISPositionRetainHours  int
+	AISInsecureTLS          bool
+	ElasticsearchURL        string
+	SearchIndexerInterval   int
 }
 
 func Load() Config {
@@ -45,6 +47,8 @@ func Load() Config {
 		InternalBroadcastKey:   env("OIL_INTEL_INTERNAL_KEY", "oil-intel-dev"),
 		AISPositionRetainHours: envInt("AIS_POSITION_RETAIN_HOURS", 72),
 		AISInsecureTLS:         envBool("OIL_INTEL_AIS_INSECURE_TLS", false),
+		ElasticsearchURL:       strings.TrimRight(env("ELASTICSEARCH_URL", "http://elasticsearch:9200"), "/"),
+		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
 	}
 }
 

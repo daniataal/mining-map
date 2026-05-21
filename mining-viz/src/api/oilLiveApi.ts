@@ -70,6 +70,8 @@ export type OilIntelligenceCard = {
   disclaimer?: string;
 };
 
+export type OilCompanySanctionsStatus = 'clear' | 'flagged' | 'review' | 'unknown' | string;
+
 export type OilCompany = {
   id: string;
   name: string;
@@ -85,6 +87,16 @@ export type OilCompany = {
   roles?: string[];
   sources?: string[];
   source?: string;
+  /** GLEIF Legal Entity Identifier (optional — populated by Worker C). */
+  lei?: string | null;
+  lei_record_id?: string | null;
+  /** OpenSanctions screening state (optional — populated by Worker B/C). */
+  sanctions_status?: OilCompanySanctionsStatus | null;
+  sanctions_checked_at?: string | null;
+  sanctions_matches?: Array<Record<string, unknown>> | null;
+  /** Wikidata QID + facts (optional — populated by Worker C). */
+  wikidata_qid?: string | null;
+  wikidata_facts?: Record<string, unknown> | null;
 };
 
 export type OilCompanyFilters = {
@@ -228,6 +240,12 @@ export async function getOilCompanies(filters: OilCompanyFilters = {}): Promise<
   return res.json();
 }
 
+export async function getOilCompany(companyId: string): Promise<OilCompany> {
+  const res = await fetch(oilUrl(`/api/oil-live/companies/${companyId}`), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`oil-live company ${res.status}`);
+  return res.json();
+}
+
 export async function saveOilCompanyToSuppliers(companyId: string): Promise<{
   status: string;
   supplier_id?: string;
@@ -314,10 +332,21 @@ export async function saveOilOpportunityEconomics(
   return data;
 }
 
+/** Normalize opportunities list from API (always returns an array). */
+export function normalizeOilOpportunitiesPayload(raw: unknown): OilOpportunity[] {
+  if (Array.isArray(raw)) return raw as OilOpportunity[];
+  if (raw && typeof raw === 'object') {
+    const body = raw as Record<string, unknown>;
+    if (Array.isArray(body.opportunities)) return body.opportunities as OilOpportunity[];
+  }
+  return [];
+}
+
 export async function getOilOpportunities(minConfidence = 0.55): Promise<{ opportunities: OilOpportunity[] }> {
   const res = await fetch(oilUrl(`/api/oil-live/opportunities?min_confidence=${minConfidence}`));
   if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return { opportunities: normalizeOilOpportunitiesPayload(data) };
 }
 
 export type DealReadinessStatus = 'complete' | 'partial' | 'missing';
@@ -365,7 +394,85 @@ export type MeridianCargoRecord = {
   evidence_chain?: string[];
   sources?: Array<{ name?: string; url?: string; fetched_at?: string }>;
   disclaimer?: string;
+  /**
+   * Optional party-enrichment fields denormalised onto the MCR row by Worker C
+   * (LEI carry-through + OpenSanctions screening). UI must work when these are
+   * absent — the backend has not necessarily shipped them yet.
+   */
+  shipper_lei?: string | null;
+  consignee_lei?: string | null;
+  shipper_sanctions_status?: OilCompanySanctionsStatus | null;
+  consignee_sanctions_status?: OilCompanySanctionsStatus | null;
 };
+
+/**
+ * Aggregated trade-flow arc returned by `GET /api/oil-live/trade-flows`.
+ * Worker B owns the endpoint; until that ships, the API client gracefully
+ * returns `{ arcs: [], count: 0 }` so the UI does not error.
+ */
+export type TradeFlowArc = {
+  key: string;
+  group: 'company_pair' | 'country_pair';
+  shipper: string;
+  consignee: string;
+  commodity_family: string;
+  cargo_count: number;
+  volume_total: number;
+  volume_unit: string;
+  avg_confidence: number;
+  origin_lat: number;
+  origin_lng: number;
+  dest_lat: number;
+  dest_lng: number;
+  sample_mcr_ids: string[];
+};
+
+export type TradeFlowsResponse = {
+  arcs: TradeFlowArc[];
+  count: number;
+};
+
+export type TradeFlowsFilters = {
+  group?: 'company_pair' | 'country_pair';
+  commodity?: string;
+  min_confidence?: number;
+  limit?: number;
+};
+
+/**
+ * Fetch aggregated trade flows. Returns an empty response (no error) when the
+ * backend has not yet implemented this endpoint (404) so the new map layer
+ * silently renders zero arcs while we wait on Worker B.
+ */
+export async function getTradeFlows(
+  filters: TradeFlowsFilters = {},
+): Promise<TradeFlowsResponse> {
+  const params = new URLSearchParams();
+  if (filters.group) params.set('group', filters.group);
+  if (filters.commodity) params.set('commodity', filters.commodity);
+  if (filters.min_confidence != null) {
+    params.set('min_confidence', String(filters.min_confidence));
+  }
+  if (filters.limit != null) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  let res: Response;
+  try {
+    res = await fetch(oilUrl(`/api/oil-live/trade-flows${qs ? `?${qs}` : ''}`));
+  } catch {
+    return { arcs: [], count: 0 };
+  }
+  if (res.status === 404 || res.status === 501) return { arcs: [], count: 0 };
+  if (!res.ok) {
+    return { arcs: [], count: 0 };
+  }
+  try {
+    const data = (await res.json()) as Partial<TradeFlowsResponse> | null;
+    const arcs = Array.isArray(data?.arcs) ? data.arcs : [];
+    return { arcs, count: data?.count ?? arcs.length };
+  } catch {
+    return { arcs: [], count: 0 };
+  }
+}
 
 /** Deal pack shape returned by GET /opportunities/{id}/deal-pack */
 export type DealExecutionPack = {
@@ -647,6 +754,123 @@ export async function assignOilAlert(alertId: string, assignee: string): Promise
     headers: authHeaders(),
     body: JSON.stringify({ user_id: oilLiveUserId(), assignee }),
   });
+}
+
+/** One of the four entity types indexed in Elasticsearch. */
+export type OilLiveSearchEntityType = 'cargo' | 'company' | 'terminal' | 'vessel';
+
+/** Subset of fields surfaced in the search drop-down per result. Source is
+ * intentionally loose — it's the raw `_source` from ES and varies per type. */
+export type OilLiveSearchHit = {
+  type: OilLiveSearchEntityType;
+  id: string;
+  score: number;
+  source: Record<string, unknown>;
+};
+
+export type OilLiveSearchResponse = {
+  hits: OilLiveSearchHit[];
+  total: number;
+  took_ms: number;
+  query: string;
+  /** When set (typically "search_unavailable"), the UI shows a degraded
+   * "Search unavailable" state inline instead of throwing. */
+  error?: string;
+};
+
+export type OilLiveSearchFilters = {
+  q: string;
+  types?: OilLiveSearchEntityType[];
+  limit?: number;
+  offset?: number;
+};
+
+const EMPTY_SEARCH: OilLiveSearchResponse = {
+  hits: [],
+  total: 0,
+  took_ms: 0,
+  query: '',
+};
+
+/**
+ * GET /api/oil-live/search — Elasticsearch-backed search across MCRs,
+ * companies, terminals, and vessels.
+ *
+ * Gracefully returns `{ hits: [], total: 0 }` on:
+ *   - 404 (endpoint not yet deployed),
+ *   - 503 (Elasticsearch container not running) — error is forwarded as
+ *     `"search_unavailable"` so callers can show a degraded inline state,
+ *   - network / parse errors,
+ * so the search bar never crashes the panel.
+ */
+export async function getOilLiveSearch(
+  filters: OilLiveSearchFilters,
+): Promise<OilLiveSearchResponse> {
+  const q = filters.q.trim();
+  if (!q) return { ...EMPTY_SEARCH, query: '' };
+  const params = new URLSearchParams();
+  params.set('q', q);
+  if (filters.types && filters.types.length > 0) {
+    params.set('types', filters.types.join(','));
+  }
+  if (filters.limit != null) params.set('limit', String(filters.limit));
+  if (filters.offset != null) params.set('offset', String(filters.offset));
+  let res: Response;
+  try {
+    res = await fetch(oilUrl(`/api/oil-live/search?${params.toString()}`));
+  } catch {
+    return { ...EMPTY_SEARCH, query: q, error: 'search_unavailable' };
+  }
+  if (res.status === 404) return { ...EMPTY_SEARCH, query: q };
+  if (res.status === 503) {
+    try {
+      const body = (await res.json()) as Partial<OilLiveSearchResponse>;
+      return {
+        ...EMPTY_SEARCH,
+        query: q,
+        error: body?.error ?? 'search_unavailable',
+      };
+    } catch {
+      return { ...EMPTY_SEARCH, query: q, error: 'search_unavailable' };
+    }
+  }
+  if (!res.ok) return { ...EMPTY_SEARCH, query: q, error: 'search_unavailable' };
+  try {
+    const data = (await res.json()) as Partial<OilLiveSearchResponse>;
+    return {
+      hits: Array.isArray(data.hits) ? (data.hits as OilLiveSearchHit[]) : [],
+      total: typeof data.total === 'number' ? data.total : 0,
+      took_ms: typeof data.took_ms === 'number' ? data.took_ms : 0,
+      query: typeof data.query === 'string' ? data.query : q,
+      error: data.error,
+    };
+  } catch {
+    return { ...EMPTY_SEARCH, query: q };
+  }
+}
+
+export type OilLiveSearchHealth = {
+  status: 'ok' | 'unavailable';
+  indices: Record<string, number>;
+};
+
+/**
+ * GET /api/oil-live/search/health — checks ES reachability and returns the
+ * doc count per index. Returns `{status:"unavailable", indices:{}}` on any
+ * non-2xx response so the admin UI can render a single status pill.
+ */
+export async function getOilLiveSearchHealth(): Promise<OilLiveSearchHealth> {
+  try {
+    const res = await fetch(oilUrl('/api/oil-live/search/health'));
+    if (!res.ok) return { status: 'unavailable', indices: {} };
+    const data = (await res.json()) as Partial<OilLiveSearchHealth>;
+    return {
+      status: data.status === 'ok' ? 'ok' : 'unavailable',
+      indices: (data.indices ?? {}) as Record<string, number>,
+    };
+  } catch {
+    return { status: 'unavailable', indices: {} };
+  }
 }
 
 export function connectOilLiveWebSocket(onMessage: (msg: { type: string; data: unknown }) => void): () => void {

@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/mining-map/oil-live-intel/internal/config"
+	"github.com/mining-map/oil-live-intel/internal/services/search"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
 )
 
@@ -23,6 +24,9 @@ type Server struct {
 	Log    zerolog.Logger
 	Config config.Config
 	Hub    *Hub
+	// SearchClient is optional — when nil, /api/oil-live/search returns
+	// {"error":"search_unavailable"} so the UI degrades gracefully.
+	SearchClient search.Client
 }
 
 var upgrader = websocket.Upgrader{
