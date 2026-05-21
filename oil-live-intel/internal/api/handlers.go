@@ -29,7 +29,16 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func (s *Server) Health(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
+	if s.Pool != nil {
+		sync := querySyncStatus(r.Context(), s.Pool)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  "ok",
+			"service": "oil-live-intel",
+			"sync":    sync,
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"service": "oil-live-intel",
@@ -343,6 +352,21 @@ func queryFloat(r *http.Request, key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+func queryBool(r *http.Request, key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(r.URL.Query().Get(key)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return def
+	}
 }
 
 func queryOffset(r *http.Request, key string) int {

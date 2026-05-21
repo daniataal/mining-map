@@ -34,9 +34,10 @@ import {
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
-import { Radio, Building2, Ship, AlertTriangle, Bell, Package, Loader2 } from 'lucide-react';
+import { Radio, Building2, Ship, AlertTriangle, Bell, Package, Loader2, Download } from 'lucide-react';
 import DealExecutionPack from './DealExecutionPack';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
+import { downloadCsv } from '../../lib/csvExport';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -72,10 +73,12 @@ export default function LiveDataIntelPanel({
   const [assignee, setAssignee] = useState('');
   const [cargoCountry, setCargoCountry] = useState('');
   const [cargoMinConfidence, setCargoMinConfidence] = useState('0.5');
+  const [includeSeedData, setIncludeSeedData] = useState(false);
   const [expandedCargoId, setExpandedCargoId] = useState<string | null>(null);
   const [cargoDetail, setCargoDetail] = useState<MeridianCargoRecord | null>(null);
   const [cargoDetailLoading, setCargoDetailLoading] = useState(false);
   const [cargoDealPackOppId, setCargoDealPackOppId] = useState<string | null>(null);
+  const [cargoExporting, setCargoExporting] = useState(false);
   const [companyRoleFilter, setCompanyRoleFilter] = useState('');
   const [companyCountryFilter, setCompanyCountryFilter] = useState('');
   const [companyOffset, setCompanyOffset] = useState(0);
@@ -161,22 +164,24 @@ export default function LiveDataIntelPanel({
 
   const cargoMinConfNum = parseFloat(cargoMinConfidence) || 0.5;
   const { data: cargoHealth } = useQuery({
-    queryKey: ['oil-live-cargo-health', productFilter],
+    queryKey: ['oil-live-cargo-health', productFilter, includeSeedData],
     queryFn: () =>
       getCargoRecords({
         commodity: productFilter === 'all' ? undefined : productFilter,
         min_confidence: 0.5,
+        exclude_seed: !includeSeedData,
         limit: 8,
       }),
     staleTime: 60_000,
   });
   const { data: cargoLedger, isLoading: cargoLoading } = useQuery({
-    queryKey: ['oil-live-cargo-ledger', productFilter, cargoCountry, cargoMinConfNum],
+    queryKey: ['oil-live-cargo-ledger', productFilter, cargoCountry, cargoMinConfNum, includeSeedData],
     queryFn: () =>
       getCargoRecords({
         commodity: productFilter === 'all' ? undefined : productFilter,
         country: cargoCountry.trim() || undefined,
         min_confidence: cargoMinConfNum,
+        exclude_seed: !includeSeedData,
         limit: 60,
       }),
     enabled: tab === 'cargo',
@@ -255,6 +260,71 @@ export default function LiveDataIntelPanel({
       return `~${Math.round(r.volume_best_estimate).toLocaleString()} ${unit}`;
     }
     return '—';
+  }
+
+  async function exportCargoCsv() {
+    setCargoExporting(true);
+    try {
+      const data = await getCargoRecords({
+        commodity: productFilter === 'all' ? undefined : productFilter,
+        country: cargoCountry.trim() || undefined,
+        min_confidence: cargoMinConfNum,
+        exclude_seed: !includeSeedData,
+        limit: 5000,
+      });
+      const records = data.cargo_records ?? [];
+      if (records.length === 0) {
+        toast.info(t('אין רשומות לייצוא', 'No cargo records to export'));
+        return;
+      }
+      const headers = [
+        'id',
+        'synthetic_bol_id',
+        'commodity_family',
+        'confidence',
+        'triangulation_score',
+        'bol_tier',
+        'shipper_name',
+        'consignee_name',
+        'vessel_name',
+        'mmsi',
+        'load_port_name',
+        'load_country',
+        'discharge_hint',
+        'discharge_country',
+        'volume_best_estimate',
+        'volume_unit',
+        'event_date',
+        'recipe',
+      ];
+      const rows = records.map((r) => [
+        r.id,
+        r.synthetic_bol_id ?? '',
+        r.commodity_family ?? '',
+        r.confidence != null ? String(r.confidence) : '',
+        r.triangulation_score != null ? String(r.triangulation_score) : '',
+        r.bol_tier ?? '',
+        r.shipper_name ?? '',
+        r.consignee_name ?? '',
+        r.vessel_name ?? '',
+        r.mmsi != null ? String(r.mmsi) : '',
+        r.load_port_name ?? '',
+        r.load_country ?? '',
+        r.discharge_hint ?? '',
+        r.discharge_country ?? '',
+        r.volume_best_estimate != null ? String(r.volume_best_estimate) : '',
+        r.volume_unit ?? '',
+        r.event_date ?? '',
+        r.recipe ?? '',
+      ]);
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadCsv(`meridian-cargo-records-${stamp}.csv`, headers, rows);
+      toast.success(t('יוצא CSV', 'CSV exported'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setCargoExporting(false);
+    }
   }
 
   async function handleSave(company: OilCompany) {
@@ -433,13 +503,22 @@ export default function LiveDataIntelPanel({
 
         {tab === 'cargo' && (
           <>
-            <div className="flex flex-wrap gap-2 mb-2">
+            <div className="flex flex-wrap gap-2 mb-2 items-center">
               <input
                 className="flex-1 min-w-[120px] text-[10px] border rounded-lg px-2 py-1.5 dark:bg-slate-900"
                 placeholder={t('מדינה (טעינה/פריקה)', 'Country (load/discharge)')}
                 value={cargoCountry}
                 onChange={(e) => setCargoCountry(e.target.value)}
               />
+              <label className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase text-slate-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeSeedData}
+                  onChange={(e) => setIncludeSeedData(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                {t('כלול נתוני seed', 'Include seed data')}
+              </label>
               <select
                 className="text-[10px] border rounded-lg px-2 py-1.5 dark:bg-slate-900"
                 value={cargoMinConfidence}
@@ -451,6 +530,19 @@ export default function LiveDataIntelPanel({
                 <option value="0.65">≥65%</option>
                 <option value="0.75">≥75%</option>
               </select>
+              <button
+                type="button"
+                disabled={cargoExporting}
+                onClick={() => void exportCargoCsv()}
+                className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-2 py-1.5 rounded-lg border border-amber-500/40 text-amber-800 dark:text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+              >
+                {cargoExporting ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Download className="w-3 h-3" />
+                )}
+                {t('ייצוא CSV', 'Export CSV')}
+              </button>
             </div>
             {cargoLoading && (
               <p className="text-xs text-slate-500 flex items-center gap-2">

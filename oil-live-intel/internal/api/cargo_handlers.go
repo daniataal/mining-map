@@ -18,33 +18,45 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 	country := r.URL.Query().Get("country")
 	mmsi := r.URL.Query().Get("mmsi")
 	minConf := queryFloat(r, "min_confidence", 0.0)
+	excludeSeed := queryBool(r, "exclude_seed", false)
 	limit := queryInt(r, "limit", 50)
 
 	q := `
-		SELECT id, synthetic_bol_id, recipe, commodity_family, confidence, triangulation_score,
-			bol_tier, shipper_name, consignee_name, vessel_name, mmsi, load_port_name, load_country,
-			discharge_hint, volume_best_estimate, volume_unit, event_date,
-			corridor_load_lat, corridor_load_lng, corridor_discharge_lat, corridor_discharge_lng
-		FROM meridian_cargo_records WHERE confidence >= $1
+		SELECT m.id, m.synthetic_bol_id, m.recipe, m.commodity_family, m.confidence, m.triangulation_score,
+			m.bol_tier, m.shipper_name, m.consignee_name, m.vessel_name, m.mmsi, m.load_port_name, m.load_country,
+			m.discharge_hint, m.volume_best_estimate, m.volume_unit, m.event_date,
+			m.corridor_load_lat, m.corridor_load_lng, m.corridor_discharge_lat, m.corridor_discharge_lng,
+			pc.evidence, pc.metadata
+		FROM meridian_cargo_records m
+		LEFT JOIN oil_port_calls pc ON pc.id = m.port_call_id
+		WHERE m.confidence >= $1
 	`
 	args := []any{minConf}
 	n := 2
+	if excludeSeed {
+		q += `
+			AND NOT (
+				COALESCE(pc.evidence::text, '') LIKE '%seed_port_calls%'
+				OR COALESCE(pc.metadata::text, '') LIKE '%seed_port_calls%'
+			)
+		`
+	}
 	if commodity != "" {
-		q += fmt.Sprintf(` AND commodity_family = $%d`, n)
+		q += fmt.Sprintf(` AND m.commodity_family = $%d`, n)
 		args = append(args, commodity)
 		n++
 	}
 	if country != "" {
-		q += fmt.Sprintf(` AND (load_country ILIKE $%d OR discharge_country ILIKE $%d)`, n, n)
+		q += fmt.Sprintf(` AND (m.load_country ILIKE $%d OR m.discharge_country ILIKE $%d)`, n, n)
 		args = append(args, "%"+country+"%")
 		n++
 	}
 	if mmsi != "" {
-		q += fmt.Sprintf(` AND mmsi::text = $%d`, n)
+		q += fmt.Sprintf(` AND m.mmsi::text = $%d`, n)
 		args = append(args, mmsi)
 		n++
 	}
-	q += fmt.Sprintf(` ORDER BY triangulation_score DESC NULLS LAST, confidence DESC, event_date DESC NULLS LAST LIMIT $%d`, n)
+	q += fmt.Sprintf(` ORDER BY m.triangulation_score DESC NULLS LAST, m.confidence DESC, m.event_date DESC NULLS LAST LIMIT $%d`, n)
 	args = append(args, limit)
 
 	rows, err := s.Pool.Query(r.Context(), q, args...)
@@ -65,16 +77,21 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 		var volUnit *string
 		var eventDate *time.Time
 		var loadLat, loadLng, discLat, discLng *float64
+		var pcEvidence, pcMetadata []byte
 		if err := rows.Scan(&id, &bolID, &recipe, &family, &conf, &tri, &tier,
 			&shipper, &consignee, &vessel, &mmsiVal, &loadPort, &loadCountry, &discharge, &vol, &volUnit, &eventDate,
-			&loadLat, &loadLng, &discLat, &discLng); err != nil {
+			&loadLat, &loadLng, &discLat, &discLng, &pcEvidence, &pcMetadata); err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		provenance := inferCargoProvenance(tier)
+		if portProv := inferPortCallProvenance(pcEvidence, pcMetadata); portProv != "unknown" {
+			provenance = portProv
 		}
 		items = append(items, map[string]any{
 			"id": id.String(), "synthetic_bol_id": bolID, "recipe": recipe,
 			"commodity_family": family, "confidence": conf, "triangulation_score": tri,
-			"bol_tier": tier, "data_provenance": inferCargoProvenance(tier),
+			"bol_tier": tier, "data_provenance": provenance,
 			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
 			"mmsi": mmsiVal, "load_port_name": loadPort, "load_country": loadCountry,
 			"discharge_hint": discharge, "volume_best_estimate": vol, "volume_unit": volUnit,

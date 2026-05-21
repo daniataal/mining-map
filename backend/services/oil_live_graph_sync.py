@@ -1102,7 +1102,12 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
     except RuntimeError as exc:
         return {"status": "skipped", "reason": str(exc)}
     started = _now_iso()
-    summary: dict[str, Any] = {"started_at": started, "steps": {}}
+    census_key = (os.getenv("CENSUS_API_KEY") or "").strip()
+    summary: dict[str, Any] = {
+        "started_at": started,
+        "census_api_key_configured": bool(census_key),
+        "steps": {},
+    }
     with conn.cursor() as cur:
         if not _table_exists(cur, "oil_terminals"):
             summary["steps"]["storage_terminals"] = {

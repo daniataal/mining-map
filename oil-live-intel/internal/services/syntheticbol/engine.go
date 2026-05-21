@@ -261,6 +261,8 @@ func recipeCorridorTrade(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, e
 		  AND te.country IS NOT NULL AND ti.country IS NOT NULL
 		  AND te.country <> ti.country
 		  AND e.arrival_ts > now() - interval '120 days'
+		ORDER BY e.arrival_ts DESC
+		LIMIT 500
 	`)
 	if err != nil {
 		return nil, err

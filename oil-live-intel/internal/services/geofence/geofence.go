@@ -20,10 +20,19 @@ type Terminal struct {
 	HasSulfur bool
 }
 
-// Index holds terminal zones.
+// gridCellDeg ~5.5 km at equator; geofence radius is ~1.2 km so ±1 cell covers matches.
+const gridCellDeg = 0.05
+
+type cellKey struct {
+	lat int
+	lon int
+}
+
+// Index holds terminal zones with a coarse lat/lon grid for O(1) average lookups.
 type Index struct {
 	terminals []Terminal
 	radiusM   float64
+	grid      map[cellKey][]int
 }
 
 func Load(ctx context.Context, pool *pgxpool.Pool, radiusM float64) (*Index, error) {
@@ -50,7 +59,24 @@ func Load(ctx context.Context, pool *pgxpool.Pool, radiusM float64) (*Index, err
 		}
 		list = append(list, t)
 	}
-	return &Index{terminals: list, radiusM: radiusM}, rows.Err()
+	idx := &Index{terminals: list, radiusM: radiusM}
+	idx.buildGrid()
+	return idx, rows.Err()
+}
+
+func toCell(lat, lon float64) cellKey {
+	return cellKey{
+		lat: int(math.Floor(lat / gridCellDeg)),
+		lon: int(math.Floor(lon / gridCellDeg)),
+	}
+}
+
+func (idx *Index) buildGrid() {
+	idx.grid = make(map[cellKey][]int, len(idx.terminals)/4+1)
+	for i := range idx.terminals {
+		ck := toCell(idx.terminals[i].Lat, idx.terminals[i].Lon)
+		idx.grid[ck] = append(idx.grid[ck], i)
+	}
 }
 
 func (idx *Index) Count() int { return len(idx.terminals) }
@@ -68,14 +94,27 @@ func (idx *Index) ByID(id uuid.UUID) *Terminal {
 
 // Match returns the nearest terminal within radius, if any.
 func (idx *Index) Match(lat, lon float64) *Terminal {
+	if len(idx.terminals) == 0 {
+		return nil
+	}
+	// Fallback for indexes built without a grid (tests).
+	if idx.grid == nil {
+		idx.buildGrid()
+	}
+	center := toCell(lat, lon)
 	var best *Terminal
 	bestDist := idx.radiusM + 1
-	for i := range idx.terminals {
-		t := &idx.terminals[i]
-		d := haversineM(t.Lat, t.Lon, lat, lon)
-		if d <= idx.radiusM && d < bestDist {
-			best = t
-			bestDist = d
+	for dLat := -1; dLat <= 1; dLat++ {
+		for dLon := -1; dLon <= 1; dLon++ {
+			ck := cellKey{lat: center.lat + dLat, lon: center.lon + dLon}
+			for _, i := range idx.grid[ck] {
+				t := &idx.terminals[i]
+				d := haversineM(t.Lat, t.Lon, lat, lon)
+				if d <= idx.radiusM && d < bestDist {
+					best = t
+					bestDist = d
+				}
+			}
 		}
 	}
 	return best

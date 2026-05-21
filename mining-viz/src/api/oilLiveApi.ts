@@ -118,7 +118,13 @@ function authHeaders(): HeadersInit {
   return h;
 }
 
-export async function getOilLiveHealth(): Promise<{ status: string; service: string }> {
+export type OilLiveHealth = {
+  status: string;
+  service: string;
+  sync?: OilLiveSyncStatus;
+};
+
+export async function getOilLiveHealth(): Promise<OilLiveHealth> {
   const res = await fetch(oilUrl('/api/oil-live/health'));
   if (!res.ok) throw new Error(`oil-live health ${res.status}`);
   return res.json();
@@ -130,6 +136,7 @@ export type OilLiveSyncStatus = {
   company_count?: number;
   cargo_record_count: number;
   port_call_count: number;
+  open_opportunity_count?: number;
   corridor_full_count?: number;
   corridor_partial_count?: number;
   last_cargo_at?: string | null;
@@ -217,6 +224,8 @@ export type CargoRecordsFilters = {
   country?: string;
   mmsi?: string | number;
   min_confidence?: number;
+  /** When true, omit cargo rows derived from graph-sync seed port calls. */
+  exclude_seed?: boolean;
   limit?: number;
 };
 
@@ -441,6 +450,7 @@ export async function getCargoRecords(
   if (filters.min_confidence != null) {
     params.set('min_confidence', String(filters.min_confidence));
   }
+  if (filters.exclude_seed) params.set('exclude_seed', 'true');
   if (filters.limit != null) params.set('limit', String(filters.limit));
   const qs = params.toString();
   const res = await fetch(oilUrl(`/api/oil-live/cargo-records${qs ? `?${qs}` : ''}`));
