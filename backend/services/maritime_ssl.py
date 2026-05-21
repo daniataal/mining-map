@@ -20,6 +20,30 @@ def maritime_ssl_verify_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+def maritime_ssl_auto_fallback_enabled() -> bool:
+    """
+    When True (default), retry AISStream WebSocket with TLS verify off after
+    upstream certificate expiry — keeps maritime-worker alive until AISStream renews.
+    Set MARITIME_SSL_AUTO_FALLBACK=0 to disable.
+    """
+    raw = os.getenv("MARITIME_SSL_AUTO_FALLBACK", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def is_certificate_expired_error(exc: BaseException) -> bool:
+    message = str(exc).strip().lower()
+    return "certificate has expired" in message or "cert has expired" in message
+
+
+def should_retry_aisstream_without_tls_verify(exc: BaseException) -> bool:
+    """Allow one insecure retry when verify is on but upstream cert is expired."""
+    if not maritime_ssl_verify_enabled():
+        return False
+    if not maritime_ssl_auto_fallback_enabled():
+        return False
+    return is_certificate_expired_error(exc)
+
+
 def build_maritime_ssl_context(*, verify: Optional[bool] = None) -> Optional[ssl.SSLContext]:
     """
     SSL context for websockets.connect(ssl=...).
@@ -63,9 +87,9 @@ def format_maritime_connection_error(url: str, exc: BaseException) -> str:
     return f"AIS watch failed for {host}: {message}{hint}"
 
 
-def websockets_ssl_argument(url: str) -> Any:
+def websockets_ssl_argument(url: str, *, verify: Optional[bool] = None) -> Any:
     """Value for websockets.connect(..., ssl=...)."""
-    ctx = build_maritime_ssl_context()
+    ctx = build_maritime_ssl_context(verify=verify)
     if ctx is not None:
         return ctx
     return True

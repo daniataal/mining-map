@@ -1473,6 +1473,70 @@ def _parse_ais_message(raw_message: dict[str, Any]) -> tuple[Optional[str], dict
     return mmsi, accumulator
 
 
+async def _receive_aisstream_vessels(
+    *,
+    subscription: dict[str, Any],
+    normalized_window: float,
+    normalized_max_vessels: int,
+    normalized_scope: str,
+    merge_ais_stream_message: Any,
+    new_vessel_accumulator: Any,
+    ssl: Any,
+) -> dict[str, dict[str, Any]]:
+    """Open AISStream WebSocket, collect raw vessel accumulators for one capture window."""
+    import websockets  # type: ignore
+
+    vessels: dict[str, dict[str, Any]] = {}
+    async with websockets.connect(
+        AISSTREAM_URL,
+        ping_interval=None,
+        close_timeout=1,
+        ssl=ssl,
+    ) as websocket:
+        await websocket.send(json.dumps(subscription))
+        started = time.monotonic()
+        raw_target_count = min(
+            max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 80),
+            max(AIS_MAX_VESSELS * 2, 12000),
+        )
+        while time.monotonic() - started < normalized_window:
+            remaining = normalized_window - (time.monotonic() - started)
+            if remaining <= 0:
+                break
+            try:
+                message_json = await asyncio.wait_for(
+                    websocket.recv(), timeout=min(1.0, remaining)
+                )
+            except asyncio.TimeoutError:
+                continue
+
+            raw_message = json.loads(message_json)
+            metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
+            body_holder = raw_message.get("Message") or {}
+            body: dict[str, Any] = {}
+            if isinstance(body_holder, dict):
+                message_type = _clean_text(raw_message.get("MessageType"))
+                body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
+                if not isinstance(body, dict):
+                    body = {}
+            mmsi = str(
+                (metadata.get("MMSI") if isinstance(metadata, dict) else None)
+                or body.get("UserID")
+                or body.get("MMSI")
+                or ""
+            ).strip()
+            if not mmsi:
+                continue
+            current = vessels.get(mmsi)
+            if current is None:
+                current = new_vessel_accumulator(mmsi)
+                vessels[mmsi] = current
+            merge_ais_stream_message(current, raw_message)
+            if len(vessels) >= raw_target_count:
+                break
+    return vessels
+
+
 async def _collect_ais_snapshot(
     *,
     timeout_seconds: float = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
@@ -1522,15 +1586,18 @@ async def _collect_ais_snapshot(
     try:
         from backend.services.maritime_ssl import (
             format_maritime_connection_error,
+            maritime_ssl_verify_enabled,
+            should_retry_aisstream_without_tls_verify,
             websockets_ssl_argument,
         )
     except ImportError:
         from services.maritime_ssl import (
             format_maritime_connection_error,
+            maritime_ssl_verify_enabled,
+            should_retry_aisstream_without_tls_verify,
             websockets_ssl_argument,
         )
 
-    vessels: dict[str, dict[str, Any]] = {}
     subscription = {
         "APIKey": api_key,
         "BoundingBoxes": plan["boxes"],
@@ -1543,56 +1610,44 @@ async def _collect_ais_snapshot(
         ],
     }
 
-    try:
-        async with websockets.connect(
-            AISSTREAM_URL,
-            ping_interval=None,
-            close_timeout=1,
-            ssl=websockets_ssl_argument(AISSTREAM_URL),
-        ) as websocket:
-            await websocket.send(json.dumps(subscription))
-            started = time.monotonic()
-            raw_target_count = min(
-                max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 80),
-                max(AIS_MAX_VESSELS * 2, 12000),
+    vessels: dict[str, dict[str, Any]] = {}
+    connection_error: Exception | None = None
+    tls_fallback_used = False
+    verify_attempts: list[bool] = [True, False] if maritime_ssl_verify_enabled() else [False]
+    for attempt_idx, verify_tls in enumerate(verify_attempts):
+        if attempt_idx > 0 and not (
+            connection_error and should_retry_aisstream_without_tls_verify(connection_error)
+        ):
+            break
+        if verify_tls is False:
+            tls_fallback_used = True
+            print(
+                "[maritime] AISStream TLS certificate expired upstream; "
+                "retrying with MARITIME_SSL_VERIFY=0 (auto-fallback until AISStream renews)."
             )
-            while time.monotonic() - started < normalized_window:
-                remaining = normalized_window - (time.monotonic() - started)
-                if remaining <= 0:
-                    break
-                try:
-                    message_json = await asyncio.wait_for(websocket.recv(), timeout=min(1.0, remaining))
-                except asyncio.TimeoutError:
-                    continue
+        try:
+            vessels = await _receive_aisstream_vessels(
+                subscription=subscription,
+                normalized_window=normalized_window,
+                normalized_max_vessels=normalized_max_vessels,
+                normalized_scope=normalized_scope,
+                merge_ais_stream_message=merge_ais_stream_message,
+                new_vessel_accumulator=new_vessel_accumulator,
+                ssl=websockets_ssl_argument(AISSTREAM_URL, verify=verify_tls),
+            )
+            connection_error = None
+            break
+        except Exception as exc:
+            connection_error = exc
+            vessels = {}
 
-                raw_message = json.loads(message_json)
-                metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
-                body_holder = raw_message.get("Message") or {}
-                body: dict[str, Any] = {}
-                if isinstance(body_holder, dict):
-                    message_type = _clean_text(raw_message.get("MessageType"))
-                    body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
-                    if not isinstance(body, dict):
-                        body = {}
-                mmsi = str(
-                    (metadata.get("MMSI") if isinstance(metadata, dict) else None)
-                    or body.get("UserID")
-                    or body.get("MMSI")
-                    or ""
-                ).strip()
-                if not mmsi:
-                    continue
-                current = vessels.get(mmsi)
-                if current is None:
-                    current = new_vessel_accumulator(mmsi)
-                    vessels[mmsi] = current
-                merge_ais_stream_message(current, raw_message)
-                if len(vessels) >= raw_target_count:
-                    break
-    except Exception as exc:
+    if connection_error is not None:
+        limitation = format_maritime_connection_error(AISSTREAM_URL, connection_error)
+        if tls_fallback_used:
+            limitation = f"{limitation} Auto-fallback to insecure TLS also failed."
         return _build_empty_ais_response(
             source="AISStream",
-            limitations=[format_maritime_connection_error(AISSTREAM_URL, exc)],
+            limitations=[limitation],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
