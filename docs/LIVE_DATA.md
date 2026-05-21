@@ -138,7 +138,7 @@ docker compose up -d oil-live-intel-worker
 |----------|--------------|-------|
 | `ADMIN_TOKEN` | Graph-sync, admin ingest | Header `X-Admin-Token`. If unset in dev, admin routes are open (logged warning). |
 | `AISSTREAM_API_KEY` | Live vessel positions + port calls | Free at [AISStream](https://aisstream.io/). Without it: seed/demo data only. |
-| `CENSUS_API_KEY` | U.S. bilateral HS27 macro trade on graph-sync | Free at [Census API signup](https://api.census.gov/data/key_signup.html). Step skipped if unset. |
+| `CENSUS_API_KEY` | U.S. bilateral HS27 macro trade on graph-sync | Free at [Census API signup](https://api.census.gov/data/key_signup.html). Step skipped if unset. Production deploy writes this from GitHub secret `CENSUS_API_KEY` via `.github/workflows/docker-image.yml`. |
 | `OIL_INTEL_INTERNAL_KEY` | Synthetic BOL rebuild from Python | Default `oil-intel-dev`; must match between backend and oil-live-intel. |
 | `DATABASE_URL` | All services | Shared Postgres `mining_db`. |
 
@@ -148,6 +148,7 @@ docker compose up -d oil-live-intel-worker
 |----------|---------|
 | `COMTRADE_API_KEY` | Higher Comtrade quota |
 | `EIA_API_KEY` | U.S. EIA petroleum volumes; also drives the new **EIA crude imports** + **refinery throughput** graph-sync steps (`backend/services/eia_imports.py`). Both skip cleanly when unset. |
+| `USITC_DATAWEB_API_KEY` | U.S. HS import/export flows via USITC DataWeb on graph-sync | Free DataWeb account; step skipped if unset. Production deploy writes this from GitHub secret `USITC_DATAWEB_API_KEY` via `.github/workflows/docker-image.yml`. |
 | `OPENSANCTIONS_API_KEY` | Optional — higher-rate-limit OpenSanctions tier. Public API works without it. The graph-sync screening step (`backend/services/opensanctions_screening.py`) writes `oil_companies.sanctions_status` + `sanctions_matches` and never auto-blocks the UI. |
 | `OPENSANCTIONS_BATCH_LIMIT` | Rows screened per graph-sync run (default 50). |
 | `GLEIF_BATCH_LIMIT` | Rows enriched per graph-sync run by `backend/services/gleif_batch.py` (default 100); writes `oil_companies.lei` + `lei_record_id`. |
