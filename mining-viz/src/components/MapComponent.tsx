@@ -282,9 +282,13 @@ interface MapComponentProps {
   onOilLiveDismiss?: () => void;
   /** Increment when entering Live Data to fly map to Gulf hub bbox. */
   liveDataFlyTrigger?: number;
+  /** When set, fly to this point instead of the default hub (search hit). */
+  liveDataFlyTarget?: { lat: number; lng: number } | null;
   /** EIA historic file-import corridor arcs (purple dashed). */
   eiaHistoricMapEnabled?: boolean;
   eiaHistoricMapArcs?: EiaHistoricMapArc[];
+  /** Show OSM petroleum infrastructure on mining/global/oil views. */
+  showInfrastructureLayers?: boolean;
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -427,18 +431,28 @@ const CountryFocusBoundsFly = ({
     return null;
 };
 
-const LiveDataHubBoundsFly = ({ trigger }: { trigger: number }) => {
+const LiveDataMapFly = ({
+    trigger,
+    target,
+}: {
+    trigger: number;
+    target: { lat: number; lng: number } | null;
+}) => {
     const map = useMap();
     useEffect(() => {
         if (trigger <= 0) return;
         const timer = window.setTimeout(() => {
             map.invalidateSize({ animate: false, pan: false });
+            if (target) {
+                map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 8), { duration: 1.0 });
+                return;
+            }
             const bounds = L.latLngBounds(LIVE_DATA_HUB_BOUNDS);
             if (!bounds.isValid()) return;
             map.flyToBounds(bounds, { padding: [48, 48], maxZoom: 6, duration: 1.2 });
         }, 120);
         return () => window.clearTimeout(timer);
-    }, [trigger, map]);
+    }, [trigger, target, map]);
     return null;
 };
 
@@ -574,8 +588,10 @@ export default function MapComponent({
   onOilLiveEntityClick,
   onOilLiveDismiss,
   liveDataFlyTrigger = 0,
+  liveDataFlyTarget = null,
   eiaHistoricMapEnabled = false,
   eiaHistoricMapArcs = [],
+  showInfrastructureLayers = false,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -1725,7 +1741,7 @@ export default function MapComponent({
                     trigger={countryFocusBoundsTrigger}
                 />
                 {isLiveDataView && (
-                    <LiveDataHubBoundsFly trigger={liveDataFlyTrigger} />
+                    <LiveDataMapFly trigger={liveDataFlyTrigger} target={liveDataFlyTarget} />
                 )}
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1797,10 +1813,16 @@ export default function MapComponent({
                             onEntityClick={onOilLiveEntityClick}
                         />
                     )}
-                    {isLiveDataView && eiaHistoricMapEnabled && (
+                    {eiaHistoricMapEnabled && eiaHistoricMapArcs.length > 0 && (
                         <EiaHistoricMapLayer
                             enabled={eiaHistoricMapEnabled}
                             arcs={eiaHistoricMapArcs}
+                        />
+                    )}
+                    {showInfrastructureLayers && onGroundVisible && !isLiveDataView && (
+                        <OsmPetroleumMapLayers
+                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                            enabled
                         />
                     )}
                     {isOilAndGasView && onGroundVisible && (

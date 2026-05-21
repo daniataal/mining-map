@@ -49,7 +49,33 @@ export type LiveDataSearchHitClick = {
   id: string;
   title: string;
   subtitle?: string;
+  lat?: number;
+  lng?: number;
 };
+
+/** Extract map fly target from Elasticsearch _source (cargo corridor or terminal location). */
+export function hitFlyCoords(hit: OilLiveSearchHit): { lat: number; lng: number } | null {
+  const s = hit.source || {};
+  const load = s.corridor_load as { lat?: number; lon?: number; lng?: number } | undefined;
+  if (load && typeof load.lat === 'number') {
+    const lng = load.lon ?? load.lng;
+    if (typeof lng === 'number') return { lat: load.lat, lng };
+  }
+  const disc = s.corridor_discharge as { lat?: number; lon?: number; lng?: number } | undefined;
+  if (disc && typeof disc.lat === 'number') {
+    const lng = disc.lon ?? disc.lng;
+    if (typeof lng === 'number') return { lat: disc.lat, lng };
+  }
+  const loc = s.location as { lat?: number; lon?: number; lng?: number } | undefined;
+  if (loc && typeof loc.lat === 'number') {
+    const lng = loc.lon ?? loc.lng;
+    if (typeof lng === 'number') return { lat: loc.lat, lng };
+  }
+  if (typeof s.lat === 'number' && typeof s.lng === 'number') {
+    return { lat: s.lat as number, lng: s.lng as number };
+  }
+  return null;
+}
 
 export interface LiveDataSearchBarProps {
   /** Called when the user clicks a hit (or presses Enter on the first one). */
@@ -161,11 +187,14 @@ export default function LiveDataSearchBar({
 
   const handleSelect = useCallback(
     (hit: OilLiveSearchHit) => {
+      const fly = hitFlyCoords(hit);
       onHitClick({
         type: hit.type,
         id: hit.id,
         title: hitTitle(hit),
         subtitle: hitSubtitle(hit) || undefined,
+        lat: fly?.lat,
+        lng: fly?.lng,
       });
       setOpen(false);
     },

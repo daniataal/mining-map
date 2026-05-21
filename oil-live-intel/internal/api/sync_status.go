@@ -8,7 +8,6 @@ import (
 )
 
 // TopCorridor is a single row in the sync-status `top_corridors` digest.
-// All four fields come from the mcr_corridor_aggregates_country view.
 type TopCorridor struct {
 	ShipperCountry   string `json:"shipper_country"`
 	ConsigneeCountry string `json:"consignee_country"`
@@ -16,28 +15,42 @@ type TopCorridor struct {
 	CargoCount       int    `json:"cargo_count"`
 }
 
+// McrTierCount groups meridian_cargo_records by bol_tier.
+type McrTierCount struct {
+	BolTier string `json:"bol_tier"`
+	Count   int    `json:"count"`
+}
+
 type syncStatusSummary struct {
-	TerminalCount                 int           `json:"terminal_count"`
-	CompanyCount                  int           `json:"company_count"`
-	CargoRecordCount              int           `json:"cargo_record_count"`
-	PortCallCount                 int           `json:"port_call_count"`
-	OpenOpportunityCount          int           `json:"open_opportunity_count"`
-	CorridorFullCount             int           `json:"corridor_full_count"`
-	CorridorPartialCount          int           `json:"corridor_partial_count"`
-	McrWithLeiCount               int           `json:"mcr_with_lei_count"`
-	McrWithSanctionsScreenedCount int           `json:"mcr_with_sanctions_screened_count"`
-	McrCorridorCompanyPairCount   int           `json:"mcr_corridor_company_pair_count"`
-	TopCorridors                  []TopCorridor `json:"top_corridors"`
-	LastGraphSyncAt               any           `json:"last_graph_sync_at"`
-	LastCargoAt                   any           `json:"last_cargo_at"`
-	Disclaimer                    string        `json:"disclaimer"`
+	TerminalCount                 int            `json:"terminal_count"`
+	CompanyCount                  int            `json:"company_count"`
+	CargoRecordCount              int            `json:"cargo_record_count"`
+	PortCallCount                 int            `json:"port_call_count"`
+	OpenOpportunityCount          int            `json:"open_opportunity_count"`
+	CorridorFullCount             int            `json:"corridor_full_count"`
+	CorridorPartialCount          int            `json:"corridor_partial_count"`
+	McrWithLeiCount               int            `json:"mcr_with_lei_count"`
+	McrWithSanctionsScreenedCount int            `json:"mcr_with_sanctions_screened_count"`
+	McrCorridorCompanyPairCount   int            `json:"mcr_corridor_company_pair_count"`
+	TopCorridors                  []TopCorridor  `json:"top_corridors"`
+	McrByTier                     []McrTierCount `json:"mcr_by_tier"`
+	OilTradeFlowCount             int            `json:"oil_trade_flow_count"`
+	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
+	TradeManifestRowCount         int            `json:"trade_manifest_row_count"`
+	LastGraphSyncAt               any            `json:"last_graph_sync_at"`
+	LastCargoAt                   any            `json:"last_cargo_at"`
+	LastComtradeSyncAt            any            `json:"last_comtrade_sync_at"`
+	LastComtradeSyncStatus        *string        `json:"last_comtrade_sync_status"`
+	Disclaimer                    string         `json:"disclaimer"`
 }
 
 func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary {
 	var terminalCount, cargoCount, portCallCount, companyCount int
 	var corridorFull, corridorPartial, openOpps int
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
-	var lastGraphSync, lastCargoAt *time.Time
+	var oilTradeFlows, eiaHistoric, tradeManifests int
+	var lastGraphSync, lastCargoAt, lastComtrade *time.Time
+	var lastComtradeStatus *string
 
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_terminals`).Scan(&terminalCount)
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_companies`).Scan(&companyCount)
@@ -57,7 +70,6 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT COUNT(*)::int FROM oil_opportunities WHERE status = 'open'
 	`).Scan(&openOpps)
 
-	// Enrichment counters from migration 013 — silently 0 if columns are missing.
 	_ = pool.QueryRow(ctx, `
 		SELECT COUNT(*)::int FROM meridian_cargo_records
 		WHERE shipper_lei IS NOT NULL OR consignee_lei IS NOT NULL
@@ -66,13 +78,16 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT COUNT(*)::int FROM meridian_cargo_records
 		WHERE shipper_sanctions_status IS NOT NULL OR consignee_sanctions_status IS NOT NULL
 	`).Scan(&mcrWithSanctions)
-
-	// Aggregate views from migration 012 — silently 0 / empty if missing.
 	_ = pool.QueryRow(ctx, `
 		SELECT COUNT(*)::int FROM mcr_corridor_aggregates_company
 	`).Scan(&mcrCorridorCompanyPairs)
 
+	oilTradeFlows = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_trade_flows`)
+	eiaHistoric = countTable(ctx, pool, `SELECT COUNT(*)::int FROM eia_historic_imports`)
+	tradeManifests = countTable(ctx, pool, `SELECT COUNT(*)::int FROM trade_manifest_rows`)
+
 	topCorridors := queryTopCorridors(ctx, pool)
+	mcrByTier := queryMcrByTier(ctx, pool)
 
 	_ = pool.QueryRow(ctx, `
 		SELECT MAX(GREATEST(created_at, COALESCE(event_date, created_at)))
@@ -81,6 +96,10 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	_ = pool.QueryRow(ctx, `
 		SELECT value FROM oil_live_sync_state WHERE key = 'last_graph_sync_at'
 	`).Scan(&lastGraphSync)
+	_ = pool.QueryRow(ctx, `
+		SELECT finished_at, status FROM comtrade_sync_runs
+		WHERE status = 'ok' ORDER BY finished_at DESC NULLS LAST LIMIT 1
+	`).Scan(&lastComtrade, &lastComtradeStatus) //nolint:errcheck — table may be absent on fresh DB
 
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
@@ -94,15 +113,49 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		McrWithSanctionsScreenedCount: mcrWithSanctions,
 		McrCorridorCompanyPairCount:   mcrCorridorCompanyPairs,
 		TopCorridors:                  topCorridors,
+		McrByTier:                     mcrByTier,
+		OilTradeFlowCount:             oilTradeFlows,
+		EiaHistoricImportCount:        eiaHistoric,
+		TradeManifestRowCount:         tradeManifests,
 		LastGraphSyncAt:               formatTimePtr(lastGraphSync),
 		LastCargoAt:                   formatTimePtr(lastCargoAt),
+		LastComtradeSyncAt:            formatTimePtr(lastComtrade),
+		LastComtradeSyncStatus:        lastComtradeStatus,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted.",
 	}
 }
 
-// queryTopCorridors returns up to 5 country-pair corridors by cargo count from
-// mcr_corridor_aggregates_country. Returns an empty (non-nil) slice if the view
-// is missing (migration 012 not yet applied) so the JSON response stays stable.
+func queryMcrByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {
+	out := []McrTierCount{}
+	rows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(TRIM(bol_tier), ''), 'inferred') AS tier, COUNT(*)::int
+		FROM meridian_cargo_records
+		GROUP BY 1
+		ORDER BY 2 DESC
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tier string
+		var count int
+		if err := rows.Scan(&tier, &count); err != nil {
+			return out
+		}
+		out = append(out, McrTierCount{BolTier: tier, Count: count})
+	}
+	return out
+}
+
+func countTable(ctx context.Context, pool *pgxpool.Pool, query string) int {
+	var n int
+	if err := pool.QueryRow(ctx, query).Scan(&n); err != nil {
+		return 0
+	}
+	return n
+}
+
 func queryTopCorridors(ctx context.Context, pool *pgxpool.Pool) []TopCorridor {
 	out := []TopCorridor{}
 	rows, err := pool.Query(ctx, `

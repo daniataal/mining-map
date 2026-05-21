@@ -167,6 +167,7 @@ def create_deal_room(
     status: str = "open",
     route_snapshot: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
+    rfq: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     ensure_deal_rooms_table(conn)
     entity = load_entity_basics(conn, entity_id, entity_kind)
@@ -191,7 +192,7 @@ def create_deal_room(
                 status,
                 _jsonb(route_snapshot) if route_snapshot is not None else None,
                 _jsonb([]),
-                _jsonb({"entity": entity, "agentOutputs": {}, "confidence": None}),
+                _jsonb({"entity": entity, "agentOutputs": {}, "confidence": None, "rfq": rfq or {}}),
                 notes,
             ),
         )

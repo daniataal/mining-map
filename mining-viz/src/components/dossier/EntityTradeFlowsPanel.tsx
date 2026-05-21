@@ -69,7 +69,31 @@ export default function EntityTradeFlowsPanel({
   if (isError || !data) return null;
 
   const flows = data.flows || [];
-  if (!flows.length && !(data.warnings?.length)) return null;
+  const warnings = data.warnings || [];
+
+  if (!flows.length) {
+    return (
+      <Card className="p-4 space-y-2 border-amber-500/25 bg-amber-500/5">
+        <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+          {t('זרימות סחר (מאקרו)', 'Trade flows (macro)')}
+        </p>
+        <Badge variant="outline" className="text-[10px] uppercase">
+          {t('רמת מאקרו', 'bol_tier: macro')}
+        </Badge>
+        {warnings.map((w, i) => (
+          <p key={i} className="text-xs text-slate-600 dark:text-slate-400">
+            {w}
+          </p>
+        ))}
+        <p className="text-[11px] text-slate-500">
+          {t(
+            'הריצו graph-sync כדי למלא Comtrade וזרימות מוצרי מדף.',
+            'Run graph-sync to populate Comtrade and commodity_trade_flows.',
+          )}
+        </p>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 space-y-3 border-amber-500/20">

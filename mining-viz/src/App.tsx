@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities } from './lib/api';
+import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, createDealRoom } from './lib/api';
+import { getEiaHistoricMap } from './api/eiaHistoricApi';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useLicenseAnnotations } from './hooks/use-license-annotations';
@@ -227,6 +228,14 @@ export default function App() {
     year: number;
   }>({ enabled: false, arcs: [], year: 2020 });
   const [liveDataFlyTrigger, setLiveDataFlyTrigger] = useState(0);
+  const [liveDataFlyTarget, setLiveDataFlyTarget] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+  const [oilGasEiaHistoric, setOilGasEiaHistoric] = useState<{
+    enabled: boolean;
+    arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
+    year: number;
+  }>({ enabled: true, arcs: [], year: 2020 });
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
@@ -403,7 +412,27 @@ export default function App() {
   useEffect(() => {
     if (viewMode === 'live_data') {
       setLiveDataFlyTrigger((n) => n + 1);
+      setLiveDataFlyTarget(null);
     }
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas') return;
+    let cancelled = false;
+    getEiaHistoricMap({ year: 2020, limit: 400 })
+      .then((res) => {
+        if (!cancelled) {
+          setOilGasEiaHistoric({ enabled: true, arcs: res.arcs ?? [], year: 2020 });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOilGasEiaHistoric((prev) => ({ ...prev, enabled: true, arcs: [] }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [viewMode]);
 
   useEffect(() => {
@@ -496,6 +525,27 @@ export default function App() {
     setSelectedMaritimeVessel(null);
     setOilLiveEntity(payload);
   }, []);
+
+  const handleLiveDataMapFlyTo = useCallback((lat: number, lng: number) => {
+    setLiveDataFlyTarget({ lat, lng });
+    setLiveDataFlyTrigger((n) => n + 1);
+  }, []);
+
+  const handleCreateDealRoomFromOpportunity = useCallback(async () => {
+    if (!oilLiveEntity || oilLiveEntity.entityKind !== 'opportunity') return;
+    try {
+      const room = await createDealRoom({
+        entityId: oilLiveEntity.entityId,
+        entityKind: 'opportunity',
+        title: oilLiveEntity.title ?? 'Live Data opportunity',
+        rfq_product: oilLiveProductFilter !== 'all' ? oilLiveProductFilter : undefined,
+      });
+      toast.success(t('חדר עסקה נוצר', 'Deal room created'));
+      handleNavigateToDealRoom(room.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Deal room failed');
+    }
+  }, [oilLiveEntity, oilLiveProductFilter, handleNavigateToDealRoom, t]);
 
   const handleOilLiveDismiss = useCallback(() => {
     setOilLiveEntity(null);
@@ -1259,8 +1309,17 @@ export default function App() {
                   onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
                   onOilLiveDismiss={viewMode === 'live_data' ? handleOilLiveDismiss : undefined}
                   liveDataFlyTrigger={viewMode === 'live_data' ? liveDataFlyTrigger : 0}
-                  eiaHistoricMapEnabled={viewMode === 'live_data' && eiaHistoricMap.enabled}
-                  eiaHistoricMapArcs={eiaHistoricMap.arcs}
+                  liveDataFlyTarget={viewMode === 'live_data' ? liveDataFlyTarget : null}
+                  eiaHistoricMapEnabled={
+                    (viewMode === 'live_data' && eiaHistoricMap.enabled) ||
+                    viewMode === 'oil_and_gas'
+                  }
+                  eiaHistoricMapArcs={
+                    viewMode === 'oil_and_gas' ? oilGasEiaHistoric.arcs : eiaHistoricMap.arcs
+                  }
+                  showInfrastructureLayers={
+                    viewMode === 'mining' || viewMode === 'global' || viewMode === 'oil_and_gas'
+                  }
                 />
               </Suspense>
             )}
@@ -1294,6 +1353,11 @@ export default function App() {
                       onClose={handleOilLiveDismiss}
                       onOpenRoutePlanner={handleOpenRoutePlannerFromLiveData}
                       onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
+                      onCreateDealRoom={
+                        oilLiveEntity.entityKind === 'opportunity'
+                          ? handleCreateDealRoomFromOpportunity
+                          : undefined
+                      }
                       onHighlightOnMap={(_selection) => {
                         // Keep the drawer open so the user can cross-reference
                         // the newly visible trade-flow arcs with the I/E table
@@ -1330,6 +1394,7 @@ export default function App() {
                       onOpenCargoRecord={handleOpenOilLiveCargo}
                       onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
                       onOpenLiveEntity={handleOilLiveEntityClick}
+                      onMapFlyTo={handleLiveDataMapFlyTo}
                       onEiaHistoricMapChange={setEiaHistoricMap}
                     />
                   </Suspense>

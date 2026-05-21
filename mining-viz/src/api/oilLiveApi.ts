@@ -179,12 +179,20 @@ export async function getOilLiveHealth(): Promise<OilLiveHealth> {
   return res.json();
 }
 
+export type McrTierCount = { bol_tier: string; count: number };
+
 export type OilLiveSyncStatus = {
   last_graph_sync_at?: string | null;
   terminal_count: number;
   company_count?: number;
   cargo_record_count: number;
   port_call_count: number;
+  oil_trade_flow_count?: number;
+  eia_historic_import_count?: number;
+  trade_manifest_row_count?: number;
+  mcr_by_tier?: McrTierCount[];
+  last_comtrade_sync_at?: string | null;
+  last_comtrade_sync_status?: string | null;
   /** Live AIS port calls (when returned by sync-status). */
   live_ais_port_call_count?: number;
   /** Recent live AIS vessel positions (when returned by sync-status). */
@@ -623,6 +631,46 @@ export async function getCargoRecords(
 export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
   const res = await fetch(oilUrl(`/api/oil-live/cargo-records/${encodeURIComponent(id)}`));
   if (!res.ok) throw new Error(`oil-live cargo-record ${res.status}`);
+  return res.json();
+}
+
+export async function getCargoRecordsMap(
+  bbox: string,
+  filters: Pick<CargoRecordsFilters, 'commodity' | 'min_confidence' | 'exclude_seed' | 'limit'> = {},
+): Promise<CargoRecordsResponse> {
+  const params = new URLSearchParams();
+  params.set('bbox', bbox);
+  if (filters.commodity) params.set('commodity', filters.commodity);
+  if (filters.min_confidence != null) {
+    params.set('min_confidence', String(filters.min_confidence));
+  }
+  if (filters.exclude_seed !== false) params.set('exclude_seed', 'true');
+  params.set('limit', String(filters.limit ?? 200));
+  const res = await fetch(oilUrl(`/api/oil-live/cargo-records/map?${params.toString()}`));
+  if (!res.ok) throw new Error(`oil-live cargo-records/map ${res.status}`);
+  return res.json();
+}
+
+export type CompanyShipmentsResponse = {
+  company: OilCompany;
+  shipments: MeridianCargoRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export async function getCompanyShipments(
+  companyId: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<CompanyShipmentsResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/companies/${encodeURIComponent(companyId)}/shipments${qs ? `?${qs}` : ''}`),
+  );
+  if (!res.ok) throw new Error(`oil-live company shipments ${res.status}`);
   return res.json();
 }
 

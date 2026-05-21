@@ -67,6 +67,14 @@ def _load_license_row(conn: Any, entity_id: str) -> Optional[dict[str, Any]]:
     }
 
 
+def _table_exists(cur: Any, name: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = %s",
+        (name,),
+    )
+    return cur.fetchone() is not None
+
+
 def query_stored_trade_flows(
     conn: Any,
     *,
@@ -77,11 +85,13 @@ def query_stored_trade_flows(
     if not country or not hs_codes:
         return []
     country_l = country.strip().lower()
+    out: list[dict[str, Any]] = []
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
-                   flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at
+                   flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at,
+                   'oil_trade_flows' AS _table
             FROM oil_trade_flows
             WHERE LOWER(reporter) LIKE %s
               AND hs_code = ANY(%s)
@@ -91,27 +101,50 @@ def query_stored_trade_flows(
             (f"%{country_l}%", list(hs_codes), limit),
         )
         rows = cur.fetchall()
+        out.extend(_rows_to_flow_dicts(rows))
+
+        if _table_exists(cur, "commodity_trade_flows"):
+            cur.execute(
+                """
+                SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
+                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at,
+                       'commodity_trade_flows' AS _table
+                FROM commodity_trade_flows
+                WHERE (LOWER(reporter) LIKE %s OR LOWER(reporter_iso2) LIKE %s)
+                  AND hs_code = ANY(%s)
+                ORDER BY year DESC, trade_value_usd DESC NULLS LAST
+                LIMIT %s
+                """,
+                (f"%{country_l}%", f"%{country_l[:2]}%", list(hs_codes), limit),
+            )
+            rows2 = cur.fetchall()
+            out.extend(_rows_to_flow_dicts(rows2))
+    out.sort(key=lambda r: (r.get("year") or 0, r.get("trade_value_usd") or 0), reverse=True)
+    return out[:limit]
+
+
+def _rows_to_flow_dicts(rows: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows or []:
         if isinstance(row, dict):
-            out.append(dict(row))
+            item = dict(row)
         else:
-            out.append(
-                {
-                    "id": row[0],
-                    "reporter": row[1],
-                    "reporter_iso2": row[2],
-                    "partner": row[3],
-                    "hs_code": row[4],
-                    "hs_description": row[5],
-                    "flow_type": row[6],
-                    "year": row[7],
-                    "trade_value_usd": row[8],
-                    "net_weight_kg": row[9],
-                    "data_source": row[10],
-                    "ingested_at": row[11].isoformat() if hasattr(row[11], "isoformat") else row[11],
-                }
-            )
+            item = {
+                "id": row[0],
+                "reporter": row[1],
+                "reporter_iso2": row[2],
+                "partner": row[3],
+                "hs_code": row[4],
+                "hs_description": row[5],
+                "flow_type": row[6],
+                "year": row[7],
+                "trade_value_usd": row[8],
+                "net_weight_kg": row[9],
+                "data_source": row[10],
+                "ingested_at": row[11].isoformat() if hasattr(row[11], "isoformat") else row[11],
+            }
+        item["bol_tier"] = "macro"
+        out.append(item)
     return out
 
 
@@ -167,12 +200,14 @@ def collect_entity_trade_flows(
         "hs_codes": hs_codes,
         "flows": flows,
         "flow_count": len(flows),
-        "provenance": "oil_trade_flows (UN Comtrade HS27 scheduled sync + seed)",
+        "bol_tier": "macro",
+        "provenance": "oil_trade_flows + commodity_trade_flows (UN Comtrade macro)",
         "limitations": [
             "Country-level bilateral flows — not company-specific customs data.",
             "Rows match license country name against Comtrade reporter field (fuzzy).",
         ],
-        "warnings": [] if flows else ["No matching rows in oil_trade_flows for this country/HS — run Comtrade sync."],
+        "warnings": [] if flows else ["No macro trade rows for this country/HS — run graph-sync / Comtrade."],
+        "sync_cta": "POST /api/admin/oil-live/graph-sync",
     }
 
 
@@ -190,4 +225,6 @@ def serialize_entity_trade_flows_response(payload: dict[str, Any]) -> dict[str, 
         "provenance": payload.get("provenance"),
         "limitations": payload.get("limitations") or [],
         "warnings": payload.get("warnings") or [],
+        "bolTier": payload.get("bol_tier") or "macro",
+        "syncCta": payload.get("sync_cta"),
     }
