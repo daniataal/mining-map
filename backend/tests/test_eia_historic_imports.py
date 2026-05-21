@@ -70,8 +70,11 @@ class EiaHistoricIngestTests(unittest.TestCase):
             cur.rowcount = 1
             conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
             conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+            conn.commit = MagicMock()
+            conn.rollback = MagicMock()
 
             summary = eia_mod.ingest_eia_downloads_folder(conn, tmp)
+            conn.commit.assert_called()
             self.assertEqual(summary["status"], "ok")
             self.assertEqual(summary["files_processed"], 1)
             self.assertGreater(summary["rows_parsed"], 0)
@@ -98,7 +101,7 @@ class EiaHistoricAutoIngestTests(unittest.TestCase):
 
 
 class EiaHistoricApiTests(unittest.TestCase):
-    @unittest.mock.patch("backend.services.eia_historic_imports.query_summary")
+    @unittest.mock.patch(f"{eia_mod.__name__}.query_summary")
     def test_query_summary_shape(self, mock_summary):
         mock_summary.return_value = {
             "year_min": 2000,

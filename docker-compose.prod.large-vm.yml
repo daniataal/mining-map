@@ -1,0 +1,27 @@
+# Optional overlay for ~23 GB RAM hosts — faster Postgres cache + ES heap.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.large-vm.yml up -d
+#
+# Tune further via backend.env if needed.
+
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=12GB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - max_connections=100
+
+  elasticsearch:
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx3g

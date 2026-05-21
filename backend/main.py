@@ -1813,11 +1813,16 @@ def _sync_eia_historic_reference() -> None:
         conn = get_db_connection()
         try:
             summary = try_auto_ingest_eia_downloads(conn)
+            if summary.get("status") == "error":
+                conn.rollback()
             print(
                 f"[EiaHistoric] Auto-ingest — status={summary.get('status')}, "
                 f"rows_inserted={summary.get('rows_inserted', 0)}, "
                 f"reason={summary.get('reason', '')}"
             )
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
     except Exception as exc:

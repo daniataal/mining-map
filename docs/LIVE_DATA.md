@@ -99,7 +99,13 @@ Optional query param: `rebuild_synthetic_bol=false` to skip the hourly MCR rebui
 Scheduled worker (daily):
 
 ```bash
-docker compose up -d oil-live-graph-sync-worker
+docker compose up -d oil-live-graph-sync-worker eia-historic-sync-worker uk-trade-manifest-sync-worker
+
+# 23 GB VM RAM tuning (Postgres + Elasticsearch):
+# docker compose -f docker-compose.prod.yml -f docker-compose.prod.large-vm.yml up -d
+
+# Copy EIA files to VM:
+# VM_HOST=user@host ./scripts/rsync-eia-downloads-to-vm.sh
 ```
 
 ### Synthetic cargo only (no full sync)
@@ -147,6 +153,8 @@ curl -sf "http://localhost:8000/api/eia-historic-imports/map?year=2020&importer=
 ```
 
 In the app: left sidebar **Historic** tab → filter importer + year → enable **Map** for purple dashed origin→U.S. Gulf arcs. Provenance: *EIA file import — historic, not real-time*.
+
+**Oil & Gas** (top nav) shows licenses and storage/tank farms only. **Live** and **Historic** sidebar tabs add live AIS/MCR overlays or EIA historic corridors respectively — they are not baked into the Oil & Gas view by default.
 
 **Column mapping (PSM Imports sheet):** `R_S_NAME` = U.S. importer company; `CNTRY_NAME` = origin country; `PROD_NAME` / `PROD_CODE` = product; `QUANTITY` = thousand barrels (stored as barrels ×1000); `RPT_PERIOD` = month-end date; `PORT_CITY` / `PORT_STATE` = U.S. discharge port.
 

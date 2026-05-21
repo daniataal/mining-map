@@ -78,6 +78,32 @@ else
   warn "oil-live-graph-sync-worker not running (graph-sync only via admin POST or deploy hook)"
 fi
 
+if "${COMPOSE[@]}" ps --status running eia-historic-sync-worker 2>/dev/null | grep -q eia-historic-sync-worker; then
+  pass "eia-historic-sync-worker running"
+else
+  warn "eia-historic-sync-worker not running (EIA impa ingest from data/eia_downloads)"
+fi
+
+if "${COMPOSE[@]}" ps --status running uk-trade-manifest-sync-worker 2>/dev/null | grep -q uk-trade-manifest-sync-worker; then
+  pass "uk-trade-manifest-sync-worker running"
+else
+  warn "uk-trade-manifest-sync-worker not running (UK CSV → trade_manifest_rows)"
+fi
+
+eia_dir="${ROOT}/data/eia_downloads"
+if [ -d "$eia_dir" ] && ls "$eia_dir"/impa*.xls "$eia_dir"/impa*.xlsx 2>/dev/null | head -1 | grep -q impa; then
+  pass "data/eia_downloads has impa files ($(ls "$eia_dir"/impa* 2>/dev/null | wc -l | tr -d ' ') files)"
+else
+  warn "data/eia_downloads missing or no impa*.xls(x) — Historic tab stays empty"
+fi
+
+uk_dir="${ROOT}/data/uk_trade_manifests"
+if [ -d "$uk_dir" ] && ls "$uk_dir"/*.csv 2>/dev/null | head -1 | grep -q '\.csv'; then
+  pass "data/uk_trade_manifests has CSV ($(ls "$uk_dir"/*.csv 2>/dev/null | wc -l | tr -d ' ') files)"
+else
+  warn "data/uk_trade_manifests missing CSV — trade_manifest_rows UK ingest sparse"
+fi
+
 section "HTTP probes"
 mkdir -p /tmp
 for label_url in \
@@ -115,7 +141,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   fail "$ENV_FILE missing"
 else
   pass "$ENV_FILE present"
-  for key in ADMIN_TOKEN OIL_INTEL_INTERNAL_KEY OIL_GRAPH_SYNC_ENABLED OIL_INTEL_API_URL AISSTREAM_API_KEY STORAGE_SKIP_LIVE_OVERPASS; do
+  for key in ADMIN_TOKEN OIL_INTEL_INTERNAL_KEY OIL_GRAPH_SYNC_ENABLED OIL_INTEL_API_URL AISSTREAM_API_KEY COMTRADE_API_KEY EIA_API_KEY OIL_LIVE_DISABLE_DEMO_SEED EIA_DOWNLOADS_DIR UK_MANIFEST_CSV_DIR STORAGE_SKIP_LIVE_OVERPASS; do
     if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
       val=$(grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2-)
       if [[ -n "$val" ]]; then
@@ -163,7 +189,11 @@ if "${COMPOSE[@]}" ps --status running db 2>/dev/null | grep -q db; then
     "SELECT 'oil_terminals', COUNT(*)::text FROM oil_terminals
      UNION ALL SELECT 'oil_companies', COUNT(*)::text FROM oil_companies
      UNION ALL SELECT 'meridian_cargo_records', COUNT(*)::text FROM meridian_cargo_records
-     UNION ALL SELECT 'oil_port_calls', COUNT(*)::text FROM oil_port_calls;" 2>/dev/null | while IFS='|' read -r tbl cnt; do
+     UNION ALL SELECT 'oil_port_calls', COUNT(*)::text FROM oil_port_calls
+     UNION ALL SELECT 'eia_historic_imports', COUNT(*)::text FROM eia_historic_imports
+     UNION ALL SELECT 'oil_trade_flows', COUNT(*)::text FROM oil_trade_flows
+     UNION ALL SELECT 'trade_manifest_rows', COUNT(*)::text FROM trade_manifest_rows
+     UNION ALL SELECT 'commodity_trade_flows', COUNT(*)::text FROM commodity_trade_flows;" 2>/dev/null | while IFS='|' read -r tbl cnt; do
     echo "  $tbl = $cnt"
   done || fail "psql query failed (migrations not applied?)"
   TERM_COUNT=$("${COMPOSE[@]}" exec -T db psql -U postgres -d mining_db -t -A -c "SELECT COUNT(*) FROM oil_terminals;" 2>/dev/null | tr -d '[:space:]' || echo "0")
@@ -237,6 +267,8 @@ echo "  • Open app at http://<host>:8080 (Caddy) or :5173 (frontend) — not b
 echo "  • If terminal_count > 0 but map empty: fly map to Persian Gulf / US Gulf (default view may be over ocean)."
 echo "  • If terminal_count still 0: fix graph-sync / Overpass (STORAGE_SKIP_LIVE_OVERPASS=true) / oil-live-intel migrations."
 echo "  • Worker logs: ${COMPOSE[*]} logs oil-live-graph-sync-worker --tail 80"
+echo "  • EIA rsync from laptop: VM_HOST=user@host ./scripts/rsync-eia-downloads-to-vm.sh"
+echo "  • Large VM RAM tuning: docker compose -f docker-compose.prod.yml -f docker-compose.prod.large-vm.yml up -d"
 
 section "Summary"
 echo "PASS=$PASS FAIL=$FAIL WARN=$WARN"

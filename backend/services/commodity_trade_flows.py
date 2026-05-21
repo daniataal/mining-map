@@ -9,10 +9,19 @@ from typing import Any
 
 MINING_HS_CODES: dict[str, str] = {
     "2601": "Iron ores and concentrates",
+    "2603": "Copper ores and concentrates",
     "7108": "Gold",
     "7403": "Copper refined",
     "7404": "Copper waste and scrap",
 }
+
+# Mining cadastre countries — ISO2 M49 codes for Comtrade reporter focus (TZ, GH, KE, ZA, ZM, CD, PE, CO).
+_DEFAULT_MINING_REPORTERS = "834,288,404,710,894,180,604,170"
+
+
+def _mining_reporter_codes() -> list[str]:
+    raw = (os.getenv("COMMODITY_COMTRADE_REPORTERS") or _DEFAULT_MINING_REPORTERS).strip()
+    return [c.strip() for c in raw.split(",") if c.strip()]
 
 SYNC_ENABLED = (os.getenv("COMMODITY_COMTRADE_SYNC_ENABLED") or "true").strip().lower() not in {
     "0",
@@ -65,7 +74,7 @@ def sync_mining_hs_comtrade(conn: Any) -> dict[str, Any]:
 
     ensure_commodity_trade_flows_table(conn)
     year = int(os.getenv("COMMODITY_COMTRADE_YEAR", str(max(2022, time.gmtime().tm_year - 2))))
-    reporters = TOP_OIL_EXPORTERS[:12]
+    reporters = _mining_reporter_codes() or TOP_OIL_EXPORTERS[:12]
     total = 0
     errors: list[str] = []
 

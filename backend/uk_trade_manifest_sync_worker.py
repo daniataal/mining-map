@@ -1,3 +1,5 @@
+"""Periodic UK / user manifest CSV ingest into trade_manifest_rows."""
+
 from __future__ import annotations
 
 import json
@@ -27,42 +29,42 @@ def _db_connection() -> Any:
 
 def run_once() -> dict[str, Any]:
     try:
-        from backend.services.eia_historic_imports import try_auto_ingest_eia_downloads
+        from backend.services.trade_manifest_ingest import sync_uk_open_trade_rows
     except ImportError:
-        from services.eia_historic_imports import try_auto_ingest_eia_downloads
+        from services.trade_manifest_ingest import sync_uk_open_trade_rows
 
-    print("[eia-historic-sync-worker] checking EIA_downloads folder…", flush=True)
     conn = _db_connection()
     try:
-        summary = try_auto_ingest_eia_downloads(conn)
+        summary = sync_uk_open_trade_rows(conn)
+        conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
-    print("[eia-historic-sync-worker] done:", json.dumps(summary, default=str)[:2000], flush=True)
+    print("[uk-trade-manifest-worker] done:", json.dumps(summary, default=str))
     return summary
 
 
 def main() -> None:
-    enabled = (os.getenv("EIA_HISTORIC_SYNC_ENABLED") or "true").strip().lower() not in {
+    enabled = (os.getenv("UK_TRADE_MANIFEST_SYNC_ENABLED") or "true").strip().lower() not in {
         "0",
         "false",
         "no",
         "off",
     }
     if not enabled:
-        print("[eia-historic-sync-worker] EIA_HISTORIC_SYNC_ENABLED is off — exiting.")
+        print("[uk-trade-manifest-worker] UK_TRADE_MANIFEST_SYNC_ENABLED is off — exiting.")
         return
 
-    interval_seconds = max(600, _int_env("EIA_HISTORIC_SYNC_INTERVAL_SECONDS", 21_600))
-    backoff_seconds = max(300, _int_env("EIA_HISTORIC_SYNC_BACKOFF_SECONDS", 1800))
+    interval_seconds = max(3600, _int_env("UK_MANIFEST_SYNC_INTERVAL_SECONDS", 86_400))
+    backoff_seconds = max(300, _int_env("UK_MANIFEST_SYNC_BACKOFF_SECONDS", 3600))
     while True:
         try:
             run_once()
             time.sleep(interval_seconds)
         except Exception as exc:
-            print(f"[eia-historic-sync-worker] sync failed: {exc}")
+            print(f"[uk-trade-manifest-worker] sync failed: {exc}")
             time.sleep(backoff_seconds)
 
 
