@@ -6,6 +6,29 @@ import json
 import os
 from typing import Any, Optional, Sequence
 
+try:
+    import psycopg2.extensions as _pg_ext
+except ImportError:
+    _pg_ext = None  # type: ignore[assignment]
+
+
+def _recover_connection(conn: Any) -> None:
+    """Clear PostgreSQL 'current transaction is aborted' so DDL/DML can proceed."""
+    if _pg_ext is None:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return
+    try:
+        if conn.get_transaction_status() == _pg_ext.TRANSACTION_STATUS_INERROR:
+            conn.rollback()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
 
 def _drift_alert_pct() -> float:
     try:
@@ -15,6 +38,7 @@ def _drift_alert_pct() -> float:
 
 
 def ensure_license_sync_tables(conn: Any) -> None:
+    _recover_connection(conn)
     with conn.cursor() as cur:
         cur.execute(
             """

@@ -1840,6 +1840,10 @@ def sync_open_data_sources(
                     summary["sync_runs"].append(run_entry)
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 if run_id is not None:
                     try:
                         finish_license_sync_run(
@@ -1848,11 +1852,15 @@ def sync_open_data_sources(
                             status="error",
                             error=str(exc),
                         )
+                        conn.commit()
                         summary["sync_runs"].append(
                             {"run_id": run_id, "source_id": source.source_id, "status": "error"}
                         )
                     except Exception:
-                        pass
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
         return summary
     finally:
         if own_connection and conn is not None:

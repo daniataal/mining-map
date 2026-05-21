@@ -1764,7 +1764,7 @@ export default function MapComponent({
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 <ViewportBoundsTracker
                     active={Boolean(onLicenseMapViewportChange) && isLicenseMapView && !isLiveDataView}
-                    debounceMs={450}
+                    debounceMs={0}
                     onBoundsChange={(bbox) => onLicenseMapViewportChange?.(bbox)}
                 />
                 <ViewportBoundsTracker

@@ -2,6 +2,7 @@ import axios, { isCancel } from 'axios';
 import { useMemo } from 'react';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import {
+  keepPreviousData,
   useQuery,
   useMutation,
   useQueryClient,
@@ -199,8 +200,23 @@ export type LicenseViewportBounds = MaritimeViewportBounds;
 const LICENSE_GET_TIMEOUT_MS = 90_000;
 /** Map viewport fetch cap (backend clamps to 15000). */
 const LICENSE_VIEWPORT_LIMIT = 5000;
-const LICENSE_VIEWPORT_DEBOUNCE_MS = 450;
-const LICENSE_VIEWPORT_STALE_MS = 5 * 60_000;
+/** Single debounce for map pan (MapComponent emits bounds immediately). */
+const LICENSE_VIEWPORT_DEBOUNCE_MS = 400;
+const LICENSE_VIEWPORT_STALE_MS = 10 * 60_000;
+
+/** Coarsen bbox so tiny pans do not refetch (≈0.25° grid). */
+export function quantizeLicenseViewportBounds(
+  bounds: LicenseViewportBounds,
+): LicenseViewportBounds {
+  const step = 0.25;
+  const q = (n: number) => Math.round(n / step) * step;
+  return {
+    south: q(bounds.south),
+    west: q(bounds.west),
+    north: q(bounds.north),
+    east: q(bounds.east),
+  };
+}
 /** Legacy bulk load — prefer useLicensesForMap. */
 const LICENSE_BULK_LIMIT = 15_000;
 const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
@@ -429,18 +445,22 @@ export function useLicensesForMap(options: {
 }): UseLicensesResult {
   const { sector, bounds, filterCountries = [], enabled } = options;
   const debouncedBounds = useDebouncedValue(bounds, LICENSE_VIEWPORT_DEBOUNCE_MS);
+  const fetchBounds = useMemo(
+    () => (debouncedBounds ? quantizeLicenseViewportBounds(debouncedBounds) : null),
+    [debouncedBounds],
+  );
   const countriesKey = filterCountries.length ? filterCountries.join('|') : '';
 
   const query = useQuery({
-    queryKey: ['licenses', 'viewport', sector, countriesKey, debouncedBounds] as const,
+    queryKey: ['licenses', 'viewport', sector, countriesKey, fetchBounds] as const,
     staleTime: LICENSE_VIEWPORT_STALE_MS,
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
     retry: 1,
     refetchOnWindowFocus: false,
-    placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
+    placeholderData: keepPreviousData,
     queryFn: async ({ signal }: QueryFunctionContext) => {
       if (filterCountries.length > 0) {
-        const hub: LicenseViewportBounds = debouncedBounds ?? {
+        const hub: LicenseViewportBounds = fetchBounds ?? {
           south: -60,
           west: -180,
           north: 72,
@@ -453,12 +473,10 @@ export function useLicensesForMap(options: {
           signal,
         });
       }
-      if (!debouncedBounds) return [];
-      return fetchLicensesViewportFromApi({ sector, bounds: debouncedBounds, signal });
+      if (!fetchBounds) return [];
+      return fetchLicensesViewportFromApi({ sector, bounds: fetchBounds, signal });
     },
-    enabled:
-      enabled &&
-      (filterCountries.length > 0 || debouncedBounds != null),
+    enabled: enabled && (filterCountries.length > 0 || fetchBounds != null),
   });
 
   const stillLoadingCountryCount =

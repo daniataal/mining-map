@@ -1352,14 +1352,22 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 CREATE INDEX IF NOT EXISTS idx_licenses_sector_lat_lng
                 ON licenses (sector, lat, lng)
                 WHERE lat IS NOT NULL AND lng IS NOT NULL;
-                
+
                 CREATE INDEX IF NOT EXISTS idx_licenses_country ON licenses (country);
                 CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
                 CREATE INDEX IF NOT EXISTS idx_licenses_id ON licenses (id);
                 CREATE INDEX IF NOT EXISTS idx_licenses_origin ON licenses (record_origin);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);
                 """
             )
+            try:
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);"
+                )
+            except Exception as ext_id_idx_exc:
+                conn.rollback()
+                print(
+                    f"idx_licenses_external_id_unique skipped (duplicate external_id?): {ext_id_idx_exc}"
+                )
             # Normalized relationship layer for cross-sector role transparency.
             # We preserve the old rel_type/source_entity_id columns for backward
             # compatibility and add richer source-backed provenance fields here.
@@ -1386,19 +1394,29 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             # Older deployments created a partial unique index on fingerprint.
             # ON CONFLICT (fingerprint) cannot infer partial indexes reliably,
             # so we normalize to a plain unique index after de-duping rows.
-            cur.execute(
-                """
-                DELETE FROM entity_relationships er
-                USING entity_relationships newer
-                WHERE er.fingerprint = newer.fingerprint
-                  AND er.fingerprint IS NOT NULL
-                  AND er.ctid < newer.ctid;
-                """
-            )
-            cur.execute("DROP INDEX IF EXISTS idx_entity_relationships_fingerprint;")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);")
+            try:
+                cur.execute(
+                    """
+                    DELETE FROM entity_relationships er
+                    USING entity_relationships newer
+                    WHERE er.fingerprint = newer.fingerprint
+                      AND er.fingerprint IS NOT NULL
+                      AND er.ctid < newer.ctid;
+                    """
+                )
+                cur.execute("DROP INDEX IF EXISTS idx_entity_relationships_fingerprint;")
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);"
+                )
+            except Exception as er_idx_exc:
+                conn.rollback()
+                print(f"entity_relationships fingerprint index migration skipped: {er_idx_exc}")
             # AI-DD enhancement: contact provenance (open_data / ai / manual) and
             # the timestamp a human verified an AI-discovered phone number. These
             # are additive — existing rows fall back to 'open_data' which matches
@@ -1441,6 +1459,11 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 ON license_annotations (user_id, updated_at DESC);
                 """
             )
+        except Exception as e:
+            conn.rollback()
+            print(f"Schema migration skipped or failed (might already exist): {e}")
+
+        try:
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS license_sync_runs (
@@ -1452,7 +1475,8 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                     records_fetched INTEGER DEFAULT 0,
                     records_written INTEGER DEFAULT 0,
                     records_skipped_manual INTEGER DEFAULT 0,
-                    error TEXT
+                    error TEXT,
+                    drift_warning JSONB
                 );
                 """
             )
@@ -1467,9 +1491,9 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             )
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
-        except Exception as e:
-            conn.rollback() 
-            print(f"Schema migration skipped or failed (might already exist): {e}")
+        except Exception as sync_runs_exc:
+            conn.rollback()
+            print(f"license_sync_runs migration skipped or failed: {sync_runs_exc}")
 
         # Geo Cache Table (used for fallback coordinate lookups)
         cur.execute("""
