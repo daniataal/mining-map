@@ -158,17 +158,34 @@ func insertOpportunity(ctx context.Context, pool *pgxpool.Pool, otype string, mm
 	return err == nil, err
 }
 
-// List returns open opportunities.
-func List(ctx context.Context, pool *pgxpool.Pool, minConf float64, limit int) ([]map[string]any, error) {
+// List returns open opportunities. When excludeDemo is true, filters demo/seed rows.
+func List(ctx context.Context, pool *pgxpool.Pool, minConf float64, limit int, excludeDemo bool) ([]map[string]any, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, o.opportunity_type, o.title, o.hypothesis, o.confidence, o.evidence, o.profit_checklist,
 			o.mmsi, o.terminal_id::text, t.name AS terminal_name, t.country AS terminal_country, o.created_at
 		FROM oil_opportunities o
 		LEFT JOIN oil_terminals t ON t.id = o.terminal_id
 		WHERE o.status='open' AND o.confidence >= $1
+		  AND (
+		    $3 = false
+		    OR (
+		      (o.mmsi IS NULL OR o.mmsi <> 636012345)
+		      AND o.title NOT ILIKE '%DEMO%'
+		      AND o.hypothesis NOT ILIKE '%DEMO%'
+		      AND NOT EXISTS (
+		        SELECT 1 FROM oil_port_calls pc
+		        WHERE pc.id = o.port_call_id
+		          AND (
+		            COALESCE(pc.evidence::text, '') ILIKE '%seed_port_calls%'
+		            OR COALESCE(pc.metadata::text, '') ILIKE '%seed_port_calls%'
+		            OR pc.vessel_name ILIKE '%DEMO%'
+		          )
+		      )
+		    )
+		  )
 		ORDER BY o.confidence DESC, o.created_at DESC
 		LIMIT $2
-	`, minConf, limit)
+	`, minConf, limit, excludeDemo)
 	if err != nil {
 		return nil, err
 	}

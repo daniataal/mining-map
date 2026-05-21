@@ -185,6 +185,10 @@ export type OilLiveSyncStatus = {
   company_count?: number;
   cargo_record_count: number;
   port_call_count: number;
+  /** Live AIS port calls (when returned by sync-status). */
+  live_ais_port_call_count?: number;
+  /** Recent live AIS vessel positions (when returned by sync-status). */
+  live_vessel_count?: number;
   open_opportunity_count?: number;
   corridor_full_count?: number;
   corridor_partial_count?: number;
@@ -265,6 +269,7 @@ export type OilOpportunity = {
   id: string;
   opportunity_type: string;
   title?: string;
+  vessel_name?: string;
   hypothesis?: string;
   confidence?: number;
   evidence?: string[];
@@ -342,8 +347,20 @@ export function normalizeOilOpportunitiesPayload(raw: unknown): OilOpportunity[]
   return [];
 }
 
-export async function getOilOpportunities(minConfidence = 0.55): Promise<{ opportunities: OilOpportunity[] }> {
-  const res = await fetch(oilUrl(`/api/oil-live/opportunities?min_confidence=${minConfidence}`));
+export type GetOilOpportunitiesOptions = {
+  /** Omit demo-seeded rows (default true). Pass false to include demo opportunities. */
+  exclude_demo?: boolean;
+};
+
+export async function getOilOpportunities(
+  minConfidence = 0.55,
+  options: GetOilOpportunitiesOptions = {},
+): Promise<{ opportunities: OilOpportunity[] }> {
+  const excludeDemo = options.exclude_demo !== false;
+  const params = new URLSearchParams();
+  params.set('min_confidence', String(minConfidence));
+  if (excludeDemo) params.set('exclude_demo', 'true');
+  const res = await fetch(oilUrl(`/api/oil-live/opportunities?${params}`));
   if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
   const data = await res.json();
   return { opportunities: normalizeOilOpportunitiesPayload(data) };
@@ -595,7 +612,7 @@ export async function getCargoRecords(
   if (filters.min_confidence != null) {
     params.set('min_confidence', String(filters.min_confidence));
   }
-  if (filters.exclude_seed) params.set('exclude_seed', 'true');
+  if (filters.exclude_seed !== false) params.set('exclude_seed', 'true');
   if (filters.limit != null) params.set('limit', String(filters.limit));
   const qs = params.toString();
   const res = await fetch(oilUrl(`/api/oil-live/cargo-records${qs ? `?${qs}` : ''}`));

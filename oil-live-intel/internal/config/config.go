@@ -19,6 +19,7 @@ type Config struct {
 	ExistingBackendURL      string
 	SupplierCreateEndpoint  string
 	SeedOnStartup           bool
+	DisableDemoSeed         bool
 	APIBaseURL              string
 	InternalBroadcastKey    string
 	AISPositionRetainHours  int
@@ -43,6 +44,7 @@ func Load() Config {
 		ExistingBackendURL:     strings.TrimRight(env("EXISTING_BACKEND_URL", "http://backend:8000"), "/"),
 		SupplierCreateEndpoint: env("SUPPLIER_CREATE_ENDPOINT", "/licenses"),
 		SeedOnStartup:          envBool("OIL_INTEL_SEED_ON_STARTUP", true),
+		DisableDemoSeed:        envDisableDemoSeed("OIL_LIVE_DISABLE_DEMO_SEED"),
 		APIBaseURL:             strings.TrimRight(env("OIL_INTEL_API_URL", "http://oil-live-intel:8095"), "/"),
 		InternalBroadcastKey:   env("OIL_INTEL_INTERNAL_KEY", "oil-intel-dev"),
 		AISPositionRetainHours: envInt("AIS_POSITION_RETAIN_HOURS", 72),
@@ -81,4 +83,20 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return b
+}
+
+// envDisableDemoSeed returns true when demo seeds should be skipped (default true).
+func envDisableDemoSeed(key string) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return true
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }

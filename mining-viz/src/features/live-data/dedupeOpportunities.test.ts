@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { coerceOpportunityList, dedupeOpportunities } from './dedupeOpportunities';
+import {
+  coerceOpportunityList,
+  dedupeOpportunities,
+  isDemoOpportunity,
+} from './dedupeOpportunities';
 import { normalizeOilOpportunitiesPayload } from '../../api/oilLiveApi';
 import type { OilOpportunity } from '../../api/oilLiveApi';
 
@@ -73,5 +77,66 @@ describe('dedupeOpportunities', () => {
       }),
     );
     expect(dedupeOpportunities(rows, 5)).toHaveLength(5);
+  });
+
+  it('drops DEMO-labelled rows when excludeDemo is on (default)', () => {
+    const rows = [
+      opp({
+        id: 'demo-title',
+        opportunity_type: 'storage',
+        terminal_id: 't-demo',
+        title: 'DEMO Hub storage flip',
+        confidence: 0.95,
+      }),
+      opp({
+        id: 'demo-vessel',
+        opportunity_type: 'flip',
+        terminal_id: 't-real',
+        vessel_name: 'demo-tanker-01',
+        confidence: 0.9,
+      }),
+      opp({
+        id: 'real',
+        opportunity_type: 'storage',
+        terminal_id: 't-real-2',
+        title: 'Rotterdam storage',
+        confidence: 0.85,
+      }),
+    ];
+    const out = dedupeOpportunities(rows, 10);
+    expect(out.map((o) => o.id)).toEqual(['real']);
+  });
+
+  it('keeps DEMO rows when excludeDemo is false', () => {
+    const rows = [
+      opp({
+        id: 'demo',
+        opportunity_type: 'x',
+        terminal_id: 't1',
+        title: 'demo opportunity',
+        confidence: 0.9,
+      }),
+    ];
+    expect(dedupeOpportunities(rows, 10, { excludeDemo: false })).toHaveLength(1);
+  });
+});
+
+describe('isDemoOpportunity', () => {
+  it('matches DEMO case-insensitively in title or vessel_name', () => {
+    expect(
+      isDemoOpportunity(
+        opp({ id: '1', opportunity_type: 'x', title: 'demo export corridor' }),
+      ),
+    ).toBe(true);
+    expect(
+      isDemoOpportunity(
+        opp({ id: '2', opportunity_type: 'x', vessel_name: 'MT Demo Star' }),
+      ),
+    ).toBe(true);
+    expect(
+      isDemoOpportunity(
+        opp({ id: '3', opportunity_type: 'x', title: 'Live Rotterdam flip' }),
+      ),
+    ).toBe(false);
   });
 });

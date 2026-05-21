@@ -60,6 +60,8 @@ curl -s http://localhost:8095/api/oil-live/health
 | `ENABLE_EIA` | no | `true` — EIA volume supplement when key set |
 | `EXISTING_BACKEND_URL` | no | `http://backend:8000` |
 | `SUPPLIER_CREATE_ENDPOINT` | no | `/licenses` |
+| `ELASTICSEARCH_URL` | for search | `http://elasticsearch:9200` |
+| `SEARCH_INDEXER_INTERVAL_SECONDS` | no | `300` (incremental sync cadence) |
 
 ## Migrations (commercial graph + synthetic cargo)
 
@@ -72,6 +74,36 @@ Go migrations run on service startup against `DATABASE_URL`:
 # Ensure DB is up, then start intel once (applies 001–009)
 docker compose up -d db oil-live-intel
 docker compose logs -f oil-live-intel | head
+```
+
+## Elasticsearch search (Phase 9)
+
+A dedicated worker (`oil-live-search-indexer`) keeps four Elasticsearch indices in sync with Postgres so the Live Data panel can do unified full-text search across:
+
+| Index | Source table |
+|-------|--------------|
+| `meridian_cargo` | `meridian_cargo_records` |
+| `oil_companies` | `oil_companies` |
+| `oil_terminals` | `oil_terminals` (centroid → `geo_point`) |
+| `oil_vessels` | `oil_vessels` (mmsi cast to string for keyword indexing) |
+
+**Boot:** full sync of every row → ES bulk API (batch size 500). After that, the worker loops on a ticker (default 300s, see `SEARCH_INDEXER_INTERVAL_SECONDS`) doing an incremental sync against the `updated_at` cursor.
+
+**Endpoints (registered in `router.go`):**
+
+| Route | Behaviour |
+|-------|-----------|
+| `GET /api/oil-live/search?q=…&types=cargo,company,terminal,vessel&limit=20&offset=0` | multi_match `best_fields` + `fuzziness=AUTO`. Returns `{hits[], total, took_ms, query, error?}`. |
+| `GET /api/oil-live/search/health` | `{status, indices:{name: doc_count}}` — drives the panel's empty/degraded state. |
+
+**Graceful degradation:** when Elasticsearch is down or `ELASTICSEARCH_URL` is empty, the API returns `{"hits":[],"total":0,"error":"search_unavailable"}` with HTTP 503; the React `LiveDataSearchBar` shows "Search unavailable" inline and the rest of the Live Data panel continues to work.
+
+**Bringing the stack up:**
+
+```bash
+docker compose up -d elasticsearch oil-live-search-indexer oil-live-intel
+curl -sf http://localhost:9200/_cluster/health | jq .status
+curl -sf http://localhost:8095/api/oil-live/search/health | jq .
 ```
 
 ## Meridian graph sync (Python)

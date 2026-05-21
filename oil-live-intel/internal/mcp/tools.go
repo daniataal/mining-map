@@ -75,7 +75,7 @@ func (h *ToolHandler) mapSnapshot(ctx context.Context, args map[string]any) (str
 			"operator": op, "products": products, "lat": lat, "lng": lon, "confidence": conf,
 		})
 	}
-	cards, _ := opportunity.List(ctx, h.Pool, 0.5, 20)
+	cards, _ := opportunity.List(ctx, h.Pool, 0.5, 20, h.Config.DisableDemoSeed)
 	out := map[string]any{"terminals": terminals, "opportunities": cards}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return string(b), nil
@@ -127,7 +127,7 @@ func (h *ToolHandler) listOpportunities(ctx context.Context, args map[string]any
 	if v, ok := args["min_confidence"].(float64); ok {
 		minConf = v
 	}
-	items, err := opportunity.List(ctx, h.Pool, minConf, 50)
+	items, err := opportunity.List(ctx, h.Pool, minConf, 50, h.Config.DisableDemoSeed)
 	if err != nil {
 		return "", err
 	}

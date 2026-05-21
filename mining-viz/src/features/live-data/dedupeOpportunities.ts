@@ -1,5 +1,17 @@
 import type { OilOpportunity } from '../../api/oilLiveApi';
 
+export type DedupeOpportunitiesOptions = {
+  /** Drop rows whose title or vessel_name contains DEMO (default true). */
+  excludeDemo?: boolean;
+};
+
+/** Client-side belt-and-suspenders filter for demo-labelled opportunities. */
+export function isDemoOpportunity(opp: OilOpportunity): boolean {
+  const title = (opp.title ?? '').toUpperCase();
+  const vessel = (opp.vessel_name ?? '').toUpperCase();
+  return title.includes('DEMO') || vessel.includes('DEMO');
+}
+
 function fingerprint(opp: OilOpportunity): string {
   const otype = opp.opportunity_type ?? '';
   if (opp.terminal_id) return `${otype}|terminal:${opp.terminal_id}`;
@@ -18,8 +30,16 @@ export function coerceOpportunityList(raw: unknown): OilOpportunity[] {
 }
 
 /** Client-side dedup when API returns duplicate terminal/title rows. */
-export function dedupeOpportunities(opportunities: unknown, maxOut = 40): OilOpportunity[] {
-  const list = coerceOpportunityList(opportunities);
+export function dedupeOpportunities(
+  opportunities: unknown,
+  maxOut = 40,
+  options: DedupeOpportunitiesOptions = {},
+): OilOpportunity[] {
+  const excludeDemo = options.excludeDemo !== false;
+  let list = coerceOpportunityList(opportunities);
+  if (excludeDemo) {
+    list = list.filter((opp) => !isDemoOpportunity(opp));
+  }
   const best = new Map<string, OilOpportunity>();
   for (const opp of list) {
     const fp = fingerprint(opp);
