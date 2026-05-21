@@ -839,11 +839,11 @@ def _seed_port_calls_if_sparse(cur: Any) -> dict[str, Any]:
                 INSERT INTO oil_port_calls (
                   mmsi, vessel_name, terminal_id, arrival_ts, departure_ts, duration_hours,
                   draft_in, draft_out, draft_delta, event_type, product_family_inferred,
-                  estimated_volume_barrels, confidence, status, evidence
+                  estimated_volume_barrels, confidence, status, evidence, metadata
                 )
                 SELECT %s, %s, %s::uuid, %s, %s,
                   EXTRACT(EPOCH FROM (%s - %s)) / 3600.0,
-                  %s, %s, %s, %s, %s, 750000, 0.74, 'closed', %s
+                  %s, %s, %s, %s, %s, 750000, 0.74, 'closed', %s, %s::jsonb
                 WHERE NOT EXISTS (
                   SELECT 1 FROM oil_port_calls
                   WHERE mmsi = %s AND terminal_id = %s::uuid
@@ -865,6 +865,7 @@ def _seed_port_calls_if_sparse(cur: Any) -> dict[str, Any]:
                     event_type,
                     product_family,
                     evidence,
+                    _pg_json({"source": "seed_port_calls"}),
                     mmsi,
                     terminal_id,
                     event_type,

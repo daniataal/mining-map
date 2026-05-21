@@ -1028,6 +1028,13 @@
   box-shadow: 0 4px 14px rgba(30, 64, 175, 0.35), inset 0 0 10px rgba(59, 130, 246, 0.2);
 }
 
+.oil-terminal-cluster-icon {
+  background: rgba(37, 99, 235, 0.85);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.45);
+}
+
 @keyframes pulse-glow {
   0% {
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.4), inset 0 0 5px rgba(59, 130, 246, 0.2);

@@ -6452,6 +6452,31 @@ def read_eu_procurement_cpv_buckets():
     return {"status": "success", "buckets": buckets}
 
 
+@app.post("/api/admin/oil-live/enrich-contacts")
+def admin_oil_live_enrich_contacts(
+    x_admin_token: Optional[str] = Header(None),
+    limit: int = 50,
+):
+    """Batch-run contact enrichment for top oil companies missing contacts (requires supplier_id)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_contact_enrichment import run_oil_live_contact_enrichment_batch
+        except ImportError:
+            from services.oil_live_contact_enrichment import run_oil_live_contact_enrichment_batch
+        conn = get_db_connection()
+        try:
+            return run_oil_live_contact_enrichment_batch(conn, limit=limit)
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.exception("oil-live enrich-contacts failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
 @app.post("/api/admin/oil-live/graph-sync")
 def admin_oil_live_graph_sync(
     x_admin_token: Optional[str] = Header(None),

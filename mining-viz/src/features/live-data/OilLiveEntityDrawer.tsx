@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { useI18n } from '../../lib/i18n';
 import DealExecutionPack from './DealExecutionPack';
+import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 
 export type OilLiveEntityKind = 'opportunity' | 'terminal' | 'vessel' | 'company' | 'cargo';
 
@@ -105,9 +106,12 @@ export default function OilLiveEntityDrawer({
           />
         ) : entityKind === 'cargo' && cargoRecord ? (
           <div className="space-y-3 text-[11px]">
-            <p className="text-[9px] font-black uppercase text-amber-600">
-              {t('מטען סינתטי (BOL-like)', 'Synthetic cargo (BOL-like)')}
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <OilLiveProvenanceBadge kind={cargoRecord.data_provenance ?? 'synthetic'} />
+              <p className="text-[9px] font-black uppercase text-amber-600">
+                {t('מטען סינתטי (BOL-like)', 'Synthetic cargo (BOL-like)')}
+              </p>
+            </div>
             <p>
               {cargoRecord.shipper_name && (
                 <>
