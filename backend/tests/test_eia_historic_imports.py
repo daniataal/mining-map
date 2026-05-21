@@ -80,6 +80,23 @@ class EiaHistoricIngestTests(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class EiaHistoricAutoIngestTests(unittest.TestCase):
+    def test_auto_ingest_skips_when_folder_empty(self):
+        conn = MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            with unittest.mock.patch.dict(os.environ, {"EIA_DOWNLOADS_DIR": tmp}, clear=False):
+                out = eia_mod.try_auto_ingest_eia_downloads(conn)
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("no impa", out.get("reason", "").lower())
+
+    def test_auto_ingest_disabled(self):
+        conn = MagicMock()
+        with unittest.mock.patch.dict(os.environ, {"EIA_HISTORIC_AUTO_INGEST": "false"}, clear=False):
+            out = eia_mod.try_auto_ingest_eia_downloads(conn)
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("AUTO_INGEST", out.get("reason", ""))
+
+
 class EiaHistoricApiTests(unittest.TestCase):
     @unittest.mock.patch("backend.services.eia_historic_imports.query_summary")
     def test_query_summary_shape(self, mock_summary):

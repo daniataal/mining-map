@@ -122,13 +122,16 @@ docker compose up -d maritime-worker oil-live-intel-worker
 
 ### EIA historic imports (user files — not API scrape)
 
-Download Petroleum Supply Monthly **Imports** workbooks from EIA (e.g. `impa00d.xls` … `impa24d.xlsx`) into a folder such as `~/Downloads/EIA_downloads`. Meridian does **not** fetch these from eia.gov automatically.
+Download Petroleum Supply Monthly **Imports** workbooks from EIA (e.g. `impa00d.xls` … `impa24d.xlsx`) into **`data/eia_downloads/`** on the host (mounted read-only in compose). Meridian does **not** fetch these from eia.gov automatically.
+
+**Auto-ingest (default):** when `impa*.xls(x)` are present, `eia-historic-sync-worker` ingests on container start and every 6h (`EIA_HISTORIC_SYNC_INTERVAL_SECONDS`). The same step runs inside `oil-live-graph-sync-worker` and on backend startup (`EIA_HISTORIC_AUTO_INGEST=true`). Manual curl is optional.
 
 ```bash
-# Optional: point backend at your folder (default ~/Downloads/EIA_downloads)
-export EIA_DOWNLOADS_DIR="$HOME/Downloads/EIA_downloads"
+# Ensure worker is up (prod + dev compose)
+docker compose up -d eia-historic-sync-worker
 
-# Ingest all impa*.xls(x) + import.xlsx into mining_db.eia_historic_imports
+# Optional manual ingest
+export EIA_DOWNLOADS_DIR="./data/eia_downloads"
 curl -X POST "http://localhost:8000/api/admin/eia-historic-imports/ingest" \
   -H "X-Admin-Token: $ADMIN_TOKEN" | jq .
 
@@ -143,7 +146,7 @@ curl -sf "http://localhost:8000/api/eia-historic-imports/summary?importer=Chevro
 curl -sf "http://localhost:8000/api/eia-historic-imports/map?year=2020&importer=Chevron" | jq .
 ```
 
-In the app: **Live Data** → intel drawer tab **Historic (EIA)** → filter importer + year → enable **Show on map** for purple dashed origin→U.S. Gulf arcs. Provenance badge: *EIA file import — historic, not real-time*.
+In the app: left sidebar **Historic** tab → filter importer + year → enable **Map** for purple dashed origin→U.S. Gulf arcs. Provenance: *EIA file import — historic, not real-time*.
 
 **Column mapping (PSM Imports sheet):** `R_S_NAME` = U.S. importer company; `CNTRY_NAME` = origin country; `PROD_NAME` / `PROD_CODE` = product; `QUANTITY` = thousand barrels (stored as barrels ×1000); `RPT_PERIOD` = month-end date; `PORT_CITY` / `PORT_STATE` = U.S. discharge port.
 

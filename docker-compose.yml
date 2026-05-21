@@ -67,6 +67,10 @@ services:
       - OIL_GRAPH_SYNC_ENABLED=${OIL_GRAPH_SYNC_ENABLED:-true}
       - OIL_GRAPH_SYNC_ON_STARTUP=${OIL_GRAPH_SYNC_ON_STARTUP:-false}
       - OIL_GRAPH_STORAGE_IMPORT_CAP=${OIL_GRAPH_STORAGE_IMPORT_CAP:-5000}
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
     healthcheck:
       test:
         [
@@ -297,10 +301,37 @@ services:
       - OIL_GRAPH_STORAGE_IMPORT_CAP=${OIL_GRAPH_STORAGE_IMPORT_CAP:-5000}
       - OIL_INTEL_API_URL=${OIL_INTEL_API_URL:-http://oil-live-intel:8095}
       - OIL_INTEL_INTERNAL_KEY=${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
     depends_on:
       db:
         condition: service_healthy
       oil-live-intel:
+        condition: service_healthy
+
+  eia-historic-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-eia-historic-sync-worker
+    restart: always
+    command: ["python", "eia_historic_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+      - EIA_HISTORIC_SYNC_ENABLED=${EIA_HISTORIC_SYNC_ENABLED:-true}
+      - EIA_HISTORIC_SYNC_INTERVAL_SECONDS=${EIA_HISTORIC_SYNC_INTERVAL_SECONDS:-21600}
+      - EIA_HISTORIC_SYNC_BACKOFF_SECONDS=${EIA_HISTORIC_SYNC_BACKOFF_SECONDS:-1800}
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
+    depends_on:
+      db:
         condition: service_healthy
 
   sweden-mining-worker:

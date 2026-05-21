@@ -12,8 +12,12 @@ import {
   Settings as LucideSettings,
   Pin as LucidePin,
   PieChart as LucidePieChart,
-  Upload as LucideUpload
+  Upload as LucideUpload,
+  Radio as LucideRadio,
+  Archive as LucideArchive,
+  List as LucideList,
 } from 'lucide-react';
+import type { MapSidebarTab } from './WorkspaceSidebarLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
@@ -50,6 +54,8 @@ interface SidebarProps {
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
   getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
+  workspaceTab?: MapSidebarTab;
+  onSelectWorkspaceTab?: (tab: MapSidebarTab) => void;
 }
 
 function sourceTrustLabel(item: MiningLicense): string {
@@ -91,6 +97,8 @@ export default function Sidebar({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   getDealRoomForLicense,
+  workspaceTab = 'licenses',
+  onSelectWorkspaceTab,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -119,14 +127,46 @@ export default function Sidebar({
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
         <button 
-          onClick={() => setViewMode('map')}
+          onClick={() => {
+            onSelectWorkspaceTab?.('licenses');
+            setViewMode('map');
+          }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
-          ${viewMode === 'map' 
+          ${workspaceTab === 'licenses' && viewMode === 'map'
             ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
             : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          title={t('רישיונות', 'Licenses')}
         >
-          <LucideMapPin className="w-5 h-5" />
+          <LucideList className="w-5 h-5" />
         </button>
+        {onSelectWorkspaceTab && (
+          <>
+            <button
+              type="button"
+              onClick={() => onSelectWorkspaceTab('live_data')}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+                workspaceTab === 'live_data'
+                  ? 'bg-sky-500/20 text-sky-600 border-sky-500/40'
+                  : 'text-slate-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+              title={t('נתונים חיים', 'Live Data')}
+            >
+              <LucideRadio className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectWorkspaceTab('historic')}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+                workspaceTab === 'historic'
+                  ? 'bg-violet-500/20 text-violet-600 border-violet-500/40'
+                  : 'text-slate-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+              title={t('היסטורי', 'Historic')}
+            >
+              <LucideArchive className="w-5 h-5" />
+            </button>
+          </>
+        )}
         <button 
           onClick={() => setViewMode('dashboard')}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
@@ -164,6 +204,31 @@ export default function Sidebar({
           exit={{ opacity: 0, x: -20 }}
           className="flex min-h-0 min-w-0 flex-1 flex-col"
         >
+          {onSelectWorkspaceTab && (
+            <div className="flex shrink-0 border-b border-black/5 dark:border-white/5">
+              {(
+                [
+                  ['licenses', 'רישיונות', 'Licenses', LucideList],
+                  ['live_data', 'חי', 'Live', LucideRadio],
+                  ['historic', 'היסטורי', 'Historic', LucideArchive],
+                ] as const
+              ).map(([key, he, en, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSelectWorkspaceTab(key)}
+                  className={`flex-1 px-2 py-2 text-[9px] font-black uppercase tracking-wide flex items-center justify-center gap-1 ${
+                    workspaceTab === key
+                      ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200 border-b-2 border-amber-500'
+                      : 'text-slate-500 border-b-2 border-transparent hover:text-slate-700'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" />
+                  {t(he, en)}
+                </button>
+              ))}
+            </div>
+          )}
           <header className="p-5 border-b border-black/5 dark:border-white/5">
             <div className="flex items-center justify-between">
               <h1 className="text-sm font-black tracking-[0.2em] text-slate-400 dark:text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>

@@ -1768,6 +1768,14 @@ def _oil_graph_sync_on_startup_enabled() -> bool:
     return flag in {"1", "true", "yes", "on"}
 
 
+def _eia_historic_auto_ingest_on_startup_enabled() -> bool:
+    try:
+        from backend.services.eia_historic_imports import eia_historic_auto_ingest_enabled
+    except ImportError:
+        from services.eia_historic_imports import eia_historic_auto_ingest_enabled
+    return eia_historic_auto_ingest_enabled()
+
+
 def _sync_gov_procurement_reference() -> None:
     if not _gov_procurement_sync_on_startup_enabled():
         return
@@ -1787,6 +1795,33 @@ def _sync_gov_procurement_reference() -> None:
             conn.close()
     except Exception as exc:
         print(f"[GovProcurement] Sync skipped or failed: {exc}")
+
+
+def _sync_eia_historic_reference() -> None:
+    """Upsert impa*.xls from EIA_DOWNLOADS_DIR when files are present (idempotent)."""
+    if not _eia_historic_auto_ingest_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[EiaHistoric] Skipping ingest until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.eia_historic_imports import try_auto_ingest_eia_downloads
+        except ImportError:
+            from services.eia_historic_imports import try_auto_ingest_eia_downloads
+
+        conn = get_db_connection()
+        try:
+            summary = try_auto_ingest_eia_downloads(conn)
+            print(
+                f"[EiaHistoric] Auto-ingest — status={summary.get('status')}, "
+                f"rows_inserted={summary.get('rows_inserted', 0)}, "
+                f"reason={summary.get('reason', '')}"
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[EiaHistoric] Auto-ingest skipped or failed: {exc}")
 
 
 def _sync_oil_live_graph_reference() -> None:
@@ -1988,6 +2023,7 @@ def startup_schema_bootstrap():
             return
         _sync_opec_gulf_reference()
         _sync_oil_products_licenses_reference()
+        _sync_eia_historic_reference()
         _sync_gov_procurement_reference()
         _sync_oil_live_graph_reference()
         _bootstrap_open_data()
