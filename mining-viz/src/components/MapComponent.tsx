@@ -61,6 +61,9 @@ import type { EiaHistoricMapArc } from '../api/eiaHistoricApi';
 import type { MacroTradeFlow } from '../api/oilLiveApi';
 import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
+import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
+import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
+import { getOilLiveSyncStatus } from '../api/oilLiveApi';
 import { LIVE_DATA_HUB_BOUNDS } from '../features/live-data/liveDataMapDefaults';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
@@ -629,6 +632,12 @@ export default function MapComponent({
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
     const isLiveDataView = viewModeKey === 'live_data';
+    const { data: oilLiveSyncStatus } = useQuery({
+        queryKey: ['oil-live-sync-status-map'],
+        queryFn: getOilLiveSyncStatus,
+        enabled: isLiveDataView && oilLiveOverlaysEnabled,
+        staleTime: 60_000,
+    });
     const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
@@ -1212,6 +1221,20 @@ export default function MapComponent({
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
+            )}
+            {isLiveDataView && oilLiveOverlaysEnabled && (
+                <>
+                <div className="absolute right-4 top-24 z-[950] pointer-events-auto hidden sm:block">
+                    <LiveDataMapLegend
+                        layers={oilLiveLayers}
+                        eiaHistoricOn={liveDataEiaHistoricOn || eiaHistoricMapEnabled}
+                        macroTradeOn={liveDataMacroTradeOn && macroTradeFlowsEnabled}
+                    />
+                </div>
+                <div className="absolute left-1/2 -translate-x-1/2 top-24 z-[950] pointer-events-auto">
+                    <GraphSyncMapBanner cargoRecordCount={oilLiveSyncStatus?.cargo_record_count} />
+                </div>
+                </>
             )}
             {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveLayersChange && (
                 <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">

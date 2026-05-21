@@ -45,10 +45,10 @@ const LAYER_META = [
   {
     key: 'corridors' as const,
     icon: Route,
-    labelEn: 'Corridors',
-    labelHe: 'מסדרונות',
-    hintEn: 'Inferred trade routes from cargo signals',
-    hintHe: 'מסלולי מסחר מסיקת רשומות מטען',
+    labelEn: 'Shipment routes (MCR)',
+    labelHe: 'מסלולי מטען (MCR)',
+    hintEn: 'Per-shipment synthetic arcs in view',
+    hintHe: 'קשתות מטען סינתטי בתצוגה',
   },
   {
     key: 'opportunities' as const,
@@ -206,12 +206,12 @@ export default function LiveDataMapLayersPanel({
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
                 <ArrowRightLeft className="h-4 w-4 shrink-0" />
-                {t('זרימת סחר (מצרפי)', 'Trade Flow (aggregated)')}
+                {t('זוגות מסחר מצרפיים', 'Aggregated trade pairs')}
               </span>
               <span className="mt-0.5 block text-xs leading-snug text-slate-600 dark:text-slate-400">
                 {t(
-                  'קשתות מצרפיות לפי זוג חברות או זוג מדינות, מצויירות מ-MCR.',
-                  'Aggregated arcs by company pair or country pair, drawn from MCR.',
+                  'קשתות מרוכזות לפי זוג חברות או מדינות (לא כל משלוח בנפרד).',
+                  'Rolled-up arcs by company or country pair — not every shipment.',
                 )}
               </span>
               <div

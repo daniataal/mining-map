@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -15,6 +16,57 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/services/opportunity"
 	"github.com/mining-map/oil-live-intel/internal/services/trade"
 )
+
+func (s *Server) ListTradeManifests(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := queryInt(r, "limit", 50)
+	if limit > 500 {
+		limit = 500
+	}
+	sql := `
+		SELECT id::text, data_source, bol_tier, source_record_url,
+			importer_name, exporter_name, partner_country, reporter_country,
+			hs_code, commodity_family, product_description, period_year, value_usd
+		FROM trade_manifest_rows WHERE 1=1
+	`
+	args := []any{}
+	n := 1
+	if q != "" {
+		sql += fmt.Sprintf(` AND (
+			importer_name ILIKE $%d OR exporter_name ILIKE $%d
+			OR partner_country ILIKE $%d OR product_description ILIKE $%d
+		)`, n, n, n, n)
+		args = append(args, "%"+q+"%")
+		n++
+	}
+	sql += fmt.Sprintf(` ORDER BY ingested_at DESC NULLS LAST LIMIT $%d`, n)
+	args = append(args, limit)
+
+	rows, err := s.Pool.Query(r.Context(), sql, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var id, src, tier, url, imp, exp, partner, reporter, hs, family, product *string
+		var year *int
+		var val *float64
+		_ = rows.Scan(&id, &src, &tier, &url, &imp, &exp, &partner, &reporter, &hs, &family, &product, &year, &val)
+		out = append(out, map[string]any{
+			"id": id, "data_source": src, "bol_tier": tier, "source_record_url": url,
+			"importer_name": imp, "exporter_name": exp, "partner_country": partner,
+			"reporter_country": reporter, "hs_code": hs, "commodity_family": family,
+			"product_description": product, "period_year": year, "value_usd": val,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"manifests": out,
+		"count":     len(out),
+		"disclaimer": "Open customs / user_upload / macro rows — verify tier and source URL.",
+	})
+}
 
 func (s *Server) ListTradeFlows(w http.ResponseWriter, r *http.Request) {
 	country := r.URL.Query().Get("country")

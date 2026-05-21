@@ -61,6 +61,8 @@ import {
 import { usePlatformHealth } from '../../lib/platformHealth';
 import { resolveLiveAisBanner } from './liveAisBanner';
 import { firstVerifyUrl } from '../../lib/verifySourceUrl';
+import CollapsibleSection from '../../components/ui/CollapsibleSection';
+import { getTradeManifests } from '../../api/oilLiveApi';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -544,6 +546,70 @@ export default function LiveDataIntelPanel({
     }
   }
 
+  async function exportAuditBundle() {
+    setCargoExporting(true);
+    try {
+      const [cargoRes, manifestRes] = await Promise.all([
+        getCargoRecords({
+          commodity: productFilter === 'all' ? undefined : productFilter,
+          min_confidence: cargoMinConfNum,
+          exclude_seed: !includeSeedData,
+          limit: 2000,
+        }),
+        getTradeManifests({ limit: 500 }),
+      ]);
+      const cargo = cargoRes.cargo_records ?? [];
+      const manifests = manifestRes.manifests ?? [];
+      if (cargo.length === 0 && manifests.length === 0) {
+        toast.info(t('אין נתונים לייצוא', 'Nothing to export'));
+        return;
+      }
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (cargo.length > 0) {
+        downloadCsv(
+          `meridian-audit-cargo-${stamp}.csv`,
+          ['id', 'bol_tier', 'shipper_name', 'consignee_name', 'commodity_family', 'event_date'],
+          cargo.map((r) => [
+            r.id,
+            r.bol_tier ?? '',
+            r.shipper_name ?? '',
+            r.consignee_name ?? '',
+            r.commodity_family ?? '',
+            r.event_date ?? '',
+          ]),
+        );
+      }
+      if (manifests.length > 0) {
+        downloadCsv(
+          `meridian-audit-manifests-${stamp}.csv`,
+          [
+            'id',
+            'bol_tier',
+            'importer_name',
+            'exporter_name',
+            'partner_country',
+            'hs_code',
+            'source_record_url',
+          ],
+          manifests.map((m) => [
+            m.id,
+            m.bol_tier ?? '',
+            m.importer_name ?? '',
+            m.exporter_name ?? '',
+            m.partner_country ?? '',
+            m.hs_code ?? '',
+            m.source_record_url ?? '',
+          ]),
+        );
+      }
+      toast.success(t('יוצא חבילת ביקורת (2 CSV)', 'Audit bundle exported (2 CSV files)'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setCargoExporting(false);
+    }
+  }
+
   async function handleWatchOpp(opp: OilOpportunity) {
     setWatchingOppId(opp.id);
     try {
@@ -622,6 +688,15 @@ export default function LiveDataIntelPanel({
         onOpenCompanyDossier(hit.id);
         return;
       }
+      if (hit.type === 'manifest') {
+        if (hit.source_record_url) {
+          window.open(hit.source_record_url, '_blank', 'noopener,noreferrer');
+        }
+        toast.info(
+          `${hit.title}${hit.bol_tier ? ` (${hit.bol_tier})` : ''} — ${t('אמת במקור', 'Verify at source')}`,
+        );
+        return;
+      }
       // Terminal / vessel without a parent handler: surface a tip so the
       // user knows the click registered but the drawer isn't wired here.
       toast.info(t('פתחו את המגירה מהמפה', 'Open the drawer from the map'));
@@ -692,34 +767,33 @@ export default function LiveDataIntelPanel({
             </ul>
           </div>
         )}
-        {liveAisBanner.kind !== 'none' && (
+        {liveAisBanner.kind !== 'none' &&
+          liveAisBanner.kind !== 'tls_expired' &&
+          liveAisBanner.kind !== 'worker_error' && (
           <div
-            className={`mt-3 rounded-xl border px-3 py-2.5 text-sm leading-relaxed ${
-              liveAisBanner.kind === 'tls_expired'
-                ? 'border-orange-500/50 bg-orange-500/15 text-orange-950 dark:text-orange-100'
-                : 'border-amber-500/40 bg-amber-500/15 text-amber-950 dark:text-amber-100'
-            }`}
+            className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 py-2.5 text-sm leading-relaxed text-amber-950 dark:text-amber-100"
             role="status"
           >
             {t(liveAisBanner.messageHe, liveAisBanner.messageEn)}
           </div>
         )}
-        <div className="mt-3 rounded-xl border border-cyan-600/30 bg-cyan-500/10 px-3 py-3">
-          <div className="flex flex-wrap items-center gap-2">
+        <CollapsibleSection
+          defaultOpen
+          className="mt-3 rounded-xl border border-cyan-600/30 bg-cyan-500/10 px-3 py-3"
+          title={
             <p className={`${LABEL} text-cyan-900 dark:text-cyan-200`}>
               {t('בריאות כיסוי', 'Coverage health')}
             </p>
-            {aisLive && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-900 dark:text-emerald-100">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                </span>
-                {t('AIS חי', 'Live AIS')}
+          }
+          badge={
+            aisLive ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-900 dark:text-emerald-100">
+                {t('AIS', 'AIS')}
               </span>
-            )}
-          </div>
-          <p className="mt-2 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
+            ) : null
+          }
+        >
+          <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
             {t('בתצוגת המפה', 'In current map view')}
           </p>
           <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -796,7 +870,7 @@ export default function LiveDataIntelPanel({
               'Sources: OSM, AIS, Comtrade, TED, licenses — graph sync via admin graph-sync',
             )}
           </p>
-        </div>
+        </CollapsibleSection>
         <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-200 mt-2">
           {t(DISCLAIMER_HE, DISCLAIMER_EN)}
         </p>
@@ -964,6 +1038,14 @@ export default function LiveDataIntelPanel({
                   <Download className="w-3 h-3" />
                 )}
                 {t('ייצוא CSV', 'Export CSV')}
+              </button>
+              <button
+                type="button"
+                disabled={cargoExporting}
+                onClick={() => void exportAuditBundle()}
+                className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-2 py-1.5 rounded-lg border border-violet-500/40 text-violet-800 dark:text-violet-200 hover:bg-violet-500/10 disabled:opacity-50"
+              >
+                {t('חבילת ביקורת', 'Audit bundle')}
               </button>
             </div>
             {cargoLoading && (

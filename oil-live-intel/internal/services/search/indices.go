@@ -11,13 +11,14 @@ const (
 	IndexCompanies = "oil_companies"
 	IndexTerminals = "oil_terminals"
 	IndexVessels   = "oil_vessels"
+	IndexManifest  = "meridian_trade_manifest"
 )
 
 // AllIndices returns the four canonical indices the search subsystem owns.
 // Order matters for the indexer (cargo last so company/terminal LEI fields are
 // resolved first).
 func AllIndices() []string {
-	return []string{IndexCompanies, IndexTerminals, IndexVessels, IndexCargo}
+	return []string{IndexCompanies, IndexTerminals, IndexVessels, IndexCargo, IndexManifest}
 }
 
 // IndexExistsOrCreate creates the index if it doesn't exist; otherwise it is
@@ -58,6 +59,32 @@ func IndexDefinitions() map[string]map[string]any {
 		IndexCompanies: companiesIndexDef(),
 		IndexTerminals: terminalsIndexDef(),
 		IndexVessels:   vesselsIndexDef(),
+		IndexManifest:  manifestIndexDef(),
+	}
+}
+
+func manifestIndexDef() map[string]any {
+	return map[string]any{
+		"settings": map[string]any{
+			"number_of_shards":   1,
+			"number_of_replicas": 0,
+		},
+		"mappings": map[string]any{
+			"properties": map[string]any{
+				"id":                keyword(),
+				"data_source":       keyword(),
+				"bol_tier":          keyword(),
+				"importer_name":     text(),
+				"exporter_name":     text(),
+				"partner_country":   text(),
+				"reporter_country":  text(),
+				"hs_code":           keyword(),
+				"commodity_family":  text(),
+				"product_description": text(),
+				"source_record_url": keyword(),
+				"period_year":       floatField(),
+			},
+		},
 	}
 }
 

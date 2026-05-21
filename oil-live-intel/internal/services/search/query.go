@@ -9,10 +9,11 @@ import (
 type EntityType string
 
 const (
-	TypeCargo    EntityType = "cargo"
-	TypeCompany  EntityType = "company"
-	TypeTerminal EntityType = "terminal"
-	TypeVessel   EntityType = "vessel"
+	TypeCargo     EntityType = "cargo"
+	TypeCompany   EntityType = "company"
+	TypeTerminal  EntityType = "terminal"
+	TypeVessel    EntityType = "vessel"
+	TypeManifest  EntityType = "manifest"
 )
 
 // IndexFor maps the public entity type code to the underlying ES index name.
@@ -26,6 +27,8 @@ func IndexFor(t EntityType) string {
 		return IndexTerminals
 	case TypeVessel:
 		return IndexVessels
+	case TypeManifest:
+		return IndexManifest
 	}
 	return ""
 }
@@ -41,6 +44,8 @@ func TypeFromIndex(idx string) EntityType {
 		return TypeTerminal
 	case IndexVessels:
 		return TypeVessel
+	case IndexManifest:
+		return TypeManifest
 	}
 	return ""
 }
@@ -48,7 +53,7 @@ func TypeFromIndex(idx string) EntityType {
 // DefaultTypes returns the four canonical entity types we expose via
 // /api/oil-live/search.
 func DefaultTypes() []EntityType {
-	return []EntityType{TypeCargo, TypeCompany, TypeTerminal, TypeVessel}
+	return []EntityType{TypeCargo, TypeCompany, TypeTerminal, TypeVessel, TypeManifest}
 }
 
 // ParseTypesParam normalises the comma-separated ?types= query string to a
@@ -73,6 +78,8 @@ func ParseTypesParam(raw string) []EntityType {
 			t = TypeTerminal
 		case "vessel", "vessels":
 			t = TypeVessel
+		case "manifest", "manifests", "trade_manifest":
+			t = TypeManifest
 		default:
 			continue
 		}
@@ -107,6 +114,15 @@ func fieldsForType(t EntityType) []string {
 		return []string{"name^3", "operator_name"}
 	case TypeVessel:
 		return []string{"name^3"}
+	case TypeManifest:
+		return []string{
+			"importer_name^3",
+			"exporter_name^3",
+			"product_description",
+			"commodity_family",
+			"partner_country",
+			"reporter_country",
+		}
 	}
 	return nil
 }

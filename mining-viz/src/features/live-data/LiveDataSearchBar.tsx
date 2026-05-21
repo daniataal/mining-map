@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Building2, Loader2, Package, Search as SearchIcon, Ship, Warehouse } from 'lucide-react';
+import { Building2, FileText, Loader2, Package, Search as SearchIcon, Ship, Warehouse } from 'lucide-react';
 import {
   getOilLiveSearch,
   type OilLiveSearchEntityType,
@@ -28,11 +28,12 @@ const DEFAULT_LIMIT = 10;
 
 /** Pretty label for each result group, in the same order the dropdown
  *  surfaces them. Order = priority when grouping hits. */
-const GROUP_ORDER: OilLiveSearchEntityType[] = ['cargo', 'company', 'terminal', 'vessel'];
+const GROUP_ORDER: OilLiveSearchEntityType[] = ['cargo', 'company', 'manifest', 'terminal', 'vessel'];
 
 const GROUP_LABEL: Record<OilLiveSearchEntityType, [string, string]> = {
   cargo: ['מטען', 'Cargo'],
   company: ['חברות', 'Companies'],
+  manifest: ['מניפסטים', 'Manifests'],
   terminal: ['מסופים', 'Terminals'],
   vessel: ['מכליות', 'Vessels'],
 };
@@ -40,6 +41,7 @@ const GROUP_LABEL: Record<OilLiveSearchEntityType, [string, string]> = {
 const GROUP_ICON: Record<OilLiveSearchEntityType, React.ComponentType<{ className?: string }>> = {
   cargo: Package,
   company: Building2,
+  manifest: FileText,
   terminal: Warehouse,
   vessel: Ship,
 };
@@ -51,6 +53,8 @@ export type LiveDataSearchHitClick = {
   subtitle?: string;
   lat?: number;
   lng?: number;
+  source_record_url?: string;
+  bol_tier?: string;
 };
 
 /** Extract map fly target from Elasticsearch _source (cargo corridor or terminal location). */
@@ -188,6 +192,7 @@ export default function LiveDataSearchBar({
   const handleSelect = useCallback(
     (hit: OilLiveSearchHit) => {
       const fly = hitFlyCoords(hit);
+      const src = hit.source ?? {};
       onHitClick({
         type: hit.type,
         id: hit.id,
@@ -195,6 +200,9 @@ export default function LiveDataSearchBar({
         subtitle: hitSubtitle(hit) || undefined,
         lat: fly?.lat,
         lng: fly?.lng,
+        source_record_url:
+          typeof src.source_record_url === 'string' ? src.source_record_url : undefined,
+        bol_tier: typeof src.bol_tier === 'string' ? src.bol_tier : undefined,
       });
       setOpen(false);
     },
@@ -347,6 +355,14 @@ export function hitTitle(hit: OilLiveSearchHit): string {
       return stringField(src, 'name') || hit.id;
     case 'vessel':
       return stringField(src, 'name') || stringField(src, 'imo') || hit.id;
+    case 'manifest': {
+      const imp = stringField(src, 'importer_name');
+      const exp = stringField(src, 'exporter_name');
+      if (imp && exp) return `${exp} → ${imp}`;
+      return imp || exp || hit.id;
+    }
+    default:
+      return hit.id;
   }
 }
 
@@ -371,6 +387,14 @@ export function hitSubtitle(hit: OilLiveSearchHit): string {
       const flag = stringField(src, 'flag');
       return [klass, flag].filter(Boolean).join(' · ');
     }
+    case 'manifest': {
+      const tier = stringField(src, 'bol_tier');
+      const partner = stringField(src, 'partner_country');
+      const hs = stringField(src, 'hs_code');
+      return [tier, partner, hs].filter(Boolean).join(' · ');
+    }
+    default:
+      return '';
   }
 }
 
