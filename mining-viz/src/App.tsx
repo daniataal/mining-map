@@ -59,7 +59,7 @@ import {
   X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
-import PlatformHealthBanner from './components/PlatformHealthBanner';
+import PlatformHealthChip from './components/PlatformHealthChip';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
@@ -929,7 +929,7 @@ export default function App() {
          </div>
       </div>
 
-      <PlatformHealthBanner />
+      <PlatformHealthChip />
 
       {viewMode !== 'ports' && viewMode !== 'route_planner' && fetchError && (
         <div

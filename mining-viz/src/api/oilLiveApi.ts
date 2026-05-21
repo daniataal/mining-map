@@ -848,7 +848,35 @@ export async function assignOilAlert(alertId: string, assignee: string): Promise
 }
 
 /** One of the four entity types indexed in Elasticsearch. */
-export type OilLiveSearchEntityType = 'cargo' | 'company' | 'terminal' | 'vessel';
+export type OilLiveSearchEntityType = 'cargo' | 'company' | 'terminal' | 'vessel' | 'manifest';
+
+export type TradeManifestRow = {
+  id: string;
+  data_source?: string;
+  bol_tier?: string;
+  source_record_url?: string;
+  importer_name?: string;
+  exporter_name?: string;
+  partner_country?: string;
+  reporter_country?: string;
+  hs_code?: string;
+  commodity_family?: string;
+  product_description?: string;
+  period_year?: number;
+  value_usd?: number;
+};
+
+export async function getTradeManifests(opts: {
+  q?: string;
+  limit?: number;
+} = {}): Promise<{ manifests: TradeManifestRow[]; count: number; disclaimer?: string }> {
+  const params = new URLSearchParams();
+  if (opts.q) params.set('q', opts.q);
+  params.set('limit', String(opts.limit ?? 100));
+  const res = await fetch(oilUrl(`/api/oil-live/trade-manifests?${params}`));
+  if (!res.ok) throw new Error(`oil-live trade-manifests ${res.status}`);
+  return res.json();
+}
 
 /** Subset of fields surfaced in the search drop-down per result. Source is
  * intentionally loose — it's the raw `_source` from ES and varies per type. */

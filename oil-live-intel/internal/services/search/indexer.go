@@ -27,6 +27,7 @@ type Cursors struct {
 	Companies time.Time
 	Terminals time.Time
 	Vessels   time.Time
+	Manifest  time.Time
 }
 
 // SyncAll runs one indexing pass over all four indices. When incremental is
@@ -43,7 +44,7 @@ func SyncAll(ctx context.Context, pool *pgxpool.Pool, c Client, batchSize int, c
 	if cursors == nil {
 		cursors = &Cursors{}
 	}
-	stats := make([]IndexerStats, 0, 4)
+	stats := make([]IndexerStats, 0, 5)
 	cargoStats, err := syncCargo(ctx, pool, c, batchSize, &cursors.Cargo, incremental)
 	if err != nil {
 		return stats, fmt.Errorf("sync cargo: %w", err)
@@ -64,6 +65,99 @@ func SyncAll(ctx context.Context, pool *pgxpool.Pool, c Client, batchSize int, c
 		return stats, fmt.Errorf("sync vessels: %w", err)
 	}
 	stats = append(stats, vesStats)
+	manStats, err := syncManifest(ctx, pool, c, batchSize, &cursors.Manifest, incremental)
+	if err != nil {
+		return stats, fmt.Errorf("sync manifest: %w", err)
+	}
+	stats = append(stats, manStats)
+	return stats, nil
+}
+
+func syncManifest(ctx context.Context, pool *pgxpool.Pool, c Client, batchSize int, cursor *time.Time, incremental bool) (IndexerStats, error) {
+	stats := IndexerStats{Index: IndexManifest}
+	// trade_manifest_rows may not exist on older DBs — skip quietly.
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = 'trade_manifest_rows'
+		)`).Scan(&exists); err != nil || !exists {
+		return stats, nil
+	}
+	const query = `
+	SELECT id::text,
+	       data_source,
+	       bol_tier,
+	       importer_name,
+	       exporter_name,
+	       partner_country,
+	       reporter_country,
+	       hs_code,
+	       commodity_family,
+	       product_description,
+	       source_record_url,
+	       period_year,
+	       ingested_at
+	FROM trade_manifest_rows
+	WHERE ($1::timestamptz IS NULL OR ingested_at >= $1)
+	ORDER BY ingested_at ASC
+	`
+	var sinceArg any
+	if incremental && !cursor.IsZero() {
+		sinceArg = *cursor
+	}
+	rows, err := pool.Query(ctx, query, sinceArg)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+
+	batch := make([]BulkDoc, 0, batchSize)
+	for rows.Next() {
+		var (
+			id, dataSource, bolTier, importer, exporter, partner, reporter, hs, family, product, sourceURL *string
+			periodYear                                                                                      *int
+			ingestedAt                                                                                      time.Time
+		)
+		if err := rows.Scan(
+			&id, &dataSource, &bolTier, &importer, &exporter, &partner, &reporter,
+			&hs, &family, &product, &sourceURL, &periodYear, &ingestedAt,
+		); err != nil {
+			return stats, err
+		}
+		stats.Fetched++
+		if ingestedAt.After(*cursor) {
+			*cursor = ingestedAt
+		}
+		doc := map[string]any{
+			"id":                  strDeref(id),
+			"data_source":         strDeref(dataSource),
+			"bol_tier":            strDeref(bolTier),
+			"importer_name":       strDeref(importer),
+			"exporter_name":       strDeref(exporter),
+			"partner_country":     strDeref(partner),
+			"reporter_country":    strDeref(reporter),
+			"hs_code":             strDeref(hs),
+			"commodity_family":    strDeref(family),
+			"product_description": strDeref(product),
+			"source_record_url":   strDeref(sourceURL),
+		}
+		if periodYear != nil {
+			doc["period_year"] = float64(*periodYear)
+		}
+		batch = append(batch, BulkDoc{ID: strDeref(id), Body: doc})
+		next, err := flushIfFull(ctx, c, IndexManifest, batch, batchSize, &stats)
+		if err != nil {
+			return stats, err
+		}
+		batch = next
+	}
+	if err := rows.Err(); err != nil {
+		return stats, err
+	}
+	if _, err := flush(ctx, c, IndexManifest, batch, &stats); err != nil {
+		return stats, err
+	}
 	return stats, nil
 }
 
