@@ -123,8 +123,11 @@ export async function getOilLiveHealth(): Promise<{ status: string; service: str
 export type OilLiveSyncStatus = {
   last_graph_sync_at?: string | null;
   terminal_count: number;
+  company_count?: number;
   cargo_record_count: number;
   port_call_count: number;
+  corridor_full_count?: number;
+  corridor_partial_count?: number;
   last_cargo_at?: string | null;
   disclaimer?: string;
 };

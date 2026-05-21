@@ -1,3 +1,5 @@
+import os
+import time
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +11,7 @@ from backend.services.storage_terminals import (
     _overpass_urls,
     _should_cache_storage_response,
     build_overpass_query,
+    get_storage_terminals,
     infer_terminal_subtype,
     normalize_storage_terminal,
 )
@@ -19,6 +22,78 @@ class StorageTerminalTests(unittest.TestCase):
         with patch.dict("os.environ", {"STORAGE_OVERPASS_URL": "https://example.test/interpreter"}, clear=False):
             urls = _overpass_urls()
         self.assertEqual(urls[0], "https://example.test/interpreter")
+
+    def test_overpass_urls_includes_default_endpoints(self):
+        with patch.dict("os.environ", {}, clear=False):
+            for key in ("STORAGE_OVERPASS_URL", "OVERPASS_URL"):
+                os.environ.pop(key, None)
+            urls = _overpass_urls()
+        self.assertIn("https://overpass.kumi.systems/api/interpreter", urls)
+        self.assertIn("https://overpass-api.de/api/interpreter", urls)
+
+    @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals", return_value=[])
+    @patch("backend.services.storage_terminals._load_bulk_osm_seed_elements")
+    @patch("backend.services.storage_terminals.fetch_overpass_elements")
+    @patch("backend.services.storage_terminals._load_storage_terminals_from_db")
+    def test_get_storage_terminals_uses_bulk_seed_when_overpass_empty(
+        self,
+        mock_load_db,
+        mock_fetch_overpass,
+        mock_bulk_seed,
+        _mock_curated,
+    ):
+        mock_load_db.return_value = ([], None)
+        mock_fetch_overpass.side_effect = RuntimeError("timeout")
+        mock_bulk_seed.return_value = [
+            {
+                "type": "node",
+                "id": 4242,
+                "lat": 51.9,
+                "lon": 4.4,
+                "tags": {"industrial": "petroleum_terminal", "name": "Bulk Seed Terminal"},
+            }
+        ]
+
+        from backend.services import storage_terminals as module
+
+        module._storage_cache["loaded_at"] = 0.0
+        module._storage_cache["response"] = None
+
+        response = get_storage_terminals(force_refresh=True)
+        osm_entities = [entity for entity in response["entities"] if str(entity.get("id", "")).startswith("osm:")]
+        self.assertGreaterEqual(len(osm_entities), 1)
+        self.assertIn("bulk seed", " ".join(response.get("limitations", [])).lower())
+
+    @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals", return_value=[])
+    @patch("backend.services.storage_terminals._load_bulk_osm_seed_elements", return_value=[])
+    @patch("backend.services.storage_terminals.fetch_overpass_elements")
+    @patch("backend.services.storage_terminals._load_storage_terminals_from_db")
+    def test_force_refresh_failure_keeps_previous_cache(
+        self,
+        mock_load_db,
+        mock_fetch_overpass,
+        _mock_bulk,
+        _mock_curated,
+    ):
+        mock_load_db.return_value = ([], None)
+        mock_fetch_overpass.side_effect = RuntimeError("timeout")
+
+        from backend.services import storage_terminals as module
+
+        module._storage_cache["loaded_at"] = time.time()
+        module._storage_cache["response"] = {
+            "entities": [{"id": "osm:node:1", "company": "Cached Terminal", "lat": 1.0, "lng": 2.0}],
+            "data_source": "cache",
+            "data_as_of": "2026-05-20T00:00:00Z",
+            "limitations": [],
+            "stats": {"total": 1},
+            "source_labels": [],
+            "coverage_note": "",
+        }
+
+        response = get_storage_terminals(force_refresh=True)
+        self.assertTrue(response.get("cached"))
+        self.assertEqual(response["entities"][0]["company"], "Cached Terminal")
 
     def test_should_not_cache_when_all_tiles_failed(self):
         warnings = [f"{name}: timeout" for name, _ in WORLD_TILES]

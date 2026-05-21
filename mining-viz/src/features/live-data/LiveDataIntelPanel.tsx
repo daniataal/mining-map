@@ -70,7 +70,7 @@ export default function LiveDataIntelPanel({
   const [oppEconomics, setOppEconomics] = useState<Record<string, OilDealEconomics>>({});
   const [assignee, setAssignee] = useState('');
   const [cargoCountry, setCargoCountry] = useState('');
-  const [cargoMinConfidence, setCargoMinConfidence] = useState('0.55');
+  const [cargoMinConfidence, setCargoMinConfidence] = useState('0.5');
   const [expandedCargoId, setExpandedCargoId] = useState<string | null>(null);
   const [cargoDetail, setCargoDetail] = useState<MeridianCargoRecord | null>(null);
   const [cargoDetailLoading, setCargoDetailLoading] = useState(false);
@@ -158,13 +158,13 @@ export default function LiveDataIntelPanel({
     refetchInterval: 120_000,
   });
 
-  const cargoMinConfNum = parseFloat(cargoMinConfidence) || 0.55;
+  const cargoMinConfNum = parseFloat(cargoMinConfidence) || 0.5;
   const { data: cargoHealth } = useQuery({
     queryKey: ['oil-live-cargo-health', productFilter],
     queryFn: () =>
       getCargoRecords({
         commodity: productFilter === 'all' ? undefined : productFilter,
-        min_confidence: 0.55,
+        min_confidence: 0.5,
         limit: 8,
       }),
     staleTime: 60_000,
@@ -445,6 +445,7 @@ export default function LiveDataIntelPanel({
                 onChange={(e) => setCargoMinConfidence(e.target.value)}
               >
                 <option value="0.45">≥45%</option>
+                <option value="0.5">≥50%</option>
                 <option value="0.55">≥55%</option>
                 <option value="0.65">≥65%</option>
                 <option value="0.75">≥75%</option>
@@ -768,6 +769,15 @@ export default function LiveDataIntelPanel({
               </p>
             )}
           </>
+        )}
+
+        {tab === 'companies' && (
+          <p className="text-[10px] text-slate-500 mb-2">
+            {t('סה״כ', 'Total')}: {companiesTotal.toLocaleString()}{' '}
+            {t('חברות', 'companies')}
+            {companiesTotal > companyPageSize &&
+              ` · ${t('מציג', 'Showing')} ${companyOffset + 1}–${Math.min(companyOffset + companyPageSize, companiesTotal)}`}
+          </p>
         )}
 
         {tab === 'companies' && (

@@ -25,10 +25,24 @@ except ImportError:
 
 
 STORAGE_TERMINALS_LAYER_ID = "storage_terminals"
-OVERPASS_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_TIMEOUT_SECONDS", "90"))
+OVERPASS_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_TIMEOUT_SECONDS", "120"))
+OVERPASS_QUERY_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_QUERY_TIMEOUT_SECONDS", "90"))
+OVERPASS_RETRY_ATTEMPTS = int(os.getenv("STORAGE_OVERPASS_RETRY_ATTEMPTS", "3"))
+OVERPASS_RETRY_DELAY_SECONDS = float(os.getenv("STORAGE_OVERPASS_RETRY_DELAY_SECONDS", "4"))
+STORAGE_SKIP_LIVE_OVERPASS = (os.getenv("STORAGE_SKIP_LIVE_OVERPASS") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 STORAGE_CACHE_TTL_SECONDS = 60 * 60 * 12
 MAX_NEARBY_PORT_DISTANCE_KM = 250.0
-MAX_TILE_WORKERS = 5
+MAX_TILE_WORKERS = int(os.getenv("STORAGE_OVERPASS_TILE_WORKERS", "3"))
+BULK_SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "oil_terminals_seed_bulk.json"
+DEFAULT_OVERPASS_URLS: tuple[str, ...] = (
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+)
 
 WORLD_TILES: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
     ("north_america_west", (7.0, -170.0, 72.0, -95.0)),
@@ -442,7 +456,7 @@ def _overpass_urls() -> tuple[str, ...]:
     candidates = [
         os.getenv("STORAGE_OVERPASS_URL", "").strip(),
         os.getenv("OVERPASS_URL", "").strip(),
-        "https://overpass.kumi.systems/api/interpreter",
+        *DEFAULT_OVERPASS_URLS,
     ]
     if os.getenv("OVERPASS_INCLUDE_DE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}:
         candidates.append("https://overpass-api.de/api/interpreter")
@@ -470,7 +484,7 @@ def build_overpass_query(bbox: tuple[float, float, float, float]) -> str:
     bbox_text = f"{south},{west},{north},{east}"
     petroleum_substance = "^(oil|petroleum|diesel|gasoline|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)"
     return f"""
-[out:json][timeout:45];
+[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];
 (
   nwr["industrial"="petroleum_terminal"]({bbox_text});
   nwr["industrial"="tank_farm"]({bbox_text});
@@ -494,13 +508,16 @@ def fetch_overpass_elements(bbox: tuple[float, float, float, float]) -> list[dic
     }
     errors: list[str] = []
     for overpass_url in _overpass_urls():
-        req = Request(overpass_url, data=body, headers=headers)
-        try:
-            with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
-                payload = json.load(response)
-            return payload.get("elements", []) if isinstance(payload, dict) else []
-        except Exception as exc:
-            errors.append(f"{overpass_url}: {exc}")
+        for attempt in range(max(1, OVERPASS_RETRY_ATTEMPTS)):
+            req = Request(overpass_url, data=body, headers=headers)
+            try:
+                with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
+                    payload = json.load(response)
+                return payload.get("elements", []) if isinstance(payload, dict) else []
+            except Exception as exc:
+                errors.append(f"{overpass_url}#{attempt + 1}: {exc}")
+                if attempt + 1 < OVERPASS_RETRY_ATTEMPTS:
+                    time.sleep(OVERPASS_RETRY_DELAY_SECONDS * (attempt + 1))
     if errors:
         raise RuntimeError("; ".join(errors))
     return []
@@ -526,6 +543,38 @@ def _element_from_db_row(
         "lat": lat,
         "lon": lng,
     }
+
+
+def _load_bulk_osm_seed_elements() -> list[dict[str, Any]]:
+    if not BULK_SEED_PATH.is_file():
+        return []
+    try:
+        payload = json.loads(BULK_SEED_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("entities") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    elements: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        osm_type = row.get("osm_type")
+        osm_id = row.get("osm_id")
+        lat = _safe_float(row.get("lat"))
+        lng = _safe_float(row.get("lng"))
+        if not osm_type or osm_id is None or lat is None or lng is None:
+            continue
+        elements.append(
+            {
+                "type": osm_type,
+                "id": int(osm_id),
+                "lat": lat,
+                "lon": lng,
+                "tags": row.get("tags") if isinstance(row.get("tags"), dict) else {},
+            }
+        )
+    return elements
 
 
 def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[str]]:
@@ -569,7 +618,54 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
         conn.close()
 
 
-def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: list[str]) -> bool:
+def _should_load_bulk_seed(db_elements: list[dict[str, Any]], osm_entity_count: int) -> bool:
+    if osm_entity_count >= MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT and db_elements:
+        return not _db_snapshot_is_globally_complete(db_elements)
+    return osm_entity_count < MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT
+
+
+def _append_bulk_seed_entities(
+    all_entities: list[dict[str, Any]],
+    fetched_at: str,
+    data_source: str,
+    warnings: list[str],
+) -> tuple[str, int]:
+    bulk_elements = _load_bulk_osm_seed_elements()
+    if not bulk_elements:
+        return data_source, 0
+    existing_ids = {entity.get("id") for entity in all_entities}
+    bulk_added = 0
+    for element in bulk_elements:
+        normalized = normalize_storage_terminal(element, fetched_at)
+        if normalized and normalized["id"] not in existing_ids:
+            normalized["sourceId"] = "osm_bulk_seed_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (offline bulk seed)"
+            all_entities.append(normalized)
+            existing_ids.add(normalized["id"])
+            bulk_added += 1
+    if bulk_added:
+        if data_source in {"bulk_seed", "database"}:
+            data_source = "bulk_seed" if data_source == "bulk_seed" else f"{data_source}+bulk_seed"
+        else:
+            data_source = f"{data_source}+bulk_seed" if data_source != "overpass" else "bulk_seed"
+        warnings.append(
+            f"Loaded {bulk_added} storage terminals from offline OSM bulk seed fallback."
+        )
+    return data_source, bulk_added
+
+
+def _load_db_snapshot_entities(
+    db_elements: list[dict[str, Any]],
+    fetched_at: str,
+) -> list[dict[str, Any]]:
+    entities: list[dict[str, Any]] = []
+    for element in db_elements:
+        normalized = normalize_storage_terminal(element, fetched_at)
+        if normalized:
+            normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+            entities.append(normalized)
+    return entities
     if entities:
         return True
     if warnings and len(warnings) >= len(WORLD_TILES):
@@ -788,10 +884,10 @@ def _fresh_cache() -> Optional[dict[str, Any]]:
 
 
 def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
-    if force_refresh:
-        _storage_cache["loaded_at"] = 0.0
-        _storage_cache["response"] = None
-    else:
+    previous_cache = dict(_storage_cache["response"]) if _storage_cache.get("response") else None
+    previous_loaded_at = float(_storage_cache.get("loaded_at") or 0.0)
+
+    if not force_refresh:
         cached = _fresh_cache()
         if cached is not None:
             return {
@@ -806,9 +902,9 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     data_source = "overpass"
     db_elements: list[dict[str, Any]] = []
     db_fetched_at: Optional[str] = None
+    osm_entity_count = 0
 
-    if not force_refresh:
-        db_elements, db_fetched_at = _load_storage_terminals_from_db()
+    db_elements, db_fetched_at = _load_storage_terminals_from_db()
 
     use_db_only = (
         not force_refresh
@@ -825,6 +921,12 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
                 normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
                 normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
                 all_entities.append(normalized)
+        osm_entity_count = len(all_entities)
+    elif STORAGE_SKIP_LIVE_OVERPASS:
+        data_source = "bulk_seed"
+        warnings.append(
+            "Live Overpass skipped (STORAGE_SKIP_LIVE_OVERPASS) — using petroleum_osm_features, bulk seed, and curated reference."
+        )
     else:
         with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
             futures = {
@@ -842,22 +944,42 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
                 except Exception as exc:
                     warnings.append(f"{tile_name}: {exc}")
 
-        if not all_entities and db_elements:
+        osm_entity_count = len(
+            [entity for entity in all_entities if str(entity.get("id", "")).startswith("osm:")]
+        )
+
+        if not osm_entity_count and db_elements:
             data_source = "database"
             fetched_at = db_fetched_at or fetched_at
             warnings.append(
                 "Live Overpass returned no normalized storage entities; using persisted petroleum_osm_features snapshot."
             )
-            for element in db_elements:
-                normalized = normalize_storage_terminal(element, fetched_at)
-                if normalized:
-                    normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
-                    normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
-                    all_entities.append(normalized)
-        elif db_elements and not use_db_only:
+            all_entities = _load_db_snapshot_entities(db_elements, fetched_at)
+            osm_entity_count = len(all_entities)
+        elif db_elements and not use_db_only and osm_entity_count:
             warnings.append(
                 "Persisted petroleum_osm_features snapshot was regional/incomplete; refreshed from live Overpass world tiles."
             )
+
+        if _should_load_bulk_seed(db_elements, osm_entity_count):
+            data_source, bulk_added = _append_bulk_seed_entities(
+                all_entities, fetched_at, data_source, warnings
+            )
+            osm_entity_count += bulk_added
+
+    if STORAGE_SKIP_LIVE_OVERPASS and _should_load_bulk_seed(db_elements, osm_entity_count):
+        if db_elements and osm_entity_count == 0:
+            data_source = "database"
+            fetched_at = db_fetched_at or fetched_at
+            all_entities.extend(_load_db_snapshot_entities(db_elements, fetched_at))
+            osm_entity_count = len(
+                [entity for entity in all_entities if str(entity.get("id", "")).startswith("osm:")]
+            )
+        if _should_load_bulk_seed(db_elements, osm_entity_count):
+            data_source, bulk_added = _append_bulk_seed_entities(
+                all_entities, fetched_at, data_source, warnings
+            )
+            osm_entity_count += bulk_added
 
     try:
         from backend.services.storage_terminals_seed import (
@@ -877,6 +999,8 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
             data_source = "database+curated"
         elif data_source == "overpass":
             data_source = "overpass+curated"
+        elif data_source == "bulk_seed":
+            data_source = "bulk_seed+curated"
 
     entities = drop_curated_near_osm_duplicates(_dedupe_entities(all_entities))
     entities.sort(
@@ -913,10 +1037,36 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     if _should_cache_storage_response(entities, warnings):
         _storage_cache["loaded_at"] = time.time()
         _storage_cache["response"] = response
+    elif force_refresh and previous_cache:
+        warnings.append(
+            "Live refresh failed; serving previous in-memory storage snapshot without overwriting cache."
+        )
+        stale = dict(previous_cache)
+        stale["cached"] = True
+        stale["data_source"] = stale.get("data_source", "cache") + "+stale_refresh"
+        stale_limitations = list(stale.get("limitations") or [])
+        stale_limitations.extend(warnings)
+        stale["limitations"] = stale_limitations
+        return {
+            **stale,
+            "entities": [_summary_entity(entity) for entity in stale.get("entities", [])],
+        }
+    elif force_refresh:
+        _storage_cache["loaded_at"] = previous_loaded_at
+        _storage_cache["response"] = previous_cache
+
     return {
         **response,
         "entities": [_summary_entity(entity) for entity in entities],
     }
+
+
+def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: list[str]) -> bool:
+    if entities:
+        return True
+    if warnings and len(warnings) >= len(WORLD_TILES):
+        return False
+    return True
 
 
 def get_storage_terminal_details(terminal_id: str) -> Optional[dict[str, Any]]:

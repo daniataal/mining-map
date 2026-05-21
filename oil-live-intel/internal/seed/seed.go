@@ -63,6 +63,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	rtID := terminalIDs["Ras Tanura Export Terminal"]
+	rotterdamID := terminalIDs["Port of Rotterdam Tank Storage"]
 	now := time.Now().UTC()
 	arrival := now.Add(-32 * time.Hour)
 	departure := now.Add(-4 * time.Hour)
@@ -73,6 +74,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 		"Draft increased from 8.2m to 14.8m (estimated)",
 		"Vessel classified as crude oil tanker",
 		"Terminal tagged as crude export hub",
+		"DEMO SEED — synthetic AIS-style port call for map wiring",
 	})
 	_, err := pool.Exec(ctx, `
 		INSERT INTO oil_port_calls (
@@ -84,6 +86,27 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	`, portCallID, rtID, arrival, departure, evidence)
 	if err != nil {
 		return fmt.Errorf("insert demo port call: %w", err)
+	}
+
+	// DEMO SEED — paired discharge visit for Recipe B corridor trade (MT DEMO STAR / MMSI 636012345)
+	importArrival := now.Add(-18 * time.Hour)
+	importDeparture := now.Add(-6 * time.Hour)
+	importEvidence, _ := json.Marshal([]string{
+		"DEMO SEED — synthetic paired port call for corridor trade demo",
+		"Draft decreased from 14.6m to 9.1m (estimated discharge)",
+		"Linked to MT DEMO STAR loading at Ras Tanura for Recipe B corridor",
+	})
+	importPortCallID := uuid.New()
+	_, err = pool.Exec(ctx, `
+		INSERT INTO oil_port_calls (
+			id, mmsi, vessel_name, terminal_id, arrival_ts, departure_ts, duration_hours,
+			draft_in, draft_out, draft_delta, event_type, product_family_inferred,
+			estimated_volume_barrels, confidence, status, evidence
+		) VALUES ($1,636012345,'MT DEMO STAR',$2,$3,$4,12,14.6,9.1,-5.5,'possible_unloading','crude_oil',
+			820000,0.79,'closed',$5)
+	`, importPortCallID, rotterdamID, importArrival, importDeparture, importEvidence)
+	if err != nil {
+		return fmt.Errorf("insert demo corridor port call: %w", err)
 	}
 
 	var companyID uuid.UUID

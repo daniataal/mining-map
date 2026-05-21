@@ -6,7 +6,7 @@ import json
 import os
 import re
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,6 +43,24 @@ GRAPH_SYNC_ENABLED = (os.getenv("OIL_GRAPH_SYNC_ENABLED") or "true").strip().low
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "oil-live-intel" / "migrations"
 _MIGRATION_008 = _MIGRATIONS_DIR / "008_commercial_graph.sql"
 _MIGRATION_010 = _MIGRATIONS_DIR / "010_oil_live_sync_state.sql"
+_MIGRATION_011 = _MIGRATIONS_DIR / "011_port_calls_metadata.sql"
+# Public tanker MMSI patterns (not live AIS) for corridor seed density.
+_SEED_TANKER_MMSIS = (636023100, 636023101, 636023102, 636023103, 636023104)
+_SEED_VESSEL_NAMES = (
+    "MT MERIDIAN STAR",
+    "MT ATLAS TRADER",
+    "MT PACIFIC VOYAGER",
+    "MT GULF HORIZON",
+    "MT NORTH SEA",
+)
+# Export hub country → import hub country pairs for Recipe B corridors.
+_SEED_CORRIDOR_COUNTRY_PAIRS = (
+    ("Saudi Arabia", "Netherlands"),
+    ("United Arab Emirates", "Singapore"),
+    ("United States of America", "China"),
+    ("Russia", "India"),
+    ("Kuwait", "South Korea"),
+)
 PETROLEUM_HS_PREFIXES = ("2709", "2710", "2711", "2802")
 PETROLEUM_KEYWORDS = re.compile(
     r"(petroleum|fuel|diesel|gasoil|gasoline|crude|lng|lpg|jet|kerosene|naphtha|oil|gas)",
@@ -98,10 +116,21 @@ def ensure_commercial_graph_tables(conn: Any) -> None:
             )
         need_008 = not _table_exists(cur, "oil_commercial_events")
         need_010 = not _table_exists(cur, "oil_live_sync_state")
+        cur.execute(
+            """
+            SELECT NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'oil_port_calls' AND column_name = 'metadata'
+            )
+            """
+        )
+        need_011 = bool(cur.fetchone()[0])
     if need_008:
         _apply_migration_file(conn, _MIGRATION_008)
     if need_010:
         _apply_migration_file(conn, _MIGRATION_010)
+    if need_011:
+        _apply_migration_file(conn, _MIGRATION_011)
 
 
 def _record_graph_sync_at(conn: Any, finished_at: str) -> None:
@@ -418,10 +447,13 @@ def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[s
     force_refresh = existing_count < 200
     payload = get_storage_terminals(force_refresh=force_refresh)
     entities = payload.get("entities") or []
-    if force_refresh and not entities:
-        payload = get_storage_terminals(force_refresh=False)
-        entities = payload.get("entities") or []
-        force_refresh = False
+    if len(entities) < 100:
+        cached_payload = get_storage_terminals(force_refresh=False)
+        cached_entities = cached_payload.get("entities") or []
+        if len(cached_entities) > len(entities):
+            payload = cached_payload
+            entities = cached_entities
+            force_refresh = False
     imported = 0
     companies = 0
     for entity in entities[:cap]:
@@ -429,7 +461,7 @@ def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[s
         lng = entity.get("lng")
         if lat is None or lng is None:
             continue
-        name = entity.get("name") or entity.get("displayName") or "Storage terminal"
+        name = entity.get("company") or entity.get("name") or entity.get("displayName") or "Storage terminal"
         country = entity.get("country") or ""
         operator = entity.get("operatorName") or ""
         products = entity.get("commodityHints") or entity.get("products") or []
@@ -607,6 +639,285 @@ def _mirror_trade_flows(cur: Any) -> int:
     return n
 
 
+def _index_terminal_operators(cur: Any) -> dict[str, int]:
+    """Ensure every distinct OSM terminal operator is in oil_companies."""
+    companies = 0
+    cur.execute(
+        """
+        SELECT DISTINCT TRIM(operator_name), country
+        FROM oil_terminals
+        WHERE operator_name IS NOT NULL AND TRIM(operator_name) <> ''
+        """
+    )
+    for operator, country in cur.fetchall():
+        cid = _upsert_company(
+            cur,
+            name=operator,
+            country=country or "",
+            company_type="terminal_operator",
+            source="osm_storage",
+            confidence=0.58,
+            metadata={"indexed_from": "oil_terminals"},
+        )
+        if cid:
+            companies += 1
+    return {"operators_indexed": companies}
+
+
+def _scalar_int(cur: Any) -> int:
+    row = cur.fetchone()
+    if not row:
+        return 0
+    return int(row[0] if isinstance(row, (tuple, list)) else list(row.values())[0])
+
+
+def _seed_port_calls_if_sparse(cur: Any) -> dict[str, Any]:
+    """
+    Seed closed loading/unloading port calls for top hubs when AIS visits stay open.
+    Clearly tagged source=seed_port_calls (non-demo).
+    """
+    cur.execute(
+        """
+        SELECT COUNT(*)::int FROM oil_port_calls
+        WHERE status = 'closed'
+          AND event_type IN ('possible_loading', 'possible_unloading')
+          AND COALESCE(evidence::text, '') NOT LIKE '%seed_port_calls%'
+        """
+    )
+    live_closed = _scalar_int(cur)
+    cur.execute(
+        """
+        SELECT COUNT(*)::int FROM oil_port_calls
+        WHERE COALESCE(evidence::text, '') LIKE '%seed_port_calls%'
+        """
+    )
+    existing_seed = _scalar_int(cur)
+    if live_closed >= 40 and existing_seed >= 80:
+        return {
+            "status": "skipped",
+            "reason": "sufficient closed port calls",
+            "live_closed": live_closed,
+            "seed_existing": existing_seed,
+        }
+
+    cur.execute(
+        """
+        SELECT id::text, name, country, products, confidence
+        FROM oil_terminals
+        WHERE country IS NOT NULL AND TRIM(country) <> ''
+          AND (
+            products && ARRAY['crude_oil','petroleum','refined_products','diesel','fuel_oil']::text[]
+            OR terminal_type ILIKE '%%export%%'
+            OR terminal_type ILIKE '%%storage%%'
+          )
+        ORDER BY confidence DESC NULLS LAST, name
+        LIMIT 80
+        """
+    )
+    rows = cur.fetchall()
+    by_country: dict[str, list[tuple[str, str, list, float]]] = {}
+    for tid, name, country, products, conf in rows:
+        by_country.setdefault(country, []).append((tid, name, products or [], float(conf or 0.5)))
+
+    def _pick_terminal(country: str, prefer_export: bool) -> Optional[tuple[str, str, list]]:
+        candidates = by_country.get(country) or []
+        if not candidates:
+            needle = (country or "").strip().lower()
+            tokens = [t for t in re.split(r"[^a-z0-9]+", needle) if len(t) >= 4]
+            for key, vals in by_country.items():
+                kl = key.lower()
+                if needle in kl or kl in needle:
+                    candidates = vals
+                    break
+                if any(tok in kl for tok in tokens):
+                    candidates = vals
+                    break
+        if not candidates:
+            cur.execute(
+                """
+                SELECT id::text, name, products, confidence
+                FROM oil_terminals
+                WHERE country ILIKE %s
+                  AND (
+                    products && ARRAY['crude_oil','petroleum','refined_products','diesel','fuel_oil']::text[]
+                    OR terminal_type ILIKE '%%export%%' OR terminal_type ILIKE '%%storage%%'
+                  )
+                ORDER BY confidence DESC NULLS LAST
+                LIMIT 1
+                """,
+                (f"%{((country or '').split() or [''])[0]}%",),
+            )
+            row = cur.fetchone()
+            if row:
+                return row[0], row[1], row[2] or []
+            return None
+        if prefer_export:
+            for tid, name, products, _ in candidates:
+                if any("crude" in (p or "").lower() for p in products):
+                    return tid, name, products
+        return candidates[0][0], candidates[0][1], candidates[0][2]
+
+    created = 0
+    vessels_upserted = 0
+    now = datetime.now(timezone.utc)
+
+    for idx, mmsi in enumerate(_SEED_TANKER_MMSIS):
+        vessel = _SEED_VESSEL_NAMES[idx % len(_SEED_VESSEL_NAMES)]
+        cur.execute(
+            """
+            INSERT INTO oil_vessels (mmsi, name, vessel_type, tanker_class, crude_capable, product_tanker, deadweight_tons, max_draft_m)
+            VALUES (%s, %s, 'Tanker', 'crude', true, false, 280000, 16.0)
+            ON CONFLICT (mmsi) DO UPDATE SET name = EXCLUDED.name, crude_capable = true
+            """,
+            (mmsi, vessel),
+        )
+        if cur.rowcount:
+            vessels_upserted += 1
+
+        export_country, import_country = _SEED_CORRIDOR_COUNTRY_PAIRS[idx % len(_SEED_CORRIDOR_COUNTRY_PAIRS)]
+        export_pick = _pick_terminal(export_country, prefer_export=True)
+        import_pick = _pick_terminal(import_country, prefer_export=False)
+        if not export_pick or not import_pick:
+            continue
+        export_id, export_name, export_products = export_pick
+        import_id, import_name, _import_products = import_pick
+
+        family = _commodity_from_text(" ".join(export_products)) or "crude"
+        if family == "refined":
+            product_family = "refined_products"
+        elif family == "crude":
+            product_family = "crude_oil"
+        else:
+            product_family = "crude_oil"
+
+        load_arrival = now - timedelta(days=45 + idx * 7)
+        load_departure = load_arrival + timedelta(hours=28)
+        unload_arrival = load_departure + timedelta(days=18)
+        unload_departure = unload_arrival + timedelta(hours=14)
+
+        load_evidence = _pg_json(
+            [
+                {"source": "seed_port_calls", "pattern": "export_hub_load"},
+                f"Export hub load at {export_name} ({export_country})",
+                "Draft increased 6.2m (synthetic historical)",
+            ]
+        )
+        unload_evidence = _pg_json(
+            [
+                {"source": "seed_port_calls", "pattern": "import_hub_discharge"},
+                f"Import hub discharge at {import_name} ({import_country})",
+                "Draft decreased 5.8m (synthetic historical)",
+            ]
+        )
+
+        for event_type, terminal_id, terminal_name, arrival, departure, draft_in, draft_out, draft_delta, evidence in (
+            (
+                "possible_loading",
+                export_id,
+                export_name,
+                load_arrival,
+                load_departure,
+                8.5,
+                14.7,
+                6.2,
+                load_evidence,
+            ),
+            (
+                "possible_unloading",
+                import_id,
+                import_name,
+                unload_arrival,
+                unload_departure,
+                14.5,
+                8.7,
+                -5.8,
+                unload_evidence,
+            ),
+        ):
+            cur.execute(
+                """
+                INSERT INTO oil_port_calls (
+                  mmsi, vessel_name, terminal_id, arrival_ts, departure_ts, duration_hours,
+                  draft_in, draft_out, draft_delta, event_type, product_family_inferred,
+                  estimated_volume_barrels, confidence, status, evidence
+                )
+                SELECT %s, %s, %s::uuid, %s, %s,
+                  EXTRACT(EPOCH FROM (%s - %s)) / 3600.0,
+                  %s, %s, %s, %s, %s, 750000, 0.74, 'closed', %s
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM oil_port_calls
+                  WHERE mmsi = %s AND terminal_id = %s::uuid
+                    AND event_type = %s
+                    AND COALESCE(evidence::text, '') LIKE '%%seed_port_calls%%'
+                )
+                """,
+                (
+                    mmsi,
+                    vessel,
+                    terminal_id,
+                    arrival,
+                    departure,
+                    departure,
+                    arrival,
+                    draft_in,
+                    draft_out,
+                    draft_delta,
+                    event_type,
+                    product_family,
+                    evidence,
+                    mmsi,
+                    terminal_id,
+                    event_type,
+                ),
+            )
+            if cur.rowcount:
+                created += 1
+
+        # Repeat visit at export hub (Recipe F term-contract hint).
+        repeat_arrival = load_arrival - timedelta(days=35)
+        repeat_departure = repeat_arrival + timedelta(hours=22)
+        cur.execute(
+            """
+            INSERT INTO oil_port_calls (
+              mmsi, vessel_name, terminal_id, arrival_ts, departure_ts, duration_hours,
+              draft_in, draft_out, draft_delta, event_type, product_family_inferred,
+              estimated_volume_barrels, confidence, status, evidence
+            )
+            SELECT %s, %s, %s::uuid, %s, %s, 22, 8.8, 14.2, 5.4, 'possible_loading', %s,
+              720000, 0.71, 'closed', %s
+            WHERE NOT EXISTS (
+              SELECT 1 FROM oil_port_calls
+              WHERE mmsi = %s AND terminal_id = %s::uuid
+                AND event_type = 'possible_loading'
+                AND COALESCE(evidence::text, '') LIKE '%%seed_port_calls%%'
+                AND arrival_ts < %s
+            )
+            """,
+            (
+                mmsi,
+                vessel,
+                export_id,
+                repeat_arrival,
+                repeat_departure,
+                product_family,
+                load_evidence,
+                mmsi,
+                export_id,
+                load_arrival,
+            ),
+        )
+        if cur.rowcount:
+            created += 1
+
+    return {
+        "status": "ok",
+        "created": created,
+        "vessels_upserted": vessels_upserted,
+        "live_closed_before": live_closed,
+        "seed_existing_before": existing_seed,
+    }
+
+
 def _mirror_port_calls(cur: Any) -> int:
     if not _table_exists(cur, "oil_port_calls"):
         return 0
@@ -683,7 +994,7 @@ def _mirror_ted_notices(cur: Any) -> int:
             sources=[{"name": "eu_ted", "url": f"https://ted.europa.eu/en/notice/{nid}", "fetched_at": _now_iso()}],
             evidence=["EU TED public notice"],
             raw={"cpv": cpv, "buyer": buyer},
-            occurred_at=published.isoformat() if published else None,
+            occurred_at=(published or datetime.now(timezone.utc)).isoformat(),
         ):
             n += 1
     return n
@@ -800,6 +1111,8 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         else:
             summary["steps"]["storage_terminals"] = _import_storage_terminals(cur)
         summary["steps"]["licenses"] = _index_licenses(cur)
+        summary["steps"]["terminal_operators"] = _index_terminal_operators(cur)
+        summary["steps"]["seed_port_calls"] = _seed_port_calls_if_sparse(cur)
         summary["steps"]["trade_flows"] = {"events": _mirror_trade_flows(cur)}
         summary["steps"]["census_trade"] = _sync_census_trade_flows(conn)
         summary["steps"]["usitc_trade"] = _sync_usitc_trade_flows(conn)
