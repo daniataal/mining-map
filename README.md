@@ -2,6 +2,8 @@
 
 A full-stack intelligence platform for visualizing mining licenses on an interactive map.
 
+**AI agents and product direction:** see [AGENTS.md](AGENTS.md) for the Meridian commodity-trading north star (open data, Live Data, deal execution).
+
 ## ✨ New Features
 *   **Secure Authentication**: Map interactions are locked until login.
 *   **Admin Panel**: Create new users and monitor system activity.

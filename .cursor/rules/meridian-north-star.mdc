@@ -1,0 +1,17 @@
+---
+description: Meridian product north star — read AGENTS.md before feature or ingest work
+alwaysApply: true
+---
+
+# Meridian north star
+
+Before implementing features, ingest jobs, or Live Data UI changes:
+
+1. Read the repository root **[AGENTS.md](../../AGENTS.md)** for mission, commodity scope, open-data tiers, and prioritization.
+2. Follow operational docs: [docs/DATA_SOURCES.md](../../docs/DATA_SOURCES.md), [docs/BOL_DATA_STRATEGY.md](../../docs/BOL_DATA_STRATEGY.md), [docs/LIVE_DATA.md](../../docs/LIVE_DATA.md).
+3. Default to **honest data tiers** (`bol_tier`, evidence chain, disclaimers); no paid BOL scraping; production without demo seed unless explicitly dev-only.
+4. Ask whether the change helps traders **discover → verify → price → execute** for oil, diesel, or other commodities—not map-only polish.
+5. **Persist** attributable data in Postgres; **fuse** multiple open APIs; grow **historical + live** trade ledgers and **mining** cadastre to global scale (ImportYeti-style UX, open-data only).
+6. Build **infrastructure in DB** (tank farms, pipelines, terminals)—creative OSM + government GIS, not Mapbox-only.
+7. **Show it on the unified map** (layer toggles, corridors, clusters)—not tables-only.
+8. Keep the app **fast**: bbox+limit APIs, debounced pan, clustering/aggregates, workers for bulk ingest—never load the world into the browser.
