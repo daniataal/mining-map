@@ -46,7 +46,6 @@ import {
 } from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
-import EiaHistoricImportsPanel from './EiaHistoricImportsPanel';
 import TradeManifestUploadPanel from './TradeManifestUploadPanel';
 import LiveDataSearchBar, { type LiveDataSearchHitClick } from './LiveDataSearchBar';
 import { dedupeOpportunities } from './dedupeOpportunities';
@@ -119,7 +118,7 @@ function ExpandableBulletList({
   );
 }
 
-type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts' | 'eia_historic';
+type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts';
 
 export type LiveDataIntelPanelProps = {
   productFilter: string;
@@ -150,12 +149,6 @@ export type LiveDataIntelPanelProps = {
   }) => void;
   /** Fly map to search hit coordinates before opening drawer. */
   onMapFlyTo?: (lat: number, lng: number) => void;
-  /** Historic EIA file-import corridor arcs on the Live Data map. */
-  onEiaHistoricMapChange?: (payload: {
-    enabled: boolean;
-    arcs: import('../../api/eiaHistoricApi').EiaHistoricMapArc[];
-    year: number;
-  }) => void;
 };
 
 export default function LiveDataIntelPanel({
@@ -169,7 +162,6 @@ export default function LiveDataIntelPanel({
   onOpenCompanyDossier,
   onOpenLiveEntity,
   onMapFlyTo,
-  onEiaHistoricMapChange,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('feed');
@@ -722,7 +714,7 @@ export default function LiveDataIntelPanel({
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 rounded-2xl border border-black/10 dark:border-white/10 bg-slate-50/95 dark:bg-slate-950/95 shadow-2xl backdrop-blur-xl overflow-hidden">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-slate-50/95 dark:bg-slate-950/95">
       <div className="shrink-0 px-4 py-4 border-b border-black/5 dark:border-white/10">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
@@ -918,7 +910,7 @@ export default function LiveDataIntelPanel({
           {t('לשכבות מפה — השתמשו בפאנל שכבות בפינה השמאלית', 'Map layers — use the panel at bottom-left of the map')}
         </p>
         <div className="flex gap-2 flex-wrap">
-          {(['feed', 'opportunities', 'cargo', 'companies', 'alerts', 'eia_historic'] as const).map((tabKey) => (
+          {(['feed', 'opportunities', 'cargo', 'companies', 'alerts'] as const).map((tabKey) => (
             <button
               key={tabKey}
               type="button"
@@ -956,7 +948,6 @@ export default function LiveDataIntelPanel({
                   )}
                 </>
               )}
-              {tabKey === 'eia_historic' && t('היסטורי (EIA)', 'Historic (EIA)')}
             </button>
           ))}
         </div>
@@ -999,6 +990,7 @@ export default function LiveDataIntelPanel({
 
         {tab === 'cargo' && (
           <>
+            <TradeManifestUploadPanel className="mb-3" />
             <div className="flex flex-wrap gap-2 mb-2 items-center">
               <input
                 className="flex-1 min-w-[120px] text-[10px] border rounded-lg px-2 py-1.5 dark:bg-slate-900"
@@ -1698,13 +1690,6 @@ export default function LiveDataIntelPanel({
             >
               {t('הבא', 'Next')}
             </button>
-          </div>
-        )}
-
-        {tab === 'eia_historic' && (
-          <div className="space-y-4">
-            <EiaHistoricImportsPanel onMapArcsChange={onEiaHistoricMapChange} />
-            <TradeManifestUploadPanel />
           </div>
         )}
 

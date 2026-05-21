@@ -1153,23 +1153,11 @@ def _sync_eia_refinery_throughput(conn: Any) -> dict[str, Any]:
 
 def _sync_eia_historic_downloads(conn: Any) -> dict[str, Any]:
     try:
-        from backend.services.eia_historic_imports import (
-            default_downloads_dir,
-            ingest_eia_downloads_folder,
-        )
+        from backend.services.eia_historic_imports import try_auto_ingest_eia_downloads
     except ImportError:
-        from services.eia_historic_imports import (
-            default_downloads_dir,
-            ingest_eia_downloads_folder,
-        )
-    target = default_downloads_dir()
-    if not target or not Path(target).is_dir():
-        return {"status": "skipped", "reason": "EIA_DOWNLOADS_DIR missing or not a directory"}
+        from services.eia_historic_imports import try_auto_ingest_eia_downloads
     try:
-        files = list(Path(target).glob("impa*"))
-        if not files:
-            return {"status": "skipped", "reason": "no impa*.xls/xlsx in EIA_DOWNLOADS_DIR"}
-        return ingest_eia_downloads_folder(conn, target)
+        return try_auto_ingest_eia_downloads(conn)
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 

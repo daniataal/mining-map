@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Archive, Crosshair, Loader2 } from 'lucide-react';
+import { Archive, Crosshair, Loader2, Terminal } from 'lucide-react';
+import { toast } from 'sonner';
 import { useI18n } from '../../lib/i18n';
+import CollapsibleSection from '../../components/ui/CollapsibleSection';
 import {
   getEiaHistoricMap,
   getEiaHistoricSeries,
@@ -9,10 +11,12 @@ import {
   type EiaHistoricMapArc,
 } from '../../api/eiaHistoricApi';
 
-const CARD =
-  'rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-4 shadow-sm';
-const LABEL = 'text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400';
-const MUTED = 'text-sm leading-relaxed text-slate-700 dark:text-slate-300';
+const SHELL = 'rounded-lg border border-black/5 dark:border-white/10 bg-white/60 dark:bg-slate-900/40 p-3';
+const LABEL = 'text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400';
+const MUTED = 'text-xs leading-relaxed text-slate-600 dark:text-slate-400';
+
+const EIA_INGEST_CURL = `curl -X POST "http://localhost:8000/api/admin/eia-historic-imports/ingest" \\
+  -H "X-Admin-Token: $ADMIN_TOKEN"`;
 
 function formatBbl(val: number): string {
   if (!Number.isFinite(val) || val <= 0) return '—';
@@ -29,14 +33,14 @@ function EiaVolumeChart({
 }) {
   if (points.length < 1) return null;
   const maxVal = Math.max(1, ...points.map((p) => p.volume_bbl));
-  const chartW = 300;
-  const chartH = 64;
-  const barW = Math.min(18, Math.max(4, chartW / Math.max(points.length, 1) - 2));
+  const chartW = 280;
+  const chartH = 56;
+  const barW = Math.min(16, Math.max(3, chartW / Math.max(points.length, 1) - 2));
 
   return (
     <svg
-      viewBox={`0 0 ${chartW} ${chartH + 14}`}
-      className="w-full max-w-md h-auto text-violet-400"
+      viewBox={`0 0 ${chartW} ${chartH + 12}`}
+      className="w-full h-auto text-violet-400"
       role="img"
       aria-label="Historic import volume over time"
     >
@@ -55,7 +59,7 @@ function EiaVolumeChart({
               rx={1}
             />
             {points.length <= 24 && (
-              <text x={x + barW / 2} y={chartH + 11} textAnchor="middle" className="fill-slate-500 text-[7px]">
+              <text x={x + barW / 2} y={chartH + 10} textAnchor="middle" className="fill-slate-500 text-[6px]">
                 {p.period.length > 7 ? p.period.slice(2) : p.period}
               </text>
             )}
@@ -76,6 +80,9 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
   const [importerDraft, setImporterDraft] = useState('');
   const [year, setYear] = useState(2020);
   const [showOnMap, setShowOnMap] = useState(false);
+  const [ingestCurlOpen, setIngestCurlOpen] = useState(false);
+
+  const applyImporter = () => setImporter(importerDraft.trim());
 
   const summaryQuery = useQuery({
     queryKey: ['eia-historic-summary', importer],
@@ -113,7 +120,7 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
 
   const originsForYear = useMemo(() => {
     if (!summaryQuery.data?.top_origins) return [];
-    return summaryQuery.data.top_origins.slice(0, 15);
+    return summaryQuery.data.top_origins.slice(0, 12);
   }, [summaryQuery.data?.top_origins]);
 
   const chartPoints = useMemo(
@@ -136,163 +143,203 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
 
   const topImporters = summaryQuery.data?.top_importers ?? [];
   const emptyDb = summaryQuery.data?.row_count === 0 && !summaryQuery.isLoading;
+  const rowCount = summaryQuery.data?.row_count;
+  const importerCount = summaryQuery.data?.importer_count;
 
   return (
-    <div className="space-y-4">
-      <div className={`${CARD} border-violet-500/30`}>
-        <div className="flex items-start gap-2">
-          <Archive className="w-5 h-5 text-violet-500 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+    <div className="space-y-3 text-sm">
+      <div className="flex items-start gap-2">
+        <Archive className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
               {t('ייבוא היסטורי (EIA)', 'Historic imports (EIA)')}
             </h3>
-            <p className={`${MUTED} mt-1`}>
-              {t(
-                'נתוני קבצי Petroleum Supply Monthly — ברמת חברה, לא AIS חי.',
-                'Petroleum Supply Monthly file data — company-level, not live AIS.',
-              )}
-            </p>
-            <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-violet-800 dark:text-violet-200">
-              {t('ייבוא קובץ EIA · היסטורי', 'EIA file import · historic')}
+            <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-200">
+              {t('היסטורי', 'Historic')}
             </span>
           </div>
+          <p className={`${MUTED} mt-0.5`}>
+            {t('קבצי Petroleum Supply Monthly — לא AIS חי.', 'PSM file data — not live AIS.')}
+          </p>
+          {!summaryQuery.isLoading && rowCount != null && rowCount > 0 && (
+            <p className={`${MUTED} mt-1 tabular-nums`}>
+              {rowCount.toLocaleString()} {t('שורות', 'rows')} ·{' '}
+              {(importerCount ?? 0).toLocaleString()} {t('יבואנים', 'importers')}
+            </p>
+          )}
         </div>
       </div>
 
       {emptyDb && (
-        <div className={`${CARD} bg-amber-50/80 dark:bg-amber-950/30 border-amber-500/40`}>
-          <p className={`${MUTED} text-amber-900 dark:text-amber-100`}>
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2.5">
+          <p className="text-xs font-semibold text-slate-900 dark:text-white">
+            {t('אין נתונים ב-DB', 'No data in database yet')}
+          </p>
+          <p className={`${MUTED} mt-1`}>
             {t(
-              'אין שורות ב-DB. הריצו ingest מתיקיית EIA_downloads (ראו LIVE_DATA.md).',
-              'No rows in DB. Run ingest from EIA_downloads folder (see LIVE_DATA.md).',
+              'הניחו impa*.xls בתיקיית data/eia_downloads — ה-worker יטעין אוטומטית (כל 6 שעות ובהפעלה).',
+              'Place impa*.xls in data/eia_downloads — eia-historic-sync-worker ingests automatically on start and every 6h.',
             )}
           </p>
-          <pre className="mt-2 text-[11px] text-slate-600 dark:text-slate-400 overflow-x-auto">
-            {`curl -X POST "$VITE_API_BASE/api/admin/eia-historic-imports/ingest" \\
-  -H "X-Admin-Token: $ADMIN_TOKEN"`}
-          </pre>
+          <button
+            type="button"
+            className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200"
+            onClick={() => setIngestCurlOpen((v) => !v)}
+          >
+            <Terminal className="h-3 w-3" />
+            {ingestCurlOpen ? t('הסתר', 'Hide') : t('פקודת ingest', 'Ingest command')}
+          </button>
+          {ingestCurlOpen && (
+            <>
+              <pre className="mt-2 overflow-x-auto rounded border border-black/10 bg-slate-950 px-2 py-1.5 text-[10px] text-emerald-300">
+                {EIA_INGEST_CURL}
+              </pre>
+              <button
+                type="button"
+                className="mt-1.5 text-[10px] font-bold uppercase text-sky-600 dark:text-sky-400"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(EIA_INGEST_CURL);
+                    toast.success(t('הועתק', 'Copied'));
+                  } catch {
+                    toast.error(t('העתקה נכשלה', 'Copy failed'));
+                  }
+                }}
+              >
+                {t('העתק', 'Copy')}
+              </button>
+            </>
+          )}
         </div>
       )}
 
-      <div className={CARD}>
-        <label className={`${LABEL} block mb-2`}>{t('יבואן (חברה)', 'Importer (company)')}</label>
+      <div className={SHELL}>
+        <label className={`${LABEL} block mb-1.5`}>{t('יבואן', 'Importer')}</label>
         <input
           type="search"
           list="eia-importer-suggestions"
           value={importerDraft}
           onChange={(e) => setImporterDraft(e.target.value)}
-          onBlur={() => setImporter(importerDraft.trim())}
+          onBlur={applyImporter}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') setImporter(importerDraft.trim());
+            if (e.key === 'Enter') applyImporter();
           }}
-          placeholder={t('לדוגמה Chevron', 'e.g. Chevron')}
-          className="w-full rounded-lg border border-slate-300 dark:border-white/15 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+          placeholder={t('Chevron, Exxon…', 'Chevron, Exxon…')}
+          className="w-full rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
         />
         <datalist id="eia-importer-suggestions">
           {topImporters.map((row) => (
             <option key={row.importer_name} value={row.importer_name} />
           ))}
         </datalist>
-        <button
-          type="button"
-          className="mt-2 text-xs font-bold text-violet-600 dark:text-violet-400"
-          onClick={() => setImporter(importerDraft.trim())}
-        >
-          {t('החל מסנן', 'Apply filter')}
-        </button>
-      </div>
 
-      <div className={CARD}>
-        <label className={`${LABEL} block mb-2`}>
-          {t('שנה', 'Year')}: {year}
-        </label>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className={LABEL}>
+            {t('שנה', 'Year')} {year}
+          </span>
+          <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={showOnMap}
+              onChange={(e) => setShowOnMap(e.target.checked)}
+              className="accent-violet-600"
+            />
+            <Crosshair className="w-3.5 h-3.5 text-violet-500" />
+            <span className="text-[10px] font-bold uppercase text-slate-600 dark:text-slate-300">
+              {t('מפה', 'Map')}
+            </span>
+          </label>
+        </div>
         <input
           type="range"
           min={yearMin}
           max={yearMax}
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
-          className="w-full accent-violet-600"
+          className="mt-1 w-full accent-violet-600"
+          disabled={emptyDb}
         />
-        <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+        <div className="flex justify-between text-[9px] text-slate-500">
           <span>{yearMin}</span>
           <span>{yearMax}</span>
         </div>
-        <label className="mt-3 flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showOnMap}
-            onChange={(e) => setShowOnMap(e.target.checked)}
-            className="accent-violet-600"
-          />
-          <Crosshair className="w-4 h-4 text-violet-500" />
-          <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            {t('הצג במפה (קשתות סגולות)', 'Show on map (purple arcs)')}
-          </span>
-        </label>
         {showOnMap && mapQuery.isFetching && (
-          <p className={`${MUTED} mt-2 flex items-center gap-1`}>
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <p className={`${MUTED} mt-1.5 flex items-center gap-1`}>
+            <Loader2 className="w-3 h-3 animate-spin" />
             {t('טוען קשתות…', 'Loading arcs…')}
           </p>
         )}
       </div>
 
       {summaryQuery.isLoading && (
-        <p className={`${MUTED} flex items-center gap-2`}>
-          <Loader2 className="w-4 h-4 animate-spin" />
-          {t('טוען סיכום…', 'Loading summary…')}
+        <p className={`${MUTED} flex items-center gap-1.5 px-1`}>
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          {t('טוען…', 'Loading…')}
         </p>
       )}
 
       {importer.trim() && (
-        <div className={CARD}>
-          <p className={`${LABEL} mb-2`}>{t('נפח לאורך זמן', 'Volume over time')}</p>
+        <CollapsibleSection
+          defaultOpen
+          className={SHELL}
+          title={
+            <span className={`${LABEL} text-violet-700 dark:text-violet-300`}>
+              {t('נפח לאורך זמן', 'Volume over time')} · {importer}
+            </span>
+          }
+        >
           {seriesQuery.isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin text-violet-500" />
-          ) : (
+            <Loader2 className="w-4 h-4 animate-spin text-violet-500" />
+          ) : chartPoints.length > 0 ? (
             <EiaVolumeChart points={chartPoints} />
+          ) : (
+            <p className={MUTED}>{t('אין נקודות ליבואן זה', 'No series for this importer')}</p>
           )}
-        </div>
+        </CollapsibleSection>
       )}
 
-      <div className={CARD}>
-        <p className={`${LABEL} mb-2`}>
-          {t('מקורות מובילים', 'Top origin countries')}
-          {importer.trim() ? ` · ${importer}` : ''}
-        </p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-white/10">
-                <th className="py-1.5 pr-2">{t('מקור', 'Origin')}</th>
-                <th className="py-1.5 pr-2 text-right">{t('נפח', 'Volume')}</th>
-                <th className="py-1.5 text-right">{t('שורות', 'Rows')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {originsForYear.map((row) => (
-                <tr
-                  key={row.origin_country}
-                  className="border-b border-slate-100 dark:border-white/5"
-                >
-                  <td className="py-1.5 pr-2 font-medium text-slate-900 dark:text-slate-100">
-                    {row.origin_country}
-                  </td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums">{formatBbl(row.volume_bbl)}</td>
-                  <td className="py-1.5 text-right tabular-nums text-slate-500">{row.row_count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {summaryQuery.data?.row_count != null && (
-          <p className={`${MUTED} mt-2 text-xs`}>
-            {t('סה״כ שורות', 'Total rows')}: {summaryQuery.data.row_count.toLocaleString()} ·{' '}
-            {t('יבואנים', 'Importers')}: {summaryQuery.data.importer_count?.toLocaleString() ?? '—'}
+      <CollapsibleSection
+        defaultOpen={originsForYear.length > 0}
+        className={SHELL}
+        title={<span className={LABEL}>{t('מקורות מובילים', 'Top origins')}</span>}
+        badge={
+          originsForYear.length > 0 ? (
+            <span className="text-[10px] tabular-nums text-slate-500">{originsForYear.length}</span>
+          ) : null
+        }
+      >
+        {originsForYear.length === 0 && !summaryQuery.isLoading ? (
+          <p className={MUTED}>
+            {emptyDb
+              ? t('הריצו ingest כדי לראות מקורות.', 'Run ingest to see origins.')
+              : t('אין מקורות לסינון הנוכחי.', 'No origins for current filter.')}
           </p>
+        ) : (
+          <div className="overflow-x-auto -mx-1">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-slate-500 border-b border-slate-200/80 dark:border-white/10">
+                  <th className="py-1 pr-2 font-bold">{t('מקור', 'Origin')}</th>
+                  <th className="py-1 pr-2 text-right font-bold">{t('נפח', 'Vol')}</th>
+                  <th className="py-1 text-right font-bold">{t('#', '#')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {originsForYear.map((row) => (
+                  <tr key={row.origin_country} className="border-b border-slate-100/80 dark:border-white/5">
+                    <td className="py-1 pr-2 font-medium text-slate-800 dark:text-slate-100 truncate max-w-[120px]">
+                      {row.origin_country}
+                    </td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{formatBbl(row.volume_bbl)}</td>
+                    <td className="py-1 text-right tabular-nums text-slate-500">{row.row_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

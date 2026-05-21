@@ -54,6 +54,35 @@ def default_downloads_dir() -> str:
     return (os.getenv("EIA_DOWNLOADS_DIR") or _DEFAULT_DOWNLOADS).strip()
 
 
+def eia_historic_auto_ingest_enabled() -> bool:
+    return (os.getenv("EIA_HISTORIC_AUTO_INGEST") or "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def try_auto_ingest_eia_downloads(
+    conn: Any,
+    *,
+    folder_path: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Ingest impa*.xls(x) when auto-ingest is on and files are present.
+    Idempotent — safe on every graph-sync / worker tick / backend startup.
+    """
+    if not eia_historic_auto_ingest_enabled():
+        return {"status": "skipped", "reason": "EIA_HISTORIC_AUTO_INGEST is off"}
+    folder = Path(folder_path or default_downloads_dir()).expanduser()
+    if not folder.is_dir():
+        return {"status": "skipped", "reason": f"EIA_DOWNLOADS_DIR missing: {folder}"}
+    paths = _iter_import_files(folder)
+    if not paths:
+        return {"status": "skipped", "reason": "no impa*.xls/xlsx in EIA_DOWNLOADS_DIR"}
+    return ingest_eia_downloads_folder(conn, str(folder))
+
+
 def ensure_eia_historic_imports_table(conn: Any) -> None:
     ddl = """
     CREATE TABLE IF NOT EXISTS eia_historic_imports (

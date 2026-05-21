@@ -11,6 +11,11 @@ mining-viz/dist/
 mining-viz/licenses_export.csv
 data/licenses_export.csv
 data/exports/
+# EIA PSM impa workbooks — keep locally / on VM; do not commit (~300MB+)
+data/eia_downloads/*.xls
+data/eia_downloads/*.xlsx
+!data/eia_downloads/README.md
+!data/eia_downloads/.gitkeep
 .DS_Store
 .idea/
 .vscode/

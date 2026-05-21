@@ -12,7 +12,7 @@ import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
 
-import Sidebar from './components/Sidebar';
+import WorkspaceSidebarLayout, { type MapSidebarTab } from './components/WorkspaceSidebarLayout';
 import AddLicenseModal from './components/AddLicenseModal';
 import BulkImportLicensesModal from './components/BulkImportLicensesModal';
 import { useDueDiligenceQueue } from './hooks/use-due-diligence-queue';
@@ -55,7 +55,6 @@ import {
   LogOut as LucideLogOut,
   Droplets as LucideDroplets,
   Navigation2 as LucideNavigation,
-  Radio as LucideRadio,
   X as LucideX,
 } from 'lucide-react';
 import ThemeToggle from './components/ThemeToggle';
@@ -74,10 +73,11 @@ const DossierView = lazy(() => import('./components/DossierView'));
 const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
-const LiveDataPanel = lazy(() => import('./features/live-data/LiveDataPanel'));
+const LiveDataIntelPanel = lazy(() => import('./features/live-data/LiveDataIntelPanel'));
+const EiaHistoricImportsPanel = lazy(() => import('./features/live-data/EiaHistoricImportsPanel'));
 const OilLiveEntityDrawer = lazy(() => import('./features/live-data/OilLiveEntityDrawer'));
 
-const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas', 'live_data']);
+const MARITIME_MAP_VIEWS = new Set(['global', 'mining', 'oil_and_gas']);
 
 function extractErrorMessage(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -145,8 +145,9 @@ export default function App() {
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
   const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'live_data' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
+    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
   >('global');
+  const [mapSidebarTab, setMapSidebarTab] = useState<MapSidebarTab>('licenses');
   const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
   const [euProcurementCpvBucket, setEuProcurementCpvBucket] = useState<string | null>(null);
   const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
@@ -225,10 +226,9 @@ export default function App() {
     opportunities: number;
     corridors: number;
   } | null>(null);
-  const [liveDataEiaHistoricOn, setLiveDataEiaHistoricOn] = useState(false);
   const [liveDataMacroTradeOn, setLiveDataMacroTradeOn] = useState(true);
   const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
-  const [eiaHistoricMap, setEiaHistoricMap] = useState<{
+  const [historicSidebarMap, setHistoricSidebarMap] = useState<{
     enabled: boolean;
     arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
     year: number;
@@ -413,21 +413,40 @@ export default function App() {
     }
   }, [viewMode]);
 
+  const isLiveDataSidebar = mapSidebarTab === 'live_data';
+  const isHistoricSidebar = mapSidebarTab === 'historic';
+  const isPetroleumMapContext =
+    viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas';
+
+  const handleMapSidebarTabChange = useCallback(
+    (tab: MapSidebarTab) => {
+      setMapSidebarTab(tab);
+      if (tab === 'live_data' || tab === 'historic') {
+        if (!isPetroleumMapContext) {
+          setViewMode('oil_and_gas');
+        }
+        setIsSidebarCollapsed(false);
+        setIsSidebarPinned(true);
+        if (tab === 'live_data') {
+          setLiveDataFlyTrigger((n) => n + 1);
+          setLiveDataFlyTarget(null);
+        }
+      }
+      if (tab !== 'live_data') {
+        setOilLiveEntity(null);
+      }
+    },
+    [isPetroleumMapContext],
+  );
+
   useEffect(() => {
-    if (viewMode !== 'live_data') {
+    if (!isLiveDataSidebar) {
       setOilLiveEntity(null);
     }
-  }, [viewMode]);
+  }, [isLiveDataSidebar]);
 
   useEffect(() => {
-    if (viewMode === 'live_data') {
-      setLiveDataFlyTrigger((n) => n + 1);
-      setLiveDataFlyTarget(null);
-    }
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (viewMode !== 'oil_and_gas' && viewMode !== 'live_data') return;
+    if (viewMode !== 'oil_and_gas') return;
     let cancelled = false;
     getEiaHistoricMap({ year: 2020, limit: 400 })
       .then((res) => {
@@ -446,7 +465,7 @@ export default function App() {
   }, [viewMode]);
 
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas' && viewMode !== 'live_data') return;
+    if (!isPetroleumMapContext) return;
     let cancelled = false;
     getMacroTradeFlows({ limit: 150 })
       .then((res) => {
@@ -458,7 +477,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode]);
+  }, [isPetroleumMapContext]);
 
   const handleInfrastructureLayerChange = useCallback(
     (layerId: OsmPetroleumLayerId, visible: boolean) => {
@@ -753,7 +772,11 @@ export default function App() {
   }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
   const mapCenter: [number, number] =
-    viewMode === 'ports' ? [20, 0] : viewMode === 'live_data' ? LIVE_DATA_HUB_CENTER : [7.9465, -1.0232];
+    viewMode === 'ports'
+      ? [20, 0]
+      : isLiveDataSidebar
+        ? LIVE_DATA_HUB_CENTER
+        : [7.9465, -1.0232];
   
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
@@ -868,16 +891,16 @@ export default function App() {
   const maritimeMapViewActive = MARITIME_MAP_VIEWS.has(viewMode);
 
   useEffect(() => {
-    if (viewMode === 'oil_and_gas' || viewMode === 'live_data') {
+    if (viewMode === 'oil_and_gas' || isLiveDataSidebar) {
       setPrioritizePetroleumVessels(true);
     }
-  }, [viewMode]);
+  }, [viewMode, isLiveDataSidebar]);
 
   useEffect(() => {
-    if (viewMode === 'live_data') {
+    if (isLiveDataSidebar) {
       setIsMaritimeLayerEnabled(false);
     }
-  }, [viewMode]);
+  }, [isLiveDataSidebar]);
 
   useEffect(() => {
     if (!maritimeMapViewActive) {
@@ -887,7 +910,7 @@ export default function App() {
   }, [maritimeMapViewActive]);
 
   useEffect(() => {
-    if (!username || !maritimeMapViewActive || viewMode === 'live_data') return;
+    if (!username || !maritimeMapViewActive || isLiveDataSidebar) return;
     const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
     void prefetchMaritimeVesselSnapshot(queryClient, {
       maxVessels: Number(maritimeMaxVessels) || 15000,
@@ -895,7 +918,7 @@ export default function App() {
       scope,
       includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
     });
-  }, [username, maritimeMapViewActive, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
+  }, [username, maritimeMapViewActive, isLiveDataSidebar, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
   return (
     <div className={`h-screen w-screen flex flex-col bg-stone-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
@@ -974,50 +997,84 @@ export default function App() {
         {/* PANEL 1: Left Navigation & Results List — hidden on mobile, shown on md+ */}
         <aside 
           className={`hidden min-h-0 md:flex md:flex-col md:h-full transition-all duration-500 ease-[0.23,1,0.32,1] z-40 border-r border-stone-200/80 dark:border-white/5 bg-stone-100/85 dark:bg-slate-950/40 backdrop-blur-3xl shadow-2xl relative
-          ${isSidebarCollapsed && !isSidebarPinned ? 'w-16' : 'w-96'}`}
+          ${
+            isSidebarCollapsed && !isSidebarPinned
+              ? 'w-16'
+              : mapSidebarTab !== 'licenses'
+                ? 'w-[min(28rem,42vw)]'
+                : 'w-96'
+          }`}
           onMouseEnter={() => !isSidebarPinned && setIsSidebarCollapsed(false)}
           onMouseLeave={() => !isSidebarPinned && setIsSidebarCollapsed(true)}
         >
-          <Sidebar
-            processedData={miningData.processedData}
-            setIsAddModalOpen={setIsAddModalOpen}
-            onOpenBulkImport={() => setIsBulkImportOpen(true)}
-            loading={
-              viewMode === 'ports'
-                ? isPortsLoading
-                : Boolean(
-                    isLoading ||
-                      (isFetching &&
-                        !isLoading &&
-                        (viewMode === 'mining' || viewMode === 'oil_and_gas')) ||
-                      (viewMode === 'oil_and_gas' && isStorageLoading),
-                  )
-            }
-            onLogout={handleLogout}
-            userAnnotations={userAnnotations}
-            selectedItem={selectedItem}
-            setSelectedItem={(item: MiningLicense) => {
-              handleSelectItem(item);
-              setMapFlyTrigger(prev => prev + 1);
-            }}
-            viewMode={sidebarViewMode}
-            setViewMode={handleSidebarViewModeChange}
-            onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
-            onToggleAdmin={() => setViewMode('admin')}
-            isFilterOpen={isFilterOpen}
-            isPinned={isSidebarPinned}
-            setIsPinned={setIsSidebarPinned}
-            isCollapsed={isSidebarCollapsed && !isSidebarPinned}
-            infrastructureStats={
-              viewMode === 'oil_and_gas' || viewMode === 'ports'
-                ? miningData.infrastructureStats
-                : undefined
-            }
-            isInDdQueue={ddQueue.isInQueue}
-            onAddToDueDiligence={ddQueue.addToQueue}
-            onRemoveFromDueDiligence={ddQueue.removeFromQueue}
-            getDealRoomForLicense={getDealRoomForLicense}
-          />
+          {(viewMode === 'global' ||
+            viewMode === 'mining' ||
+            viewMode === 'oil_and_gas' ||
+            viewMode === 'suppliers') && (
+            <WorkspaceSidebarLayout
+              tab={mapSidebarTab}
+              onTabChange={handleMapSidebarTabChange}
+              isCollapsed={isSidebarCollapsed && !isSidebarPinned}
+              isPinned={isSidebarPinned}
+              setIsPinned={setIsSidebarPinned}
+              sidebarViewMode={sidebarViewMode}
+              onSidebarViewModeChange={handleSidebarViewModeChange}
+              onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
+              onToggleAdmin={() => setViewMode('admin')}
+              isFilterOpen={isFilterOpen}
+              onLogout={handleLogout}
+              processedData={miningData.processedData}
+              setIsAddModalOpen={setIsAddModalOpen}
+              onOpenBulkImport={() => setIsBulkImportOpen(true)}
+              loading={
+                viewMode === 'ports'
+                  ? isPortsLoading
+                  : Boolean(
+                      isLoading ||
+                        (isFetching &&
+                          !isLoading &&
+                          (viewMode === 'mining' || viewMode === 'oil_and_gas')) ||
+                        (viewMode === 'oil_and_gas' && isStorageLoading),
+                    )
+              }
+              userAnnotations={userAnnotations}
+              selectedItem={selectedItem}
+              setSelectedItem={(item: MiningLicense) => {
+                handleSelectItem(item);
+                setMapFlyTrigger((prev) => prev + 1);
+              }}
+              infrastructureStats={
+                viewMode === 'oil_and_gas' || viewMode === 'ports'
+                  ? miningData.infrastructureStats
+                  : undefined
+              }
+              isInDdQueue={ddQueue.isInQueue}
+              onAddToDueDiligence={ddQueue.addToQueue}
+              onRemoveFromDueDiligence={ddQueue.removeFromQueue}
+              getDealRoomForLicense={getDealRoomForLicense}
+              liveDataPanel={
+                <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
+                  <LiveDataIntelPanel
+                    productFilter={oilLiveProductFilter}
+                    onProductFilterChange={setOilLiveProductFilter}
+                    terminalSearch={oilLiveTerminalSearch}
+                    onTerminalSearchChange={setOilLiveTerminalSearch}
+                    coverageStats={oilLiveCoverageStats}
+                    onOpenOpportunity={handleOpenOilLiveOpportunity}
+                    onOpenCargoRecord={handleOpenOilLiveCargo}
+                    onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
+                    onOpenLiveEntity={handleOilLiveEntityClick}
+                    onMapFlyTo={handleLiveDataMapFlyTo}
+                  />
+                </Suspense>
+              }
+              historicPanel={
+                <Suspense fallback={<LazySurfaceFallback label={t('טוען היסטורי…', 'Loading historic…')} />}>
+                  <EiaHistoricImportsPanel onMapArcsChange={setHistoricSidebarMap} />
+                </Suspense>
+              }
+            />
+          )}
         </aside>
 
         {/* PANEL 2: Central Map Workspace */}
@@ -1030,8 +1087,7 @@ export default function App() {
             viewMode === 'suppliers' ||
             viewMode === 'ports' ||
             viewMode === 'investigations' ||
-            viewMode === 'route_planner' ||
-            viewMode === 'live_data') && (
+            viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
@@ -1136,13 +1192,6 @@ export default function App() {
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
                       {t("נפט וגז", "Oil & Gas")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('live_data')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'live_data' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
-                    >
-                      <LucideRadio className="w-3.5 h-3.5" />
-                      {t('נתונים חיים', 'Live Data')}
                     </button>
                     <button
                       onClick={() => setViewMode('suppliers')}
@@ -1262,7 +1311,6 @@ export default function App() {
               viewMode === 'suppliers' ||
               viewMode === 'ports' ||
               viewMode === 'oil_and_gas' ||
-              viewMode === 'live_data' ||
               viewMode === 'route_planner') && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
                 <MapComponent
@@ -1327,31 +1375,30 @@ export default function App() {
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
                   }
-                  oilLiveOverlaysEnabled={viewMode === 'live_data'}
+                  oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}
                   oilLiveTerminalSearch={oilLiveTerminalSearch}
                   oilLiveLayers={oilLiveLayers}
-                  onOilLiveLayersChange={viewMode === 'live_data' ? setOilLiveLayers : undefined}
+                  onOilLiveLayersChange={isLiveDataSidebar ? setOilLiveLayers : undefined}
                   oilLiveTradeFlowGroup={oilLiveTradeFlowGroup}
                   onOilLiveTradeFlowGroupChange={
-                    viewMode === 'live_data' ? setOilLiveTradeFlowGroup : undefined
+                    isLiveDataSidebar ? setOilLiveTradeFlowGroup : undefined
                   }
-                  oilLiveCoverageStats={viewMode === 'live_data' ? oilLiveCoverageStats : undefined}
-                  onOilLiveStatsChange={viewMode === 'live_data' ? setOilLiveCoverageStats : undefined}
-                  onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
-                  onOilLiveDismiss={viewMode === 'live_data' ? handleOilLiveDismiss : undefined}
-                  liveDataFlyTrigger={viewMode === 'live_data' ? liveDataFlyTrigger : 0}
-                  liveDataFlyTarget={viewMode === 'live_data' ? liveDataFlyTarget : null}
+                  oilLiveCoverageStats={isLiveDataSidebar ? oilLiveCoverageStats : undefined}
+                  onOilLiveStatsChange={isLiveDataSidebar ? setOilLiveCoverageStats : undefined}
+                  onOilLiveEntityClick={isLiveDataSidebar ? handleOilLiveEntityClick : undefined}
+                  onOilLiveDismiss={isLiveDataSidebar ? handleOilLiveDismiss : undefined}
+                  liveDataFlyTrigger={isLiveDataSidebar ? liveDataFlyTrigger : 0}
+                  liveDataFlyTarget={isLiveDataSidebar ? liveDataFlyTarget : null}
                   eiaHistoricMapEnabled={
                     viewMode === 'oil_and_gas' ||
-                    (viewMode === 'live_data' && (liveDataEiaHistoricOn || eiaHistoricMap.enabled))
+                    (isHistoricSidebar && historicSidebarMap.enabled)
                   }
                   eiaHistoricMapArcs={
-                    viewMode === 'oil_and_gas' ? oilGasEiaHistoric.arcs : eiaHistoricMap.arcs
+                    viewMode === 'oil_and_gas' ? oilGasEiaHistoric.arcs : historicSidebarMap.arcs
                   }
                   macroTradeFlowsEnabled={
-                    viewMode === 'oil_and_gas' ||
-                    (viewMode === 'live_data' && liveDataMacroTradeOn)
+                    (viewMode === 'oil_and_gas' || isLiveDataSidebar) && liveDataMacroTradeOn
                   }
                   showInfrastructureLayers={
                     viewMode === 'mining' || viewMode === 'global' || viewMode === 'oil_and_gas'
@@ -1367,14 +1414,11 @@ export default function App() {
                       : undefined
                   }
                   macroTradeFlows={macroTradeFlows}
-                  liveDataEiaHistoricOn={viewMode === 'live_data' ? liveDataEiaHistoricOn : undefined}
-                  onLiveDataEiaHistoricChange={
-                    viewMode === 'live_data' ? setLiveDataEiaHistoricOn : undefined
-                  }
-                  liveDataMacroTradeOn={viewMode === 'live_data' ? liveDataMacroTradeOn : undefined}
+                  liveDataMacroTradeOn={isLiveDataSidebar ? liveDataMacroTradeOn : undefined}
                   onLiveDataMacroTradeChange={
-                    viewMode === 'live_data' ? setLiveDataMacroTradeOn : undefined
+                    isLiveDataSidebar ? setLiveDataMacroTradeOn : undefined
                   }
+                  oilLiveSidebarActive={isLiveDataSidebar}
                 />
               </Suspense>
             )}
@@ -1395,7 +1439,7 @@ export default function App() {
                 <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
               </div>
             )}
-            {viewMode === 'live_data' && oilLiveEntity && !isDossierOpen && (
+            {isLiveDataSidebar && oilLiveEntity && !isDossierOpen && (
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1150] flex justify-start sm:inset-x-auto sm:left-4 sm:bottom-4 sm:top-24 sm:right-auto">
                 <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:w-[min(400px,calc(100vw-2rem))]">
                   <Suspense fallback={<LazySurfaceFallback label={t('טוען ישות…', 'Loading entity…')} />}>
@@ -1430,27 +1474,6 @@ export default function App() {
                           entityId: cargoId,
                         });
                       }}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-            )}
-            {viewMode === 'live_data' && (
-              <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1100] flex justify-end sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-24">
-                <div className="pointer-events-auto flex max-h-full min-h-0 w-full flex-col sm:min-w-[420px] sm:w-[min(480px,calc(100vw-2rem))]">
-                  <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
-                    <LiveDataPanel
-                      productFilter={oilLiveProductFilter}
-                      onProductFilterChange={setOilLiveProductFilter}
-                      terminalSearch={oilLiveTerminalSearch}
-                      onTerminalSearchChange={setOilLiveTerminalSearch}
-                      coverageStats={oilLiveCoverageStats}
-                      onOpenOpportunity={handleOpenOilLiveOpportunity}
-                      onOpenCargoRecord={handleOpenOilLiveCargo}
-                      onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
-                      onOpenLiveEntity={handleOilLiveEntityClick}
-                      onMapFlyTo={handleLiveDataMapFlyTo}
-                      onEiaHistoricMapChange={setEiaHistoricMap}
                     />
                   </Suspense>
                 </div>

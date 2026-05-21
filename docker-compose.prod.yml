@@ -45,9 +45,13 @@ services:
       - OIL_GRAPH_SYNC_ENABLED=true
       # Set true for one-time populate on fresh VM (slow startup); otherwise run admin graph-sync curl.
       - OIL_GRAPH_SYNC_ON_STARTUP=false
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=true
       - MARITIME_GULF_DEMO_SEED=0
       - MARITIME_COASTAL_DEMO_SEED=0
       - OIL_LIVE_DISABLE_DEMO_SEED=1
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
     healthcheck:
       test:
         [
@@ -264,6 +268,7 @@ services:
       - OIL_INTEL_INTERNAL_KEY
       - OIL_LIVE_DISABLE_DEMO_SEED=1
       - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=true
       - EUROSTAT_SYNC_ENABLED=true
       - JODI_SYNC_ENABLED=true
       - COMMODITY_COMTRADE_SYNC_ENABLED=true
@@ -274,6 +279,31 @@ services:
       db:
         condition: service_healthy
       oil-live-intel:
+        condition: service_healthy
+
+  eia-historic-sync-worker:
+    image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: mining-eia-historic-sync-worker
+    restart: always
+    command: ["python", "eia_historic_sync_worker.py"]
+    env_file:
+      - backend.env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=true
+      - EIA_HISTORIC_SYNC_ENABLED=true
+      - EIA_HISTORIC_SYNC_INTERVAL_SECONDS=21600
+      - EIA_HISTORIC_SYNC_BACKOFF_SECONDS=1800
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
+    depends_on:
+      db:
         condition: service_healthy
 
   sweden-mining-worker:

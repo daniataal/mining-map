@@ -295,10 +295,9 @@ interface MapComponentProps {
     opportunities: number;
     corridors: number;
   }) => void;
-  liveDataEiaHistoricOn?: boolean;
-  onLiveDataEiaHistoricChange?: (on: boolean) => void;
   liveDataMacroTradeOn?: boolean;
   onLiveDataMacroTradeChange?: (on: boolean) => void;
+  oilLiveSidebarActive?: boolean;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
   /** Increment when entering Live Data to fly map to Gulf hub bbox. */
@@ -622,16 +621,15 @@ export default function MapComponent({
   onInfrastructureLayerChange,
   macroTradeFlowsEnabled = false,
   macroTradeFlows = [],
-  liveDataEiaHistoricOn = false,
-  onLiveDataEiaHistoricChange,
   liveDataMacroTradeOn = true,
   onLiveDataMacroTradeChange,
+  oilLiveSidebarActive = false,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
-    const isLiveDataView = viewModeKey === 'live_data';
+    const isLiveDataView = oilLiveSidebarActive;
     const { data: oilLiveSyncStatus } = useQuery({
         queryKey: ['oil-live-sync-status-map'],
         queryFn: getOilLiveSyncStatus,
@@ -1227,7 +1225,7 @@ export default function MapComponent({
                 <div className="absolute right-4 top-24 z-[950] pointer-events-auto hidden sm:block">
                     <LiveDataMapLegend
                         layers={oilLiveLayers}
-                        eiaHistoricOn={liveDataEiaHistoricOn || eiaHistoricMapEnabled}
+                        eiaHistoricOn={eiaHistoricMapEnabled}
                         macroTradeOn={liveDataMacroTradeOn && macroTradeFlowsEnabled}
                     />
                 </div>
@@ -1247,8 +1245,6 @@ export default function MapComponent({
                         globalMaritimeCount={maritimeSnapshotTotal}
                         tradeFlowGroup={oilLiveTradeFlowGroup}
                         onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
-                        eiaHistoricEnabled={liveDataEiaHistoricOn}
-                        onEiaHistoricChange={onLiveDataEiaHistoricChange}
                         macroTradeEnabled={liveDataMacroTradeOn}
                         onMacroTradeChange={onLiveDataMacroTradeChange}
                     />
@@ -1720,7 +1716,7 @@ export default function MapComponent({
             <MapContainer 
               center={mapCenter} 
               zoom={
-                viewModeKey === 'ports' || viewModeKey === 'live_data'
+                viewModeKey === 'ports' || oilLiveSidebarActive
                   ? 3
                   : viewModeKey === 'route_planner'
                     ? 4
