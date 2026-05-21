@@ -83,10 +83,13 @@ Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin
 | **EIA crude imports** | `eia_imports.sync_eia_crude_imports` (graph-sync step) | `EIA_API_KEY` | `oil_trade_flows.data_source='eia'`, HS 2709, partner=origin country; aggregated last-12-months macro tier |
 | **EIA refinery throughput (PADD)** | `eia_imports.sync_eia_refinery_throughput` | `EIA_API_KEY` | `oil_refinery_throughput` (PADD, week_ending, utilization_pct, crude_input_mbbl_d); feeds **Recipe G** in `engine.go` |
 | **AIS (live)** | `maritime-worker` + `oil-live-intel-worker` | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_port_calls`; WebSocket map layer |
+| **Vessel positions (multi-source merge)** | `oil-live-intel` map API + `vessel_position_observations.py` (graph-sync mirror) | `OIL_LIVE_MERGED_VESSEL_POSITIONS=1` (opt-in); `REDIS_HOST` for maritime mirror | `oil_vessel_position_observations` — per-source rows keyed by `(data_source, source_record_id)`; display merge by MMSI never UPDATE-overwrites another source |
+| **Maritime Redis snapshot (secondary)** | `maritime-worker` → Redis; graph-sync `vessel_position_mirror` | `MARITIME_SNAPSHOT_REDIS_KEY` (default `maritime:snapshot:global`) | `data_source=maritime_redis` rows in `oil_vessel_position_observations`; complements AISStream without replacing `oil_ais_positions` writes |
 | **OSM storage** | Overpass + `petroleum_osm_features` + bulk seed | ODbL | `oil_terminals` (~12k after dedup); map bbox API |
 | **EU TED** | `ted_procurement_sync.py` | EU open | `eu_procurement_notices`; Recipe C tender signals |
 | **USAspending** | `gov_procurement_sync.py` | US open | Awards → Recipe E government offtake hints |
 | **OpenSanctions** | `opensanctions_screening.py` (graph-sync step) | Public API; `OPENSANCTIONS_API_KEY` optional for higher quota | `oil_companies.sanctions_status` + `sanctions_matches`; non-blocking UI chip only |
+| **Elasticsearch (search index)** | `oil-live-intel/cmd/oil-live-search-indexer` (Go) | `ELASTICSEARCH_URL` (`http://elasticsearch:9200` in compose); single-node 8.13.4 image; volume `meridian_elasticsearch_data` | **Not a data source** — indexes Postgres (`meridian_cargo_records`, `oil_companies`, `oil_terminals`, `oil_vessels`) for full-text search via `/api/oil-live/search`. Full sync on boot, incremental on `updated_at`. UI degrades to "Search unavailable" when ES is down. |
 | **GLEIF LEI batch** | `gleif_batch.enrich_companies_with_lei` (graph-sync step) | Public API, no key | `oil_companies.lei` + `lei_record_id`; denormalised onto `meridian_cargo_records.shipper_lei` / `consignee_lei` |
 | **Wikidata company facts** | `wikidata_company_enrichment.py` (graph-sync step) | Public MediaWiki API; polite `User-Agent` | `oil_companies.wikidata_qid` + `wikidata_facts` JSONB (industries, hq, country, website, freebase id) |
 | **Licenses / suppliers** | App licenses + [LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md) | User / admin CSV | `oil_companies` index on graph-sync step 2 |
@@ -425,7 +428,12 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |
 | `backend/services/oil_live_graph_sync.py` | Live Data graph-sync orchestrator |
+| `backend/services/vessel_position_observations.py` | Multi-source vessel position upsert + Redis maritime mirror |
+| `oil-live-intel/internal/services/vesselmerge/` | Map API merge reader (precedence: live_ais > aisstream > maritime_redis > inferred) |
+| `oil-live-intel/migrations/014_vessel_position_sources.sql` | `oil_vessel_position_observations` table |
 | `backend/services/census_trade.py` | U.S. Census HS27 macro flows |
 | `backend/services/usitc_dataweb.py` | USITC DataWeb macro flows |
 | `oil-live-intel/internal/services/syntheticbol/` | MCR recipes A–F + rebuild |
+| `oil-live-intel/internal/services/search/` | Elasticsearch indexer + query builder for MCRs, companies, terminals, vessels |
+| `oil-live-intel/cmd/oil-live-search-indexer/` | Worker syncing Postgres → ES on a ticker (default 300s) |
 | `docs/LIVE_DATA.md` | Live Data onboarding, env keys, trader workflows |

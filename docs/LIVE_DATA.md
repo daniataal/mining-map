@@ -22,6 +22,7 @@
 | **EIA crude imports + refinery throughput** | Done | `backend/services/eia_imports.py` on graph-sync; new `oil_refinery_throughput` table; `EIA_API_KEY` optional (step skipped if unset). |
 | **OpenSanctions screening** | Done | `backend/services/opensanctions_screening.py` on graph-sync; non-blocking UI chip; key optional. |
 | **GLEIF LEI batch + Wikidata enrichment** | Done | `backend/services/gleif_batch.py` + `backend/services/wikidata_company_enrichment.py` populate `oil_companies.lei` + `wikidata_qid`. LEI/sanctions denormalised onto `meridian_cargo_records` post-rebuild via `oil_live_mcr_denormalize.py`. |
+| **Search (Elasticsearch)** | Done | `oil-live-search-indexer` syncs MCRs, companies, terminals, vessels into Elasticsearch; `/api/oil-live/search` + `/api/oil-live/search/health`; in-panel search bar with grouped hits. Degrades gracefully when ES is down. See [Search](#search). |
 
 **Not yet / optional:** paid BOL ingestion, automated deal-room from opportunities, MCP CI smoke.
 
@@ -204,6 +205,44 @@ Actions available in the Live Data intel drawer and left entity drawer (no separ
 
 ---
 
+## Real data checklist (vessel positions)
+
+| Step | Command / action | Pass criteria |
+|------|------------------|---------------|
+| 1 | `docker compose up -d db oil-live-intel maritime-worker` | Migration `014` applied; `oil_vessel_position_observations` exists |
+| 2 | `docker compose up -d maritime-worker` + `AISSTREAM_API_KEY` | Redis key `maritime:snapshot:global` has rows (`GET` or `/api/maritime/vessels`) |
+| 3 | `POST /api/admin/oil-live/graph-sync` | `steps.vessel_position_mirror.upserted` > 0 when Redis populated |
+| 4 | `OIL_LIVE_MERGED_VESSEL_POSITIONS=1` on **oil-live-intel** + restart | `GET /api/oil-live/map?bbox=…` vessels include `data_source` field |
+| 5 | Compare with flag off | Same bbox falls back to `oil_ais_positions` (worker path) |
+
+**Merge policy:** each ingest source writes its own rows; upsert only on `(data_source, source_record_id)`. Map display picks latest per source, then precedence: `live_ais` > `aisstream` / `aisstream_snapshot` > `maritime_redis` > `inferred_port_call`. Free public secondary AIS APIs are scarce — the first production secondary path is the **maritime-worker Redis snapshot** (`maritime_redis`), not a second paid AIS vendor.
+
+---
+
+## Secondary vessel position source
+
+| Source | Writer | Table key | Notes |
+|--------|--------|-----------|-------|
+| AISStream worker | Go `oil-live-intel-worker` | `oil_ais_positions` (legacy map path) | Primary live path until merge flag enabled |
+| Maritime Redis | Python `mirror_maritime_redis_snapshot` on graph-sync | `data_source=maritime_redis`, `source_record_id=redis:{mmsi}` | Read-only mirror from `maritime-worker`; does not delete or overwrite `aisstream` rows |
+| Future secondary | TBD ingest job | unique `(data_source, source_record_id)` | Add new `data_source` + extend precedence in `vesselmerge` |
+
+Enable merged map positions:
+
+```bash
+# oil-live-intel service env
+OIL_LIVE_MERGED_VESSEL_POSITIONS=1
+```
+
+Populate observations before enabling the flag:
+
+```bash
+curl -sf -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq '.steps.vessel_position_mirror'
+```
+
+---
+
 ## End-to-end test checklist
 
 1. Start stack: `docker compose up -d db backend oil-live-intel`
@@ -258,6 +297,55 @@ Graph-sync may insert demo **seed port calls** (`source=seed_port_calls`) when A
 
 - **Default (production feel):** Cargo tab hides seed-derived rows. Toggle **Include seed data** to show them.
 - **API:** `GET /api/oil-live/cargo-records?exclude_seed=true` (used by the UI when the toggle is off).
+
+---
+
+## Search
+
+The Live Data panel has an Elasticsearch-backed search bar above the tabs that searches MCRs, companies, terminals, and vessels in one box.
+
+### Architecture
+
+| Component | Service | Notes |
+|-----------|---------|-------|
+| Search backend | `elasticsearch` (docker-compose, single-node 8.13.4) | Indices: `meridian_cargo`, `oil_companies`, `oil_terminals`, `oil_vessels`. Volume: `meridian_elasticsearch_data`. |
+| Indexer worker | `oil-live-search-indexer` (Go) | Full sync on boot; incremental sync every `SEARCH_INDEXER_INTERVAL_SECONDS` (default 300s) using `updated_at` cursor. |
+| Query API | `GET /api/oil-live/search?q=…&types=cargo,company,terminal,vessel&limit=20&offset=0` | multi_match best_fields + fuzziness=AUTO. |
+| Health | `GET /api/oil-live/search/health` | Returns `{status, indices:{name: doc_count}}` — drives the search-bar empty state. |
+| Frontend | `mining-viz/src/features/live-data/LiveDataSearchBar.tsx` | 300 ms debounced; groups hits by type; Enter opens first result; Esc closes. |
+
+### Quick start
+
+```bash
+# 1) Bring up Elasticsearch + the indexer alongside the rest of the stack:
+docker compose up -d elasticsearch oil-live-search-indexer oil-live-intel
+
+# 2) Wait for ES healthcheck (cold start ~30–60s the first time):
+curl -sf "http://localhost:9200/_cluster/health" | jq '.status'
+
+# 3) Verify search health:
+curl -sf "http://localhost:8095/api/oil-live/search/health" | jq .
+# {"status":"ok","indices":{"meridian_cargo": 1234, "oil_companies": 567, ...}}
+
+# 4) Search:
+curl -sf "http://localhost:8095/api/oil-live/search?q=ras+tanura&types=terminal,cargo&limit=5" | jq .
+```
+
+### Env keys
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `ELASTICSEARCH_URL` | `http://elasticsearch:9200` (compose) / `http://localhost:9200` (host) | Used by `oil-live-intel`, `oil-live-intel-worker`, and `oil-live-search-indexer`. |
+| `SEARCH_INDEXER_INTERVAL_SECONDS` | `300` | Tick between incremental syncs (clamped to ≥ 10s). |
+
+### Troubleshooting
+
+- **UI shows "Search unavailable"** — the API returned a 503 envelope because the ES client failed to connect. Check `docker compose ps elasticsearch`; ES uses ~1.2 GB of RAM at idle, the container can OOM on small hosts. Re-run with `ES_JAVA_OPTS=-Xms1g -Xmx1g` if needed.
+- **Search returns 0 hits but the panel has data** — the indexer hasn't run yet. `docker compose logs -f oil-live-search-indexer` should show `indexer pass complete` per index. The first boot runs a *full sync* of every row, so it can take a minute on large datasets.
+- **ES container won't start** — likely `vm.max_map_count` is too low. Either upgrade Docker Desktop or run `sudo sysctl -w vm.max_map_count=262144` on Linux hosts.
+- **Search is slow / stale** — the indexer is incremental after the first pass; lower `SEARCH_INDEXER_INTERVAL_SECONDS` if you need fresher data, but ES bulk indexing should keep up easily at the default cadence.
+
+The frontend, API, and indexer **all** degrade gracefully if ES is down: the search dropdown shows "Search unavailable" inline, `/search` returns `{"hits":[],"total":0,"error":"search_unavailable"}` with HTTP 503, and the rest of the Live Data panel keeps working.
 
 ---
 

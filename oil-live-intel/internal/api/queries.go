@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
+	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
 
 type companyFilters struct {
@@ -82,6 +83,14 @@ func scanTerminalRows(rows pgx.Rows) ([]map[string]any, error) {
 }
 
 func (s *Server) listLiveVessels(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
+	ctx := r.Context()
+	if vesselmerge.MergedPositionsEnabled() && s.Pool != nil &&
+		vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.HasRows(ctx, s.Pool) {
+		merged, err := vesselmerge.ListMergedVesselsInBbox(ctx, s.Pool, bbox, bboxOK, limit)
+		if err == nil {
+			return merged, nil
+		}
+	}
 	q := `
 		SELECT DISTINCT ON (p.mmsi) p.mmsi, p.ts, p.lat, p.lon, p.speed, p.course, p.draft_m, p.destination,
 			v.name, v.tanker_class, v.crude_capable, v.product_tanker

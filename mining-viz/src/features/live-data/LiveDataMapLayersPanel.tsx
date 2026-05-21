@@ -106,6 +106,14 @@ export default function LiveDataMapLayersPanel({
             {t('הזדמנויות', 'opportunities')}
           </p>
         )}
+        {coverageStats != null && coverageStats.vessels === 0 && (
+          <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+            {t(
+              'מכליות דורשות AIS חי (AISSTREAM_API_KEY).',
+              'Vessels require live AIS (AISSTREAM_API_KEY).',
+            )}
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-2">
           {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {

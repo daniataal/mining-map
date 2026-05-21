@@ -4,12 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func demoSeedDisabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("OIL_LIVE_DISABLE_DEMO_SEED")))
+	if v == "" {
+		return true
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
 
 func RunIfEmpty(ctx context.Context, pool *pgxpool.Pool) error {
 	var n int
@@ -62,6 +78,14 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 
+	if demoSeedDisabled() {
+		return nil
+	}
+
+	return applyDemoSeeds(ctx, pool, terminalIDs)
+}
+
+func applyDemoSeeds(ctx context.Context, pool *pgxpool.Pool, terminalIDs map[string]uuid.UUID) error {
 	rtID := terminalIDs["Ras Tanura Export Terminal"]
 	rotterdamID := terminalIDs["Port of Rotterdam Tank Storage"]
 	now := time.Now().UTC()

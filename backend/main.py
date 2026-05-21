@@ -6477,6 +6477,29 @@ def admin_oil_live_enrich_contacts(
         return {"status": "error", "message": str(exc)}
 
 
+@app.post("/api/admin/oil-live/purge-demo-seed")
+def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
+    """Delete demo opportunities and seed/demo port calls (MT DEMO STAR, seed_port_calls)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import purge_demo_seed
+        except ImportError:
+            from services.oil_live_graph_sync import purge_demo_seed
+        conn = get_db_connection()
+        try:
+            result = purge_demo_seed(conn)
+        finally:
+            conn.close()
+        return {"status": "ok", **result}
+    except Exception as exc:
+        logger.exception("oil-live purge-demo-seed failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
 @app.post("/api/admin/oil-live/graph-sync")
 def admin_oil_live_graph_sync(
     x_admin_token: Optional[str] = Header(None),

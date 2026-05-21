@@ -7,14 +7,18 @@ import pytest
 try:
     from backend.services.oil_live_graph_sync import (
         _commodity_from_text,
+        _ensure_demo_opportunities,
         _merge_company_metadata,
         _normalize_name,
+        _seed_port_calls_if_sparse,
     )
 except ImportError:
     from services.oil_live_graph_sync import (
         _commodity_from_text,
+        _ensure_demo_opportunities,
         _merge_company_metadata,
         _normalize_name,
+        _seed_port_calls_if_sparse,
     )
 
 
@@ -33,6 +37,19 @@ def test_normalize_name():
 )
 def test_commodity_from_text(text, expected):
     assert _commodity_from_text(text) == expected
+
+
+def test_demo_seed_disabled_skips_helpers(monkeypatch):
+    monkeypatch.setenv("OIL_LIVE_DISABLE_DEMO_SEED", "1")
+    cur = object()
+    assert _ensure_demo_opportunities(cur) == {
+        "skipped": True,
+        "reason": "OIL_LIVE_DISABLE_DEMO_SEED",
+    }
+    assert _seed_port_calls_if_sparse(cur) == {
+        "skipped": True,
+        "reason": "OIL_LIVE_DISABLE_DEMO_SEED",
+    }
 
 
 def test_merge_company_metadata_roles_and_sources():

@@ -548,14 +548,6 @@ export default function OilLiveMapOverlays({
               eventHandlers={{
                 click: (e) => {
                   L.DomEvent.stopPropagation(e);
-                  const linked = opportunityByTerminalId.get(term.id);
-                  onEntityClick?.({
-                    entityKind: 'terminal',
-                    entityId: term.id,
-                    opportunityId: linked?.id,
-                    title: term.name,
-                    subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
-                  });
                 },
               }}
             >
@@ -597,12 +589,6 @@ export default function OilLiveMapOverlays({
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
-                onEntityClick?.({
-                  entityKind: 'vessel',
-                  entityId: String(v.mmsi),
-                  title: v.name ?? `MMSI ${v.mmsi}`,
-                  subtitle: v.tanker_class,
-                });
               },
             }}
           >
@@ -611,6 +597,22 @@ export default function OilLiveMapOverlays({
               <strong>{v.name ?? `MMSI ${v.mmsi}`}</strong>
               <br />
               {v.tanker_class}
+              {onEntityClick && (
+                <button
+                  type="button"
+                  className="oil-live-popup-btn"
+                  onClick={() =>
+                    onEntityClick({
+                      entityKind: 'vessel',
+                      entityId: String(v.mmsi),
+                      title: v.name ?? `MMSI ${v.mmsi}`,
+                      subtitle: v.tanker_class,
+                    })
+                  }
+                >
+                  View details
+                </button>
+              )}
             </Popup>
           </Marker>
         ))}
@@ -623,14 +625,6 @@ export default function OilLiveMapOverlays({
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
-                onEntityClick?.({
-                  entityKind: 'cargo',
-                  entityId: r.id,
-                  title: r.vessel_name ?? `Cargo ${r.commodity_family ?? ''}`,
-                  subtitle: [r.load_port_name, r.discharge_hint ?? 'discharge unknown']
-                    .filter(Boolean)
-                    .join(' → '),
-                });
               },
             }}
           >
@@ -659,6 +653,24 @@ export default function OilLiveMapOverlays({
                   Discharge hint: {r.discharge_hint}
                 </>
               )}
+              {onEntityClick && (
+                <button
+                  type="button"
+                  className="oil-live-popup-btn"
+                  onClick={() =>
+                    onEntityClick({
+                      entityKind: 'cargo',
+                      entityId: r.id,
+                      title: r.vessel_name ?? `Cargo ${r.commodity_family ?? ''}`,
+                      subtitle: [r.load_port_name, r.discharge_hint ?? 'discharge unknown']
+                        .filter(Boolean)
+                        .join(' → '),
+                    })
+                  }
+                >
+                  View details
+                </button>
+              )}
             </Popup>
           </Marker>
         ))}
@@ -680,14 +692,6 @@ export default function OilLiveMapOverlays({
           const sources = c.record.sources ?? [];
           const onClickPopup = (e: L.LeafletMouseEvent) => {
             L.DomEvent.stopPropagation(e);
-            onEntityClick?.({
-              entityKind: 'cargo',
-              entityId: c.id,
-              title: c.record.vessel_name ?? `Cargo ${c.record.commodity_family ?? ''}`,
-              subtitle: [c.record.load_port_name, c.record.discharge_hint]
-                .filter(Boolean)
-                .join(' → '),
-            });
           };
 
           return (
@@ -858,6 +862,25 @@ export default function OilLiveMapOverlays({
                           ))}
                       </div>
                     )}
+                    {onEntityClick && (
+                      <button
+                        type="button"
+                        className="oil-live-popup-btn"
+                        onClick={() =>
+                          onEntityClick({
+                            entityKind: 'cargo',
+                            entityId: c.id,
+                            title:
+                              c.record.vessel_name ?? `Cargo ${c.record.commodity_family ?? ''}`,
+                            subtitle: [c.record.load_port_name, c.record.discharge_hint]
+                              .filter(Boolean)
+                              .join(' → '),
+                          })
+                        }
+                      >
+                        View details
+                      </button>
+                    )}
                   </div>
                 </Popup>
               </ArrowPolyline>
@@ -964,16 +987,28 @@ export default function OilLiveMapOverlays({
             eventHandlers={{
               click: (e) => {
                 L.DomEvent.stopPropagation(e);
-                onEntityClick?.({
-                  entityKind: 'opportunity',
-                  entityId: o.oppId,
-                  opportunityId: o.oppId,
-                  title: o.title,
-                });
               },
             }}
           >
-            <Popup>{o.title}</Popup>
+            <Popup>
+              {o.title}
+              {onEntityClick && (
+                <button
+                  type="button"
+                  className="oil-live-popup-btn"
+                  onClick={() =>
+                    onEntityClick({
+                      entityKind: 'opportunity',
+                      entityId: o.oppId,
+                      opportunityId: o.oppId,
+                      title: o.title,
+                    })
+                  }
+                >
+                  View details
+                </button>
+              )}
+            </Popup>
           </Marker>
         ))}
     </LayerGroup>

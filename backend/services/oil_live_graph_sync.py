@@ -40,6 +40,16 @@ GRAPH_SYNC_ENABLED = (os.getenv("OIL_GRAPH_SYNC_ENABLED") or "true").strip().low
     "no",
     "off",
 }
+
+
+def _demo_seed_disabled() -> bool:
+    """True when OIL_LIVE_DISABLE_DEMO_SEED is unset or truthy (default: real data only)."""
+    return (os.getenv("OIL_LIVE_DISABLE_DEMO_SEED", "1") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "oil-live-intel" / "migrations"
 _MIGRATION_008 = _MIGRATIONS_DIR / "008_commercial_graph.sql"
 _MIGRATION_010 = _MIGRATIONS_DIR / "010_oil_live_sync_state.sql"
@@ -147,8 +157,14 @@ def _record_graph_sync_at(conn: Any, finished_at: str) -> None:
         )
 
 
-def _ensure_demo_opportunities(cur: Any) -> dict[str, int]:
-    """Link open opportunities to real terminals; seed one demo row when empty."""
+def _ensure_demo_opportunities(cur: Any) -> dict[str, Any]:
+    """
+    Link open opportunities to real terminals; seed one demo row when empty.
+
+    When OIL_LIVE_DISABLE_DEMO_SEED is truthy (default), skips entirely — no linking or inserts.
+    """
+    if _demo_seed_disabled():
+        return {"skipped": True, "reason": "OIL_LIVE_DISABLE_DEMO_SEED"}
     linked_from_port_call = 0
     remapped_terminals = 0
     created = 0
@@ -675,7 +691,11 @@ def _seed_port_calls_if_sparse(cur: Any) -> dict[str, Any]:
     """
     Seed closed loading/unloading port calls for top hubs when AIS visits stay open.
     Clearly tagged source=seed_port_calls (non-demo).
+
+    When OIL_LIVE_DISABLE_DEMO_SEED is truthy (default), skips entirely.
     """
+    if _demo_seed_disabled():
+        return {"skipped": True, "reason": "OIL_LIVE_DISABLE_DEMO_SEED"}
     cur.execute(
         """
         SELECT COUNT(*)::int FROM oil_port_calls
@@ -1215,6 +1235,21 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
             conn, limit=opensanctions_limit
         )
         summary["steps"]["port_calls"] = {"events": _mirror_port_calls(cur)}
+        try:
+            try:
+                from backend.services.vessel_position_observations import (
+                    mirror_maritime_redis_snapshot,
+                )
+            except ImportError:
+                from services.vessel_position_observations import (
+                    mirror_maritime_redis_snapshot,
+                )
+            summary["steps"]["vessel_position_mirror"] = mirror_maritime_redis_snapshot(conn)
+        except Exception as exc:
+            summary["steps"]["vessel_position_mirror"] = {
+                "status": "skipped",
+                "error": str(exc),
+            }
         summary["steps"]["ted"] = {"events": _mirror_ted_notices(cur)}
         summary["steps"]["gov_awards"] = {"events": _mirror_gov_awards(cur)}
         summary["steps"]["opportunity_links"] = _ensure_demo_opportunities(cur)
@@ -1231,3 +1266,48 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
     conn.commit()
     summary["status"] = "ok"
     return summary
+
+
+def purge_demo_seed(conn: Any) -> dict[str, int]:
+    """
+    Remove demo opportunities and seeded/demo port calls from mining_db.
+
+    Admin: POST /api/admin/oil-live/purge-demo-seed with X-Admin-Token.
+    Example:
+      curl -X POST "http://localhost:8000/api/admin/oil-live/purge-demo-seed" \\
+        -H "X-Admin-Token: $ADMIN_API_TOKEN"
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM oil_opportunities o
+            WHERE o.title ILIKE '%%DEMO%%'
+               OR o.hypothesis ILIKE '%%DEMO%%'
+               OR o.mmsi = 636012345
+               OR EXISTS (
+                 SELECT 1 FROM oil_port_calls pc
+                 WHERE pc.id = o.port_call_id
+                   AND (
+                     COALESCE(pc.evidence::text, '') ILIKE '%%seed_port_calls%%'
+                     OR COALESCE(pc.metadata::text, '') ILIKE '%%seed_port_calls%%'
+                     OR pc.vessel_name ILIKE '%%DEMO%%'
+                   )
+               )
+            """
+        )
+        opportunities_deleted = int(cur.rowcount or 0)
+        cur.execute(
+            """
+            DELETE FROM oil_port_calls
+            WHERE vessel_name ILIKE '%%DEMO%%'
+               OR mmsi = 636012345
+               OR COALESCE(evidence::text, '') ILIKE '%%seed_port_calls%%'
+               OR COALESCE(metadata::text, '') ILIKE '%%seed_port_calls%%'
+            """
+        )
+        port_calls_deleted = int(cur.rowcount or 0)
+    conn.commit()
+    return {
+        "opportunities_deleted": opportunities_deleted,
+        "port_calls_deleted": port_calls_deleted,
+    }
