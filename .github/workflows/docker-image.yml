@@ -301,7 +301,7 @@ jobs:
           echo "oil-live-intel ready: $OIL_LIVE_READY"
 
           if [ "$BACKEND_READY" = "true" ] && [ "$OIL_LIVE_READY" = "true" ] && [ -n "${ADMIN_TOKEN}" ]; then
-            nohup curl -sS -o /tmp/oil_graph_sync_response.json -w "%{http_code}" \
+            nohup curl -sS --max-time 600 -o /tmp/oil_graph_sync_response.json -w "%{http_code}" \
               -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
               -H "X-Admin-Token: ${ADMIN_TOKEN}" \
               >/tmp/oil_graph_sync_http_code.txt 2>&1 &
