@@ -9,7 +9,9 @@ import {
   getEiaHistoricSeries,
   getEiaHistoricSummary,
   type EiaHistoricMapArc,
+  type EiaHistoricMapOrigin,
 } from '../../api/eiaHistoricApi';
+import { getOilLiveSyncStatus } from '../../api/oilLiveApi';
 
 const SHELL = 'rounded-lg border border-black/5 dark:border-white/10 bg-white/60 dark:bg-slate-900/40 p-3';
 const LABEL = 'text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400';
@@ -71,23 +73,56 @@ function EiaVolumeChart({
 }
 
 export type EiaHistoricImportsPanelProps = {
-  onMapArcsChange?: (payload: { enabled: boolean; arcs: EiaHistoricMapArc[]; year: number }) => void;
+  onMapArcsChange?: (payload: {
+    enabled: boolean;
+    arcs: EiaHistoricMapArc[];
+    origins?: EiaHistoricMapOrigin[];
+    year: number;
+    showCorridors: boolean;
+  }) => void;
+  /** Set when user picks an importer from a map origin popup */
+  importerFromMap?: string | null;
+  onImporterFromMapConsumed?: () => void;
 };
 
-export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoricImportsPanelProps) {
+export default function EiaHistoricImportsPanel({
+  onMapArcsChange,
+  importerFromMap,
+  onImporterFromMapConsumed,
+}: EiaHistoricImportsPanelProps) {
   const { t } = useI18n();
   const [importer, setImporter] = useState('');
   const [importerDraft, setImporterDraft] = useState('');
   const [year, setYear] = useState(2020);
   const [showOnMap, setShowOnMap] = useState(false);
+  const [showCorridors, setShowCorridors] = useState(false);
   const [ingestCurlOpen, setIngestCurlOpen] = useState(false);
 
   const applyImporter = () => setImporter(importerDraft.trim());
+
+  useEffect(() => {
+    if (!importerFromMap?.trim()) return;
+    setImporterDraft(importerFromMap.trim());
+    setImporter(importerFromMap.trim());
+    onImporterFromMapConsumed?.();
+  }, [importerFromMap, onImporterFromMapConsumed]);
 
   const summaryQuery = useQuery({
     queryKey: ['eia-historic-summary', importer],
     queryFn: () => getEiaHistoricSummary({ importer: importer || undefined }),
     staleTime: 120_000,
+    refetchInterval: (q) =>
+      q.state.data?.row_count === 0 && !q.state.isFetching ? 20_000 : false,
+  });
+
+  const syncStatusQuery = useQuery({
+    queryKey: ['oil-live-sync-status'],
+    queryFn: getOilLiveSyncStatus,
+    staleTime: 60_000,
+    refetchInterval: (q) => {
+      const eia = q.state.data?.eia_historic_import_count ?? 0;
+      return eia === 0 ? 15_000 : false;
+    },
   });
 
   const yearMin = summaryQuery.data?.year_min ?? 2000;
@@ -112,7 +147,7 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
       getEiaHistoricMap({
         year,
         importer: importer.trim() || undefined,
-        limit: 60,
+        limit: 80,
       }),
     enabled: showOnMap,
     staleTime: 120_000,
@@ -137,12 +172,17 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
     onMapArcsChange({
       enabled: showOnMap,
       arcs: showOnMap ? (mapQuery.data?.arcs ?? []) : [],
+      origins: showOnMap ? mapQuery.data?.origins : undefined,
       year,
+      showCorridors: showOnMap && showCorridors,
     });
-  }, [showOnMap, mapQuery.data?.arcs, year, onMapArcsChange]);
+  }, [showOnMap, showCorridors, mapQuery.data?.arcs, mapQuery.data?.origins, year, onMapArcsChange]);
 
   const topImporters = summaryQuery.data?.top_importers ?? [];
   const emptyDb = summaryQuery.data?.row_count === 0 && !summaryQuery.isLoading;
+  const syncEiaCount = syncStatusQuery.data?.eia_historic_import_count;
+  const ingestPending =
+    emptyDb && (syncEiaCount === 0 || syncEiaCount == null) && !summaryQuery.isError;
   const rowCount = summaryQuery.data?.row_count;
   const importerCount = summaryQuery.data?.importer_count;
 
@@ -166,20 +206,38 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
             <p className={`${MUTED} mt-1 tabular-nums`}>
               {rowCount.toLocaleString()} {t('שורות', 'rows')} ·{' '}
               {(importerCount ?? 0).toLocaleString()} {t('יבואנים', 'importers')}
+              {syncEiaCount != null && syncEiaCount > 0 && (
+                <> · sync {syncEiaCount.toLocaleString()}</>
+              )}
             </p>
           )}
         </div>
       </div>
 
-      {emptyDb && (
+      {ingestPending && (
+        <div className="rounded-lg border border-violet-500/25 bg-violet-500/8 px-3 py-2.5">
+          <p className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-500" />
+            {t('ממתין ל-ingest…', 'Waiting for ingest…')}
+          </p>
+          <p className={`${MUTED} mt-1`}>
+            {t(
+              'קבצים ב-data/eia_downloads — הריצו: docker compose up -d eia-historic-sync-worker (כמה דקות ל-39 קבצים).',
+              'Files are in data/eia_downloads — run: docker compose up -d eia-historic-sync-worker (a few minutes for ~39 files).',
+            )}
+          </p>
+        </div>
+      )}
+
+      {emptyDb && !ingestPending && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2.5">
           <p className="text-xs font-semibold text-slate-900 dark:text-white">
             {t('אין נתונים ב-DB', 'No data in database yet')}
           </p>
           <p className={`${MUTED} mt-1`}>
             {t(
-              'הניחו impa*.xls בתיקיית data/eia_downloads — ה-worker יטעין אוטומטית (כל 6 שעות ובהפעלה).',
-              'Place impa*.xls in data/eia_downloads — eia-historic-sync-worker ingests automatically on start and every 6h.',
+              'הניחו impa*.xls בתיקיית data/eia_downloads והפעילו eia-historic-sync-worker.',
+              'Place impa*.xls in data/eia_downloads and start eia-historic-sync-worker.',
             )}
           </p>
           <button
@@ -251,6 +309,27 @@ export default function EiaHistoricImportsPanel({ onMapArcsChange }: EiaHistoric
             </span>
           </label>
         </div>
+        {showOnMap && (
+          <label className="mt-2 flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showCorridors}
+              onChange={(e) => setShowCorridors(e.target.checked)}
+              className="accent-violet-600"
+            />
+            <span className={`${MUTED} text-[10px]`}>
+              {t('קווי זרימה (אופציונלי)', 'Flow lines (optional)')}
+            </span>
+          </label>
+        )}
+        {showOnMap && (
+          <p className={`${MUTED} mt-1.5`}>
+            {t(
+              'לחצו נקודה — חץ ממקור לארה״ב. קווים לכל המקורות רק עם flow lines.',
+              'Click a dot — arrow from origin to U.S. Optional flow lines shows all routes.',
+            )}
+          </p>
+        )}
         <input
           type="range"
           min={yearMin}

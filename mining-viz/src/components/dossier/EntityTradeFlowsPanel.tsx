@@ -87,8 +87,8 @@ export default function EntityTradeFlowsPanel({
         ))}
         <p className="text-[11px] text-slate-500">
           {t(
-            'הריצו graph-sync כדי למלא Comtrade וזרימות מוצרי מדף.',
-            'Run graph-sync to populate Comtrade and commodity_trade_flows.',
+            'הריצו graph-sync עם COMTRADE_API_KEY — זרימות מדף ב-commodity_trade_flows (TZ/GH/KE/ZA…).',
+            'Run graph-sync with COMTRADE_API_KEY — mining macro flows land in commodity_trade_flows (TZ/GH/KE/ZA…).',
           )}
         </p>
       </Card>

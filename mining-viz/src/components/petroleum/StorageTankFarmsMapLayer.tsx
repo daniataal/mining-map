@@ -16,6 +16,7 @@ import { createStorageTerminalMapIcon, createTankFarmMapIcon } from './refineryM
 interface StorageTankFarmsMapLayerProps {
   entities: MiningLicense[];
   enabled: boolean;
+  mapZoom?: number;
   selectedId?: string | null;
   onSelect: (item: MiningLicense) => void;
 }
@@ -23,6 +24,7 @@ interface StorageTankFarmsMapLayerProps {
 export default function StorageTankFarmsMapLayer({
   entities,
   enabled,
+  mapZoom,
   selectedId,
   onSelect,
 }: StorageTankFarmsMapLayerProps) {
@@ -32,7 +34,7 @@ export default function StorageTankFarmsMapLayer({
   const selectedTerminalIcon = useMemo(() => createStorageTerminalMapIcon(true), []);
   const selectedTankFarmIcon = useMemo(() => createTankFarmMapIcon(true), []);
 
-  if (!storageTankFarmsLayerShouldMount(enabled)) return null;
+  if (!storageTankFarmsLayerShouldMount(enabled, mapZoom)) return null;
 
   const layerLabel = t(
     'מסופי אחסון / טנקים (OSM + מקורות)',

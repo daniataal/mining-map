@@ -1,6 +1,18 @@
 import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, startTransition, lazy, Suspense } from 'react';
-import { useLicenses, useUpdateLicense, useDeleteLicense, useLogActivity, login, API_BASE, describeLicenseFetchFailureContext, useWorldCoverage, useStorageTerminals, usePortLogisticsEntities, createDealRoom } from './lib/api';
-import { getEiaHistoricMap } from './api/eiaHistoricApi';
+import {
+  useLicensesForMap,
+  useUpdateLicense,
+  useDeleteLicense,
+  useLogActivity,
+  login,
+  API_BASE,
+  describeLicenseFetchFailureContext,
+  useWorldCoverage,
+  useStorageTerminals,
+  usePortLogisticsEntities,
+  createDealRoom,
+  type LicenseViewportBounds,
+} from './lib/api';
 import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
 import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
 import { DEFAULT_OSM_LAYER_VISIBILITY } from './lib/osmPetroleumLayers';
@@ -164,13 +176,22 @@ export default function App() {
   const queryClient = useQueryClient();
   
   // Data Fetching
-  const { data: worldCoverage } = useWorldCoverage(true);
+  const [licenseMapViewport, setLicenseMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const licenseMapFetchEnabled =
+    viewMode !== 'route_planner' && viewMode !== 'ports';
+  const { data: worldCoverage } = useWorldCoverage(
+    viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'global',
+  );
   const {
     data: rawData = [],
     isLoading,
     isFetching,
     error: fetchError,
-  } = useLicenses(licenseSector);
+  } = useLicensesForMap({
+    sector: licenseSector,
+    bounds: licenseMapViewport,
+    enabled: licenseMapFetchEnabled,
+  });
   const licensesMapSecondaryStatus = useMemo(() => {
     if (!isFetching || isLoading || rawData.length === 0) return null;
     return t('מרענן מאגר רישיונות…', 'Refreshing license bundle…');
@@ -179,7 +200,7 @@ export default function App() {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
     error: storageError,
-  } = useStorageTerminals(viewMode === 'oil_and_gas');
+  } = useStorageTerminals(viewMode === 'oil_and_gas' && mapSidebarTab === 'licenses');
   const {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
@@ -231,17 +252,15 @@ export default function App() {
   const [historicSidebarMap, setHistoricSidebarMap] = useState<{
     enabled: boolean;
     arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
+    origins?: import('./api/eiaHistoricApi').EiaHistoricMapOrigin[];
     year: number;
-  }>({ enabled: false, arcs: [], year: 2020 });
+    showCorridors: boolean;
+  }>({ enabled: false, arcs: [], year: 2020, showCorridors: false });
+  const [historicImporterFromMap, setHistoricImporterFromMap] = useState<string | null>(null);
   const [liveDataFlyTrigger, setLiveDataFlyTrigger] = useState(0);
   const [liveDataFlyTarget, setLiveDataFlyTarget] = useState<{ lat: number; lng: number } | null>(
     null,
   );
-  const [oilGasEiaHistoric, setOilGasEiaHistoric] = useState<{
-    enabled: boolean;
-    arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
-    year: number;
-  }>({ enabled: true, arcs: [], year: 2020 });
   const [macroTradeFlows, setMacroTradeFlows] = useState<MacroTradeFlow[]>([]);
   const [infrastructureLayerVisibility, setInfrastructureLayerVisibility] = useState<
     Record<OsmPetroleumLayerId, boolean>
@@ -446,26 +465,7 @@ export default function App() {
   }, [isLiveDataSidebar]);
 
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas') return;
-    let cancelled = false;
-    getEiaHistoricMap({ year: 2020, limit: 400 })
-      .then((res) => {
-        if (!cancelled && viewMode === 'oil_and_gas') {
-          setOilGasEiaHistoric({ enabled: true, arcs: res.arcs ?? [], year: 2020 });
-        }
-      })
-      .catch(() => {
-        if (!cancelled && viewMode === 'oil_and_gas') {
-          setOilGasEiaHistoric((prev) => ({ ...prev, enabled: true, arcs: [] }));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (!isPetroleumMapContext) return;
+    if (!isLiveDataSidebar) return;
     let cancelled = false;
     getMacroTradeFlows({ limit: 150 })
       .then((res) => {
@@ -477,7 +477,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isPetroleumMapContext]);
+  }, [isLiveDataSidebar]);
 
   const handleInfrastructureLayerChange = useCallback(
     (layerId: OsmPetroleumLayerId, visible: boolean) => {
@@ -801,7 +801,12 @@ export default function App() {
   };
 
   const switchSectorView = useCallback((mode: 'global' | 'mining' | 'oil_and_gas') => {
-    startTransition(() => setViewMode(mode));
+    startTransition(() => {
+      setViewMode(mode);
+      // Oil & Gas top-nav view = license/storage map; Live/Historic are sidebar tabs only.
+      setMapSidebarTab('licenses');
+      setOilLiveEntity(null);
+    });
   }, []);
 
   useEffect(() => {
@@ -1070,7 +1075,11 @@ export default function App() {
               }
               historicPanel={
                 <Suspense fallback={<LazySurfaceFallback label={t('טוען היסטורי…', 'Loading historic…')} />}>
-                  <EiaHistoricImportsPanel onMapArcsChange={setHistoricSidebarMap} />
+                  <EiaHistoricImportsPanel
+                    onMapArcsChange={setHistoricSidebarMap}
+                    importerFromMap={historicImporterFromMap}
+                    onImporterFromMapConsumed={() => setHistoricImporterFromMap(null)}
+                  />
                 </Suspense>
               }
             />
@@ -1371,6 +1380,7 @@ export default function App() {
                   getDealRoomForLicense={getDealRoomForLicense}
                   countryFocusCountry={countryFocusCountry}
                   countryFocusBoundsTrigger={countryFocusBoundsTrigger}
+                  onLicenseMapViewportChange={licenseMapFetchEnabled ? setLicenseMapViewport : undefined}
                   storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
@@ -1390,16 +1400,18 @@ export default function App() {
                   onOilLiveDismiss={isLiveDataSidebar ? handleOilLiveDismiss : undefined}
                   liveDataFlyTrigger={isLiveDataSidebar ? liveDataFlyTrigger : 0}
                   liveDataFlyTarget={isLiveDataSidebar ? liveDataFlyTarget : null}
-                  eiaHistoricMapEnabled={
-                    viewMode === 'oil_and_gas' ||
-                    (isHistoricSidebar && historicSidebarMap.enabled)
+                  eiaHistoricMapEnabled={isHistoricSidebar && historicSidebarMap.enabled}
+                  eiaHistoricMapArcs={historicSidebarMap.arcs}
+                  eiaHistoricMapOrigins={historicSidebarMap.origins}
+                  eiaHistoricMapYear={historicSidebarMap.year}
+                  eiaHistoricShowCorridors={historicSidebarMap.showCorridors}
+                  onEiaHistoricSelectImporter={
+                    isHistoricSidebar ? setHistoricImporterFromMap : undefined
                   }
-                  eiaHistoricMapArcs={
-                    viewMode === 'oil_and_gas' ? oilGasEiaHistoric.arcs : historicSidebarMap.arcs
+                  suppressLicenseClusters={
+                    isHistoricSidebar && historicSidebarMap.enabled
                   }
-                  macroTradeFlowsEnabled={
-                    (viewMode === 'oil_and_gas' || isLiveDataSidebar) && liveDataMacroTradeOn
-                  }
+                  macroTradeFlowsEnabled={isLiveDataSidebar && liveDataMacroTradeOn}
                   showInfrastructureLayers={
                     viewMode === 'mining' || viewMode === 'global' || viewMode === 'oil_and_gas'
                   }

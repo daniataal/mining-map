@@ -344,10 +344,26 @@ def _ingest_file(conn: Any, path: Path, *, data_source: str = "eia_file_upload")
                 records.append(rec)
 
         upserted = 0
+        batch_size = max(50, int(os.getenv("EIA_HISTORIC_INSERT_BATCH", "500")))
         with conn.cursor() as cur:
-            for rec in records:
-                cur.execute(upsert_sql, rec)
-                upserted += cur.rowcount
+            try:
+                from psycopg2.extras import execute_batch
+            except ImportError:
+                execute_batch = None  # type: ignore
+            if execute_batch and len(records) > 1:
+                for i in range(0, len(records), batch_size):
+                    chunk = records[i : i + batch_size]
+                    try:
+                        execute_batch(cur, upsert_sql, chunk, page_size=batch_size)
+                        upserted += len(chunk)
+                    except (TypeError, AttributeError):
+                        for rec in chunk:
+                            cur.execute(upsert_sql, rec)
+                            upserted += cur.rowcount
+            else:
+                for rec in records:
+                    cur.execute(upsert_sql, rec)
+                    upserted += cur.rowcount
 
         file_stats["sheets"].append(
             {"sheet": sheet, "rows_parsed": len(records), "rows_inserted": upserted}
@@ -392,13 +408,22 @@ def ingest_eia_downloads_folder(
 
     for path in paths:
         try:
+            print(f"[eia-historic] ingesting {path.name}…", flush=True)
             file_stats = _ingest_file(conn, path, data_source=data_source)
+            conn.commit()
+            print(
+                f"[eia-historic] {path.name}: parsed={file_stats.get('rows_parsed', 0)} "
+                f"upserted={file_stats.get('rows_upserted', 0)}",
+                flush=True,
+            )
             summary["files"].append(file_stats)
             summary["files_processed"] += 1
             summary["rows_parsed"] += file_stats.get("rows_parsed", 0)
             summary["rows_inserted"] += file_stats.get("rows_upserted", 0)
         except Exception as exc:
+            conn.rollback()
             summary["errors"].append(f"{path.name}: {exc}")
+            print(f"[eia-historic] {path.name} failed: {exc}", flush=True)
 
     if summary["errors"] and summary["files_processed"] == 0:
         summary["status"] = "error"
@@ -606,9 +631,58 @@ def query_map_arcs(
         for r in rows
     ]
 
+    origin_countries = sorted({a["origin_country"] for a in arcs if a.get("origin_country")})
+    origins: list[dict[str, Any]] = []
+    importer_limit = max(3, min(15, int(os.getenv("EIA_HISTORIC_MAP_IMPORTERS_PER_ORIGIN", "10"))))
+
+    for origin in origin_countries:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT importer_name,
+                       SUM(volume)::float AS volume_bbl,
+                       COUNT(*)::bigint AS row_count
+                FROM eia_historic_imports
+                WHERE {where} AND origin_country = %s
+                  AND importer_name IS NOT NULL AND TRIM(importer_name) <> ''
+                GROUP BY importer_name
+                ORDER BY volume_bbl DESC NULLS LAST
+                LIMIT %s;
+                """,
+                [*params, origin, importer_limit],
+            )
+            top_importers = [
+                {
+                    "importer_name": imp[0],
+                    "volume_bbl": imp[1],
+                    "row_count": imp[2],
+                }
+                for imp in cur.fetchall()
+            ]
+
+        by_commodity = [
+            {
+                "commodity_family": a["commodity_family"],
+                "volume_bbl": a["volume_bbl"],
+                "row_count": a["row_count"],
+            }
+            for a in arcs
+            if a["origin_country"] == origin
+        ]
+        origins.append(
+            {
+                "origin_country": origin,
+                "volume_bbl": sum(c["volume_bbl"] or 0 for c in by_commodity),
+                "row_count": sum(c["row_count"] or 0 for c in by_commodity),
+                "top_importers": top_importers,
+                "by_commodity": by_commodity,
+            }
+        )
+
     return {
         "year": year,
         "importer": importer,
         "arcs": arcs,
+        "origins": origins,
         "provenance": "EIA file import — historic corridor (country centroids)",
     }

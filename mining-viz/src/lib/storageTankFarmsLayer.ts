@@ -1,8 +1,10 @@
 import type { MiningLicense } from '../types';
 
 /** Leaflet LayersControl only registers overlays present on first mount — never gate on entity count. */
-export function storageTankFarmsLayerShouldMount(enabled: boolean): boolean {
-  return enabled;
+export function storageTankFarmsLayerShouldMount(enabled: boolean, mapZoom?: number): boolean {
+  if (!enabled) return false;
+  if (mapZoom != null && mapZoom < 9) return false;
+  return true;
 }
 
 export const STORAGE_OPERATOR_UNTAGGED = 'Operator not tagged';

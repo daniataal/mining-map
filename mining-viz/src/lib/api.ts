@@ -1,5 +1,6 @@
 import axios, { isCancel } from 'axios';
 import { useMemo } from 'react';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
 import {
   useQuery,
   useMutation,
@@ -192,11 +193,15 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-/** Viewport for GET /licenses bbox params (south/west/north/east). Kept for API typing; map loads ignore bbox. */
+/** Viewport for GET /licenses bbox params (south/west/north/east). */
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
-/** One GET /licenses per view mode; filters (country, commodity, etc.) run client-side only. */
+/** Map viewport fetch cap (backend clamps to 15000). */
+const LICENSE_VIEWPORT_LIMIT = 5000;
+const LICENSE_VIEWPORT_DEBOUNCE_MS = 450;
+const LICENSE_VIEWPORT_STALE_MS = 5 * 60_000;
+/** Legacy bulk load — prefer useLicensesForMap. */
 const LICENSE_BULK_LIMIT = 15_000;
 const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
 /** USGS global fallback — excluded from map country fetches (dominates shared SQL limits). */
@@ -362,6 +367,16 @@ export type UseLicensesResult = {
   bundleMode: LicenseBundleMode;
 };
 
+async function parseLicensesResponse(data: unknown): Promise<MiningLicense[]> {
+  if (Array.isArray(data)) return data as MiningLicense[];
+  if (data && typeof data === 'object' && 'error' in data) {
+    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
+    throw new Error(msg);
+  }
+  console.warn('[licenses] Expected array from /licenses, got:', data);
+  return [];
+}
+
 async function fetchLicenseBundleFromApi(
   sector: 'mining' | 'oil_and_gas' | undefined,
   signal?: AbortSignal,
@@ -375,13 +390,90 @@ async function fetchLicenseBundleFromApi(
       ...(sector ? { sector } : {}),
     },
   });
-  if (Array.isArray(data)) return data as MiningLicense[];
-  if (data && typeof data === 'object' && 'error' in data) {
-    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-    throw new Error(msg);
-  }
-  console.warn('[useLicenses] Expected array from /licenses, got:', data);
-  return [];
+  return parseLicensesResponse(data);
+}
+
+async function fetchLicensesViewportFromApi(
+  options: {
+    sector?: 'mining' | 'oil_and_gas';
+    bounds: LicenseViewportBounds;
+    countries?: string[];
+    signal?: AbortSignal;
+  },
+): Promise<MiningLicense[]> {
+  const { sector, bounds, countries, signal } = options;
+  const params: Record<string, string | number | boolean> = {
+    prefer_open_data: true,
+    limit: LICENSE_VIEWPORT_LIMIT,
+    min_lat: bounds.south,
+    max_lat: bounds.north,
+    min_lng: bounds.west,
+    max_lng: bounds.east,
+  };
+  if (sector) params.sector = sector;
+  if (countries?.length) params.countries = countries.join(',');
+  const { data } = await apiClient.get<unknown>('/licenses', {
+    signal,
+    timeout: 60_000,
+    params,
+  });
+  return parseLicensesResponse(data);
+}
+
+/** Viewport-scoped licenses for the map (debounced bbox). Country filters use `countries` param when set. */
+export function useLicensesForMap(options: {
+  sector?: 'mining' | 'oil_and_gas';
+  bounds: LicenseViewportBounds | null;
+  filterCountries?: string[];
+  enabled: boolean;
+}): UseLicensesResult {
+  const { sector, bounds, filterCountries = [], enabled } = options;
+  const debouncedBounds = useDebouncedValue(bounds, LICENSE_VIEWPORT_DEBOUNCE_MS);
+  const countriesKey = filterCountries.length ? filterCountries.join('|') : '';
+
+  const query = useQuery({
+    queryKey: ['licenses', 'viewport', sector, countriesKey, debouncedBounds] as const,
+    staleTime: LICENSE_VIEWPORT_STALE_MS,
+    gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: (previousData: MiningLicense[] | undefined) => previousData,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      if (filterCountries.length > 0) {
+        const hub: LicenseViewportBounds = debouncedBounds ?? {
+          south: -60,
+          west: -180,
+          north: 72,
+          east: 180,
+        };
+        return fetchLicensesViewportFromApi({
+          sector,
+          bounds: hub,
+          countries: filterCountries,
+          signal,
+        });
+      }
+      if (!debouncedBounds) return [];
+      return fetchLicensesViewportFromApi({ sector, bounds: debouncedBounds, signal });
+    },
+    enabled:
+      enabled &&
+      (filterCountries.length > 0 || debouncedBounds != null),
+  });
+
+  const stillLoadingCountryCount =
+    query.isLoading && !query.data?.length ? 1 : 0;
+  const failedCountryQueryCount = query.isError && !query.data?.length ? 1 : 0;
+
+  return {
+    data: query.data ?? [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error instanceof Error ? query.error : query.error ? new Error(String(query.error)) : null,
+    stillLoadingCountryCount,
+    failedCountryQueryCount,
+    bundleMode: licenseBundleModeFromSector(sector),
+  };
 }
 
 export const useLicenses = (sector?: 'mining' | 'oil_and_gas'): UseLicensesResult => {

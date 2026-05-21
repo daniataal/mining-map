@@ -27,6 +27,20 @@ export type EiaHistoricMapArc = {
   destination_country: string;
 };
 
+export type EiaHistoricOriginImporter = {
+  importer_name: string;
+  volume_bbl: number;
+  row_count: number;
+};
+
+export type EiaHistoricMapOrigin = {
+  origin_country: string;
+  volume_bbl: number;
+  row_count: number;
+  top_importers: EiaHistoricOriginImporter[];
+  by_commodity: { commodity_family: string; volume_bbl: number; row_count: number }[];
+};
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`EIA historic API ${res.status}`);
@@ -61,7 +75,12 @@ export function getEiaHistoricMap(params: {
   year: number;
   importer?: string;
   limit?: number;
-}): Promise<{ year: number; arcs: EiaHistoricMapArc[]; provenance?: string }> {
+}): Promise<{
+  year: number;
+  arcs: EiaHistoricMapArc[];
+  origins?: EiaHistoricMapOrigin[];
+  provenance?: string;
+}> {
   const q = new URLSearchParams({ year: String(params.year) });
   if (params.importer) q.set('importer', params.importer);
   if (params.limit != null) q.set('limit', String(params.limit));

@@ -261,7 +261,7 @@ services:
       - DB_USER=postgres
       - DB_PASSWORD=password
       - OIL_GRAPH_SYNC_ENABLED=true
-      - OIL_GRAPH_SYNC_INTERVAL_SECONDS=86400
+      - OIL_GRAPH_SYNC_INTERVAL_SECONDS=43200
       - OIL_GRAPH_SYNC_BACKOFF_SECONDS=3600
       - OIL_GRAPH_STORAGE_IMPORT_CAP=5000
       - OIL_INTEL_API_URL=http://oil-live-intel:8095
@@ -273,12 +273,38 @@ services:
       - JODI_SYNC_ENABLED=true
       - COMMODITY_COMTRADE_SYNC_ENABLED=true
       - UK_TRADE_MANIFEST_SYNC_ENABLED=true
+      - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
     volumes:
       - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/uk_trade_manifests:/data/uk_trade_manifests:ro
     depends_on:
       db:
         condition: service_healthy
       oil-live-intel:
+        condition: service_healthy
+
+  uk-trade-manifest-sync-worker:
+    image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: mining-uk-trade-manifest-sync-worker
+    restart: always
+    command: ["python", "uk_trade_manifest_sync_worker.py"]
+    env_file:
+      - backend.env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
+      - UK_TRADE_MANIFEST_SYNC_ENABLED=true
+      - UK_MANIFEST_SYNC_INTERVAL_SECONDS=86400
+      - UK_MANIFEST_SYNC_BACKOFF_SECONDS=3600
+    volumes:
+      - ./data/uk_trade_manifests:/data/uk_trade_manifests:ro
+    depends_on:
+      db:
         condition: service_healthy
 
   eia-historic-sync-worker:

@@ -57,7 +57,7 @@ import OilLiveMapOverlays, {
 import LiveDataMapLayersPanel from '../features/live-data/LiveDataMapLayersPanel';
 import EiaHistoricMapLayer from '../features/live-data/EiaHistoricMapLayer';
 import MacroTradeFlowsMapLayer from '../features/live-data/MacroTradeFlowsMapLayer';
-import type { EiaHistoricMapArc } from '../api/eiaHistoricApi';
+import type { EiaHistoricMapArc, EiaHistoricMapOrigin } from '../api/eiaHistoricApi';
 import type { MacroTradeFlow } from '../api/oilLiveApi';
 import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
@@ -233,7 +233,8 @@ interface MapComponentProps {
   licensesRefetching?: boolean;
   /** Optional status line while some country feeds are still loading or failed (non-blocking). */
   licensesSecondaryStatus?: string | null;
-  /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
+  /** Debounced map bounds → GET /licenses?min_lat&… (sparse wire). */
+  onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds | null) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -307,6 +308,12 @@ interface MapComponentProps {
   /** EIA historic file-import corridor arcs (purple dashed). */
   eiaHistoricMapEnabled?: boolean;
   eiaHistoricMapArcs?: EiaHistoricMapArc[];
+  eiaHistoricMapOrigins?: EiaHistoricMapOrigin[];
+  eiaHistoricMapYear?: number;
+  eiaHistoricShowCorridors?: boolean;
+  onEiaHistoricSelectImporter?: (importerName: string) => void;
+  /** Hide mining license clusters so historic EIA points are clickable */
+  suppressLicenseClusters?: boolean;
   /** Show OSM petroleum infrastructure on mining/global/oil views. */
   showInfrastructureLayers?: boolean;
   infrastructureLayerVisibility?: Record<OsmPetroleumLayerId, boolean>;
@@ -593,6 +600,7 @@ export default function MapComponent({
   getDealRoomForLicense,
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
+  onLicenseMapViewportChange,
   storageEntities = [],
   onStorageInViewCountChange,
   oilLiveOverlaysEnabled = false,
@@ -616,6 +624,11 @@ export default function MapComponent({
   liveDataFlyTarget = null,
   eiaHistoricMapEnabled = false,
   eiaHistoricMapArcs = [],
+  eiaHistoricMapOrigins = [],
+  eiaHistoricMapYear,
+  eiaHistoricShowCorridors = false,
+  onEiaHistoricSelectImporter,
+  suppressLicenseClusters = false,
   showInfrastructureLayers = false,
   infrastructureLayerVisibility,
   onInfrastructureLayerChange,
@@ -629,6 +642,11 @@ export default function MapComponent({
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isLicenseMapView =
+        viewModeKey === 'mining' ||
+        viewModeKey === 'oil_and_gas' ||
+        viewModeKey === 'global' ||
+        viewModeKey === 'suppliers';
     const isLiveDataView = oilLiveSidebarActive;
     const { data: oilLiveSyncStatus } = useQuery({
         queryKey: ['oil-live-sync-status-map'],
@@ -1745,6 +1763,11 @@ export default function MapComponent({
                 />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 <ViewportBoundsTracker
+                    active={Boolean(onLicenseMapViewportChange) && isLicenseMapView && !isLiveDataView}
+                    debounceMs={450}
+                    onBoundsChange={(bbox) => onLicenseMapViewportChange?.(bbox)}
+                />
+                <ViewportBoundsTracker
                     active={isOilAndGasView}
                     debounceMs={100}
                     onBoundsChange={setOilGasMapViewport}
@@ -1879,10 +1902,14 @@ export default function MapComponent({
                             onEntityClick={onOilLiveEntityClick}
                         />
                     )}
-                    {eiaHistoricMapEnabled && eiaHistoricMapArcs.length > 0 && (
+                    {eiaHistoricMapEnabled && (eiaHistoricMapArcs.length > 0 || (eiaHistoricMapOrigins?.length ?? 0) > 0) && (
                         <EiaHistoricMapLayer
                             enabled={eiaHistoricMapEnabled}
                             arcs={eiaHistoricMapArcs}
+                            origins={eiaHistoricMapOrigins}
+                            year={eiaHistoricMapYear}
+                            showCorridors={eiaHistoricShowCorridors}
+                            onSelectImporter={onEiaHistoricSelectImporter}
                         />
                     )}
                     {macroTradeFlowsEnabled && macroTradeFlows.length > 0 && (
@@ -1912,6 +1939,7 @@ export default function MapComponent({
                             <StorageTankFarmsMapLayer
                                 entities={storageEntities}
                                 enabled={isOilAndGasView && onGroundVisible}
+                                mapZoom={petroleumDetailZoom}
                                 selectedId={selectedItem?.entityKind === 'storage_terminal' ? selectedItem.id : null}
                                 onSelect={(item) => {
                                     onSelectMaritimeVessel(null);
@@ -1943,7 +1971,7 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
-                {onGroundVisible && (
+                {onGroundVisible && !suppressLicenseClusters && (
                 <MarkerClusterGroup
                     showCoverageOnHover={false}
                     iconCreateFunction={licenseClusterIconCreate}
