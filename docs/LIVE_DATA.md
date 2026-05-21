@@ -207,6 +207,15 @@ See `.env.example` for the full list.
 
 ### Production VM runbook (SSH)
 
+**One-shot diagnostic** (copy to VM, or use repo script after deploy):
+
+```bash
+cd /opt/mining-map
+chmod +x scripts/vm-live-data-diagnose.sh
+./scripts/vm-live-data-diagnose.sh          # includes graph-sync POST (~minutes)
+./scripts/vm-live-data-diagnose.sh --dry-run   # probes only, no graph-sync
+```
+
 Ranked root causes when Live Data shows **0 terminals / 0 tankers** and **In database —**:
 
 1. **Graph-sync never populated `oil_terminals`** — `OIL_INTEL_SEED_ON_STARTUP=false` and deploy does not auto-run admin graph-sync; `oil-live-graph-sync-worker` runs once on start then every 24h (can fail silently on first pass).

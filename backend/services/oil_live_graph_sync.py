@@ -456,7 +456,7 @@ def _upsert_commercial_event(
     return cur.rowcount > 0
 
 
-def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[str, int]:
+def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[str, Any]:
     cur.execute("SELECT COUNT(*)::int FROM oil_terminals")
     existing_count = int(cur.fetchone()[0] or 0)
     # Refresh OSM when DB is still seed-sized; cached snapshot avoids hammering Overpass every run.
@@ -470,6 +470,10 @@ def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[s
             payload = cached_payload
             entities = cached_entities
             force_refresh = False
+    storage_warnings = [
+        str(w) for w in (payload.get("limitations") or []) if str(w).strip()
+    ][:8]
+    data_source = payload.get("data_source")
     imported = 0
     companies = 0
     for entity in entities[:cap]:
@@ -528,14 +532,29 @@ def _import_storage_terminals(cur: Any, cap: int = STORAGE_IMPORT_CAP) -> dict[s
                 companies += 1
     cur.execute("SELECT COUNT(*)::int FROM oil_terminals")
     terminal_count = int(cur.fetchone()[0] or 0)
-    return {
+    result: dict[str, Any] = {
         "terminals_imported": imported,
         "companies_upserted": companies,
         "candidates": len(entities),
         "terminal_count": terminal_count,
         "force_refresh": force_refresh,
         "existing_before_import": existing_count,
+        "data_source": data_source,
     }
+    if storage_warnings:
+        result["warnings"] = storage_warnings
+    if len(entities) < 100 and terminal_count < 50:
+        result["status"] = "error"
+        result["error"] = (
+            "Few storage candidates — Overpass may be blocked on this host. "
+            "Set STORAGE_SKIP_LIVE_OVERPASS=true in backend.env and re-run graph-sync."
+        )
+    elif imported == 0 and terminal_count < 50:
+        result["status"] = "warning"
+        result["error"] = "No new terminals imported; DB still sparse."
+    else:
+        result["status"] = "ok"
+    return result
 
 
 def _index_licenses(cur: Any) -> dict[str, int]:
