@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const defaultScanBatchLimit = 500
 
 const (
 	TypeTermLead       = "possible_term_contract_lead"
@@ -38,7 +42,23 @@ func ScanRecentPortCalls(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	return created, err
 }
 
+func scanBatchLimit() int {
+	raw := os.Getenv("OIL_OPPORTUNITY_SCAN_LIMIT")
+	if raw == "" {
+		return defaultScanBatchLimit
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return defaultScanBatchLimit
+	}
+	if n > 5000 {
+		return 5000
+	}
+	return n
+}
+
 func scanTermLeads(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	limit := scanBatchLimit()
 	rows, err := pool.Query(ctx, `
 		SELECT pc.terminal_id, t.name, t.operator_name, pc.mmsi, COUNT(*)::int
 		FROM oil_port_calls pc
@@ -46,7 +66,9 @@ func scanTermLeads(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 		WHERE pc.status='closed' AND pc.arrival_ts > now() - interval '90 days'
 		GROUP BY pc.terminal_id, t.name, t.operator_name, pc.mmsi
 		HAVING COUNT(*) >= 3
-	`)
+		ORDER BY COUNT(*) DESC
+		LIMIT $1
+	`, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -76,6 +98,7 @@ func scanTermLeads(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 }
 
 func scanCargoFlip(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	limit := scanBatchLimit()
 	rows, err := pool.Query(ctx, `
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, t.name, pc.event_type,
 			pc.duration_hours, pc.confidence, pc.draft_delta
@@ -85,7 +108,9 @@ func scanCargoFlip(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 		  AND pc.event_type='possible_loading'
 		  AND pc.duration_hours < 48
 		  AND pc.arrival_ts > now() - interval '14 days'
-	`)
+		ORDER BY pc.arrival_ts DESC
+		LIMIT $1
+	`, limit)
 	if err != nil {
 		return 0, err
 	}
