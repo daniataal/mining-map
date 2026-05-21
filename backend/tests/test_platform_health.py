@@ -40,6 +40,27 @@ class PlatformHealthTests(unittest.TestCase):
             "env": {},
         },
     )
+    def test_build_platform_health_degraded_when_oil_live_down(self, _mock_ai):
+        body = build_platform_health(
+            redis_enabled=True,
+            redis_ping=lambda: mock.Mock(ping=mock.Mock(return_value=True)),
+            get_snapshot_meta=lambda: {"available": True, "stale": False},
+            get_maritime_stats=lambda: {"worker": {"status": "ok"}, "redis_snapshot": {}},
+            get_oil_live_health=lambda: {"ok": False, "error": "connection refused", "url": "http://oil-live-intel:8095/api/oil-live/health"},
+        )
+        self.assertEqual(body["status"], "degraded")
+        self.assertFalse(body["oil_live_intel"]["ok"])
+
+    @mock.patch(
+        "backend.services.platform_health.get_ai_provider_status",
+        return_value={
+            "groq": "configured",
+            "openrouter": "missing",
+            "pollinations_enabled": False,
+            "ready": True,
+            "env": {},
+        },
+    )
     def test_build_platform_health_degraded_when_redis_down(self, _mock_ai):
         body = build_platform_health(
             redis_enabled=True,

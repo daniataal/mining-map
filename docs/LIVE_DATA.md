@@ -20,6 +20,7 @@
 | **Company dossier link** | Done | Shipper/consignee + saved companies → opens existing license dossier when `supplier_id` is set. |
 | **USITC macro trade** | Done | `backend/services/usitc_dataweb.py` on graph-sync (`USITC_DATAWEB_API_KEY`). |
 | **EIA crude imports + refinery throughput** | Done | `backend/services/eia_imports.py` on graph-sync; new `oil_refinery_throughput` table; `EIA_API_KEY` optional (step skipped if unset). |
+| **EIA historic company imports (files)** | Done | `backend/services/eia_historic_imports.py` + Live Data tab **Historic (EIA)**; user-provided `impa*.xls/xlsx` only (not live AIS). |
 | **OpenSanctions screening** | Done | `backend/services/opensanctions_screening.py` on graph-sync; non-blocking UI chip; key optional. |
 | **GLEIF LEI batch + Wikidata enrichment** | Done | `backend/services/gleif_batch.py` + `backend/services/wikidata_company_enrichment.py` populate `oil_companies.lei` + `wikidata_qid`. LEI/sanctions denormalised onto `meridian_cargo_records` post-rebuild via `oil_live_mcr_denormalize.py`. |
 | **Search (Elasticsearch)** | Done | `oil-live-search-indexer` syncs MCRs, companies, terminals, vessels into Elasticsearch; `/api/oil-live/search` + `/api/oil-live/search/health`; in-panel search bar with grouped hits. Degrades gracefully when ES is down. See [Search](#search). |
@@ -119,6 +120,33 @@ docker compose up -d maritime-worker oil-live-intel-worker
 - **maritime-worker** → Redis snapshot → canvas vessel layer
 - **oil-live-intel-worker** → terminal geofence port calls → intelligence cards + WebSocket
 
+### EIA historic imports (user files — not API scrape)
+
+Download Petroleum Supply Monthly **Imports** workbooks from EIA (e.g. `impa00d.xls` … `impa24d.xlsx`) into a folder such as `~/Downloads/EIA_downloads`. Meridian does **not** fetch these from eia.gov automatically.
+
+```bash
+# Optional: point backend at your folder (default ~/Downloads/EIA_downloads)
+export EIA_DOWNLOADS_DIR="$HOME/Downloads/EIA_downloads"
+
+# Ingest all impa*.xls(x) + import.xlsx into mining_db.eia_historic_imports
+curl -X POST "http://localhost:8000/api/admin/eia-historic-imports/ingest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" | jq .
+
+# Or pass a custom path in the body
+curl -X POST "http://localhost:8000/api/admin/eia-historic-imports/ingest" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/EIA_downloads"}' | jq .
+
+# Query (after ingest)
+curl -sf "http://localhost:8000/api/eia-historic-imports/summary?importer=Chevron" | jq .
+curl -sf "http://localhost:8000/api/eia-historic-imports/map?year=2020&importer=Chevron" | jq .
+```
+
+In the app: **Live Data** → intel drawer tab **Historic (EIA)** → filter importer + year → enable **Show on map** for purple dashed origin→U.S. Gulf arcs. Provenance badge: *EIA file import — historic, not real-time*.
+
+**Column mapping (PSM Imports sheet):** `R_S_NAME` = U.S. importer company; `CNTRY_NAME` = origin country; `PROD_NAME` / `PROD_CODE` = product; `QUANTITY` = thousand barrels (stored as barrels ×1000); `RPT_PERIOD` = month-end date; `PORT_CITY` / `PORT_STATE` = U.S. discharge port.
+
 ### Other admin syncs (optional)
 
 ```bash
@@ -167,13 +195,61 @@ See `.env.example` for the full list.
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
+| **In database** shows `—` for terminals/port calls/cargo | `GET /api/oil-live/sync-status` failed (oil-live-intel down or browser not proxied to :8095) | VM checklist below; open app via **Caddy :8080** or **frontend :5173**, not backend :8000 alone |
 | Only 6 terminal dots (Ras Tanura, Fujairah, …) | Graph-sync never run | Run `POST /api/admin/oil-live/graph-sync` |
 | No terminals at all | oil-live-intel not started / migrations missing | `docker compose up -d oil-live-intel`; check logs |
 | No vessels | No AIS key or workers stopped | Set `AISSTREAM_API_KEY`; start `maritime-worker` + `oil-live-intel-worker` |
+| Platform banner: maritime worker SSL / certificate expired | AISStream upstream TLS cert expired (`stream.aisstream.io`) | Wait for AISStream renewal; **does not block terminals** if graph-sync ran. Dev-only: `MARITIME_SSL_VERIFY=0` in `backend.env` |
 | Terminals but no cargo records | No closed port calls or rebuild skipped | Re-run graph-sync; check `curl …/sync-status` for `cargo_record_count` |
 | Cargo tab empty, sync-status shows port calls | Synthetic rebuild failed | Check `OIL_INTEL_INTERNAL_KEY`; manual synthetic-bol-rebuild curl above |
 | Live Data tab errors in console | Backend/intel not reachable | Verify `curl …/api/oil-live/health`; check Vite proxy / `VITE_OIL_INTEL_BASE` |
 | Overpass timeout in Docker | Live OSM fetch blocked | Set `STORAGE_SKIP_LIVE_OVERPASS=true` (uses DB cache + bulk seed) |
+
+### Production VM runbook (SSH)
+
+Ranked root causes when Live Data shows **0 terminals / 0 tankers** and **In database —**:
+
+1. **Graph-sync never populated `oil_terminals`** — `OIL_INTEL_SEED_ON_STARTUP=false` and deploy does not auto-run admin graph-sync; `oil-live-graph-sync-worker` runs once on start then every 24h (can fail silently on first pass).
+2. **`oil-live-intel` container not running or unhealthy** — backend `depends_on` may block startup; check `docker compose ps`.
+3. **Browser cannot reach `/api/oil-live/*`** — use **Caddy** (`http://<host>:8080`) or **frontend :5173** (Vite proxies to oil-live-intel). Opening only **backend :8000** does not serve the React app or oil-live routes.
+4. **Live AIS only** — expired AISStream certificate breaks **maritime-worker** (0 tankers) but **terminals should still appear** after graph-sync.
+
+Required secrets on the VM (`/opt/mining-map/backend.env`): `ADMIN_TOKEN`, `OIL_INTEL_INTERNAL_KEY` (must match between backend and oil-live-intel), `AISSTREAM_API_KEY` (live vessels only).
+
+```bash
+cd /opt/mining-map
+
+# 1) Stack health
+sudo docker compose -f docker-compose.prod.yml ps
+sudo docker compose -f docker-compose.prod.yml ps oil-live-intel oil-live-graph-sync-worker maritime-worker
+
+# 2) oil-live-intel direct (should return JSON with sync.terminal_count)
+curl -sf http://localhost:8095/api/oil-live/health | jq .
+curl -sf http://localhost:8095/api/oil-live/sync-status | jq .
+
+# 3) Same routes via Caddy (what the browser should use)
+curl -sf http://localhost:8080/api/oil-live/health | jq .
+curl -sf http://localhost:8080/api/oil-live/sync-status | jq .
+
+# 4) Platform health (includes oil_live_intel probe from backend)
+curl -sf http://localhost:8000/api/health | jq '.oil_live_intel, .maritime_worker'
+
+# 5) One-time graph population (replace token; takes several minutes)
+curl -sf -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
+  -H "X-Admin-Token: YOUR_ADMIN_TOKEN" | jq .
+
+# 6) Logs
+sudo docker logs oil-live-intel --tail 80
+sudo docker logs mining-oil-live-graph-sync-worker --tail 80
+sudo docker logs mining-maritime-worker --tail 40
+
+# 7) Re-check counts (expect terminal_count >> 6)
+curl -sf http://localhost:8095/api/oil-live/sync-status | jq '{terminal_count, port_call_count, cargo_record_count, last_graph_sync_at}'
+```
+
+Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYNC_ON_STARTUP=true` on the **backend** service in `docker-compose.prod.yml`, then recreate backend after oil-live-intel is healthy.
+
+After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
 **Coverage banner** (intel drawer header) shows: terminal count, live vessels, open opportunities, last graph-sync time. Ops endpoint:
 

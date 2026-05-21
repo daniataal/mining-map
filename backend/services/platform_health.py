@@ -16,6 +16,7 @@ def build_platform_health(
     redis_ping,
     get_snapshot_meta,
     get_maritime_stats,
+    get_oil_live_health=None,
 ) -> dict[str, Any]:
     redis_ok = False
     redis_error: Optional[str] = None
@@ -45,8 +46,16 @@ def build_platform_health(
     worker_healthy = worker_status in {"ok", "running", "idle"}
     snapshot_ok = bool(maritime_snapshot.get("available")) and not bool(maritime_snapshot.get("stale"))
 
+    oil_live_intel: dict[str, Any] = {"ok": None, "error": None, "terminal_count": None, "url": None}
+    if get_oil_live_health is not None:
+        try:
+            oil_live_intel = get_oil_live_health()
+        except Exception as exc:
+            oil_live_intel = {"ok": False, "error": str(exc)}
+
     ai_providers = get_ai_provider_status()
-    platform_ok = redis_ok and (worker_healthy or snapshot_ok)
+    oil_live_ok = oil_live_intel.get("ok") is not False
+    platform_ok = redis_ok and (worker_healthy or snapshot_ok) and oil_live_ok
     status = "ok" if platform_ok and ai_providers.get("ready") else "degraded"
 
     return {
@@ -59,5 +68,6 @@ def build_platform_health(
         "ai_providers": ai_providers,
         "maritime_snapshot": maritime_snapshot,
         "maritime_worker": maritime_worker,
+        "oil_live_intel": oil_live_intel,
         "status": status,
     }

@@ -32,6 +32,13 @@ export interface PlatformHealthResponse {
     last_error?: string | null;
     last_success_at?: string | null;
   };
+  oil_live_intel?: {
+    ok?: boolean | null;
+    error?: string | null;
+    url?: string | null;
+    terminal_count?: number | null;
+    cargo_record_count?: number | null;
+  };
 }
 
 export async function fetchPlatformHealth(): Promise<PlatformHealthResponse> {
@@ -75,6 +82,14 @@ export function platformHealthIssues(payload: PlatformHealthResponse | undefined
       payload.maritime_worker?.last_error
         ? `Maritime worker: ${workerStatus} (${payload.maritime_worker.last_error})`
         : `Maritime worker: ${workerStatus}`,
+    );
+  }
+  const oilLive = payload.oil_live_intel;
+  if (oilLive?.ok === false) {
+    issues.push(
+      oilLive.error
+        ? `Live Data (oil-live-intel) unreachable: ${oilLive.error}. Check oil-live-intel container and use port :8080 (Caddy) or :5173 with /api/oil-live proxy — not :8000 alone.`
+        : 'Live Data (oil-live-intel) unreachable — Live Data map counts will show unavailable until oil-live-intel is healthy.',
     );
   }
   const ai = payload.ai_providers;
