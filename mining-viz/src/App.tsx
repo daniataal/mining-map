@@ -192,10 +192,7 @@ export default function App() {
     bounds: licenseMapViewport,
     enabled: licenseMapFetchEnabled,
   });
-  const licensesMapSecondaryStatus = useMemo(() => {
-    if (!isFetching || isLoading || rawData.length === 0) return null;
-    return t('מרענן מאגר רישיונות…', 'Refreshing license bundle…');
-  }, [isFetching, isLoading, rawData.length, t]);
+  // Viewport loads use keepPreviousData — no "refreshing bundle" banner on pan (map stays instant).
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
@@ -1337,14 +1334,8 @@ export default function App() {
                     !fetchError &&
                     !(viewMode === 'oil_and_gas' && storageError)
                   }
-                  licensesRefetching={
-                    viewMode !== 'route_planner' &&
-                    (viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                    isFetching &&
-                    !isLoading &&
-                    !fetchError
-                  }
-                  licensesSecondaryStatus={viewMode === 'route_planner' ? null : licensesMapSecondaryStatus}
+                  licensesRefetching={false}
+                  licensesSecondaryStatus={null}
                   setSelectedItem={handleSelectItem}
                   handleOpenDossier={handleOpenDossier}
                   mapCenter={mapCenter}
