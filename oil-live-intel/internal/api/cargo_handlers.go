@@ -44,7 +44,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 		args = append(args, mmsi)
 		n++
 	}
-	q += fmt.Sprintf(` ORDER BY event_date DESC NULLS LAST, confidence DESC LIMIT $%d`, n)
+	q += fmt.Sprintf(` ORDER BY triangulation_score DESC NULLS LAST, confidence DESC, event_date DESC NULLS LAST LIMIT $%d`, n)
 	args = append(args, limit)
 
 	rows, err := s.Pool.Query(r.Context(), q, args...)

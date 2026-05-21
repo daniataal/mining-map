@@ -80,12 +80,14 @@ class StorageTerminalsSeedTests(unittest.TestCase):
         self.assertIn("curated_storage_cushing_crude_oil_storage_hub_united_states", ids)
         self.assertNotIn("curated_storage_rotterdam_europoort_tank_storage_netherlands", ids)
 
+    @patch("backend.services.storage_terminals._load_bulk_osm_seed_elements", return_value=[])
     @patch("backend.services.storage_terminals.fetch_overpass_elements")
     @patch("backend.services.storage_terminals._load_storage_terminals_from_db")
     def test_get_storage_terminals_includes_curated_seed_when_overpass_empty(
         self,
         mock_load_db,
         mock_fetch_overpass,
+        _mock_bulk,
     ):
         mock_load_db.return_value = ([], None)
         mock_fetch_overpass.return_value = []

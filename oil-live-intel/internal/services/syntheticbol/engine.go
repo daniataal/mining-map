@@ -70,40 +70,55 @@ type mcrDraft struct {
 	Metadata             map[string]any
 }
 
+type recipeFn struct {
+	name string
+	run  func(context.Context, *pgxpool.Pool) ([]mcrDraft, error)
+}
+
 // RunRebuild executes triangulation recipes A–F and upserts MCR rows.
 func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (BuildResult, error) {
 	res := BuildResult{Recipes: map[string]int{}}
-	recipes := []func(context.Context, *pgxpool.Pool) ([]mcrDraft, error){
-		recipeLikelyLoad,
-		recipeCorridorTrade,
-		recipeTenderBuyer,
-		recipeSulfurBulk,
-		recipeGovOfftake,
-		recipeRepeatDealer,
+	recipes := []recipeFn{
+		{RecipeLikelyLoad, recipeLikelyLoad},
+		{RecipeCorridor, recipeCorridorTrade},
+		{RecipeTenderBuyer, recipeTenderBuyer},
+		{RecipeSulfurBulk, recipeSulfurBulk},
+		{RecipeGovOfftake, recipeGovOfftake},
+		{RecipeRepeatDealer, recipeRepeatDealer},
 	}
-	for _, fn := range recipes {
-		drafts, err := fn(ctx, pool)
+	for _, rf := range recipes {
+		drafts, err := rf.run(ctx, pool)
 		if err != nil {
-			res.Errors = append(res.Errors, err.Error())
-			log.Warn().Err(err).Msg("synthetic bol recipe failed")
+			res.Errors = append(res.Errors, fmt.Sprintf("%s: %s", rf.name, err.Error()))
+			log.Warn().Err(err).Str("recipe", rf.name).Msg("synthetic bol recipe failed")
 			continue
 		}
+		var upserted int
+		var skipped int
 		for i := range drafts {
 			d := &drafts[i]
 			if d.TriangulationScore < 2 {
+				skipped++
 				continue
 			}
 			applyDischargeFallback(ctx, pool, d)
 			ok, err := upsertMCR(ctx, pool, *d)
 			if err != nil {
-				res.Errors = append(res.Errors, err.Error())
+				res.Errors = append(res.Errors, fmt.Sprintf("%s: %s", rf.name, err.Error()))
 				continue
 			}
 			if ok {
+				upserted++
 				res.Upserted++
 				res.Recipes[d.Recipe]++
 			}
 		}
+		log.Info().
+			Str("recipe", rf.name).
+			Int("drafts", len(drafts)).
+			Int("upserted", upserted).
+			Int("skipped_low_score", skipped).
+			Msg("synthetic bol recipe batch")
 	}
 	return res, nil
 }
@@ -337,10 +352,15 @@ func recipeTenderBuyer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, err
 		SELECT id, title, summary, country, partner_country, commodity_family, company_id, occurred_at
 		FROM oil_commercial_events
 		WHERE event_type = 'procurement_notice'
-		  AND (commodity_family IS NOT NULL OR summary ILIKE '%diesel%' OR summary ILIKE '%gasoil%' OR title ILIKE '%fuel%')
-		  AND occurred_at > now() - interval '365 days'
-		ORDER BY occurred_at DESC NULLS LAST
-		LIMIT 200
+		  AND (
+		    commodity_family IS NOT NULL AND commodity_family <> ''
+		    OR summary ILIKE '%diesel%' OR summary ILIKE '%gasoil%' OR summary ILIKE '%gas oil%'
+		    OR title ILIKE '%fuel%' OR title ILIKE '%diesel%' OR title ILIKE '%petrol%'
+		    OR title ILIKE '%petroleum%' OR title ILIKE '%gas oil%' OR title ILIKE '%natural gas%'
+		    OR title ILIKE '%oil%' OR title ILIKE '% LPG%' OR title ILIKE '% LNG%'
+		  )
+		ORDER BY created_at DESC NULLS LAST
+		LIMIT 500
 	`)
 	if err != nil {
 		return nil, err
@@ -361,7 +381,9 @@ func recipeTenderBuyer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, err
 		if family != nil && *family != "" {
 			fam = *family
 		}
-		hasImport := countryHasHSImport(ctx, pool, country, "2710")
+		hasImport := countryHasHSImport(ctx, pool, country, "2710") ||
+			countryHasHSImport(ctx, pool, country, "2709") ||
+			countryHasMacroTrade(ctx, pool, country, "2710")
 		score := 2
 		evidence := []any{
 			"TED/procurement notice matched petroleum keywords",
@@ -370,8 +392,16 @@ func recipeTenderBuyer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, err
 		sources := []any{map[string]string{"name": "oil_commercial_events", "event_type": "procurement_notice"}}
 		if hasImport {
 			score++
-			evidence = append(evidence, fmt.Sprintf("Comtrade import HS 2710 for %s", country))
+			evidence = append(evidence, fmt.Sprintf("Macro import context for %s (HS 2710/2709)", country))
 			sources = append(sources, map[string]string{"name": "oil_trade_flows", "hs_code": "2710"})
+		}
+		if opName, opID := topTerminalOperatorInCountry(ctx, pool, country); opName != "" {
+			score++
+			evidence = append(evidence, fmt.Sprintf("Terminal operator in country: %s", opName))
+			sources = append(sources, map[string]string{"name": "oil_terminals", "field": "operator"})
+			if companyID == nil {
+				companyID = opID
+			}
 		}
 		buyer := title
 		if len(buyer) > 80 {
@@ -401,6 +431,18 @@ func recipeTenderBuyer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, err
 }
 
 func recipeSulfurBulk(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
+	out, err := recipeSulfurFromPortCalls(ctx, pool)
+	if err != nil {
+		return out, err
+	}
+	terminalDrafts, err := recipeSulfurFromTerminals(ctx, pool)
+	if err != nil {
+		return out, err
+	}
+	return append(out, terminalDrafts...), nil
+}
+
+func recipeSulfurFromPortCalls(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, pc.duration_hours, pc.arrival_ts,
 			t.name, t.operator_name, t.country, t.products,
@@ -481,6 +523,74 @@ func recipeSulfurBulk(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, erro
 	return out, rows.Err()
 }
 
+func recipeSulfurFromTerminals(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT t.id, t.name, t.operator_name, t.country,
+			ST_Y(t.geom::geometry) AS lat, ST_X(t.geom::geometry) AS lon
+		FROM oil_terminals t
+		WHERE 'sulfur' = ANY(t.products)
+		ORDER BY t.confidence DESC NULLS LAST
+		LIMIT 40
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []mcrDraft
+	for rows.Next() {
+		var tid uuid.UUID
+		var tname, operator, country string
+		var lat, lon float64
+		if err := rows.Scan(&tid, &tname, &operator, &country, &lat, &lon); err != nil {
+			return out, err
+		}
+		hasExport := countryHasHSExport(ctx, pool, country, "2802")
+		score := 2
+		evidence := []any{
+			fmt.Sprintf("Sulfur terminal tagged: %s", tname),
+			"Terminal products include sulfur (no AIS visit required)",
+		}
+		sources := []any{map[string]string{"name": "oil_terminals", "field": "products"}}
+		if hasExport {
+			score++
+			evidence = append(evidence, fmt.Sprintf("Comtrade HS 2802 export from %s", country))
+			sources = append(sources, map[string]string{"name": "oil_trade_flows", "hs_code": "2802"})
+		}
+		shipper := operator
+		if shipper == "" {
+			shipper = tname
+		}
+		shipperID, _ := resolveCompany(ctx, pool, shipper, country)
+		tonnes := 25000.0
+		now := time.Now().UTC().Add(-72 * time.Hour)
+		fp := fingerprint(RecipeSulfurBulk, "terminal", tid.String())
+		out = append(out, mcrDraft{
+			Fingerprint:          fp,
+			Recipe:               RecipeSulfurBulk,
+			CommodityFamily:      "sulfur",
+			Confidence:           0.6,
+			TriangulationScore:   score,
+			ShipperName:          strPtr(shipper),
+			ShipperCompanyID:     shipperID,
+			LoadTerminalID:       &tid,
+			LoadPortName:         strPtr(tname),
+			LoadCountry:          strPtr(country),
+			CommodityDescription: strPtr("Elemental sulfur bulk export (terminal + trade)"),
+			VolumeBestEstimate:   &tonnes,
+			VolumeMethod:         strPtr("terminal_capacity_hint"),
+			VolumeUnit:           "mt",
+			EventDate:            &now,
+			CorridorLoadLat:      &lat,
+			CorridorLoadLng:      &lon,
+			EvidenceChain:        evidence,
+			Sources:              sources,
+			Metadata:             map[string]any{"terminal_only": true},
+		})
+	}
+	return out, rows.Err()
+}
+
 func recipeGovOfftake(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
 	if !tableExists(ctx, pool, "oil_commercial_events") {
 		return nil, nil
@@ -489,10 +599,13 @@ func recipeGovOfftake(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, erro
 		SELECT id, title, summary, country, company_id, occurred_at, raw
 		FROM oil_commercial_events
 		WHERE event_type = 'gov_contract'
-		  AND (summary ILIKE '%fuel%' OR summary ILIKE '%petroleum%' OR title ILIKE '%fuel%')
-		  AND occurred_at > now() - interval '730 days'
-		ORDER BY occurred_at DESC NULLS LAST
-		LIMIT 100
+		  AND (
+		    summary ILIKE '%fuel%' OR summary ILIKE '%petroleum%' OR summary ILIKE '%diesel%'
+		    OR title ILIKE '%fuel%' OR title ILIKE '%oil%' OR commodity_family IN ('refined', 'crude', 'gas')
+		  )
+		  AND COALESCE(occurred_at, created_at) > now() - interval '730 days'
+		ORDER BY COALESCE(occurred_at, created_at) DESC NULLS LAST
+		LIMIT 200
 	`)
 	if err != nil {
 		return nil, err
@@ -509,7 +622,9 @@ func recipeGovOfftake(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, erro
 		if err := rows.Scan(&id, &title, &summary, &country, &companyID, &occurred, &raw); err != nil {
 			return out, err
 		}
-		hasMacro := countryHasHSExport(ctx, pool, "United States", "2710") || countryHasHSExport(ctx, pool, country, "2710")
+		hasMacro := countryHasHSExport(ctx, pool, "United States", "2710") ||
+			countryHasHSExport(ctx, pool, country, "2710") ||
+			countryHasMacroTrade(ctx, pool, "United States", "2710")
 		score := 2
 		evidence := []any{"USAspending/gov contract petroleum keyword match", title}
 		sources := []any{map[string]string{"name": "oil_commercial_events", "event_type": "gov_contract"}}
@@ -517,6 +632,11 @@ func recipeGovOfftake(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, erro
 			score++
 			evidence = append(evidence, "Macro refined export context (HS 2710)")
 			sources = append(sources, map[string]string{"name": "oil_trade_flows", "hs_code": "2710"})
+		}
+		if termName, termCountry := usRefinedTerminalHint(ctx, pool); termName != "" {
+			score++
+			evidence = append(evidence, fmt.Sprintf("US storage hub context: %s (%s)", termName, termCountry))
+			sources = append(sources, map[string]string{"name": "oil_terminals", "field": "us_hub"})
 		}
 		var rawMap map[string]any
 		_ = json.Unmarshal(raw, &rawMap)
@@ -556,9 +676,9 @@ func recipeRepeatDealer(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, er
 			ST_Y(t.geom::geometry) AS lat, ST_X(t.geom::geometry) AS lon
 		FROM oil_port_calls pc
 		JOIN oil_terminals t ON t.id = pc.terminal_id
-		WHERE pc.status = 'closed' AND pc.arrival_ts > now() - interval '90 days'
+		WHERE pc.status = 'closed' AND pc.arrival_ts > now() - interval '180 days'
 		GROUP BY pc.terminal_id, t.name, t.operator_name, t.country, pc.mmsi, t.geom
-		HAVING COUNT(*) >= 3
+		HAVING COUNT(*) >= 2
 	`)
 	if err != nil {
 		return nil, err
@@ -646,7 +766,8 @@ func upsertMCR(ctx context.Context, pool *pgxpool.Pool, d mcrDraft) (bool, error
 	if unit == "" {
 		unit = "bbl"
 	}
-	tag, err := pool.Exec(ctx, `
+	var insertedID uuid.UUID
+	err := pool.QueryRow(ctx, `
 		INSERT INTO meridian_cargo_records (
 			synthetic_bol_id, fingerprint, recipe, commodity_family, confidence, triangulation_score,
 			bol_tier, shipper_name, consignee_name, shipper_company_id, consignee_company_id,
@@ -682,6 +803,7 @@ func upsertMCR(ctx context.Context, pool *pgxpool.Pool, d mcrDraft) (bool, error
 			sources = EXCLUDED.sources,
 			metadata = EXCLUDED.metadata,
 			updated_at = now()
+		RETURNING id
 	`, synID, d.Fingerprint, d.Recipe, d.CommodityFamily, d.Confidence, d.TriangulationScore,
 		d.ShipperName, d.ConsigneeName, d.ShipperCompanyID, d.ConsigneeCompanyID,
 		d.VesselName, d.MMSI, d.IMO, d.LoadTerminalID, d.LoadPortName, d.LoadCountry,
@@ -690,11 +812,11 @@ func upsertMCR(ctx context.Context, pool *pgxpool.Pool, d mcrDraft) (bool, error
 		d.EventDate, d.PortCallID, d.CommercialEventID, d.OpportunityID,
 		d.CorridorMMSI, d.CorridorLoadLat, d.CorridorLoadLng, d.CorridorDischargeLat, d.CorridorDischargeLng,
 		evidence, sources, d.ContactIDs, meta,
-	)
+	).Scan(&insertedID)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return insertedID != uuid.Nil, nil
 }
 
 func inferCommodityFamily(products []string, crudeCapable, productTanker *bool) string {
@@ -776,6 +898,57 @@ func countryHasHSExport(ctx context.Context, pool *pgxpool.Pool, country, hs str
 		WHERE flow_type = 'X' AND hs_code = $2 AND reporter ILIKE $1
 	`, "%"+country+"%", hs).Scan(&n)
 	return n > 0
+}
+
+func countryHasMacroTrade(ctx context.Context, pool *pgxpool.Pool, country, hs string) bool {
+	if !tableExists(ctx, pool, "oil_commercial_events") {
+		return false
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int FROM oil_commercial_events
+		WHERE event_type = 'macro_trade_flow'
+		  AND hs_code = $2
+		  AND (country ILIKE $1 OR partner_country ILIKE $1)
+	`, "%"+country+"%", hs).Scan(&n)
+	return n > 0
+}
+
+func topTerminalOperatorInCountry(ctx context.Context, pool *pgxpool.Pool, country string) (string, *uuid.UUID) {
+	if country == "" {
+		return "", nil
+	}
+	var operator string
+	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(TRIM(operator_name), ''), name)
+		FROM oil_terminals
+		WHERE country ILIKE $1 AND operator_name IS NOT NULL AND TRIM(operator_name) <> ''
+		ORDER BY confidence DESC NULLS LAST
+		LIMIT 1
+	`, "%"+country+"%").Scan(&operator)
+	if err != nil || operator == "" {
+		return "", nil
+	}
+	id, _ := resolveCompany(ctx, pool, operator, country)
+	return operator, id
+}
+
+func usRefinedTerminalHint(ctx context.Context, pool *pgxpool.Pool) (string, string) {
+	var name, country string
+	err := pool.QueryRow(ctx, `
+		SELECT name, country FROM oil_terminals
+		WHERE country ILIKE '%United States%'
+		  AND (
+		    products && ARRAY['crude_oil','refined_products','diesel','petroleum']::text[]
+		    OR name ILIKE '%Houston%' OR name ILIKE '%Corpus%'
+		  )
+		ORDER BY confidence DESC NULLS LAST
+		LIMIT 1
+	`).Scan(&name, &country)
+	if err != nil {
+		return "", ""
+	}
+	return name, country
 }
 
 func resolveCompany(ctx context.Context, pool *pgxpool.Pool, name, country string) (*uuid.UUID, error) {

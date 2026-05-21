@@ -119,6 +119,37 @@ curl -sf "http://localhost:8095/api/oil-live/cargo-records?limit=1" | jq '.count
 # Expect: terminal_count >> 6 after graph-sync, cargo_record_count > 0 when port calls exist
 ```
 
+## OSM storage import (Overpass + fallbacks)
+
+Graph sync imports petroleum storage terminals via `GET /api/storage/terminals` (Python `backend/services/storage_terminals.py`).
+
+**Fetch order**
+
+1. **Live Overpass** — 11 world tiles; tries `STORAGE_OVERPASS_URL` / `OVERPASS_URL`, then `overpass.kumi.systems`, then `overpass-api.de`, with retries.
+2. **`petroleum_osm_features`** — persisted nightly OSM sync (`petroleum_osm_sync_worker`); used when live Overpass fails or cache is globally complete.
+3. **Offline bulk seed** — `backend/data/oil_terminals_seed_bulk.json` (~300 worldwide terminals) when live + DB coverage is still sparse (typical in Docker/CI when Overpass times out).
+4. **Curated reference** — `data/storage_terminals_seed.json` (major named hubs).
+
+**Cache behavior:** `force_refresh=true` no longer clears the in-memory cache up front. If a refresh fails (all tiles timeout), the previous cached snapshot is returned and graph-sync can still import hundreds of terminals from cache/DB/bulk seed.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `STORAGE_OVERPASS_URL` | `https://overpass.kumi.systems/api/interpreter` | Primary Overpass mirror for storage tiles |
+| `OVERPASS_URL` | same as above | Shared fallback for petroleum OSM sync |
+| `STORAGE_OVERPASS_TIMEOUT_SECONDS` | `120` | HTTP read timeout per tile request |
+| `STORAGE_OVERPASS_QUERY_TIMEOUT_SECONDS` | `90` | Overpass `[timeout:…]` inside QL |
+| `STORAGE_OVERPASS_RETRY_ATTEMPTS` | `3` | Retries per mirror before next endpoint |
+| `STORAGE_OVERPASS_TILE_WORKERS` | `3` | Parallel world tiles (lower = gentler on public mirrors) |
+| `STORAGE_SKIP_LIVE_OVERPASS` | unset (`true` in docker-compose) | Skip live Overpass; use `petroleum_osm_features` + bulk seed + curated reference |
+
+Regenerate the offline bulk seed when Overpass is reachable:
+
+```bash
+python backend/scripts/build_oil_terminals_bulk_seed.py
+```
+
+**Demo corridor (Recipe B):** Fresh DB seed (`oil-live-intel/internal/seed/seed.go`) inserts paired `possible_loading` + `possible_unloading` port calls for demo vessel **MT DEMO STAR** (MMSI `636012345`) — Ras Tanura → Rotterdam — so synthetic BOL rebuild can produce at least one full corridor when trade-flow data exists.
+
 Scheduled graph sync worker:
 
 ```bash
