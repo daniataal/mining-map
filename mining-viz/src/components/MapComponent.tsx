@@ -54,6 +54,8 @@ import OilLiveMapOverlays, {
   type OilLiveEntityClickPayload,
   type OilLiveLayerVisibility,
 } from './petroleum/OilLiveMapOverlays';
+import LiveDataMapLayersPanel from '../features/live-data/LiveDataMapLayersPanel';
+import { LIVE_DATA_HUB_BOUNDS } from '../features/live-data/liveDataMapDefaults';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
@@ -268,9 +270,13 @@ interface MapComponentProps {
   oilLiveOverlaysEnabled?: boolean;
   oilLiveProductFilter?: string;
   oilLiveLayers?: OilLiveLayerVisibility;
+  onOilLiveLayersChange?: (layers: OilLiveLayerVisibility) => void;
+  oilLiveCoverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
   onOilLiveStatsChange?: (stats: { terminals: number; vessels: number; opportunities: number }) => void;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
+  /** Increment when entering Live Data to fly map to Gulf hub bbox. */
+  liveDataFlyTrigger?: number;
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -413,6 +419,21 @@ const CountryFocusBoundsFly = ({
     return null;
 };
 
+const LiveDataHubBoundsFly = ({ trigger }: { trigger: number }) => {
+    const map = useMap();
+    useEffect(() => {
+        if (trigger <= 0) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            const bounds = L.latLngBounds(LIVE_DATA_HUB_BOUNDS);
+            if (!bounds.isValid()) return;
+            map.flyToBounds(bounds, { padding: [48, 48], maxZoom: 6, duration: 1.2 });
+        }, 120);
+        return () => window.clearTimeout(timer);
+    }, [trigger, map]);
+    return null;
+};
+
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
@@ -530,9 +551,12 @@ export default function MapComponent({
   oilLiveOverlaysEnabled = false,
   oilLiveProductFilter = 'all',
   oilLiveLayers = { terminals: true, vessels: true, corridors: true, opportunities: true },
+  onOilLiveLayersChange,
+  oilLiveCoverageStats = null,
   onOilLiveStatsChange,
   onOilLiveEntityClick,
   onOilLiveDismiss,
+  liveDataFlyTrigger = 0,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -709,7 +733,10 @@ export default function MapComponent({
         if (!isOilAndGasView || !onStorageInViewCountChange) return;
         onStorageInViewCountChange(countEntitiesInViewport(storageEntities, oilGasMapViewport));
     }, [isOilAndGasView, storageEntities, oilGasMapViewport, onStorageInViewCountChange]);
-    const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
+    const vesselsVisible =
+      isMaritimeMapView &&
+      (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only') &&
+      (!isLiveDataView || isMaritimeLayerEnabled);
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
     const maritimeDrawRecords = useMemo(
@@ -1120,7 +1147,19 @@ export default function MapComponent({
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
             )}
-            {isMaritimeMapView && (
+            {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveLayersChange && (
+                <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">
+                    <LiveDataMapLayersPanel
+                        layers={oilLiveLayers}
+                        onLayersChange={onOilLiveLayersChange}
+                        coverageStats={oilLiveCoverageStats}
+                        allMaritimeEnabled={isMaritimeLayerEnabled}
+                        onAllMaritimeChange={setIsMaritimeLayerEnabled}
+                        globalMaritimeCount={maritimeSnapshotTotal}
+                    />
+                </div>
+            )}
+            {isMaritimeMapView && !isLiveDataView && (
                 <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
@@ -1664,6 +1703,9 @@ export default function MapComponent({
                     geojson={filteredGeoJson ?? null}
                     trigger={countryFocusBoundsTrigger}
                 />
+                {isLiveDataView && (
+                    <LiveDataHubBoundsFly trigger={liveDataFlyTrigger} />
+                )}
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -1769,7 +1811,7 @@ export default function MapComponent({
                         </LayersControl.Overlay>
                     )}
                 </MapBasemapLayers>
-                {isMaritimeMapView && (
+                {isMaritimeMapView && (!isLiveDataView || isMaritimeLayerEnabled) && (
                     <MaritimeLayerSync layerName={vesselLayerLabel} onLayerActiveChange={handleMaritimeLayerActiveChange} />
                 )}
 

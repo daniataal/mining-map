@@ -162,7 +162,7 @@ func insertOpportunity(ctx context.Context, pool *pgxpool.Pool, otype string, mm
 func List(ctx context.Context, pool *pgxpool.Pool, minConf float64, limit int) ([]map[string]any, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, o.opportunity_type, o.title, o.hypothesis, o.confidence, o.evidence, o.profit_checklist,
-			o.mmsi, t.name AS terminal_name, o.created_at
+			o.mmsi, o.terminal_id::text, t.name AS terminal_name, t.country AS terminal_country, o.created_at
 		FROM oil_opportunities o
 		LEFT JOIN oil_terminals t ON t.id = o.terminal_id
 		WHERE o.status='open' AND o.confidence >= $1
@@ -180,20 +180,25 @@ func List(ctx context.Context, pool *pgxpool.Pool, minConf float64, limit int) (
 		var conf float64
 		var ev, pc []byte
 		var mmsi *int64
-		var tname *string
+		var tid *string
+		var tname, tcountry *string
 		var created time.Time
-		if err := rows.Scan(&id, &otype, &title, &hyp, &conf, &ev, &pc, &mmsi, &tname, &created); err != nil {
+		if err := rows.Scan(&id, &otype, &title, &hyp, &conf, &ev, &pc, &mmsi, &tid, &tname, &tcountry, &created); err != nil {
 			return nil, err
 		}
 		var evA, pcA []any
 		_ = json.Unmarshal(ev, &evA)
 		_ = json.Unmarshal(pc, &pcA)
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"id": id.String(), "opportunity_type": otype, "title": title, "hypothesis": hyp,
 			"confidence": conf, "evidence": evA, "profit_checklist": pcA,
-			"mmsi": mmsi, "terminal_name": tname, "created_at": created,
+			"mmsi": mmsi, "terminal_name": tname, "terminal_country": tcountry, "created_at": created,
 			"disclaimer": "Hypothesis from public data — not a confirmed transaction or listing.",
-		})
+		}
+		if tid != nil && *tid != "" {
+			row["terminal_id"] = *tid
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

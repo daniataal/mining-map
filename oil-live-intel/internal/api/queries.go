@@ -103,17 +103,28 @@ func (s *Server) listLiveVessels(r *http.Request, bbox [4]float64, bboxOK bool, 
 	for rows.Next() {
 		var mmsi int64
 		var ts time.Time
-		var lat, lon, speed, course, draft float64
+		var lat, lon float64
+		var speed, course, draft *float64
 		var dest, name, tclass *string
 		var crude, product *bool
 		if err := rows.Scan(&mmsi, &ts, &lat, &lon, &speed, &course, &draft, &dest, &name, &tclass, &crude, &product); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{
-			"mmsi": mmsi, "ts": ts, "lat": lat, "lng": lon, "speed": speed,
-			"course": course, "draft_m": draft, "destination": dest,
-			"name": name, "tanker_class": tclass, "crude_capable": crude, "product_tanker": product,
-		})
+		item := map[string]any{
+			"mmsi": mmsi, "ts": ts, "lat": lat, "lng": lon,
+			"destination": dest, "name": name, "tanker_class": tclass,
+			"crude_capable": crude, "product_tanker": product,
+		}
+		if speed != nil {
+			item["speed"] = *speed
+		}
+		if course != nil {
+			item["course"] = *course
+		}
+		if draft != nil {
+			item["draft_m"] = *draft
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }

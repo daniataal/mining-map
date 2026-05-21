@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../../lib/i18n';
 import {
@@ -12,9 +12,9 @@ import {
   saveOilCompanyToSuppliers,
   draftOilOutreach,
   getCargoRecords,
-  getCargoRecord,
   getOilTerminals,
   getOilLiveSyncStatus,
+  enrichOilLiveContactsBatch,
   type OilContact,
   type OilDealEconomics,
   getOilWatchlists,
@@ -31,36 +31,95 @@ import {
   type OilCompany,
   type MeridianCargoRecord,
 } from '../../api/oilLiveApi';
-import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
-import { Radio, Building2, Ship, AlertTriangle, Bell, Package, Loader2, Download } from 'lucide-react';
-import DealExecutionPack from './DealExecutionPack';
+import {
+  Radio,
+  Building2,
+  Ship,
+  AlertTriangle,
+  Bell,
+  Package,
+  Loader2,
+  Download,
+  CircleHelp,
+} from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
+import GraphSyncEmptyCta from './GraphSyncEmptyCta';
+import { dedupeOpportunities } from './dedupeOpportunities';
 import { downloadCsv } from '../../lib/csvExport';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
 const DISCLAIMER_HE = 'מסקנות מנתונים ציבוריים בלבד — לא עסקה, קונה, מוכר או סוג מוצר מאומתים.';
 
+const BODY = 'text-sm leading-relaxed text-slate-800 dark:text-slate-200';
+const MUTED = 'text-sm leading-relaxed text-slate-700 dark:text-slate-300';
+const LABEL = 'text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400';
+const CARD =
+  'rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-4 shadow-sm';
+const OPP_CARD =
+  'rounded-xl border border-emerald-600/35 bg-emerald-50 dark:bg-slate-900 p-4 shadow-sm';
+const BTN =
+  'min-h-[36px] px-3 py-2 rounded-lg text-xs font-bold uppercase transition-colors';
+const TAB_ACTIVE = 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900';
+const TAB_IDLE =
+  'bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 text-slate-600 dark:text-slate-300';
+
+function ExpandableBulletList({
+  items,
+  limit = 3,
+  className = MUTED,
+}: {
+  items: string[];
+  limit?: number;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  if (!items.length) return null;
+  const showAll = expanded || items.length <= limit;
+  const visible = showAll ? items : items.slice(0, limit);
+  return (
+    <div>
+      <ul className={`${className} list-disc pl-5 space-y-1`}>
+        {visible.map((line, i) => (
+          <li key={i} className={showAll ? '' : 'line-clamp-2'}>
+            {line}
+          </li>
+        ))}
+      </ul>
+      {items.length > limit && (
+        <button
+          type="button"
+          className="mt-1.5 text-xs font-bold text-sky-600 dark:text-sky-400"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t('הצג פחות', 'Show less')
+            : t(`הצג עוד (${items.length - limit})`, `Show more (${items.length - limit})`)}
+        </button>
+      )}
+    </div>
+  );
+}
+
 type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts';
 
 export type LiveDataIntelPanelProps = {
   productFilter: string;
   onProductFilterChange: (value: string) => void;
-  layers: OilLiveLayerVisibility;
-  onLayersChange: (layers: OilLiveLayerVisibility) => void;
   coverageStats?: { terminals: number; vessels: number; opportunities: number } | null;
   onOpenOpportunity?: (opportunityId: string, title?: string) => void;
+  onOpenCargoRecord?: (record: MeridianCargoRecord) => void;
 };
 
 export default function LiveDataIntelPanel({
   productFilter,
   onProductFilterChange,
-  layers,
-  onLayersChange,
   coverageStats,
   onOpenOpportunity,
+  onOpenCargoRecord,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('feed');
@@ -74,15 +133,15 @@ export default function LiveDataIntelPanel({
   const [cargoCountry, setCargoCountry] = useState('');
   const [cargoMinConfidence, setCargoMinConfidence] = useState('0.5');
   const [includeSeedData, setIncludeSeedData] = useState(false);
-  const [expandedCargoId, setExpandedCargoId] = useState<string | null>(null);
-  const [cargoDetail, setCargoDetail] = useState<MeridianCargoRecord | null>(null);
-  const [cargoDetailLoading, setCargoDetailLoading] = useState(false);
-  const [cargoDealPackOppId, setCargoDealPackOppId] = useState<string | null>(null);
   const [cargoExporting, setCargoExporting] = useState(false);
+  const [enrichContactsLoading, setEnrichContactsLoading] = useState(false);
   const [companyRoleFilter, setCompanyRoleFilter] = useState('');
   const [companyCountryFilter, setCompanyCountryFilter] = useState('');
   const [companyOffset, setCompanyOffset] = useState(0);
   const companyPageSize = 40;
+  const [liveDataHelpOpen, setLiveDataHelpOpen] = useState(false);
+  const [aisLive, setAisLive] = useState(false);
+  const aisLiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dealSheet, setDealSheet] = useState({
     volume_bbl: '',
     buy_price_usd_per_bbl: '',
@@ -111,7 +170,13 @@ export default function LiveDataIntelPanel({
 
   useEffect(() => {
     const disconnect = connectOilLiveWebSocket((msg) => {
-      if (msg.type === 'intelligence_card_created' || msg.type === 'vessel_position') {
+      if (msg.type === 'vessel_position') {
+        setAisLive(true);
+        if (aisLiveTimerRef.current) clearTimeout(aisLiveTimerRef.current);
+        aisLiveTimerRef.current = setTimeout(() => setAisLive(false), 90_000);
+        void queryClient.invalidateQueries({ queryKey: ['oil-live-map'] });
+      }
+      if (msg.type === 'intelligence_card_created') {
         void queryClient.invalidateQueries({ queryKey: ['oil-live-map'] });
         void queryClient.invalidateQueries({ queryKey: ['oil-live-intelligence'] });
       }
@@ -120,7 +185,10 @@ export default function LiveDataIntelPanel({
         toast.info(t('התראה חדשה', 'New watchlist alert'));
       }
     });
-    return disconnect;
+    return () => {
+      disconnect();
+      if (aisLiveTimerRef.current) clearTimeout(aisLiveTimerRef.current);
+    };
   }, [queryClient, refetchAlerts, t]);
 
   const { data: cardsData, isLoading } = useQuery({
@@ -130,9 +198,10 @@ export default function LiveDataIntelPanel({
   });
 
   const { data: opportunitiesData } = useQuery({
-    queryKey: ['oil-live-opportunities'],
+    queryKey: ['oil-live-opportunities', 0.55],
     queryFn: async () => (await getOilOpportunities(0.55)).opportunities,
-    staleTime: 60_000,
+    staleTime: 120_000,
+    refetchOnWindowFocus: false,
   });
 
   const { data: companiesData } = useQuery({
@@ -191,16 +260,43 @@ export default function LiveDataIntelPanel({
   const cards = cardsData ?? [];
   const companies = companiesData?.companies ?? [];
   const companiesTotal = companiesData?.total ?? companies.length;
-  const opportunities = opportunitiesData ?? [];
+  const opportunities = useMemo(
+    () => dedupeOpportunities(opportunitiesData ?? []),
+    [opportunitiesData],
+  );
 
   const filteredCards = useMemo(() => {
     if (productFilter === 'all') return cards;
     return cards.filter((c) => (c.product_family_inferred || '').includes(productFilter));
   }, [cards, productFilter]);
 
-  function toggleLayer(key: keyof OilLiveLayerVisibility) {
-    onLayersChange({ ...layers, [key]: !layers[key] });
-  }
+  const coverageInView = [
+    { key: 'terminals', label: t('מסופים', 'Terminals'), value: coverageStats?.terminals ?? 0 },
+    { key: 'vessels', label: t('מכליות', 'Tankers'), value: coverageStats?.vessels ?? 0 },
+    {
+      key: 'opportunities',
+      label: t('הזדמנויות', 'Opportunities'),
+      value: coverageStats?.opportunities ?? 0,
+    },
+  ] as const;
+
+  const coverageDatabase = [
+    {
+      key: 'terminals-db',
+      label: t('מסופים', 'Terminals'),
+      value: syncStatus?.terminal_count ?? terminalsIndex?.length ?? '…',
+    },
+    {
+      key: 'port-calls',
+      label: t('קריאות נמל', 'Port calls'),
+      value: syncStatus?.port_call_count ?? '…',
+    },
+    {
+      key: 'cargo',
+      label: t('מטען סינתטי', 'Synthetic cargo'),
+      value: syncStatus?.cargo_record_count ?? '…',
+    },
+  ] as const;
 
   const lastCargoSyncLabel = useMemo(() => {
     const ts =
@@ -229,26 +325,34 @@ export default function LiveDataIntelPanel({
     return t(`לפני ${days} ימים`, `${days}d ago`);
   }, [syncStatus?.last_graph_sync_at, t]);
 
-  async function toggleCargoDetail(record: MeridianCargoRecord) {
-    if (expandedCargoId === record.id) {
-      setExpandedCargoId(null);
-      setCargoDetail(null);
-      setCargoDealPackOppId(null);
+  async function handleBatchEnrichContacts() {
+    setEnrichContactsLoading(true);
+    try {
+      const result = await enrichOilLiveContactsBatch(20);
+      if (result.status === 'error') {
+        toast.error(result.message ?? t('העשרת אנשי קשר נכשלה', 'Contact enrichment failed'));
+        return;
+      }
+      toast.success(
+        t(
+          `הושלם: ${result.enriched ?? 0} מועשרים · ${result.candidates ?? 0} מועמדים · ${result.skipped ?? 0} דולגו`,
+          `Done: ${result.enriched ?? 0} enriched · ${result.candidates ?? 0} candidates · ${result.skipped ?? 0} skipped`,
+        ),
+      );
+      void queryClient.invalidateQueries({ queryKey: ['oil-live-companies'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('העשרת אנשי קשר נכשלה', 'Contact enrichment failed'));
+    } finally {
+      setEnrichContactsLoading(false);
+    }
+  }
+
+  function openCargoRecord(record: MeridianCargoRecord) {
+    if (onOpenCargoRecord) {
+      onOpenCargoRecord(record);
       return;
     }
-    setExpandedCargoId(record.id);
-    setCargoDetailLoading(true);
-    setCargoDealPackOppId(record.opportunity_id ?? null);
-    try {
-      const detail = await getCargoRecord(record.id);
-      setCargoDetail(detail);
-      if (detail.opportunity_id) setCargoDealPackOppId(detail.opportunity_id);
-    } catch (e) {
-      setCargoDetail(record);
-      toast.error(e instanceof Error ? e.message : 'Failed to load cargo record');
-    } finally {
-      setCargoDetailLoading(false);
-    }
+    toast.info(t('פתחו את המגירה מהמפה', 'Open the drawer from the map'));
   }
 
   function formatVolumeBand(r: MeridianCargoRecord): string {
@@ -346,69 +450,137 @@ export default function LiveDataIntelPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0 rounded-2xl border border-black/10 dark:border-white/10 bg-slate-50/95 dark:bg-slate-950/95 shadow-2xl backdrop-blur-xl overflow-hidden">
-      <div className="shrink-0 px-4 py-3 border-b border-black/5 dark:border-white/10">
+      <div className="shrink-0 px-4 py-4 border-b border-black/5 dark:border-white/10">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-            <Radio className="w-4 h-4 text-sky-500" />
+          <h2 className="text-base font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+            <Radio className="w-5 h-5 text-sky-500" />
             {t('נתונים חיים', 'Live Data')}
           </h2>
+          <button
+            type="button"
+            title={t('מה זה נתונים חיים?', 'What is Live Data?')}
+            aria-expanded={liveDataHelpOpen}
+            aria-label={t('מה זה נתונים חיים?', 'What is Live Data?')}
+            onClick={() => setLiveDataHelpOpen((v) => !v)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20"
+          >
+            <CircleHelp className="h-4 w-4" />
+          </button>
         </div>
-        <div className="mt-2 rounded-xl border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-950 dark:text-cyan-100">
-          <p className="font-black uppercase tracking-widest text-[8px] text-cyan-800 dark:text-cyan-200">
-            {t('בריאות כיסוי', 'Coverage health')}
-          </p>
-          <p className="mt-0.5">
-            {t('במפה', 'In map view')}:{' '}
-            <span className="font-bold">{coverageStats?.terminals ?? 0}</span> {t('מסופים', 'terminals')} ·{' '}
-            <span className="font-bold">{coverageStats?.vessels ?? 0}</span> {t('כלי שיט', 'vessels')} ·{' '}
-            <span className="font-bold">{coverageStats?.opportunities ?? 0}</span>{' '}
-            {t('הזדמנויות', 'opportunities')}
-          </p>
-          <p className="mt-0.5 text-cyan-900/80 dark:text-cyan-100/80">
-            {t('במאגר', 'In database')}:{' '}
-            <span className="font-bold">{syncStatus?.terminal_count ?? terminalsIndex?.length ?? '…'}</span>{' '}
-            {t('מסופים', 'terminals')} ·{' '}
-            <span className="font-bold">{syncStatus?.port_call_count ?? '…'}</span>{' '}
-            {t('קריאות נמל', 'port calls')}
-            {syncStatus != null && (
-              <>
-                {' '}
-                · <span className="font-bold">{syncStatus.cargo_record_count}</span>{' '}
-                {t('רשומות מטען סינתטיות', 'synthetic cargo records')}
-              </>
+        {liveDataHelpOpen && (
+          <div className="mt-2 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-sm leading-relaxed text-slate-800 dark:text-slate-200">
+            <p className={`${LABEL} text-sky-800 dark:text-sky-200 mb-1.5`}>
+              {t('מה זה נתונים חיים?', 'What is Live Data?')}
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                {t(
+                  'מטען סינתטי — מסיקה מ-AIS, נמלים ומסחר; לא BOL בתשלום.',
+                  'Synthetic cargo — inferred from AIS, ports, and trade signals; not paid BOL data.',
+                )}
+              </li>
+              <li>
+                {t(
+                  'לא עסקה מאומתת — רק רמזים ציבוריים/ch חינמיים.',
+                  'Not a confirmed deal — public/free-source hints only.',
+                )}
+              </li>
+              <li>
+                {t(
+                  'הריצו graph-sync (Admin) כדי לרענן מסופים, חברות ומטען.',
+                  'Run graph-sync (Admin) to refresh terminals, companies, and cargo records.',
+                )}
+              </li>
+            </ul>
+          </div>
+        )}
+        <div className="mt-3 rounded-xl border border-cyan-600/30 bg-cyan-500/10 px-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className={`${LABEL} text-cyan-900 dark:text-cyan-200`}>
+              {t('בריאות כיסוי', 'Coverage health')}
+            </p>
+            {aisLive && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-900 dark:text-emerald-100">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                {t('AIS חי', 'Live AIS')}
+              </span>
             )}
-            {lastGraphSyncLabel && (
-              <>
-                {' '}
-                · {t('סנכרון גרף', 'Graph sync')}: {lastGraphSyncLabel}
-              </>
-            )}
-            {lastCargoSyncLabel && (
-              <>
-                {' '}
-                · {t('מטען אחרון', 'Last cargo')}: {lastCargoSyncLabel}
-              </>
-            )}
+          </div>
+          <p className="mt-2 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
+            {t('בתצוגת המפה', 'In current map view')}
           </p>
-          <p className="mt-1 text-[8px] text-cyan-800/70 dark:text-cyan-200/70">
+          <div className="mt-1.5 grid grid-cols-3 gap-2">
+            {coverageInView.map(({ key, label, value }) => (
+              <div
+                key={key}
+                className="rounded-lg border border-cyan-600/20 bg-white/70 px-2 py-2 text-center dark:bg-slate-950/40"
+              >
+                <p className="text-xl font-black tabular-nums leading-none text-cyan-950 dark:text-cyan-50">
+                  {value}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+                  {label}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
+            {t('במאגר', 'In database')}
+          </p>
+          <div className="mt-1.5 grid grid-cols-3 gap-2">
+            {coverageDatabase.map(({ key, label, value }) => (
+              <div
+                key={key}
+                className="rounded-lg border border-cyan-600/20 bg-white/70 px-2 py-2 text-center dark:bg-slate-950/40"
+              >
+                <p className="text-xl font-black tabular-nums leading-none text-cyan-950 dark:text-cyan-50">
+                  {value}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+                  {label}
+                </p>
+              </div>
+            ))}
+          </div>
+          {(lastGraphSyncLabel || lastCargoSyncLabel) && (
+            <p className="mt-2 text-xs leading-relaxed text-cyan-900/90 dark:text-cyan-100/90">
+              {lastGraphSyncLabel && (
+                <>
+                  {t('סנכרון גרף', 'Graph sync')}: {lastGraphSyncLabel}
+                </>
+              )}
+              {lastGraphSyncLabel && lastCargoSyncLabel && ' · '}
+              {lastCargoSyncLabel && (
+                <>
+                  {t('מטען אחרון', 'Last cargo')}: {lastCargoSyncLabel}
+                </>
+              )}
+            </p>
+          )}
+          <p className="mt-2 text-xs leading-relaxed text-cyan-900/80 dark:text-cyan-100/80">
             {t(
               'מקורות: OSM, AIS, Comtrade, TED, רישיונות — סנכרון גרף דרך graph-sync',
               'Sources: OSM, AIS, Comtrade, TED, licenses — graph sync via admin graph-sync',
             )}
           </p>
         </div>
-        <p className="text-[9px] text-amber-700 dark:text-amber-300 mt-1">{t(DISCLAIMER_HE, DISCLAIMER_EN)}</p>
+        <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-200 mt-2">
+          {t(DISCLAIMER_HE, DISCLAIMER_EN)}
+        </p>
 
-        <div className="flex gap-1.5 mt-2 flex-wrap">
+        <div className="flex gap-2 mt-3 flex-wrap">
           {(['all', 'crude', 'refined', 'gas', 'sulfur'] as const).map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => onProductFilterChange(p)}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase ${
+              className={`${BTN} ${
                 productFilter === p
                   ? 'bg-sky-600 text-white'
-                  : 'bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10'
+                  : TAB_IDLE
               }`}
             >
               {p === 'all' ? t('הכל', 'All') : p}
@@ -416,55 +588,48 @@ export default function LiveDataIntelPanel({
           ))}
         </div>
 
-        <div className="flex gap-1.5 mt-2 flex-wrap">
-          {(
-            [
-              ['terminals', t('מסופים', 'Terminals')],
-              ['vessels', t('כלי שיט', 'Vessels')],
-              ['corridors', t('מסדרונות', 'Corridors')],
-              ['opportunities', t('הזדמנויות', 'Opportunities')],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => toggleLayer(key)}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase ${
-                layers[key]
-                  ? 'bg-amber-500 text-slate-950'
-                  : 'bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 text-slate-500'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      </div>
 
-        <div className="flex gap-1.5 mt-2 flex-wrap">
+      <div className="shrink-0 sticky top-0 z-10 border-b border-black/5 bg-slate-50/98 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/98">
+        <p className={`${LABEL} text-slate-600 dark:text-slate-400 mb-2`}>
+          {t('לשכבות מפה — השתמשו בפאנל שכבות בפינה השמאלית', 'Map layers — use the panel at bottom-left of the map')}
+        </p>
+        <div className="flex gap-2 flex-wrap">
           {(['feed', 'opportunities', 'cargo', 'companies', 'alerts'] as const).map((tabKey) => (
             <button
               key={tabKey}
               type="button"
               onClick={() => setTab(tabKey)}
-              className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase flex items-center gap-1 ${
-                tab === tabKey ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-white dark:bg-slate-900 border'
+              className={`${BTN} flex items-center gap-1.5 ${
+                tab === tabKey ? TAB_ACTIVE : TAB_IDLE
               }`}
             >
               {tabKey === 'feed' && t('מודיעין', 'Intelligence')}
-              {tabKey === 'opportunities' && t('הזדמנויות', 'Opportunities')}
+              {tabKey === 'opportunities' && (
+                <>
+                  {t('הזדמנויות', 'Opportunities')}
+                  {opportunities.length > 0 && (
+                    <span className="rounded-full bg-emerald-600/20 px-1.5 text-[10px] font-black text-emerald-800 dark:text-emerald-200">
+                      {opportunities.length}
+                    </span>
+                  )}
+                </>
+              )}
               {tabKey === 'cargo' && (
                 <>
-                  <Package className="w-3 h-3" />
+                  <Package className="w-3.5 h-3.5" />
                   {t('מטען', 'Cargo')}
                 </>
               )}
               {tabKey === 'companies' && t('חברות', 'Companies')}
               {tabKey === 'alerts' && (
                 <>
-                  <Bell className="w-3 h-3" />
+                  <Bell className="w-3.5 h-3.5" />
                   {t('התראות', 'Alerts')}
                   {unreadCount > 0 && (
-                    <span className="bg-red-500 text-white rounded-full px-1 text-[8px]">{unreadCount}</span>
+                    <span className="bg-red-500 text-white rounded-full min-w-[18px] px-1.5 text-[10px] font-black">
+                      {unreadCount}
+                    </span>
                   )}
                 </>
               )}
@@ -473,24 +638,31 @@ export default function LiveDataIntelPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+      <div
+        className={`flex-1 min-h-0 p-4 ${
+          tab === 'opportunities'
+            ? 'overflow-y-auto max-h-[min(58vh,520px)]'
+            : 'overflow-y-auto'
+        }`}
+      >
+        <div className="space-y-4">
         {tab === 'feed' &&
           filteredCards.map((card) => (
             <article
               key={card.id}
-              className="rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-slate-900 p-3 shadow-sm cursor-pointer hover:border-sky-500/40"
+              className={`${CARD} cursor-pointer hover:border-sky-500/40`}
               onClick={() => setSelectedCard(card)}
             >
               <div className="flex justify-between gap-2">
-                <h3 className="text-xs font-bold text-slate-900 dark:text-white">{card.title}</h3>
-                <span className="shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">{card.title}</h3>
+                <span className="shrink-0 text-xs font-black px-2.5 py-1 rounded-full bg-sky-600/15 text-sky-900 dark:text-sky-200">
                   {Math.round((card.confidence ?? 0) * 100)}%
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1 line-clamp-2">{card.summary}</p>
-              <div className="flex flex-wrap gap-2 mt-2 text-[9px] uppercase font-bold text-slate-400">
+              <p className={`${MUTED} mt-2 line-clamp-3`}>{card.summary}</p>
+              <div className={`flex flex-wrap gap-2 mt-2 ${LABEL}`}>
                 <span className="flex items-center gap-1">
-                  <Ship className="w-3 h-3" />
+                  <Ship className="w-3.5 h-3.5" />
                   {card.event_type}
                 </span>
                 {card.terminal_name && <span>{card.terminal_name}</span>}
@@ -550,12 +722,19 @@ export default function LiveDataIntelPanel({
                 {t('טוען רשומות מטען…', 'Loading cargo records…')}
               </p>
             )}
-            {(cargoLedger?.cargo_records ?? []).map((record) => {
-              const expanded = expandedCargoId === record.id;
-              return (
+            {(cargoLedger?.cargo_records ?? []).map((record) => (
                 <article
                   key={record.id}
-                  className="rounded-xl border border-amber-500/25 bg-white dark:bg-slate-900 p-3"
+                  role="button"
+                  tabIndex={0}
+                  className="rounded-xl border border-amber-500/25 bg-white dark:bg-slate-900 p-3 cursor-pointer hover:border-amber-500/50 transition-colors"
+                  onClick={() => openCargoRecord(record)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openCargoRecord(record);
+                    }
+                  }}
                 >
                   <div className="flex justify-between gap-2 items-start">
                     <div className="min-w-0">
@@ -587,65 +766,31 @@ export default function LiveDataIntelPanel({
                     {record.load_port_name && ` · ${record.load_port_name}`}
                     {record.load_country && ` (${record.load_country})`}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  {record.opportunity_id && onOpenOpportunity && (
                     <button
                       type="button"
-                      className="text-[9px] font-bold uppercase text-amber-700"
-                      onClick={() => void toggleCargoDetail(record)}
+                      className="mt-2 text-[9px] font-bold uppercase text-emerald-700"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenOpportunity(
+                          record.opportunity_id!,
+                          record.vessel_name ?? record.synthetic_bol_id,
+                        );
+                      }}
                     >
-                      {expanded ? t('הסתר', 'Hide') : t('פרטים', 'Details')}
+                      {t('חבילת עסקה', 'Deal pack')}
                     </button>
-                    {(record.opportunity_id || cargoDealPackOppId) && onOpenOpportunity && (
-                      <button
-                        type="button"
-                        className="text-[9px] font-bold uppercase text-emerald-700"
-                        onClick={() =>
-                          onOpenOpportunity(
-                            (record.opportunity_id ?? cargoDealPackOppId)!,
-                            record.vessel_name ?? record.synthetic_bol_id,
-                          )
-                        }
-                      >
-                        {t('חבילת עסקה', 'Deal pack')}
-                      </button>
-                    )}
-                  </div>
-                  {expanded && (
-                    <div className="mt-2 border-t border-black/5 dark:border-white/10 pt-2 space-y-2">
-                      {cargoDetailLoading && (
-                        <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          {t('טוען…', 'Loading…')}
-                        </p>
-                      )}
-                      {cargoDetail && !cargoDetailLoading && (
-                        <>
-                          <ul className="text-[9px] text-slate-500 list-disc pl-4 space-y-0.5">
-                            {(cargoDetail.evidence_chain ?? []).slice(0, 6).map((line, i) => (
-                              <li key={i}>{line}</li>
-                            ))}
-                          </ul>
-                          {cargoDealPackOppId && (
-                            <div className="mt-2">
-                              <DealExecutionPack opportunityId={cargoDealPackOppId} />
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
                   )}
                 </article>
-              );
-            })}
+              ))}
             {!cargoLoading && (cargoLedger?.cargo_records ?? []).length === 0 && (
-              <p className="text-xs text-slate-500">
-                {t(
-                  'אין רשומות מטען — הריצו graph-sync ו-synthetic BOL rebuild',
-                  'No cargo records — run graph-sync and synthetic BOL rebuild',
-                )}
-              </p>
+              <GraphSyncEmptyCta context="cargo" />
             )}
           </>
+        )}
+
+        {tab === 'opportunities' && opportunities.length === 0 && (
+          <GraphSyncEmptyCta context="cargo" />
         )}
 
         {tab === 'opportunities' &&
@@ -655,26 +800,35 @@ export default function LiveDataIntelPanel({
             return (
               <article
                 key={opp.id}
-                className="rounded-xl border border-emerald-500/20 bg-white dark:bg-slate-900 p-3"
+                className={OPP_CARD}
               >
-                <div className="flex justify-between gap-2">
-                  <h3 className="text-xs font-bold text-slate-900 dark:text-white">{opp.title}</h3>
-                  <span className="text-[9px] font-black text-emerald-600">
-                    {Math.round((opp.confidence ?? 0) * 100)}%
+                <div className="flex justify-between gap-3 items-start">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug flex-1 min-w-0">
+                    {opp.title}
+                  </h3>
+                  <span className="shrink-0 text-xs font-black px-2.5 py-1 rounded-full bg-emerald-600/15 text-emerald-900 dark:text-emerald-200">
+                    {Math.round((opp.confidence ?? 0) * 100)}% {t('ביטחון', 'confidence')}
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1">{opp.hypothesis}</p>
+                <p className={`${MUTED} mt-2`}>{opp.hypothesis}</p>
                 {opp.profit_checklist && opp.profit_checklist.length > 0 && (
-                  <ul className="mt-2 text-[9px] text-slate-500 list-disc pl-4">
-                    {opp.profit_checklist.slice(0, 4).map((line, i) => (
-                      <li key={i}>{line}</li>
-                    ))}
-                  </ul>
+                  <div className="mt-3">
+                    <p className={`${LABEL} mb-1`}>{t('ראיות', 'Evidence')}</p>
+                    <ExpandableBulletList items={opp.profit_checklist} limit={4} />
+                  </div>
+                )}
+                {opp.evidence && opp.evidence.length > 0 && (
+                  <div className="mt-2">
+                    <ExpandableBulletList items={opp.evidence} limit={3} />
+                  </div>
                 )}
                 <button
                   type="button"
-                  className="mt-2 w-full py-1.5 text-[9px] font-bold uppercase text-emerald-700"
+                  className="mt-4 w-full min-h-[44px] py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold uppercase tracking-wide hover:bg-emerald-500 transition-colors"
                   onClick={async () => {
+                    if (onOpenOpportunity) {
+                      onOpenOpportunity(opp.id, opp.title);
+                    }
                     if (expanded) {
                       setExpandedOpp(null);
                       return;
@@ -865,6 +1019,25 @@ export default function LiveDataIntelPanel({
               </p>
             )}
           </>
+        )}
+
+        {tab === 'companies' && (
+          <div className="flex gap-2 mb-2 flex-wrap items-center">
+            <button
+              type="button"
+              disabled={enrichContactsLoading}
+              onClick={() => void handleBatchEnrichContacts()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-violet-500/40 bg-violet-500/10 text-[10px] font-black uppercase text-violet-800 dark:text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+            >
+              {enrichContactsLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : null}
+              {t('העשר אנשי קשר (batch)', 'Enrich contacts (batch)')}
+            </button>
+            <span className="text-[9px] text-slate-500">
+              {t('דורש Admin token · עד 20 חברות', 'Requires admin token · up to 20 companies')}
+            </span>
+          </div>
         )}
 
         {tab === 'companies' && (
@@ -1085,6 +1258,11 @@ export default function LiveDataIntelPanel({
         {tab === 'feed' && filteredCards.length === 0 && !isLoading && (
           <p className="text-xs text-slate-500">{t('אין כרטיסי מודיעין', 'No intelligence cards yet')}</p>
         )}
+
+        {tab === 'companies' && !companies.length && companiesTotal === 0 && (
+          <GraphSyncEmptyCta context="companies" />
+        )}
+        </div>
       </div>
 
       {selectedCard && (
@@ -1094,16 +1272,17 @@ export default function LiveDataIntelPanel({
               <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
               <p className="text-[10px] text-amber-700 dark:text-amber-300">{t(DISCLAIMER_HE, DISCLAIMER_EN)}</p>
             </div>
-            <h2 className="text-lg font-bold">{selectedCard.title}</h2>
-            <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{selectedCard.summary}</p>
-            <ul className="mt-4 space-y-1 text-[11px] text-slate-500">
-              {(selectedCard.evidence || []).map((e, i) => (
-                <li key={i}>• {e}</li>
-              ))}
-            </ul>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{selectedCard.title}</h2>
+            <p className={`${BODY} mt-3`}>{selectedCard.summary}</p>
+            {(selectedCard.evidence?.length ?? 0) > 0 && (
+              <div className="mt-4">
+                <p className={LABEL}>{t('ראיות', 'Evidence')}</p>
+                <ExpandableBulletList items={selectedCard.evidence ?? []} limit={5} />
+              </div>
+            )}
             <button
               type="button"
-              className="mt-4 w-full py-2 rounded-xl border text-[10px] font-bold uppercase"
+              className="mt-4 w-full min-h-[44px] py-2.5 rounded-xl border text-sm font-bold uppercase text-slate-700 dark:text-slate-200"
               onClick={() => setSelectedCard(null)}
             >
               {t('סגור', 'Close')}

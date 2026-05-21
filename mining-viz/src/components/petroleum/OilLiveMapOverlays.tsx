@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDebouncedValue } from '../../hooks/use-debounced-value';
 import { Marker, Popup, Polyline, LayerGroup } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -18,6 +19,7 @@ import {
 } from '../../api/oilLiveApi';
 import type { MaritimeViewportBounds } from '../../types';
 import type { OilLiveEntityKind } from '../../features/live-data/OilLiveEntityDrawer';
+import { dedupeOpportunities } from '../../features/live-data/dedupeOpportunities';
 
 export type OilLiveEntityClickPayload = {
   entityKind: OilLiveEntityKind;
@@ -106,19 +108,22 @@ export default function OilLiveMapOverlays({
 }: Props) {
   const queryClient = useQueryClient();
   const [liveVessels, setLiveVessels] = useState<Record<number, OilLiveVessel>>({});
+  const debouncedViewport = useDebouncedValue(viewport, 450);
 
-  const bbox = viewport
-    ? `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`
+  const bbox = debouncedViewport
+    ? `${debouncedViewport.west},${debouncedViewport.south},${debouncedViewport.east},${debouncedViewport.north}`
     : undefined;
 
   const viewportReady = Boolean(bbox);
+  const oppQueryKey = ['oil-live-opportunities', 0.55] as const;
 
   const { data: mapData } = useQuery({
     queryKey: ['oil-live-map', bbox],
     queryFn: () => getOilLiveMap(bbox),
     enabled: enabled && viewportReady,
-    staleTime: 15_000,
-    refetchInterval: enabled && viewportReady ? 20_000 : false,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+    refetchInterval: enabled && viewportReady ? 30_000 : false,
   });
 
   const { data: cargoData } = useQuery({
@@ -134,10 +139,11 @@ export default function OilLiveMapOverlays({
   });
 
   const { data: oppsData } = useQuery({
-    queryKey: ['oil-live-opportunities-map'],
+    queryKey: oppQueryKey,
     queryFn: () => getOilOpportunities(0.55),
     enabled: enabled && layers.opportunities,
-    staleTime: 60_000,
+    staleTime: 120_000,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -211,8 +217,13 @@ export default function OilLiveMapOverlays({
     return m;
   }, [mapData?.terminals]);
 
+  const dedupedOpportunities = useMemo(
+    () => dedupeOpportunities(oppsData?.opportunities ?? [], 30),
+    [oppsData?.opportunities],
+  );
+
   const opportunityMarkers = useMemo(() => {
-    const opps = oppsData?.opportunities ?? [];
+    const opps = dedupedOpportunities;
     const out: Array<{ key: string; lat: number; lng: number; title: string; oppId: string }> = [];
     for (const opp of opps) {
       const tid = opp.terminal_id;
@@ -229,17 +240,17 @@ export default function OilLiveMapOverlays({
       });
     }
     return out;
-  }, [oppsData?.opportunities, terminalById, viewport]);
+  }, [dedupedOpportunities, terminalById, viewport]);
 
   const opportunityByTerminalId = useMemo(() => {
     const m = new Map<string, OilOpportunity>();
-    for (const opp of oppsData?.opportunities ?? []) {
+    for (const opp of dedupedOpportunities) {
       if (opp.terminal_id && !m.has(opp.terminal_id)) {
         m.set(opp.terminal_id, opp);
       }
     }
     return m;
-  }, [oppsData?.opportunities]);
+  }, [dedupedOpportunities]);
 
   useEffect(() => {
     if (!onStatsChange) return;
@@ -260,8 +271,10 @@ export default function OilLiveMapOverlays({
         <MarkerClusterGroup
           showCoverageOnHover={false}
           chunkedLoading
-          maxClusterRadius={48}
-          disableClusteringAtZoom={14}
+          maxClusterRadius={42}
+          disableClusteringAtZoom={11}
+          spiderfyOnMaxZoom
+          zoomToBoundsOnClick
           iconCreateFunction={terminalClusterIcon}
           spiderLegPolylineOptions={{ interactive: false }}
         >
@@ -284,12 +297,30 @@ export default function OilLiveMapOverlays({
                 },
               }}
             >
-              <Popup>
-                <strong>{term.name}</strong>
-                <br />
-                {term.operator_name}
-                <br />
-                {(term.products ?? []).join(', ')}
+              <Popup className="oil-live-leaflet-popup">
+                <div className="oil-live-popup-body">
+                  <strong>{term.name}</strong>
+                  <p>{term.operator_name}</p>
+                  <p>{(term.products ?? []).slice(0, 4).join(', ')}</p>
+                  {term.country && <p className="oil-live-popup-muted">{term.country}</p>}
+                  {onEntityClick && (
+                    <button
+                      type="button"
+                      className="oil-live-popup-btn"
+                      onClick={() =>
+                        onEntityClick({
+                          entityKind: 'terminal',
+                          entityId: term.id,
+                          opportunityId: opportunityByTerminalId.get(term.id)?.id,
+                          title: term.name,
+                          subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
+                        })
+                      }
+                    >
+                      View details
+                    </button>
+                  )}
+                </div>
               </Popup>
             </Marker>
           ))}
