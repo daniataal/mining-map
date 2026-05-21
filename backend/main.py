@@ -5463,6 +5463,30 @@ def get_company_registry_links(company_name: str, country: str = ""):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _probe_oil_live_health() -> dict:
+    """Reachability check for oil-live-intel (Live Data terminals / sync-status)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    base = (os.getenv("OIL_INTEL_API_URL") or "http://oil-live-intel:8095").rstrip("/")
+    url = f"{base}/api/oil-live/health"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        sync = payload.get("sync") if isinstance(payload.get("sync"), dict) else {}
+        return {
+            "ok": True,
+            "url": url,
+            "terminal_count": sync.get("terminal_count"),
+            "cargo_record_count": sync.get("cargo_record_count"),
+        }
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "url": url, "error": f"HTTP {exc.code}"}
+    except Exception as exc:
+        return {"ok": False, "url": url, "error": str(exc)}
+
+
 @app.get("/api/health")
 def platform_health():
     """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
@@ -5482,6 +5506,7 @@ def platform_health():
         redis_ping=cache.get_client,
         get_snapshot_meta=get_snapshot_meta,
         get_maritime_stats=get_maritime_stats,
+        get_oil_live_health=_probe_oil_live_health,
     )
 
 
@@ -6347,6 +6372,120 @@ def admin_data_health(
             conn.commit()
         return result
     except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+class EiaHistoricIngestRequest(BaseModel):
+    path: Optional[str] = None
+
+
+@app.get("/api/eia-historic-imports/summary")
+def eia_historic_imports_summary(
+    importer: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    limit: int = 50,
+):
+    """Aggregate EIA file-import volumes by year and top origin countries."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_summary
+        except ImportError:
+            from services.eia_historic_imports import query_summary
+        return query_summary(
+            conn,
+            importer=importer,
+            year_from=year_from,
+            year_to=year_to,
+            limit=limit,
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/eia-historic-imports/series")
+def eia_historic_imports_series(
+    importer: str,
+    origin_country: Optional[str] = None,
+    commodity_family: Optional[str] = None,
+):
+    """Monthly/annual import time series for one U.S. importer (company-level EIA files)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_series
+        except ImportError:
+            from services.eia_historic_imports import query_series
+        return query_series(
+            conn,
+            importer=importer,
+            origin_country=origin_country,
+            commodity_family=commodity_family,
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/eia-historic-imports/map")
+def eia_historic_imports_map(
+    year: int,
+    importer: Optional[str] = None,
+    limit: int = 80,
+):
+    """Origin→U.S. corridor aggregates for map arcs (geocode client-side)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_map_arcs
+        except ImportError:
+            from services.eia_historic_imports import query_map_arcs
+        return query_map_arcs(conn, year=year, importer=importer, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/eia-historic-imports/ingest")
+def admin_eia_historic_imports_ingest(
+    request: EiaHistoricIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+    folder: Optional[str] = None,
+):
+    """
+    Ingest EIA ``impa*.xls(x)`` from ``EIA_DOWNLOADS_DIR`` or ``folder`` query/body path.
+    User-provided files only — does not scrape eia.gov.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    target = (request.path or folder or "").strip()
+    if not target:
+        try:
+            from backend.services.eia_historic_imports import default_downloads_dir
+        except ImportError:
+            from services.eia_historic_imports import default_downloads_dir
+        target = default_downloads_dir()
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import ingest_eia_downloads_folder
+        except ImportError:
+            from services.eia_historic_imports import ingest_eia_downloads_folder
+        summary = ingest_eia_downloads_folder(conn, target)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
         return {"status": "error", "message": str(exc)}
     finally:
         conn.close()

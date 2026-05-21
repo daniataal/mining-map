@@ -221,6 +221,11 @@ export default function App() {
     opportunities: number;
   } | null>(null);
   const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
+  const [eiaHistoricMap, setEiaHistoricMap] = useState<{
+    enabled: boolean;
+    arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
+    year: number;
+  }>({ enabled: false, arcs: [], year: 2020 });
   const [liveDataFlyTrigger, setLiveDataFlyTrigger] = useState(0);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
@@ -1254,6 +1259,8 @@ export default function App() {
                   onOilLiveEntityClick={viewMode === 'live_data' ? handleOilLiveEntityClick : undefined}
                   onOilLiveDismiss={viewMode === 'live_data' ? handleOilLiveDismiss : undefined}
                   liveDataFlyTrigger={viewMode === 'live_data' ? liveDataFlyTrigger : 0}
+                  eiaHistoricMapEnabled={viewMode === 'live_data' && eiaHistoricMap.enabled}
+                  eiaHistoricMapArcs={eiaHistoricMap.arcs}
                 />
               </Suspense>
             )}
@@ -1323,6 +1330,7 @@ export default function App() {
                       onOpenCargoRecord={handleOpenOilLiveCargo}
                       onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
                       onOpenLiveEntity={handleOilLiveEntityClick}
+                      onEiaHistoricMapChange={setEiaHistoricMap}
                     />
                   </Suspense>
                 </div>

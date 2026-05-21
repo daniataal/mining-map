@@ -290,6 +290,24 @@ jobs:
             echo "DB license export status: $EXPORT_STATUS"
           fi
 
+          OIL_LIVE_READY="false"
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:8095/api/oil-live/health >/dev/null 2>&1; then
+              OIL_LIVE_READY="true"
+              break
+            fi
+            sleep 2
+          done
+          echo "oil-live-intel ready: $OIL_LIVE_READY"
+
+          if [ "$BACKEND_READY" = "true" ] && [ "$OIL_LIVE_READY" = "true" ] && [ -n "${ADMIN_TOKEN}" ]; then
+            nohup curl -sS -o /tmp/oil_graph_sync_response.json -w "%{http_code}" \
+              -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
+              -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              >/tmp/oil_graph_sync_http_code.txt 2>&1 &
+            echo "Started background graph-sync (check /tmp/oil_graph_sync_response.json and mining-oil-live-graph-sync-worker logs)"
+          fi
+
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \
               -X POST "http://localhost:8000/api/admin/import/extracted-csv?countries=South%20Africa,Ghana&sector=mining" \

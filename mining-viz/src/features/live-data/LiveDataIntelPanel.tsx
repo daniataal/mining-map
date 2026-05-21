@@ -46,6 +46,7 @@ import {
 } from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
+import EiaHistoricImportsPanel from './EiaHistoricImportsPanel';
 import LiveDataSearchBar, { type LiveDataSearchHitClick } from './LiveDataSearchBar';
 import { dedupeOpportunities } from './dedupeOpportunities';
 import { downloadCsv } from '../../lib/csvExport';
@@ -112,7 +113,7 @@ function ExpandableBulletList({
   );
 }
 
-type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts';
+type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts' | 'eia_historic';
 
 export type LiveDataIntelPanelProps = {
   productFilter: string;
@@ -136,6 +137,12 @@ export type LiveDataIntelPanelProps = {
     title?: string;
     subtitle?: string;
   }) => void;
+  /** Historic EIA file-import corridor arcs on the Live Data map. */
+  onEiaHistoricMapChange?: (payload: {
+    enabled: boolean;
+    arcs: import('../../api/eiaHistoricApi').EiaHistoricMapArc[];
+    year: number;
+  }) => void;
 };
 
 export default function LiveDataIntelPanel({
@@ -148,6 +155,7 @@ export default function LiveDataIntelPanel({
   onOpenCargoRecord,
   onOpenCompanyDossier,
   onOpenLiveEntity,
+  onEiaHistoricMapChange,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('feed');
@@ -254,12 +262,21 @@ export default function LiveDataIntelPanel({
     staleTime: 120_000,
   });
 
-  const { data: syncStatus } = useQuery({
+  const {
+    data: syncStatus,
+    isError: syncStatusError,
+    error: syncStatusErr,
+    isPending: syncStatusPending,
+  } = useQuery({
     queryKey: ['oil-live-sync-status'],
     queryFn: getOilLiveSyncStatus,
     staleTime: 45_000,
     refetchInterval: 120_000,
   });
+
+  const syncStatusUnreachable = syncStatusError && !syncStatus;
+  const syncStatusErrorMessage =
+    syncStatusErr instanceof Error ? syncStatusErr.message : syncStatusErr ? String(syncStatusErr) : null;
 
   const cargoMinConfNum = parseFloat(cargoMinConfidence) || 0.5;
   const { data: cargoHealth } = useQuery({
@@ -329,21 +346,27 @@ export default function LiveDataIntelPanel({
     },
   ] as const;
 
+  const dbCountFallback = syncStatusUnreachable
+    ? '—'
+    : syncStatusPending
+      ? '…'
+      : '—';
+
   const coverageDatabase = [
     {
       key: 'terminals-db',
       label: t('מסופים', 'Terminals'),
-      value: syncStatus?.terminal_count ?? terminalsIndex?.length ?? '…',
+      value: syncStatus?.terminal_count ?? terminalsIndex?.length ?? dbCountFallback,
     },
     {
       key: 'port-calls',
       label: t('קריאות נמל', 'Port calls'),
-      value: syncStatus?.port_call_count ?? '…',
+      value: syncStatus?.port_call_count ?? dbCountFallback,
     },
     {
       key: 'cargo',
       label: t('מטען סינתטי', 'Synthetic cargo'),
-      value: syncStatus?.cargo_record_count ?? '…',
+      value: syncStatus?.cargo_record_count ?? dbCountFallback,
     },
   ] as const;
 
@@ -672,6 +695,18 @@ export default function LiveDataIntelPanel({
           <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
             {t('במאגר', 'In database')}
           </p>
+          {syncStatusUnreachable && (
+            <p
+              className="mt-1.5 rounded-lg border border-rose-500/35 bg-rose-500/10 px-2.5 py-2 text-xs leading-relaxed text-rose-950 dark:text-rose-100"
+              role="alert"
+            >
+              {t(
+                'לא ניתן להגיע ל-oil-live-intel (/api/oil-live/sync-status). ודאו שהקונטיינר רץ, graph-sync הורץ, והדפדפן פונה דרך Caddy :8080 או frontend :5173 (לא backend :8000 בלבד).',
+                'Cannot reach oil-live-intel (/api/oil-live/sync-status). Ensure the container is running, graph-sync has completed, and the browser uses Caddy :8080 or frontend :5173 (not backend :8000 alone).',
+              )}
+              {syncStatusErrorMessage ? ` (${syncStatusErrorMessage})` : ''}
+            </p>
+          )}
           <div className="mt-1.5 grid grid-cols-3 gap-2">
             {coverageDatabase.map(({ key, label, value }) => (
               <div
@@ -756,7 +791,7 @@ export default function LiveDataIntelPanel({
           {t('לשכבות מפה — השתמשו בפאנל שכבות בפינה השמאלית', 'Map layers — use the panel at bottom-left of the map')}
         </p>
         <div className="flex gap-2 flex-wrap">
-          {(['feed', 'opportunities', 'cargo', 'companies', 'alerts'] as const).map((tabKey) => (
+          {(['feed', 'opportunities', 'cargo', 'companies', 'alerts', 'eia_historic'] as const).map((tabKey) => (
             <button
               key={tabKey}
               type="button"
@@ -794,6 +829,7 @@ export default function LiveDataIntelPanel({
                   )}
                 </>
               )}
+              {tabKey === 'eia_historic' && t('היסטורי (EIA)', 'Historic (EIA)')}
             </button>
           ))}
         </div>
@@ -1517,6 +1553,10 @@ export default function LiveDataIntelPanel({
               {t('הבא', 'Next')}
             </button>
           </div>
+        )}
+
+        {tab === 'eia_historic' && (
+          <EiaHistoricImportsPanel onMapArcsChange={onEiaHistoricMapChange} />
         )}
 
         {tab === 'feed' && filteredCards.length === 0 && !isLoading && (

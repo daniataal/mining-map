@@ -55,6 +55,8 @@ import OilLiveMapOverlays, {
   type OilLiveLayerVisibility,
 } from './petroleum/OilLiveMapOverlays';
 import LiveDataMapLayersPanel from '../features/live-data/LiveDataMapLayersPanel';
+import EiaHistoricMapLayer from '../features/live-data/EiaHistoricMapLayer';
+import type { EiaHistoricMapArc } from '../api/eiaHistoricApi';
 import { LIVE_DATA_HUB_BOUNDS } from '../features/live-data/liveDataMapDefaults';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
@@ -280,6 +282,9 @@ interface MapComponentProps {
   onOilLiveDismiss?: () => void;
   /** Increment when entering Live Data to fly map to Gulf hub bbox. */
   liveDataFlyTrigger?: number;
+  /** EIA historic file-import corridor arcs (purple dashed). */
+  eiaHistoricMapEnabled?: boolean;
+  eiaHistoricMapArcs?: EiaHistoricMapArc[];
 }
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
@@ -569,6 +574,8 @@ export default function MapComponent({
   onOilLiveEntityClick,
   onOilLiveDismiss,
   liveDataFlyTrigger = 0,
+  eiaHistoricMapEnabled = false,
+  eiaHistoricMapArcs = [],
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -1788,6 +1795,12 @@ export default function MapComponent({
                             viewport={liveDataMapViewport}
                             onStatsChange={onOilLiveStatsChange}
                             onEntityClick={onOilLiveEntityClick}
+                        />
+                    )}
+                    {isLiveDataView && eiaHistoricMapEnabled && (
+                        <EiaHistoricMapLayer
+                            enabled={eiaHistoricMapEnabled}
+                            arcs={eiaHistoricMapArcs}
                         />
                     )}
                     {isOilAndGasView && onGroundVisible && (
