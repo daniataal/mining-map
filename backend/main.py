@@ -3045,6 +3045,11 @@ class DealRoomCreateRequest(BaseModel):
     status: str = "open"
     route_snapshot: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
+    # RFQ-lite (stored in evidence_json.rfq)
+    rfq_quantity: Optional[str] = None
+    rfq_hs_code: Optional[str] = None
+    rfq_incoterm: Optional[str] = None
+    rfq_product: Optional[str] = None
 
 
 class DealRoomPatchRequest(BaseModel):
@@ -3199,6 +3204,14 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
     services = _load_deal_room_services()
     conn = get_db_connection()
     try:
+        rfq = {}
+        if payload.rfq_product or payload.rfq_quantity or payload.rfq_hs_code or payload.rfq_incoterm:
+            rfq = {
+                "product": payload.rfq_product,
+                "quantity": payload.rfq_quantity,
+                "hs_code": payload.rfq_hs_code,
+                "incoterm": payload.rfq_incoterm,
+            }
         room = services.create_deal_room(
             conn,
             entity_id=payload.entity_id,
@@ -3207,6 +3220,7 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
             status=payload.status,
             route_snapshot=payload.route_snapshot,
             notes=payload.notes,
+            rfq=rfq or None,
         )
         return _decorate_deal_room(conn, room)
     finally:
@@ -6637,6 +6651,93 @@ def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
     except Exception as exc:
         logger.exception("oil-live purge-demo-seed failed: %s", exc)
         return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/trade-manifests/upload")
+def admin_trade_manifest_upload(
+    x_admin_token: Optional[str] = Header(None),
+    file_path: str = "",
+    consent: bool = True,
+):
+    """Ingest user-provided manifest CSV into trade_manifest_rows (tier=user_upload)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    if not file_path.strip():
+        return {"status": "error", "message": "file_path required"}
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.trade_manifest_ingest import ingest_user_manifest_csv
+        except ImportError:
+            from services.trade_manifest_ingest import ingest_user_manifest_csv
+        conn = get_db_connection()
+        try:
+            result = ingest_user_manifest_csv(conn, file_path.strip(), consent=consent)
+            conn.commit()
+        finally:
+            conn.close()
+        return result
+    except Exception as exc:
+        logger.exception("trade manifest upload failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/commodity/benchmarks")
+def commodity_benchmarks_panel(
+    products: str = "crude,diesel,jet,gold",
+):
+    """Free/public benchmark snapshot for deal pack and dossier (benchmark_only tier)."""
+    ensure_schema_initialized()
+    out: list[dict[str, Any]] = []
+    requested = [p.strip().lower() for p in products.split(",") if p.strip()]
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT country, product, flow_indicator, period, value, unit
+                FROM jodi_oil_snapshots
+                ORDER BY ingested_at DESC NULLS LAST
+                LIMIT 20;
+                """
+            )
+            for row in cur.fetchall() or []:
+                out.append(
+                    {
+                        "source": "jodi",
+                        "tier": "benchmark_only",
+                        "product": row[1] or row[3],
+                        "country": row[0],
+                        "period": row[3],
+                        "value": float(row[4]) if row[4] is not None else None,
+                        "unit": row[5],
+                        "disclaimer": "JODI macro supply/demand — not a transaction price.",
+                    }
+                )
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    for prod in requested:
+        if prod in ("gold", "silver"):
+            try:
+                ticker = "GC=F" if prod == "gold" else "SI=F"
+                snap = _yahoo_futures_spot(ticker)
+                if snap:
+                    out.append(
+                        {
+                            "source": "yahoo_delayed",
+                            "tier": "benchmark_only",
+                            "product": prod,
+                            "value": snap.get("price"),
+                            "unit": "USD",
+                            "disclaimer": "Delayed exchange quote — not for execution pricing.",
+                        }
+                    )
+            except Exception:
+                pass
+    return {"benchmarks": out, "disclaimer": "Public benchmarks only — verify at source before pricing deals."}
 
 
 @app.post("/api/admin/oil-live/graph-sync")

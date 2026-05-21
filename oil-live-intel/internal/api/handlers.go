@@ -261,6 +261,86 @@ func (s *Server) GetCompany(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+// GetCompanyShipments returns paginated MCR rows for a company (ImportYeti-style ledger).
+func (s *Server) GetCompanyShipments(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	limit := queryInt(r, "limit", 50)
+	offset := queryInt(r, "offset", 0)
+	if limit > 200 {
+		limit = 200
+	}
+	company, err := s.getCompany(r, id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "company not found")
+		return
+	}
+	name, _ := company["name"].(string)
+	companyID, _ := company["id"].(string)
+
+	rows, err := s.Pool.Query(r.Context(), `
+		SELECT m.id, m.synthetic_bol_id, m.recipe, m.commodity_family, m.confidence,
+			m.bol_tier, m.shipper_name, m.consignee_name, m.vessel_name,
+			m.load_port_name, m.load_country, m.discharge_hint, m.discharge_country,
+			m.volume_best_estimate, m.volume_unit, m.event_date,
+			m.corridor_load_lat, m.corridor_load_lng, m.corridor_discharge_lat, m.corridor_discharge_lng,
+			m.evidence_chain, m.sources
+		FROM meridian_cargo_records m
+		WHERE m.shipper_company_id::text = $1 OR m.consignee_company_id::text = $1
+		   OR ($2 <> '' AND (LOWER(m.shipper_name) = LOWER($2) OR LOWER(m.consignee_name) = LOWER($2)))
+		ORDER BY m.event_date DESC NULLS LAST, m.confidence DESC
+		LIMIT $3 OFFSET $4
+	`, companyID, name, limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	var items []map[string]any
+	for rows.Next() {
+		var rid uuid.UUID
+		var bolID, recipe, family, tier string
+		var shipper, consignee, vessel, loadPort, loadCountry, discharge, discCountry *string
+		var volBest *float64
+		var volUnit *string
+		var conf float64
+		var eventDate *time.Time
+		var loadLat, loadLng, discLat, discLng *float64
+		var evidenceChain, sources []byte
+		if err := rows.Scan(&rid, &bolID, &recipe, &family, &conf, &tier,
+			&shipper, &consignee, &vessel, &loadPort, &loadCountry, &discharge, &discCountry,
+			&volBest, &volUnit, &eventDate,
+			&loadLat, &loadLng, &discLat, &discLng, &evidenceChain, &sources); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var evChain, srcList any
+		_ = json.Unmarshal(evidenceChain, &evChain)
+		_ = json.Unmarshal(sources, &srcList)
+		items = append(items, map[string]any{
+			"id": rid.String(), "synthetic_bol_id": bolID, "recipe": recipe,
+			"commodity_family": family, "confidence": conf, "bol_tier": tier,
+			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
+			"load_port_name": loadPort, "load_country": loadCountry,
+			"discharge_hint": discharge, "discharge_country": discCountry,
+			"volume_best_estimate": volBest, "volume_unit": volUnit,
+			"event_date": formatTimePtr(eventDate),
+			"corridor_load_lat": loadLat, "corridor_load_lng": loadLng,
+			"corridor_discharge_lat": discLat, "corridor_discharge_lng": discLng,
+			"evidence_chain": evChain, "sources": srcList,
+			"disclaimer": "Synthetic cargo record — inferred from public sources, not a legal BOL.",
+		})
+	}
+	var total int
+	_ = s.Pool.QueryRow(r.Context(), `
+		SELECT COUNT(*)::int FROM meridian_cargo_records m
+		WHERE m.shipper_company_id::text = $1 OR m.consignee_company_id::text = $1
+		   OR ($2 <> '' AND (LOWER(m.shipper_name) = LOWER($2) OR LOWER(m.consignee_name) = LOWER($2)))
+	`, companyID, name).Scan(&total)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"company": company, "shipments": items, "total": total, "limit": limit, "offset": offset,
+	})
+}
+
 func (s *Server) SupplierCandidates(w http.ResponseWriter, r *http.Request) {
 	f := companyFilters{SupplierStatus: "candidate", MinConfidence: 0.55}
 	items, err := s.listCompanies(r, f, 100, 0)

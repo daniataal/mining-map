@@ -10,7 +10,7 @@ import { createOilTerminalClusterIconFactory } from '../../lib/mapClusterIcons';
 import OilLiveProvenanceBadge from '../../features/live-data/OilLiveProvenanceBadge';
 import {
   connectOilLiveWebSocket,
-  getCargoRecords,
+  getCargoRecordsMap,
   getOilLiveMap,
   getOilOpportunities,
   getTradeFlows,
@@ -317,15 +317,16 @@ export default function OilLiveMapOverlays({
   });
 
   const { data: cargoData } = useQuery({
-    queryKey: ['oil-live-cargo', productFilter],
+    queryKey: ['oil-live-cargo-map', bbox, productFilter],
     queryFn: () =>
-      getCargoRecords({
+      getCargoRecordsMap(bbox!, {
         commodity: productFilter === 'all' ? undefined : productFilter,
         min_confidence: 0.6,
-        limit: 50,
+        limit: 200,
       }),
-    enabled: enabled && layers.corridors,
+    enabled: enabled && layers.corridors && viewportReady,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   });
 
   const { data: tradeFlowsData } = useQuery({

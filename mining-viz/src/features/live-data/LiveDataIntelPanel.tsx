@@ -137,6 +137,8 @@ export type LiveDataIntelPanelProps = {
     title?: string;
     subtitle?: string;
   }) => void;
+  /** Fly map to search hit coordinates before opening drawer. */
+  onMapFlyTo?: (lat: number, lng: number) => void;
   /** Historic EIA file-import corridor arcs on the Live Data map. */
   onEiaHistoricMapChange?: (payload: {
     enabled: boolean;
@@ -155,6 +157,7 @@ export default function LiveDataIntelPanel({
   onOpenCargoRecord,
   onOpenCompanyDossier,
   onOpenLiveEntity,
+  onMapFlyTo,
   onEiaHistoricMapChange,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
@@ -368,7 +371,33 @@ export default function LiveDataIntelPanel({
       label: t('מטען סינתטי', 'Synthetic cargo'),
       value: syncStatus?.cargo_record_count ?? dbCountFallback,
     },
+    {
+      key: 'macro-flows',
+      label: t('זרימות מאקרו', 'Macro flows'),
+      value: syncStatus?.oil_trade_flow_count ?? dbCountFallback,
+    },
+    {
+      key: 'eia-historic',
+      label: t('היסטורי EIA', 'EIA historic'),
+      value: syncStatus?.eia_historic_import_count ?? dbCountFallback,
+    },
+    {
+      key: 'manifests',
+      label: t('מניפסטים', 'Manifests'),
+      value: syncStatus?.trade_manifest_row_count ?? dbCountFallback,
+    },
   ] as const;
+
+  const globalCoverageBanner = useMemo(() => {
+    if (!syncStatus || syncStatusUnreachable) return null;
+    const tiers = (syncStatus.mcr_by_tier ?? [])
+      .map((t) => `${t.bol_tier}:${t.count}`)
+      .join(' · ');
+    const comtrade = syncStatus.last_comtrade_sync_at
+      ? new Date(syncStatus.last_comtrade_sync_at).toLocaleDateString()
+      : null;
+    return { tiers, comtrade };
+  }, [syncStatus, syncStatusUnreachable]);
 
   const lastCargoSyncLabel = useMemo(() => {
     const ts =
@@ -559,6 +588,9 @@ export default function LiveDataIntelPanel({
 
   const handleSearchHit = useCallback(
     (hit: LiveDataSearchHitClick) => {
+      if (hit.lat != null && hit.lng != null && onMapFlyTo) {
+        onMapFlyTo(hit.lat, hit.lng);
+      }
       if (onOpenLiveEntity) {
         onOpenLiveEntity({
           entityKind: hit.type,
@@ -582,7 +614,7 @@ export default function LiveDataIntelPanel({
       // user knows the click registered but the drawer isn't wired here.
       toast.info(t('פתחו את המגירה מהמפה', 'Open the drawer from the map'));
     },
-    [onOpenLiveEntity, onOpenCargoRecord, onOpenCompanyDossier, t],
+    [onOpenLiveEntity, onOpenCargoRecord, onOpenCompanyDossier, onMapFlyTo, t],
   );
 
   async function handleSave(company: OilCompany) {
@@ -707,7 +739,15 @@ export default function LiveDataIntelPanel({
               {syncStatusErrorMessage ? ` (${syncStatusErrorMessage})` : ''}
             </p>
           )}
-          <div className="mt-1.5 grid grid-cols-3 gap-2">
+          {globalCoverageBanner && (
+            <p className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-sky-950 dark:text-sky-100">
+              {t('כיסוי גלובלי', 'Global ledger')}:{' '}
+              {globalCoverageBanner.tiers || t('אין מטען', 'no cargo')}{' '}
+              {globalCoverageBanner.comtrade &&
+                ` · ${t('Comtrade', 'Comtrade')} ${globalCoverageBanner.comtrade}`}
+            </p>
+          )}
+          <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2">
             {coverageDatabase.map(({ key, label, value }) => (
               <div
                 key={key}
@@ -767,7 +807,7 @@ export default function LiveDataIntelPanel({
         </div>
 
         <div className="flex gap-2 mt-3 flex-wrap">
-          {(['all', 'crude', 'refined', 'gas', 'sulfur'] as const).map((p) => (
+          {(['all', 'crude', 'diesel', 'gasoil', 'jet', 'gasoline', 'lng', 'lpg', 'gas', 'sulfur'] as const).map((p) => (
             <button
               key={p}
               type="button"

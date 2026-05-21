@@ -1128,6 +1128,73 @@ def _sync_eia_refinery_throughput(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_eia_historic_downloads(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.eia_historic_imports import (
+            default_downloads_dir,
+            ingest_eia_downloads_folder,
+        )
+    except ImportError:
+        from services.eia_historic_imports import (
+            default_downloads_dir,
+            ingest_eia_downloads_folder,
+        )
+    target = default_downloads_dir()
+    if not target or not Path(target).is_dir():
+        return {"status": "skipped", "reason": "EIA_DOWNLOADS_DIR missing or not a directory"}
+    try:
+        files = list(Path(target).glob("impa*"))
+        if not files:
+            return {"status": "skipped", "reason": "no impa*.xls/xlsx in EIA_DOWNLOADS_DIR"}
+        return ingest_eia_downloads_folder(conn, target)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_eurostat_trade_flows(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.eurostat_trade import sync_eurostat_hs27
+    except ImportError:
+        from services.eurostat_trade import sync_eurostat_hs27
+    try:
+        return sync_eurostat_hs27(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_jodi_validation(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.jodi_oil import sync_jodi_snapshots
+    except ImportError:
+        from services.jodi_oil import sync_jodi_snapshots
+    try:
+        return sync_jodi_snapshots(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_commodity_trade_comtrade(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.commodity_trade_flows import sync_mining_hs_comtrade
+    except ImportError:
+        from services.commodity_trade_flows import sync_mining_hs_comtrade
+    try:
+        return sync_mining_hs_comtrade(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_uk_trade_manifests(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.trade_manifest_ingest import sync_uk_open_trade_rows
+    except ImportError:
+        from services.trade_manifest_ingest import sync_uk_open_trade_rows
+    try:
+        return sync_uk_open_trade_rows(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _run_gleif_batch(conn: Any, *, limit: int) -> dict[str, Any]:
     try:
         from backend.services.gleif_batch import enrich_companies_with_lei
@@ -1244,6 +1311,11 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         # Phase 4b — EIA crude imports + refinery throughput (macro tier, country-level).
         summary["steps"]["eia_crude_imports"] = _sync_eia_crude_imports(conn)
         summary["steps"]["eia_refinery_throughput"] = _sync_eia_refinery_throughput(conn)
+        summary["steps"]["eia_historic_imports"] = _sync_eia_historic_downloads(conn)
+        summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
+        summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
+        summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)
+        summary["steps"]["trade_manifest_uk"] = _sync_uk_trade_manifests(conn)
         # Phase 4c — LEI + Wikidata batch enrichment for oil_companies.
         summary["steps"]["gleif_batch"] = _run_gleif_batch(conn, limit=gleif_limit)
         summary["steps"]["wikidata_enrich"] = _run_wikidata_batch(

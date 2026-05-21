@@ -14,6 +14,7 @@ import {
   type DealExecutionPack as DealPack,
   type MeridianCargoRecord,
 } from '../../api/oilLiveApi';
+import { getCommodityBenchmarks } from '../../api/commodityBenchmarks';
 import { useI18n } from '../../lib/i18n';
 import {
   buildRoutePlannerHintsFromCargo,
@@ -100,6 +101,11 @@ export default function DealExecutionPack({
     queryFn: () => getOpportunityDealPack(opportunityId),
     enabled: Boolean(opportunityId),
   });
+  const { data: benchmarks } = useQuery({
+    queryKey: ['commodity-benchmarks', 'deal-pack'],
+    queryFn: () => getCommodityBenchmarks('crude,diesel,jet,gold'),
+    staleTime: 300_000,
+  });
 
   if (isLoading) {
     return (
@@ -155,6 +161,20 @@ export default function DealExecutionPack({
       </div>
 
       <p className="text-[10px] text-amber-800 dark:text-amber-200">{pack.disclaimer}</p>
+
+      {benchmarks?.benchmarks && benchmarks.benchmarks.length > 0 && (
+        <div className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+            {t('מחירי מדף (ציבורי)', 'Public benchmarks')}
+          </p>
+          {benchmarks.benchmarks.slice(0, 6).map((b, i) => (
+            <p key={i} className="text-[10px] text-slate-600 dark:text-slate-300">
+              {b.product ?? b.source}: {b.value != null ? `${b.value} ${b.unit ?? ''}` : '—'}{' '}
+              <span className="text-slate-400">({b.tier})</span>
+            </p>
+          ))}
+        </div>
+      )}
 
       <ul className="space-y-2">
         {pack.checklist?.map((item) => (

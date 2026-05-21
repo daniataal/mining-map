@@ -63,11 +63,19 @@ export async function saveCompanyToSuppliers(companyId: string): Promise<{
   return saveOilCompanyToSuppliers(companyId);
 }
 
+const REFINED_ALIASES = ['diesel', 'gasoil', 'jet', 'gasoline', 'naphtha', 'fuel_oil', 'refined'];
+
 export function commodityMatchesFilter(
   commodityFamily: string | undefined,
   productFilter: string,
 ): boolean {
   if (productFilter === 'all') return true;
   const family = (commodityFamily ?? '').toLowerCase();
+  if (productFilter === 'refined') {
+    return REFINED_ALIASES.some((a) => family.includes(a)) || family.includes('refined');
+  }
+  if (['diesel', 'gasoil', 'jet', 'gasoline', 'lng', 'lpg'].includes(productFilter)) {
+    return family.includes(productFilter);
+  }
   return family === productFilter || family.includes(productFilter);
 }

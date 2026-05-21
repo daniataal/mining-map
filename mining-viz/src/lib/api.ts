@@ -515,6 +515,10 @@ export async function createDealRoom(payload: {
   status?: string;
   routeSnapshot?: Record<string, unknown>;
   notes?: string;
+  rfq_quantity?: string;
+  rfq_hs_code?: string;
+  rfq_incoterm?: string;
+  rfq_product?: string;
 }): Promise<DealRoom> {
   const { data } = await apiClient.post<DealRoom>('/api/deal-rooms', {
     entity_id: payload.entityId,
@@ -523,6 +527,10 @@ export async function createDealRoom(payload: {
     status: payload.status,
     route_snapshot: payload.routeSnapshot,
     notes: payload.notes,
+    rfq_quantity: payload.rfq_quantity,
+    rfq_hs_code: payload.rfq_hs_code,
+    rfq_incoterm: payload.rfq_incoterm,
+    rfq_product: payload.rfq_product,
   });
   return data;
 }
