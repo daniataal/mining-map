@@ -44,6 +44,11 @@ export type EiaHistoricOriginImporter = {
   importer_name: string;
   volume_bbl: number;
   row_count: number;
+  /** Dominant U.S. discharge port for this importer (origin slice). */
+  port_city?: string | null;
+  port_state?: string | null;
+  port_code?: string | null;
+  port_label?: string;
 };
 
 export type EiaHistoricMapOrigin = {

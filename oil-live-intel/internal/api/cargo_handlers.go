@@ -27,6 +27,10 @@ func (s *Server) ListCargoRecordsMap(w http.ResponseWriter, r *http.Request) {
 	if limit > 2000 {
 		limit = 2000
 	}
+	zoom := queryFloat(r, "zoom", 0)
+	if zoom > 0 && zoom < 8 && limit > 120 {
+		limit = 120
+	}
 
 	q := `
 		SELECT m.id, m.synthetic_bol_id, m.recipe, m.commodity_family, m.confidence, m.triangulation_score,
@@ -105,7 +109,7 @@ func (s *Server) ListCargoRecordsMap(w http.ResponseWriter, r *http.Request) {
 			"sources":                srcList,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cargo_records": items, "count": len(items)})
+	writeJSONCached(w, http.StatusOK, map[string]any{"cargo_records": items, "count": len(items)}, 45)
 }
 
 func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
@@ -269,9 +273,14 @@ func (s *Server) GetCargoRecord(w http.ResponseWriter, r *http.Request) {
 //	min_confidence  = float (default 0)
 //	limit           = int (default 100, capped at 500)
 func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
+	zoom := queryFloat(r, "zoom", 0)
 	group := r.URL.Query().Get("group")
 	if group == "" {
-		group = "company_pair"
+		if zoom > 0 && zoom < 8 {
+			group = "country_pair"
+		} else {
+			group = "company_pair"
+		}
 	}
 	if group != "company_pair" && group != "country_pair" {
 		writeErr(w, http.StatusBadRequest, "group must be company_pair or country_pair")
@@ -367,12 +376,13 @@ func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSONCached(w, http.StatusOK, map[string]any{
 		"arcs":       arcs,
 		"count":      len(arcs),
 		"group":      group,
+		"zoom":       zoom,
 		"disclaimer": "Aggregated from synthetic Meridian Cargo Records — inferred from public sources, not legal BOLs.",
-	})
+	}, 120)
 }
 
 func (s *Server) ListCommercialEvents(w http.ResponseWriter, r *http.Request) {

@@ -67,6 +67,8 @@ export interface MiningLicense {
   locode?: string | null;
   countryIso2?: string | null;
   subdivision?: string | null;
+  /** Server-side viewport cluster count (low zoom); not a real license row. */
+  mapClusterCount?: number;
 }
 
 export interface MarketTickerRow {

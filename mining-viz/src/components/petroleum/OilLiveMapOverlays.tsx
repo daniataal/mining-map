@@ -114,6 +114,8 @@ const partialCorridorIcon = new L.DivIcon({
 
 type Props = {
   enabled: boolean;
+  /** Leaflet zoom — drives API LOD (trade flows country-pair when &lt; 8). */
+  mapZoom?: number;
   productFilter?: string;
   terminalSearch?: string;
   layers?: OilLiveLayerVisibility;
@@ -287,6 +289,7 @@ function ArrowPolyline({
 
 export default function OilLiveMapOverlays({
   enabled,
+  mapZoom = 5,
   productFilter = 'all',
   terminalSearch = '',
   layers = {
@@ -310,24 +313,28 @@ export default function OilLiveMapOverlays({
     : undefined;
 
   const viewportReady = Boolean(bbox);
+  const mapLayersActive = layers.terminals || layers.vessels;
+  const effectiveTradeFlowGroup: 'company_pair' | 'country_pair' =
+    mapZoom < 8 ? 'country_pair' : tradeFlowGroup;
   const oppQueryKey = ['oil-live-opportunities', 0.55] as const;
 
   const { data: mapData } = useQuery({
-    queryKey: ['oil-live-map', bbox],
-    queryFn: () => getOilLiveMap(bbox),
-    enabled: enabled && viewportReady,
+    queryKey: ['oil-live-map', bbox, Math.floor(mapZoom)],
+    queryFn: () => getOilLiveMap(bbox, mapZoom),
+    enabled: enabled && viewportReady && mapLayersActive,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
-    refetchInterval: enabled && viewportReady ? 30_000 : false,
+    refetchInterval: enabled && viewportReady && mapLayersActive ? 30_000 : false,
   });
 
   const { data: cargoData } = useQuery({
-    queryKey: ['oil-live-cargo-map', bbox, productFilter],
+    queryKey: ['oil-live-cargo-map', bbox, productFilter, Math.floor(mapZoom)],
     queryFn: () =>
       getCargoRecordsMap(bbox!, {
         commodity: productFilter === 'all' ? undefined : productFilter,
         min_confidence: 0.6,
         limit: 200,
+        zoom: mapZoom,
       }),
     enabled: enabled && layers.corridors && viewportReady,
     staleTime: 60_000,
@@ -335,13 +342,14 @@ export default function OilLiveMapOverlays({
   });
 
   const { data: tradeFlowsData } = useQuery({
-    queryKey: ['oil-live-trade-flows', tradeFlowGroup, productFilter],
+    queryKey: ['oil-live-trade-flows', effectiveTradeFlowGroup, productFilter, Math.floor(mapZoom)],
     queryFn: () =>
       getTradeFlows({
-        group: tradeFlowGroup,
+        group: effectiveTradeFlowGroup,
         commodity: productFilter === 'all' ? undefined : productFilter,
         min_confidence: 0.55,
-        limit: 200,
+        limit: mapZoom < 8 ? 80 : 200,
+        zoom: mapZoom,
       }),
     enabled: enabled && layers.tradeFlows,
     staleTime: 120_000,
@@ -356,7 +364,7 @@ export default function OilLiveMapOverlays({
   });
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !layers.vessels) return;
     const disconnect = connectOilLiveWebSocket((msg) => {
       if (msg.type === 'vessel_position' && msg.data && typeof msg.data === 'object') {
         const d = msg.data as OilLiveVessel;

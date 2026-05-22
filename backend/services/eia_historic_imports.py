@@ -759,14 +759,39 @@ def query_map_arcs(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT importer_name,
-                       SUM(volume)::float AS volume_bbl,
-                       COUNT(*)::bigint AS row_count
-                FROM eia_historic_imports
-                WHERE {where} AND origin_country = %s
-                  AND importer_name IS NOT NULL AND TRIM(importer_name) <> ''
-                GROUP BY importer_name
-                ORDER BY volume_bbl DESC NULLS LAST
+                WITH port_slices AS (
+                    SELECT importer_name,
+                           port_city,
+                           port_state,
+                           port_code,
+                           SUM(volume)::float AS slice_vol,
+                           COUNT(*)::bigint AS slice_rows,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY importer_name
+                               ORDER BY SUM(volume) DESC NULLS LAST
+                           ) AS rn
+                    FROM eia_historic_imports
+                    WHERE {where} AND origin_country = %s
+                      AND importer_name IS NOT NULL AND TRIM(importer_name) <> ''
+                    GROUP BY importer_name, port_city, port_state, port_code
+                ),
+                importer_totals AS (
+                    SELECT importer_name,
+                           SUM(slice_vol)::float AS volume_bbl,
+                           SUM(slice_rows)::bigint AS row_count
+                    FROM port_slices
+                    GROUP BY importer_name
+                )
+                SELECT t.importer_name,
+                       t.volume_bbl,
+                       t.row_count,
+                       p.port_city,
+                       p.port_state,
+                       p.port_code
+                FROM importer_totals t
+                JOIN port_slices p
+                  ON p.importer_name = t.importer_name AND p.rn = 1
+                ORDER BY t.volume_bbl DESC NULLS LAST
                 LIMIT %s;
                 """,
                 [*params, origin, importer_limit],
@@ -776,6 +801,10 @@ def query_map_arcs(
                     "importer_name": imp[0],
                     "volume_bbl": imp[1],
                     "row_count": imp[2],
+                    "port_city": imp[3],
+                    "port_state": imp[4],
+                    "port_code": imp[5],
+                    "port_label": _port_label(imp[3], imp[4], imp[5]),
                 }
                 for imp in cur.fetchall()
             ]
