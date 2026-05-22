@@ -9,11 +9,8 @@ import {
   type LatLngTuple,
 } from '../../lib/corridorGeometry';
 import { unwrapLongitudePath } from '../../lib/unwrapLongitudePath';
-import {
-  countryCentroid,
-  US_IMPORT_HUB,
-  type CountryCentroid,
-} from '../../lib/countryCentroids';
+import { countryCentroid } from '../../lib/countryCentroids';
+import { dischargeFromHistoricPort, type UsPortFields } from '../../lib/usPortCentroids';
 import type { EiaHistoricMapArc, EiaHistoricMapOrigin } from '../../api/eiaHistoricApi';
 import EiaHistoricOriginPopup from './EiaHistoricOriginPopup';
 
@@ -21,18 +18,41 @@ export type EiaHistoricMapArcGeo = EiaHistoricMapArc & {
   load: LatLngTuple;
   discharge: LatLngTuple;
   origin_label: string;
+  discharge_label: string;
 };
+
+function arcPortFields(arc: EiaHistoricMapArc): UsPortFields {
+  return {
+    port_city: arc.port_city,
+    port_state: arc.port_state,
+    port_code: arc.port_code,
+    port_label: arc.port_label,
+  };
+}
+
+function originPrimaryPort(origin: EiaHistoricMapOrigin): UsPortFields | null {
+  const top = origin.top_ports?.[0];
+  if (!top) return null;
+  return {
+    port_city: top.port_city,
+    port_state: top.port_state,
+    port_code: top.port_code,
+    port_label: top.port_label,
+  };
+}
 
 export function arcsToGeo(arcs: EiaHistoricMapArc[]): EiaHistoricMapArcGeo[] {
   const out: EiaHistoricMapArcGeo[] = [];
   for (const arc of arcs) {
     const origin = countryCentroid(arc.origin_country);
     if (!origin) continue;
+    const discharge = dischargeFromHistoricPort(arcPortFields(arc));
     out.push({
       ...arc,
       load: [origin.lat, origin.lng],
-      discharge: [US_IMPORT_HUB.lat, US_IMPORT_HUB.lng],
+      discharge: [discharge.lat, discharge.lng],
       origin_label: origin.label,
+      discharge_label: discharge.label,
     });
   }
   return out;
@@ -58,6 +78,12 @@ function aggregateCorridorsByOrigin(
     if (arc.volume_bbl > prev.dominantSliceVol) {
       prev.dominantSliceVol = arc.volume_bbl;
       prev.commodity_family = arc.commodity_family;
+      prev.discharge = arc.discharge;
+      prev.discharge_label = arc.discharge_label;
+      prev.port_city = arc.port_city;
+      prev.port_state = arc.port_state;
+      prev.port_code = arc.port_code;
+      prev.port_label = arc.port_label;
     }
   }
   return [...byOrigin.values()]
@@ -140,6 +166,18 @@ export default function EiaHistoricMapLayer({
                   volume_bbl: arc.volume_bbl,
                   row_count: arc.row_count,
                   top_importers: [],
+                  top_ports: arc.port_city
+                    ? [
+                        {
+                          port_city: arc.port_city ?? null,
+                          port_state: arc.port_state ?? null,
+                          port_code: arc.port_code ?? null,
+                          port_label: arc.port_label ?? '',
+                          volume_bbl: arc.volume_bbl,
+                          row_count: arc.row_count,
+                        },
+                      ]
+                    : [],
                   by_commodity: [
                     {
                       commodity_family: arc.commodity_family,
@@ -176,18 +214,31 @@ export default function EiaHistoricMapLayer({
     [originPoints, selectedOriginKey],
   );
 
-  const selectedCorridor = useMemo(() => {
+  const selectedDischarge = useMemo(() => {
     if (!selectedOrigin) return null;
+    const portFields = originPrimaryPort(selectedOrigin);
+    if (portFields) return dischargeFromHistoricPort(portFields);
+    const fallbackArc = geoArcs.find((a) => a.origin_country === selectedOrigin.origin_country);
+    if (fallbackArc) {
+      return {
+        lat: fallbackArc.discharge[0],
+        lng: fallbackArc.discharge[1],
+        label: fallbackArc.discharge_label,
+      };
+    }
+    return null;
+  }, [selectedOrigin, geoArcs]);
+
+  const selectedCorridor = useMemo(() => {
+    if (!selectedOrigin || !selectedDischarge) return null;
     const load: LatLngTuple = [selectedOrigin.lat, selectedOrigin.lng];
-    const discharge: LatLngTuple = [US_IMPORT_HUB.lat, US_IMPORT_HUB.lng];
+    const discharge: LatLngTuple = [selectedDischarge.lat, selectedDischarge.lng];
     const color = commodityColor(dominantCommodity(selectedOrigin));
     const positions = unwrapLongitudePath(bezierMidpoint(load, discharge, 0));
-    return { positions, color, load, discharge };
-  }, [selectedOrigin]);
+    return { positions, color, load, discharge, dischargeLabel: selectedDischarge.label };
+  }, [selectedOrigin, selectedDischarge]);
 
   if (!enabled || (originPoints.length === 0 && corridorArcs.length === 0)) return null;
-
-  const hubHighlighted = selectedOriginKey != null;
 
   return (
     <LayerGroup>
@@ -202,7 +253,7 @@ export default function EiaHistoricMapLayer({
           const weight = Math.min(4, volumeToWeight(arc.volume_bbl));
           return (
             <ArrowPolyline
-              key={`corridor-${arc.origin_country}`}
+              key={`corridor-${arc.origin_country}-${arc.discharge_label}`}
               positions={positions}
               arrowColor={color}
               arrowSize={10}
@@ -217,48 +268,51 @@ export default function EiaHistoricMapLayer({
           );
         })}
 
-      {selectedCorridor && (
-        <ArrowPolyline
-          key={`selected-${selectedOriginKey}`}
-          positions={selectedCorridor.positions}
-          arrowColor={selectedCorridor.color}
-          arrowSize={14}
-          pathOptions={{
-            color: selectedCorridor.color,
-            weight: 4,
-            opacity: 0.92,
-            lineCap: 'round',
-            lineJoin: 'round',
-          }}
-        />
+      {selectedCorridor && selectedDischarge && (
+        <>
+          <ArrowPolyline
+            key={`selected-${selectedOriginKey}`}
+            positions={selectedCorridor.positions}
+            arrowColor={selectedCorridor.color}
+            arrowSize={14}
+            pathOptions={{
+              color: selectedCorridor.color,
+              weight: 4,
+              opacity: 0.92,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+          />
+          <CircleMarker
+            center={[selectedDischarge.lat, selectedDischarge.lng]}
+            radius={10}
+            pathOptions={{
+              color: '#f5f3ff',
+              fillColor: HUB_COLOR,
+              fillOpacity: 1,
+              weight: 3,
+            }}
+          >
+            <Popup className="eia-historic-leaflet-popup" maxWidth={300} minWidth={260}>
+              <div className="eia-historic-popup-card eia-historic-popup-card--hub">
+                <p className="eia-historic-popup-title">{selectedDischarge.label}</p>
+                <p className="eia-historic-popup-sub">
+                  U.S. discharge port for {selectedOrigin?.label} ({year ?? '—'}).
+                </p>
+                <span className="eia-historic-popup-tier">Historic · EIA</span>
+              </div>
+            </Popup>
+          </CircleMarker>
+        </>
       )}
-
-      <CircleMarker
-        center={[US_IMPORT_HUB.lat, US_IMPORT_HUB.lng]}
-        radius={hubHighlighted ? 11 : 9}
-        pathOptions={{
-          color: hubHighlighted ? '#f5f3ff' : '#5b21b6',
-          fillColor: HUB_COLOR,
-          fillOpacity: hubHighlighted ? 1 : 0.92,
-          weight: hubHighlighted ? 3 : 2,
-        }}
-      >
-        <Popup className="eia-historic-leaflet-popup" maxWidth={300} minWidth={260}>
-          <div className="eia-historic-popup-card eia-historic-popup-card--hub">
-            <p className="eia-historic-popup-title">{US_IMPORT_HUB.label}</p>
-            <p className="eia-historic-popup-sub">
-              {selectedOrigin
-                ? `Discharge end for ${selectedOrigin.label} (${year ?? '—'}).`
-                : `U.S. discharge hub. Click an origin dot to see import arrow.`}
-            </p>
-            <span className="eia-historic-popup-tier">Historic · EIA</span>
-          </div>
-        </Popup>
-      </CircleMarker>
 
       {originPoints.map((o) => {
         const isSelected = o.origin_country === selectedOriginKey;
         const dimmed = selectedOriginKey != null && !isSelected;
+        const dischargeLabel =
+          originPrimaryPort(o) != null
+            ? dischargeFromHistoricPort(originPrimaryPort(o)!).label
+            : selectedDischarge?.label ?? 'U.S. port';
         return (
           <CircleMarker
             key={o.origin_country}
@@ -289,7 +343,7 @@ export default function EiaHistoricMapLayer({
                 label={o.label}
                 origin={o}
                 year={year}
-                routeLabel={`${o.label} → ${US_IMPORT_HUB.label}`}
+                routeLabel={`${o.label} → ${dischargeLabel}`}
                 onSelectImporter={onSelectImporter}
               />
             </Popup>
@@ -299,5 +353,3 @@ export default function EiaHistoricMapLayer({
     </LayerGroup>
   );
 }
-
-export { US_IMPORT_HUB, type CountryCentroid };

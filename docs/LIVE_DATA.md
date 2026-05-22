@@ -130,7 +130,7 @@ docker compose up -d maritime-worker oil-live-intel-worker
 
 Download Petroleum Supply Monthly **Imports** workbooks from EIA (e.g. `impa00d.xls` … `impa24d.xlsx`) into **`data/eia_downloads/`** on the host (mounted read-only in compose). Meridian does **not** fetch these from eia.gov automatically.
 
-**Auto-ingest (default):** when `impa*.xls(x)` are present, `eia-historic-sync-worker` ingests on container start and every 6h (`EIA_HISTORIC_SYNC_INTERVAL_SECONDS`). The same step runs inside `oil-live-graph-sync-worker` and on backend startup (`EIA_HISTORIC_AUTO_INGEST=true`). Manual curl is optional.
+**Auto-ingest (default):** `impa*.xls(x)` are parsed **once per file change** into `eia_historic_imports` (Postgres). `eia_historic_file_state` stores file size/mtime so the worker **skips** unchanged files on its 6h schedule. UI reads **only from the DB** — not from Excel on each request. Prefer `eia-historic-sync-worker` for ingest; set `EIA_HISTORIC_STARTUP_INGEST=true` only if you want parse-on-backend-boot (default off). `EIA_HISTORIC_FORCE_REINGEST=true` forces a full re-parse. Graph-sync step `eia_historic_imports` also skips unchanged files.
 
 ```bash
 # Ensure worker is up (prod + dev compose)

@@ -43,11 +43,16 @@ export interface PlatformHealthResponse {
 
 export async function fetchPlatformHealth(): Promise<PlatformHealthResponse> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 6000);
+  const timer = window.setTimeout(() => controller.abort(), 12_000);
   try {
     const res = await fetch(`${API_BASE}/api/health`, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as PlatformHealthResponse;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Health check timed out — backend may still be starting (EIA ingest, graph-sync)');
+    }
+    throw err;
   } finally {
     window.clearTimeout(timer);
   }

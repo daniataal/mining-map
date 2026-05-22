@@ -35,12 +35,21 @@ def run_once() -> dict[str, Any]:
     conn = _db_connection()
     try:
         summary = try_auto_ingest_eia_downloads(conn)
+        if summary.get("status") != "error":
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
-    print("[eia-historic-sync-worker] done:", json.dumps(summary, default=str)[:2000], flush=True)
+    skipped = summary.get("files_skipped_unchanged", 0)
+    if summary.get("status") == "skipped" and skipped:
+        print(
+            f"[eia-historic-sync-worker] all {skipped} file(s) unchanged — serving from Postgres",
+            flush=True,
+        )
+    else:
+        print("[eia-historic-sync-worker] done:", json.dumps(summary, default=str)[:2000], flush=True)
     return summary
 
 

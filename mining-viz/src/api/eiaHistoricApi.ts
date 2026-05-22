@@ -19,12 +19,25 @@ export type EiaHistoricSeriesPoint = {
   period: string;
 };
 
+export type EiaHistoricMapPort = {
+  port_city: string | null;
+  port_state: string | null;
+  port_code: string | null;
+  port_label: string;
+  volume_bbl: number;
+  row_count: number;
+};
+
 export type EiaHistoricMapArc = {
   origin_country: string;
   commodity_family: string;
   volume_bbl: number;
   row_count: number;
   destination_country: string;
+  port_city?: string | null;
+  port_state?: string | null;
+  port_code?: string | null;
+  port_label?: string;
 };
 
 export type EiaHistoricOriginImporter = {
@@ -38,6 +51,7 @@ export type EiaHistoricMapOrigin = {
   volume_bbl: number;
   row_count: number;
   top_importers: EiaHistoricOriginImporter[];
+  top_ports?: EiaHistoricMapPort[];
   by_commodity: { commodity_family: string; volume_bbl: number; row_count: number }[];
 };
 
