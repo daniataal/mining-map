@@ -11,6 +11,11 @@ import {
   type EiaHistoricMapArc,
   type EiaHistoricMapOrigin,
 } from '../../api/eiaHistoricApi';
+import {
+  EIA_HISTORIC_STALE_MS,
+  eiaHistoricMapQueryKey,
+  eiaHistoricSummaryQueryKey,
+} from '../../hooks/use-petroleum-sidebar-prefetch';
 import { getOilLiveSyncStatus } from '../../api/oilLiveApi';
 
 const SHELL = 'rounded-lg border border-black/5 dark:border-white/10 bg-white/60 dark:bg-slate-900/40 p-3';
@@ -94,7 +99,7 @@ export default function EiaHistoricImportsPanel({
   const [importer, setImporter] = useState('');
   const [importerDraft, setImporterDraft] = useState('');
   const [year, setYear] = useState(2020);
-  const [showOnMap, setShowOnMap] = useState(false);
+  const [showOnMap, setShowOnMap] = useState(true);
   const [showCorridors, setShowCorridors] = useState(false);
   const [ingestCurlOpen, setIngestCurlOpen] = useState(false);
 
@@ -108,9 +113,9 @@ export default function EiaHistoricImportsPanel({
   }, [importerFromMap, onImporterFromMapConsumed]);
 
   const summaryQuery = useQuery({
-    queryKey: ['eia-historic-summary', importer],
+    queryKey: eiaHistoricSummaryQueryKey(importer),
     queryFn: () => getEiaHistoricSummary({ importer: importer || undefined }),
-    staleTime: 120_000,
+    staleTime: EIA_HISTORIC_STALE_MS,
     refetchInterval: (q) =>
       q.state.data?.row_count === 0 && !q.state.isFetching ? 20_000 : false,
   });
@@ -142,7 +147,7 @@ export default function EiaHistoricImportsPanel({
   });
 
   const mapQuery = useQuery({
-    queryKey: ['eia-historic-map', year, importer],
+    queryKey: eiaHistoricMapQueryKey(year, importer),
     queryFn: () =>
       getEiaHistoricMap({
         year,
@@ -150,7 +155,7 @@ export default function EiaHistoricImportsPanel({
         limit: 80,
       }),
     enabled: showOnMap,
-    staleTime: 120_000,
+    staleTime: EIA_HISTORIC_STALE_MS,
   });
 
   const originsForYear = useMemo(() => {

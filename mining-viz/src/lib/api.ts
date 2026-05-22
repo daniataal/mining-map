@@ -440,6 +440,21 @@ async function fetchLicensesViewportFromApi(
   return parseLicensesResponse(data);
 }
 
+/** Background warm-up for Oil & Gas tab / Historic sidebar (avoids cold fetch on sector switch). */
+export function prefetchOilAndGasLicensesHub(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  const fetchBounds = quantizeLicenseViewportBounds(LICENSE_COUNTRY_FETCH_HUB);
+  return queryClient
+    .prefetchQuery({
+      queryKey: ['licenses', 'viewport', 'oil_and_gas', '', 'scoped', fetchBounds] as const,
+      queryFn: ({ signal }: QueryFunctionContext) =>
+        fetchLicensesViewportFromApi({ sector: 'oil_and_gas', bounds: fetchBounds, signal }),
+      staleTime: LICENSE_VIEWPORT_STALE_MS,
+    })
+    .then(() => undefined);
+}
+
 /** Viewport-scoped licenses for the map (debounced bbox). Country filters use `countries` param when set. */
 export function useLicensesForMap(options: {
   sector?: 'mining' | 'oil_and_gas';
