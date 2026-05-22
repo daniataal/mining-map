@@ -182,11 +182,17 @@ export default function App() {
 
   // Data Fetching
   const [licenseMapViewport, setLicenseMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const [licenseMapZoom, setLicenseMapZoom] = useState(5);
   const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
   const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
   const [licenseFetchCountries, setLicenseFetchCountries] = useState<string[]>([]);
+  const isLiveDataSidebar = mapSidebarTab === 'live_data';
+  const isHistoricSidebar = mapSidebarTab === 'historic';
+  const hideLicenseMarkersOnMap = isHistoricSidebar || isLiveDataSidebar;
   const licenseMapFetchEnabled =
-    viewMode !== 'route_planner' && viewMode !== 'ports';
+    viewMode !== 'route_planner' &&
+    viewMode !== 'ports' &&
+    !hideLicenseMarkersOnMap;
   const { data: worldCoverage } = useWorldCoverage(
     viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'global',
   );
@@ -200,8 +206,13 @@ export default function App() {
     bounds: licenseMapViewport,
     filterCountries: licenseFetchCountries,
     countryFocusBboxOnly: Boolean(countryFocusCountry?.trim()),
+    mapZoom: licenseMapZoom,
     enabled: licenseMapFetchEnabled,
   });
+  const licenseServerClustered = useMemo(
+    () => rawData.some((row) => (row.mapClusterCount ?? 0) > 0),
+    [rawData],
+  );
   // Viewport loads use keepPreviousData — no "refreshing bundle" banner on pan (map stays instant).
   const {
     data: storageTerminalResponse,
@@ -452,9 +463,6 @@ export default function App() {
       setStorageInViewCount(null);
     }
   }, [viewMode]);
-
-  const isLiveDataSidebar = mapSidebarTab === 'live_data';
-  const isHistoricSidebar = mapSidebarTab === 'historic';
 
   const handleMapSidebarTabChange = useCallback(
     (tab: MapSidebarTab) => {
@@ -1435,6 +1443,7 @@ export default function App() {
                   countryFocusCountry={countryFocusCountry}
                   countryFocusBoundsTrigger={countryFocusBoundsTrigger}
                   onLicenseMapViewportChange={licenseMapFetchEnabled ? setLicenseMapViewport : undefined}
+                  onLicenseMapZoomChange={licenseMapFetchEnabled ? setLicenseMapZoom : undefined}
                   storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
@@ -1462,9 +1471,8 @@ export default function App() {
                   onEiaHistoricSelectImporter={
                     isHistoricSidebar ? setHistoricImporterFromMap : undefined
                   }
-                  suppressLicenseClusters={
-                    isHistoricSidebar && historicSidebarMap.enabled
-                  }
+                  hideLicenseMarkers={hideLicenseMarkersOnMap}
+                  suppressLicenseClusters={licenseServerClustered}
                   macroTradeFlowsEnabled={isLiveDataSidebar && liveDataMacroTradeOn}
                   showInfrastructureLayers={
                     viewMode === 'mining' || viewMode === 'global' || viewMode === 'oil_and_gas'

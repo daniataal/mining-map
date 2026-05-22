@@ -71,7 +71,10 @@ import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
-import { createLicenseClusterIconFactory } from '../lib/mapClusterIcons';
+import {
+  createLicenseClusterIconFactory,
+  createServerLicenseClusterIcon,
+} from '../lib/mapClusterIcons';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
@@ -235,6 +238,8 @@ interface MapComponentProps {
   licensesSecondaryStatus?: string | null;
   /** Debounced map bounds → GET /licenses?min_lat&… (sparse wire). */
   onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds | null) => void;
+  /** Map zoom for license clustering and overlay LOD. */
+  onLicenseMapZoomChange?: (zoom: number) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -314,6 +319,8 @@ interface MapComponentProps {
   onEiaHistoricSelectImporter?: (importerName: string) => void;
   /** Hide mining license clusters so historic EIA points are clickable */
   suppressLicenseClusters?: boolean;
+  /** Do not paint license markers (Historic / Live Data tabs). */
+  hideLicenseMarkers?: boolean;
   /** Show OSM petroleum infrastructure on mining/global/oil views. */
   showInfrastructureLayers?: boolean;
   infrastructureLayerVisibility?: Record<OsmPetroleumLayerId, boolean>;
@@ -619,6 +626,7 @@ export default function MapComponent({
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
   onLicenseMapViewportChange,
+  onLicenseMapZoomChange,
   storageEntities = [],
   onStorageInViewCountChange,
   oilLiveOverlaysEnabled = false,
@@ -647,6 +655,7 @@ export default function MapComponent({
   eiaHistoricShowCorridors = false,
   onEiaHistoricSelectImporter,
   suppressLicenseClusters = false,
+  hideLicenseMarkers = false,
   showInfrastructureLayers = false,
   infrastructureLayerVisibility,
   onInfrastructureLayerChange,
@@ -714,6 +723,7 @@ export default function MapComponent({
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
+    const [overlayMapZoom, setOverlayMapZoom] = useState(5);
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
     const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
         if (typeof window === 'undefined') return false;
@@ -838,6 +848,7 @@ export default function MapComponent({
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') &&
       !isRoutePlannerView &&
       (!isLiveDataView || countryFocusActive);
+    const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers;
 
     useEffect(() => {
         if (!isOilAndGasView || !onStorageInViewCountChange) return;
@@ -1092,11 +1103,16 @@ export default function MapComponent({
             const isEsgRisk = esgZone !== null;
             const refineryPin = isRefineryEntity(item);
             const oilFieldPin = !refineryPin && isOilFieldEntity(item);
-            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
+            const clusterCount = item.mapClusterCount ?? 0;
+            const sig = clusterCount
+              ? `srv-cluster:${clusterCount}:${isDark ? 'd' : 'l'}`
+              : markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
             icons.set(
                 item.id,
                 cache.get(item.id, sig, () =>
-                    refineryPin
+                    clusterCount > 0
+                      ? createServerLicenseClusterIcon(clusterCount, isDark)
+                      : refineryPin
                         ? createRefineryMapIcon()
                         : oilFieldPin
                           ? createOilFieldMapIcon()
@@ -1114,7 +1130,7 @@ export default function MapComponent({
     );
 
     const renderedMarkers = useMemo(() => {
-        if (!onGroundVisible) return null;
+        if (!showLicenseMarkers) return null;
         return mapDisplayData.map((item) => {
             if (item._displayLat == null || item._displayLng == null) return null;
             const markerIcon = licenseMarkerIcons.get(item.id);
@@ -1162,7 +1178,7 @@ export default function MapComponent({
         userAnnotations,
         onSelectMaritimeVessel,
         setSelectedItem,
-        onGroundVisible,
+        showLicenseMarkers,
     ]);
 
     const handleMaritimeVesselClick = useCallback(
@@ -1803,6 +1819,7 @@ export default function MapComponent({
                 <ViewportBoundsTracker
                     active={
                         Boolean(onLicenseMapViewportChange) &&
+                        !hideLicenseMarkers &&
                         isLicenseMapView &&
                         (!isLiveDataView || countryFocusActive)
                     }
@@ -1833,8 +1850,28 @@ export default function MapComponent({
                     </div>
                 )}
                 {isOilAndGasView && onGroundVisible && (
-                    <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
+                    <MapZoomTracker
+                        onZoomChange={(z) => {
+                            setPetroleumMapZoom(z);
+                            setOverlayMapZoom(z);
+                            onLicenseMapZoomChange?.(z);
+                        }}
+                    />
                 )}
+                {isLiveDataView && oilLiveOverlaysEnabled && !isOilAndGasView && (
+                    <MapZoomTracker
+                        onZoomChange={(z) => {
+                            setOverlayMapZoom(z);
+                            onLicenseMapZoomChange?.(z);
+                        }}
+                    />
+                )}
+                {onLicenseMapViewportChange &&
+                    isLicenseMapView &&
+                    (!isLiveDataView || countryFocusActive) &&
+                    !isOilAndGasView && (
+                        <MapZoomTracker onZoomChange={onLicenseMapZoomChange} />
+                    )}
                 {isMaritimeMapView && isMaritimeLayerEnabled && (
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
@@ -1935,6 +1972,7 @@ export default function MapComponent({
                     {isLiveDataView && oilLiveOverlaysEnabled && (
                         <OilLiveMapOverlays
                             enabled
+                            mapZoom={overlayMapZoom}
                             productFilter={oilLiveProductFilter}
                             terminalSearch={oilLiveTerminalSearch}
                             layers={oilLiveLayers}
@@ -2013,7 +2051,7 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
-                {onGroundVisible &&
+                {showLicenseMarkers &&
                     (suppressLicenseClusters ? (
                         <LayerGroup>{renderedMarkers}</LayerGroup>
                     ) : (

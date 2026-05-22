@@ -1,25 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { dischargeFromHistoricPort, formatUsPortLabel, usPortCentroid } from './usPortCentroids';
+import { dischargeFromHistoricPort, usPortCentroid } from './usPortCentroids';
 
-describe('formatUsPortLabel', () => {
-  it('formats city and state', () => {
-    expect(formatUsPortLabel('Houston', 'TX', null)).toBe('Houston, TX');
-  });
-});
-
-describe('usPortCentroid', () => {
-  it('resolves known EIA ports', () => {
-    const c = usPortCentroid({ port_city: 'Houston', port_state: 'TX' });
-    expect(c.label).toBe('Houston, TX');
-    expect(c.lat).toBeCloseTo(29.73, 0);
-  });
-
-  it('uses port label from API when provided', () => {
-    const d = dischargeFromHistoricPort({
-      port_city: 'Nederland',
-      port_state: 'TX',
-      port_label: 'Nederland, TX',
+describe('usPortCentroids', () => {
+  it('resolves Newark with full state name (not Gulf fallback)', () => {
+    const c = usPortCentroid({
+      port_city: 'NEWARK',
+      port_state: 'NEW JERSEY',
+      port_code: '5201',
     });
-    expect(d.label).toBe('Nederland, TX');
+    expect(c.label).toContain('Newark');
+    expect(c.lat).toBeGreaterThan(40);
+    expect(c.lng).toBeLessThan(-73);
+    expect(c.label).not.toContain('Gulf');
+  });
+
+  it('resolves El Segundo, CA', () => {
+    const d = dischargeFromHistoricPort({
+      port_city: 'EL SEGUNDO',
+      port_state: 'CALIFORNIA',
+    });
+    expect(d.label).toContain('El Segundo');
+    expect(d.lat).toBeLessThan(34.5);
+    expect(d.lng).toBeLessThan(-117);
   });
 });

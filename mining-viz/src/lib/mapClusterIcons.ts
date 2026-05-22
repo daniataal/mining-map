@@ -2,6 +2,18 @@ import L from 'leaflet';
 
 export type ClusterIconFactory = (cluster: { getChildCount: () => number }) => L.DivIcon;
 
+/** Pre-aggregated grid cell from GET /licenses?zoom&lt;8 (server cluster). */
+export function createServerLicenseClusterIcon(count: number, isDark: boolean): L.DivIcon {
+  const size = count < 5 ? 32 : count < 25 ? 38 : count < 100 ? 46 : 54;
+  const base = isDark ? 'custom-cluster-icon' : 'custom-cluster-icon custom-cluster-icon--light';
+  const className = `${base} custom-cluster-icon--server`;
+  return L.divIcon({
+    html: `<span>${count}</span>`,
+    className,
+    iconSize: L.point(size, size),
+  });
+}
+
 /** Theme-aware license marker cluster bubbles (Leaflet MarkerClusterGroup). */
 export function createLicenseClusterIconFactory(isDark: boolean): ClusterIconFactory {
   return (cluster) => {

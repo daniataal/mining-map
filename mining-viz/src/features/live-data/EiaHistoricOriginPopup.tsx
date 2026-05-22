@@ -1,5 +1,6 @@
 import { Archive, ExternalLink } from 'lucide-react';
-import type { EiaHistoricMapOrigin } from '../../api/eiaHistoricApi';
+import { formatUsPortLabel } from '../../lib/usPortCentroids';
+import type { EiaHistoricMapOrigin, EiaHistoricOriginImporter } from '../../api/eiaHistoricApi';
 
 function formatBbl(val: number): string {
   if (!Number.isFinite(val) || val <= 0) return '—';
@@ -15,7 +16,7 @@ type Props = {
   year?: number;
   /** e.g. "Spain → U.S. Gulf Coast" when corridor is highlighted on map */
   routeLabel?: string;
-  onSelectImporter?: (name: string) => void;
+  onSelectImporter?: (importer: EiaHistoricOriginImporter) => void;
 };
 
 export default function EiaHistoricOriginPopup({
@@ -91,21 +92,27 @@ export default function EiaHistoricOriginPopup({
         <div className="eia-historic-popup-section">
           <p className="eia-historic-popup-label">Top U.S. importers</p>
           <ul className="eia-historic-importer-list">
-            {origin.top_importers.map((imp) => (
-              <li key={imp.importer_name}>
-                <button
-                  type="button"
-                  className="eia-historic-importer-btn"
-                  onClick={() => onSelectImporter?.(imp.importer_name)}
-                >
-                  <span className="eia-historic-importer-name">{imp.importer_name}</span>
-                  <ExternalLink className="w-3 h-3 shrink-0 opacity-60" aria-hidden />
-                </button>
-                <span className="eia-historic-importer-meta">
-                  {formatBbl(imp.volume_bbl)} · {imp.row_count.toLocaleString()} rows
-                </span>
-              </li>
-            ))}
+            {origin.top_importers.map((imp) => {
+              const portHint =
+                imp.port_label ||
+                formatUsPortLabel(imp.port_city, imp.port_state, imp.port_code);
+              return (
+                <li key={imp.importer_name}>
+                  <button
+                    type="button"
+                    className="eia-historic-importer-btn"
+                    onClick={() => onSelectImporter?.(imp)}
+                  >
+                    <span className="eia-historic-importer-name">{imp.importer_name}</span>
+                    <ExternalLink className="w-3 h-3 shrink-0 opacity-60" aria-hidden />
+                  </button>
+                  <span className="eia-historic-importer-meta">
+                    {formatBbl(imp.volume_bbl)} · {imp.row_count.toLocaleString()} rows
+                    {portHint ? ` · → ${portHint}` : ''}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

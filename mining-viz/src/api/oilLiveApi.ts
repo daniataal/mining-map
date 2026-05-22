@@ -210,9 +210,12 @@ export async function getOilLiveSyncStatus(): Promise<OilLiveSyncStatus> {
   return res.json();
 }
 
-export async function getOilLiveMap(bbox?: string): Promise<OilLiveMapResponse> {
-  const q = bbox ? `?bbox=${encodeURIComponent(bbox)}&limit=500` : '?limit=500';
-  const res = await fetch(oilUrl(`/api/oil-live/map${q}`));
+export async function getOilLiveMap(bbox?: string, zoom?: number): Promise<OilLiveMapResponse> {
+  const params = new URLSearchParams();
+  params.set('limit', zoom != null && zoom < 8 ? '250' : '500');
+  if (bbox) params.set('bbox', bbox);
+  if (zoom != null && Number.isFinite(zoom)) params.set('zoom', String(zoom));
+  const res = await fetch(oilUrl(`/api/oil-live/map?${params.toString()}`));
   if (!res.ok) throw new Error(`oil-live map ${res.status}`);
   return res.json();
 }
@@ -296,6 +299,7 @@ export type CargoRecordsFilters = {
   /** When true, omit cargo rows derived from graph-sync seed port calls. */
   exclude_seed?: boolean;
   limit?: number;
+  zoom?: number;
 };
 
 export type CargoRecordsResponse = {
@@ -462,6 +466,7 @@ export type TradeFlowsFilters = {
   commodity?: string;
   min_confidence?: number;
   limit?: number;
+  zoom?: number;
 };
 
 /**
@@ -479,6 +484,9 @@ export async function getTradeFlows(
     params.set('min_confidence', String(filters.min_confidence));
   }
   if (filters.limit != null) params.set('limit', String(filters.limit));
+  if (filters.zoom != null && Number.isFinite(filters.zoom)) {
+    params.set('zoom', String(filters.zoom));
+  }
   const qs = params.toString();
   let res: Response;
   try {
@@ -636,7 +644,10 @@ export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
 
 export async function getCargoRecordsMap(
   bbox: string,
-  filters: Pick<CargoRecordsFilters, 'commodity' | 'min_confidence' | 'exclude_seed' | 'limit'> = {},
+  filters: Pick<
+    CargoRecordsFilters,
+    'commodity' | 'min_confidence' | 'exclude_seed' | 'limit' | 'zoom'
+  > = {},
 ): Promise<CargoRecordsResponse> {
   const params = new URLSearchParams();
   params.set('bbox', bbox);
@@ -646,6 +657,9 @@ export async function getCargoRecordsMap(
   }
   if (filters.exclude_seed !== false) params.set('exclude_seed', 'true');
   params.set('limit', String(filters.limit ?? 200));
+  if (filters.zoom != null && Number.isFinite(filters.zoom)) {
+    params.set('zoom', String(filters.zoom));
+  }
   const res = await fetch(oilUrl(`/api/oil-live/cargo-records/map?${params.toString()}`));
   if (!res.ok) throw new Error(`oil-live cargo-records/map ${res.status}`);
   return res.json();

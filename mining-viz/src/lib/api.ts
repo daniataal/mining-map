@@ -389,9 +389,15 @@ export type UseLicensesResult = {
 
 async function parseLicensesResponse(data: unknown): Promise<MiningLicense[]> {
   if (Array.isArray(data)) return data as MiningLicense[];
-  if (data && typeof data === 'object' && 'error' in data) {
-    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-    throw new Error(msg);
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    if ('error' in obj) {
+      const msg = String(obj.error ?? 'Licenses request failed');
+      throw new Error(msg);
+    }
+    if (obj.mode === 'clusters' && Array.isArray(obj.clusters)) {
+      return obj.clusters as MiningLicense[];
+    }
   }
   console.warn('[licenses] Expected array from /licenses, got:', data);
   return [];
@@ -418,10 +424,11 @@ async function fetchLicensesViewportFromApi(
     sector?: 'mining' | 'oil_and_gas';
     bounds: LicenseViewportBounds;
     countries?: string[];
+    mapZoom?: number;
     signal?: AbortSignal;
   },
 ): Promise<MiningLicense[]> {
-  const { sector, bounds, countries, signal } = options;
+  const { sector, bounds, countries, mapZoom, signal } = options;
   const params: Record<string, string | number | boolean> = {
     prefer_open_data: true,
     limit: LICENSE_VIEWPORT_LIMIT,
@@ -429,9 +436,11 @@ async function fetchLicensesViewportFromApi(
     max_lat: bounds.north,
     min_lng: bounds.west,
     max_lng: bounds.east,
+    map: 1,
   };
   if (sector) params.sector = sector;
   if (countries?.length) params.countries = countries.join(',');
+  if (mapZoom != null && Number.isFinite(mapZoom)) params.zoom = Math.round(mapZoom * 10) / 10;
   const { data } = await apiClient.get<unknown>('/licenses', {
     signal,
     timeout: 60_000,
@@ -462,9 +471,11 @@ export function useLicensesForMap(options: {
   filterCountries?: string[];
   /** Country-focus mode: fetch by country border bbox only (no `countries` SQL filter). */
   countryFocusBboxOnly?: boolean;
+  /** Map zoom for server-side clustering (zoom &lt; 8 → grid aggregates). */
+  mapZoom?: number;
   enabled: boolean;
 }): UseLicensesResult {
-  const { sector, bounds, filterCountries = [], countryFocusBboxOnly = false, enabled } = options;
+  const { sector, bounds, filterCountries = [], countryFocusBboxOnly = false, mapZoom, enabled } = options;
   const debouncedBounds = useDebouncedValue(bounds, LICENSE_VIEWPORT_DEBOUNCE_MS);
   const viewportBounds = useMemo(
     () => (debouncedBounds ? quantizeLicenseViewportBounds(debouncedBounds) : null),
@@ -497,6 +508,7 @@ export function useLicensesForMap(options: {
       sector,
       countriesKey,
       countryFocusBboxOnly ? 'focus-bbox' : 'scoped',
+      mapZoom != null ? Math.floor(mapZoom) : null,
       fetchBounds,
     ] as const,
     staleTime: LICENSE_VIEWPORT_STALE_MS,
@@ -510,11 +522,12 @@ export function useLicensesForMap(options: {
           sector,
           bounds: fetchBounds,
           countries: countryFocusBboxOnly ? undefined : filterCountries,
+          mapZoom,
           signal,
         });
       }
       if (!fetchBounds) return [];
-      return fetchLicensesViewportFromApi({ sector, bounds: fetchBounds, signal });
+      return fetchLicensesViewportFromApi({ sector, bounds: fetchBounds, mapZoom, signal });
     },
     enabled: enabled && (countryScoped ? fetchBounds != null : viewportBounds != null),
   });

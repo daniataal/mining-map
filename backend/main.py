@@ -654,6 +654,52 @@ def _build_license_api_results(
     return results
 
 
+def _build_license_map_results(
+    rows: list,
+    cached_geo: dict[str, dict],
+) -> list[dict[str, Any]]:
+    """Slim map-marker payload (smaller JSON than dossier/list views)."""
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        keys = row.keys()
+        display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(
+            row, cached_geo
+        )
+        results.append(
+            {
+                "id": row["id"],
+                "company": row["company"],
+                "licenseType": row["license_type"],
+                "commodity": row["commodity"],
+                "status": row["status"],
+                "date": row["date_issued"],
+                "country": row["country"],
+                "region": row["region"],
+                "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
+                "lat": display_lat,
+                "lng": display_lng,
+                "entityKind": row["entity_kind"] if "entity_kind" in keys and row["entity_kind"] else "license",
+                "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
+                "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
+                "recordOrigin": row["record_origin"] if "record_origin" in keys else None,
+                "sourceName": row["source_name"] if "source_name" in keys else None,
+                "geoSource": display_geo_source if "geo_source" in keys else None,
+                "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
+                "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
+            }
+        )
+    return results
+
+
+def _licenses_json_response(payload: Any, *, max_age: int = 120):
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        content=payload,
+        headers={"Cache-Control": f"public, max-age={max_age}"},
+    )
+
+
 # Allow CORS for local development (so React/Vite can fetch from us)
 app.add_middleware(
     CORSMiddleware,
@@ -2370,6 +2416,8 @@ def read_licenses(
     max_lng: Optional[float] = None,
     limit: int = 5000,
     countries: Optional[str] = None,
+    zoom: Optional[float] = None,
+    map: bool = False,
 ):
     """Return licenses for the map and admin views.
 
@@ -2388,7 +2436,11 @@ def read_licenses(
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing license schema")
 
-    cache_key = f"licenses:sector:{sector}:prefer_open_data:{prefer_open_data}:bbox:{min_lat}_{max_lat}_{min_lng}_{max_lng}:limit:{limit}:countries:{countries}"
+    map_mode = map or str(zoom or "").strip() != ""
+    cache_key = (
+        f"licenses:sector:{sector}:prefer_open_data:{prefer_open_data}:bbox:{min_lat}_{max_lat}_{min_lng}_{max_lng}"
+        f":limit:{limit}:countries:{countries}:zoom:{zoom}:map:{int(map_mode)}"
+    )
     cached_val = cache.get(cache_key)
     if cached_val:
         try:
@@ -2500,6 +2552,57 @@ def read_licenses(
     if bbox is not None:
         c = conn.cursor(cursor_factory=RealDictCursor)
         try:
+            try:
+                from backend.services.license_map_perf import (
+                    license_cluster_limit_for_zoom,
+                    license_grid_degrees,
+                    query_license_clusters,
+                )
+            except ImportError:
+                from services.license_map_perf import (
+                    license_cluster_limit_for_zoom,
+                    license_grid_degrees,
+                    query_license_clusters,
+                )
+
+            grid_deg = license_grid_degrees(zoom) if map_mode else None
+            min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
+            sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
+            country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
+            exists_sql = f"""
+                SELECT EXISTS (
+                    SELECT 1 FROM licenses
+                    WHERE {sector_sql}
+                      AND ({country_sql})
+                      AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
+                )
+            """
+            c.execute(exists_sql, tuple(sector_params + country_params))
+            has_row = c.fetchone() or {}
+            has_preferred_live_rows = bool(has_row.get("exists"))
+            open_clause = ""
+            if prefer_open_data and has_preferred_live_rows:
+                open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+
+            if grid_deg is not None:
+                clusters = query_license_clusters(
+                    c,
+                    sector_sql=sector_sql,
+                    sector_params=sector_params,
+                    country_sql=country_sql,
+                    country_params=country_params,
+                    min_lat=min_la,
+                    max_lat=max_la,
+                    min_lng=min_lo,
+                    max_lng=max_lo,
+                    grid_deg=grid_deg,
+                    open_clause=open_clause,
+                    limit=license_cluster_limit_for_zoom(zoom, int(limit or 800)),
+                )
+                conn.close()
+                payload = {"mode": "clusters", "clusters": clusters, "zoom": zoom, "grid_degrees": grid_deg}
+                return _licenses_json_response(_cache_and_return(payload), max_age=180)
+
             rows, cached_geo, has_preferred_live_rows = _bbox_query(c)
         except Exception as e:
             conn.close()
@@ -2525,14 +2628,17 @@ def read_licenses(
             print(f"[licenses] bbox query failed: {e}")
             return _schema_unavailable_response("reading licenses")
         conn.close()
-        results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
+        if map_mode:
+            results = _build_license_map_results(rows, cached_geo)
+        else:
+            results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
         if not results:
             print(
                 "[licenses] empty feed (bbox) "
                 f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
                 f"has_live_origin_signal={has_preferred_live_rows}"
             )
-        return _cache_and_return(results)
+        return _licenses_json_response(_cache_and_return(results), max_age=120)
 
     start_time = time.time()
     c = conn.cursor(cursor_factory=RealDictCursor)
@@ -5886,6 +5992,7 @@ def get_petroleum_osm_layer(
     west: Optional[float] = None,
     north: Optional[float] = None,
     east: Optional[float] = None,
+    zoom: Optional[float] = None,
 ):
     """GeoJSON for OSM petroleum pipelines or refineries (DB snapshot first, Overpass fallback)."""
     try:
@@ -5899,7 +6006,7 @@ def get_petroleum_osm_layer(
             bbox = (south, west, north, east)
         conn = get_db_connection()
         try:
-            return get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox)
+            payload = get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox, zoom=zoom)
         finally:
             conn.close()
     except KeyError:
@@ -5913,6 +6020,7 @@ def get_petroleum_osm_layer(
             "data_as_of": datetime.utcnow().isoformat(),
             "limitations": [f"OSM petroleum layer fetch failed: {exc}"],
         }
+    return _licenses_json_response(payload, max_age=600)
 
 
 @app.get("/api/companies/{company_name}/sec-filings")

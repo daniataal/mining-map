@@ -52,19 +52,24 @@ func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Map(w http.ResponseWriter, r *http.Request) {
 	minLon, minLat, maxLon, maxLat, bboxOK := parseBBox(r.URL.Query().Get("bbox"))
 	bbox := [4]float64{minLon, minLat, maxLon, maxLat}
+	zoom := queryFloat(r, "zoom", 0)
 	limit := queryInt(r, "limit", 500)
+	if zoom > 0 && zoom < 8 {
+		limit = min(limit, 250)
+	}
 	terminals, _ := s.listTerminals(r, bbox, bboxOK, limit)
 	vessels, _ := s.listLiveVessels(r, bbox, bboxOK, limit)
 	events, _ := s.listRecentPortCalls(r, limit/2)
 	cards, _ := s.listIntelligence(r, limit/2)
 	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4, 0)
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSONCached(w, http.StatusOK, map[string]any{
 		"terminals": terminals,
 		"vessels":   vessels,
 		"events":    events,
 		"cards":     cards,
 		"companies": companies,
-	})
+		"zoom":      zoom,
+	}, 45)
 }
 
 func (s *Server) ListTerminals(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +416,14 @@ func (s *Server) WebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
+	writeJSONCached(w, code, v, 0)
+}
+
+func writeJSONCached(w http.ResponseWriter, code int, v any, maxAgeSec int) {
 	w.Header().Set("Content-Type", "application/json")
+	if maxAgeSec > 0 {
+		w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(maxAgeSec))
+	}
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }
