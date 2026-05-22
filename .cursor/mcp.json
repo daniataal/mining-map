@@ -1,5 +1,12 @@
 {
   "mcpServers": {
+    "paperclip": {
+      "command": "/bin/bash",
+      "args": [
+        "-lc",
+        "set -a; source \"$HOME/ai-agent-stack/.env\"; set +a; exec docker exec -i -e PAPERCLIP_API_URL=http://127.0.0.1:3100 -e PAPERCLIP_API_KEY=\"$PAPERCLIP_API_KEY\" -e PAPERCLIP_HOME=/paperclip paperclip-safe bash -lc 'cd /app && node --import /app/server/node_modules/tsx/dist/loader.mjs /app/packages/mcp-server/src/stdio.ts'"
+      ]
+    },
     "oil-live-intel": {
       "command": "docker",
       "args": [

@@ -13,6 +13,7 @@ import {
   getCargoRecords,
   getOilTerminals,
   getOilLiveSyncStatus,
+  getOilLiveSourceHealth,
   enrichOilLiveContactsBatch,
   type OilContact,
   type OilDealEconomics,
@@ -29,6 +30,7 @@ import {
   type OilIntelligenceCard,
   type OilCompany,
   type MeridianCargoRecord,
+  type OilLiveSourceHealth,
 } from '../../api/oilLiveApi';
 import { runContactEnrichmentAgent } from '../../lib/api';
 import { toast } from 'sonner';
@@ -212,6 +214,13 @@ export default function LiveDataIntelPanel({
 
   const unreadCount = (alertsData ?? []).filter((a) => !a.read_at).length;
 
+  const { data: sourceHealthData } = useQuery({
+    queryKey: ['oil-live-source-health'],
+    queryFn: getOilLiveSourceHealth,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  });
+
   useEffect(() => {
     const disconnect = connectOilLiveWebSocket((msg) => {
       if (msg.type === 'vessel_position') {
@@ -317,6 +326,10 @@ export default function LiveDataIntelPanel({
     () => dedupeOpportunities(opportunitiesData ?? [], 40, { excludeDemo: true }),
     [opportunitiesData],
   );
+  const maritimeSourceHealth = useMemo<OilLiveSourceHealth[]>(
+    () => (sourceHealthData?.sources ?? []).slice(0, 5),
+    [sourceHealthData?.sources],
+  );
 
   const { data: platformHealth } = usePlatformHealth(true);
 
@@ -363,6 +376,11 @@ export default function LiveDataIntelPanel({
 
   const coverageDatabase = [
     {
+      key: 'vessel-observations',
+      label: t('תצפיות כלי שיט', 'Vessel observations'),
+      value: syncStatus?.vessel_observation_count ?? dbCountFallback,
+    },
+    {
       key: 'terminals-db',
       label: t('מסופים', 'Terminals'),
       value: syncStatus?.terminal_count ?? terminalsIndex?.length ?? dbCountFallback,
@@ -386,6 +404,11 @@ export default function LiveDataIntelPanel({
       key: 'eia-historic',
       label: t('היסטורי EIA', 'EIA historic'),
       value: syncStatus?.eia_historic_import_count ?? dbCountFallback,
+    },
+    {
+      key: 'coverage-gaps',
+      label: t('אזורי חוסר AIS', 'AIS gap zones'),
+      value: syncStatus?.coverage_gap_watch_zone_count ?? dbCountFallback,
     },
     {
       key: 'manifests',
@@ -858,10 +881,23 @@ export default function LiveDataIntelPanel({
           )}
           <p className="mt-2 text-xs leading-relaxed text-cyan-900/80 dark:text-cyan-100/80">
             {t(
-              'מקורות: OSM, AIS, Comtrade, TED, רישיונות — סנכרון גרף דרך graph-sync',
-              'Sources: OSM, AIS, Comtrade, TED, licenses — graph sync via admin graph-sync',
+              'מקורות: OSM, AIS פתוח, Comtrade, TED, רישיונות — AIS חסר מסומן כחור כיסוי ולא כאין פעילות.',
+              'Sources: OSM, open AIS, Comtrade, TED, licenses — missing AIS is labeled as a coverage gap, not no activity.',
             )}
           </p>
+          {maritimeSourceHealth.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {maritimeSourceHealth.map((source) => (
+                <span
+                  key={source.source}
+                  className="rounded-full border border-cyan-700/20 bg-cyan-50 px-2 py-1 text-[10px] font-bold uppercase text-cyan-950 dark:border-cyan-300/20 dark:bg-cyan-950/40 dark:text-cyan-100"
+                  title={source.limitations?.[0] ?? source.coverage_tier}
+                >
+                  {source.display_name}: {source.status.replaceAll('_', ' ')}
+                </span>
+              ))}
+            </div>
+          )}
         </CollapsibleSection>
         <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-200 mt-2">
           {t(DISCLAIMER_HE, DISCLAIMER_EN)}

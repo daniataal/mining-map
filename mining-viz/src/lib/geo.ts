@@ -1,58 +1,55 @@
 // Geographic helpers for the map view.
 //
-// Why this file exists
-// --------------------
-// A large chunk of license rows lack precise coordinates and instead share the
-// centroid of their region/district (e.g. dozens of "Ashanti Region" licenses
-// all sit on top of each other at 6.7470, -1.5209).
+// Many license rows share the same region/district centroid (e.g. dozens of
+// Ghana licenses at one Ashanti point). Tiny per-id jitter (~88 m) is invisible
+// at country zoom — MarkerCluster still merges them into one mega-cluster, and
+// spiderfyOnMaxZoom draws a huge "flower" into the ocean.
 //
-// When MarkerCluster spiderfies an exact-collision stack the markers are
-// spread visually via CSS transforms but every marker still reports the same
-// logical lat/lng — so `marker.openPopup()` anchors the popup at the centroid
-// (hidden behind the cluster icon) and clicking a spider-leg does not show
-// the per-license popup the user expected.
-//
-// The fix is twofold:
-//   1. Apply a tiny *deterministic* jitter (driven by the row id) ONLY to
-//      points that share coordinates with at least one other row. The jitter
-//      is small enough (~80 m at the equator) to be invisible at country/
-//      regional zoom but large enough that markercluster can give each
-//      marker its own anchor at street zoom — popups now open over the
-//      correct spider leg.
-//   2. The jitter is deterministic, so it is stable across reloads and does
-//      not introduce phantom movement between renders.
-//
-// We never mutate the source data — jittered rows carry the original
-// coordinates in `_originalLat` / `_originalLng` for reference. Callers that
-// need the canonical position (audit, export, dossier) should use the
-// originals.
+// For collocated groups we spread display positions on a small disc (canonical
+// lat/lng unchanged). MarkerCluster then forms multiple sub-clusters; click
+// zooms in instead of spiderfying hundreds of legs.
 
-import type { MiningLicense } from "../types";
+import type { MiningLicense } from '../types';
 
 const COLLISION_KEY_PRECISION = 5; // ~1.1 m bucket — anything closer counts as collocated
-const JITTER_MAGNITUDE_DEG = 0.0008; // ≈88 m at the equator
+
+/** Max spread radius (degrees) for a collocated stack — ~4.4 km at equator. */
+export const MAX_SPREAD_RADIUS_DEG = 0.04;
+
+/** Scales spread with sqrt(n) before cap. */
+export const SPREAD_RADIUS_PER_SQRT_N = 0.00015;
 
 const positionKey = (lat: number, lng: number) =>
   `${lat.toFixed(COLLISION_KEY_PRECISION)},${lng.toFixed(COLLISION_KEY_PRECISION)}`;
 
-// Stable 32-bit string hash (djb2 variant). Cheap and dependency-free.
-const hashId = (id: string): number => {
-  let h = 5381 | 0;
-  for (let i = 0; i < id.length; i++) {
-    h = ((h << 5) + h + id.charCodeAt(i)) | 0;
-  }
-  return h;
-};
+/** Disc radius for n collocated markers (degrees). */
+export function spreadRadiusDeg(collocatedCount: number): number {
+  if (collocatedCount <= 1) return 0;
+  return Math.min(MAX_SPREAD_RADIUS_DEG, SPREAD_RADIUS_PER_SQRT_N * Math.sqrt(collocatedCount));
+}
 
-// Two pseudo-random offsets in [-1, 1] derived from a single id hash so the
-// pair is decorrelated enough that two ids hashing close together don't end
-// up overlapping again.
-const jitterOffsets = (id: string): [number, number] => {
-  const h = hashId(id);
-  const lo = (h & 0xffff) / 0xffff; // [0,1]
-  const hi = ((h >>> 16) & 0xffff) / 0xffff; // [0,1]
-  return [(lo - 0.5) * 2, (hi - 0.5) * 2];
-};
+/**
+ * Deterministic offset on a disc around (lat, lng) for index i of n collocated rows.
+ * Golden-angle spacing avoids radial spokes.
+ */
+export function collocatedDisplayOffset(
+  lat: number,
+  lng: number,
+  index: number,
+  total: number,
+): { dLat: number; dLng: number } {
+  if (total <= 1) return { dLat: 0, dLng: 0 };
+  const maxR = spreadRadiusDeg(total);
+  const t = (index + 0.5) / total;
+  const r = maxR * Math.sqrt(t);
+  const golden = 2.399963229728653;
+  const angle = index * golden;
+  const cosLat = Math.max(0.25, Math.cos((lat * Math.PI) / 180));
+  return {
+    dLat: r * Math.cos(angle),
+    dLng: (r * Math.sin(angle)) / cosLat,
+  };
+}
 
 export interface JitteredLicense extends MiningLicense {
   _displayLat: number;
@@ -62,19 +59,30 @@ export interface JitteredLicense extends MiningLicense {
 }
 
 /**
- * Return the input list with `_displayLat` / `_displayLng` set. Points that
- * share coordinates with another row are nudged by a deterministic offset;
- * everything else is passed through unchanged.
- *
- * The original `lat` / `lng` are never overwritten — consumers that care about
- * the canonical position (export, dossier, backend writes) keep using them.
+ * Return the input list with `_displayLat` / `_displayLng` set. Collocated rows
+ * are spread on a small disc; singletons pass through unchanged.
  */
 export function applyCollocationJitter(rows: MiningLicense[]): JitteredLicense[] {
   const counts = new Map<string, number>();
+  const groups = new Map<string, MiningLicense[]>();
+
   for (const r of rows) {
     if (r.lat == null || r.lng == null) continue;
     const k = positionKey(r.lat, r.lng);
     counts.set(k, (counts.get(k) || 0) + 1);
+    const list = groups.get(k);
+    if (list) list.push(r);
+    else groups.set(k, [r]);
+  }
+
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  const indexInGroup = new Map<string, number>();
+  for (const list of groups.values()) {
+    if (list.length <= 1) continue;
+    list.forEach((r, i) => indexInGroup.set(r.id, i));
   }
 
   return rows.map((r) => {
@@ -98,11 +106,12 @@ export function applyCollocationJitter(rows: MiningLicense[]): JitteredLicense[]
         _collocatedCount: 1,
       } as JitteredLicense;
     }
-    const [dx, dy] = jitterOffsets(r.id);
+    const idx = indexInGroup.get(r.id) ?? 0;
+    const { dLat, dLng } = collocatedDisplayOffset(r.lat, r.lng, idx, collocated);
     return {
       ...r,
-      _displayLat: r.lat + dy * JITTER_MAGNITUDE_DEG,
-      _displayLng: r.lng + dx * JITTER_MAGNITUDE_DEG,
+      _displayLat: r.lat + dLat,
+      _displayLng: r.lng + dLng,
       _wasJittered: true,
       _collocatedCount: collocated,
     } as JitteredLicense;

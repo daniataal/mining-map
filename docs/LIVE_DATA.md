@@ -1,6 +1,6 @@
 # Live Data — user onboarding
 
-**Last reviewed:** 2026-05-21
+**Last reviewed:** 2026-05-22
 
 ## What's implemented (2026-05)
 
@@ -13,7 +13,8 @@
 | **Companies + contacts** | Done | Save to Suppliers, per-company agent, batch enrich via `POST /api/admin/oil-live/enrich-contacts?limit=20`. |
 | **Graph sync CTA** | Done | Empty states link to admin graph-sync. |
 | **Performance** | Done | Debounced map bbox (450ms, keepPreviousData). Shared opportunities cache; no refetch on pan for opps list. |
-| **Live AIS** | Done | WebSocket positions; optional workers. |
+| **Open-only AIS coverage** | Done | Multi-source vessel observations, `coverage_cells`, watch zones, source health, and map coverage-gap overlay. Empty sea means "coverage gap" unless confirmed by source health. |
+| **Live AIS** | Done | WebSocket positions; optional workers; AISStream is treated as partial coastal/community coverage, not global truth. |
 | **Dedup** | Done | Client + server opportunity dedup/diversify. |
 | **Trader workflows** | Done | Save to Suppliers (cargo/entity drawers), watch opportunity → `oil_watchlists` / `oil_alerts`, terminal search, commodity map filter, CSV export (cargo + opportunities). |
 | **Route planner deep link** | Done | Deal pack + cargo drawer → **Open in Route Planner** pre-fills load/discharge from MCR port names. |
@@ -38,6 +39,7 @@ Live Data is Meridian’s **commercial intelligence mode**: a unified map plus i
 | Layer | What it is | How to tell in UI |
 |-------|------------|-------------------|
 | **Live** | Real-time AIS positions, open/closed port calls, WebSocket vessel updates | Vessel markers move; port calls tagged `live_ais` |
+| **Coverage / gap** | Open AIS density and strategic watch zones | Red/sparse cells mean missing feed coverage, not “no vessels” |
 | **Synthetic / inferred** | Meridian Cargo Records (MCR), opportunities, intelligence cards | Amber “Synthetic cargo” badges, confidence %, triangulation source count |
 | **Macro / seed** | Comtrade/Census country flows, OSM terminals, demo seed corridors | Coverage banner counts; `bol_tier=inferred`; disclaimer on every card |
 | **Demo seed** | Curated hubs + graph-sync seed port calls when AIS is sparse | `source=seed_port_calls` in evidence; works without AIS key |
@@ -67,6 +69,8 @@ docker compose up -d maritime-worker oil-live-intel-worker
 
 # 5) Verify coverage
 curl -sf http://localhost:8095/api/oil-live/sync-status | jq .
+curl -sf "http://localhost:8095/api/oil-live/coverage?bbox=48,22,58.8,30.8" | jq .
+curl -sf http://localhost:8095/api/oil-live/source-health | jq .
 curl -sf "http://localhost:8095/api/oil-live/cargo-records?limit=5" | jq .
 ```
 
@@ -125,6 +129,19 @@ docker compose up -d maritime-worker oil-live-intel-worker
 
 - **maritime-worker** → Redis snapshot → canvas vessel layer
 - **oil-live-intel-worker** → terminal geofence port calls → intelligence cards + WebSocket
+- **graph-sync vessel mirror** → `oil_vessel_position_observations` so `/api/oil-live/vessels`, `/api/oil-live/coverage`, and `/api/oil-live/source-health` can label freshness, source, confidence, and coverage gaps.
+
+AISStream is an open/community source with uneven geography. Meridian must not treat it as global satellite AIS. Persian Gulf, Red Sea/Suez, West Africa, East Africa, South Africa, and Tangier/Gibraltar are tracked as `maritime_watch_zones`; when no fresh open AIS is present, the UI shows a coverage gap rather than implying no vessels are there.
+
+Open-only expansion path:
+
+| Source | Status | Product meaning |
+|--------|--------|-----------------|
+| AISStream | Active when `AISSTREAM_API_KEY` is set | Partial open AIS base feed; movement evidence only |
+| AISHub | Planned contributor path | Add partner receiver stations near Gulf/Africa gaps before relying on API access |
+| BarentsWatch / Norway | Planned regional government AIS | Hardens open AIS ingest model; not Gulf/Africa coverage |
+| Danish historical AIS | Planned historical government AIS | Training/validation data, not live vessel truth |
+| Sentinel-1 SAR | Optional planned monitor | Detects likely vessels only; label `satellite_detected_unidentified` |
 
 ### EIA historic imports (user files — not API scrape)
 
@@ -176,7 +193,7 @@ docker compose up -d oil-live-intel-worker
 | Variable | Required for | Notes |
 |----------|--------------|-------|
 | `ADMIN_TOKEN` | Graph-sync, admin ingest | Header `X-Admin-Token`. If unset in dev, admin routes are open (logged warning). |
-| `AISSTREAM_API_KEY` | Live vessel positions + port calls | Free at [AISStream](https://aisstream.io/). Without it: seed/demo data only. |
+| `AISSTREAM_API_KEY` | Live vessel positions + port calls | Free at [AISStream](https://aisstream.io/). Partial open/community coverage; without it: seed/demo data only. |
 | `CENSUS_API_KEY` | U.S. bilateral HS27 macro trade on graph-sync | Free at [Census API signup](https://api.census.gov/data/key_signup.html). Step skipped if unset. Production deploy writes this from GitHub secret `CENSUS_API_KEY` via `.github/workflows/docker-image.yml`. |
 | `OIL_INTEL_INTERNAL_KEY` | Synthetic BOL rebuild from Python | Default `oil-intel-dev`; must match between backend and oil-live-intel. |
 | `DATABASE_URL` | All services | Shared Postgres `mining_db`. |
@@ -210,6 +227,7 @@ See `.env.example` for the full list.
 | Only 6 terminal dots (Ras Tanura, Fujairah, …) | Graph-sync never run | Run `POST /api/admin/oil-live/graph-sync` |
 | No terminals at all | oil-live-intel not started / migrations missing | `docker compose up -d oil-live-intel`; check logs |
 | No vessels | No AIS key or workers stopped | Set `AISSTREAM_API_KEY`; start `maritime-worker` + `oil-live-intel-worker` |
+| No vessels in Gulf/Africa but source-health is OK elsewhere | Open AIS coverage gap, not necessarily no vessels | Enable **AIS coverage** layer; check `/api/oil-live/coverage`; add AISHub receiver/port-event source before making absence claims |
 | Platform banner: maritime worker SSL / certificate expired | AISStream upstream TLS cert expired (`stream.aisstream.io`) | Wait for AISStream renewal; **does not block terminals** if graph-sync ran. Dev-only: `MARITIME_SSL_VERIFY=0` in `backend.env` |
 | Terminals but no cargo records | No closed port calls or rebuild skipped | Re-run graph-sync; check `curl …/sync-status` for `cargo_record_count` |
 | Cargo tab empty, sync-status shows port calls | Synthetic rebuild failed | Check `OIL_INTEL_INTERNAL_KEY`; manual synthetic-bol-rebuild curl above |
@@ -271,11 +289,14 @@ Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYN
 
 After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
-**Coverage banner** (intel drawer header) shows: terminal count, live vessels, open opportunities, last graph-sync time. Ops endpoint:
+**Coverage banner** (intel drawer header) shows: terminal count, live vessels, vessel observations, AIS gap zones, open opportunities, last graph-sync time. Ops endpoints:
 
 ```bash
 curl -sf http://localhost:8095/api/oil-live/health | jq .
 curl -sf http://localhost:8095/api/oil-live/sync-status | jq .
+curl -sf "http://localhost:8095/api/oil-live/vessels?bbox=48,22,58.8,30.8&freshness_minutes=180" | jq .
+curl -sf "http://localhost:8095/api/oil-live/coverage?bbox=48,22,58.8,30.8" | jq .
+curl -sf http://localhost:8095/api/oil-live/source-health | jq .
 ```
 
 Expect `terminal_count` ≫ 6 after graph-sync; `cargo_record_count` > 0 when port calls + rebuild succeeded.
@@ -306,13 +327,13 @@ Actions available in the Live Data intel drawer and left entity drawer (no separ
 
 | Step | Command / action | Pass criteria |
 |------|------------------|---------------|
-| 1 | `docker compose up -d db oil-live-intel maritime-worker` | Migration `014` applied; `oil_vessel_position_observations` exists |
+| 1 | `docker compose up -d db oil-live-intel maritime-worker` | Migrations `014` + `017` applied; `oil_vessel_position_observations`, `coverage_cells`, `port_event_observations`, and watch/source-health tables exist |
 | 2 | `docker compose up -d maritime-worker` + `AISSTREAM_API_KEY` | Redis key `maritime:snapshot:global` has rows (`GET` or `/api/maritime/vessels`) |
 | 3 | `POST /api/admin/oil-live/graph-sync` | `steps.vessel_position_mirror.upserted` > 0 when Redis populated |
-| 4 | `OIL_LIVE_MERGED_VESSEL_POSITIONS=1` on **oil-live-intel** + restart | `GET /api/oil-live/map?bbox=…` vessels include `data_source` field |
+| 4 | **oil-live-intel** running after graph-sync | `GET /api/oil-live/vessels?bbox=…` vessels include `source`, `source_type`, `freshness_seconds`, and `confidence`; set `OIL_LIVE_MERGED_VESSEL_POSITIONS=false` only to force the legacy table |
 | 5 | Compare with flag off | Same bbox falls back to `oil_ais_positions` (worker path) |
 
-**Merge policy:** each ingest source writes its own rows; upsert only on `(data_source, source_record_id)`. Map display picks latest per source, then precedence: `live_ais` > `aisstream` / `aisstream_snapshot` > `maritime_redis` > `inferred_port_call`. Free public secondary AIS APIs are scarce — the first production secondary path is the **maritime-worker Redis snapshot** (`maritime_redis`), not a second paid AIS vendor.
+**Merge policy:** each ingest source writes its own rows; upsert only on `(data_source, source_record_id)`. Map display picks latest per source, then precedence: `live_ais` > `aisstream` / `aisstream_snapshot` / `aishub` > `barentswatch` / `denmark_ais` > `maritime_redis` > `inferred_port_call` > `sentinel1_sar`. Free public secondary AIS APIs are scarce; absent coverage is shown as a data gap.
 
 ---
 
@@ -320,15 +341,17 @@ Actions available in the Live Data intel drawer and left entity drawer (no separ
 
 | Source | Writer | Table key | Notes |
 |--------|--------|-----------|-------|
-| AISStream worker | Go `oil-live-intel-worker` | `oil_ais_positions` (legacy map path) | Primary live path until merge flag enabled |
+| AISStream worker | Go `oil-live-intel-worker` | `oil_ais_positions` (legacy fallback) | Live path for port calls + WebSocket; open coverage is partial |
 | Maritime Redis | Python `mirror_maritime_redis_snapshot` on graph-sync | `data_source=maritime_redis`, `source_record_id=redis:{mmsi}` | Read-only mirror from `maritime-worker`; does not delete or overwrite `aisstream` rows |
-| Future secondary | TBD ingest job | unique `(data_source, source_record_id)` | Add new `data_source` + extend precedence in `vesselmerge` |
+| AISHub contributor | Future ingest job after receiver contribution | unique `(data_source, source_record_id)` | Main open path for Gulf/Africa gap reduction |
+| BarentsWatch / Denmark | Future government adapters | unique `(data_source, source_record_id)` | Regional/historical AIS validation |
+| Sentinel-1 SAR | Future optional monitor | `source_type=satellite_detected_unidentified` | Vessel-like detections only; never MMSI-confirmed |
 
-Enable merged map positions:
+Merged map positions are enabled by default when `oil_vessel_position_observations` has rows. To force the old table:
 
 ```bash
 # oil-live-intel service env
-OIL_LIVE_MERGED_VESSEL_POSITIONS=1
+OIL_LIVE_MERGED_VESSEL_POSITIONS=false
 ```
 
 Populate observations before enabling the flag:

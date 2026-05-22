@@ -2,6 +2,7 @@
 
 from backend.services.license_map_perf import (
     license_cluster_limit_for_zoom,
+    license_cluster_min_count,
     license_grid_degrees,
     simplify_tolerance_for_zoom,
 )
@@ -11,13 +12,20 @@ def test_license_grid_degrees_low_zoom():
     assert license_grid_degrees(2) == 12.0
     assert license_grid_degrees(3) == 8.0
     assert license_grid_degrees(5) == 4.0
-    assert license_grid_degrees(7) == 1.5
+    assert license_grid_degrees(6) == 4.0
 
 
 def test_license_grid_degrees_detail_zoom():
+    assert license_grid_degrees(7) is None
     assert license_grid_degrees(8) is None
     assert license_grid_degrees(12) is None
     assert license_grid_degrees(None) is None
+
+
+def test_license_cluster_min_count():
+    assert license_cluster_min_count(1.5) == 2
+    assert license_cluster_min_count(4.0) == 3
+    assert license_cluster_min_count(12.0) == 3
 
 
 def test_cluster_limit_tighter_at_world_zoom():

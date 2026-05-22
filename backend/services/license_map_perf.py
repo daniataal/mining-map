@@ -14,15 +14,23 @@ def license_grid_degrees(zoom: Optional[float]) -> Optional[float]:
         z = float(zoom)
     except (TypeError, ValueError):
         return None
-    if z >= 8:
+    # z >= 7: bbox points + client MarkerClusterGroup (avoids 1.5° grid soup).
+    if z >= 7:
         return None
     if z < 3:
         return 12.0
     if z < 4:
         return 8.0
-    if z < 6:
-        return 4.0
-    return 1.5
+    return 4.0
+
+
+def license_cluster_min_count(grid_deg: float) -> int:
+    """Drop singleton grid cells; coarse cells need more licenses to be useful."""
+    try:
+        g = float(grid_deg)
+    except (TypeError, ValueError):
+        return 2
+    return 3 if g >= 4.0 else 2
 
 
 def query_license_clusters(
@@ -42,6 +50,7 @@ def query_license_clusters(
 ) -> list[dict[str, Any]]:
     """Aggregate licenses into viewport grid cells for low-zoom map paint."""
     safe_limit = max(1, min(int(limit or 800), 2000))
+    min_cnt = license_cluster_min_count(grid_deg)
     sql = f"""
         SELECT
             (FLOOR(lat / %s) * %s + %s / 2.0)::float AS lat,
@@ -57,6 +66,7 @@ def query_license_clusters(
           AND lng BETWEEN %s AND %s
           {open_clause}
         GROUP BY FLOOR(lat / %s), FLOOR(lng / %s)
+        HAVING COUNT(*) >= %s
         ORDER BY cnt DESC
         LIMIT %s
     """
@@ -76,6 +86,7 @@ def query_license_clusters(
         max_lng,
         g,
         g,
+        min_cnt,
         safe_limit,
     ]
     cur.execute(sql, tuple(params))
@@ -88,7 +99,7 @@ def query_license_clusters(
         cnt = row["cnt"] if "cnt" in keys else row[2]
         country = (row["country"] if "country" in keys else row[3]) or ""
         sector = (row["sector"] if "sector" in keys else row[4]) or "mining"
-        if lat is None or lng is None or not cnt:
+        if lat is None or lng is None or not cnt or int(cnt) < min_cnt:
             continue
         out.append(
             {
@@ -104,6 +115,7 @@ def query_license_clusters(
                 "lat": float(lat),
                 "lng": float(lng),
                 "mapClusterCount": int(cnt),
+                "mapClusterGridDeg": float(g),
                 "entityKind": "license",
             }
         )

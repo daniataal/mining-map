@@ -12,6 +12,7 @@ import {
   usePortLogisticsEntities,
   createDealRoom,
   type LicenseViewportBounds,
+  normalizeLicenseViewportBounds,
 } from './lib/api';
 import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
 import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
@@ -256,6 +257,7 @@ export default function App() {
     corridors: true,
     opportunities: true,
     tradeFlows: false,
+    coverage: true,
   });
   const [oilLiveTradeFlowGroup, setOilLiveTradeFlowGroup] = useState<
     'company_pair' | 'country_pair'
@@ -1442,7 +1444,14 @@ export default function App() {
                   getDealRoomForLicense={getDealRoomForLicense}
                   countryFocusCountry={countryFocusCountry}
                   countryFocusBoundsTrigger={countryFocusBoundsTrigger}
-                  onLicenseMapViewportChange={licenseMapFetchEnabled ? setLicenseMapViewport : undefined}
+                  onLicenseMapViewportChange={
+                    licenseMapFetchEnabled
+                      ? (bbox) =>
+                          setLicenseMapViewport(
+                            bbox ? normalizeLicenseViewportBounds(bbox) : null,
+                          )
+                      : undefined
+                  }
                   onLicenseMapZoomChange={licenseMapFetchEnabled ? setLicenseMapZoom : undefined}
                   storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={

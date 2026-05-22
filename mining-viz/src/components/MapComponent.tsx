@@ -71,6 +71,7 @@ import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
+import { clusterTargetZoom, isServerLicenseCluster } from '../lib/licenseMapCluster';
 import {
   createLicenseClusterIconFactory,
   createServerLicenseClusterIcon,
@@ -330,14 +331,20 @@ interface MapComponentProps {
   macroTradeFlows?: MacroTradeFlow[];
 }
 
-/** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
+/** Max markers before we always zoom instead of spiderfy (spiderfy disabled anyway). */
+const LICENSE_CLUSTER_FIT_MAX_ZOOM = 14;
+
+/** Capture the Leaflet MarkerClusterGroup instance for popup timing. */
 function ClusterGroupRefBridge({
     clusterGroupRef,
     onSingleMarkerClusterClick,
+    onLicenseMapZoomChange,
 }: {
     clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
     onSingleMarkerClusterClick?: (marker: L.Marker) => void;
+    onLicenseMapZoomChange?: (zoom: number) => void;
 }) {
+    const map = useMap();
     const { layerContainer } = useLeafletContext();
     useEffect(() => {
         const group = asLicenseMarkerClusterGroup(layerContainer);
@@ -345,25 +352,43 @@ function ClusterGroupRefBridge({
         const onClusterClick = (event: L.LeafletEvent) => {
             const layer = event.layer as L.Layer & {
                 getAllChildMarkers?: () => L.Marker[];
+                getLatLng?: () => L.LatLng;
             };
             const children = layer.getAllChildMarkers?.() ?? [];
             if (children.length === 1 && onSingleMarkerClusterClick) {
                 L.DomEvent.stopPropagation(event);
                 onSingleMarkerClusterClick(children[0]);
+                return;
+            }
+            if (children.length > 1) {
+                L.DomEvent.stopPropagation(event);
+                const bounds = L.latLngBounds(children.map((m) => m.getLatLng()));
+                const targetZoom = Math.max(
+                    clusterTargetZoom(map.getZoom()),
+                    Math.min(
+                        LICENSE_CLUSTER_FIT_MAX_ZOOM,
+                        map.getBoundsZoom(bounds.pad(0.12)) ?? clusterTargetZoom(map.getZoom()),
+                    ),
+                );
+                map.fitBounds(bounds.pad(0.15), {
+                    maxZoom: LICENSE_CLUSTER_FIT_MAX_ZOOM,
+                    duration: 0.35,
+                });
+                onLicenseMapZoomChange?.(targetZoom);
             }
         };
-        if (group && onSingleMarkerClusterClick) {
+        if (group) {
             group.on('clusterclick', onClusterClick);
         }
         return () => {
-            if (group && onSingleMarkerClusterClick) {
+            if (group) {
                 group.off('clusterclick', onClusterClick);
             }
             if (clusterGroupRef.current === group) {
                 clusterGroupRef.current = null;
             }
         };
-    }, [layerContainer, clusterGroupRef, onSingleMarkerClusterClick]);
+    }, [map, layerContainer, clusterGroupRef, onSingleMarkerClusterClick, onLicenseMapZoomChange]);
     return null;
 }
 
@@ -389,6 +414,52 @@ const MapEffect = ({
         const targetZoom = Math.max(currentZoom, 16);
         map.flyTo([tgt.lat, tgt.lng], targetZoom, { duration: 1.0 });
     }, [mapFlyTrigger, map, selectedItem, flyTarget]);
+    return null;
+};
+
+/** Fly into a server-side license cluster; sync zoom/bbox from map on moveend (zoom ≥ 8 → points). */
+const LicenseClusterFlyEffect = ({
+    cluster,
+    onLicenseMapZoomChange,
+    onLicenseMapViewportChange,
+    onComplete,
+}: {
+    cluster: MiningLicense | null;
+    onLicenseMapZoomChange?: (zoom: number) => void;
+    onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
+    onComplete: () => void;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!cluster) return;
+        const lat = cluster._displayLat ?? cluster.lat;
+        const lng = cluster._displayLng ?? cluster.lng;
+        if (lat == null || lng == null) {
+            onComplete();
+            return;
+        }
+        const targetZoom = clusterTargetZoom(map.getZoom());
+        // Request individual licenses immediately; bbox syncs on moveend from the real viewport.
+        onLicenseMapZoomChange?.(targetZoom);
+        map.flyTo([lat, lng], targetZoom, { duration: 0.4 });
+        const done = () => {
+            const bounds = map.getBounds();
+            if (bounds.isValid() && onLicenseMapViewportChange) {
+                onLicenseMapViewportChange({
+                    south: Number(bounds.getSouth().toFixed(4)),
+                    west: Number(bounds.getWest().toFixed(4)),
+                    north: Number(bounds.getNorth().toFixed(4)),
+                    east: Number(bounds.getEast().toFixed(4)),
+                });
+            }
+            onLicenseMapZoomChange?.(map.getZoom());
+            onComplete();
+        };
+        map.once('moveend', done);
+        return () => {
+            map.off('moveend', done);
+        };
+    }, [cluster, map, onComplete, onLicenseMapZoomChange, onLicenseMapViewportChange]);
     return null;
 };
 
@@ -638,6 +709,7 @@ export default function MapComponent({
     corridors: true,
     opportunities: true,
     tradeFlows: false,
+    coverage: true,
   },
   onOilLiveLayersChange,
   oilLiveTradeFlowGroup = 'company_pair',
@@ -724,6 +796,9 @@ export default function MapComponent({
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
+    const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<MiningLicense | null>(
+        null,
+    );
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
     const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
         if (typeof window === 'undefined') return false;
@@ -1152,10 +1227,22 @@ export default function MapComponent({
                         click: (e) => {
                             L.DomEvent.stopPropagation(e);
                             onSelectMaritimeVessel(null);
+                            if (isServerLicenseCluster(item)) {
+                                setSelectedItem(null);
+                                setPendingLicenseClusterFly(item);
+                                return;
+                            }
                             setSelectedItem(item);
                         },
                     }}
                 >
+                    {isServerLicenseCluster(item) ? (
+                      <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                        <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                          Zoom in — {item.mapClusterCount ?? ''} licenses
+                        </span>
+                      </Tooltip>
+                    ) : (
                     <Tooltip direction="top" offset={[0, -20]} opacity={1}>
                         <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
                             <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
@@ -1169,6 +1256,7 @@ export default function MapComponent({
                             )}
                         </div>
                     </Tooltip>
+                    )}
                 </Marker>
             );
         });
@@ -1203,6 +1291,11 @@ export default function MapComponent({
                 });
             if (!item) return;
             onSelectMaritimeVessel(null);
+            if (isServerLicenseCluster(item)) {
+                setSelectedItem(null);
+                setPendingLicenseClusterFly(item);
+                return;
+            }
             setSelectedItem(item);
         },
         [mapDisplayData, onSelectMaritimeVessel, setSelectedItem],
@@ -1876,6 +1969,12 @@ export default function MapComponent({
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <LicenseClusterFlyEffect
+                    cluster={pendingLicenseClusterFly}
+                    onLicenseMapZoomChange={onLicenseMapZoomChange}
+                    onLicenseMapViewportChange={onLicenseMapViewportChange}
+                    onComplete={() => setPendingLicenseClusterFly(null)}
+                />
                 <LicenseMapPopupController
                     selectedItem={selectedItem}
                     mapFlyTrigger={mapFlyTrigger}
@@ -2057,11 +2156,11 @@ export default function MapComponent({
                     ) : (
                         <MarkerClusterGroup
                             showCoverageOnHover={false}
-                            spiderfyOnMaxZoom
+                            spiderfyOnMaxZoom={false}
                             spiderfyOnEveryZoom={false}
                             maxClusterRadius={52}
                             disableClusteringAtZoom={14}
-                            zoomToBoundsOnClick
+                            zoomToBoundsOnClick={false}
                             iconCreateFunction={licenseClusterIconCreate}
                             spiderLegPolylineOptions={{
                                 weight: 1.5,
@@ -2073,6 +2172,7 @@ export default function MapComponent({
                             <ClusterGroupRefBridge
                                 clusterGroupRef={clusterGroupRef}
                                 onSingleMarkerClusterClick={handleSingleClusterMarkerClick}
+                                onLicenseMapZoomChange={onLicenseMapZoomChange}
                             />
                             {renderedMarkers}
                         </MarkerClusterGroup>
