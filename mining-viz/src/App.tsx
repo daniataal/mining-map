@@ -20,6 +20,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useMiningData } from './hooks/use-mining-data';
 import { useLicenseAnnotations } from './hooks/use-license-annotations';
 import { useDebouncedValue } from './hooks/use-debounced-value';
+import {
+  eiaHistoricMapQueryKey,
+  prefetchEiaHistoricData,
+  usePetroleumSidebarPrefetch,
+} from './hooks/use-petroleum-sidebar-prefetch';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
 import { toast } from "sonner";
@@ -174,7 +179,7 @@ export default function App() {
     return t(h.he, h.en);
   }, [t]);
   const queryClient = useQueryClient();
-  
+
   // Data Fetching
   const [licenseMapViewport, setLicenseMapViewport] = useState<LicenseViewportBounds | null>(null);
   const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
@@ -214,6 +219,7 @@ export default function App() {
 
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
+  usePetroleumSidebarPrefetch(Boolean(token));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
   const dealRooms = useDealRooms(Boolean(username));
   const [userId, setUserId] = useState<string | null>(localStorage.getItem('mining_userid'));
@@ -462,13 +468,55 @@ export default function App() {
           setLiveDataFlyTrigger((n) => n + 1);
           setLiveDataFlyTarget(null);
         }
+        if (tab === 'historic') {
+          void prefetchEiaHistoricData(queryClient).then(({ year }) => {
+            const mapData = queryClient.getQueryData<{
+              arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
+              origins?: import('./api/eiaHistoricApi').EiaHistoricMapOrigin[];
+            }>(eiaHistoricMapQueryKey(year, ''));
+            if (!mapData?.arcs?.length) return;
+            setHistoricSidebarMap((prev) =>
+              prev.enabled
+                ? prev
+                : {
+                    enabled: true,
+                    arcs: mapData.arcs,
+                    origins: mapData.origins,
+                    year,
+                    showCorridors: prev.showCorridors,
+                  },
+            );
+          });
+        }
       }
       if (tab !== 'live_data') {
         setOilLiveEntity(null);
       }
     },
-    [],
+    [queryClient],
   );
+
+  useEffect(() => {
+    if (!isHistoricSidebar) return;
+    void prefetchEiaHistoricData(queryClient).then(({ year }) => {
+      const mapData = queryClient.getQueryData<{
+        arcs: import('./api/eiaHistoricApi').EiaHistoricMapArc[];
+        origins?: import('./api/eiaHistoricApi').EiaHistoricMapOrigin[];
+      }>(eiaHistoricMapQueryKey(year, ''));
+      if (!mapData?.arcs?.length) return;
+      setHistoricSidebarMap((prev) =>
+        prev.enabled
+          ? prev
+          : {
+              enabled: true,
+              arcs: mapData.arcs,
+              origins: mapData.origins,
+              year,
+              showCorridors: prev.showCorridors,
+            },
+      );
+    });
+  }, [isHistoricSidebar, queryClient]);
 
   useEffect(() => {
     if (!isLiveDataSidebar) {
