@@ -57,6 +57,11 @@ export default function LicenseMapPopupController({
   const popupRef = useRef<L.Popup | null>(null);
   const prevFlyTriggerRef = useRef(mapFlyTrigger);
   const selectedIdRef = useRef<string | null>(null);
+  const selectedItemRef = useRef<MiningLicense | null>(null);
+
+  useEffect(() => {
+    selectedItemRef.current = selectedItem;
+  }, [selectedItem]);
 
   const ensureContainer = useCallback(() => {
     if (!containerRef.current) {
@@ -119,14 +124,17 @@ export default function LicenseMapPopupController({
   );
 
   const openAtSelectedMarker = useCallback(() => {
-    const id = selectedIdRef.current;
-    if (!id) return;
-    const marker = markerRefs.current[id];
-    if (!marker) return;
+    const item = selectedItemRef.current;
+    if (!item) return;
+
+    const lat = item._displayLat ?? item.lat;
+    const lng = item._displayLng ?? item.lng;
+    if (lat == null || lng == null) return;
 
     const container = ensureContainer();
     const popup = ensurePopup();
-    const latlng = marker.getLatLng();
+    const marker = markerRefs.current[item.id];
+    const latlng = marker?.getLatLng?.() ?? L.latLng(lat, lng);
 
     if (popup.isOpen()) {
       popup.setLatLng(latlng);
@@ -173,11 +181,23 @@ export default function LicenseMapPopupController({
 
     const finishOpen = () => {
       if (cancelled) return;
-      raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(() => {
-          if (!cancelled) openAtSelectedMarker();
-        });
-      });
+      const attemptOpen = (triesLeft: number) => {
+        if (cancelled) return;
+        const item = selectedItemRef.current;
+        const hasCoords =
+          item != null &&
+          (item._displayLat ?? item.lat) != null &&
+          (item._displayLng ?? item.lng) != null;
+        const hasMarker = item != null && Boolean(markerRefs.current[item.id]);
+        if (hasCoords && (hasMarker || triesLeft <= 0)) {
+          openAtSelectedMarker();
+          return;
+        }
+        if (triesLeft > 0) {
+          raf1 = requestAnimationFrame(() => attemptOpen(triesLeft - 1));
+        }
+      };
+      raf1 = requestAnimationFrame(() => attemptOpen(8));
     };
 
     if (sidebarFly) {

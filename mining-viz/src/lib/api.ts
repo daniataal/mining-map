@@ -44,6 +44,10 @@ import {
   writeLicenseBundleCache,
   type LicenseBundleMode,
 } from './licenseBundleCache';
+import {
+  LICENSE_COUNTRY_FETCH_HUB,
+  licenseViewportBoundsFromGeoJson,
+} from './countryBounds';
 
 export {
   clearLicenseBundleCaches,
@@ -441,42 +445,63 @@ export function useLicensesForMap(options: {
   sector?: 'mining' | 'oil_and_gas';
   bounds: LicenseViewportBounds | null;
   filterCountries?: string[];
+  /** Country-focus mode: fetch by country border bbox only (no `countries` SQL filter). */
+  countryFocusBboxOnly?: boolean;
   enabled: boolean;
 }): UseLicensesResult {
-  const { sector, bounds, filterCountries = [], enabled } = options;
+  const { sector, bounds, filterCountries = [], countryFocusBboxOnly = false, enabled } = options;
   const debouncedBounds = useDebouncedValue(bounds, LICENSE_VIEWPORT_DEBOUNCE_MS);
-  const fetchBounds = useMemo(
+  const viewportBounds = useMemo(
     () => (debouncedBounds ? quantizeLicenseViewportBounds(debouncedBounds) : null),
     [debouncedBounds],
   );
   const countriesKey = filterCountries.length ? filterCountries.join('|') : '';
+  const countryScoped = filterCountries.length > 0;
+
+  const bordersQuery = useQuery({
+    queryKey: ['country-borders', 'license-fetch', countriesKey] as const,
+    queryFn: () => getCountryBorders(filterCountries),
+    enabled: enabled && countryScoped,
+    staleTime: 1000 * 60 * 60 * 24,
+    gcTime: 1000 * 60 * 60 * 24 * 7,
+  });
+
+  const countryFetchBounds = useMemo(() => {
+    if (!countryScoped) return null;
+    return (
+      licenseViewportBoundsFromGeoJson(bordersQuery.data) ?? LICENSE_COUNTRY_FETCH_HUB
+    );
+  }, [countryScoped, bordersQuery.data]);
+
+  const fetchBounds = countryScoped ? countryFetchBounds : viewportBounds;
 
   const query = useQuery({
-    queryKey: ['licenses', 'viewport', sector, countriesKey, fetchBounds] as const,
+    queryKey: [
+      'licenses',
+      'viewport',
+      sector,
+      countriesKey,
+      countryFocusBboxOnly ? 'focus-bbox' : 'scoped',
+      fetchBounds,
+    ] as const,
     staleTime: LICENSE_VIEWPORT_STALE_MS,
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
     retry: 1,
     refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }: QueryFunctionContext) => {
-      if (filterCountries.length > 0) {
-        const hub: LicenseViewportBounds = fetchBounds ?? {
-          south: -60,
-          west: -180,
-          north: 72,
-          east: 180,
-        };
+      if (countryScoped && fetchBounds) {
         return fetchLicensesViewportFromApi({
           sector,
-          bounds: hub,
-          countries: filterCountries,
+          bounds: fetchBounds,
+          countries: countryFocusBboxOnly ? undefined : filterCountries,
           signal,
         });
       }
       if (!fetchBounds) return [];
       return fetchLicensesViewportFromApi({ sector, bounds: fetchBounds, signal });
     },
-    enabled: enabled && (filterCountries.length > 0 || fetchBounds != null),
+    enabled: enabled && (countryScoped ? fetchBounds != null : viewportBounds != null),
   });
 
   const stillLoadingCountryCount =

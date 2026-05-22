@@ -15,6 +15,17 @@ export default function PlatformHealthChip() {
   const issues = useMemo(() => {
     if (isError) {
       const message = error instanceof Error ? error.message : String(error);
+      const warming =
+        /abort|timed out|still be starting/i.test(message) ||
+        (error instanceof Error && error.name === 'AbortError');
+      if (warming) {
+        return [
+          t(
+            'השרת עדיין עולה (ingest ברקע) — נסו שוב בעוד דקה',
+            'Backend still starting (background ingest) — retry in a minute',
+          ),
+        ];
+      }
       return [
         t(
           'לא ניתן להגיע ל-API',

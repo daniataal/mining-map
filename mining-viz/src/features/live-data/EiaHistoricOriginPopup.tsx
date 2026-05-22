@@ -40,12 +40,37 @@ export default function EiaHistoricOriginPopup({
       </div>
       {routeLabel && (
         <p className="eia-historic-route-pill" title={routeLabel}>
-          <span className="eia-historic-route-from">{label}</span>
-          <span className="eia-historic-route-arrow" aria-hidden>
-            →
-          </span>
-          <span className="eia-historic-route-to">U.S. Gulf Coast</span>
+          {routeLabel.includes('→') ? (
+            <>
+              <span className="eia-historic-route-from">{label}</span>
+              <span className="eia-historic-route-arrow" aria-hidden>
+                →
+              </span>
+              <span className="eia-historic-route-to">
+                {routeLabel.split('→').slice(1).join('→').trim()}
+              </span>
+            </>
+          ) : (
+            <span className="eia-historic-route-to">{routeLabel}</span>
+          )}
         </p>
+      )}
+
+      {(origin.top_ports?.length ?? 0) > 0 && (
+        <div className="eia-historic-popup-section">
+          <p className="eia-historic-popup-label">Top U.S. discharge ports</p>
+          <ul className="eia-historic-popup-chips">
+            {origin.top_ports!.slice(0, 6).map((p) => (
+              <li
+                key={`${p.port_code ?? ''}-${p.port_city ?? ''}-${p.port_state ?? ''}`}
+                className="eia-historic-chip"
+              >
+                <span>{p.port_label || p.port_city || 'Port'}</span>
+                <span className="eia-historic-chip-val">{formatBbl(p.volume_bbl)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {origin.by_commodity.length > 0 && (

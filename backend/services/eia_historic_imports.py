@@ -124,6 +124,84 @@ def ensure_eia_historic_imports_table(conn: Any) -> None:
     """
     with conn.cursor() as cur:
         cur.execute(ddl)
+    ensure_eia_historic_file_state_table(conn)
+
+
+def ensure_eia_historic_file_state_table(conn: Any) -> None:
+    """Tracks on-disk file fingerprint so the worker does not re-parse unchanged xls/xlsx."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS eia_historic_file_state (
+                source_file TEXT NOT NULL,
+                data_source TEXT NOT NULL,
+                file_size BIGINT NOT NULL,
+                file_mtime DOUBLE PRECISION NOT NULL,
+                row_count INT DEFAULT 0,
+                last_ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (data_source, source_file)
+            );
+            """
+        )
+
+
+def _force_reingest_eia_files() -> bool:
+    return (os.getenv("EIA_HISTORIC_FORCE_REINGEST") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _file_fingerprint(path: Path) -> tuple[int, float]:
+    st = path.stat()
+    return int(st.st_size), float(st.st_mtime)
+
+
+def _file_unchanged_on_disk(conn: Any, path: Path, *, data_source: str) -> bool:
+    if _force_reingest_eia_files():
+        return False
+    ensure_eia_historic_file_state_table(conn)
+    size, mtime = _file_fingerprint(path)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT file_size, file_mtime
+            FROM eia_historic_file_state
+            WHERE source_file = %s AND data_source = %s;
+            """,
+            (path.name, data_source),
+        )
+        row = cur.fetchone()
+    if not row:
+        return False
+    stored_size, stored_mtime = row[0], float(row[1])
+    return stored_size == size and abs(stored_mtime - mtime) < 0.001
+
+
+def _record_file_ingest_state(
+    conn: Any,
+    path: Path,
+    *,
+    data_source: str,
+    row_count: int,
+) -> None:
+    size, mtime = _file_fingerprint(path)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO eia_historic_file_state (
+                source_file, data_source, file_size, file_mtime, row_count, last_ingested_at
+            ) VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (data_source, source_file) DO UPDATE SET
+                file_size = EXCLUDED.file_size,
+                file_mtime = EXCLUDED.file_mtime,
+                row_count = EXCLUDED.row_count,
+                last_ingested_at = NOW();
+            """,
+            (path.name, data_source, size, mtime, row_count),
+        )
 
 
 def map_product_to_commodity_family(product: Optional[str], prod_code: Optional[str] = None) -> str:
@@ -392,6 +470,7 @@ def ingest_eia_downloads_folder(
         "folder": str(folder),
         "files_found": 0,
         "files_processed": 0,
+        "files_skipped_unchanged": 0,
         "rows_parsed": 0,
         "rows_inserted": 0,
         "files": [],
@@ -408,8 +487,25 @@ def ingest_eia_downloads_folder(
 
     for path in paths:
         try:
+            if _file_unchanged_on_disk(conn, path, data_source=data_source):
+                summary["files_skipped_unchanged"] += 1
+                summary["files"].append(
+                    {
+                        "file": path.name,
+                        "status": "skipped",
+                        "reason": "unchanged_on_disk",
+                    }
+                )
+                continue
+
             print(f"[eia-historic] ingesting {path.name}…", flush=True)
             file_stats = _ingest_file(conn, path, data_source=data_source)
+            _record_file_ingest_state(
+                conn,
+                path,
+                data_source=data_source,
+                row_count=int(file_stats.get("rows_upserted", 0) or 0),
+            )
             conn.commit()
             print(
                 f"[eia-historic] {path.name}: parsed={file_stats.get('rows_parsed', 0)} "
@@ -425,8 +521,11 @@ def ingest_eia_downloads_folder(
             summary["errors"].append(f"{path.name}: {exc}")
             print(f"[eia-historic] {path.name} failed: {exc}", flush=True)
 
-    if summary["errors"] and summary["files_processed"] == 0:
+    if summary["errors"] and summary["files_processed"] == 0 and summary["files_skipped_unchanged"] == 0:
         summary["status"] = "error"
+    elif summary["files_processed"] == 0 and summary["files_skipped_unchanged"] > 0:
+        summary["status"] = "skipped"
+        summary["reason"] = "all_files_unchanged_db_current"
 
     return summary
 
@@ -586,6 +685,19 @@ def query_series(
     }
 
 
+def _port_label(port_city: Optional[str], port_state: Optional[str], port_code: Optional[str]) -> str:
+    city = (port_city or "").strip()
+    state = (port_state or "").strip()
+    if city and state:
+        return f"{city}, {state}"
+    if city:
+        return city
+    code = (port_code or "").strip()
+    if code:
+        return f"Port {code}"
+    return ""
+
+
 def query_map_arcs(
     conn: Any,
     *,
@@ -608,11 +720,14 @@ def query_map_arcs(
             f"""
             SELECT origin_country,
                    commodity_family,
+                   port_city,
+                   port_state,
+                   port_code,
                    SUM(volume)::float AS volume_bbl,
                    COUNT(*)::bigint AS row_count
             FROM eia_historic_imports
             WHERE {where}
-            GROUP BY origin_country, commodity_family
+            GROUP BY origin_country, commodity_family, port_city, port_state, port_code
             ORDER BY volume_bbl DESC NULLS LAST
             LIMIT %s;
             """,
@@ -624,8 +739,12 @@ def query_map_arcs(
         {
             "origin_country": r[0],
             "commodity_family": r[1] or "other",
-            "volume_bbl": r[2],
-            "row_count": r[3],
+            "port_city": r[2],
+            "port_state": r[3],
+            "port_code": r[4],
+            "port_label": _port_label(r[2], r[3], r[4]),
+            "volume_bbl": r[5],
+            "row_count": r[6],
             "destination_country": "United States",
         }
         for r in rows
@@ -634,6 +753,7 @@ def query_map_arcs(
     origin_countries = sorted({a["origin_country"] for a in arcs if a.get("origin_country")})
     origins: list[dict[str, Any]] = []
     importer_limit = max(3, min(15, int(os.getenv("EIA_HISTORIC_MAP_IMPORTERS_PER_ORIGIN", "10"))))
+    port_limit = max(3, min(8, int(os.getenv("EIA_HISTORIC_MAP_PORTS_PER_ORIGIN", "5"))))
 
     for origin in origin_countries:
         with conn.cursor() as cur:
@@ -660,6 +780,38 @@ def query_map_arcs(
                 for imp in cur.fetchall()
             ]
 
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT port_city,
+                       port_state,
+                       port_code,
+                       SUM(volume)::float AS volume_bbl,
+                       COUNT(*)::bigint AS row_count
+                FROM eia_historic_imports
+                WHERE {where} AND origin_country = %s
+                  AND (
+                    (port_city IS NOT NULL AND TRIM(port_city) <> '')
+                    OR (port_code IS NOT NULL AND TRIM(port_code) <> '')
+                  )
+                GROUP BY port_city, port_state, port_code
+                ORDER BY volume_bbl DESC NULLS LAST
+                LIMIT %s;
+                """,
+                [*params, origin, port_limit],
+            )
+            top_ports = [
+                {
+                    "port_city": p[0],
+                    "port_state": p[1],
+                    "port_code": p[2],
+                    "port_label": _port_label(p[0], p[1], p[2]),
+                    "volume_bbl": p[3],
+                    "row_count": p[4],
+                }
+                for p in cur.fetchall()
+            ]
+
         by_commodity = [
             {
                 "commodity_family": a["commodity_family"],
@@ -675,6 +827,7 @@ def query_map_arcs(
                 "volume_bbl": sum(c["volume_bbl"] or 0 for c in by_commodity),
                 "row_count": sum(c["row_count"] or 0 for c in by_commodity),
                 "top_importers": top_importers,
+                "top_ports": top_ports,
                 "by_commodity": by_commodity,
             }
         )
@@ -684,5 +837,5 @@ def query_map_arcs(
         "importer": importer,
         "arcs": arcs,
         "origins": origins,
-        "provenance": "EIA file import — historic corridor (country centroids)",
+        "provenance": "EIA file import — historic corridors (origin country + U.S. discharge port)",
     }

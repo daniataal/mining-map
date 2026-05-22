@@ -1822,8 +1822,14 @@ def _sync_gov_procurement_reference() -> None:
 
 
 def _sync_eia_historic_reference() -> None:
-    """Upsert impa*.xls from EIA_DOWNLOADS_DIR when files are present (idempotent)."""
-    if not _eia_historic_auto_ingest_on_startup_enabled():
+    """Upsert impa*.xls from EIA_DOWNLOADS_DIR when files are present (skips unchanged files)."""
+    startup_off = (os.getenv("EIA_HISTORIC_STARTUP_INGEST") or "false").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if startup_off or not _eia_historic_auto_ingest_on_startup_enabled():
         return
     if not ensure_schema_initialized():
         print("[EiaHistoric] Skipping ingest until schema is ready.")
@@ -2393,7 +2399,16 @@ def read_licenses(
     def _cache_and_return(res):
         if isinstance(res, list) or (isinstance(res, dict) and "error" not in res):
             try:
-                cache.set(cache_key, json.dumps(res), ex_seconds=1800)
+                cache.set(
+                    cache_key,
+                    json.dumps(
+                        res,
+                        default=lambda o: o.isoformat()
+                        if isinstance(o, datetime)
+                        else str(o),
+                    ),
+                    ex_seconds=1800,
+                )
             except Exception as exc:
                 print(f"[Redis] Failed to cache response: {exc}")
         return res

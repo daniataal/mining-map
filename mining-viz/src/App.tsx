@@ -177,6 +177,9 @@ export default function App() {
   
   // Data Fetching
   const [licenseMapViewport, setLicenseMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
+  const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
+  const [licenseFetchCountries, setLicenseFetchCountries] = useState<string[]>([]);
   const licenseMapFetchEnabled =
     viewMode !== 'route_planner' && viewMode !== 'ports';
   const { data: worldCoverage } = useWorldCoverage(
@@ -190,6 +193,8 @@ export default function App() {
   } = useLicensesForMap({
     sector: licenseSector,
     bounds: licenseMapViewport,
+    filterCountries: licenseFetchCountries,
+    countryFocusBboxOnly: Boolean(countryFocusCountry?.trim()),
     enabled: licenseMapFetchEnabled,
   });
   // Viewport loads use keepPreviousData — no "refreshing bundle" banner on pan (map stays instant).
@@ -366,21 +371,34 @@ export default function App() {
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations, {
     suppliersPipelineMode: viewMode === 'suppliers',
+    skipCountryFilterForMap: Boolean(countryFocusCountry?.trim()),
   });
   const suppliersCounts = useMemo(
     () => countSuppliersPipeline(allLicenses.map((l) => l.id), userAnnotations),
     [allLicenses, userAnnotations],
   );
-  const mapProcessedData = useDeferredValue(miningData.processedData);
+  const mapProcessedData = useDeferredValue(
+    countryFocusCountry?.trim() ? miningData.mapProcessedData : miningData.processedData,
+  );
+
+  useEffect(() => {
+    const focus = countryFocusCountry?.trim();
+    if (focus) {
+      setLicenseFetchCountries([focus]);
+      return;
+    }
+    if (miningData.selectedCountry.length === 1) {
+      setLicenseFetchCountries([...miningData.selectedCountry]);
+      return;
+    }
+    setLicenseFetchCountries([]);
+  }, [countryFocusCountry, miningData.selectedCountry]);
 
   const selectedCountryBeforeFocusRef = useRef<string[]>([]);
   const selectedCountryLiveRef = useRef<string[]>([]);
   useEffect(() => {
     selectedCountryLiveRef.current = miningData.selectedCountry;
   }, [miningData.selectedCountry]);
-
-  const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
-  const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
 
   const applyCountryFocus = useCallback(
     (name: string) => {
@@ -431,16 +449,13 @@ export default function App() {
 
   const isLiveDataSidebar = mapSidebarTab === 'live_data';
   const isHistoricSidebar = mapSidebarTab === 'historic';
-  const isPetroleumMapContext =
-    viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas';
 
   const handleMapSidebarTabChange = useCallback(
     (tab: MapSidebarTab) => {
       setMapSidebarTab(tab);
       if (tab === 'live_data' || tab === 'historic') {
-        if (!isPetroleumMapContext) {
-          setViewMode('oil_and_gas');
-        }
+        // Live + Historic layers use petroleum APIs/overlays — always open Oil & Gas map context.
+        setViewMode('oil_and_gas');
         setIsSidebarCollapsed(false);
         setIsSidebarPinned(true);
         if (tab === 'live_data') {
@@ -452,7 +467,7 @@ export default function App() {
         setOilLiveEntity(null);
       }
     },
-    [isPetroleumMapContext],
+    [],
   );
 
   useEffect(() => {

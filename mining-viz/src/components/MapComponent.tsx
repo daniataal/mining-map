@@ -326,19 +326,37 @@ interface MapComponentProps {
 /** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
 function ClusterGroupRefBridge({
     clusterGroupRef,
+    onSingleMarkerClusterClick,
 }: {
     clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
+    onSingleMarkerClusterClick?: (marker: L.Marker) => void;
 }) {
     const { layerContainer } = useLeafletContext();
     useEffect(() => {
         const group = asLicenseMarkerClusterGroup(layerContainer);
         clusterGroupRef.current = group;
+        const onClusterClick = (event: L.LeafletEvent) => {
+            const layer = event.layer as L.Layer & {
+                getAllChildMarkers?: () => L.Marker[];
+            };
+            const children = layer.getAllChildMarkers?.() ?? [];
+            if (children.length === 1 && onSingleMarkerClusterClick) {
+                L.DomEvent.stopPropagation(event);
+                onSingleMarkerClusterClick(children[0]);
+            }
+        };
+        if (group && onSingleMarkerClusterClick) {
+            group.on('clusterclick', onClusterClick);
+        }
         return () => {
+            if (group && onSingleMarkerClusterClick) {
+                group.off('clusterclick', onClusterClick);
+            }
             if (clusterGroupRef.current === group) {
                 clusterGroupRef.current = null;
             }
         };
-    }, [layerContainer, clusterGroupRef]);
+    }, [layerContainer, clusterGroupRef, onSingleMarkerClusterClick]);
     return null;
 }
 
@@ -815,10 +833,11 @@ export default function MapComponent({
     const maritimeServedFromCache = Boolean(
         maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
     );
+    const countryFocusActive = Boolean(countryFocusCountry?.trim());
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') &&
       !isRoutePlannerView &&
-      !isLiveDataView;
+      (!isLiveDataView || countryFocusActive);
 
     useEffect(() => {
         if (!isOilAndGasView || !onStorageInViewCountChange) return;
@@ -1152,6 +1171,25 @@ export default function MapComponent({
             onSelectMaritimeVessel(vessel);
         },
         [onSelectMaritimeVessel, setSelectedItem],
+    );
+
+    const handleSingleClusterMarkerClick = useCallback(
+        (marker: L.Marker) => {
+            const ll = marker.getLatLng();
+            const byRef = Object.entries(markerRefs.current).find(([, m]) => m === marker)?.[0];
+            const item =
+                (byRef ? mapDisplayData.find((d) => d.id === byRef) : null) ??
+                mapDisplayData.find((d) => {
+                    const lat = d._displayLat ?? d.lat;
+                    const lng = d._displayLng ?? d.lng;
+                    if (lat == null || lng == null) return false;
+                    return Math.abs(lat - ll.lat) < 1e-4 && Math.abs(lng - ll.lng) < 1e-4;
+                });
+            if (!item) return;
+            onSelectMaritimeVessel(null);
+            setSelectedItem(item);
+        },
+        [mapDisplayData, onSelectMaritimeVessel, setSelectedItem],
     );
 
     const formatMaritimeVesselTooltip = useCallback((vessel: MaritimeVessel) => {
@@ -1763,7 +1801,11 @@ export default function MapComponent({
                 />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
                 <ViewportBoundsTracker
-                    active={Boolean(onLicenseMapViewportChange) && isLicenseMapView && !isLiveDataView}
+                    active={
+                        Boolean(onLicenseMapViewportChange) &&
+                        isLicenseMapView &&
+                        (!isLiveDataView || countryFocusActive)
+                    }
                     debounceMs={0}
                     onBoundsChange={(bbox) => onLicenseMapViewportChange?.(bbox)}
                 />
@@ -1971,21 +2013,32 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
-                {onGroundVisible && !suppressLicenseClusters && (
-                <MarkerClusterGroup
-                    showCoverageOnHover={false}
-                    iconCreateFunction={licenseClusterIconCreate}
-                    spiderLegPolylineOptions={{
-                        weight: 1.5,
-                        color: isDark ? '#64748b' : '#334155',
-                        opacity: isDark ? 0.5 : 0.65,
-                        interactive: false,
-                    }}
-                >
-                    <ClusterGroupRefBridge clusterGroupRef={clusterGroupRef} />
-                    {renderedMarkers}
-                </MarkerClusterGroup>
-                )}
+                {onGroundVisible &&
+                    (suppressLicenseClusters ? (
+                        <LayerGroup>{renderedMarkers}</LayerGroup>
+                    ) : (
+                        <MarkerClusterGroup
+                            showCoverageOnHover={false}
+                            spiderfyOnMaxZoom
+                            spiderfyOnEveryZoom={false}
+                            maxClusterRadius={52}
+                            disableClusteringAtZoom={14}
+                            zoomToBoundsOnClick
+                            iconCreateFunction={licenseClusterIconCreate}
+                            spiderLegPolylineOptions={{
+                                weight: 1.5,
+                                color: isDark ? '#64748b' : '#334155',
+                                opacity: isDark ? 0.5 : 0.65,
+                                interactive: false,
+                            }}
+                        >
+                            <ClusterGroupRefBridge
+                                clusterGroupRef={clusterGroupRef}
+                                onSingleMarkerClusterClick={handleSingleClusterMarkerClick}
+                            />
+                            {renderedMarkers}
+                        </MarkerClusterGroup>
+                    ))}
                 {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (
                   <Suspense fallback={null}>
                     <RoutePlannerPortMarkers

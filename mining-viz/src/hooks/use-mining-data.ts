@@ -6,6 +6,7 @@ import {
 import { FilterResultCache } from '../lib/filterResultCache';
 import { buildLicenseSearchIndex, licenseHaystackMatches } from '../lib/licenseSearchIndex';
 import { matchesSuppliersPipeline } from '../lib/suppliersPipeline';
+import { licenseMatchesSelectedCountries } from '../lib/licenseCountryMatch';
 import { MiningLicense, UserAnnotation } from '../types';
 
 function normalizeSubtypeLabel(value: string | null | undefined): string {
@@ -75,9 +76,10 @@ function buildProcessedDataCacheKey(
 export const useMiningData = (
   rawData: MiningLicense[],
   userAnnotations: Record<string, UserAnnotation>,
-  options?: { suppliersPipelineMode?: boolean },
+  options?: { suppliersPipelineMode?: boolean; skipCountryFilterForMap?: boolean },
 ) => {
   const suppliersPipelineMode = Boolean(options?.suppliersPipelineMode);
+  const skipCountryFilterForMap = Boolean(options?.skipCountryFilterForMap);
   const [filter, setFilter] = useState('');
   /** Drives license list + map; updated on Enter / clear, not on every keystroke. */
   const [appliedFilter, setAppliedFilter] = useState('');
@@ -150,27 +152,8 @@ export const useMiningData = (
     [rawData, userAnnotations],
   );
 
-  const processedData = useMemo(() => {
-    const cacheKey = buildProcessedDataCacheKey(
-      rawData.length,
-      appliedFilter,
-      sortBy,
-      selectedCountry,
-      selectedCommodity,
-      selectedLicenseType,
-      userStatusFilter,
-      selectedEntitySubtype,
-      selectedSourceLabel,
-      selectedConfidenceBucket,
-      selectedSector,
-      portLinkedOnly,
-      suppliersPipelineMode,
-      suppliersShowAll,
-      annotationRevisionRef.current,
-    );
-    const cached = filterCacheRef.current.get(cacheKey);
-    if (cached) return cached;
-
+  const { processedData, mapProcessedData } = useMemo(() => {
+    const runFilters = (skipCountry: boolean): MiningLicense[] => {
     let data: MiningLicense[] = rawData;
 
     if (selectedSector) {
@@ -180,11 +163,8 @@ export const useMiningData = (
       });
     }
 
-    if (selectedCountry.length > 0) {
-      data = data.filter((item) => {
-        const country = item.country?.trim();
-        return country ? selectedCountry.includes(country) : false;
-      });
+    if (!skipCountry && selectedCountry.length > 0) {
+      data = data.filter((item) => licenseMatchesSelectedCountries(item, selectedCountry));
     }
 
     if (selectedCommodity.length > 0) {
@@ -249,14 +229,35 @@ export const useMiningData = (
       );
     }
 
-    const sorted = data.slice().sort((a, b) => {
+    return data.slice().sort((a, b) => {
       const valA = (a[sortBy] ?? '').toString().toLowerCase();
       const valB = (b[sortBy] ?? '').toString().toLowerCase();
       return valA.localeCompare(valB);
     });
+    };
 
-    filterCacheRef.current.set(cacheKey, sorted);
-    return sorted;
+    const cacheKey = buildProcessedDataCacheKey(
+      rawData.length,
+      appliedFilter,
+      sortBy,
+      selectedCountry,
+      selectedCommodity,
+      selectedLicenseType,
+      userStatusFilter,
+      selectedEntitySubtype,
+      selectedSourceLabel,
+      selectedConfidenceBucket,
+      selectedSector,
+      portLinkedOnly,
+      suppliersPipelineMode,
+      suppliersShowAll,
+      annotationRevisionRef.current,
+    );
+    const cached = filterCacheRef.current.get(cacheKey);
+    const processed = cached ?? runFilters(false);
+    if (!cached) filterCacheRef.current.set(cacheKey, processed);
+    const mapData = skipCountryFilterForMap ? runFilters(true) : processed;
+    return { processedData: processed, mapProcessedData: mapData };
   }, [
     rawData,
     appliedFilter,
@@ -274,6 +275,7 @@ export const useMiningData = (
     suppliersPipelineMode,
     suppliersShowAll,
     searchIndex,
+    skipCountryFilterForMap,
   ]);
 
   const countries = useMemo(() => {
@@ -404,6 +406,7 @@ export const useMiningData = (
 
   return {
     processedData,
+    mapProcessedData,
     countries,
     commodities,
     licenseTypes,
