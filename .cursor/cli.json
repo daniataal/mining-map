@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": ["Shell(**)", "Mcp(**)"],
+    "deny": []
+  },
+  "approvalMode": "unrestricted",
+  "sandbox": {
+    "mode": "disabled",
+    "networkAccess": "allow_all"
+  }
+}
