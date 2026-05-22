@@ -1405,6 +1405,7 @@ export default function MapComponent({
                         layers={oilLiveLayers}
                         onLayersChange={onOilLiveLayersChange}
                         coverageStats={oilLiveCoverageStats}
+                        syncStatus={oilLiveSyncStatus}
                         allMaritimeEnabled={isMaritimeLayerEnabled}
                         onAllMaritimeChange={setIsMaritimeLayerEnabled}
                         globalMaritimeCount={maritimeSnapshotTotal}

@@ -1,5 +1,6 @@
 import { Anchor, ArrowRightLeft, Globe2, Layers, Radar, Route, Ship, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
+import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
 export type TradeFlowGroup = 'company_pair' | 'country_pair';
@@ -21,6 +22,8 @@ export type LiveDataMapLayersPanelProps = {
   /** Aggregated Trade Flow layer group selector (company_pair vs country_pair). */
   tradeFlowGroup?: TradeFlowGroup;
   onTradeFlowGroupChange?: (group: TradeFlowGroup) => void;
+  /** Global ledger counts from GET /api/oil-live/sync-status (AIS coverage health). */
+  syncStatus?: OilLiveSyncStatus | null;
 };
 
 const LAYER_META = [
@@ -77,14 +80,21 @@ export default function LiveDataMapLayersPanel({
   onTradeFlowGroupChange,
   macroTradeEnabled = true,
   onMacroTradeChange,
+  syncStatus,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
+
+  const fmtCount = (n: number | undefined) =>
+    n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   function toggleLayer(key: keyof OilLiveLayerVisibility) {
     onLayersChange({ ...layers, [key]: !layers[key] });
   }
 
   const tradeFlowsOn = Boolean(layers.tradeFlows);
+  const coverageNeedsAttention =
+    syncStatus != null &&
+    ((syncStatus.coverage_gap_watch_zone_count ?? 0) > 0 || syncStatus.live_vessel_count === 0);
 
   return (
     <div className="w-[min(100vw-2rem,420px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
@@ -142,9 +152,51 @@ export default function LiveDataMapLayersPanel({
           </p>
         )}
 
+        {syncStatus && (
+          <div
+            className={`rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
+              layers.coverage
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-950 dark:text-rose-100'
+                : 'border-slate-500/20 bg-slate-500/5 text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <p className="text-[10px] font-black uppercase tracking-wide text-rose-700 dark:text-rose-300">
+              {t('בריאות AIS (מסד נתונים)', 'AIS health (database)')}
+            </p>
+            <p className="mt-1">
+              {t('כלי שיט חיים', 'Live vessels')}:{' '}
+              <span className="font-semibold">{fmtCount(syncStatus.live_vessel_count)}</span>
+              {' · '}
+              {t('קריאות נמל AIS', 'AIS port calls')}:{' '}
+              <span className="font-semibold">
+                {fmtCount(syncStatus.live_ais_port_call_count ?? syncStatus.port_call_count)}
+              </span>
+              {' · '}
+              {t('אזורי חוסר', 'Gap zones')}:{' '}
+              <span className="font-semibold">{fmtCount(syncStatus.coverage_gap_watch_zone_count)}</span>
+              {syncStatus.coverage_watch_zone_count != null && (
+                <>
+                  {' · '}
+                  {t('אזורי מעקב', 'Watch zones')}:{' '}
+                  <span className="font-semibold">{fmtCount(syncStatus.coverage_watch_zone_count)}</span>
+                </>
+              )}
+            </p>
+            {!layers.coverage && (
+              <p className="mt-1 opacity-80">
+                {t(
+                  'הפעילו שכבת כיסוי AIS כדי לצייר חורים בתצוגה.',
+                  'Turn on the AIS coverage layer to draw gap cells in the viewport.',
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-2">
           {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {
             const on = layers[key];
+            const coverageHighlight = key === 'coverage' && coverageNeedsAttention && !on;
             return (
               <button
                 key={key}
@@ -153,7 +205,9 @@ export default function LiveDataMapLayersPanel({
                 className={`flex min-h-[52px] flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors ${
                   on
                     ? 'border-amber-500/40 bg-amber-500/15 text-slate-900 dark:text-slate-100'
-                    : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-400'
+                    : coverageHighlight
+                      ? 'border-rose-500/40 bg-rose-500/10 text-rose-950 dark:text-rose-100'
+                      : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-400'
                 }`}
               >
                 <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide">
