@@ -42,6 +42,13 @@ const SWATCHES: { key: string; color: string; dash?: string; labelEn: string; la
     labelEn: 'Terminals',
     labelHe: 'מסופים',
   },
+  {
+    key: 'coverage',
+    color: '#ef4444',
+    dash: '6 4',
+    labelEn: 'AIS sparse / gap cells',
+    labelHe: 'תאי AIS דלילים / חסרים',
+  },
 ];
 
 export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn }: Props) {
@@ -53,6 +60,7 @@ export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn 
     if (s.key === 'macro') return macroTradeOn;
     if (s.key === 'eia') return eiaHistoricOn;
     if (s.key === 'terminal') return layers.terminals;
+    if (s.key === 'coverage') return layers.coverage;
     return false;
   });
 

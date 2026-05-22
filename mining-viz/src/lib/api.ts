@@ -48,6 +48,7 @@ import {
   LICENSE_COUNTRY_FETCH_HUB,
   licenseViewportBoundsFromGeoJson,
 } from './countryBounds';
+import { MIN_SERVER_LICENSE_CLUSTER_COUNT } from './licenseMapCluster';
 
 export {
   clearLicenseBundleCaches,
@@ -208,19 +209,17 @@ const LICENSE_VIEWPORT_LIMIT = 5000;
 const LICENSE_VIEWPORT_DEBOUNCE_MS = 400;
 const LICENSE_VIEWPORT_STALE_MS = 10 * 60_000;
 
-/** Coarsen bbox so tiny pans do not refetch (≈0.25° grid). */
-export function quantizeLicenseViewportBounds(
-  bounds: LicenseViewportBounds,
-): LicenseViewportBounds {
-  const step = 0.25;
-  const q = (n: number) => Math.round(n / step) * step;
-  return {
-    south: q(bounds.south),
-    west: q(bounds.west),
-    north: q(bounds.north),
-    east: q(bounds.east),
-  };
-}
+import {
+  normalizeLicenseViewportBounds,
+  quantizeLicenseViewportBounds,
+  wrapLongitude,
+} from './licenseViewportBounds';
+
+export {
+  normalizeLicenseViewportBounds,
+  quantizeLicenseViewportBounds,
+  wrapLongitude,
+};
 /** Legacy bulk load — prefer useLicensesForMap. */
 const LICENSE_BULK_LIMIT = 15_000;
 const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
@@ -396,7 +395,9 @@ async function parseLicensesResponse(data: unknown): Promise<MiningLicense[]> {
       throw new Error(msg);
     }
     if (obj.mode === 'clusters' && Array.isArray(obj.clusters)) {
-      return obj.clusters as MiningLicense[];
+      return (obj.clusters as MiningLicense[]).filter(
+        (row) => (row.mapClusterCount ?? 0) >= MIN_SERVER_LICENSE_CLUSTER_COUNT,
+      );
     }
   }
   console.warn('[licenses] Expected array from /licenses, got:', data);
@@ -429,13 +430,14 @@ async function fetchLicensesViewportFromApi(
   },
 ): Promise<MiningLicense[]> {
   const { sector, bounds, countries, mapZoom, signal } = options;
+  const fetchBounds = quantizeLicenseViewportBounds(bounds);
   const params: Record<string, string | number | boolean> = {
     prefer_open_data: true,
     limit: LICENSE_VIEWPORT_LIMIT,
-    min_lat: bounds.south,
-    max_lat: bounds.north,
-    min_lng: bounds.west,
-    max_lng: bounds.east,
+    min_lat: fetchBounds.south,
+    max_lat: fetchBounds.north,
+    min_lng: fetchBounds.west,
+    max_lng: fetchBounds.east,
     map: 1,
   };
   if (sector) params.sector = sector;
@@ -471,7 +473,7 @@ export function useLicensesForMap(options: {
   filterCountries?: string[];
   /** Country-focus mode: fetch by country border bbox only (no `countries` SQL filter). */
   countryFocusBboxOnly?: boolean;
-  /** Map zoom for server-side clustering (zoom &lt; 8 → grid aggregates). */
+  /** Map zoom for server-side clustering (zoom &lt; 7 → grid aggregates). */
   mapZoom?: number;
   enabled: boolean;
 }): UseLicensesResult {
@@ -515,7 +517,17 @@ export function useLicensesForMap(options: {
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
     retry: 1,
     refetchOnWindowFocus: false,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData) => {
+      // After zooming into a cluster, do not keep low-zoom cluster bubbles while refetching points.
+      if (
+        mapZoom != null &&
+        mapZoom >= 7 &&
+        previousData?.some((row) => (row.mapClusterCount ?? 0) > 0)
+      ) {
+        return undefined;
+      }
+      return keepPreviousData(previousData);
+    },
     queryFn: async ({ signal }: QueryFunctionContext) => {
       if (countryScoped && fetchBounds) {
         return fetchLicensesViewportFromApi({

@@ -2,7 +2,7 @@
 
 This document is the operational source-of-truth for **what** Meridian ingests, **why** gaps exist (e.g. Kazakhstan), and **how** to verify rows in production. Paid APIs (Mapbox tilesets, commercial company registries) are called out explicitly so we do not mistake them for official cadastre data.
 
-**Last reviewed:** 2026-05-21
+**Last reviewed:** 2026-05-22
 
 ---
 
@@ -87,9 +87,12 @@ Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin
 | **JODI oil snapshots** | `jodi_oil.sync_jodi_snapshots` | `JODI_CSV_URL` or `JODI_CSV_PATH` (public export) | `jodi_oil_snapshots`; validates corridors / benchmarks |
 | **Mining HS Comtrade** | `commodity_trade_flows.sync_mining_hs_comtrade` | `COMTRADE_API_KEY`; `COMMODITY_COMTRADE_SYNC_ENABLED` | `commodity_trade_flows` (HS 26xx/71xx/74xx); license dossier trade panel |
 | **UK / user trade manifests** | `trade_manifest_ingest.sync_uk_open_trade_rows` | `UK_MANIFEST_CSV_DIR`, `USER_MANIFEST_CSV_DIR`; admin `POST /api/admin/trade-manifests/upload`; sample CSV in `data/uk_trade_manifests/`; `uk-trade-manifest-sync-worker` | `trade_manifest_rows` (`customs_open`, `user_upload`, `macro`) |
-| **AIS (live)** | `maritime-worker` + `oil-live-intel-worker` | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_port_calls`; WebSocket map layer |
-| **Vessel positions (multi-source merge)** | `oil-live-intel` map API + `vessel_position_observations.py` (graph-sync mirror) | `OIL_LIVE_MERGED_VESSEL_POSITIONS=1` (opt-in); `REDIS_HOST` for maritime mirror | `oil_vessel_position_observations` — per-source rows keyed by `(data_source, source_record_id)`; display merge by MMSI never UPDATE-overwrites another source |
+| **AIS (live)** | `maritime-worker` + `oil-live-intel-worker` | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_port_calls`; WebSocket map layer. Partial open/community coverage, not global truth |
+| **Vessel positions (multi-source merge)** | `oil-live-intel` map API + `vessel_position_observations.py` (graph-sync mirror) | Enabled by default when observations exist; `REDIS_HOST` for maritime mirror; set `OIL_LIVE_MERGED_VESSEL_POSITIONS=false` for legacy fallback | `oil_vessel_position_observations` — per-source rows keyed by `(data_source, source_record_id)`; source/source_type/freshness/confidence retained |
 | **Maritime Redis snapshot (secondary)** | `maritime-worker` → Redis; graph-sync `vessel_position_mirror` | `MARITIME_SNAPSHOT_REDIS_KEY` (default `maritime:snapshot:global`) | `data_source=maritime_redis` rows in `oil_vessel_position_observations`; complements AISStream without replacing `oil_ais_positions` writes |
+| **Open AIS coverage + gaps** | `oil-live-intel` `/coverage`, `/source-health`; migration `017_open_ais_coverage.sql` | No paid source; AISHub requires contributed receivers | `coverage_cells`, `maritime_watch_zones`, `maritime_source_health`, `port_event_observations`; map labels sparse Gulf/Africa areas as coverage gaps |
+| **AISHub contributor path** | Future adapter after station contribution | AISHub free API requires sharing receiver data | Planned source in `maritime_source_health`; priority for Fujairah/UAE, Oman, Suez/Red Sea, Durban/Richards Bay, Lagos/Tema, Mombasa/Dar, Tangier |
+| **Government AIS / SAR validation** | Future BarentsWatch, Denmark AIS, Sentinel-1 monitor | Public/regional; SAR is unidentified vessel detection only | Planned source health rows; Sentinel-1 must be `source_type=satellite_detected_unidentified` |
 | **OSM storage** | Overpass + `petroleum_osm_features` + bulk seed | ODbL | `oil_terminals` (~12k after dedup); map bbox API |
 | **EU TED** | `ted_procurement_sync.py` | EU open | `eu_procurement_notices`; Recipe C tender signals |
 | **USAspending** | `gov_procurement_sync.py` | US open | Awards → Recipe E government offtake hints |
@@ -434,8 +437,9 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |
 | `backend/services/oil_live_graph_sync.py` | Live Data graph-sync orchestrator |
 | `backend/services/vessel_position_observations.py` | Multi-source vessel position upsert + Redis maritime mirror |
-| `oil-live-intel/internal/services/vesselmerge/` | Map API merge reader (precedence: live_ais > aisstream > maritime_redis > inferred) |
-| `oil-live-intel/migrations/014_vessel_position_sources.sql` | `oil_vessel_position_observations` table |
+| `oil-live-intel/internal/services/vesselmerge/` | Map API merge reader (precedence: live_ais > aisstream/aishub > government AIS > maritime_redis > inferred > SAR) |
+| `oil-live-intel/migrations/014_vessel_position_sources.sql` | Base `oil_vessel_position_observations` table |
+| `oil-live-intel/migrations/017_open_ais_coverage.sql` | Source/freshness columns, `coverage_cells`, `port_event_observations`, watch zones, source health |
 | `backend/services/census_trade.py` | U.S. Census HS27 macro flows |
 | `backend/services/usitc_dataweb.py` | USITC DataWeb macro flows |
 | `oil-live-intel/internal/services/syntheticbol/` | MCR recipes A–F + rebuild |

@@ -69,6 +69,8 @@ export interface MiningLicense {
   subdivision?: string | null;
   /** Server-side viewport cluster count (low zoom); not a real license row. */
   mapClusterCount?: number;
+  /** Grid cell size (degrees) when `mapClusterCount` is set. */
+  mapClusterGridDeg?: number;
 }
 
 export interface MarketTickerRow {

@@ -37,6 +37,10 @@ type syncStatusSummary struct {
 	OilTradeFlowCount             int            `json:"oil_trade_flow_count"`
 	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
 	TradeManifestRowCount         int            `json:"trade_manifest_row_count"`
+	LiveVesselCount               int            `json:"live_vessel_count"`
+	VesselObservationCount        int            `json:"vessel_observation_count"`
+	CoverageWatchZoneCount        int            `json:"coverage_watch_zone_count"`
+	CoverageGapWatchZoneCount     int            `json:"coverage_gap_watch_zone_count"`
 	LastGraphSyncAt               any            `json:"last_graph_sync_at"`
 	LastCargoAt                   any            `json:"last_cargo_at"`
 	LastComtradeSyncAt            any            `json:"last_comtrade_sync_at"`
@@ -49,6 +53,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	var corridorFull, corridorPartial, openOpps int
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
 	var oilTradeFlows, eiaHistoric, tradeManifests int
+	var liveVessels, vesselObservations, coverageWatchZones, coverageGapZones int
 	var lastGraphSync, lastCargoAt, lastComtrade *time.Time
 	var lastComtradeStatus *string
 
@@ -85,6 +90,23 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	oilTradeFlows = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_trade_flows`)
 	eiaHistoric = countTable(ctx, pool, `SELECT COUNT(*)::int FROM eia_historic_imports`)
 	tradeManifests = countTable(ctx, pool, `SELECT COUNT(*)::int FROM trade_manifest_rows`)
+	vesselObservations = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_vessel_position_observations`)
+	liveVessels = countTable(ctx, pool, `
+		SELECT COUNT(DISTINCT mmsi)::int
+		FROM oil_vessel_position_observations
+		WHERE COALESCE(position_time, observed_at) > now() - interval '24 hours'
+	`)
+	coverageWatchZones = countTable(ctx, pool, `SELECT COUNT(*)::int FROM maritime_watch_zones`)
+	coverageGapZones = countTable(ctx, pool, `
+		SELECT COUNT(*)::int
+		FROM maritime_watch_zones z
+		WHERE NOT EXISTS (
+		  SELECT 1 FROM oil_vessel_position_observations o
+		  WHERE o.lat >= z.min_lat AND o.lat <= z.max_lat
+		    AND o.lng >= z.min_lng AND o.lng <= z.max_lng
+		    AND COALESCE(o.position_time, o.observed_at) > now() - interval '3 hours'
+		)
+	`)
 
 	topCorridors := queryTopCorridors(ctx, pool)
 	mcrByTier := queryMcrByTier(ctx, pool)
@@ -117,6 +139,10 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		OilTradeFlowCount:             oilTradeFlows,
 		EiaHistoricImportCount:        eiaHistoric,
 		TradeManifestRowCount:         tradeManifests,
+		LiveVesselCount:               liveVessels,
+		VesselObservationCount:        vesselObservations,
+		CoverageWatchZoneCount:        coverageWatchZones,
+		CoverageGapWatchZoneCount:     coverageGapZones,
 		LastGraphSyncAt:               formatTimePtr(lastGraphSync),
 		LastCargoAt:                   formatTimePtr(lastCargoAt),
 		LastComtradeSyncAt:            formatTimePtr(lastComtrade),

@@ -665,6 +665,7 @@ def _build_license_map_results(
         display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(
             row, cached_geo
         )
+        date_val = row["date_issued"]
         results.append(
             {
                 "id": row["id"],
@@ -672,7 +673,7 @@ def _build_license_map_results(
                 "licenseType": row["license_type"],
                 "commodity": row["commodity"],
                 "status": row["status"],
-                "date": row["date_issued"],
+                "date": date_val.isoformat() if hasattr(date_val, "isoformat") else date_val,
                 "country": row["country"],
                 "region": row["region"],
                 "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
@@ -692,10 +693,11 @@ def _build_license_map_results(
 
 
 def _licenses_json_response(payload: Any, *, max_age: int = 120):
+    from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse
 
     return JSONResponse(
-        content=payload,
+        content=jsonable_encoder(payload),
         headers={"Cache-Control": f"public, max-age={max_age}"},
     )
 

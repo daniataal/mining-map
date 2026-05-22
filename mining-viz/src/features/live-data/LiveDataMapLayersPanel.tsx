@@ -1,4 +1,4 @@
-import { Anchor, ArrowRightLeft, Globe2, Layers, Route, Ship, Sparkles } from 'lucide-react';
+import { Anchor, ArrowRightLeft, Globe2, Layers, Radar, Route, Ship, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
@@ -39,6 +39,14 @@ const LAYER_META = [
     labelHe: 'כלי שיט',
     hintEn: 'Oil/tanker AIS near terminals (capped)',
     hintHe: 'AIS מכליות ליד מסופים (מוגבל)',
+  },
+  {
+    key: 'coverage' as const,
+    icon: Radar,
+    labelEn: 'AIS coverage',
+    labelHe: 'כיסוי AIS',
+    hintEn: 'Sparse/gap overlay for open AIS sources',
+    hintHe: 'שכבת חוסרים ודלילות למקורות AIS פתוחים',
   },
   {
     key: 'corridors' as const,
@@ -90,7 +98,7 @@ export default function LiveDataMapLayersPanel({
               {t('שכבות מפת נתונים חיים', 'Live Data map layers')}
             </p>
             <p className="text-base leading-snug text-slate-700 dark:text-slate-200">
-              {t('מסופים · מכליות · מסדרונות · הזדמנויות', 'Terminals · tankers · corridors · opportunities')}
+              {t('מסופים · מכליות · כיסוי · מסדרונות', 'Terminals · tankers · coverage · corridors')}
             </p>
           </div>
         </div>
@@ -128,8 +136,8 @@ export default function LiveDataMapLayersPanel({
         {coverageStats != null && coverageStats.vessels === 0 && (
           <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
             {t(
-              'מכליות דורשות AIS חי (AISSTREAM_API_KEY).',
-              'Vessels require live AIS (AISSTREAM_API_KEY).',
+              'אין ספינות בתצוגה לא אומר שאין פעילות. בדקו את שכבת כיסוי AIS כדי לראות חורי דאטה.',
+              'No vessels in view does not mean no activity. Check the AIS coverage layer for data gaps.',
             )}
           </p>
         )}

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,17 +25,23 @@ const tableName = "oil_vessel_position_observations"
 
 // SourceRank returns display precedence (lower = higher priority).
 func SourceRank(dataSource string) int {
-	switch dataSource {
+	switch strings.TrimSpace(strings.ToLower(dataSource)) {
 	case "live_ais":
 		return 0
 	case "aisstream", "aisstream_snapshot":
 		return 1
-	case "maritime_redis":
+	case "aishub":
+		return 1
+	case "barentswatch", "denmark_ais":
 		return 2
-	case "inferred_port_call":
+	case "maritime_redis":
 		return 3
-	default:
+	case "inferred_port_call":
 		return 4
+	case "sentinel1_sar":
+		return 5
+	default:
+		return 6
 	}
 }
 
@@ -42,12 +49,19 @@ func SourceRank(dataSource string) int {
 type MergedVesselPosition struct {
 	MMSI       int64
 	DataSource string
+	SourceType string
 	Lat        float64
 	Lng        float64
 	SOG        *float64
 	COG        *float64
 	VesselName *string
 	ObservedAt time.Time
+}
+
+// QueryOptions controls the map-facing merged read.
+type QueryOptions struct {
+	FreshnessMinutes int
+	Sources          []string
 }
 
 // TableReady reports whether the observations table exists.
@@ -74,11 +88,13 @@ func HasRows(ctx context.Context, pool *pgxpool.Pool) bool {
 	return err == nil && n > 0
 }
 
-// MergedPositionsEnabled is true when OIL_LIVE_MERGED_VESSEL_POSITIONS=1.
+// MergedPositionsEnabled is true unless explicitly disabled. The observation
+// table is now the preferred open-only AIS merge layer; oil_ais_positions is
+// kept as a fallback for legacy deployments.
 func MergedPositionsEnabled() bool {
 	v := os.Getenv("OIL_LIVE_MERGED_VESSEL_POSITIONS")
 	if v == "" {
-		return false
+		return true
 	}
 	b, err := strconv.ParseBool(v)
 	return err == nil && b
@@ -87,47 +103,85 @@ func MergedPositionsEnabled() bool {
 // ListMergedVesselsInBbox returns one position per MMSI inside bbox using per-source
 // latest observation and display precedence. bbox is [minLon, minLat, maxLon, maxLat].
 func ListMergedVesselsInBbox(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
+	return ListMergedVessels(ctx, pool, bbox, bboxOK, limit, QueryOptions{FreshnessMinutes: 1440})
+}
+
+// ListMergedVessels returns one position per MMSI inside bbox using per-source
+// latest observation and display precedence. bbox is [minLon, minLat, maxLon, maxLat].
+func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int, opts QueryOptions) ([]map[string]any, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("nil pool")
 	}
 	if limit <= 0 {
 		limit = 200
 	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	freshnessMinutes := opts.FreshnessMinutes
+	if freshnessMinutes <= 0 {
+		freshnessMinutes = 1440
+	}
 
 	q := `
 		WITH latest AS (
 		  SELECT DISTINCT ON (o.mmsi, o.data_source)
-		    o.mmsi, o.data_source, o.lat, o.lng, o.sog, o.cog, o.vessel_name, o.observed_at
+		    o.mmsi,
+		    COALESCE(NULLIF(o.source, ''), o.data_source) AS source,
+		    o.data_source,
+		    COALESCE(NULLIF(o.source_type, ''), o.data_source) AS source_type,
+		    o.imo,
+		    o.lat,
+		    o.lng,
+		    o.sog,
+		    o.cog,
+		    o.vessel_name,
+		    COALESCE(o.position_time, o.observed_at) AS position_time,
+		    COALESCE(o.received_at, o.ingested_at) AS received_at,
+		    o.confidence,
+		    o.source_url
 		  FROM oil_vessel_position_observations o
-		  WHERE o.observed_at > now() - interval '24 hours'`
-	args := []any{}
+		  WHERE COALESCE(o.position_time, o.observed_at) > now() - ($1 || ' minutes')::interval`
+	args := []any{freshnessMinutes}
 	n := 1
+	n++
 	if bboxOK {
 		q += fmt.Sprintf(` AND o.lat >= $%d AND o.lat <= $%d AND o.lng >= $%d AND o.lng <= $%d`, n, n+1, n+2, n+3)
 		args = append(args, bbox[1], bbox[3], bbox[0], bbox[2])
 		n += 4
 	}
+	cleanSources := normalizeSources(opts.Sources)
+	if len(cleanSources) > 0 {
+		q += fmt.Sprintf(` AND LOWER(COALESCE(NULLIF(o.source, ''), o.data_source)) = ANY($%d::text[])`, n)
+		args = append(args, cleanSources)
+		n++
+	}
 	q += `
-		  ORDER BY o.mmsi, o.data_source, o.observed_at DESC
+		  ORDER BY o.mmsi, o.data_source, COALESCE(o.position_time, o.observed_at) DESC
 		),
 		ranked AS (
 		  SELECT *,
-		    CASE data_source
+		    CASE LOWER(source)
 		      WHEN 'live_ais' THEN 0
 		      WHEN 'aisstream' THEN 1
 		      WHEN 'aisstream_snapshot' THEN 1
-		      WHEN 'maritime_redis' THEN 2
-		      WHEN 'inferred_port_call' THEN 3
-		      ELSE 4
+		      WHEN 'aishub' THEN 1
+		      WHEN 'barentswatch' THEN 2
+		      WHEN 'denmark_ais' THEN 2
+		      WHEN 'maritime_redis' THEN 3
+		      WHEN 'inferred_port_call' THEN 4
+		      WHEN 'sentinel1_sar' THEN 5
+		      ELSE 6
 		    END AS src_rank
 		  FROM latest
 		)
 		SELECT DISTINCT ON (r.mmsi)
-		  r.mmsi, r.data_source, r.lat, r.lng, r.sog, r.cog, r.vessel_name, r.observed_at,
+		  r.mmsi, r.source, r.data_source, r.source_type, r.imo, r.lat, r.lng, r.sog, r.cog,
+		  r.vessel_name, r.position_time, r.received_at, r.confidence, r.source_url,
 		  v.name, v.tanker_class, v.crude_capable, v.product_tanker
 		FROM ranked r
 		LEFT JOIN oil_vessels v ON v.mmsi = r.mmsi
-		ORDER BY r.mmsi, r.src_rank ASC, r.observed_at DESC`
+		ORDER BY r.mmsi, r.src_rank ASC, r.position_time DESC`
 	q += fmt.Sprintf(` LIMIT %d`, limit)
 
 	rows, err := pool.Query(ctx, q, args...)
@@ -139,13 +193,17 @@ func ListMergedVesselsInBbox(ctx context.Context, pool *pgxpool.Pool, bbox [4]fl
 	var out []map[string]any
 	for rows.Next() {
 		var mmsi int64
-		var dataSource string
+		var source, dataSource, sourceType string
+		var imo *string
 		var lat, lng float64
-		var sog, cog *float64
+		var sog, cog, confidence *float64
 		var vesselName, name, tclass *string
+		var sourceURL *string
 		var observed time.Time
+		var received *time.Time
 		var crude, product *bool
-		if err := rows.Scan(&mmsi, &dataSource, &lat, &lng, &sog, &cog, &vesselName, &observed,
+		if err := rows.Scan(&mmsi, &source, &dataSource, &sourceType, &imo, &lat, &lng, &sog, &cog,
+			&vesselName, &observed, &received, &confidence, &sourceURL,
 			&name, &tclass, &crude, &product); err != nil {
 			return nil, err
 		}
@@ -154,9 +212,15 @@ func ListMergedVesselsInBbox(ctx context.Context, pool *pgxpool.Pool, bbox [4]fl
 			displayName = vesselName
 		}
 		item := map[string]any{
-			"mmsi": mmsi, "ts": observed, "lat": lat, "lng": lng,
-			"data_source": dataSource, "name": displayName,
+			"mmsi": mmsi, "ts": observed, "position_time": observed, "lat": lat, "lng": lng,
+			"source": source, "data_source": dataSource, "source_type": sourceType,
+			"imo": imo, "name": displayName, "vessel_name": displayName,
 			"tanker_class": tclass, "crude_capable": crude, "product_tanker": product,
+			"confidence": confidence, "source_url": sourceURL,
+			"freshness_seconds": int(time.Since(observed).Seconds()),
+		}
+		if received != nil {
+			item["received_at"] = *received
 		}
 		if sog != nil {
 			item["speed"] = *sog
@@ -185,4 +249,18 @@ func PickBest(obs []MergedVesselPosition) *MergedVesselPosition {
 		}
 	}
 	return best
+}
+
+func normalizeSources(sources []string) []string {
+	out := make([]string, 0, len(sources))
+	seen := map[string]bool{}
+	for _, source := range sources {
+		clean := strings.TrimSpace(strings.ToLower(source))
+		if clean == "" || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out
 }

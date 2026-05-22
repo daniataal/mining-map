@@ -26,7 +26,9 @@ export type OilTerminal = {
 
 export type OilLiveVessel = {
   mmsi: number;
+  imo?: string | null;
   name?: string;
+  vessel_name?: string;
   lat: number;
   lng: number;
   speed?: number;
@@ -34,6 +36,85 @@ export type OilLiveVessel = {
   draft_m?: number;
   tanker_class?: string;
   crude_capable?: boolean;
+  source?: string;
+  source_type?: string;
+  data_source?: string;
+  position_time?: string;
+  freshness_seconds?: number;
+  confidence?: number;
+  source_url?: string | null;
+};
+
+export type OilLiveCoverageCell = {
+  cell_id: string;
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
+  observation_count: number;
+  vessel_count: number;
+  freshness_seconds?: number;
+  sources?: string[];
+  coverage_quality: 'strong' | 'fair' | 'sparse' | 'gap' | string;
+  confidence?: number;
+};
+
+export type OilLiveWatchZone = {
+  id: string;
+  name: string;
+  priority?: number;
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
+  status?: string;
+  expected_gap_reason?: string | null;
+  recent_vessel_count?: number;
+  last_observation_at?: string | null;
+  coverage_quality: 'active' | 'sparse' | 'coverage_gap' | string;
+};
+
+export type OilLiveCoverageResponse = {
+  coverage_cells: OilLiveCoverageCell[];
+  watch_zones: OilLiveWatchZone[];
+  freshness_minutes: number;
+  sources?: string[];
+  summary?: {
+    coverage_quality?: string;
+    cell_count?: number;
+    vessels_recent?: number;
+    watch_zone_count?: number;
+  };
+  limitations?: string[];
+};
+
+export type OilLiveVesselsResponse = {
+  vessels: OilLiveVessel[];
+  count: number;
+  freshness_minutes?: number;
+  sources?: string[];
+  source_mode?: string;
+  limitations?: string[];
+};
+
+export type OilLiveSourceHealth = {
+  source: string;
+  source_type: string;
+  display_name: string;
+  status: string;
+  coverage_tier?: string;
+  observation_count?: number;
+  vessel_count?: number;
+  last_observation_at?: string | null;
+  limitations?: string[];
+  source_url?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type OilLiveSourceHealthResponse = {
+  sources: OilLiveSourceHealth[];
+  count: number;
+  limitations?: string[];
 };
 
 export type OilLiveProvenance = 'seed_port_calls' | 'synthetic' | 'live_ais' | string;
@@ -197,6 +278,9 @@ export type OilLiveSyncStatus = {
   live_ais_port_call_count?: number;
   /** Recent live AIS vessel positions (when returned by sync-status). */
   live_vessel_count?: number;
+  vessel_observation_count?: number;
+  coverage_watch_zone_count?: number;
+  coverage_gap_watch_zone_count?: number;
   open_opportunity_count?: number;
   corridor_full_count?: number;
   corridor_partial_count?: number;
@@ -217,6 +301,42 @@ export async function getOilLiveMap(bbox?: string, zoom?: number): Promise<OilLi
   if (zoom != null && Number.isFinite(zoom)) params.set('zoom', String(zoom));
   const res = await fetch(oilUrl(`/api/oil-live/map?${params.toString()}`));
   if (!res.ok) throw new Error(`oil-live map ${res.status}`);
+  return res.json();
+}
+
+export async function getOilLiveVessels(options: {
+  bbox?: string;
+  freshness_minutes?: number;
+  sources?: string[];
+  limit?: number;
+} = {}): Promise<OilLiveVesselsResponse> {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit ?? 500));
+  params.set('freshness_minutes', String(options.freshness_minutes ?? 1440));
+  if (options.bbox) params.set('bbox', options.bbox);
+  if (options.sources?.length) params.set('sources', options.sources.join(','));
+  const res = await fetch(oilUrl(`/api/oil-live/vessels?${params.toString()}`));
+  if (!res.ok) throw new Error(`oil-live vessels ${res.status}`);
+  return res.json();
+}
+
+export async function getOilLiveCoverage(options: {
+  bbox: string;
+  freshness_minutes?: number;
+  sources?: string[];
+}): Promise<OilLiveCoverageResponse> {
+  const params = new URLSearchParams();
+  params.set('bbox', options.bbox);
+  params.set('freshness_minutes', String(options.freshness_minutes ?? 180));
+  if (options.sources?.length) params.set('sources', options.sources.join(','));
+  const res = await fetch(oilUrl(`/api/oil-live/coverage?${params.toString()}`));
+  if (!res.ok) throw new Error(`oil-live coverage ${res.status}`);
+  return res.json();
+}
+
+export async function getOilLiveSourceHealth(): Promise<OilLiveSourceHealthResponse> {
+  const res = await fetch(oilUrl('/api/oil-live/source-health'));
+  if (!res.ok) throw new Error(`oil-live source-health ${res.status}`);
   return res.json();
 }
 

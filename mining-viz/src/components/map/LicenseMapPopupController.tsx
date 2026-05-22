@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { I18nProvider } from '../../lib/i18n';
+import { isServerLicenseCluster } from '../../lib/licenseMapCluster';
 import { isSidebarFlySelection } from '../../lib/licensePopupOpenDelay';
 import { getEsgZoneIntersection } from '../../lib/esgConservationZones';
 import type { LicenseMarkerClusterGroup } from '../../lib/markerClusterTypes';
@@ -161,6 +162,14 @@ export default function LicenseMapPopupController({
     prevFlyTriggerRef.current = mapFlyTrigger;
 
     if (!selectedItem) {
+      selectedIdRef.current = null;
+      if (popupRef.current?.isOpen()) {
+        map.closePopup(popupRef.current);
+      }
+      return;
+    }
+
+    if (isServerLicenseCluster(selectedItem)) {
       selectedIdRef.current = null;
       if (popupRef.current?.isOpen()) {
         map.closePopup(popupRef.current);

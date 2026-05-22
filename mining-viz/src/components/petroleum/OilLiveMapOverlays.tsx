@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDebouncedValue } from '../../hooks/use-debounced-value';
-import { Marker, Popup, Polyline, LayerGroup, useMap } from 'react-leaflet';
+import { Marker, Popup, Polyline, Rectangle, LayerGroup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet.markercluster';
@@ -11,11 +11,14 @@ import OilLiveProvenanceBadge from '../../features/live-data/OilLiveProvenanceBa
 import {
   connectOilLiveWebSocket,
   getCargoRecordsMap,
+  getOilLiveCoverage,
   getOilLiveMap,
   getOilOpportunities,
   getTradeFlows,
   type MeridianCargoRecord,
   type OilLiveVessel,
+  type OilLiveCoverageCell,
+  type OilLiveWatchZone,
   type OilOpportunity,
   type OilTerminal,
   type TradeFlowArc,
@@ -52,6 +55,8 @@ export type OilLiveLayerVisibility = {
   opportunities: boolean;
   /** Aggregated company-pair / country-pair "Trade Flow" arcs. Off by default. */
   tradeFlows: boolean;
+  /** Open AIS coverage quality / gap overlay. */
+  coverage: boolean;
 };
 
 /** Cap of per-MCR arrows kept on the map at once (Phase 1 constraint). */
@@ -79,6 +84,18 @@ const oppIcon = new L.DivIcon({
   iconSize: [18, 18],
   iconAnchor: [9, 9],
 });
+
+const COVERAGE_STYLE: Record<string, L.PathOptions> = {
+  strong: { color: '#059669', fillColor: '#10b981', fillOpacity: 0.08, weight: 1 },
+  fair: { color: '#0ea5e9', fillColor: '#38bdf8', fillOpacity: 0.08, weight: 1 },
+  sparse: { color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.1, weight: 1 },
+  gap: { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.06, weight: 1 },
+  coverage_gap: { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.04, weight: 2, dashArray: '6 4' },
+};
+
+function coveragePathOptions(quality?: string): L.PathOptions {
+  return COVERAGE_STYLE[quality ?? 'gap'] ?? COVERAGE_STYLE.gap;
+}
 
 function inViewport(
   lat: number,
@@ -298,6 +315,7 @@ export default function OilLiveMapOverlays({
     corridors: true,
     opportunities: true,
     tradeFlows: false,
+    coverage: true,
   },
   tradeFlowGroup = 'company_pair',
   viewport,
@@ -325,6 +343,15 @@ export default function OilLiveMapOverlays({
     staleTime: 30_000,
     placeholderData: keepPreviousData,
     refetchInterval: enabled && viewportReady && mapLayersActive ? 30_000 : false,
+  });
+
+  const { data: coverageData } = useQuery({
+    queryKey: ['oil-live-coverage', bbox, Math.floor(mapZoom)],
+    queryFn: () => getOilLiveCoverage({ bbox: bbox!, freshness_minutes: 180 }),
+    enabled: enabled && viewportReady && layers.coverage,
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    refetchInterval: enabled && viewportReady && layers.coverage ? 60_000 : false,
   });
 
   const { data: cargoData } = useQuery({
@@ -377,7 +404,7 @@ export default function OilLiveMapOverlays({
       }
     });
     return disconnect;
-  }, [enabled, queryClient]);
+  }, [enabled, layers.vessels, queryClient]);
 
   const terminals = useMemo(() => {
     let list = mapData?.terminals ?? [];
@@ -544,6 +571,61 @@ export default function OilLiveMapOverlays({
 
   return (
     <LayerGroup>
+      {layers.coverage &&
+        (coverageData?.coverage_cells ?? []).map((cell: OilLiveCoverageCell) => (
+          <Rectangle
+            key={`coverage-${cell.cell_id}`}
+            bounds={[
+              [cell.min_lat, cell.min_lng],
+              [cell.max_lat, cell.max_lng],
+            ]}
+            pathOptions={coveragePathOptions(cell.coverage_quality)}
+            interactive
+          >
+            <Popup>
+              <div className="oil-live-popup-body">
+                <OilLiveProvenanceBadge kind="macro" className="mb-1" />
+                <strong>AIS coverage: {cell.coverage_quality.replaceAll('_', ' ')}</strong>
+                <p>{cell.vessel_count} vessels observed in this open-data cell</p>
+                <p className="oil-live-popup-muted">
+                  {cell.sources?.length ? `Sources: ${cell.sources.join(', ')}` : 'Open AIS observations'}
+                </p>
+                <p className="oil-live-popup-muted">
+                  Sparse or empty cells mean a coverage gap, not confirmed vessel absence.
+                </p>
+              </div>
+            </Popup>
+          </Rectangle>
+        ))}
+      {layers.coverage &&
+        (coverageData?.watch_zones ?? []).map((zone: OilLiveWatchZone) => (
+          <Rectangle
+            key={`watch-${zone.id}`}
+            bounds={[
+              [zone.min_lat, zone.min_lng],
+              [zone.max_lat, zone.max_lng],
+            ]}
+            pathOptions={coveragePathOptions(zone.coverage_quality)}
+            interactive
+          >
+            <Popup>
+              <div className="oil-live-popup-body">
+                <OilLiveProvenanceBadge kind="inferred" className="mb-1" />
+                <strong>{zone.name}</strong>
+                <p>
+                  {zone.recent_vessel_count ?? 0} recent open AIS vessels ·{' '}
+                  {zone.coverage_quality.replaceAll('_', ' ')}
+                </p>
+                {zone.expected_gap_reason && (
+                  <p className="oil-live-popup-muted">{zone.expected_gap_reason}</p>
+                )}
+                <p className="oil-live-popup-muted">
+                  Watch zones guide receiver rollout and port-event fallback priority.
+                </p>
+              </div>
+            </Popup>
+          </Rectangle>
+        ))}
       {layers.terminals && terminals.length > 0 && (
         <MarkerClusterGroup
           showCoverageOnHover={false}
@@ -608,10 +690,28 @@ export default function OilLiveMapOverlays({
             }}
           >
             <Popup>
-              <OilLiveProvenanceBadge kind="live_ais" className="mb-1" />
+              <OilLiveProvenanceBadge kind={v.source ?? v.data_source ?? 'live_ais'} className="mb-1" />
               <strong>{v.name ?? `MMSI ${v.mmsi}`}</strong>
               <br />
               {v.tanker_class}
+              {v.source_type && (
+                <>
+                  <br />
+                  <span className="oil-live-popup-muted">{v.source_type.replaceAll('_', ' ')}</span>
+                </>
+              )}
+              {v.freshness_seconds != null && (
+                <>
+                  <br />
+                  <span className="oil-live-popup-muted">
+                    Freshness: {Math.round(v.freshness_seconds / 60)} min
+                  </span>
+                </>
+              )}
+              <br />
+              <span className="oil-live-popup-muted">
+                AIS does not confirm supplier or receiver.
+              </span>
               {onEntityClick && (
                 <button
                   type="button"
