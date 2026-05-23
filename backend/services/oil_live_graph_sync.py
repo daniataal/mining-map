@@ -54,6 +54,7 @@ _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "oil-live-intel" / "migr
 _MIGRATION_008 = _MIGRATIONS_DIR / "008_commercial_graph.sql"
 _MIGRATION_010 = _MIGRATIONS_DIR / "010_oil_live_sync_state.sql"
 _MIGRATION_011 = _MIGRATIONS_DIR / "011_port_calls_metadata.sql"
+_MIGRATION_018 = _MIGRATIONS_DIR / "018_oil_trade_flows_source_unique.sql"
 # Public tanker MMSI patterns (not live AIS) for corridor seed density.
 _SEED_TANKER_MMSIS = (636023100, 636023101, 636023102, 636023103, 636023104)
 _SEED_VESSEL_NAMES = (
@@ -135,12 +136,25 @@ def ensure_commercial_graph_tables(conn: Any) -> None:
             """
         )
         need_011 = bool(cur.fetchone()[0])
+        cur.execute(
+            """
+            SELECT NOT EXISTS (
+              SELECT 1 FROM pg_constraint c
+              JOIN pg_class t ON c.conrelid = t.oid
+              WHERE t.relname = 'oil_trade_flows'
+                AND c.conname = 'oil_trade_flows_macro_source_unique'
+            )
+            """
+        )
+        need_018 = bool(cur.fetchone()[0])
     if need_008:
         _apply_migration_file(conn, _MIGRATION_008)
     if need_010:
         _apply_migration_file(conn, _MIGRATION_010)
     if need_011:
         _apply_migration_file(conn, _MIGRATION_011)
+    if need_018:
+        _apply_migration_file(conn, _MIGRATION_018)
 
 
 def _record_graph_sync_at(conn: Any, finished_at: str) -> None:

@@ -6158,6 +6158,7 @@ def get_oil_flows(
     hs: Optional[str] = None,
     year: Optional[int] = None,
     flow: Optional[str] = None,
+    data_source: Optional[str] = None,
     limit: int = 200,
 ):
     """
@@ -6169,6 +6170,7 @@ def get_oil_flows(
     hs       : HS code, e.g. "2709" | "2710" | "2711"
     year     : e.g. 2022
     flow     : "X" (exports) | "M" (imports)
+    data_source : macro ingest source, e.g. "eurostat", "census_api", "usitc_dataweb", "UN Comtrade"
     limit    : max rows returned (default 200)
 
     Returns
@@ -6193,6 +6195,9 @@ def get_oil_flows(
         if flow:
             filters.append("flow_type = %s")
             params.append(flow.upper())
+        if data_source:
+            filters.append("data_source = %s")
+            params.append(data_source.strip())
 
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
