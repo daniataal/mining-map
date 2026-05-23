@@ -311,7 +311,7 @@ def _parse_eurostat_json(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _eurostat_m49_codes(row: dict[str, Any]) -> tuple[str, str]:
-    """Stable dedupe keys for oil_trade_flows UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)."""
+    """Stable dedupe keys for oil_trade_flows UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)."""
     dims = (row.get("raw") or {}).get("dimensions") or {}
     reporter_m49 = str(dims.get("geo") or row.get("reporter_iso2") or "EU27")[:10]
     partner_m49 = str(dims.get("partner") or "").strip()[:10]
