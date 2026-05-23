@@ -66,6 +66,41 @@ class TestParseEurostatJson(unittest.TestCase):
         self.assertEqual(rows[0]["reporter_iso2"], "EU")
         self.assertIn("partner", rows[0]["raw"]["dimensions"])
 
+    def test_product_dimension_maps_hs_code(self) -> None:
+        payload = {
+            "id": ["geo", "product", "time"],
+            "size": [1, 2, 1],
+            "dimension": {
+                "geo": {
+                    "category": {
+                        "index": {"DE": 0},
+                        "label": {"DE": "Germany"},
+                    }
+                },
+                "product": {
+                    "category": {
+                        "index": {"2709": 0, "2710": 1},
+                        "label": {"2709": "Crude oil", "2710": "Refined products"},
+                    }
+                },
+                "time": {
+                    "category": {
+                        "index": {"2024": 0},
+                        "label": {"2024": "2024"},
+                    }
+                },
+            },
+            "value": {"0": 10.0, "1": 20.0},
+        }
+        rows = _parse_eurostat_json(payload)
+        self.assertEqual(len(rows), 2)
+        hs_codes = {r["hs_code"] for r in rows}
+        self.assertEqual(hs_codes, {"2709", "2710"})
+        crude = next(r for r in rows if r["hs_code"] == "2709")
+        self.assertEqual(crude["hs_description"], "Crude oil")
+        self.assertEqual(crude["year"], 2024)
+        self.assertEqual(crude["reporter_iso2"], "DE")
+
 
 class TestSyncSkippedWhenDisabled(unittest.TestCase):
     def test_disabled_returns_skipped(self) -> None:
@@ -110,6 +145,50 @@ class TestRecordEurostatSync(unittest.TestCase):
         self.assertEqual(len(executed), 1)
         self.assertIn("last_eurostat_sync", executed[0][0])
         self.assertIn('"status": "ok"', executed[0][1][0])
+
+
+class TestEurostatIngestRow(unittest.TestCase):
+    def test_dimensional_m49_codes(self) -> None:
+        try:
+            from backend.services.eurostat_trade import _to_ingest_row
+        except ImportError:
+            from services.eurostat_trade import _to_ingest_row  # type: ignore
+
+        row = {
+            "reporter": "European Union - 27 countries",
+            "reporter_iso2": "EU",
+            "partner": "Russia",
+            "hs_code": "2709",
+            "flow_type": "M",
+            "year": 2023,
+            "trade_value_usd": 100_000.0,
+            "raw": {"dimensions": {"geo": "EU27_2020", "partner": "RU", "TIME_PERIOD": "2023"}},
+        }
+        ingest = _to_ingest_row(row)
+        self.assertEqual(ingest["reporter_m49"], "EU27_2020")
+        self.assertEqual(ingest["partner_m49"], "RU")
+        self.assertEqual(ingest["data_source"], "eurostat")
+        self.assertEqual(ingest["flow_type"], "M")
+
+    def test_flat_fallback_partner_m49(self) -> None:
+        try:
+            from backend.services.eurostat_trade import _to_ingest_row
+        except ImportError:
+            from services.eurostat_trade import _to_ingest_row  # type: ignore
+
+        ingest = _to_ingest_row(
+            {
+                "reporter": "European Union",
+                "reporter_iso2": "EU",
+                "partner": "Extra-EU",
+                "hs_code": "2709",
+                "flow_type": "M",
+                "year": 2023,
+                "trade_value_usd": 50_000.0,
+                "raw": {},
+            }
+        )
+        self.assertEqual(ingest["partner_m49"], "0")
 
 
 if __name__ == "__main__":
