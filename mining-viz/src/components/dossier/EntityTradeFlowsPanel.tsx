@@ -14,6 +14,7 @@ interface StoredTradeFlow {
   trade_value_usd?: number | null;
   data_source?: string;
   bol_tier?: string;
+  sourceRecordUrl?: string;
 }
 
 interface EntityTradeFlowsResponse {
@@ -145,7 +146,20 @@ export default function EntityTradeFlowsPanel({
                   </td>
                   <td className="py-1 pr-2">{row.hs_code}</td>
                   <td className="py-1 pr-2">{row.partner || '—'}</td>
-                  <td className="py-1 pr-2 text-slate-500">{row.data_source || '—'}</td>
+                  <td className="py-1 pr-2 text-slate-500">
+                    {row.sourceRecordUrl ? (
+                      <a
+                        href={row.sourceRecordUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-cyan-700 dark:text-cyan-300"
+                      >
+                        {row.data_source || 'verify'}
+                      </a>
+                    ) : (
+                      row.data_source || '—'
+                    )}
+                  </td>
                   <td className="py-1 pr-2 text-slate-500 uppercase text-[10px]">
                     {row.bol_tier || 'macro'}
                   </td>
