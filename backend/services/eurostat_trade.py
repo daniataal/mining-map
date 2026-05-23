@@ -354,4 +354,32 @@ def _upsert_oil_trade_flows(conn: Any, rows: list[dict[str, Any]]) -> int:
 
     ensure_table(conn)
     ingest_rows = [_to_ingest_row(row) for row in rows]
-    return upsert_rows(conn, ingest_rows)
+    written = upsert_rows(conn, ingest_rows)
+    _attach_eurostat_raw(conn, rows)
+    return written
+
+
+def _attach_eurostat_raw(conn: Any, rows: list[dict[str, Any]]) -> None:
+    """Store JSON-stat dimension provenance on matching rows (requires raw JSONB column)."""
+    try:
+        with conn.cursor() as cur:
+            for row in rows:
+                ingest = _to_ingest_row(row)
+                cur.execute(
+                    """
+                    UPDATE oil_trade_flows
+                    SET raw = %s::jsonb
+                    WHERE reporter_m49 = %s AND partner_m49 = %s AND hs_code = %s
+                      AND flow_type = %s AND year = %s AND data_source = 'eurostat'
+                    """,
+                    (
+                        json.dumps(row.get("raw") or {}),
+                        ingest["reporter_m49"],
+                        ingest["partner_m49"],
+                        ingest["hs_code"],
+                        ingest["flow_type"],
+                        ingest["year"],
+                    ),
+                )
+    except Exception:
+        pass
