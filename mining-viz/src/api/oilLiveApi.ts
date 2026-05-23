@@ -274,6 +274,9 @@ export type OilLiveSyncStatus = {
   mcr_by_tier?: McrTierCount[];
   last_comtrade_sync_at?: string | null;
   last_comtrade_sync_status?: string | null;
+  eurostat_trade_flow_count?: number;
+  last_eurostat_sync_at?: string | null;
+  last_eurostat_sync_status?: string | null;
   /** Live AIS port calls (when returned by sync-status). */
   live_ais_port_call_count?: number;
   /** Recent live AIS vessel positions (when returned by sync-status). */

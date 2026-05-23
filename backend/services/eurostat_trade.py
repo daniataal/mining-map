@@ -20,9 +20,32 @@ _DATASET = os.getenv("EUROSTAT_DATASET", "DS-045409")
 _BASE = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
 
 
+def _record_eurostat_sync(conn: Any, step: dict[str, Any]) -> None:
+    """Persist last Eurostat graph-sync step for oil-live sync-status."""
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO oil_live_sync_state (key, value, metadata, updated_at)
+                VALUES ('last_eurostat_sync', now(), %s::jsonb, now())
+                ON CONFLICT (key) DO UPDATE SET
+                  value = now(),
+                  metadata = EXCLUDED.metadata,
+                  updated_at = now()
+                """,
+                (json.dumps(step),),
+            )
+    except Exception:
+        pass  # table may be absent before oil-live-intel migrations
+
+
 def sync_eurostat_hs27(conn: Any) -> dict[str, Any]:
     if not EUROSTAT_ENABLED:
-        return {"status": "skipped", "reason": "EUROSTAT_SYNC_ENABLED is off"}
+        result = {"status": "skipped", "reason": "EUROSTAT_SYNC_ENABLED is off"}
+        _record_eurostat_sync(conn, result)
+        return result
 
     url = f"{_BASE}/{_DATASET}?format=JSON&lang=en&lastTimePeriod=3"
     try:
@@ -30,14 +53,20 @@ def sync_eurostat_hs27(conn: Any) -> dict[str, Any]:
         with urllib.request.urlopen(req, timeout=90) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
-        return {"status": "skipped", "error": str(exc), "note": "Eurostat API unreachable"}
+        result = {"status": "skipped", "error": str(exc), "note": "Eurostat API unreachable"}
+        _record_eurostat_sync(conn, result)
+        return result
 
     rows = _parse_eurostat_json(payload)
     if not rows:
-        return {"status": "skipped", "rows": 0, "note": "no parseable Eurostat rows"}
+        result = {"status": "skipped", "rows": 0, "note": "no parseable Eurostat rows"}
+        _record_eurostat_sync(conn, result)
+        return result
 
     upserted = _upsert_oil_trade_flows(conn, rows)
-    return {"status": "ok", "rows_upserted": upserted, "data_source": "eurostat"}
+    result = {"status": "ok", "rows_upserted": upserted, "data_source": "eurostat"}
+    _record_eurostat_sync(conn, result)
+    return result
 
 
 def _parse_eurostat_json(payload: dict[str, Any]) -> list[dict[str, Any]]:
