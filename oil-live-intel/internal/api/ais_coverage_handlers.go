@@ -16,10 +16,7 @@ const defaultVesselFreshnessMinutes = 1440
 func (s *Server) ListVessels(w http.ResponseWriter, r *http.Request) {
 	minLon, minLat, maxLon, maxLat, bboxOK := parseBBox(r.URL.Query().Get("bbox"))
 	bbox := [4]float64{minLon, minLat, maxLon, maxLat}
-	limit := queryInt(r, "limit", 500)
-	if limit > 2000 {
-		limit = 2000
-	}
+	limit := vesselmerge.ClampLimitWithMax(queryInt(r, "limit", 500), 2000)
 	freshness := queryInt(r, "freshness_minutes", defaultVesselFreshnessMinutes)
 	sources := parseCSVParam(r.URL.Query().Get("sources"))
 

@@ -21,7 +21,41 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const tableName = "oil_vessel_position_observations"
+const (
+	tableName          = "oil_vessel_position_observations"
+	defaultVesselLimit = 200
+	maxVesselLimit     = 5000
+)
+
+// ClampLimit normalizes a vessel list limit to [defaultVesselLimit, maxVesselLimit].
+func ClampLimit(limit int) int {
+	if limit <= 0 {
+		return defaultVesselLimit
+	}
+	if limit > maxVesselLimit {
+		return maxVesselLimit
+	}
+	return limit
+}
+
+// ClampLimitWithMax applies ClampLimit then caps at max when max > 0.
+func ClampLimitWithMax(limit, max int) int {
+	c := ClampLimit(limit)
+	if max > 0 && c > max {
+		return max
+	}
+	return c
+}
+
+// VesselIdentityKey returns the dedupe key: IMO when present, else MMSI.
+func VesselIdentityKey(mmsi int64, imo *string) string {
+	if imo != nil {
+		if trimmed := strings.TrimSpace(*imo); trimmed != "" {
+			return "imo:" + trimmed
+		}
+	}
+	return fmt.Sprintf("mmsi:%d", mmsi)
+}
 
 // SourceRank returns display precedence (lower = higher priority).
 func SourceRank(dataSource string) int {
@@ -112,12 +146,7 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 	if pool == nil {
 		return nil, fmt.Errorf("nil pool")
 	}
-	if limit <= 0 {
-		limit = 200
-	}
-	if limit > 5000 {
-		limit = 5000
-	}
+	limit = ClampLimit(limit)
 	freshnessMinutes := opts.FreshnessMinutes
 	if freshnessMinutes <= 0 {
 		freshnessMinutes = 1440
@@ -172,16 +201,21 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		      WHEN 'inferred_port_call' THEN 4
 		      WHEN 'sentinel1_sar' THEN 5
 		      ELSE 6
-		    END AS src_rank
+		    END AS src_rank,
+		    CASE
+		      WHEN NULLIF(TRIM(COALESCE(imo, '')), '') IS NOT NULL
+		        THEN 'imo:' || NULLIF(TRIM(imo), '')
+		      ELSE 'mmsi:' || mmsi::text
+		    END AS vessel_key
 		  FROM latest
 		)
-		SELECT DISTINCT ON (r.mmsi)
+		SELECT DISTINCT ON (r.vessel_key)
 		  r.mmsi, r.source, r.data_source, r.source_type, r.imo, r.lat, r.lng, r.sog, r.cog,
 		  r.vessel_name, r.position_time, r.received_at, r.confidence, r.source_url,
 		  v.name, v.tanker_class, v.crude_capable, v.product_tanker
 		FROM ranked r
 		LEFT JOIN oil_vessels v ON v.mmsi = r.mmsi
-		ORDER BY r.mmsi, r.src_rank ASC, r.position_time DESC`
+		ORDER BY r.vessel_key, r.src_rank ASC, r.position_time DESC`
 	q += fmt.Sprintf(` LIMIT %d`, limit)
 
 	rows, err := pool.Query(ctx, q, args...)

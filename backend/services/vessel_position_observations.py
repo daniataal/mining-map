@@ -7,14 +7,43 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 try:
-    from psycopg2.extras import Json
+    from psycopg2.extras import Json, execute_values
 except ImportError:
     Json = None  # type: ignore
+    execute_values = None  # type: ignore
 
 TABLE = "oil_vessel_position_observations"
 DATA_SOURCE_MARITIME_REDIS = "maritime_redis"
 SOURCE_TYPE_COMMUNITY_AIS = "community_coastal_ais"
 AISSTREAM_DOC_URL = "https://aisstream.io/documentation.html"
+
+_UPSERT_SQL = f"""
+INSERT INTO {TABLE} (
+  mmsi, data_source, source_record_id, lat, lng, sog, cog,
+  vessel_name, imo, source, source_type, observed_at, position_time,
+  received_at, freshness_seconds, confidence, source_url,
+  geom, raw
+) VALUES %s
+ON CONFLICT (data_source, source_record_id) DO UPDATE SET
+  mmsi = EXCLUDED.mmsi,
+  lat = EXCLUDED.lat,
+  lng = EXCLUDED.lng,
+  sog = EXCLUDED.sog,
+  cog = EXCLUDED.cog,
+  vessel_name = EXCLUDED.vessel_name,
+  imo = EXCLUDED.imo,
+  source = EXCLUDED.source,
+  source_type = EXCLUDED.source_type,
+  observed_at = EXCLUDED.observed_at,
+  position_time = EXCLUDED.position_time,
+  received_at = EXCLUDED.received_at,
+  freshness_seconds = EXCLUDED.freshness_seconds,
+  confidence = EXCLUDED.confidence,
+  source_url = EXCLUDED.source_url,
+  geom = EXCLUDED.geom,
+  raw = EXCLUDED.raw,
+  ingested_at = now()
+"""
 
 
 def _pg_json(obj: Any) -> Any:
@@ -58,6 +87,65 @@ def _parse_optional_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_observed_at(observed_at: datetime) -> datetime:
+    if observed_at.tzinfo is None:
+        return observed_at.replace(tzinfo=timezone.utc)
+    return observed_at.astimezone(timezone.utc)
+
+
+def _observation_tuple(
+    mmsi: int,
+    data_source: str,
+    source_record_id: str,
+    lat: float,
+    lng: float,
+    observed_at: datetime,
+    *,
+    sog: Optional[float] = None,
+    cog: Optional[float] = None,
+    vessel_name: Optional[str] = None,
+    imo: Optional[str] = None,
+    source_type: Optional[str] = None,
+    received_at: Optional[datetime] = None,
+    confidence: Optional[float] = None,
+    source_url: Optional[str] = None,
+    raw: Optional[dict[str, Any]] = None,
+) -> tuple[Any, ...]:
+    observed_at = _normalize_observed_at(observed_at)
+    if received_at is None:
+        received_at = datetime.now(timezone.utc)
+    elif received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    else:
+        received_at = received_at.astimezone(timezone.utc)
+    freshness_seconds = max(0, int((received_at - observed_at).total_seconds()))
+    normalized_source_type = source_type or data_source
+    normalized_confidence = 0.5 if confidence is None else max(0.0, min(1.0, float(confidence)))
+    payload = raw if raw is not None else {}
+    return (
+        mmsi,
+        data_source,
+        source_record_id,
+        lat,
+        lng,
+        sog,
+        cog,
+        vessel_name,
+        imo,
+        data_source,
+        normalized_source_type,
+        observed_at,
+        observed_at,
+        received_at,
+        freshness_seconds,
+        normalized_confidence,
+        source_url,
+        lng,
+        lat,
+        _pg_json(payload),
+    )
 
 
 def _table_exists_named(cur: Any, table_name: str) -> bool:
@@ -183,6 +271,46 @@ def refresh_coverage_cells(
         }
 
 
+def batch_upsert_observations(conn: Any, rows: list[dict[str, Any]]) -> int:
+    """Upsert many observations in one execute_values call."""
+    if not rows:
+        return 0
+    values = [
+        _observation_tuple(
+            row["mmsi"],
+            row["data_source"],
+            row["source_record_id"],
+            row["lat"],
+            row["lng"],
+            row["observed_at"],
+            sog=row.get("sog"),
+            cog=row.get("cog"),
+            vessel_name=row.get("vessel_name"),
+            imo=row.get("imo"),
+            source_type=row.get("source_type"),
+            received_at=row.get("received_at"),
+            confidence=row.get("confidence"),
+            source_url=row.get("source_url"),
+            raw=row.get("raw"),
+        )
+        for row in rows
+    ]
+    template = (
+        "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+        "ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s)"
+    )
+    with conn.cursor() as cur:
+        if execute_values is not None:
+            execute_values(cur, _UPSERT_SQL, values, template=template, page_size=len(values))
+        else:
+            for value in values:
+                cur.execute(
+                    _UPSERT_SQL.replace(" VALUES %s", " VALUES " + template),
+                    value,
+                )
+    return len(values)
+
+
 def upsert_observation(
     conn: Any,
     mmsi: int,
@@ -203,73 +331,28 @@ def upsert_observation(
     raw: Optional[dict[str, Any]] = None,
 ) -> None:
     """Upsert one observation; ON CONFLICT updates only the same (data_source, source_record_id)."""
-    if observed_at.tzinfo is None:
-        observed_at = observed_at.replace(tzinfo=timezone.utc)
-    if received_at is None:
-        received_at = datetime.now(timezone.utc)
-    elif received_at.tzinfo is None:
-        received_at = received_at.replace(tzinfo=timezone.utc)
-    freshness_seconds = max(0, int((received_at - observed_at).total_seconds()))
-    normalized_source_type = source_type or data_source
-    normalized_confidence = 0.5 if confidence is None else max(0.0, min(1.0, float(confidence)))
-    payload = raw if raw is not None else {}
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""
-            INSERT INTO {TABLE} (
-              mmsi, data_source, source_record_id, lat, lng, sog, cog,
-              vessel_name, imo, source, source_type, observed_at, position_time,
-              received_at, freshness_seconds, confidence, source_url,
-              geom, raw
-            ) VALUES (
-              %s, %s, %s, %s, %s, %s, %s,
-              %s, %s, %s, %s, %s, %s,
-              %s, %s, %s, %s,
-              ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s
-            )
-            ON CONFLICT (data_source, source_record_id) DO UPDATE SET
-              mmsi = EXCLUDED.mmsi,
-              lat = EXCLUDED.lat,
-              lng = EXCLUDED.lng,
-              sog = EXCLUDED.sog,
-              cog = EXCLUDED.cog,
-              vessel_name = EXCLUDED.vessel_name,
-              imo = EXCLUDED.imo,
-              source = EXCLUDED.source,
-              source_type = EXCLUDED.source_type,
-              observed_at = EXCLUDED.observed_at,
-              position_time = EXCLUDED.position_time,
-              received_at = EXCLUDED.received_at,
-              freshness_seconds = EXCLUDED.freshness_seconds,
-              confidence = EXCLUDED.confidence,
-              source_url = EXCLUDED.source_url,
-              geom = EXCLUDED.geom,
-              raw = EXCLUDED.raw,
-              ingested_at = now()
-            """,
-            (
-                mmsi,
-                data_source,
-                source_record_id,
-                lat,
-                lng,
-                sog,
-                cog,
-                vessel_name,
-                imo,
-                data_source,
-                normalized_source_type,
-                observed_at,
-                observed_at,
-                received_at,
-                freshness_seconds,
-                normalized_confidence,
-                source_url,
-                lng,
-                lat,
-                _pg_json(payload),
-            ),
-        )
+    batch_upsert_observations(
+        conn,
+        [
+            {
+                "mmsi": mmsi,
+                "data_source": data_source,
+                "source_record_id": source_record_id,
+                "lat": lat,
+                "lng": lng,
+                "observed_at": observed_at,
+                "sog": sog,
+                "cog": cog,
+                "vessel_name": vessel_name,
+                "imo": imo,
+                "source_type": source_type,
+                "received_at": received_at,
+                "confidence": confidence,
+                "source_url": source_url,
+                "raw": raw,
+            }
+        ],
+    )
 
 
 def mirror_maritime_redis_snapshot(conn: Any, limit: int = 5000) -> dict[str, Any]:
@@ -295,7 +378,7 @@ def mirror_maritime_redis_snapshot(conn: Any, limit: int = 5000) -> dict[str, An
     if not rows:
         return {"status": "skipped", "reason": "redis_empty", "upserted": 0}
 
-    upserted = 0
+    batch_rows: list[dict[str, Any]] = []
     for row in list(rows)[: max(1, limit)]:
         if not isinstance(row, dict):
             continue
@@ -312,32 +395,32 @@ def mirror_maritime_redis_snapshot(conn: Any, limit: int = 5000) -> dict[str, An
         observed_at = _parse_observed_at(row)
         sog_f = _parse_optional_float(row.get("speed_knots") or row.get("speed"))
         cog_f = _parse_optional_float(row.get("course") or row.get("course_over_ground"))
-        source_record_id = f"redis:{mmsi}"
-        upsert_observation(
-            conn,
-            mmsi,
-            DATA_SOURCE_MARITIME_REDIS,
-            source_record_id,
-            lat_f,
-            lng_f,
-            observed_at,
-            sog=sog_f,
-            cog=cog_f,
-            vessel_name=row.get("vessel_name"),
-            imo=row.get("imo"),
-            source_type=SOURCE_TYPE_COMMUNITY_AIS,
-            confidence=0.55,
-            source_url=AISSTREAM_DOC_URL,
-            raw={
-                "snapshot": row,
-                "coverage_note": (
-                    "Mirrored from the open maritime-worker snapshot; open AIS is partial "
-                    "and does not prove supplier/receiver."
-                ),
-            },
+        batch_rows.append(
+            {
+                "mmsi": mmsi,
+                "data_source": DATA_SOURCE_MARITIME_REDIS,
+                "source_record_id": f"redis:{mmsi}",
+                "lat": lat_f,
+                "lng": lng_f,
+                "observed_at": observed_at,
+                "sog": sog_f,
+                "cog": cog_f,
+                "vessel_name": row.get("vessel_name"),
+                "imo": row.get("imo"),
+                "source_type": SOURCE_TYPE_COMMUNITY_AIS,
+                "confidence": 0.55,
+                "source_url": AISSTREAM_DOC_URL,
+                "raw": {
+                    "snapshot": row,
+                    "coverage_note": (
+                        "Mirrored from the open maritime-worker snapshot; open AIS is partial "
+                        "and does not prove supplier/receiver."
+                    ),
+                },
+            }
         )
-        upserted += 1
 
+    upserted = batch_upsert_observations(conn, batch_rows)
     coverage_result = refresh_coverage_cells(conn)
 
     return {"status": "ok", "upserted": upserted, "limit": limit, "coverage_cells": coverage_result}
