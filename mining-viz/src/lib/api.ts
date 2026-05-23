@@ -49,6 +49,7 @@ import {
   licenseViewportBoundsFromGeoJson,
 } from './countryBounds';
 import { MIN_SERVER_LICENSE_CLUSTER_COUNT } from './licenseMapCluster';
+import { getStoredMiningToken } from './miningAuth';
 
 export {
   clearLicenseBundleCaches,
@@ -87,7 +88,11 @@ export const apiClient = axios.create({
   },
 });
 
-export { clearMiningAuthStorage, MINING_AUTH_STORAGE_KEYS } from './miningAuth';
+export {
+  clearMiningAuthStorage,
+  getStoredMiningToken,
+  MINING_AUTH_STORAGE_KEYS,
+} from './miningAuth';
 
 let licensesFallbackDataPromise: Promise<MiningLicense[]> | null = null;
 
@@ -148,9 +153,9 @@ function normalizeCountryBordersParam(countries: string[]): string[] {
 
 // Request interceptor for auth (mining_token from login UI; token alias for legacy scripts)
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('mining_token') || localStorage.getItem('token');
-  if (token?.trim()) {
-    config.headers.Authorization = `Bearer ${token.trim()}`;
+  const token = getStoredMiningToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
