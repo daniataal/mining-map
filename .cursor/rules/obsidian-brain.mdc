@@ -25,7 +25,8 @@ Never store secrets, API keys, `.env` contents, SSH keys, or credentials in the 
    - `08_Data-Sources/`
    - `05_Research/`
 3. Read repo `AGENTS.md` and operational docs (`docs/DATA_SOURCES.md`, `docs/LIVE_DATA.md`) for implementation work.
-4. Run `git branch --show-current` and `git status --short`. Do not switch branches unless asked.
+4. Run `git branch --show-current` and `git status --short`.
+5. **Paperclip agent wakes:** checkout branch **`paperclip2`** only (see `.paperclip/GIT-BRANCH.md`). Human Cursor IDE sessions: stay on your current branch unless the user asks to switch.
 
 ## During work
 

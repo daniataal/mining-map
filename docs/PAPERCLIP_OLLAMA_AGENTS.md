@@ -20,7 +20,8 @@ Small **local** models for Paperclip chores (triage, short docs, status comments
 | `opencode_local` | Ollama / Groq / OpenRouter via OpenCode in container |
 | `cursor` | Cursor Engineer — primary repo work |
 | `openclaw_gateway` | Research + Obsidian (separate from these specialists) |
-| `gemini_local` | CEO when `OLLAMA_CEO=0` |
+| `cursor` | **CEO (default)** + Cursor Engineer — `paperclip-ceo-cursor.sh` |
+| `gemini_local` | CEO when `CURSOR_CEO=0` and `OLLAMA_CEO=0` |
 
 MCP in Cursor (`mining-map/.cursor/mcp.json`) talks to Paperclip; specialists run **inside** Paperclip wakes, not in the IDE.
 
@@ -50,7 +51,11 @@ Checklist: [.paperclip/MAD-CTO-CHECKLIST.md](../.paperclip/MAD-CTO-CHECKLIST.md)
 
 Example PATCH body: `.paperclip/agents/example-opencode-agent-patch.json`.
 
-**Keep heartbeats off** for specialists, **Cursor Engineer**, Groq, and OpenRouter (`intervalSec: 0` — wake on assign/@mention only). Only **CEO** keeps a slow timer to mint MAD issues.
+**Keep heartbeats off** for specialists, **Cursor Engineer**, Groq, and OpenRouter (`intervalSec: 0`). **CEO (Cursor)** uses a slow timer by default (`1800s`) to mint MAD issues — set `CURSOR_CEO_HEARTBEAT_SEC=0` for assign-only CEO.
+
+```bash
+bash scripts/paperclip-ceo-cursor.sh
+```
 
 Re-apply Cursor (disables 5-minute idle timer):
 
@@ -153,11 +158,22 @@ Do **not** point specialists at full-repo Meridian heartbeats (Live Data ingest,
 
 | Symptom | Fix |
 |---------|-----|
+| `parseBoolean is not defined` on opencode_local | Re-run `bash ~/ai-agent-stack/scripts/paperclip-adapter-runtime-patch.sh` then **new run** (not Retry) |
 | `connection refused` to Ollama from container | Ollama running on Mac; `OLLAMA_BASE_URL=http://host.docker.internal:11434` |
 | OpenCode picks wrong model | Re-run `bash ~/ai-agent-stack/scripts/paperclip-opencode-providers.sh` |
 | Huge token use | Re-run `paperclip-minimal-context.sh` path: `paperclip_install_minimal_skill` |
 | `403 Board access required` | Agent token cannot create secrets; use default `local-env` keys in `.env` |
 | Invalid `.cursor/cli.json` | Repo file must be **permissions only** — see `.paperclip-mad13-unblock.md` |
+
+## Git branch `paperclip2`
+
+All repo-touching agents work on **`paperclip2`** only (not `main` / `Paperclip`):
+
+```bash
+bash scripts/paperclip-branch-paperclip2.sh
+```
+
+See [.paperclip/GIT-BRANCH.md](../.paperclip/GIT-BRANCH.md).
 
 ## OpenClaw Operator (research)
 
