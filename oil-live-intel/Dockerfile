@@ -1,9 +1,17 @@
+# syntax=docker/dockerfile:1
+
 FROM golang:1.23-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git
-COPY go.mod ./
+
+# Layer cache: module download only invalidates when go.mod/go.sum change.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
 COPY . .
-RUN go mod tidy && \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -o /api ./cmd/api && \
     CGO_ENABLED=0 go build -o /worker ./cmd/worker && \
     CGO_ENABLED=0 go build -o /mcp ./cmd/mcp && \
