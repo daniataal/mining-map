@@ -39,6 +39,7 @@ import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
+import { LICENSE_MAP_DEFAULT_ZOOM } from './lib/licenseMapCluster';
 import OilMaritimePanel from './components/OilMaritimePanel';
 import {
   DEFAULT_VESSEL_FILTERS,
@@ -183,7 +184,9 @@ export default function App() {
 
   // Data Fetching
   const [licenseMapViewport, setLicenseMapViewport] = useState<LicenseViewportBounds | null>(null);
-  const [licenseMapZoom, setLicenseMapZoom] = useState(5);
+  const [licenseMapZoom, setLicenseMapZoom] = useState(
+    () => LICENSE_MAP_DEFAULT_ZOOM,
+  );
   const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
   const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
   const [licenseFetchCountries, setLicenseFetchCountries] = useState<string[]>([]);
