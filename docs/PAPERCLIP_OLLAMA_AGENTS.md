@@ -33,9 +33,30 @@ MCP in Cursor (`mining-map/.cursor/mcp.json`) talks to Paperclip; specialists ru
 | **Paperclip Status** | `phi3:mini` | `opencode_local` | `.paperclip/agents/status/AGENTS.md` | Progress comment, light PATCH |
 | **Paperclip Diagnose** | `llama3.2:3b` | `opencode_local` | `.paperclip/agents/diagnose/AGENTS.md` | Single-file / error triage |
 
+## CTO (architecture lane)
+
+| Agent name | Model (`ollama/…`) | Role | Instructions | Use case |
+|------------|-------------------|------|--------------|----------|
+| **CTO (Ollama)** | `qwen2.5-coder:7b-instruct` | `cto` | `.paperclip/agents/cto/AGENTS.md` | ADRs, compose/migrations review, security; **delegates** code to engineers |
+
+Register:
+
+```bash
+ollama pull qwen2.5-coder:7b-instruct
+bash scripts/paperclip-ollama-cto.sh
+```
+
+Checklist: [.paperclip/MAD-CTO-CHECKLIST.md](../.paperclip/MAD-CTO-CHECKLIST.md). After first hire, add the printed agent UUID to `~/ai-agent-stack/scripts/paperclip-ceo-delegation.md`.
+
 Example PATCH body: `.paperclip/agents/example-opencode-agent-patch.json`.
 
-**Keep heartbeats off** for specialists (`intervalSec: 0`, wake on assign/@mention). CEO (`paperclip-ceo-ollama.sh`) and **Cursor Engineer** own scheduled / heavy work.
+**Keep heartbeats off** for specialists, **Cursor Engineer**, Groq, and OpenRouter (`intervalSec: 0` — wake on assign/@mention only). Only **CEO** keeps a slow timer to mint MAD issues.
+
+Re-apply Cursor (disables 5-minute idle timer):
+
+```bash
+bash ~/ai-agent-stack/scripts/paperclip-cursor-agent.sh
+```
 
 ## Mac setup — pull models
 
@@ -137,6 +158,46 @@ Do **not** point specialists at full-repo Meridian heartbeats (Live Data ingest,
 | Huge token use | Re-run `paperclip-minimal-context.sh` path: `paperclip_install_minimal_skill` |
 | `403 Board access required` | Agent token cannot create secrets; use default `local-env` keys in `.env` |
 | Invalid `.cursor/cli.json` | Repo file must be **permissions only** — see `.paperclip-mad13-unblock.md` |
+
+## OpenClaw Operator (research)
+
+Paperclip talks to the **OpenClaw gateway** (`openclaw_gateway` adapter). The gateway runs its **own** embedded agent, which defaulted to **`openai/gpt-5.5`** with no API key — hence `No API key found for provider "openai"`.
+
+Fix (local Ollama, free):
+
+```bash
+ollama pull llama3.2
+bash scripts/paperclip-openclaw-fix.sh
+```
+
+Then **Resume** OpenClaw Operator and start a **new run** (not Retry).
+
+## Hosted lanes (Groq / OpenRouter) — lightweight
+
+Groq free tier allows **~6k TPM**; OpenRouter free keys have **low credits**. These agents must stay ultra-light:
+
+| Setting | Groq Fast Analyst | OpenRouter Engineer |
+|---------|-------------------|---------------------|
+| Default model | `groq/llama-3.1-8b-instant` | `openrouter/meta-llama/llama-3.2-3b-instruct:free` |
+| Skill | `paperclip-minimal` (~1 KB) only | same |
+| Session resume | **off** | **off** |
+| Wake payload | compact (truncated) | compact |
+| Heartbeat | `0` (assign only) | `0` (assign only) |
+
+Re-apply after image rebuild:
+
+```bash
+bash scripts/paperclip-fix-hosted-lanes.sh
+# or: bash ~/ai-agent-stack/scripts/paperclip-hosted-agents.sh
+```
+
+Use **New run** in Paperclip after a failure — **Retry** reuses bloated session history.
+
+Override cheap model:
+
+```bash
+OPENROUTER_MODEL=openrouter/google/gemma-2-9b-it:free bash ~/ai-agent-stack/scripts/paperclip-openrouter-agent.sh
+```
 
 ## Related
 
