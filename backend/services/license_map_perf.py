@@ -40,7 +40,9 @@ def license_cluster_min_count(grid_deg: float) -> int:
 
 
 def _cluster_cell_key(lat: float, lng: float, grid_deg: float) -> tuple[int, int]:
-    return (round(lat / grid_deg), round(lng / grid_deg))
+    # Match SQL GROUP BY FLOOR(coord / grid_deg); centers are at k*g + g/2.
+    half = grid_deg / 2.0
+    return (math.floor((lat - half) / grid_deg), math.floor((lng - half) / grid_deg))
 
 
 def merge_license_clusters(
@@ -161,6 +163,9 @@ def query_license_clusters(
         WHERE {sector_sql}
           AND ({country_sql})
           AND lat IS NOT NULL AND lng IS NOT NULL
+          AND lat BETWEEN -90 AND 90
+          AND lng BETWEEN -180 AND 180
+          AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
           AND lat BETWEEN %s AND %s
           AND lng BETWEEN %s AND %s
           {open_clause}

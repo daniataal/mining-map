@@ -134,6 +134,9 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 		WHERE %s
 		  AND (%s)
 		  AND lat IS NOT NULL AND lng IS NOT NULL
+		  AND lat BETWEEN -90 AND 90
+		  AND lng BETWEEN -180 AND 180
+		  AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
 		  AND lat BETWEEN $%d AND $%d
 		  AND lng BETWEEN $%d AND $%d
 		  %s
