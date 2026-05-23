@@ -243,7 +243,7 @@ def ensure_table(conn: psycopg2.extensions.connection) -> None:
                 net_weight_kg   BIGINT,
                 data_source     VARCHAR(80)   NOT NULL DEFAULT 'seed/static',
                 ingested_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)
+                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)
             );
         """)
         cur.execute("""
@@ -365,7 +365,7 @@ UPSERT_SQL = """
          hs_code, hs_description, flow_type, year,
          trade_value_usd, net_weight_kg, data_source)
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year)
+    ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)
     DO UPDATE SET
         reporter        = EXCLUDED.reporter,
         reporter_iso2   = EXCLUDED.reporter_iso2,
@@ -392,7 +392,7 @@ def upsert_rows(conn, rows: list[dict]) -> int:
                     row.get("partner", "World"),
                     row.get("partner_m49", "0"),
                     hs,
-                    OIL_HS_CODES.get(hs, ""),
+                    row.get("hs_description") or OIL_HS_CODES.get(hs, ""),
                     row.get("flow_type", row.get("flow", "X")),
                     int(row.get("year", 2022)),
                     row.get("trade_value_usd", row.get("value_usd")),

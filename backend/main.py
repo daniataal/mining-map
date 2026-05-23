@@ -1669,7 +1669,7 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 net_weight_kg   BIGINT,
                 data_source     VARCHAR(80)   NOT NULL DEFAULT 'seed/static',
                 ingested_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)
+                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)
             );
         """)
         cur.execute("""
