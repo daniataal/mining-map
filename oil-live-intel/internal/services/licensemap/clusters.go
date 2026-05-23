@@ -49,7 +49,8 @@ func expandCountryNames(requested []string) []string {
 	}
 	seen := map[string]struct{}{}
 	var out []string
-	add := func(s string) {
+	var add func(string)
+	add = func(s string) {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			return
@@ -106,7 +107,6 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 
 	openClause := ""
 	if q.PreferOpenData {
-		n := len(args) + 1
 		existsSQL := fmt.Sprintf(`
 			SELECT EXISTS (
 				SELECT 1 FROM licenses
