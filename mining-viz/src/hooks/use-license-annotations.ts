@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../lib/api';
 import { isAnnotationsAuthError } from '../lib/annotationsAuth';
-import { clearMiningAuthStorage } from '../lib/miningAuth';
+import { fetchLicenseAnnotationsFromServer, resetSharedAnnotationsHydration } from '../lib/annotationsHydration';
+import {
+  blockAnnotationsServerHydration,
+  clearMiningAuthStorage,
+  isAnnotationsServerHydrationBlocked,
+  isJwtExpired,
+  resetAnnotationsHydrationSession,
+} from '../lib/miningAuth';
 import { normalizeAnnotationStage } from '../lib/dealWorkflow';
 import type { UserAnnotation } from '../types';
 
@@ -59,18 +66,30 @@ export function useLicenseAnnotations(
   );
   const [hydrated, setHydrated] = useState(false);
   const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const skipServerHydrationRef = useRef(false);
   const onAuthInvalidRef = useRef(options?.onAuthInvalid);
   onAuthInvalidRef.current = options?.onAuthInvalid;
+
+  const invalidateSession = useCallback(() => {
+    if (isAnnotationsServerHydrationBlocked()) return;
+    blockAnnotationsServerHydration();
+    clearMiningAuthStorage();
+    onAuthInvalidRef.current?.();
+  }, []);
 
   useEffect(() => {
     const sessionToken = token?.trim();
     if (!sessionToken) {
-      skipServerHydrationRef.current = false;
+      resetAnnotationsHydrationSession();
+      resetSharedAnnotationsHydration();
       setHydrated(true);
       return;
     }
-    if (skipServerHydrationRef.current) {
+    if (isAnnotationsServerHydrationBlocked()) {
+      setHydrated(true);
+      return;
+    }
+    if (isJwtExpired(sessionToken)) {
+      invalidateSession();
       setHydrated(true);
       return;
     }
@@ -78,12 +97,8 @@ export function useLicenseAnnotations(
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await apiClient.get<{
-          annotations?: Record<string, UserAnnotation>;
-        }>('/api/licenses/annotations');
+        const { annotations: server } = await fetchLicenseAnnotationsFromServer(sessionToken);
         if (cancelled) return;
-
-        const server = data?.annotations || {};
         const local = readLocalAnnotations();
         const merged = mergeAnnotations(local, server);
         setUserAnnotations(merged);
@@ -109,9 +124,7 @@ export function useLicenseAnnotations(
         }
       } catch (err) {
         if (isAnnotationsAuthError(err)) {
-          skipServerHydrationRef.current = true;
-          clearMiningAuthStorage();
-          onAuthInvalidRef.current?.();
+          invalidateSession();
         } else {
           console.warn('[annotations] server hydration failed, using local cache', err);
         }
@@ -123,7 +136,7 @@ export function useLicenseAnnotations(
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, invalidateSession]);
 
   const persistToServer = useCallback(
     (licenseId: string, annotation: UserAnnotation) => {
@@ -138,9 +151,7 @@ export function useLicenseAnnotations(
           });
         } catch (err) {
           if (isAnnotationsAuthError(err)) {
-            skipServerHydrationRef.current = true;
-            clearMiningAuthStorage();
-            onAuthInvalidRef.current?.();
+            invalidateSession();
           } else {
             console.warn(`[annotations] failed to save ${licenseId}`, err);
           }
@@ -148,7 +159,7 @@ export function useLicenseAnnotations(
       }, 400);
       pendingWrites.current.set(licenseId, timer);
     },
-    [token],
+    [token, invalidateSession],
   );
 
   const updateAnnotation = useCallback(

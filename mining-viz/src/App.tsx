@@ -5,6 +5,7 @@ import {
   useDeleteLicense,
   useLogActivity,
   login,
+  getStoredMiningToken,
   API_BASE,
   describeLicenseFetchFailureContext,
   useWorldCoverage,
@@ -232,7 +233,7 @@ export default function App() {
   const logActivityMutation = useLogActivity();
 
   // Auth State
-  const [token, setToken] = useState<string | null>(localStorage.getItem('mining_token'));
+  const [token, setToken] = useState<string | null>(() => getStoredMiningToken());
   usePetroleumSidebarPrefetch(Boolean(token));
   const [username, setUsername] = useState<string | null>(localStorage.getItem('mining_username'));
   const dealRooms = useDealRooms(Boolean(username));
