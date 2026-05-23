@@ -417,11 +417,11 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/services/eu_company_registers.py` | EU member-state register URL mapping (legacy import) |
 | `backend/services/deal_room_export_pdf.py` | Reportlab PDF deal export (+ HTML fallback) |
 | `mining-viz/src/components/dossier/TradeFlowsChart.tsx` | Comtrade year bar chart in dossier |
-| `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27 linkage |
+| `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27; reporter fuzzy + Eurostat `partner` match |
 | `backend/services/deal_room_export_html.py` | Printable HTML deal export |
 | `backend/arcgis_probe_sync_worker.py` | Weekly KZ + PH ArcGIS probes |
 | `mining-viz/src/components/dossier/CompanyRegistryLinks.tsx` | Dossier OC + national register chips |
-| `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored Comtrade rows in dossier |
+| `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored macro trade rows (Comtrade + Eurostat) in dossier |
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |

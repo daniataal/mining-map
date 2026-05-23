@@ -61,7 +61,7 @@ export default function EntityTradeFlowsPanel({
   if (isLoading) {
     return (
       <Card className="p-4 text-xs text-slate-500">
-        {t('טוען זרימות סחר מ-Comtrade…', 'Loading stored Comtrade trade flows…')}
+        {t('טוען זרימות סחר מאקרו…', 'Loading stored macro trade flows (Comtrade, Eurostat)…')}
       </Card>
     );
   }
@@ -87,8 +87,8 @@ export default function EntityTradeFlowsPanel({
         ))}
         <p className="text-[11px] text-slate-500">
           {t(
-            'הריצו graph-sync עם COMTRADE_API_KEY — זרימות מדף ב-commodity_trade_flows (TZ/GH/KE/ZA…).',
-            'Run graph-sync with COMTRADE_API_KEY — mining macro flows land in commodity_trade_flows (TZ/GH/KE/ZA…).',
+            'הריצו graph-sync — Comtrade (מפתח API) + Eurostat (EU, ללא מפתח) ב-oil_trade_flows; כרייה ב-commodity_trade_flows.',
+            'Run graph-sync — Comtrade (API key) + Eurostat (EU, no key) in oil_trade_flows; mining rows in commodity_trade_flows.',
           )}
         </p>
       </Card>
@@ -100,7 +100,7 @@ export default function EntityTradeFlowsPanel({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
-            {t('זרימות סחר (Comtrade DB)', 'Trade flows (Comtrade DB)')}
+            {t('זרימות סחר (מאקרו DB)', 'Trade flows (macro DB)')}
           </p>
           {data.country && (
             <p className="text-[10px] text-slate-500">
@@ -127,6 +127,7 @@ export default function EntityTradeFlowsPanel({
                 <th className="py-1 pr-2">Flow</th>
                 <th className="py-1 pr-2">HS</th>
                 <th className="py-1 pr-2">Partner</th>
+                <th className="py-1 pr-2">Source</th>
                 <th className="py-1">USD</th>
               </tr>
             </thead>
@@ -142,6 +143,7 @@ export default function EntityTradeFlowsPanel({
                   </td>
                   <td className="py-1 pr-2">{row.hs_code}</td>
                   <td className="py-1 pr-2">{row.partner || '—'}</td>
+                  <td className="py-1 pr-2 text-slate-500">{row.data_source || '—'}</td>
                   <td className="py-1">{fmtUsd(row.trade_value_usd)}</td>
                 </tr>
               ))}
