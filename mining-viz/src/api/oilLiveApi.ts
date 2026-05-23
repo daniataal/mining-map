@@ -277,6 +277,9 @@ export type OilLiveSyncStatus = {
   eurostat_trade_flow_count?: number;
   last_eurostat_sync_at?: string | null;
   last_eurostat_sync_status?: string | null;
+  jodi_snapshot_count?: number;
+  last_jodi_sync_at?: string | null;
+  last_jodi_sync_status?: string | null;
   /** Live AIS port calls (when returned by sync-status). */
   live_ais_port_call_count?: number;
   /** Recent live AIS vessel positions (when returned by sync-status). */

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import os
 import urllib.request
 from typing import Any
@@ -18,6 +19,26 @@ JODI_ENABLED = (os.getenv("JODI_SYNC_ENABLED") or "true").strip().lower() not in
 # Optional: path or URL to JODI World CSV export (user-provided, no scraping behind login)
 JODI_CSV_URL = (os.getenv("JODI_CSV_URL") or "").strip()
 JODI_CSV_PATH = (os.getenv("JODI_CSV_PATH") or "").strip()
+
+
+def _record_jodi_sync(conn: Any, step: dict[str, Any]) -> None:
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO oil_live_sync_state (key, value, metadata, updated_at)
+                VALUES ('last_jodi_sync', now(), %s::jsonb, now())
+                ON CONFLICT (key) DO UPDATE SET
+                  value = now(),
+                  metadata = EXCLUDED.metadata,
+                  updated_at = now()
+                """,
+                (json.dumps(step),),
+            )
+    except Exception:
+        pass
 
 
 def ensure_jodi_table(conn: Any) -> None:
@@ -43,19 +64,25 @@ def ensure_jodi_table(conn: Any) -> None:
 
 def sync_jodi_snapshots(conn: Any) -> dict[str, Any]:
     if not JODI_ENABLED:
-        return {"status": "skipped", "reason": "JODI_SYNC_ENABLED is off"}
+        result = {"status": "skipped", "reason": "JODI_SYNC_ENABLED is off"}
+        _record_jodi_sync(conn, result)
+        return result
 
     ensure_jodi_table(conn)
     text = _load_csv_text()
     if not text:
-        return {
+        result = {
             "status": "skipped",
             "reason": "set JODI_CSV_URL or JODI_CSV_PATH to a public JODI export",
         }
+        _record_jodi_sync(conn, result)
+        return result
 
     rows = list(csv.DictReader(io.StringIO(text)))
     if not rows:
-        return {"status": "skipped", "rows": 0}
+        result = {"status": "skipped", "rows": 0}
+        _record_jodi_sync(conn, result)
+        return result
 
     upserted = 0
     with conn.cursor() as cur:
@@ -81,7 +108,9 @@ def sync_jodi_snapshots(conn: Any) -> dict[str, Any]:
                 (country, product, indicator, period, val, row.get("Unit") or row.get("unit")),
             )
             upserted += 1
-    return {"status": "ok", "rows_upserted": upserted}
+    result = {"status": "ok", "rows_upserted": upserted, "data_source": "jodi"}
+    _record_jodi_sync(conn, result)
+    return result
 
 
 def _load_csv_text() -> str:

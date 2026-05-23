@@ -406,6 +406,11 @@ export default function LiveDataIntelPanel({
       value: syncStatus?.eurostat_trade_flow_count ?? dbCountFallback,
     },
     {
+      key: 'jodi-macro',
+      label: t('JODI (ספק/ביקוש)', 'JODI snapshots'),
+      value: syncStatus?.jodi_snapshot_count ?? dbCountFallback,
+    },
+    {
       key: 'eia-historic',
       label: t('היסטורי EIA', 'EIA historic'),
       value: syncStatus?.eia_historic_import_count ?? dbCountFallback,
