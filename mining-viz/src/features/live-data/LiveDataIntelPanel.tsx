@@ -425,7 +425,10 @@ export default function LiveDataIntelPanel({
     const comtrade = syncStatus.last_comtrade_sync_at
       ? new Date(syncStatus.last_comtrade_sync_at).toLocaleDateString()
       : null;
-    return { tiers, comtrade };
+    const eurostat = syncStatus.last_eurostat_sync_at
+      ? new Date(syncStatus.last_eurostat_sync_at).toLocaleDateString()
+      : null;
+    return { tiers, comtrade, eurostat };
   }, [syncStatus, syncStatusUnreachable]);
 
   const lastCargoSyncLabel = useMemo(() => {
@@ -847,6 +850,8 @@ export default function LiveDataIntelPanel({
               {globalCoverageBanner.tiers || t('אין מטען', 'no cargo')}{' '}
               {globalCoverageBanner.comtrade &&
                 ` · ${t('Comtrade', 'Comtrade')} ${globalCoverageBanner.comtrade}`}
+              {globalCoverageBanner.eurostat &&
+                ` · ${t('Eurostat', 'Eurostat')} ${globalCoverageBanner.eurostat}`}
             </p>
           )}
           <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2">

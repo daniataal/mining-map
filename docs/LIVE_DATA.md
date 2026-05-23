@@ -196,8 +196,6 @@ docker compose up -d oil-live-intel-worker
 | `ADMIN_TOKEN` | Graph-sync, admin ingest | Header `X-Admin-Token`. If unset in dev, admin routes are open (logged warning). |
 | `AISSTREAM_API_KEY` | Live vessel positions + port calls | Free at [AISStream](https://aisstream.io/). Partial open/community coverage; without it: seed/demo data only. |
 | `CENSUS_API_KEY` | U.S. bilateral HS27 macro trade on graph-sync | Free at [Census API signup](https://api.census.gov/data/key_signup.html). Step skipped if unset. Production deploy writes this from GitHub secret `CENSUS_API_KEY` via `.github/workflows/docker-image.yml`. |
-| `EUROSTAT_SYNC_ENABLED` | EU27 extra-EU crude macro (`eurostat_trade` step) | Default on (`true`). Set `false` to skip. No API key — [Eurostat REST](https://ec.europa.eu/eurostat/web/main/data/web-services). Rows land in `oil_trade_flows` with `data_source=eurostat`, `bol_tier=macro`. |
-| `EUROSTAT_DATASET` | Eurostat dataset code | Default `DS-045409` (EU extra-EU crude aggregate). Change only when targeting a different COMEXT table. |
 | `OIL_INTEL_INTERNAL_KEY` | Synthetic BOL rebuild from Python | Default `oil-intel-dev`; must match between backend and oil-live-intel. |
 | `DATABASE_URL` | All services | Shared Postgres `mining_db`. |
 
@@ -287,14 +285,14 @@ sudo docker logs mining-oil-live-graph-sync-worker --tail 80
 sudo docker logs mining-maritime-worker --tail 40
 
 # 7) Re-check counts (expect terminal_count >> 6)
-curl -sf http://localhost:8095/api/oil-live/sync-status | jq '{terminal_count, port_call_count, cargo_record_count, last_graph_sync_at}'
+curl -sf http://localhost:8095/api/oil-live/sync-status | jq '{terminal_count, port_call_count, cargo_record_count, last_graph_sync_at, eurostat_trade_flow_count, last_eurostat_sync_at, last_eurostat_sync_status}'
 ```
 
 Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYNC_ON_STARTUP=true` on the **backend** service in `docker-compose.prod.yml`, then recreate backend after oil-live-intel is healthy.
 
 After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
-**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts and `last_graph_sync_at`. Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
+**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts, `last_graph_sync_at`, and macro ingest health (`last_comtrade_sync_at`, `eurostat_trade_flow_count`, `last_eurostat_sync_at` / `last_eurostat_sync_status` from graph-sync `eurostat_trade` step). Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
 
 ```bash
 curl -sf http://localhost:8095/api/oil-live/health | jq .

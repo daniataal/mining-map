@@ -32,7 +32,10 @@ class TestParseEurostatJson(unittest.TestCase):
 
 class TestSyncSkippedWhenDisabled(unittest.TestCase):
     def test_disabled_returns_skipped(self) -> None:
-        import backend.services.eurostat_trade as et  # type: ignore
+        try:
+            import backend.services.eurostat_trade as et  # type: ignore
+        except ImportError:
+            import services.eurostat_trade as et  # type: ignore
 
         old = et.EUROSTAT_ENABLED
         try:
@@ -41,6 +44,35 @@ class TestSyncSkippedWhenDisabled(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
         finally:
             et.EUROSTAT_ENABLED = old
+
+
+class TestRecordEurostatSync(unittest.TestCase):
+    def test_writes_sync_state(self) -> None:
+        try:
+            from backend.services.eurostat_trade import _record_eurostat_sync
+        except ImportError:
+            from services.eurostat_trade import _record_eurostat_sync  # type: ignore
+
+        executed: list[tuple] = []
+
+        class _Cur:
+            def execute(self, sql: str, params: tuple) -> None:
+                executed.append((sql.strip(), params))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        class _Conn:
+            def cursor(self) -> _Cur:
+                return _Cur()
+
+        _record_eurostat_sync(_Conn(), {"status": "ok", "rows_upserted": 3})
+        self.assertEqual(len(executed), 1)
+        self.assertIn("last_eurostat_sync", executed[0][0])
+        self.assertIn('"status": "ok"', executed[0][1][0])
 
 
 if __name__ == "__main__":
