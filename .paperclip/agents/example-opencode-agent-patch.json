@@ -1,0 +1,43 @@
+{
+  "name": "Paperclip Triage (Ollama)",
+  "role": "researcher",
+  "title": "Paperclip Triage",
+  "icon": "list",
+  "reportsTo": "<PAPERCLIP_CEO_AGENT_ID>",
+  "capabilities": "Issue triage only — minimal Paperclip skill, ollama/llama3.2:3b, no repo edits.",
+  "adapterType": "opencode_local",
+  "adapterConfig": {
+    "cwd": "/workspace/shared",
+    "command": "opencode",
+    "model": "ollama/llama3.2:3b",
+    "dangerouslySkipPermissions": true,
+    "env": {
+      "HOME": { "type": "plain", "value": "/paperclip/instances/default/agents/<AGENT_ID>/opencode-home" },
+      "XDG_CONFIG_HOME": { "type": "plain", "value": "/paperclip/.config" },
+      "XDG_DATA_HOME": { "type": "plain", "value": "/paperclip/.local/share" },
+      "OLLAMA_HOST": { "type": "plain", "value": "http://host.docker.internal:11434" }
+    },
+    "promptTemplate": "You are {{agent.name}}. Handle this Paperclip wake only. Few tool steps. Short comment before exit.",
+    "paperclipRuntimeSkills": [
+      {
+        "key": "paperclip-minimal",
+        "runtimeName": "paperclip",
+        "source": "/paperclip/skills-minimal",
+        "required": true
+      }
+    ]
+  },
+  "runtimeConfig": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalSec": 0,
+      "wakeOnDemand": true,
+      "maxConcurrentRuns": 1
+    }
+  },
+  "instructionsBundle": {
+    "files": {
+      "AGENTS.md": "<paste from .paperclip/agents/triage/AGENTS.md>"
+    }
+  }
+}
