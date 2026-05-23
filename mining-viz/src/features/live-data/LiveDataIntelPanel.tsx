@@ -401,6 +401,11 @@ export default function LiveDataIntelPanel({
       value: syncStatus?.oil_trade_flow_count ?? dbCountFallback,
     },
     {
+      key: 'eurostat-macro',
+      label: t('Eurostat (EU)', 'Eurostat (EU)'),
+      value: syncStatus?.eurostat_trade_flow_count ?? dbCountFallback,
+    },
+    {
       key: 'eia-historic',
       label: t('היסטורי EIA', 'EIA historic'),
       value: syncStatus?.eia_historic_import_count ?? dbCountFallback,
