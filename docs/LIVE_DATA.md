@@ -1,6 +1,6 @@
 # Live Data — user onboarding
 
-**Last reviewed:** 2026-05-22
+**Last reviewed:** 2026-05-23
 
 ## What's implemented (2026-05)
 
@@ -300,6 +300,36 @@ curl -sf http://localhost:8095/api/oil-live/source-health | jq .
 ```
 
 Expect `terminal_count` ≫ 6 after graph-sync; `cargo_record_count` > 0 when port calls + rebuild succeeded.
+
+### Paperclip / Cursor CLI (agents)
+
+Repo **`.cursor/cli.json`** must contain **only** `permissions` (allow/deny globs). The Cursor CLI schema rejects `approvalMode`, `sandbox`, and other keys in the project file.
+
+Valid project file (commit `3b0f186` on `Paperclip`):
+
+```json
+{
+  "permissions": {
+    "allow": ["Shell(**)", "Mcp(**)"],
+    "deny": []
+  }
+}
+```
+
+| Setting | Where |
+|---------|--------|
+| Shell/MCP permissions | Repo `.cursor/cli.json` |
+| Headless approvals (`--yolo`, `--trust`) | Paperclip agent `extraArgs` on **Cursor Engineer** |
+| Sandbox disabled / network | Paperclip `extraArgs` or agent-home `cli-config.json`, not the repo |
+
+If a Paperclip wake fails with:
+
+```
+Invalid project config at /workspace/repo/.cursor/cli.json: schema validation failed.
+Unrecognized key(s): approvalMode, sandbox
+```
+
+remove those keys from the repo file and rely on Paperclip adapter config instead. Specialist agents: [PAPERCLIP_OLLAMA_AGENTS.md](PAPERCLIP_OLLAMA_AGENTS.md).
 
 ---
 
