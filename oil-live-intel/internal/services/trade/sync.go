@@ -146,7 +146,7 @@ func upsertBatch(ctx context.Context, pool *pgxpool.Pool, exp Exporter, hs strin
 				hs_code, hs_description, flow_type, year,
 				trade_value_usd, net_weight_kg, data_source
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-			ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year)
+			ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)
 			DO UPDATE SET
 				trade_value_usd = EXCLUDED.trade_value_usd,
 				net_weight_kg = EXCLUDED.net_weight_kg,

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
+from unittest import mock
+from unittest.mock import MagicMock
 
 try:
     from backend.services.eurostat_trade import _parse_eurostat_json, sync_eurostat_hs27
@@ -145,6 +148,81 @@ class TestRecordEurostatSync(unittest.TestCase):
         self.assertEqual(len(executed), 1)
         self.assertIn("last_eurostat_sync", executed[0][0])
         self.assertIn('"status": "ok"', executed[0][1][0])
+
+
+class TestEurostatUpsertPath(unittest.TestCase):
+    def test_upsert_calls_ingest_helpers(self) -> None:
+        try:
+            from backend.services import eurostat_trade as et  # type: ignore
+        except ImportError:
+            from services import eurostat_trade as et  # type: ignore
+
+        fake_ingest = MagicMock()
+        fake_ingest.ensure_table = MagicMock()
+        fake_ingest.upsert_rows = MagicMock(return_value=1)
+        modules = {
+            "backend.ingest_oil_trades": fake_ingest,
+            "ingest_oil_trades": fake_ingest,
+        }
+        conn = MagicMock()
+        rows = [
+            {
+                "reporter": "Germany",
+                "reporter_iso2": "DE",
+                "partner": "Russia",
+                "hs_code": "2709",
+                "hs_description": "Crude oil",
+                "flow_type": "M",
+                "year": 2024,
+                "trade_value_usd": 1000.0,
+                "raw": {"dimensions": {"geo": "DE", "partner": "RU"}},
+            }
+        ]
+        with mock.patch.dict(sys.modules, modules):
+            count = et._upsert_oil_trade_flows(conn, rows)
+
+        self.assertEqual(count, 1)
+        fake_ingest.ensure_table.assert_called_once_with(conn)
+        fake_ingest.upsert_rows.assert_called_once()
+        ingest_rows = fake_ingest.upsert_rows.call_args[0][1]
+        self.assertEqual(ingest_rows[0]["reporter_m49"], "DE")
+        self.assertEqual(ingest_rows[0]["partner_m49"], "RU")
+        self.assertEqual(ingest_rows[0]["hs_description"], "Crude oil")
+        self.assertEqual(ingest_rows[0]["data_source"], "eurostat")
+
+
+class TestOilTradeFlowsUniqueKey(unittest.TestCase):
+    def test_upsert_sql_includes_data_source_in_conflict_target(self) -> None:
+        from pathlib import Path
+
+        ingest_py = Path(__file__).resolve().parents[1] / "ingest_oil_trades.py"
+        source = ingest_py.read_text(encoding="utf-8")
+        self.assertIn(
+            "ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)",
+            source,
+        )
+
+    def test_graph_sync_applies_migration_018_when_constraint_missing(self) -> None:
+        try:
+            from backend.services import oil_live_graph_sync as gs  # type: ignore
+        except ImportError:
+            from services import oil_live_graph_sync as gs  # type: ignore
+
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.fetchone.side_effect = [
+            (False,),  # port_calls.metadata exists → skip 011
+            (True,),  # macro_source_unique missing → apply 018
+        ]
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        with mock.patch.object(gs, "_table_exists", return_value=True), mock.patch.object(
+            gs, "_apply_migration_file"
+        ) as apply_mock:
+            gs.ensure_commercial_graph_tables(conn)
+
+        apply_mock.assert_called_once_with(conn, gs._MIGRATION_018)
 
 
 class TestEurostatIngestRow(unittest.TestCase):
