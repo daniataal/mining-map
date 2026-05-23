@@ -87,6 +87,8 @@ export const apiClient = axios.create({
   },
 });
 
+export { clearMiningAuthStorage, MINING_AUTH_STORAGE_KEYS } from './miningAuth';
+
 let licensesFallbackDataPromise: Promise<MiningLicense[]> | null = null;
 
 async function loadBundledLicenseFallback(): Promise<MiningLicense[]> {
