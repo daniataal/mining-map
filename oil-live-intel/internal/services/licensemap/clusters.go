@@ -194,7 +194,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 			EntityKind:        "license",
 		})
 	}
-	return out, rows.Err()
+	return MergeClusters(out, g), rows.Err()
 }
 
 // ValidBBox returns false for degenerate boxes.

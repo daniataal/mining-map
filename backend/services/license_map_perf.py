@@ -14,14 +14,16 @@ def license_grid_degrees(zoom: Optional[float]) -> Optional[float]:
         z = float(zoom)
     except (TypeError, ValueError):
         return None
-    # z >= 7: bbox points + client MarkerClusterGroup (avoids 1.5° grid soup).
+    # z >= 7: bbox points + client MarkerClusterGroup (avoids grid soup).
     if z >= 7:
         return None
     if z < 3:
-        return 12.0
+        return 16.0
     if z < 4:
+        return 12.0
+    if z < 5:
         return 8.0
-    return 4.0
+    return 6.0
 
 
 def license_cluster_min_count(grid_deg: float) -> int:
@@ -30,7 +32,104 @@ def license_cluster_min_count(grid_deg: float) -> int:
         g = float(grid_deg)
     except (TypeError, ValueError):
         return 2
-    return 3 if g >= 4.0 else 2
+    if g >= 12.0:
+        return 4
+    if g >= 4.0:
+        return 3
+    return 2
+
+
+def _cluster_cell_key(lat: float, lng: float, grid_deg: float) -> tuple[int, int]:
+    return (round(lat / grid_deg), round(lng / grid_deg))
+
+
+def merge_license_clusters(
+    clusters: list[dict[str, Any]], *, grid_deg: float
+) -> list[dict[str, Any]]:
+    """Merge neighboring grid bubbles so continental zoom shows fewer overlapping markers."""
+    if len(clusters) < 2 or grid_deg <= 0:
+        return clusters
+
+    parent = list(range(len(clusters)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        pi, pj = find(i), find(j)
+        if pi != pj:
+            parent[pj] = pi
+
+    cells: dict[tuple[int, int], list[int]] = {}
+    for idx, cluster in enumerate(clusters):
+        key = _cluster_cell_key(float(cluster["lat"]), float(cluster["lng"]), grid_deg)
+        cells.setdefault(key, []).append(idx)
+
+    for (iy, ix), members in list(cells.items()):
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                neighbor = cells.get((iy + dy, ix + dx))
+                if not neighbor:
+                    continue
+                for i in members:
+                    for j in neighbor:
+                        union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for idx in range(len(clusters)):
+        groups.setdefault(find(idx), []).append(idx)
+
+    merged: list[dict[str, Any]] = []
+    for members in groups.values():
+        if len(members) == 1:
+            merged.append(clusters[members[0]])
+            continue
+        total = 0
+        wlat = 0.0
+        wlng = 0.0
+        country = ""
+        sector = "mining"
+        for idx in members:
+            row = clusters[idx]
+            cnt = int(row.get("mapClusterCount") or 0)
+            total += cnt
+            wlat += float(row["lat"]) * cnt
+            wlng += float(row["lng"]) * cnt
+            if not country and row.get("country"):
+                country = str(row["country"])
+            if row.get("sector"):
+                sector = str(row["sector"])
+        if total <= 0:
+            merged.append(clusters[members[0]])
+            continue
+        lat = wlat / total
+        lng = wlng / total
+        merged.append(
+            {
+                "id": f"cluster:{round(lat, 4)}:{round(lng, 4)}",
+                "company": f"{total} licenses",
+                "licenseType": "Cluster",
+                "commodity": "",
+                "status": "Active",
+                "date": None,
+                "country": country,
+                "region": "",
+                "sector": sector,
+                "lat": lat,
+                "lng": lng,
+                "mapClusterCount": total,
+                "mapClusterGridDeg": float(grid_deg),
+                "entityKind": "license",
+            }
+        )
+
+    merged.sort(key=lambda row: int(row.get("mapClusterCount") or 0), reverse=True)
+    return merged
 
 
 def query_license_clusters(
@@ -119,7 +218,7 @@ def query_license_clusters(
                 "entityKind": "license",
             }
         )
-    return out
+    return merge_license_clusters(out, grid_deg=g)
 
 
 def simplify_tolerance_for_zoom(zoom: Optional[float]) -> float:

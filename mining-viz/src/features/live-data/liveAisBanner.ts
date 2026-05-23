@@ -25,13 +25,23 @@ export function resolveLiveAisBanner(
   const workerStatus = (options.platformHealth?.maritime_worker?.status ?? '').toLowerCase();
   const keyMissing = options.platformHealth?.maritime_snapshot?.available === false && !workerErr;
 
+  if (workerStatus === 'stale_error') {
+    return {
+      kind: 'tls_expired',
+      messageHe:
+        'אין AIS חי — סטטוס ingest ישן (תעודת AISStream תקפה). הפעילו מחדש maritime-worker ו-oil-live-intel-worker.',
+      messageEn:
+        'No live AIS — stale ingest status (AISStream TLS is valid upstream). Force-recreate maritime-worker and oil-live-intel-worker.',
+    };
+  }
+
   if (workerErr.includes('certificate has expired') || workerErr.includes('CERTIFICATE_VERIFY_FAILED')) {
     return {
       kind: 'tls_expired',
       messageHe:
-        'אין AIS חי — תעודת TLS של AISStream פגה. פרטים בשורת מצב הפלטפורמה למעלה; הפעילו מחדש maritime-worker.',
+        'אין AIS חי — שגיאת TLS של AISStream. פרטים בשורת מצב הפלטפורמה; הפעילו מחדש maritime-worker עם MARITIME_SSL_AUTO_FALLBACK=1.',
       messageEn:
-        'No live AIS — AISStream TLS certificate expired. See the platform status bar above; recreate maritime-worker when ready.',
+        'No live AIS — AISStream TLS error. See the platform status bar; recreate maritime-worker with MARITIME_SSL_AUTO_FALLBACK=1.',
     };
   }
 

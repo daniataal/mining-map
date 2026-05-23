@@ -65,7 +65,7 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 	cycleCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
-	return ais.RunStream(cycleCtx, sub, func(ctx context.Context, u *ais.Update) error {
+	return ais.RunStreamWithTLSFallback(cycleCtx, sub, func(ctx context.Context, u *ais.Update) error {
 		term := index.Match(u.Lat, u.Lon)
 		nearSulfur := term != nil && term.HasSulfur
 		if !ais.IsRelevantVessel(u.ShipTypeCode, u.ShipTypeLabel, u.Name, nearSulfur) {
@@ -98,7 +98,7 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 			})
 		}
 		return nil
-	}, cfg.AISInsecureTLS)
+	}, cfg.AISInsecureTLS, cfg.AISAutoTLSFallback)
 }
 
 func loadTerminalCoords(ctx context.Context, pool *pgxpool.Pool) (lats, lons []float64, err error) {

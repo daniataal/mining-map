@@ -43,6 +43,25 @@ def build_platform_health(
         maritime_worker = {"status": "error", "last_error": str(exc)}
 
     worker_status = str(maritime_worker.get("status") or "unknown")
+    last_error = str(maritime_worker.get("last_error") or "")
+    if worker_status == "error" and "expired" in last_error.lower():
+        try:
+            from backend.services.maritime_ssl import probe_aisstream_tls
+        except ImportError:
+            from services.maritime_ssl import probe_aisstream_tls  # type: ignore[no-redef]
+
+        tls_ok, tls_detail = probe_aisstream_tls()
+        if tls_ok:
+            maritime_worker = {
+                **maritime_worker,
+                "status": "stale_error",
+                "recovery_hint": (
+                    "AISStream TLS is valid upstream; maritime-worker last_error is stale. "
+                    "Force-recreate maritime-worker and oil-live-intel-worker after setting AISSTREAM_API_KEY."
+                ),
+                "aisstream_tls_valid_until": tls_detail,
+            }
+            worker_status = "stale_error"
     worker_healthy = worker_status in {"ok", "running", "idle"}
     snapshot_ok = bool(maritime_snapshot.get("available")) and not bool(maritime_snapshot.get("stale"))
 

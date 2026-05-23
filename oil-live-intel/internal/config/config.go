@@ -24,6 +24,7 @@ type Config struct {
 	InternalBroadcastKey    string
 	AISPositionRetainHours  int
 	AISInsecureTLS          bool
+	AISAutoTLSFallback      bool
 	ElasticsearchURL        string
 	SearchIndexerInterval   int
 }
@@ -49,6 +50,7 @@ func Load() Config {
 		InternalBroadcastKey:   env("OIL_INTEL_INTERNAL_KEY", "oil-intel-dev"),
 		AISPositionRetainHours: envInt("AIS_POSITION_RETAIN_HOURS", 72),
 		AISInsecureTLS:         aisInsecureTLS(),
+		AISAutoTLSFallback:     aisAutoTLSFallback(),
 		ElasticsearchURL:       strings.TrimRight(env("ELASTICSEARCH_URL", "http://elasticsearch:9200"), "/"),
 		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
 	}
@@ -93,6 +95,20 @@ func aisInsecureTLS() bool {
 	}
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv("MARITIME_SSL_VERIFY")))
 	return raw == "0" || raw == "false" || raw == "no" || raw == "off"
+}
+
+// aisAutoTLSFallback mirrors Python MARITIME_SSL_AUTO_FALLBACK (default on).
+func aisAutoTLSFallback() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("MARITIME_SSL_AUTO_FALLBACK")))
+	if raw == "" {
+		return true
+	}
+	switch raw {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func envDisableDemoSeed(key string) bool {

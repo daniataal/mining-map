@@ -41,6 +41,7 @@ import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
   CanvasVesselLayer,
+  filterVesselsByViewport,
   sortVesselsForDisplay,
   toVesselDrawRecords,
   planVesselLodDraw,
@@ -70,6 +71,7 @@ import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
 import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
 import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
+import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
 import { getOilLiveSyncStatus } from '../api/oilLiveApi';
 import { LIVE_DATA_HUB_BOUNDS, LIVE_DATA_DEFAULT_LAYERS, GOVERNMENT_AIS_COVERAGE_SOURCES, viewportOverlapsPersianGulfHub } from '../features/live-data/liveDataMapDefaults';
@@ -84,8 +86,12 @@ import {
     clusterTargetZoom,
     isServerLicenseCluster,
     LICENSE_MAP_DEFAULT_ZOOM,
+    planClusterDrillFly,
     serverClusterFlyBounds,
+    SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from '../lib/licenseMapCluster';
+import { capMarkersInViewport } from '../lib/mapDomMarkerCap';
+import { LICENSE_MAP_DOM_MARKER_CAP, MAP_VIEWPORT_DEBOUNCE_MS } from '../lib/mapViewportDebounce';
 import {
   createLicenseClusterIconFactory,
   createServerLicenseClusterIcon,
@@ -254,6 +260,8 @@ interface MapComponentProps {
   onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds | null) => void;
   /** Map zoom for license clustering and overlay LOD. */
   onLicenseMapZoomChange?: (zoom: number) => void;
+  /** After server-cluster drill fly completes — refetch viewport licenses. */
+  onLicenseClusterDrillComplete?: () => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -319,6 +327,8 @@ interface MapComponentProps {
   }) => void;
   liveDataMacroTradeOn?: boolean;
   onLiveDataMacroTradeChange?: (on: boolean) => void;
+  liveDataEiaHistoricOn?: boolean;
+  onLiveDataEiaHistoricChange?: (on: boolean) => void;
   oilLiveSidebarActive?: boolean;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
@@ -335,6 +345,9 @@ interface MapComponentProps {
   eiaHistoricMapYear?: number;
   eiaHistoricShowCorridors?: boolean;
   onEiaHistoricSelectImporter?: (importerName: string) => void;
+  onEiaHistoricViewArcDetails?: (
+    selection: import('../features/live-data/HistoricArcDetailDrawer').HistoricArcSelection,
+  ) => void;
   /** Hide mining license clusters so historic EIA points are clickable */
   suppressLicenseClusters?: boolean;
   /** Do not paint license markers (Historic / Live Data tabs). */
@@ -342,7 +355,14 @@ interface MapComponentProps {
   /** Show OSM petroleum infrastructure on mining/global/oil views. */
   showInfrastructureLayers?: boolean;
   infrastructureLayerVisibility?: Record<OsmPetroleumLayerId, boolean>;
+  infrastructureForcedLayers?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  infrastructureMapZoom?: number;
+  infrastructureMapBbox?: import('../lib/petroleumLayers').PetroleumViewportBounds | null;
+  infrastructurePanelHint?: 'zoom' | 'off' | null;
   onInfrastructureLayerChange?: (layerId: OsmPetroleumLayerId, visible: boolean) => void;
+  onInfrastructureFeatureClick?: (
+    selection: import('../features/infrastructure/InfrastructureFeatureDrawer').InfrastructureFeatureSelection,
+  ) => void;
   /** Comtrade/Census macro country-pair arcs (gray). */
   macroTradeFlowsEnabled?: boolean;
   macroTradeFlows?: MacroTradeFlow[];
@@ -446,20 +466,24 @@ const LicenseClusterFlyEffect = ({
     cluster,
     onLicenseMapZoomChange,
     onLicenseMapViewportChange,
+    onLicenseClusterDrillComplete,
     onComplete,
 }: {
     cluster: MiningLicense | null;
     onLicenseMapZoomChange?: (zoom: number) => void;
     onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
+    onLicenseClusterDrillComplete?: () => void;
     onComplete: () => void;
 }) => {
     const map = useMap();
     const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
     const onLicenseMapViewportChangeRef = useRef(onLicenseMapViewportChange);
+    const onLicenseClusterDrillCompleteRef = useRef(onLicenseClusterDrillComplete);
     const onCompleteRef = useRef(onComplete);
     const clusterRef = useRef(cluster);
     onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
     onLicenseMapViewportChangeRef.current = onLicenseMapViewportChange;
+    onLicenseClusterDrillCompleteRef.current = onLicenseClusterDrillComplete;
     onCompleteRef.current = onComplete;
     clusterRef.current = cluster;
     const clusterFlyId = cluster?.id ?? null;
@@ -477,11 +501,22 @@ const LicenseClusterFlyEffect = ({
             [flyBox.south, flyBox.west],
             [flyBox.north, flyBox.east],
         );
-        const targetZoom = clusterTargetZoom(map.getZoom());
+        const boundsSpanDeg = Math.max(
+            Math.abs(flyBox.north - flyBox.south),
+            Math.abs(flyBox.east - flyBox.west),
+        );
+        const boundsFitZoom = map.getBoundsZoom(bounds, false, [36, 36]);
+        const flyPlan = planClusterDrillFly(map.getZoom(), boundsSpanDeg, boundsFitZoom);
         let finished = false;
         const finish = () => {
             if (finished) return;
             finished = true;
+            let zoom = map.getZoom();
+            if (zoom < SERVER_CLUSTER_MIN_DRILL_ZOOM) {
+                const targetZoom = clusterTargetZoom(zoom);
+                map.setView([lat, lng], targetZoom, { animate: false });
+                zoom = map.getZoom();
+            }
             const mapBounds = map.getBounds();
             if (mapBounds.isValid()) {
                 onLicenseMapViewportChangeRef.current?.({
@@ -491,15 +526,20 @@ const LicenseClusterFlyEffect = ({
                     east: Number(mapBounds.getEast().toFixed(4)),
                 });
             }
-            onLicenseMapZoomChangeRef.current?.(map.getZoom());
+            onLicenseMapZoomChangeRef.current?.(zoom);
+            onLicenseClusterDrillCompleteRef.current?.();
             onCompleteRef.current();
         };
         map.stop();
-        map.flyToBounds(bounds, {
-            maxZoom: Math.min(LICENSE_CLUSTER_FIT_MAX_ZOOM, targetZoom + 1),
-            duration: 0.55,
-            padding: [36, 36],
-        });
+        if (flyPlan.mode === 'center') {
+            map.flyTo([lat, lng], flyPlan.zoom, { duration: 0.55 });
+        } else {
+            map.flyToBounds(bounds, {
+                maxZoom: flyPlan.maxZoom,
+                duration: 0.55,
+                padding: [36, 36],
+            });
+        }
         map.once('moveend', finish);
         return () => {
             map.off('moveend', finish);
@@ -636,7 +676,7 @@ const LiveDataMapFly = ({
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
-    debounceMs = 0,
+    debounceMs = MAP_VIEWPORT_DEBOUNCE_MS,
 }: {
     active: boolean;
     onBoundsChange: (bbox: MaritimeViewportBounds | null) => void;
@@ -659,7 +699,7 @@ const ViewportBoundsTracker = ({
         const signature = `${nextBounds.south}:${nextBounds.west}:${nextBounds.north}:${nextBounds.east}`;
         if (signature === lastSignatureRef.current) return;
         lastSignatureRef.current = signature;
-        onBoundsChange(nextBounds);
+        startTransition(() => onBoundsChange(nextBounds));
     }, [active, map, onBoundsChange]);
 
     const scheduleEmitBounds = useCallback(() => {
@@ -747,6 +787,7 @@ export default function MapComponent({
   countryFocusBoundsTrigger = 0,
   onLicenseMapViewportChange,
   onLicenseMapZoomChange,
+  onLicenseClusterDrillComplete,
   storageEntities = [],
   onStorageInViewCountChange,
   oilLiveOverlaysEnabled = false,
@@ -769,15 +810,23 @@ export default function MapComponent({
   eiaHistoricMapYear,
   eiaHistoricShowCorridors = false,
   onEiaHistoricSelectImporter,
+  onEiaHistoricViewArcDetails,
   suppressLicenseClusters = false,
   hideLicenseMarkers = false,
   showInfrastructureLayers = false,
   infrastructureLayerVisibility,
+  infrastructureForcedLayers,
+  infrastructureMapZoom,
+  infrastructureMapBbox,
+  infrastructurePanelHint,
   onInfrastructureLayerChange,
+  onInfrastructureFeatureClick,
   macroTradeFlowsEnabled = false,
   macroTradeFlows = [],
   liveDataMacroTradeOn = true,
   onLiveDataMacroTradeChange,
+  liveDataEiaHistoricOn = false,
+  onLiveDataEiaHistoricChange,
   oilLiveSidebarActive = false,
 }: MapComponentProps) {
     const { t } = useI18n();
@@ -790,7 +839,11 @@ export default function MapComponent({
         viewModeKey === 'global' ||
         viewModeKey === 'suppliers';
     const isLiveDataView = oilLiveSidebarActive;
-    const { data: oilLiveSyncStatus } = useQuery({
+    const {
+        data: oilLiveSyncStatus,
+        isError: oilLiveSyncStatusError,
+        isPending: oilLiveSyncStatusPending,
+    } = useQuery({
         queryKey: ['oil-live-sync-status-map'],
         queryFn: getOilLiveSyncStatus,
         enabled: isLiveDataView && oilLiveOverlaysEnabled,
@@ -840,6 +893,7 @@ export default function MapComponent({
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
+    const [licenseViewport, setLicenseViewport] = useState<MaritimeViewportBounds | null>(null);
     const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<MiningLicense | null>(
         null,
     );
@@ -851,6 +905,19 @@ export default function MapComponent({
         },
         [setIsMaritimeLayerEnabled],
     );
+    const handleLicenseViewportChange = useCallback(
+        (bbox: MaritimeViewportBounds | null) => {
+            setLicenseViewport(bbox);
+            onLicenseMapViewportChange?.(bbox);
+        },
+        [onLicenseMapViewportChange],
+    );
+    const handleLicenseZoomChange = useCallback(
+        (zoom: number) => {
+            onLicenseMapZoomChange?.(zoom);
+        },
+        [onLicenseMapZoomChange],
+    );
     const vesselApiScope =
         prioritizePetroleumVessels && isOilAndGasView ? ('oil_tankers' as const) : ('all_vessels' as const);
 
@@ -858,51 +925,6 @@ export default function MapComponent({
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
     const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
 
-    const mobileFilteredData = useMemo(() => {
-        if (!isMobileDevice || !currentVisibleViewport) {
-            return { data: displayData, capped: false };
-        }
-        const filtered = displayData.filter((item) => {
-            if (item.lat == null || item.lng == null) return false;
-            if (selectedItem && item.id === selectedItem.id) return true;
-            return (
-                item.lat >= currentVisibleViewport.south &&
-                item.lat <= currentVisibleViewport.north &&
-                item.lng >= currentVisibleViewport.west &&
-                item.lng <= currentVisibleViewport.east
-            );
-        });
-
-        const MOBILE_RENDER_LIMIT = 800;
-        if (filtered.length > MOBILE_RENDER_LIMIT) {
-            const capped = filtered.slice(0, MOBILE_RENDER_LIMIT);
-            if (selectedItem) {
-                const selected = filtered.find((item) => item.id === selectedItem.id);
-                if (selected && !capped.some((item) => item.id === selected.id)) {
-                    capped[capped.length - 1] = selected;
-                }
-            }
-            return { data: capped, capped: true };
-        }
-        return { data: filtered, capped: false };
-    }, [displayData, selectedItem, isMobileDevice, currentVisibleViewport]);
-
-    const mapDisplayData = useMemo(() => {
-        if (isMobileDevice) {
-            return mobileFilteredData.data;
-        }
-
-        if (viewModeKey !== 'ports' || displayData.length <= PORTS_MAP_RENDER_LIMIT) {
-            return displayData;
-        }
-        const capped = displayData.slice(0, PORTS_MAP_RENDER_LIMIT);
-        if (!selectedItem) return capped;
-        const selected = displayData.find((item) => item.id === selectedItem.id);
-        if (!selected || capped.some((item) => item.id === selected.id)) {
-            return capped;
-        }
-        return [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
-    }, [displayData, selectedItem, viewModeKey, isMobileDevice, mobileFilteredData]);
     const {
         data: maritimeFeed,
         isLoading: isMaritimeLoading,
@@ -960,6 +982,46 @@ export default function MapComponent({
       !isRoutePlannerView &&
       (!isLiveDataView || countryFocusActive);
     const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers;
+
+    const { mapDisplayData, licenseMarkersCapped } = useMemo(() => {
+        let data = displayData;
+
+        if (viewModeKey === 'ports' && data.length > PORTS_MAP_RENDER_LIMIT) {
+            const capped = data.slice(0, PORTS_MAP_RENDER_LIMIT);
+            if (selectedItem) {
+                const selected = displayData.find((item) => item.id === selectedItem.id);
+                if (selected && !capped.some((item) => item.id === selected.id)) {
+                    data = [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
+                } else {
+                    data = capped;
+                }
+            } else {
+                data = capped;
+            }
+        }
+
+        const serverClusterMode = data.some(isServerLicenseCluster);
+        if (showLicenseMarkers && !serverClusterMode && data.length > LICENSE_MAP_DOM_MARKER_CAP) {
+            const markerViewport = isMobileDevice ? currentVisibleViewport : licenseViewport;
+            const capped = capMarkersInViewport(
+                data,
+                markerViewport,
+                LICENSE_MAP_DOM_MARKER_CAP,
+                selectedItem?.id,
+            );
+            return { mapDisplayData: capped.data, licenseMarkersCapped: capped.capped };
+        }
+
+        return { mapDisplayData: data, licenseMarkersCapped: false };
+    }, [
+        displayData,
+        selectedItem,
+        viewModeKey,
+        isMobileDevice,
+        currentVisibleViewport,
+        licenseViewport,
+        showLicenseMarkers,
+    ]);
 
     useEffect(() => {
         if (!isOilAndGasView || !onStorageInViewCountChange) return;
@@ -1247,11 +1309,13 @@ export default function MapComponent({
         }
         const server: ReactNode[] = [];
         const points: ReactNode[] = [];
+        const serverClusterMode = mapDisplayData.some(isServerLicenseCluster);
         for (const item of mapDisplayData) {
             if (item._displayLat == null || item._displayLng == null) continue;
             const markerIcon = licenseMarkerIcons.get(item.id);
             if (!markerIcon) continue;
             const isServerCluster = isServerLicenseCluster(item);
+            if (!isServerCluster && serverClusterMode) continue;
             const marker = (
                 <Marker
                     key={item.id}
@@ -1473,7 +1537,14 @@ export default function MapComponent({
                         macroTradeOn={liveDataMacroTradeOn && macroTradeFlowsEnabled}
                     />
                 </div>
-                <div className="absolute left-1/2 -translate-x-1/2 top-24 z-[950] pointer-events-auto">
+                <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-auto px-2 w-full max-w-[520px] flex justify-center">
+                    <LiveDataSyncStatusBanner
+                        syncStatus={oilLiveSyncStatus}
+                        unreachable={oilLiveSyncStatusError}
+                        pending={oilLiveSyncStatusPending}
+                    />
+                </div>
+                <div className="absolute left-1/2 -translate-x-1/2 top-[7.5rem] z-[950] pointer-events-auto">
                     <GraphSyncMapBanner cargoRecordCount={oilLiveSyncStatus?.cargo_record_count} />
                 </div>
                 </>
@@ -1492,6 +1563,9 @@ export default function MapComponent({
                         onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
                         macroTradeEnabled={liveDataMacroTradeOn}
                         onMacroTradeChange={onLiveDataMacroTradeChange}
+                        eiaHistoricEnabled={liveDataEiaHistoricOn}
+                        onEiaHistoricChange={onLiveDataEiaHistoricChange}
+                        eiaHistoricRowCount={oilLiveSyncStatus?.eia_historic_import_count ?? null}
                         governmentAisCoverageEnabled={governmentAisCoverageEnabled}
                         onGovernmentAisCoverageChange={setGovernmentAisCoverageEnabled}
                     />
@@ -1506,6 +1580,8 @@ export default function MapComponent({
                     <InfrastructureLayersPanel
                         visibility={infrastructureLayerVisibility}
                         onChange={onInfrastructureLayerChange}
+                        mapZoom={infrastructureMapZoom}
+                        panelHint={infrastructurePanelHint}
                     />
                 </div>
             )}
@@ -1915,7 +1991,6 @@ export default function MapComponent({
                 />
                 <ViewportBoundsTracker
                     active={isMaritimeMapView && isMaritimeLayerEnabled}
-                    debounceMs={50}
                     onBoundsChange={setMaritimeViewport}
                 />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
@@ -1926,28 +2001,25 @@ export default function MapComponent({
                         isLicenseMapView &&
                         (!isLiveDataView || countryFocusActive)
                     }
-                    debounceMs={0}
-                    onBoundsChange={(bbox) => onLicenseMapViewportChange?.(bbox)}
+                    onBoundsChange={handleLicenseViewportChange}
                 />
                 <ViewportBoundsTracker
                     active={isOilAndGasView}
-                    debounceMs={100}
                     onBoundsChange={setOilGasMapViewport}
                 />
                 <ViewportBoundsTracker
                     active={isLiveDataView && oilLiveOverlaysEnabled}
-                    debounceMs={100}
                     onBoundsChange={setLiveDataMapViewport}
                 />
-                {isMobileDevice && mobileFilteredData.capped && (
+                {licenseMarkersCapped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
-                            {t('ביצועי מובייל אופטימליים', 'Mobile performance optimized')}
+                            {t('מגבלת סימנים לביצועים', 'Marker limit for performance')}
                         </p>
                         <p className="text-[10px] text-slate-400 text-center text-xs">
                             {t(
-                                'מוצגות רק 800 הקונססיות הקרובות ביותר. עשה זום-אין לצפייה בשאר.',
-                                'Showing nearest 800 concessions only. Zoom in to view others.'
+                                `מוצגות עד ${LICENSE_MAP_DOM_MARKER_CAP} קונססיות בתצוגה. התקרבו לזום-אין לפרטים נוספים.`,
+                                `Showing up to ${LICENSE_MAP_DOM_MARKER_CAP} concessions in view. Zoom in for more detail.`
                             )}
                         </p>
                     </div>
@@ -1957,7 +2029,7 @@ export default function MapComponent({
                         onZoomChange={(z) => {
                             setPetroleumMapZoom(z);
                             setOverlayMapZoom(z);
-                            onLicenseMapZoomChange?.(z);
+                            handleLicenseZoomChange(z);
                         }}
                     />
                 )}
@@ -1965,7 +2037,7 @@ export default function MapComponent({
                     <MapZoomTracker
                         onZoomChange={(z) => {
                             setOverlayMapZoom(z);
-                            onLicenseMapZoomChange?.(z);
+                            handleLicenseZoomChange(z);
                         }}
                     />
                 )}
@@ -1973,7 +2045,7 @@ export default function MapComponent({
                     isLicenseMapView &&
                     (!isLiveDataView || countryFocusActive) &&
                     !isOilAndGasView && (
-                        <MapZoomTracker onZoomChange={onLicenseMapZoomChange} />
+                        <MapZoomTracker onZoomChange={handleLicenseZoomChange} />
                     )}
                 {isMaritimeMapView && isMaritimeLayerEnabled && (
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
@@ -1981,8 +2053,9 @@ export default function MapComponent({
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <LicenseClusterFlyEffect
                     cluster={pendingLicenseClusterFly}
-                    onLicenseMapZoomChange={onLicenseMapZoomChange}
-                    onLicenseMapViewportChange={onLicenseMapViewportChange}
+                    onLicenseMapZoomChange={handleLicenseZoomChange}
+                    onLicenseMapViewportChange={handleLicenseViewportChange}
+                    onLicenseClusterDrillComplete={onLicenseClusterDrillComplete}
                     onComplete={() => setPendingLicenseClusterFly(null)}
                 />
                 <LicenseMapPopupController
@@ -2102,6 +2175,7 @@ export default function MapComponent({
                             year={eiaHistoricMapYear}
                             showCorridors={eiaHistoricShowCorridors}
                             onSelectImporter={onEiaHistoricSelectImporter}
+                            onViewArcDetails={onEiaHistoricViewArcDetails}
                         />
                     )}
                     {macroTradeFlowsEnabled && macroTradeFlows.length > 0 && (
@@ -2112,9 +2186,12 @@ export default function MapComponent({
                     )}
                     {showInfrastructureLayers && onGroundVisible && !isLiveDataView && (
                         <OsmPetroleumMapLayers
-                            bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                            bbox={infrastructureMapBbox ?? WORLD_PETROLEUM_PRELOAD_BBOX}
                             enabled
                             layerVisibility={infrastructureLayerVisibility}
+                            forcedLayers={infrastructureForcedLayers}
+                            mapZoom={infrastructureMapZoom}
+                            onFeatureClick={onInfrastructureFeatureClick}
                         />
                     )}
                     {isOilAndGasView && onGroundVisible && (

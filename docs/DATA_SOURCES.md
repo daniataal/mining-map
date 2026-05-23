@@ -41,10 +41,37 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Norway | oil_and_gas | `norway_npd_production_licences_current` | NPD Factmaps |
 | Finland | mining | `finland_tukes_active_mining_areas` | Tukes via GTK |
 | Colombia | mining | `colombia_anm_titulo_vigente` | ANM ServiciosANM layer 4, capped 2000 |
+| Mexico | mining | `mexico_inecc_concesiones_mineras` | INECC Atlas Minero MapServer/22; national concessions; capped 2000/run |
 | Peru | mining | `peru_ingemmet_derechos_mineros` | INGEMMET Derechos Mineros; ~2k cap (no offset pagination) |
 | Australia (QLD) | mining | `australia_queensland_mineral_tenement` | State only, capped |
 | Global | mining | `usgs_mrds_global` | **Fallback** — sites/deposits, not licences; updates ceased ~2011 |
 | Global | oil_and_gas | `megagiant_oil_gas_fields_world` | **Fallback** — giant fields only |
+
+#### Mexico — `mexico_inecc_concesiones_mineras` (MAD-77)
+
+| | |
+|--|--|
+| **URL** | https://mapas.inecc.gob.mx/ArcGIS/rest/services/Atlas_Minero_Mercurio/MapServer/22 |
+| **License** | Mexican government open GIS (INECC Atlas Minero; concession attributes from national mining cadastre) |
+| **Refresh cadence** | On-demand via `POST /api/admin/open-data/sync?source_id=mexico_inecc_concesiones_mineras`; optional daily worker with other `OPEN_DATA_SOURCES` |
+| **Ingest** | `open_data_sync` ArcGIS query → idempotent upsert (`record_origin=open_data`) |
+| **Match keys** | Primary: `TITULO` (concession title no.); fallback: `OBJECTID`; holder: `TITULAR` |
+| **Mapped fields** | `TITULAR` → company; `NOMBRELOTE` → license type label; `SUST1`–`SUST3` → commodity codes; `MUNICIPIO` + `NOM_ENT` → region |
+| **Tier honesty** | National polygon layer (~25k features); sync capped at **2000 records/run** for MVP performance — not a live SGM portal scrape |
+| **Verify** | `curl` layer `returnCountOnly`; after sync: `SELECT COUNT(*) FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras'`; sample `id` like `mexico_inecc_concesiones_mineras:232215` |
+
+#### GEM — `gem_global_extraction_tracker_march_2026` (MAD-99)
+
+| | |
+|--|--|
+| **File** | `Global-Oil-and-Gas-Extraction-Tracker-March-2026.xlsx` (repo root or `GEM_TRACKER_XLSX_PATH`) |
+| **License** | [Global Energy Monitor](https://globalenergymonitor.org/projects/global-oil-gas-extraction-tracker/) open tracker (March 2026) |
+| **Refresh cadence** | On-demand `POST /api/admin/gem-extraction-tracker/ingest`; optional auto step on `POST /api/admin/oil-live/graph-sync` when `GEM_TRACKER_AUTO_INGEST=true` |
+| **Ingest** | `gem_extraction_tracker_import.py` — Field-level main data (~7.6k rows); reserves/production merged into `raw_payload` when present |
+| **Match keys** | Primary: `Unit ID` → `id` prefix `gem_global_extraction_tracker_march_2026:` |
+| **Mapped fields** | `Operator`/`Owner(s)` → company; `Country/Area` → country; `Subnational unit`/`Basin`/`Block(s)` → region; `Fuel type` → commodity; `Status` → status; `Latitude`/`Longitude` → map coords when present |
+| **Tier honesty** | Global NGO field-level extraction reference — **not** an official licence/block registry (`record_origin=global_open_fallback`) |
+| **Verify** | After ingest: `SELECT COUNT(*) FROM licenses WHERE source_id='gem_global_extraction_tracker_march_2026'`; sample `id` like `gem_global_extraction_tracker_march_2026:L100000321006`; Oil & Gas map with `prefer_open_data=true` |
 
 ### 2.2 Other backend ingest (not ArcGIS list)
 
@@ -53,6 +80,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `opec_gulf_sync.py` | Gulf/OPEC NOCs, major fields, terminals | Static + optional EIA API key | `record_origin` → `opec_gulf_reference` / open_data; compare to national NOC sites |
 | `gov_procurement_sync.py` | USAspending contract awards | Yes (US federal) | Award ID on USAspending.gov |
 | `csv_fallback_import.py` | User/admin CSV (e.g. SA/Ghana mining) | User-provided | `user_import_csv`; source file + row hash |
+| `gem_extraction_tracker_import.py` | GEM Global Oil & Gas Extraction Tracker (March 2026 xlsx) | Yes (GEM open data) | `source_id=gem_global_extraction_tracker_march_2026`; `record_origin=global_open_fallback`; admin `POST /api/admin/gem-extraction-tracker/ingest`; auto on graph-sync when xlsx present |
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
@@ -135,7 +163,7 @@ Paid BOL vendors (e.g. ImportYeti) are **explicitly excluded** — see roadmap i
 | **EU** | Finland Tukes mining areas | In repo | Open gov | `arcgis` | `ALUETUNNUS` on Tukes register |
 | **Africa** | Zambia/Kenya/SA petroleum & mining | In repo | Official cadastre | `arcgis` | Source layer URL + external id |
 | **Middle East** | OPEC Gulf reference + Megagiant | In repo + `opec_gulf_sync` | Reference / open layer | `static` + `arcgis` | Flag as fallback; NOC website |
-| **Latin America** | ANM Colombia, ANM-style portals | National URLs vary | Open gov (varies) | **Gap** | Per-country licence ID |
+| **Latin America** | ANM Colombia, INGEMMET Peru, INECC Mexico concessions | In repo (see §2.1) | Open gov (varies) | `arcgis` | `TITULO` / `CG_CODIGO` / `CODIGO_EXPEDIENTE` |
 | **Petroleum infra** | OSM pipelines (`man_made=pipeline`) | Overpass API | ODbL | **`overpass`** (opt-in map layers) | OSM way ID + tag inspection |
 | **Petroleum infra** | oilmap / Mapbox tilesets | Mapbox | Third-party | **Paid** — `petroleum_infrastructure` | Document token; not official |
 | **Trade** | UN Comtrade HS 2709/2710 | https://comtrade.un.org/ | UN terms (free tier) | `api` (partial in repo) | Reporter/partner/year in response |
@@ -205,7 +233,7 @@ Paid BOL vendors (e.g. ImportYeti) are **explicitly excluded** — see roadmap i
 |------------|--------|-------|
 | **Central Asia hydrocarbons** | Done | KZ ArcGIS hub unverified (timeout); TM/UZ `WORLD_COVERAGE_OVERRIDES`. |
 | **EU mining** | Done | Sweden SGU OGC + Poland PGI portal refs in `WORLD_COVERAGE_OVERRIDES` (no ArcGIS sync). |
-| **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `peru_ingemmet_derechos_mineros` (Peru capped ~2k, no offset pagination). |
+| **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `mexico_inecc_concesiones_mineras`, `peru_ingemmet_derechos_mineros` (Mexico/Peru capped ~2k/run). |
 | **Comtrade HS27** | Done | Daily worker + admin endpoints; 429/503 backoff in `ingest_oil_trades._fetch_comtrade_bulk`. |
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
 | **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
@@ -289,7 +317,7 @@ Paid BOL vendors (e.g. ImportYeti) are **explicitly excluded** — see roadmap i
 | **OSM petroleum** | Done (starter) | `GET /api/petroleum/osm-layers/{pipelines\|refineries}`; Overpass tile cache; opt-in map layers labeled “OpenStreetMap (community)”. |
 | **SEC EDGAR linker** | Done (starter) | `GET /api/companies/{name}/sec-filings`; dossier SEC link; `SEC_EDGAR_USER_AGENT`; mocked ticker JSON tests. |
 | **Central Asia hydrocarbons** | Done (honest gaps) | KZ oil: `official_portal_only` + arcgis.gis-center.kz timeout note; TM/UZ portal refs in `WORLD_COVERAGE_OVERRIDES`. |
-| **EU mining / LatAm** | Done (partial) | Sweden SGU OGC documented (not ArcGIS sync); Colombia ANM + Peru INGEMMET in `OPEN_DATA_SOURCES` (verified 2026-05). |
+| **EU mining / LatAm** | Done (partial) | Sweden SGU OGC documented (not ArcGIS sync); Colombia ANM + Mexico INECC + Peru INGEMMET in `OPEN_DATA_SOURCES` (verified 2026-05). |
 | **Comtrade refresh** | Done | `comtrade_scheduled_sync.py`, `comtrade_sync_runs`, admin sync + sync-runs, `comtrade-sync-worker` in docker-compose. |
 | **GLEIF LEI** | Done (starter) | `GET /api/companies/{name}/lei` via GLEIF public API. |
 | **OSM petroleum persist** | Stub | `petroleum_osm_features` table on init; nightly worker deferred. |
@@ -365,6 +393,13 @@ curl -s "http://localhost:8000/api/admin/data-health?refresh_probes=true" -H "X-
 # Single-source open-data sync
 curl -X POST "http://localhost:8000/api/admin/open-data/sync?source_id=kenya_mining_cadastre" \
   -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
+
+# Mexico INECC mining concessions (MAD-77)
+curl -X POST "http://localhost:8000/api/admin/open-data/sync?source_id=mexico_inecc_concesiones_mineras" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
+# Sample row count + licence id
+psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras';"
+psql "$DATABASE_URL" -c "SELECT id, company, region FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras' LIMIT 3;"
 
 # Coverage single country (server-side filter)
 curl -s "http://localhost:8000/api/open-data/coverage/world?country=Ghana" | jq '.countries'

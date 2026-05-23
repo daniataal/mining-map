@@ -99,7 +99,7 @@ export default function EiaHistoricImportsPanel({
   const [importer, setImporter] = useState('');
   const [importerDraft, setImporterDraft] = useState('');
   const [year, setYear] = useState(2020);
-  const [showOnMap, setShowOnMap] = useState(true);
+  const [showOnMap, setShowOnMap] = useState(false);
   const [showCorridors, setShowCorridors] = useState(false);
   const [ingestCurlOpen, setIngestCurlOpen] = useState(false);
 

@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
+import type { LicenseCoverageSector } from '../lib/licenseCoverage';
+import { LicenseCoverageBreakdown } from '../features/licenses/LicenseCoverageBreakdown';
+import { LicenseSyncStatusBar } from '../features/licenses/LicenseSyncStatusBar';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
@@ -57,6 +60,10 @@ interface SidebarProps {
   getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
   workspaceTab?: MapSidebarTab;
   onSelectWorkspaceTab?: (tab: MapSidebarTab) => void;
+  worldCoverage?: WorldCoverageResponse | null;
+  licenseCoverageSector?: LicenseCoverageSector | null;
+  licenseCoverageAlsoShowSector?: LicenseCoverageSector | null;
+  showLicenseCoveragePanel?: boolean;
 }
 
 function sourceTrustLabel(item: MiningLicense): string {
@@ -100,6 +107,10 @@ export default function Sidebar({
   getDealRoomForLicense,
   workspaceTab = 'licenses',
   onSelectWorkspaceTab,
+  worldCoverage,
+  licenseCoverageSector,
+  licenseCoverageAlsoShowSector,
+  showLicenseCoveragePanel,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -267,6 +278,18 @@ export default function Sidebar({
                  </Button>
                </div>
             </div>
+            {showLicenseCoveragePanel && licenseCoverageSector && (
+              <div className="mt-4 space-y-3">
+                <LicenseCoverageBreakdown
+                  sector={licenseCoverageSector}
+                  worldCoverage={worldCoverage}
+                  alsoShowSector={licenseCoverageAlsoShowSector}
+                />
+                {licenseCoverageSector === 'mining' && (
+                  <LicenseSyncStatusBar worldCoverage={worldCoverage} />
+                )}
+              </div>
+            )}
             {infrastructureStats && infrastructureStats.total > 0 && (
               <div className="mt-4 rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-3 space-y-3">
                 <div className="grid grid-cols-2 gap-2">

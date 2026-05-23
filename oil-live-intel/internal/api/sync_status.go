@@ -59,6 +59,10 @@ type syncStatusSummary struct {
 	JodiSnapshotCount             int            `json:"jodi_snapshot_count"`
 	LastJodiSyncAt                any            `json:"last_jodi_sync_at"`
 	LastJodiSyncStatus            *string        `json:"last_jodi_sync_status"`
+	DemoPortCallCount             int            `json:"demo_port_call_count"`
+	DemoCargoRecordCount          int            `json:"demo_cargo_record_count"`
+	ProductionCargoRecordCount    int            `json:"production_cargo_record_count"`
+	LastVesselObservationAt       any            `json:"last_vessel_observation_at"`
 	Disclaimer                    string         `json:"disclaimer"`
 }
 
@@ -68,7 +72,8 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
 	var oilTradeFlows, eiaHistoric, tradeManifests, eurostatTradeFlows, jodiSnapshots int
 	var liveVessels, liveAisPortCalls, vesselObservations, coverageWatchZones, coverageGapZones int
-	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat, lastJodi *time.Time
+	var demoPortCalls, demoCargo, productionCargo int
+	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat, lastJodi, lastVesselObs *time.Time
 	var lastComtradeStatus, lastEurostatStatus, lastJodiStatus *string
 
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_terminals`).Scan(&terminalCount)
@@ -134,6 +139,24 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		    AND COALESCE(o.position_time, o.observed_at) > now() - interval '3 hours'
 		)
 	`)
+	demoPortCalls = countTable(ctx, pool, `
+		SELECT COUNT(*)::int FROM oil_port_calls
+		WHERE COALESCE(evidence::text, '') ILIKE '%seed_port_calls%'
+		   OR COALESCE(evidence::text, '') ILIKE '%demo seed%'
+		   OR COALESCE(metadata::text, '') ILIKE '%seed_port_calls%'
+	`)
+	demoCargo = countTable(ctx, pool, `
+		SELECT COUNT(*)::int FROM meridian_cargo_records
+		WHERE COALESCE(evidence::text, '') ILIKE '%seed_port_calls%'
+		   OR COALESCE(evidence::text, '') ILIKE '%demo seed%'
+		   OR LOWER(COALESCE(bol_tier, '')) IN ('demo', 'seed', 'seed_port_calls')
+	`)
+	productionCargo = countTable(ctx, pool, `
+		SELECT COUNT(*)::int FROM meridian_cargo_records
+		WHERE COALESCE(evidence::text, '') NOT ILIKE '%seed_port_calls%'
+		  AND COALESCE(evidence::text, '') NOT ILIKE '%demo seed%'
+		  AND LOWER(COALESCE(bol_tier, '')) NOT IN ('demo', 'seed', 'seed_port_calls')
+	`)
 
 	topCorridors := queryTopCorridors(ctx, pool)
 	mcrByTier := queryMcrByTier(ctx, pool)
@@ -158,6 +181,10 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT value, metadata->>'status' FROM oil_live_sync_state
 		WHERE key = 'last_jodi_sync'
 	`).Scan(&lastJodi, &lastJodiStatus) //nolint:errcheck — row may be absent
+	_ = pool.QueryRow(ctx, `
+		SELECT MAX(COALESCE(position_time, observed_at))
+		FROM oil_vessel_position_observations
+	`).Scan(&lastVesselObs)
 
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
@@ -191,7 +218,11 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		JodiSnapshotCount:             jodiSnapshots,
 		LastJodiSyncAt:                formatTimePtr(lastJodi),
 		LastJodiSyncStatus:            lastJodiStatus,
-		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted.",
+		DemoPortCallCount:             demoPortCalls,
+		DemoCargoRecordCount:          demoCargo,
+		ProductionCargoRecordCount:    productionCargo,
+		LastVesselObservationAt:       formatTimePtr(lastVesselObs),
+		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted; demo/seed rows reported separately.",
 	}
 }
 

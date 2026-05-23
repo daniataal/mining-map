@@ -19,6 +19,7 @@
 | **Trader workflows** | Done | Save to Suppliers (cargo/entity drawers), watch opportunity → `oil_watchlists` / `oil_alerts`, terminal search, commodity map filter, CSV export (cargo + opportunities). |
 | **Route planner deep link** | Done | Deal pack + cargo drawer → **Open in Route Planner** pre-fills load/discharge from MCR port names. |
 | **Company dossier link** | Done | Shipper/consignee + saved companies → opens existing license dossier when `supplier_id` is set. |
+| **Vessel drawer (MAD-85)** | Done | Map popup **View details** → `OilLiveEntityDrawer` loads `GET /api/oil-live/vessels/{mmsi}/dossier` (AIS position, port calls, MCR parties, `bol_tier` badges). Postgres-backed; seed port calls excluded when `OIL_LIVE_DISABLE_DEMO_SEED=1`. |
 | **USITC macro trade** | Done | `backend/services/usitc_dataweb.py` on graph-sync (`USITC_DATAWEB_API_KEY`). |
 | **Eurostat COMEXT (macro)** | Done | `backend/services/eurostat_trade.py` on graph-sync (`EUROSTAT_SYNC_ENABLED`, `EUROSTAT_DATASET`); no API key — public REST; count in Live Data coverage grid. |
 | **EIA crude imports + refinery throughput** | Done | `backend/services/eia_imports.py` on graph-sync; new `oil_refinery_throughput` table; `EIA_API_KEY` optional (step skipped if unset). |
@@ -248,7 +249,7 @@ See `.env.example` for the full list.
 | No terminals at all | oil-live-intel not started / migrations missing | `docker compose up -d oil-live-intel`; check logs |
 | No vessels | No AIS key or workers stopped | Set `AISSTREAM_API_KEY`; start `maritime-worker` + `oil-live-intel-worker` |
 | No vessels in Gulf/Africa but source-health is OK elsewhere | Open AIS coverage gap, not necessarily no vessels | Enable **AIS coverage** layer; check `/api/oil-live/coverage`; add AISHub receiver/port-event source before making absence claims |
-| Platform banner: maritime worker SSL / certificate expired | AISStream upstream TLS cert expired (`stream.aisstream.io`) | Wait for AISStream renewal; **does not block terminals** if graph-sync ran. Dev-only: `MARITIME_SSL_VERIFY=0` in `backend.env` |
+| Platform banner: maritime worker SSL / certificate expired | Stale `maritime_ingest_status` and/or upstream TLS (`stream.aisstream.io`) | As of May 2026 upstream cert is renewed — `force-recreate maritime-worker oil-live-intel-worker` with `AISSTREAM_API_KEY` set. Auto-fallback: `MARITIME_SSL_AUTO_FALLBACK=1` (default). Dev-only: `MARITIME_SSL_VERIFY=0`. **Does not block terminals** if graph-sync ran. |
 | Terminals but no cargo records | No closed port calls or rebuild skipped | Re-run graph-sync; check `curl …/sync-status` for `cargo_record_count` |
 | Cargo tab empty, sync-status shows port calls | Synthetic rebuild failed | Check `OIL_INTEL_INTERNAL_KEY`; manual synthetic-bol-rebuild curl above |
 | Live Data tab errors in console | Backend/intel not reachable | Verify `curl …/api/oil-live/health`; check Vite proxy / `VITE_OIL_INTEL_BASE` |
@@ -309,12 +310,16 @@ Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYN
 
 After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
-**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts, `last_graph_sync_at`, and macro ingest health (`last_comtrade_sync_at`, `eurostat_trade_flow_count`, `last_eurostat_sync_at` / `last_eurostat_sync_status` from graph-sync `eurostat_trade` step; `jodi_snapshot_count`, `last_jodi_sync_at` / `last_jodi_sync_status` from graph-sync `jodi_oil` step). Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
+**Sync-status banner (MAD-89)** — compact chip at top of Live Data map plus intel drawer **Coverage health** grid. Both read `GET /api/oil-live/sync-status` with tier-labelled counts (Live AIS, infrastructure/OSM terminals, synthetic MCR, macro trade, EIA historic) and relative last-sync ages (`last_vessel_observation_at`, `last_graph_sync_at`, macro step timestamps). Production coverage uses `production_cargo_record_count` and excludes `demo_port_call_count` / `demo_cargo_record_count` (seed/demo evidence). UI warns when only demo rows remain (`demo_only` state).
+
+**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read the same endpoint: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts, `last_graph_sync_at`, and macro ingest health (`last_comtrade_sync_at`, `eurostat_trade_flow_count`, `last_eurostat_sync_at` / `last_eurostat_sync_status` from graph-sync `eurostat_trade` step; `jodi_snapshot_count`, `last_jodi_sync_at` / `last_jodi_sync_status` from graph-sync `jodi_oil` step). Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
 
 ```bash
 curl -sf http://localhost:8095/api/oil-live/health | jq .
 curl -sf http://localhost:8095/api/oil-live/sync-status | jq .
 curl -sf "http://localhost:8095/api/oil-live/vessels?bbox=48,22,58.8,30.8&freshness_minutes=180" | jq .
+# Vessel drawer dossier (replace MMSI with a tanker from the bbox response):
+curl -sf "http://localhost:8095/api/oil-live/vessels/636093192/dossier?exclude_seed=true" | jq '{mmsi, position: .position.bol_tier, port_calls: (.port_calls|length), mcr: .cargo_records.total, parties: (.parties|length)}'
 curl -sf "http://localhost:8095/api/oil-live/coverage?bbox=48,22,58.8,30.8" | jq .
 curl -sf http://localhost:8095/api/oil-live/source-health | jq .
 ```

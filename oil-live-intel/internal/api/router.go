@@ -29,6 +29,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/vessels", s.ListVessels)
 		api.Get("/vessels/live", s.LiveVessels)
 		api.Get("/vessels/{mmsi}", s.GetVessel)
+		api.Get("/vessels/{mmsi}/dossier", s.GetVesselDossier)
 		api.Get("/port-calls/recent", s.RecentPortCalls)
 		api.Get("/port-calls/{id}", s.GetPortCall)
 		api.Get("/port-calls/{id}/explain", s.ExplainPortCall)

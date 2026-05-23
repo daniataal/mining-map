@@ -193,6 +193,8 @@ class OpenDataSyncTests(unittest.TestCase):
         self.assertEqual(registry["british_columbia_mineral_tenure"]["coverage_state"], "official_syncable")
         self.assertEqual(registry["usgs_mrds_global"]["source_kind"], "global_open_fallback")
         self.assertEqual(registry["usgs_mrds_global"]["coverage_state"], "global_fallback_only")
+        self.assertEqual(registry["gem_global_extraction_tracker_march_2026"]["source_kind"], "global_open_fallback")
+        self.assertIn("GEM", registry["gem_global_extraction_tracker_march_2026"]["provenance_note"])
 
     def test_global_open_fallback_provenance_is_explicit(self):
         provenance = describe_license_source_record("opec_gulf_reference", "global_open_fallback")
@@ -227,7 +229,34 @@ class OpenDataSyncTests(unittest.TestCase):
     def test_latam_sources_in_open_data(self):
         ids = {s.source_id for s in OPEN_DATA_SOURCES}
         self.assertIn("colombia_anm_titulo_vigente", ids)
+        self.assertIn("mexico_inecc_concesiones_mineras", ids)
         self.assertIn("peru_ingemmet_derechos_mineros", ids)
+
+    def test_normalize_mexico_inecc_feature(self):
+        mexico = next(
+            s for s in OPEN_DATA_SOURCES if s.source_id == "mexico_inecc_concesiones_mineras"
+        )
+        record = normalize_feature(
+            mexico,
+            {
+                "attributes": {
+                    "OBJECTID": 99,
+                    "TITULO": "232215",
+                    "TITULAR": "MINERA REAL DE ANGELES, S.A. DE C.V.",
+                    "NOMBRELOTE": "BANCO DEL PITACOCHE",
+                    "MUNICIPIO": "CALVILLO",
+                    "NOM_ENT": "Aguascalientes",
+                    "SUST1": "AU",
+                },
+                "geometry": {"x": -102.3, "y": 22.1},
+            },
+        )
+        self.assertEqual(record["country"], "Mexico")
+        self.assertEqual(record["id"], "mexico_inecc_concesiones_mineras:232215")
+        self.assertEqual(record["company"], "MINERA REAL DE ANGELES, S.A. DE C.V.")
+        self.assertIn("CALVILLO", record["region"])
+        self.assertEqual(record["commodity"], "AU")
+        self.assertEqual(record["record_origin"], "open_data")
 
     def test_peru_source_disables_offset_pagination(self):
         peru = next(s for s in OPEN_DATA_SOURCES if s.source_id == "peru_ingemmet_derechos_mineros")

@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import L from 'leaflet';
 import { GeoJSON, LayerGroup, LayersControl } from 'react-leaflet';
-import type { PathOptions } from 'leaflet';
+import type { Layer, PathOptions } from 'leaflet';
 import {
   OsmPetroleumLayerId,
   defaultOsmLayerVisibility,
   useOsmPetroleumLayerGeoJson,
 } from '../../lib/osmPetroleumLayers';
-import type { PetroleumViewportBounds } from '../../lib/petroleumLayers';
+import type { PetroleumLayerId, PetroleumViewportBounds } from '../../lib/petroleumLayers';
 import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/petroleumLayers';
+import { infrastructureLayerShouldRender } from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import { createRefineryMapIcon } from './refineryMapIcon';
@@ -17,6 +18,7 @@ import {
   splitOsmPipelineFeatures,
   classifyPipelineSubstance,
 } from '../../lib/pipelineSubstance';
+import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
 
 const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
 
@@ -51,11 +53,39 @@ const OSM_WATER_PIPELINE_LABEL: [string, string] = [
   'Water pipelines — OpenStreetMap',
 ];
 
+function getFeatureCoordinates(
+  geometry: GeoJSON.Geometry | null | undefined,
+): { lat: number; lng: number } | null {
+  if (!geometry) return null;
+  if (geometry.type === 'Point') {
+    const [lng, lat] = geometry.coordinates as [number, number];
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    return null;
+  }
+  if (geometry.type === 'MultiPoint' && geometry.coordinates.length > 0) {
+    const [lng, lat] = geometry.coordinates[0] as [number, number];
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  return null;
+}
+
+function osmLayerToPopupLayerId(
+  layerId: OsmPetroleumLayerId,
+  props: Record<string, unknown>,
+): PetroleumLayerId {
+  if (layerId === 'pipelines') {
+    return pipelineSubstancePopupLayerId(classifyPipelineSubstance(props));
+  }
+  return 'refineries';
+}
+
 interface OsmLayerOverlayProps {
-  layerId: 'pipelines' | 'refineries';
+  layerId: OsmPetroleumLayerId;
   label: string;
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
+  mapZoom?: number;
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
 }
 
 interface OsmPipelineGeoJsonProps {
@@ -65,12 +95,42 @@ interface OsmPipelineGeoJsonProps {
   defaultVisible: boolean;
 }
 
+function bindOsmFeatureInteraction(
+  layer: Layer,
+  osmLayerId: OsmPetroleumLayerId,
+  props: Record<string, unknown>,
+  geometry: GeoJSON.Geometry | null | undefined,
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void,
+) {
+  if (onFeatureClick) {
+    layer.on('click', (e) => {
+      L.DomEvent.stopPropagation(e);
+      onFeatureClick({
+        layerId: osmLayerId,
+        popupLayerId: osmLayerToPopupLayerId(osmLayerId, props),
+        properties: props,
+        geometry: geometry ?? null,
+        coordinates: getFeatureCoordinates(geometry),
+      });
+    });
+    return;
+  }
+  const substance = classifyPipelineSubstance(props);
+  const popupLayerId = pipelineSubstancePopupLayerId(substance);
+  bindPetroleumFeaturePopup(layer, popupLayerId, props, geometry ?? null);
+}
+
 function OsmPipelineGeoJson({
   label,
   features,
   style,
   defaultVisible,
-}: OsmPipelineGeoJsonProps) {
+  osmLayerId,
+  onFeatureClick,
+}: OsmPipelineGeoJsonProps & {
+  osmLayerId: 'pipelines';
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
+}) {
   const geojson = useMemo(
     () => ({ type: 'FeatureCollection' as const, features }),
     [features],
@@ -85,9 +145,13 @@ function OsmPipelineGeoJson({
           style={style}
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
-            const substance = classifyPipelineSubstance(props);
-            const popupLayerId = pipelineSubstancePopupLayerId(substance);
-            bindPetroleumFeaturePopup(layer, popupLayerId, props, feature.geometry ?? null);
+            bindOsmFeatureInteraction(
+              layer,
+              osmLayerId,
+              props,
+              feature.geometry ?? null,
+              onFeatureClick,
+            );
           }}
         />
       </LayerGroup>
@@ -100,14 +164,18 @@ function OsmPipelinesOverlays({
   bbox,
   enabled,
   defaultOilGasVisible,
+  mapZoom,
+  onFeatureClick,
 }: {
   label: string;
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
   defaultOilGasVisible: boolean;
+  mapZoom?: number;
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
 }) {
   const { t } = useI18n();
-  const { data } = useOsmPetroleumLayerGeoJson('pipelines', bbox, enabled);
+  const { data } = useOsmPetroleumLayerGeoJson('pipelines', bbox, enabled, mapZoom);
   const { oilGas, water } = useMemo(() => {
     const features = data?.features ?? [];
     return splitOsmPipelineFeatures(features);
@@ -120,6 +188,8 @@ function OsmPipelinesOverlays({
         features={oilGas}
         style={OSM_STYLE.pipelines}
         defaultVisible={defaultOilGasVisible}
+        osmLayerId="pipelines"
+        onFeatureClick={onFeatureClick}
       />
       {water.length > 0 && (
         <OsmPipelineGeoJson
@@ -127,6 +197,8 @@ function OsmPipelinesOverlays({
           features={water}
           style={OSM_WATER_PIPELINE_STYLE}
           defaultVisible={false}
+          osmLayerId="pipelines"
+          onFeatureClick={onFeatureClick}
         />
       )}
     </>
@@ -139,8 +211,10 @@ function OsmLayerOverlay({
   bbox,
   enabled,
   defaultVisible,
+  mapZoom,
+  onFeatureClick,
 }: OsmLayerOverlayProps & { defaultVisible: boolean }) {
-  const { data } = useOsmPetroleumLayerGeoJson(layerId, bbox, enabled);
+  const { data } = useOsmPetroleumLayerGeoJson(layerId, bbox, enabled, mapZoom);
   const style = OSM_STYLE[layerId];
   const geojson = useMemo(
     () => data ?? { type: 'FeatureCollection' as const, features: [] },
@@ -153,8 +227,10 @@ function OsmLayerOverlay({
       <OsmPipelinesOverlays
         label={label}
         bbox={bbox}
-        enabled={enabled}
+        enabled={enabled && defaultVisible}
         defaultOilGasVisible={defaultVisible}
+        mapZoom={mapZoom}
+        onFeatureClick={onFeatureClick}
       />
     );
   }
@@ -171,7 +247,13 @@ function OsmLayerOverlay({
           }
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
-            bindPetroleumFeaturePopup(layer, 'refineries', props, feature.geometry ?? null);
+            bindOsmFeatureInteraction(
+              layer,
+              layerId,
+              props,
+              feature.geometry ?? null,
+              onFeatureClick,
+            );
           }}
         />
       </LayerGroup>
@@ -186,6 +268,10 @@ interface OsmPetroleumMapLayersProps {
   layerIds?: OsmPetroleumLayerId[];
   /** Per-layer visibility when using external toggles (mining/global panel). */
   layerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  /** User toggled layers on at low zoom (bypass z≥9 gate). */
+  forcedLayers?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  mapZoom?: number;
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
 }
 
 export default function OsmPetroleumMapLayers({
@@ -193,6 +279,9 @@ export default function OsmPetroleumMapLayers({
   enabled,
   layerIds,
   layerVisibility,
+  forcedLayers,
+  mapZoom,
+  onFeatureClick,
 }: OsmPetroleumMapLayersProps) {
   const { t } = useI18n();
   const { data: catalog } = usePetroleumLayerCatalog(enabled);
@@ -205,16 +294,26 @@ export default function OsmPetroleumMapLayers({
   return (
     <>
       {activeIds.map((layerId) => {
+        const toggled = layerVisibility?.[layerId] ?? osmDefaults[layerId];
+        if (layerVisibility != null) {
+          if (!toggled) return null;
+          if (
+            !infrastructureLayerShouldRender(layerId, mapZoom, layerVisibility, forcedLayers ?? {})
+          ) {
+            return null;
+          }
+        }
         const visible = layerVisibility?.[layerId] ?? osmDefaults[layerId];
-        if (layerVisibility && !visible) return null;
         return (
           <OsmLayerOverlay
             key={layerId}
             layerId={layerId}
             label={t(OSM_LABELS[layerId][0], OSM_LABELS[layerId][1])}
             bbox={bbox}
-            enabled={enabled}
+            enabled={enabled && visible}
             defaultVisible={visible}
+            mapZoom={mapZoom}
+            onFeatureClick={onFeatureClick}
           />
         );
       })}

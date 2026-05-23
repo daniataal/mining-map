@@ -35,6 +35,7 @@ import {
 } from './liveDataWorkflow';
 import { buildRoutePlannerHintsFromCargo } from './liveDataRoutePrefill';
 import TradingWorkflowPanel from './TradingWorkflowPanel';
+import VesselDrawerPanel from './VesselDrawerPanel';
 import { tradingWorkflowContextFromEntity } from './tradingWorkflowState';
 
 export type OilLiveEntityKind = 'opportunity' | 'terminal' | 'vessel' | 'company' | 'cargo';
@@ -101,16 +102,19 @@ export default function OilLiveEntityDrawer({
   const [watchLoading, setWatchLoading] = useState(false);
   const resolvedOppId = opportunityId ?? (entityKind === 'opportunity' ? entityId : undefined);
   const showImportsExportsTab = entityKind === 'company' || entityKind === 'terminal';
+  const isVesselDrawer = entityKind === 'vessel';
   const defaultTab: DrawerTab = useMemo(
     () =>
       entityKind === 'cargo'
         ? 'mcr'
-        : resolvedOppId
-          ? 'deal_pack'
-          : showImportsExportsTab
-            ? 'imports_exports'
-            : 'overview',
-    [entityKind, resolvedOppId, showImportsExportsTab],
+        : isVesselDrawer
+          ? 'overview'
+          : resolvedOppId
+            ? 'deal_pack'
+            : showImportsExportsTab
+              ? 'imports_exports'
+              : 'overview',
+    [entityKind, isVesselDrawer, resolvedOppId, showImportsExportsTab],
   );
   const [tab, setTab] = useState<DrawerTab>(initialDrawerTab ?? defaultTab);
 
@@ -289,7 +293,7 @@ export default function OilLiveEntityDrawer({
               {t('יבוא ויצוא', 'Imports & Exports')}
             </button>
           )}
-          {resolvedOppId && entityKind !== 'cargo' && (
+          {(isVesselDrawer || (resolvedOppId && entityKind !== 'cargo')) && (
             <button
               type="button"
               onClick={() => setTab('overview')}
@@ -542,6 +546,13 @@ export default function OilLiveEntityDrawer({
             onOpenRoutePlanner={onOpenRoutePlanner}
             onOpenCompanyDossier={onOpenCompanyDossier}
             onCreateDealRoom={onCreateDealRoom}
+          />
+        ) : isVesselDrawer && tab === 'overview' ? (
+          <VesselDrawerPanel
+            mmsi={entityId}
+            title={title}
+            onOpenCargo={onOpenCargo}
+            onOpenCompanyDossier={onOpenCompanyDossier}
           />
         ) : (
           <div className="space-y-3 text-[11px] text-slate-500">

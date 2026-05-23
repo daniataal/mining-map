@@ -37,21 +37,27 @@ export function useOsmPetroleumLayerGeoJson(
   layerId: OsmPetroleumLayerId,
   bbox: PetroleumViewportBounds | null,
   enabled: boolean,
+  mapZoom?: number,
 ) {
   return useQuery<OsmPetroleumLayerGeoJson>({
-    queryKey: ['osm-petroleum-layer', layerId, bbox],
+    queryKey: ['osm-petroleum-layer', layerId, bbox, mapZoom],
     queryFn: async () => {
       const { data } = await apiClient.get<OsmPetroleumLayerGeoJson>(
         `/api/petroleum/osm-layers/${layerId}`,
         {
-          params: bbox
-            ? {
-                south: bbox.south,
-                west: bbox.west,
-                north: bbox.north,
-                east: bbox.east,
-              }
-            : undefined,
+          params: {
+            ...(bbox
+              ? {
+                  south: bbox.south,
+                  west: bbox.west,
+                  north: bbox.north,
+                  east: bbox.east,
+                }
+              : {}),
+            ...(mapZoom != null && Number.isFinite(mapZoom)
+              ? { zoom: Math.round(mapZoom * 10) / 10 }
+              : {}),
+          },
         },
       );
       return data;

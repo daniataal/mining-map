@@ -143,8 +143,60 @@ export type OilPortCall = {
   confidence?: number;
   estimated_volume_barrels?: number;
   evidence?: string[];
+  bol_tier?: string;
   data_provenance?: OilLiveProvenance;
+  source_links?: { name?: string; url: string }[];
   metadata?: Record<string, unknown>;
+  disclaimer?: string;
+};
+
+export type VesselDossierPosition = {
+  mmsi: number;
+  lat?: number;
+  lng?: number;
+  position_time?: string;
+  source?: string;
+  data_source?: string;
+  source_type?: string;
+  source_url?: string | null;
+  bol_tier?: string;
+  data_provenance?: OilLiveProvenance;
+  freshness_seconds?: number;
+  confidence?: number;
+  speed?: number;
+  course?: number;
+  draft_m?: number;
+  vessel_name?: string;
+  imo?: string | null;
+};
+
+export type VesselDossierParty = {
+  role: 'shipper' | 'consignee' | string;
+  name: string;
+  company_id?: string;
+  bol_tier?: string;
+  data_provenance?: OilLiveProvenance;
+  confidence?: number;
+  lei?: string;
+  sanctions_status?: string;
+  cargo_record_id?: string;
+  synthetic_bol_id?: string;
+};
+
+export type VesselDossierResponse = {
+  mmsi: number;
+  vessel?: Record<string, unknown>;
+  position?: VesselDossierPosition | null;
+  port_calls: OilPortCall[];
+  cargo_records: {
+    items: MeridianCargoRecord[];
+    total: number;
+    limit: number;
+    offset: number;
+  };
+  parties: VesselDossierParty[];
+  disclaimer?: string;
+  empty_state?: string;
 };
 
 export type OilIntelligenceCard = {
@@ -293,6 +345,14 @@ export type OilLiveSyncStatus = {
   jodi_snapshot_count?: number;
   last_jodi_sync_at?: string | null;
   last_jodi_sync_status?: string | null;
+  /** Port calls tagged seed/demo (excluded from production coverage). */
+  demo_port_call_count?: number;
+  /** MCR rows tagged seed/demo (excluded from production coverage). */
+  demo_cargo_record_count?: number;
+  /** MCR rows excluding seed/demo evidence. */
+  production_cargo_record_count?: number;
+  /** Latest vessel position observation timestamp. */
+  last_vessel_observation_at?: string | null;
   /** Live AIS port calls (when returned by sync-status). */
   live_ais_port_call_count?: number;
   /** Recent live AIS vessel positions (when returned by sync-status). */
@@ -778,6 +838,26 @@ export async function getCargoRecords(
 export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
   const res = await fetch(oilUrl(`/api/oil-live/cargo-records/${encodeURIComponent(id)}`));
   if (!res.ok) throw new Error(`oil-live cargo-record ${res.status}`);
+  return res.json();
+}
+
+export async function getVesselDossier(
+  mmsi: string | number,
+  opts: { mcr_limit?: number; mcr_offset?: number; port_call_limit?: number; exclude_seed?: boolean } = {},
+): Promise<VesselDossierResponse> {
+  const params = new URLSearchParams();
+  if (opts.mcr_limit != null) params.set('mcr_limit', String(opts.mcr_limit));
+  if (opts.mcr_offset != null) params.set('mcr_offset', String(opts.mcr_offset));
+  if (opts.port_call_limit != null) params.set('port_call_limit', String(opts.port_call_limit));
+  if (opts.exclude_seed !== false) params.set('exclude_seed', 'true');
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/vessels/${encodeURIComponent(String(mmsi))}/dossier${qs ? `?${qs}` : ''}`),
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || `oil-live vessel dossier ${res.status}`);
+  }
   return res.json();
 }
 

@@ -57,5 +57,6 @@ curl -sI "http://127.0.0.1:8080/api/oil-live/map?bbox=-10,-20,10,20&zoom=5&limit
 ## 5. Targets (engineering bar)
 
 - Initial map paint: &lt; 2s for default hub bbox (one overlay + terminals).
-- Pan refetch: debounced (~450ms licenses, ~450ms live); stale layer until new data (`keepPreviousData`).
+- Pan refetch: debounced once at **450ms** (`MAP_VIEWPORT_DEBOUNCE_MS` in `mining-viz/src/lib/mapViewportDebounce.ts`); stale layer until new data (`keepPreviousData`).
+- License DOM markers capped at **800** when not server-clustered (`LICENSE_MAP_DOM_MARKER_CAP`).
 - Per-bbox marker cap: server `limit` 500–2000; clusters at zoom &lt; 8.

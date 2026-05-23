@@ -74,6 +74,12 @@ class MaritimeSslTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MARITIME_SSL_AUTO_FALLBACK": "0"}, clear=False):
             self.assertFalse(should_retry_aisstream_without_tls_verify(exc))
 
+    def test_expired_cert_detected_in_cause_chain(self):
+        inner = ssl.SSLError("certificate has expired")
+        outer = ConnectionError("AIS watch failed")
+        outer.__cause__ = inner
+        self.assertTrue(is_certificate_expired_error(outer))
+
 
 if __name__ == "__main__":
     unittest.main()

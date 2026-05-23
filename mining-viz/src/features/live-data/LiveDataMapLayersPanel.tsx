@@ -1,4 +1,4 @@
-import { Anchor, ArrowRightLeft, Globe2, Layers, Radar, Route, Ship, Sparkles } from 'lucide-react';
+import { Anchor, Archive, ArrowRightLeft, Globe2, Layers, Radar, Route, Ship, Sparkles } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
@@ -29,6 +29,10 @@ export type LiveDataMapLayersPanelProps = {
   onTradeFlowGroupChange?: (group: TradeFlowGroup) => void;
   /** Global ledger counts from GET /api/oil-live/sync-status (AIS coverage health). */
   syncStatus?: OilLiveSyncStatus | null;
+  /** EIA historic import arcs (Historic group — off by default). */
+  eiaHistoricEnabled?: boolean;
+  onEiaHistoricChange?: (on: boolean) => void;
+  eiaHistoricRowCount?: number | null;
 };
 
 const LAYER_META = [
@@ -88,6 +92,9 @@ export default function LiveDataMapLayersPanel({
   macroTradeEnabled = true,
   onMacroTradeChange,
   syncStatus,
+  eiaHistoricEnabled = false,
+  onEiaHistoricChange,
+  eiaHistoricRowCount,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
 
@@ -260,6 +267,39 @@ export default function LiveDataMapLayersPanel({
             );
           })}
         </div>
+
+        {onEiaHistoricChange && (
+          <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300 mb-2">
+              {t('היסטורי', 'Historic')}
+            </p>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={eiaHistoricEnabled}
+                onChange={(e) => onEiaHistoricChange(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  <Archive className="h-4 w-4 shrink-0" />
+                  {t('קשתות יבוא EIA', 'EIA historic import arcs')}
+                </span>
+                <span className="mt-0.5 block text-xs leading-snug text-slate-600 dark:text-slate-400">
+                  {t(
+                    'bol_tier=historic — קבצי impa EIA, לא מכס ולא AIS חי.',
+                    'bol_tier=historic — EIA impa files, not customs BOL or live AIS.',
+                  )}
+                </span>
+                {eiaHistoricRowCount != null && eiaHistoricRowCount > 0 && (
+                  <span className="mt-1 block text-[10px] tabular-nums text-slate-500">
+                    {eiaHistoricRowCount.toLocaleString()} {t('שורות במסד', 'rows in DB')}
+                  </span>
+                )}
+              </span>
+            </label>
+          </div>
+        )}
 
         {onMacroTradeChange && (
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-500/30 bg-slate-500/5 px-3 py-2">
