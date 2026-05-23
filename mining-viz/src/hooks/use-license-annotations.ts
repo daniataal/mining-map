@@ -1,15 +1,19 @@
-import axios from 'axios';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../lib/api';
+import { isAnnotationsAuthError } from '../lib/annotationsAuth';
+import { clearMiningAuthStorage } from '../lib/miningAuth';
 import { normalizeAnnotationStage } from '../lib/dealWorkflow';
 import type { UserAnnotation } from '../types';
+
+export { isAnnotationsAuthError } from '../lib/annotationsAuth';
 
 const LOCAL_STORAGE_KEY = 'mining_user_data';
 const MIGRATION_FLAG_KEY = 'mining_annotations_migrated_v1';
 
-function isAnnotationsAuthError(err: unknown): boolean {
-  return axios.isAxiosError(err) && err.response?.status === 401;
-}
+export type UseLicenseAnnotationsOptions = {
+  /** Called when the server rejects the stored JWT (expired / invalid). */
+  onAuthInvalid?: () => void;
+};
 
 function readLocalAnnotations(): Record<string, UserAnnotation> {
   try {
@@ -46,15 +50,27 @@ function mergeAnnotations(
  * User license annotations: server is source of truth when logged in;
  * localStorage is offline cache / one-time migration source.
  */
-export function useLicenseAnnotations(token: string | null | undefined) {
+export function useLicenseAnnotations(
+  token: string | null | undefined,
+  options?: UseLicenseAnnotationsOptions,
+) {
   const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() =>
     normalizeRecord(readLocalAnnotations()),
   );
   const [hydrated, setHydrated] = useState(false);
   const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const skipServerHydrationRef = useRef(false);
+  const onAuthInvalidRef = useRef(options?.onAuthInvalid);
+  onAuthInvalidRef.current = options?.onAuthInvalid;
 
   useEffect(() => {
-    if (!token?.trim()) {
+    const sessionToken = token?.trim();
+    if (!sessionToken) {
+      skipServerHydrationRef.current = false;
+      setHydrated(true);
+      return;
+    }
+    if (skipServerHydrationRef.current) {
       setHydrated(true);
       return;
     }
@@ -92,7 +108,11 @@ export function useLicenseAnnotations(token: string | null | undefined) {
           localStorage.setItem(MIGRATION_FLAG_KEY, '1');
         }
       } catch (err) {
-        if (!isAnnotationsAuthError(err)) {
+        if (isAnnotationsAuthError(err)) {
+          skipServerHydrationRef.current = true;
+          clearMiningAuthStorage();
+          onAuthInvalidRef.current?.();
+        } else {
           console.warn('[annotations] server hydration failed, using local cache', err);
         }
       } finally {
@@ -117,7 +137,11 @@ export function useLicenseAnnotations(token: string | null | undefined) {
             annotation,
           });
         } catch (err) {
-          if (!isAnnotationsAuthError(err)) {
+          if (isAnnotationsAuthError(err)) {
+            skipServerHydrationRef.current = true;
+            clearMiningAuthStorage();
+            onAuthInvalidRef.current?.();
+          } else {
             console.warn(`[annotations] failed to save ${licenseId}`, err);
           }
         }

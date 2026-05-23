@@ -288,7 +288,15 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
-  const { userAnnotations, updateAnnotation: persistAnnotation } = useLicenseAnnotations(token);
+  const handleAuthInvalid = useCallback(() => {
+    setToken(null);
+    setUsername(null);
+    setUserId(null);
+  }, []);
+
+  const { userAnnotations, updateAnnotation: persistAnnotation } = useLicenseAnnotations(token, {
+    onAuthInvalid: handleAuthInvalid,
+  });
 
   // Locally-added licenses (persisted to localStorage)
   const [localLicenses, setLocalLicenses] = useState<MiningLicense[]>(() => {
