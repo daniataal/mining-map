@@ -262,6 +262,8 @@ export async function getOilLiveHealth(): Promise<OilLiveHealth> {
 
 export type McrTierCount = { bol_tier: string; count: number };
 
+export type TradeFlowSourceCount = { data_source: string; count: number };
+
 export type OilLiveSyncStatus = {
   last_graph_sync_at?: string | null;
   terminal_count: number;
@@ -272,6 +274,7 @@ export type OilLiveSyncStatus = {
   eia_historic_import_count?: number;
   trade_manifest_row_count?: number;
   mcr_by_tier?: McrTierCount[];
+  oil_trade_flows_by_source?: TradeFlowSourceCount[];
   last_comtrade_sync_at?: string | null;
   last_comtrade_sync_status?: string | null;
   eurostat_trade_flow_count?: number;

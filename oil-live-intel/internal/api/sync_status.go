@@ -21,6 +21,12 @@ type McrTierCount struct {
 	Count   int    `json:"count"`
 }
 
+// TradeFlowSourceCount groups oil_trade_flows by data_source (macro ingest).
+type TradeFlowSourceCount struct {
+	DataSource string `json:"data_source"`
+	Count      int    `json:"count"`
+}
+
 type syncStatusSummary struct {
 	TerminalCount                 int            `json:"terminal_count"`
 	CompanyCount                  int            `json:"company_count"`
@@ -33,8 +39,9 @@ type syncStatusSummary struct {
 	McrWithSanctionsScreenedCount int            `json:"mcr_with_sanctions_screened_count"`
 	McrCorridorCompanyPairCount   int            `json:"mcr_corridor_company_pair_count"`
 	TopCorridors                  []TopCorridor  `json:"top_corridors"`
-	McrByTier                     []McrTierCount `json:"mcr_by_tier"`
-	OilTradeFlowCount             int            `json:"oil_trade_flow_count"`
+	McrByTier                     []McrTierCount         `json:"mcr_by_tier"`
+	OilTradeFlowsBySource         []TradeFlowSourceCount `json:"oil_trade_flows_by_source"`
+	OilTradeFlowCount             int                    `json:"oil_trade_flow_count"`
 	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
 	TradeManifestRowCount         int            `json:"trade_manifest_row_count"`
 	LiveVesselCount               int            `json:"live_vessel_count"`
@@ -130,6 +137,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 
 	topCorridors := queryTopCorridors(ctx, pool)
 	mcrByTier := queryMcrByTier(ctx, pool)
+	oilFlowsBySource := queryOilTradeFlowsBySource(ctx, pool)
 
 	_ = pool.QueryRow(ctx, `
 		SELECT MAX(GREATEST(created_at, COALESCE(event_date, created_at)))
@@ -164,6 +172,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		McrCorridorCompanyPairCount:   mcrCorridorCompanyPairs,
 		TopCorridors:                  topCorridors,
 		McrByTier:                     mcrByTier,
+		OilTradeFlowsBySource:         oilFlowsBySource,
 		OilTradeFlowCount:             oilTradeFlows,
 		EurostatTradeFlowCount:        eurostatTradeFlows,
 		EiaHistoricImportCount:        eiaHistoric,
@@ -184,6 +193,30 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		LastJodiSyncStatus:            lastJodiStatus,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted.",
 	}
+}
+
+func queryOilTradeFlowsBySource(ctx context.Context, pool *pgxpool.Pool) []TradeFlowSourceCount {
+	out := []TradeFlowSourceCount{}
+	rows, err := pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(TRIM(data_source), ''), 'unknown') AS data_source, COUNT(*)::int
+		FROM oil_trade_flows
+		GROUP BY 1
+		ORDER BY 2 DESC
+		LIMIT 12
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var source string
+		var count int
+		if err := rows.Scan(&source, &count); err != nil {
+			return out
+		}
+		out = append(out, TradeFlowSourceCount{DataSource: source, Count: count})
+	}
+	return out
 }
 
 func queryMcrByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {

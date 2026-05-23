@@ -302,14 +302,14 @@ sudo docker logs mining-oil-live-graph-sync-worker --tail 80
 sudo docker logs mining-maritime-worker --tail 40
 
 # 7) Re-check counts (expect terminal_count >> 6)
-curl -sf http://localhost:8095/api/oil-live/sync-status | jq '{terminal_count, port_call_count, cargo_record_count, last_graph_sync_at, eurostat_trade_flow_count, last_eurostat_sync_at, last_eurostat_sync_status}'
+curl -sf http://localhost:8095/api/oil-live/sync-status | jq '{terminal_count, port_call_count, cargo_record_count, last_graph_sync_at, eurostat_trade_flow_count, oil_trade_flows_by_source, last_eurostat_sync_at, last_eurostat_sync_status, jodi_snapshot_count, last_jodi_sync_at, last_jodi_sync_status}'
 ```
 
 Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYNC_ON_STARTUP=true` on the **backend** service in `docker-compose.prod.yml`, then recreate backend after oil-live-intel is healthy.
 
 After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
-**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts, `last_graph_sync_at`, and macro ingest health (`last_comtrade_sync_at`, `eurostat_trade_flow_count`, `last_eurostat_sync_at` / `last_eurostat_sync_status` from graph-sync `eurostat_trade` step). Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
+**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts, `last_graph_sync_at`, and macro ingest health (`last_comtrade_sync_at`, `eurostat_trade_flow_count`, `last_eurostat_sync_at` / `last_eurostat_sync_status` from graph-sync `eurostat_trade` step; `jodi_snapshot_count`, `last_jodi_sync_at` / `last_jodi_sync_status` from graph-sync `jodi_oil` step). Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
 
 ```bash
 curl -sf http://localhost:8095/api/oil-live/health | jq .

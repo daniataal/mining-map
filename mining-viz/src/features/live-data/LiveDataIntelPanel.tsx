@@ -438,7 +438,14 @@ export default function LiveDataIntelPanel({
     const eurostat = syncStatus.last_eurostat_sync_at
       ? new Date(syncStatus.last_eurostat_sync_at).toLocaleDateString()
       : null;
-    return { tiers, comtrade, eurostat };
+    const jodi = syncStatus.last_jodi_sync_at
+      ? new Date(syncStatus.last_jodi_sync_at).toLocaleDateString()
+      : null;
+    const macroSources = (syncStatus.oil_trade_flows_by_source ?? [])
+      .slice(0, 4)
+      .map((s) => `${s.data_source}:${s.count}`)
+      .join(' · ');
+    return { tiers, comtrade, eurostat, jodi, macroSources };
   }, [syncStatus, syncStatusUnreachable]);
 
   const lastCargoSyncLabel = useMemo(() => {
@@ -862,6 +869,13 @@ export default function LiveDataIntelPanel({
                 ` · ${t('Comtrade', 'Comtrade')} ${globalCoverageBanner.comtrade}`}
               {globalCoverageBanner.eurostat &&
                 ` · ${t('Eurostat', 'Eurostat')} ${globalCoverageBanner.eurostat}`}
+              {globalCoverageBanner.macroSources &&
+                ` · ${t('מאקרו לפי מקור', 'macro by source')} ${globalCoverageBanner.macroSources}`}
+              {globalCoverageBanner.jodi &&
+                ` · ${t('JODI', 'JODI')} ${globalCoverageBanner.jodi}`}
+              {syncStatus?.last_jodi_sync_status &&
+                syncStatus.last_jodi_sync_status !== 'ok' &&
+                ` (${syncStatus.last_jodi_sync_status})`}
             </p>
           )}
           <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2">
