@@ -93,12 +93,18 @@ def query_stored_trade_flows(
                    flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at,
                    'oil_trade_flows' AS _table
             FROM oil_trade_flows
-            WHERE LOWER(reporter) LIKE %s
-              AND hs_code = ANY(%s)
+            WHERE hs_code = ANY(%s)
+              AND (
+                LOWER(reporter) LIKE %s
+                OR (
+                  data_source = 'eurostat'
+                  AND LOWER(partner) LIKE %s
+                )
+              )
             ORDER BY year DESC, trade_value_usd DESC NULLS LAST
             LIMIT %s
             """,
-            (f"%{country_l}%", list(hs_codes), limit),
+            (list(hs_codes), f"%{country_l}%", f"%{country_l}%", limit),
         )
         rows = cur.fetchall()
         out.extend(_rows_to_flow_dicts(rows))
@@ -201,12 +207,12 @@ def collect_entity_trade_flows(
         "flows": flows,
         "flow_count": len(flows),
         "bol_tier": "macro",
-        "provenance": "oil_trade_flows + commodity_trade_flows (UN Comtrade macro)",
+        "provenance": "oil_trade_flows + commodity_trade_flows (Comtrade, Eurostat, Census, USITC macro)",
         "limitations": [
             "Country-level bilateral flows — not company-specific customs data.",
-            "Rows match license country name against Comtrade reporter field (fuzzy).",
+            "Rows match license country against reporter (fuzzy) or Eurostat partner (EU extra-EU imports).",
         ],
-        "warnings": [] if flows else ["No macro trade rows for this country/HS — run graph-sync / Comtrade."],
+        "warnings": [] if flows else ["No macro trade rows for this country/HS — run graph-sync."],
         "sync_cta": "POST /api/admin/oil-live/graph-sync",
     }
 
