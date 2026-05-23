@@ -289,7 +289,7 @@ Optional first-boot graph-sync from backend (slower startup): set `OIL_GRAPH_SYN
 
 After deploy merge: confirm `docker-compose.prod.yml` and `Caddyfile` were SCP'd (workflow uploads to `/tmp/mining-map-deploy/`) and `docker compose … up -d` was re-run so **oil-live-intel** and **elasticsearch** services exist.
 
-**Coverage banner** (intel drawer header) shows: terminal count, live vessels, vessel observations, AIS gap zones, open opportunities, last graph-sync time. Ops endpoints:
+**Coverage banner** (intel drawer header) and **Live Data → layers → AIS health** read `GET /api/oil-live/sync-status`: `live_vessel_count`, `live_ais_port_call_count` (metadata `source=live_ais` or public-AIS evidence, excluding seed/demo rows), `vessel_observation_count`, `coverage_watch_zone_count`, `coverage_gap_watch_zone_count`, plus ledger counts and `last_graph_sync_at`. Map overlay uses `GET /coverage?bbox=…` (requires bbox; `freshness_minutes` default 180; cell `limit` capped at 400) and `GET /source-health` for open-tier honesty labels. Ops endpoints:
 
 ```bash
 curl -sf http://localhost:8095/api/oil-live/health | jq .

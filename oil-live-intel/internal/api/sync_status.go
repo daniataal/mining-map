@@ -38,6 +38,7 @@ type syncStatusSummary struct {
 	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
 	TradeManifestRowCount         int            `json:"trade_manifest_row_count"`
 	LiveVesselCount               int            `json:"live_vessel_count"`
+	LiveAisPortCallCount          int            `json:"live_ais_port_call_count"`
 	VesselObservationCount        int            `json:"vessel_observation_count"`
 	CoverageWatchZoneCount        int            `json:"coverage_watch_zone_count"`
 	CoverageGapWatchZoneCount     int            `json:"coverage_gap_watch_zone_count"`
@@ -53,7 +54,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	var corridorFull, corridorPartial, openOpps int
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
 	var oilTradeFlows, eiaHistoric, tradeManifests int
-	var liveVessels, vesselObservations, coverageWatchZones, coverageGapZones int
+	var liveVessels, liveAisPortCalls, vesselObservations, coverageWatchZones, coverageGapZones int
 	var lastGraphSync, lastCargoAt, lastComtrade *time.Time
 	var lastComtradeStatus *string
 
@@ -95,6 +96,15 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT COUNT(DISTINCT mmsi)::int
 		FROM oil_vessel_position_observations
 		WHERE COALESCE(position_time, observed_at) > now() - interval '24 hours'
+	`)
+	liveAisPortCalls = countTable(ctx, pool, `
+		SELECT COUNT(*)::int FROM oil_port_calls
+		WHERE NULLIF(TRIM(metadata->>'source'), '') = 'live_ais'
+		   OR (
+		     evidence::text ILIKE '%inferred from public ais%'
+		     AND evidence::text NOT ILIKE '%seed_port_calls%'
+		     AND evidence::text NOT ILIKE '%demo seed%'
+		   )
 	`)
 	coverageWatchZones = countTable(ctx, pool, `SELECT COUNT(*)::int FROM maritime_watch_zones`)
 	coverageGapZones = countTable(ctx, pool, `
@@ -140,6 +150,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		EiaHistoricImportCount:        eiaHistoric,
 		TradeManifestRowCount:         tradeManifests,
 		LiveVesselCount:               liveVessels,
+		LiveAisPortCallCount:          liveAisPortCalls,
 		VesselObservationCount:        vesselObservations,
 		CoverageWatchZoneCount:        coverageWatchZones,
 		CoverageGapWatchZoneCount:     coverageGapZones,

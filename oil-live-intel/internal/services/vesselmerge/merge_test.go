@@ -17,6 +17,44 @@ func TestSourceRankPrecedence(t *testing.T) {
 	}
 }
 
+func TestClampLimit(t *testing.T) {
+	if ClampLimit(0) != defaultVesselLimit {
+		t.Fatalf("zero -> default, got %d", ClampLimit(0))
+	}
+	if ClampLimit(-5) != defaultVesselLimit {
+		t.Fatalf("negative -> default, got %d", ClampLimit(-5))
+	}
+	if ClampLimit(100) != 100 {
+		t.Fatalf("in-range unchanged, got %d", ClampLimit(100))
+	}
+	if ClampLimit(99999) != maxVesselLimit {
+		t.Fatalf("over max capped, got %d", ClampLimit(99999))
+	}
+	if ClampLimitWithMax(3000, 2000) != 2000 {
+		t.Fatalf("ClampLimitWithMax should cap at max, got %d", ClampLimitWithMax(3000, 2000))
+	}
+	if ClampLimitWithMax(100, 2000) != 100 {
+		t.Fatalf("ClampLimitWithMax should not raise under max, got %d", ClampLimitWithMax(100, 2000))
+	}
+}
+
+func TestVesselIdentityKeyPrefersIMO(t *testing.T) {
+	imo := " 9876543 "
+	if got := VesselIdentityKey(123456789, &imo); got != "imo:9876543" {
+		t.Fatalf("expected imo key, got %q", got)
+	}
+}
+
+func TestVesselIdentityKeyFallsBackToMMSI(t *testing.T) {
+	if got := VesselIdentityKey(636023100, nil); got != "mmsi:636023100" {
+		t.Fatalf("expected mmsi key, got %q", got)
+	}
+	empty := "   "
+	if got := VesselIdentityKey(636023100, &empty); got != "mmsi:636023100" {
+		t.Fatalf("blank imo should fall back to mmsi, got %q", got)
+	}
+}
+
 func TestPickBestUsesPrecedenceThenRecency(t *testing.T) {
 	older := time.Now().Add(-2 * time.Hour)
 	newer := time.Now().Add(-1 * time.Hour)

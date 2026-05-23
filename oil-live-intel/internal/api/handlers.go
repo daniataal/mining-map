@@ -17,6 +17,7 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/services/search"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
+	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
 
 type Server struct {
@@ -53,7 +54,7 @@ func (s *Server) Map(w http.ResponseWriter, r *http.Request) {
 	minLon, minLat, maxLon, maxLat, bboxOK := parseBBox(r.URL.Query().Get("bbox"))
 	bbox := [4]float64{minLon, minLat, maxLon, maxLat}
 	zoom := queryFloat(r, "zoom", 0)
-	limit := queryInt(r, "limit", 500)
+	limit := vesselmerge.ClampLimit(queryInt(r, "limit", 500))
 	if zoom > 0 && zoom < 8 {
 		limit = min(limit, 250)
 	}
@@ -138,7 +139,7 @@ func (s *Server) ImportGeoJSON(w http.ResponseWriter, r *http.Request) {
 func (s *Server) LiveVessels(w http.ResponseWriter, r *http.Request) {
 	minLon, minLat, maxLon, maxLat, bboxOK := parseBBox(r.URL.Query().Get("bbox"))
 	bbox := [4]float64{minLon, minLat, maxLon, maxLat}
-	limit := queryInt(r, "limit", 200)
+	limit := vesselmerge.ClampLimit(queryInt(r, "limit", 200))
 	items, err := s.listLiveVessels(r, bbox, bboxOK, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
