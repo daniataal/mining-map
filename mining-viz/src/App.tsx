@@ -81,7 +81,12 @@ import PlatformHealthChip from './components/PlatformHealthChip';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
-import { LIVE_DATA_HUB_CENTER, LIVE_DATA_DEFAULT_LAYERS, LIVE_DATA_VESSEL_FILTERS } from './features/live-data/liveDataMapDefaults';
+import {
+  LIVE_DATA_HUB_CENTER,
+  LIVE_DATA_DEFAULT_LAYERS,
+  LIVE_DATA_OIL_GAS_TAB_LAYERS,
+  LIVE_DATA_VESSEL_FILTERS,
+} from './features/live-data/liveDataMapDefaults';
 import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
@@ -254,7 +259,7 @@ export default function App() {
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [oilLiveProductFilter, setOilLiveProductFilter] = useState('all');
   const [oilLiveTerminalSearch, setOilLiveTerminalSearch] = useState('');
-  const [oilLiveLayers, setOilLiveLayers] = useState({ ...LIVE_DATA_DEFAULT_LAYERS });
+  const [oilLiveLayers, setOilLiveLayers] = useState({ ...LIVE_DATA_OIL_GAS_TAB_LAYERS });
   const [oilLiveTradeFlowGroup, setOilLiveTradeFlowGroup] = useState<
     'company_pair' | 'country_pair'
   >('company_pair');
@@ -536,7 +541,9 @@ export default function App() {
   useEffect(() => {
     if (!isLiveDataSidebar) {
       setOilLiveEntity(null);
+      return;
     }
+    setOilLiveLayers((prev) => (prev.vessels ? prev : { ...prev, vessels: true }));
   }, [isLiveDataSidebar]);
 
   useEffect(() => {

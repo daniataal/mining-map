@@ -204,8 +204,11 @@ export default function EiaHistoricImportsPanel({
               {t('היסטורי', 'Historic')}
             </span>
           </div>
-          <p className={`${MUTED} mt-0.5`}>
-            {t('קבצי Petroleum Supply Monthly — לא AIS חי.', 'PSM file data — not live AIS.')}
+          <p
+            className="mt-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-950 dark:text-violet-100"
+            role="note"
+          >
+            {t('היסטורי EIA (מאגר) — לא AIS חי', 'EIA historic (DB) — not live AIS')}
           </p>
           {!summaryQuery.isLoading && rowCount != null && rowCount > 0 && (
             <p className={`${MUTED} mt-1 tabular-nums`}>

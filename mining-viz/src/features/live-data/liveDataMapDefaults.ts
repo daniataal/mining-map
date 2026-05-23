@@ -43,6 +43,12 @@ export const LIVE_DATA_DEFAULT_LAYERS: OilLiveLayerVisibility = {
   coverage: true,
 };
 
+/** MAD-74: Oil & Gas → Live tab — tanker AIS on by default (still capped, not global maritime). */
+export const LIVE_DATA_OIL_GAS_TAB_LAYERS: OilLiveLayerVisibility = {
+  ...LIVE_DATA_DEFAULT_LAYERS,
+  vessels: true,
+};
+
 /** When user opts into All maritime AIS on Live Data, favor tankers/cargo. */
 export const LIVE_DATA_VESSEL_FILTERS: VesselFilters = {
   search: '',

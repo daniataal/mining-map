@@ -21,6 +21,7 @@ import type { MapSidebarTab } from './WorkspaceSidebarLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { licenseCardSubtitle, licenseCardTitle } from '../lib/licenseSidebarCard';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -337,7 +338,7 @@ export default function Sidebar({
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h3 className={`text-xs font-black uppercase tracking-tight truncate pr-4 transition-colors ${isSelected ? 'text-amber-500' : 'text-slate-700 dark:text-slate-200'}`}>
-                        {item.company}
+                        {licenseCardTitle(item)}
                       </h3>
                       <div className="flex gap-1 shrink-0">
                          {annotation.status === 'good' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
@@ -346,8 +347,10 @@ export default function Sidebar({
                       </div>
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
-                       <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
-                       <span className="truncate">{item.region}</span>
+                       <LucideMapPin className="w-3 h-3 mr-1 shrink-0 text-slate-600" />
+                       <span className="truncate" title={licenseCardSubtitle(item)}>
+                         {licenseCardSubtitle(item)}
+                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <Badge className={`${sourceTrustClass(item)} border-none text-[8px] font-black uppercase`}>

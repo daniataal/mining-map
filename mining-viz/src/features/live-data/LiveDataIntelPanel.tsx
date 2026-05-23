@@ -61,6 +61,7 @@ import {
 } from './liveDataWorkflow';
 import { usePlatformHealth } from '../../lib/platformHealth';
 import { resolveLiveAisBanner } from './liveAisBanner';
+import { coverageViewVsDbNote } from './coverageHealthNote';
 import { firstVerifyUrl } from '../../lib/verifySourceUrl';
 import CollapsibleSection from '../../components/ui/CollapsibleSection';
 import { getTradeManifests } from '../../api/oilLiveApi';
@@ -353,6 +354,21 @@ export default function LiveDataIntelPanel({
     if (productFilter === 'all') return cards;
     return cards.filter((c) => (c.product_family_inferred || '').includes(productFilter));
   }, [cards, productFilter]);
+
+  const coverageViewNote = useMemo(() => {
+    const dbVessels = syncStatus?.vessel_observation_count;
+    const dbTerminals = syncStatus?.terminal_count ?? terminalsIndex?.length;
+    if (typeof dbVessels !== 'number' || typeof dbTerminals !== 'number') return null;
+    return coverageViewVsDbNote({
+      inView: {
+        terminals: coverageStats?.terminals ?? 0,
+        vessels: coverageStats?.vessels ?? 0,
+        corridors: coverageStats?.corridors ?? 0,
+        opportunities: coverageStats?.opportunities ?? 0,
+      },
+      db: { vesselObservations: dbVessels, terminals: dbTerminals },
+    });
+  }, [syncStatus, terminalsIndex?.length, coverageStats]);
 
   const coverageInView = [
     { key: 'terminals', label: t('מסופים', 'Terminals'), value: coverageStats?.terminals ?? 0 },
@@ -847,6 +863,14 @@ export default function LiveDataIntelPanel({
               </div>
             ))}
           </div>
+          {coverageViewNote && (
+            <p
+              className="mt-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-xs leading-relaxed text-amber-950 dark:text-amber-100"
+              role="note"
+            >
+              {t(coverageViewNote.he, coverageViewNote.en)}
+            </p>
+          )}
           <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-cyan-800/90 dark:text-cyan-200/90">
             {t('במאגר', 'In database')}
           </p>
