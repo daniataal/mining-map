@@ -6212,15 +6212,20 @@ def get_oil_flows(
             params,
         )
         rows = c.fetchall()
+        data = []
+        for row in rows:
+            item = dict(row)
+            item["bol_tier"] = "macro"
+            data.append(item)
 
         return {
-            "data": rows,
-            "count": len(rows),
+            "data": data,
+            "count": len(data),
+            "bol_tier": "macro",
             "hs_codes_covered": _OIL_HS_META,
             "provenance": (
-                "Seed: UN Comtrade aggregate tables (comtradeplus.un.org, 2024-Q4), "
-                "cross-checked with BP Statistical Review 2023. "
-                "Live rows sourced via UN Comtrade API v1."
+                "Macro tier in oil_trade_flows from graph-sync: UN Comtrade, Eurostat, "
+                "U.S. Census, USITC DataWeb, EIA, and static seed — not company BOLs."
             ),
             "limitations": _OIL_LIMITATIONS,
         }

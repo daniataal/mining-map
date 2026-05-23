@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 # HS chapter 27 petroleum codes synced by comtrade worker
@@ -67,6 +68,40 @@ def _load_license_row(conn: Any, entity_id: str) -> Optional[dict[str, Any]]:
     }
 
 
+def _parse_year_from_period(period: str | None) -> int | None:
+    if not period:
+        return None
+    match = re.search(r"(20\d{2}|19\d{2})", str(period))
+    return int(match.group(1)) if match else None
+
+
+def _jodi_rows_to_flow_dicts(rows: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            country = row.get("country")
+            product = row.get("product")
+            indicator = row.get("flow_indicator")
+            period = row.get("period")
+            value = row.get("value")
+        else:
+            country, product, indicator, period, value = row[0], row[1], row[2], row[3], row[4]
+        out.append(
+            {
+                "reporter": country,
+                "partner": indicator or "JODI aggregate",
+                "hs_code": "2709",
+                "hs_description": product or "JODI oil supply/demand",
+                "flow_type": "M",
+                "year": _parse_year_from_period(period) or 0,
+                "trade_value_usd": float(value) if value is not None else None,
+                "data_source": "jodi",
+                "bol_tier": "macro",
+            }
+        )
+    return out
+
+
 def _table_exists(cur: Any, name: str) -> bool:
     cur.execute(
         "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = %s",
@@ -125,6 +160,19 @@ def query_stored_trade_flows(
             )
             rows2 = cur.fetchall()
             out.extend(_rows_to_flow_dicts(rows2))
+
+        if _table_exists(cur, "jodi_oil_snapshots"):
+            cur.execute(
+                """
+                SELECT country, product, flow_indicator, period, value, unit, data_source, ingested_at
+                FROM jodi_oil_snapshots
+                WHERE LOWER(country) LIKE %s
+                ORDER BY period DESC NULLS LAST
+                LIMIT %s
+                """,
+                (f"%{country_l}%", limit),
+            )
+            out.extend(_jodi_rows_to_flow_dicts(cur.fetchall()))
     out.sort(key=lambda r: (r.get("year") or 0, r.get("trade_value_usd") or 0), reverse=True)
     return out[:limit]
 
@@ -207,10 +255,10 @@ def collect_entity_trade_flows(
         "flows": flows,
         "flow_count": len(flows),
         "bol_tier": "macro",
-        "provenance": "oil_trade_flows + commodity_trade_flows (Comtrade, Eurostat, Census, USITC macro)",
+        "provenance": "oil_trade_flows + commodity_trade_flows + jodi_oil_snapshots (macro tier)",
         "limitations": [
             "Country-level bilateral flows — not company-specific customs data.",
-            "Rows match license country against reporter (fuzzy) or Eurostat partner (EU extra-EU imports).",
+            "Rows match license country against reporter (fuzzy), Eurostat partner, or JODI country.",
         ],
         "warnings": [] if flows else ["No macro trade rows for this country/HS — run graph-sync."],
         "sync_cta": "POST /api/admin/oil-live/graph-sync",

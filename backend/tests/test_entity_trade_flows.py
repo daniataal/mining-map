@@ -41,6 +41,20 @@ class TestQueryStoredTradeFlows(unittest.TestCase):
         self.assertIn("eurostat", sql)
         self.assertIn("partner", sql)
 
+    def test_jodi_rows_mapped_to_macro_flows(self) -> None:
+        try:
+            from backend.services.entity_trade_flows import _jodi_rows_to_flow_dicts
+        except ImportError:
+            from services.entity_trade_flows import _jodi_rows_to_flow_dicts  # type: ignore
+
+        rows = _jodi_rows_to_flow_dicts(
+            [("Norway", "Crude oil", "Production", "2023-Q1", 1.5, None, "jodi", None)]
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["data_source"], "jodi")
+        self.assertEqual(rows[0]["bol_tier"], "macro")
+        self.assertEqual(rows[0]["year"], 2023)
+
 
 if __name__ == "__main__":
     unittest.main()
