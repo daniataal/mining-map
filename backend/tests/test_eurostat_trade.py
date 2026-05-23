@@ -225,6 +225,45 @@ class TestOilTradeFlowsUniqueKey(unittest.TestCase):
         apply_mock.assert_called_once_with(conn, gs._MIGRATION_018)
 
 
+class TestAttachEurostatRaw(unittest.TestCase):
+    def test_update_raw_by_dedupe_key(self) -> None:
+        try:
+            from backend.services.eurostat_trade import _attach_eurostat_raw
+        except ImportError:
+            from services.eurostat_trade import _attach_eurostat_raw  # type: ignore
+
+        executed: list[tuple] = []
+
+        class _Cur:
+            def execute(self, sql: str, params: tuple) -> None:
+                executed.append((sql, params))
+
+            def __enter__(self) -> "_Cur":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+        class _Conn:
+            def cursor(self) -> _Cur:
+                return _Cur()
+
+        row = {
+            "reporter": "EU",
+            "reporter_iso2": "EU",
+            "partner": "Russia",
+            "hs_code": "2709",
+            "flow_type": "M",
+            "year": 2023,
+            "trade_value_usd": 1000.0,
+            "raw": {"dimensions": {"partner": "RU"}},
+        }
+        _attach_eurostat_raw(_Conn(), [row])
+        self.assertEqual(len(executed), 1)
+        self.assertIn("UPDATE oil_trade_flows", executed[0][0])
+        self.assertIn("RU", executed[0][1][0])
+
+
 class TestEurostatIngestRow(unittest.TestCase):
     def test_dimensional_m49_codes(self) -> None:
         try:

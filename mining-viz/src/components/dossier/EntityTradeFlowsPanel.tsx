@@ -13,6 +13,7 @@ interface StoredTradeFlow {
   year?: number;
   trade_value_usd?: number | null;
   data_source?: string;
+  bol_tier?: string;
 }
 
 interface EntityTradeFlowsResponse {
@@ -128,6 +129,7 @@ export default function EntityTradeFlowsPanel({
                 <th className="py-1 pr-2">HS</th>
                 <th className="py-1 pr-2">Partner</th>
                 <th className="py-1 pr-2">Source</th>
+                <th className="py-1 pr-2">Tier</th>
                 <th className="py-1">USD</th>
               </tr>
             </thead>
@@ -144,6 +146,9 @@ export default function EntityTradeFlowsPanel({
                   <td className="py-1 pr-2">{row.hs_code}</td>
                   <td className="py-1 pr-2">{row.partner || '—'}</td>
                   <td className="py-1 pr-2 text-slate-500">{row.data_source || '—'}</td>
+                  <td className="py-1 pr-2 text-slate-500 uppercase text-[10px]">
+                    {row.bol_tier || 'macro'}
+                  </td>
                   <td className="py-1">{fmtUsd(row.trade_value_usd)}</td>
                 </tr>
               ))}
