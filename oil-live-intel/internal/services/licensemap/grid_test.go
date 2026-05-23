@@ -8,16 +8,19 @@ import (
 func floatPtr(v float64) *float64 { return &v }
 
 func TestGridDegreesLowZoom(t *testing.T) {
-	if g := GridDegrees(floatPtr(2)); g == nil || *g != 12.0 {
+	if g := GridDegrees(floatPtr(2)); g == nil || *g != 16.0 {
 		t.Fatalf("zoom 2: got %v", g)
 	}
-	if g := GridDegrees(floatPtr(3)); g == nil || *g != 8.0 {
+	if g := GridDegrees(floatPtr(3)); g == nil || *g != 12.0 {
 		t.Fatalf("zoom 3: got %v", g)
 	}
-	if g := GridDegrees(floatPtr(5)); g == nil || *g != 4.0 {
+	if g := GridDegrees(floatPtr(4)); g == nil || *g != 8.0 {
+		t.Fatalf("zoom 4: got %v", g)
+	}
+	if g := GridDegrees(floatPtr(5)); g == nil || *g != 6.0 {
 		t.Fatalf("zoom 5: got %v", g)
 	}
-	if g := GridDegrees(floatPtr(6)); g == nil || *g != 4.0 {
+	if g := GridDegrees(floatPtr(6)); g == nil || *g != 6.0 {
 		t.Fatalf("zoom 6: got %v", g)
 	}
 }
@@ -40,7 +43,7 @@ func TestClusterMinCount(t *testing.T) {
 	if ClusterMinCount(4.0) != 3 {
 		t.Fatal("4.0")
 	}
-	if ClusterMinCount(12.0) != 3 {
+	if ClusterMinCount(12.0) != 4 {
 		t.Fatal("12.0")
 	}
 }

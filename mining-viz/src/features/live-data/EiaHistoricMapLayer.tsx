@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CircleMarker, LayerGroup, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+import type { HistoricArcSelection } from './HistoricArcDetailDrawer';
 import ArrowPolyline from '../../components/map/ArrowPolyline';
 import {
   bezierMidpoint,
@@ -173,9 +174,21 @@ type Props = {
   year?: number;
   showCorridors?: boolean;
   onSelectImporter?: (importerName: string) => void;
+  /** Opens detail drawer (explicit action — not on every map click). */
+  onViewArcDetails?: (selection: HistoricArcSelection) => void;
 };
 
 const HUB_COLOR = '#8b5cf6';
+
+function arcSelectionKey(arc: EiaHistoricMapArc): string {
+  return [
+    arc.origin_country,
+    arc.commodity_family,
+    arc.port_city ?? '',
+    arc.port_state ?? '',
+    arc.port_code ?? '',
+  ].join('::');
+}
 
 export default function EiaHistoricMapLayer({
   enabled,
@@ -184,6 +197,7 @@ export default function EiaHistoricMapLayer({
   year,
   showCorridors = false,
   onSelectImporter,
+  onViewArcDetails,
 }: Props) {
   const [selectedOriginKey, setSelectedOriginKey] = useState<string | null>(null);
   const [highlightImporter, setHighlightImporter] = useState<string | null>(null);
@@ -319,9 +333,13 @@ export default function EiaHistoricMapLayer({
           const positions = unwrapLongitudePath(bent);
           const color = commodityColor(arc.commodity_family);
           const weight = Math.min(4, volumeToWeight(arc.volume_bbl));
+          const openDetails = () => {
+            if (year == null || !onViewArcDetails) return;
+            onViewArcDetails({ arc, year });
+          };
           return (
             <ArrowPolyline
-              key={`corridor-${arc.origin_country}-${arc.port_city}-${arc.port_state}-${arc.discharge_label}`}
+              key={`corridor-${arcSelectionKey(arc)}-${arc.discharge_label}`}
               positions={positions}
               arrowColor={color}
               arrowSize={10}
@@ -332,25 +350,84 @@ export default function EiaHistoricMapLayer({
                 lineCap: 'round',
                 lineJoin: 'round',
               }}
-            />
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  openDetails();
+                },
+              }}
+            >
+              {onViewArcDetails && (
+                <Popup className="eia-historic-leaflet-popup" maxWidth={280}>
+                  <div className="eia-historic-popup-card">
+                    <p className="eia-historic-popup-title">
+                      {arc.origin_label} → {arc.discharge_label}
+                    </p>
+                    <p className="eia-historic-popup-sub capitalize">
+                      {arc.commodity_family} · {year ?? '—'}
+                    </p>
+                    <span className="eia-historic-popup-tier">Historic · EIA</span>
+                    <button type="button" className="eia-historic-importer-btn mt-2 w-full" onClick={openDetails}>
+                      View details
+                    </button>
+                  </div>
+                </Popup>
+              )}
+            </ArrowPolyline>
           );
         })}
 
-      {selectedCorridors.map((corridor) => (
-        <ArrowPolyline
-          key={`selected-${selectedOriginKey}-${corridor.key}`}
-          positions={corridor.positions}
-          arrowColor={corridor.color}
-          arrowSize={corridor.arrowSize}
-          pathOptions={{
-            color: corridor.color,
-            weight: corridor.weight,
-            opacity: corridor.opacity,
-            lineCap: 'round',
-            lineJoin: 'round',
-          }}
-        />
-      ))}
+      {selectedCorridors.map((corridor) => {
+        const slice = selectedPortSlices.find((s) => portSliceKey(s.fields) === corridor.key);
+        const matchingArc = geoArcs.find(
+          (a) =>
+            a.origin_country === selectedOriginKey &&
+            portSliceKey(arcPortFields(a)) === corridor.key,
+        );
+        const openSliceDetails = () => {
+          if (year == null || !onViewArcDetails || !matchingArc) return;
+          onViewArcDetails({ arc: matchingArc, year });
+        };
+        return (
+          <ArrowPolyline
+            key={`selected-${selectedOriginKey}-${corridor.key}`}
+            positions={corridor.positions}
+            arrowColor={corridor.color}
+            arrowSize={corridor.arrowSize}
+            pathOptions={{
+              color: corridor.color,
+              weight: corridor.weight,
+              opacity: corridor.opacity,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
+            eventHandlers={
+              onViewArcDetails && matchingArc
+                ? {
+                    click: (e) => {
+                      L.DomEvent.stopPropagation(e);
+                      openSliceDetails();
+                    },
+                  }
+                : undefined
+            }
+          >
+            {onViewArcDetails && matchingArc && slice && (
+              <Popup className="eia-historic-leaflet-popup" maxWidth={280}>
+                <div className="eia-historic-popup-card">
+                  <p className="eia-historic-popup-title">{corridor.dischargeLabel}</p>
+                  <p className="eia-historic-popup-sub">
+                    {selectedOrigin?.label} · {year ?? '—'}
+                  </p>
+                  <button type="button" className="eia-historic-importer-btn mt-2 w-full" onClick={openSliceDetails}>
+                    View details
+                  </button>
+                </div>
+              </Popup>
+            )}
+          </ArrowPolyline>
+        );
+      })}
       {selectedCorridors.map((corridor) => (
         <CircleMarker
           key={`hub-${selectedOriginKey}-${corridor.key}`}

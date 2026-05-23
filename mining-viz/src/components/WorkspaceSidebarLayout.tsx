@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { Archive, Layers, List, LogOut, PieChart, Radio, Settings } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import Sidebar from './Sidebar';
-import type { MiningLicense, UserAnnotation } from '../types';
+import type { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
+import type { LicenseCoverageSector } from '../lib/licenseCoverage';
 
 export type MapSidebarTab = 'licenses' | 'live_data' | 'historic';
 
@@ -35,6 +36,10 @@ export type WorkspaceSidebarLayoutProps = {
   getDealRoomForLicense?: Parameters<typeof Sidebar>[0]['getDealRoomForLicense'];
   liveDataPanel: ReactNode;
   historicPanel: ReactNode;
+  worldCoverage?: WorldCoverageResponse | null;
+  licenseCoverageSector?: LicenseCoverageSector | null;
+  licenseCoverageAlsoShowSector?: LicenseCoverageSector | null;
+  showLicenseCoveragePanel?: boolean;
 };
 
 export default function WorkspaceSidebarLayout({
@@ -65,6 +70,10 @@ export default function WorkspaceSidebarLayout({
   getDealRoomForLicense,
   liveDataPanel,
   historicPanel,
+  worldCoverage,
+  licenseCoverageSector,
+  licenseCoverageAlsoShowSector,
+  showLicenseCoveragePanel,
 }: WorkspaceSidebarLayoutProps) {
   const { t } = useI18n();
 
@@ -113,6 +122,10 @@ export default function WorkspaceSidebarLayout({
           getDealRoomForLicense={getDealRoomForLicense}
           onSelectWorkspaceTab={onTabChange}
           workspaceTab={tab}
+          worldCoverage={worldCoverage}
+          licenseCoverageSector={licenseCoverageSector}
+          licenseCoverageAlsoShowSector={licenseCoverageAlsoShowSector}
+          showLicenseCoveragePanel={showLicenseCoveragePanel}
         />
       </div>
     );

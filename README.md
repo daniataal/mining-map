@@ -73,7 +73,7 @@ curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east
 
 If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
 
-If worker logs mention `stream.aisstream.io` and `certificate has expired`, the AISStream TLS certificate needs renewal on their side (not a local CA bundle issue). Until then, dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`. Production: wait for upstream renewal or contact AISStream.
+If worker logs mention `stream.aisstream.io` and `certificate has expired`, check whether upstream renewed the cert (May 2026+). Workers auto-retry once with `MARITIME_SSL_AUTO_FALLBACK=1` (default). After renewal, force-recreate `maritime-worker` and `oil-live-intel-worker` to clear stale ingest status. Dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`.
 
 ### Remote PostGIS Recovery
 

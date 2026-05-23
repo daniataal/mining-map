@@ -6594,6 +6594,10 @@ class EiaHistoricIngestRequest(BaseModel):
     path: Optional[str] = None
 
 
+class GemExtractionTrackerIngestRequest(BaseModel):
+    path: Optional[str] = None
+
+
 @app.get("/api/eia-historic-imports/summary")
 def eia_historic_imports_summary(
     importer: Optional[str] = None,
@@ -6661,6 +6665,37 @@ def eia_historic_imports_map(
             from services.eia_historic_imports import query_map_arcs
         return query_map_arcs(conn, year=year, importer=importer, limit=limit)
     except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-extraction-tracker/ingest")
+def admin_gem_extraction_tracker_ingest(
+    request: GemExtractionTrackerIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+    path: Optional[str] = None,
+):
+    """
+    Ingest GEM Global Oil and Gas Extraction Tracker xlsx into ``licenses``
+    (``sector=oil_and_gas``). Defaults to repo-root workbook or ``GEM_TRACKER_XLSX_PATH``.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    target = (request.path or path or "").strip() or None
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_extraction_tracker_import import ingest_gem_extraction_tracker
+        except ImportError:
+            from services.ingest.gem_extraction_tracker_import import ingest_gem_extraction_tracker
+        summary = ingest_gem_extraction_tracker(conn, workbook_path=target)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
         return {"status": "error", "message": str(exc)}
     finally:
         conn.close()

@@ -31,6 +31,8 @@ export interface PlatformHealthResponse {
     status?: string;
     last_error?: string | null;
     last_success_at?: string | null;
+    recovery_hint?: string | null;
+    aisstream_tls_valid_until?: string | null;
   };
   oil_live_intel?: {
     ok?: boolean | null;
@@ -79,8 +81,8 @@ export function shortenMaritimeWorkerError(raw: string | undefined | null): stri
     err.includes('stream.aisstream.io')
   ) {
     return (
-      'AISStream TLS certificate expired (stream.aisstream.io). ' +
-      'Set MARITIME_SSL_AUTO_FALLBACK=1 and recreate maritime-worker + oil-live-intel-worker.'
+      'AISStream TLS error (stream.aisstream.io). ' +
+      'Upstream cert may be renewed — force-recreate maritime-worker + oil-live-intel-worker with MARITIME_SSL_AUTO_FALLBACK=1.'
     );
   }
   return err.length > 160 ? `${err.slice(0, 160)}…` : err;
@@ -99,7 +101,12 @@ export function platformHealthIssues(payload: PlatformHealthResponse | undefined
     issues.push('Maritime snapshot is stale — start maritime-worker');
   }
   const workerStatus = payload.maritime_worker?.status;
-  if (workerStatus && !['ok', 'running', 'idle'].includes(workerStatus)) {
+  if (workerStatus === 'stale_error') {
+    const hint =
+      payload.maritime_worker?.recovery_hint?.trim() ||
+      'AISStream TLS is valid but ingest status is stale — recreate maritime-worker.';
+    issues.push(hint);
+  } else if (workerStatus && !['ok', 'running', 'idle'].includes(workerStatus)) {
     const shortErr = shortenMaritimeWorkerError(payload.maritime_worker?.last_error);
     issues.push(
       shortErr

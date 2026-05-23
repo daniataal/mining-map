@@ -13,19 +13,26 @@ func GridDegrees(zoom *float64) *float64 {
 		return nil
 	}
 	if z < 3 {
-		g := 12.0
+		g := 16.0
 		return &g
 	}
 	if z < 4 {
+		g := 12.0
+		return &g
+	}
+	if z < 5 {
 		g := 8.0
 		return &g
 	}
-	g := 4.0
+	g := 6.0
 	return &g
 }
 
 // ClusterMinCount drops singleton grid cells; coarse cells need more licenses.
 func ClusterMinCount(gridDeg float64) int {
+	if gridDeg >= 12.0 {
+		return 4
+	}
 	if gridDeg >= 4.0 {
 		return 3
 	}

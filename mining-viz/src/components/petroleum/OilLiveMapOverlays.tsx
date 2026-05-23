@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useDebouncedValue } from '../../hooks/use-debounced-value';
 import { Marker, Popup, Polyline, Rectangle, LayerGroup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
@@ -313,7 +312,7 @@ function ArrowPolyline({
   );
 }
 
-export default function OilLiveMapOverlays({
+function OilLiveMapOverlays({
   enabled,
   mapZoom = 5,
   productFilter = 'all',
@@ -327,10 +326,8 @@ export default function OilLiveMapOverlays({
 }: Props) {
   const queryClient = useQueryClient();
   const [liveVessels, setLiveVessels] = useState<Record<number, OilLiveVessel>>({});
-  const debouncedViewport = useDebouncedValue(viewport, 450);
-
-  const bbox = debouncedViewport
-    ? `${debouncedViewport.west},${debouncedViewport.south},${debouncedViewport.east},${debouncedViewport.north}`
+  const bbox = viewport
+    ? `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`
     : undefined;
 
   const viewportReady = Boolean(bbox);
@@ -1180,3 +1177,5 @@ export default function OilLiveMapOverlays({
     </LayerGroup>
   );
 }
+
+export default memo(OilLiveMapOverlays);

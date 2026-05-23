@@ -49,6 +49,9 @@ export const LIVE_DATA_OIL_GAS_TAB_LAYERS: OilLiveLayerVisibility = {
   vessels: true,
 };
 
+/** MAD-95: EIA historic arcs on Live Data map — off until user toggles Historic group. */
+export const LIVE_DATA_EIA_HISTORIC_DEFAULT_YEAR = 2020;
+
 /** When user opts into All maritime AIS on Live Data, favor tankers/cargo. */
 export const LIVE_DATA_VESSEL_FILTERS: VesselFilters = {
   search: '',

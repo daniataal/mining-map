@@ -1,6 +1,5 @@
 import axios, { isCancel } from 'axios';
 import { useMemo } from 'react';
-import { useDebouncedValue } from '../hooks/use-debounced-value';
 import {
   keepPreviousData,
   useQuery,
@@ -50,6 +49,7 @@ import {
 } from './countryBounds';
 import { MIN_SERVER_LICENSE_CLUSTER_COUNT } from './licenseMapCluster';
 import { getStoredMiningToken } from './miningAuth';
+import { MAP_VIEWPORT_DEBOUNCE_MS } from './mapViewportDebounce';
 
 export {
   clearLicenseBundleCaches,
@@ -212,9 +212,10 @@ export type LicenseViewportBounds = MaritimeViewportBounds;
 const LICENSE_GET_TIMEOUT_MS = 90_000;
 /** Map viewport fetch cap (backend clamps to 15000). */
 const LICENSE_VIEWPORT_LIMIT = 5000;
-/** Single debounce for map pan (MapComponent emits bounds immediately). */
-const LICENSE_VIEWPORT_DEBOUNCE_MS = 400;
 const LICENSE_VIEWPORT_STALE_MS = 10 * 60_000;
+
+/** @deprecated Use MAP_VIEWPORT_DEBOUNCE_MS from mapViewportDebounce — kept for callers. */
+export const LICENSE_VIEWPORT_DEBOUNCE_MS = MAP_VIEWPORT_DEBOUNCE_MS;
 
 import {
   normalizeLicenseViewportBounds,
@@ -485,10 +486,9 @@ export function useLicensesForMap(options: {
   enabled: boolean;
 }): UseLicensesResult {
   const { sector, bounds, filterCountries = [], countryFocusBboxOnly = false, mapZoom, enabled } = options;
-  const debouncedBounds = useDebouncedValue(bounds, LICENSE_VIEWPORT_DEBOUNCE_MS);
   const viewportBounds = useMemo(
-    () => (debouncedBounds ? quantizeLicenseViewportBounds(debouncedBounds) : null),
-    [debouncedBounds],
+    () => (bounds ? quantizeLicenseViewportBounds(bounds) : null),
+    [bounds],
   );
   const countriesKey = filterCountries.length ? filterCountries.join('|') : '';
   const countryScoped = filterCountries.length > 0;
@@ -524,17 +524,7 @@ export function useLicensesForMap(options: {
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
     retry: 1,
     refetchOnWindowFocus: false,
-    placeholderData: (previousData) => {
-      // After zooming into a cluster, do not keep low-zoom cluster bubbles while refetching points.
-      if (
-        mapZoom != null &&
-        mapZoom >= 7 &&
-        previousData?.some((row) => (row.mapClusterCount ?? 0) > 0)
-      ) {
-        return undefined;
-      }
-      return keepPreviousData(previousData);
-    },
+    placeholderData: keepPreviousData,
     queryFn: async ({ signal }: QueryFunctionContext) => {
       if (countryScoped && fetchBounds) {
         return fetchLicensesViewportFromApi({

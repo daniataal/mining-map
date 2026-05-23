@@ -1,4 +1,8 @@
 import { useI18n } from '../../lib/i18n';
+import {
+  EIA_HISTORIC_DISCLAIMER_EN,
+  EIA_HISTORIC_DISCLAIMER_HE,
+} from '../../lib/eiaHistoricLayer';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
 type Props = {
@@ -87,6 +91,11 @@ export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn 
           </li>
         ))}
       </ul>
+      {eiaHistoricOn && (
+        <p className="mt-2 border-t border-slate-200/80 pt-2 text-[9px] leading-snug text-violet-800 dark:text-violet-200">
+          {t(EIA_HISTORIC_DISCLAIMER_HE, EIA_HISTORIC_DISCLAIMER_EN)}
+        </p>
+      )}
     </div>
   );
 }

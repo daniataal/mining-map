@@ -24,8 +24,33 @@ export function clusterExpandPaddingDeg(item: MiningLicense): number {
 /** Match MapComponent default zoom for license views (must align API zoom with map). */
 export const LICENSE_MAP_DEFAULT_ZOOM = 7;
 
+/** Server grid mode ends below this zoom; drill must reach individual points. */
+export const SERVER_CLUSTER_MIN_DRILL_ZOOM = 8;
+
 export function clusterTargetZoom(currentZoom: number): number {
   return Math.max(Math.min(currentZoom + 3, 12), 9);
+}
+
+export type ClusterDrillFlyPlan =
+  | { mode: 'center'; zoom: number }
+  | { mode: 'bounds'; maxZoom: number };
+
+/** Pick center fly when bounds are too wide to reach drill zoom via fit-bounds alone. */
+export function planClusterDrillFly(
+  currentZoom: number,
+  boundsSpanDeg: number,
+  boundsFitZoom: number | null,
+): ClusterDrillFlyPlan {
+  const targetZoom = clusterTargetZoom(currentZoom);
+  const fitZoom = boundsFitZoom ?? 0;
+  if (
+    boundsSpanDeg > 2.5 ||
+    fitZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM ||
+    currentZoom < 5
+  ) {
+    return { mode: 'center', zoom: targetZoom };
+  }
+  return { mode: 'bounds', maxZoom: Math.min(14, targetZoom + 1) };
 }
 
 /** Leaflet bounds for flying into a server grid cell (degrees). */

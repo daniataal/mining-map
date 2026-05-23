@@ -22,6 +22,29 @@ type Subscription struct {
 type StreamHandler func(ctx context.Context, u *Update) error
 
 func RunStream(ctx context.Context, sub Subscription, handler StreamHandler, insecureTLS bool) error {
+	return runStream(ctx, sub, handler, insecureTLS)
+}
+
+// RunStreamWithTLSFallback dials with verify on first; on upstream cert expiry retries once
+// with InsecureSkipVerify when autoFallback is true (mirrors Python maritime_ssl.py).
+func RunStreamWithTLSFallback(
+	ctx context.Context,
+	sub Subscription,
+	handler StreamHandler,
+	insecureTLS bool,
+	autoFallback bool,
+) error {
+	if insecureTLS {
+		return runStream(ctx, sub, handler, true)
+	}
+	err := runStream(ctx, sub, handler, false)
+	if err == nil || !autoFallback || !IsCertificateExpiredError(err) {
+		return err
+	}
+	return runStream(ctx, sub, handler, true)
+}
+
+func runStream(ctx context.Context, sub Subscription, handler StreamHandler, insecureTLS bool) error {
 	if sub.APIKey == "" {
 		return fmt.Errorf("aisstream api key missing")
 	}
@@ -31,7 +54,7 @@ func RunStream(ctx context.Context, sub Subscription, handler StreamHandler, ins
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
-		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecureTLS}, //nolint:gosec // dev-only flag
+		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecureTLS}, //nolint:gosec // dev-only when env-gated
 	}
 	conn, _, err := dialer.DialContext(ctx, StreamURL, nil)
 	if err != nil {

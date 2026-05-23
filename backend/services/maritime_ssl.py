@@ -30,9 +30,36 @@ def maritime_ssl_auto_fallback_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+def _exception_message_chain(exc: BaseException) -> str:
+    parts: list[str] = []
+    current: BaseException | None = exc
+    while current is not None:
+        parts.append(str(current).strip().lower())
+        current = current.__cause__ or current.__context__
+    return " ".join(parts)
+
+
 def is_certificate_expired_error(exc: BaseException) -> bool:
-    message = str(exc).strip().lower()
+    message = _exception_message_chain(exc)
     return "certificate has expired" in message or "cert has expired" in message
+
+
+def probe_aisstream_tls(
+    host: str = "stream.aisstream.io",
+    port: int = 443,
+    timeout: float = 5.0,
+) -> tuple[bool, str | None]:
+    """Return (ok, not_after) from a short TLS handshake to the AISStream host."""
+    import socket
+
+    ctx = ssl.create_default_context()
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert() or {}
+                return True, cert.get("notAfter")
+    except Exception as exc:
+        return False, str(exc)
 
 
 def should_retry_aisstream_without_tls_verify(exc: BaseException) -> bool:

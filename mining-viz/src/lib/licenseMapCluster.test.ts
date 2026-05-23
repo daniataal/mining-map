@@ -2,22 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   clusterTargetZoom,
   clusterExpandPaddingDeg,
+  planClusterDrillFly,
   shouldRenderServerLicenseCluster,
   serverClusterFlyBounds,
   MIN_SERVER_LICENSE_CLUSTER_COUNT,
+  SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from './licenseMapCluster';
 import type { MiningLicense } from '../types';
 
 describe('licenseMapCluster', () => {
   describe('clusterTargetZoom', () => {
-    it('increases zoom by 3, capped at 12', () => {
-      expect(clusterTargetZoom(5)).toBe(8);
+    it('increases zoom by 3, capped at 12, floored at 9', () => {
+      expect(clusterTargetZoom(5)).toBe(9);
       expect(clusterTargetZoom(9)).toBe(12);
       expect(clusterTargetZoom(11)).toBe(12);
     });
 
     it('stays at 9 or above', () => {
       expect(clusterTargetZoom(2)).toBe(9);
+      expect(clusterTargetZoom(2)).toBeGreaterThanOrEqual(SERVER_CLUSTER_MIN_DRILL_ZOOM);
+    });
+  });
+
+  describe('planClusterDrillFly', () => {
+    it('uses center fly for wide continental clusters', () => {
+      const plan = planClusterDrillFly(4, 12, 3);
+      expect(plan).toEqual({ mode: 'center', zoom: 9 });
+    });
+
+    it('uses bounds fly when fit zoom reaches drill threshold', () => {
+      const plan = planClusterDrillFly(6, 1.2, 10);
+      expect(plan).toEqual({ mode: 'bounds', maxZoom: 10 });
     });
   });
 

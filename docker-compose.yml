@@ -507,7 +507,8 @@ services:
       DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
       OIL_INTEL_API_URL: "http://oil-live-intel:8095"
       OIL_INTEL_INTERNAL_KEY: ${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
-      OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-true}
+      OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-false}
+      MARITIME_SSL_AUTO_FALLBACK: ${MARITIME_SSL_AUTO_FALLBACK:-1}
       AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
       EIA_API_KEY: ${EIA_API_KEY:-}
       COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
