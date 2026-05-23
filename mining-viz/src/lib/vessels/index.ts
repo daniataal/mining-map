@@ -17,10 +17,6 @@ export {
   fetchMaritimeVesselSnapshot,
   maritimeVesselSnapshotQueryKey,
   MARITIME_VESSEL_SNAPSHOT_QUERY_KEY,
-  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
-  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
-  readMaritimeIncludeGulfDemoPreference,
-  readMaritimeIncludeCoastalDemoPreference,
 } from './useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './useVessels';
 export * from './vesselAlerts';

@@ -1,6 +1,5 @@
-# Local stack: MARITIME_COASTAL_DEMO_SEED defaults to 1 so Hormuz + Africa-adjacent reference
-# boxes merge synthetic demo traffic when live AIS counts are low (see backend maritime_intel).
-# Legacy MARITIME_GULF_DEMO_SEED still supported; set both to 0 in .env for production-like behavior.
+# Local stack: maritime demo seeds default to 0 (honest AIS). Synthetic demos require
+# MARITIME_ALLOW_DEMO_SEED=1 plus MARITIME_*_DEMO_SEED in .env (dev-only; not used in prod compose).
 
 services:
   backend:

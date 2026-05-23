@@ -3,7 +3,9 @@ import { useI18n } from '../../lib/i18n';
 import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
-export type TradeFlowGroup = 'company_pair' | 'country_pair';
+import { OIL_LIVE_MAP_VESSEL_FETCH_CAP } from './liveDataMapDefaults';
+import { resolveLiveDataVesselStatus } from './liveDataVesselStatus';
+import { canToggleGovernmentAisCoverage } from './liveDataDevFeatures';
 
 export type LiveDataMapLayersPanelProps = {
   layers: OilLiveLayerVisibility;
@@ -19,6 +21,9 @@ export type LiveDataMapLayersPanelProps = {
   allMaritimeEnabled: boolean;
   onAllMaritimeChange: (enabled: boolean) => void;
   globalMaritimeCount?: number | null;
+  /** Dev toggle: filter AIS coverage overlay to government sources (BarentsWatch). */
+  governmentAisCoverageEnabled?: boolean;
+  onGovernmentAisCoverageChange?: (enabled: boolean) => void;
   /** Aggregated Trade Flow layer group selector (company_pair vs country_pair). */
   tradeFlowGroup?: TradeFlowGroup;
   onTradeFlowGroupChange?: (group: TradeFlowGroup) => void;
@@ -76,6 +81,8 @@ export default function LiveDataMapLayersPanel({
   allMaritimeEnabled,
   onAllMaritimeChange,
   globalMaritimeCount,
+  governmentAisCoverageEnabled = false,
+  onGovernmentAisCoverageChange,
   tradeFlowGroup = 'company_pair',
   onTradeFlowGroupChange,
   macroTradeEnabled = true,
@@ -95,6 +102,15 @@ export default function LiveDataMapLayersPanel({
   const coverageNeedsAttention =
     syncStatus != null &&
     ((syncStatus.coverage_gap_watch_zone_count ?? 0) > 0 || syncStatus.live_vessel_count === 0);
+
+  const vesselWatchStatus =
+    layers.vessels
+      ? resolveLiveDataVesselStatus({
+          vesselsInView: coverageStats?.vessels ?? 0,
+          syncStatus,
+          allMaritimeEnabled: allMaritimeEnabled,
+        })
+      : null;
 
   return (
     <div className="w-[min(100vw-2rem,420px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
@@ -150,6 +166,31 @@ export default function LiveDataMapLayersPanel({
               'No vessels in view does not mean no activity. Check the AIS coverage layer for data gaps.',
             )}
           </p>
+        )}
+
+        {layers.vessels && (
+          <div
+            className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
+            role="status"
+          >
+            <p className="text-[10px] font-black uppercase tracking-wide text-sky-800 dark:text-sky-200">
+              {t('מעקב מכליות', 'Vessel watch')}
+            </p>
+            <p className="mt-1">
+              {t(vesselWatchStatus!.headlineHe, vesselWatchStatus!.headlineEn)}
+            </p>
+            {vesselWatchStatus!.detailEn && vesselWatchStatus!.detailHe && (
+              <p className="mt-1 opacity-85">
+                {t(vesselWatchStatus!.detailHe, vesselWatchStatus!.detailEn)}
+              </p>
+            )}
+            <p className="mt-1 opacity-85">
+              {t(
+                `מגבלת fetch ${OIL_LIVE_MAP_VESSEL_FETCH_CAP} · ברירת מחדל: מכליות oil-live (לא AIS גלובלי)`,
+                `Fetch cap ${OIL_LIVE_MAP_VESSEL_FETCH_CAP} · default: oil-live tankers (not global AIS)`,
+              )}
+            </p>
+          </div>
         )}
 
         {syncStatus && (
@@ -288,6 +329,30 @@ export default function LiveDataMapLayersPanel({
             </span>
           </label>
         </div>
+
+        {canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={governmentAisCoverageEnabled}
+                onChange={(e) => onGovernmentAisCoverageChange(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  {t('כיסוי AIS ממשלתי (נורווגיה)', 'Government AIS coverage (Norway)')}
+                </span>
+                <span className="mt-0.5 block text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                  {t(
+                    'מסנן שכבת כיסוי ל-BarentsWatch בלבד. לא מכסה מפרץ/אפריקה — לבדיקת ingest אזורי.',
+                    'Filters the coverage overlay to BarentsWatch only. Does not cover Gulf/Africa — for regional ingest QA.',
+                  )}
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
 
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">

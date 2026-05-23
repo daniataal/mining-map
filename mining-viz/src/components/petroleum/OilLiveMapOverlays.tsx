@@ -24,8 +24,12 @@ import {
   type TradeFlowArc,
 } from '../../api/oilLiveApi';
 import type { MaritimeViewportBounds } from '../../types';
-import type { OilLiveEntityKind } from '../../features/live-data/OilLiveEntityDrawer';
+import type {
+  OilLiveDrawerTab,
+  OilLiveEntityKind,
+} from '../../features/live-data/OilLiveEntityDrawer';
 import { dedupeOpportunities } from '../../features/live-data/dedupeOpportunities';
+import { LIVE_DATA_DEFAULT_LAYERS } from '../../features/live-data/liveDataMapDefaults';
 import {
   commodityMatchesFilter,
   terminalMatchesSearch,
@@ -46,6 +50,8 @@ export type OilLiveEntityClickPayload = {
   opportunityId?: string;
   title?: string;
   subtitle?: string;
+  /** Opens entity drawer on Trading workflow tab (MAD-46 §8). */
+  initialDrawerTab?: OilLiveDrawerTab;
 };
 
 export type OilLiveLayerVisibility = {
@@ -138,11 +144,14 @@ type Props = {
   layers?: OilLiveLayerVisibility;
   tradeFlowGroup?: 'company_pair' | 'country_pair';
   viewport?: MaritimeViewportBounds | null;
+  /** When set, filters GET /coverage to these open AIS sources (e.g. barentswatch). */
+  coverageSources?: readonly string[];
   onStatsChange?: (stats: {
     terminals: number;
     vessels: number;
     opportunities: number;
     corridors: number;
+    vesselMeta?: import('../../api/oilLiveApi').OilLiveVesselMeta | null;
   }) => void;
   onEntityClick?: (payload: OilLiveEntityClickPayload) => void;
 };
@@ -309,16 +318,10 @@ export default function OilLiveMapOverlays({
   mapZoom = 5,
   productFilter = 'all',
   terminalSearch = '',
-  layers = {
-    terminals: true,
-    vessels: true,
-    corridors: true,
-    opportunities: true,
-    tradeFlows: false,
-    coverage: true,
-  },
+  layers = LIVE_DATA_DEFAULT_LAYERS,
   tradeFlowGroup = 'company_pair',
   viewport,
+  coverageSources,
   onStatsChange,
   onEntityClick,
 }: Props) {
@@ -346,8 +349,13 @@ export default function OilLiveMapOverlays({
   });
 
   const { data: coverageData } = useQuery({
-    queryKey: ['oil-live-coverage', bbox, Math.floor(mapZoom)],
-    queryFn: () => getOilLiveCoverage({ bbox: bbox!, freshness_minutes: 180 }),
+    queryKey: ['oil-live-coverage', bbox, Math.floor(mapZoom), coverageSources?.join(',') ?? 'all'],
+    queryFn: () =>
+      getOilLiveCoverage({
+        bbox: bbox!,
+        freshness_minutes: 180,
+        sources: coverageSources?.length ? [...coverageSources] : undefined,
+      }),
     enabled: enabled && viewportReady && layers.coverage,
     staleTime: 60_000,
     placeholderData: keepPreviousData,
@@ -562,8 +570,16 @@ export default function OilLiveMapOverlays({
       vessels: vessels.length,
       opportunities: opportunityMarkers.length,
       corridors: corridors.length,
+      vesselMeta: mapData?.vessel_meta ?? null,
     });
-  }, [terminals.length, vessels.length, opportunityMarkers.length, corridors.length, onStatsChange]);
+  }, [
+    terminals.length,
+    vessels.length,
+    opportunityMarkers.length,
+    corridors.length,
+    mapData?.vessel_meta,
+    onStatsChange,
+  ]);
 
   const terminalClusterIcon = useMemo(() => createOilTerminalClusterIconFactory(), []);
 
@@ -655,21 +671,39 @@ export default function OilLiveMapOverlays({
                   <p>{(term.products ?? []).slice(0, 4).join(', ')}</p>
                   {term.country && <p className="oil-live-popup-muted">{term.country}</p>}
                   {onEntityClick && (
-                    <button
-                      type="button"
-                      className="oil-live-popup-btn"
-                      onClick={() =>
-                        onEntityClick({
-                          entityKind: 'terminal',
-                          entityId: term.id,
-                          opportunityId: opportunityByTerminalId.get(term.id)?.id,
-                          title: term.name,
-                          subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
-                        })
-                      }
-                    >
-                      View details
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="oil-live-popup-btn"
+                        onClick={() =>
+                          onEntityClick({
+                            entityKind: 'terminal',
+                            entityId: term.id,
+                            opportunityId: opportunityByTerminalId.get(term.id)?.id,
+                            title: term.name,
+                            subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
+                          })
+                        }
+                      >
+                        View details
+                      </button>
+                      <button
+                        type="button"
+                        className="oil-live-popup-btn oil-live-popup-btn--outline"
+                        onClick={() =>
+                          onEntityClick({
+                            entityKind: 'terminal',
+                            entityId: term.id,
+                            opportunityId: opportunityByTerminalId.get(term.id)?.id,
+                            title: term.name,
+                            subtitle: [term.operator_name, term.country].filter(Boolean).join(' · '),
+                            initialDrawerTab: 'workflow',
+                          })
+                        }
+                      >
+                        Trading workflow
+                      </button>
+                    </>
                   )}
                 </div>
               </Popup>
@@ -1108,20 +1142,37 @@ export default function OilLiveMapOverlays({
             <Popup>
               {o.title}
               {onEntityClick && (
-                <button
-                  type="button"
-                  className="oil-live-popup-btn"
-                  onClick={() =>
-                    onEntityClick({
-                      entityKind: 'opportunity',
-                      entityId: o.oppId,
-                      opportunityId: o.oppId,
-                      title: o.title,
-                    })
-                  }
-                >
-                  View details
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="oil-live-popup-btn"
+                    onClick={() =>
+                      onEntityClick({
+                        entityKind: 'opportunity',
+                        entityId: o.oppId,
+                        opportunityId: o.oppId,
+                        title: o.title,
+                      })
+                    }
+                  >
+                    View details
+                  </button>
+                  <button
+                    type="button"
+                    className="oil-live-popup-btn oil-live-popup-btn--outline"
+                    onClick={() =>
+                      onEntityClick({
+                        entityKind: 'opportunity',
+                        entityId: o.oppId,
+                        opportunityId: o.oppId,
+                        title: o.title,
+                        initialDrawerTab: 'workflow',
+                      })
+                    }
+                  >
+                    Trading workflow
+                  </button>
+                </>
               )}
             </Popup>
           </Marker>

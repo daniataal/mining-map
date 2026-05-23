@@ -64,6 +64,7 @@ import { resolveLiveAisBanner } from './liveAisBanner';
 import { firstVerifyUrl } from '../../lib/verifySourceUrl';
 import CollapsibleSection from '../../components/ui/CollapsibleSection';
 import { getTradeManifests } from '../../api/oilLiveApi';
+import { canShowSeedDataToggle } from './liveDataDevFeatures';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -1063,15 +1064,17 @@ export default function LiveDataIntelPanel({
                 value={cargoCountry}
                 onChange={(e) => setCargoCountry(e.target.value)}
               />
-              <label className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase text-slate-500 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeSeedData}
-                  onChange={(e) => setIncludeSeedData(e.target.checked)}
-                  className="rounded border-slate-300"
-                />
-                {t('כלול נתוני seed', 'Include seed data')}
-              </label>
+              {canShowSeedDataToggle() && (
+                <label className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase text-slate-500 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeSeedData}
+                    onChange={(e) => setIncludeSeedData(e.target.checked)}
+                    className="rounded border-slate-300"
+                  />
+                  {t('כלול נתוני seed', 'Include seed data')}
+                </label>
+              )}
               <select
                 className="text-[10px] border rounded-lg px-2 py-1.5 dark:bg-slate-900"
                 value={cargoMinConfidence}
@@ -1128,7 +1131,7 @@ export default function LiveDataIntelPanel({
                   <div className="flex justify-between gap-2 items-start">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1 mb-0.5">
-                        <OilLiveProvenanceBadge kind={record.data_provenance ?? 'synthetic'} />
+                        <OilLiveProvenanceBadge kind={record.data_provenance} />
                       </div>
                       <p className="text-[9px] font-mono text-amber-700 dark:text-amber-300 truncate">
                         {record.synthetic_bol_id ?? record.id.slice(0, 8)}

@@ -116,7 +116,7 @@ export default function LiveDataSearchBar({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hits, setHits] = useState<OilLiveSearchHit[]>([]);
-  const [errorState, setErrorState] = useState<'none' | 'unavailable'>('none');
+  const [errorState, setErrorState] = useState<'none' | 'unavailable' | 'degraded'>('none');
   const [touched, setTouched] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const requestSeq = useRef(0);
@@ -150,7 +150,7 @@ export default function LiveDataSearchBar({
           setErrorState('unavailable');
         } else {
           setHits(Array.isArray(res.hits) ? res.hits : []);
-          setErrorState('none');
+          setErrorState(res.degraded === 'postgres' ? 'degraded' : 'none');
         }
       })
       .catch(() => {
@@ -224,7 +224,13 @@ export default function LiveDataSearchBar({
   );
 
   const showDropdown =
-    open && touched && (loading || hits.length > 0 || errorState === 'unavailable' || (!!debouncedQuery && !loading));
+    open &&
+    touched &&
+    (loading ||
+      hits.length > 0 ||
+      errorState === 'unavailable' ||
+      errorState === 'degraded' ||
+      (!!debouncedQuery && !loading));
 
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
@@ -252,10 +258,14 @@ export default function LiveDataSearchBar({
             setTouched(true);
           }}
           onKeyDown={handleKeyDown}
-          placeholder={tShort(
-            'חיפוש מטענים, חברות, מסופים, מכליות…',
-            'Search cargo, companies, terminals, vessels…',
-          )}
+          placeholder={
+            types?.length === 1 && types[0] === 'company'
+              ? tShort('חיפוש חברות…', 'Search companies…')
+              : tShort(
+                  'חיפוש מטענים, חברות, מסופים, מכליות…',
+                  'Search cargo, companies, terminals, vessels…',
+                )
+          }
           className="w-full pl-8 pr-9 py-2 rounded-lg border border-black/10 dark:border-white/10 text-xs bg-white dark:bg-slate-900"
           data-testid="live-data-search-input"
         />
@@ -273,6 +283,17 @@ export default function LiveDataSearchBar({
           className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-80 overflow-y-auto rounded-xl border border-black/10 dark:border-white/10 bg-white dark:bg-slate-900 shadow-xl"
           data-testid="live-data-search-dropdown"
         >
+          {errorState === 'degraded' && (
+            <p
+              data-testid="live-data-search-degraded"
+              className="px-3 py-2.5 text-xs leading-relaxed text-sky-700 dark:text-sky-300 border-b border-black/5 dark:border-white/5"
+            >
+              {tShort(
+                'חיפוש מסד נתונים (Elasticsearch לא זמין)',
+                'Database search (Elasticsearch unavailable)',
+              )}
+            </p>
+          )}
           {errorState === 'unavailable' && (
             <p
               data-testid="live-data-search-unavailable"

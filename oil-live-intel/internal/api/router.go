@@ -19,6 +19,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/health", s.Health)
 		api.Get("/sync-status", s.SyncStatus)
 		api.Get("/map", s.Map)
+		api.Get("/licenses/map", s.LicenseMapClusters)
 		api.Get("/coverage", s.VesselCoverage)
 		api.Get("/source-health", s.SourceHealth)
 		api.Get("/terminals", s.ListTerminals)

@@ -41,10 +41,6 @@ import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
   CanvasVesselLayer,
-  clearMaritimeSnapshotCache,
-  filterVesselsByViewport,
-  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
-  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
   sortVesselsForDisplay,
   toVesselDrawRecords,
   planVesselLodDraw,
@@ -74,8 +70,10 @@ import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
 import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
 import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
+import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
 import { getOilLiveSyncStatus } from '../api/oilLiveApi';
-import { LIVE_DATA_HUB_BOUNDS } from '../features/live-data/liveDataMapDefaults';
+import { LIVE_DATA_HUB_BOUNDS, LIVE_DATA_DEFAULT_LAYERS, GOVERNMENT_AIS_COVERAGE_SOURCES, viewportOverlapsPersianGulfHub } from '../features/live-data/liveDataMapDefaults';
+import { resolveLiveDataVesselStatus } from '../features/live-data/liveDataVesselStatus';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
@@ -125,7 +123,6 @@ import {
 
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 
@@ -311,18 +308,22 @@ interface MapComponentProps {
     vessels: number;
     opportunities: number;
     corridors: number;
+    vesselMeta?: import('../api/oilLiveApi').OilLiveVesselMeta | null;
   } | null;
   onOilLiveStatsChange?: (stats: {
     terminals: number;
     vessels: number;
     opportunities: number;
     corridors: number;
+    vesselMeta?: import('../api/oilLiveApi').OilLiveVesselMeta | null;
   }) => void;
   liveDataMacroTradeOn?: boolean;
   onLiveDataMacroTradeChange?: (on: boolean) => void;
   oilLiveSidebarActive?: boolean;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
+  /** Fly map when a Live Data search hit has coordinates. */
+  onLiveDataMapFlyTo?: (lat: number, lng: number) => void;
   /** Increment when entering Live Data to fly map to Gulf hub bbox. */
   liveDataFlyTrigger?: number;
   /** When set, fly to this point instead of the default hub (search hit). */
@@ -362,6 +363,10 @@ function ClusterGroupRefBridge({
 }) {
     const map = useMap();
     const { layerContainer } = useLeafletContext();
+    const onSingleMarkerClusterClickRef = useRef(onSingleMarkerClusterClick);
+    const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
+    onSingleMarkerClusterClickRef.current = onSingleMarkerClusterClick;
+    onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
     useEffect(() => {
         const group = asLicenseMarkerClusterGroup(layerContainer);
         clusterGroupRef.current = group;
@@ -371,9 +376,9 @@ function ClusterGroupRefBridge({
                 getLatLng?: () => L.LatLng;
             };
             const children = layer.getAllChildMarkers?.() ?? [];
-            if (children.length === 1 && onSingleMarkerClusterClick) {
+            if (children.length === 1 && onSingleMarkerClusterClickRef.current) {
                 L.DomEvent.stopPropagation(event);
-                onSingleMarkerClusterClick(children[0]);
+                onSingleMarkerClusterClickRef.current(children[0]);
                 return;
             }
             if (children.length > 1) {
@@ -386,12 +391,13 @@ function ClusterGroupRefBridge({
                         map.getBoundsZoom(bounds.pad(0.12)) ?? clusterTargetZoom(map.getZoom()),
                     ),
                 );
+                map.stop();
                 map.flyToBounds(bounds.pad(0.15), {
                     maxZoom: fitMaxZoom,
                     duration: 0.55,
                     padding: [32, 32],
                 });
-                const syncZoom = () => onLicenseMapZoomChange?.(map.getZoom());
+                const syncZoom = () => onLicenseMapZoomChangeRef.current?.(map.getZoom());
                 map.once('moveend', syncZoom);
             }
         };
@@ -406,7 +412,7 @@ function ClusterGroupRefBridge({
                 clusterGroupRef.current = null;
             }
         };
-    }, [map, layerContainer, clusterGroupRef, onSingleMarkerClusterClick, onLicenseMapZoomChange]);
+    }, [map, layerContainer, clusterGroupRef]);
     return null;
 }
 
@@ -448,43 +454,61 @@ const LicenseClusterFlyEffect = ({
     onComplete: () => void;
 }) => {
     const map = useMap();
+    const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
+    const onLicenseMapViewportChangeRef = useRef(onLicenseMapViewportChange);
+    const onCompleteRef = useRef(onComplete);
+    const clusterRef = useRef(cluster);
+    onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
+    onLicenseMapViewportChangeRef.current = onLicenseMapViewportChange;
+    onCompleteRef.current = onComplete;
+    clusterRef.current = cluster;
+    const clusterFlyId = cluster?.id ?? null;
     useEffect(() => {
-        if (!cluster) return;
-        const lat = cluster._displayLat ?? cluster.lat;
-        const lng = cluster._displayLng ?? cluster.lng;
+        const clusterItem = clusterRef.current;
+        if (!clusterFlyId || !clusterItem) return;
+        const lat = clusterItem._displayLat ?? clusterItem.lat;
+        const lng = clusterItem._displayLng ?? clusterItem.lng;
         if (lat == null || lng == null) {
-            onComplete();
+            onCompleteRef.current();
             return;
         }
-        const flyBox = serverClusterFlyBounds(lat, lng, cluster);
+        const flyBox = serverClusterFlyBounds(lat, lng, clusterItem);
         const bounds = L.latLngBounds(
             [flyBox.south, flyBox.west],
             [flyBox.north, flyBox.east],
         );
         const targetZoom = clusterTargetZoom(map.getZoom());
-        map.flyToBounds(bounds, {
-            maxZoom: Math.min(LICENSE_CLUSTER_FIT_MAX_ZOOM, targetZoom + 1),
-            duration: 0.55,
-            padding: [36, 36],
-        });
-        const done = () => {
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
             const mapBounds = map.getBounds();
-            if (mapBounds.isValid() && onLicenseMapViewportChange) {
-                onLicenseMapViewportChange({
+            if (mapBounds.isValid()) {
+                onLicenseMapViewportChangeRef.current?.({
                     south: Number(mapBounds.getSouth().toFixed(4)),
                     west: Number(mapBounds.getWest().toFixed(4)),
                     north: Number(mapBounds.getNorth().toFixed(4)),
                     east: Number(mapBounds.getEast().toFixed(4)),
                 });
             }
-            onLicenseMapZoomChange?.(map.getZoom());
-            onComplete();
+            onLicenseMapZoomChangeRef.current?.(map.getZoom());
+            onCompleteRef.current();
         };
-        map.once('moveend', done);
+        map.stop();
+        map.flyToBounds(bounds, {
+            maxZoom: Math.min(LICENSE_CLUSTER_FIT_MAX_ZOOM, targetZoom + 1),
+            duration: 0.55,
+            padding: [36, 36],
+        });
+        map.once('moveend', finish);
         return () => {
-            map.off('moveend', done);
+            map.off('moveend', finish);
+            map.stop();
+            if (!finished) {
+                finish();
+            }
         };
-    }, [cluster, map, onComplete, onLicenseMapZoomChange, onLicenseMapViewportChange]);
+    }, [clusterFlyId, map]);
     return null;
 };
 
@@ -728,14 +752,7 @@ export default function MapComponent({
   oilLiveOverlaysEnabled = false,
   oilLiveProductFilter = 'all',
   oilLiveTerminalSearch = '',
-  oilLiveLayers = {
-    terminals: true,
-    vessels: true,
-    corridors: true,
-    opportunities: true,
-    tradeFlows: false,
-    coverage: true,
-  },
+  oilLiveLayers = LIVE_DATA_DEFAULT_LAYERS,
   onOilLiveLayersChange,
   oilLiveTradeFlowGroup = 'company_pair',
   onOilLiveTradeFlowGroupChange,
@@ -743,6 +760,7 @@ export default function MapComponent({
   onOilLiveStatsChange,
   onOilLiveEntityClick,
   onOilLiveDismiss,
+  onLiveDataMapFlyTo,
   liveDataFlyTrigger = 0,
   liveDataFlyTarget = null,
   eiaHistoricMapEnabled = false,
@@ -789,6 +807,7 @@ export default function MapComponent({
     const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
     const [oilGasMapViewport, setOilGasMapViewport] = useState<MaritimeViewportBounds | null>(null);
     const [liveDataMapViewport, setLiveDataMapViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [governmentAisCoverageEnabled, setGovernmentAisCoverageEnabled] = useState(false);
 
     const isMobileDevice = useMemo(() => {
         if (typeof window === 'undefined') return false;
@@ -825,13 +844,6 @@ export default function MapComponent({
         null,
     );
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
-    const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        if (window.localStorage.getItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY) === '1') {
-            return true;
-        }
-        return window.localStorage.getItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY) === '1';
-    });
     const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
     const handleMaritimeLayerActiveChange = useCallback(
         (active: boolean) => {
@@ -903,7 +915,6 @@ export default function MapComponent({
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
         viewport: maritimeViewport,
-        includeCoastalDemo: includeCoastalDemoVessels,
     });
     const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
     const maritimeBboxTotal =
@@ -988,26 +999,6 @@ export default function MapComponent({
         pushVesselsToCanvas();
     }, [pushVesselsToCanvas]);
 
-    const prevCoastalDemoToggleMount = useRef(true);
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        if (includeCoastalDemoVessels) {
-            window.localStorage.setItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY, '1');
-            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
-        } else {
-            window.localStorage.removeItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY);
-            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
-        }
-    }, [includeCoastalDemoVessels]);
-
-    useEffect(() => {
-        if (prevCoastalDemoToggleMount.current) {
-            prevCoastalDemoToggleMount.current = false;
-            return;
-        }
-        clearMaritimeSnapshotCache();
-    }, [includeCoastalDemoVessels]);
-
     useEffect(() => {
         if (isMaritimeMapView) return;
         setOilAndGasDisplayMode('combined');
@@ -1051,12 +1042,33 @@ export default function MapComponent({
         maritimeStatusMessages?.sparseWarningHe && maritimeStatusMessages.sparseWarningEn
             ? t(maritimeStatusMessages.sparseWarningHe, maritimeStatusMessages.sparseWarningEn)
             : null;
+    const liveDataVesselStatus = useMemo(
+        () =>
+            isLiveDataView && oilLiveLayers.vessels
+                ? resolveLiveDataVesselStatus({
+                      vesselsInView: oilLiveCoverageStats?.vessels ?? 0,
+                      syncStatus: oilLiveSyncStatus,
+                      allMaritimeEnabled: isMaritimeLayerEnabled,
+                      maritimeMessages: maritimeStatusMessages,
+                      inPersianGulfViewport: viewportOverlapsPersianGulfHub(liveDataMapViewport),
+                      vesselMeta: oilLiveCoverageStats?.vesselMeta ?? null,
+                  })
+                : null,
+        [
+            isLiveDataView,
+            oilLiveLayers.vessels,
+            oilLiveCoverageStats?.vessels,
+            oilLiveCoverageStats?.vesselMeta,
+            oilLiveSyncStatus,
+            isMaritimeLayerEnabled,
+            maritimeStatusMessages,
+            liveDataMapViewport,
+        ],
+    );
     const maritimeViewportAisGap =
         isMaritimeLayerEnabled &&
         maritimeVessels.length === 0 &&
-        Boolean(maritimeFeed?.viewport_ais_coverage_gap) &&
-        !maritimeFeed?.coastal_demo_synthetic &&
-        !includeCoastalDemoVessels;
+        Boolean(maritimeFeed?.viewport_ais_coverage_gap);
     const maritimeLodUiNote =
         isMaritimeLayerEnabled &&
         maritimeVessels.length > 0 &&
@@ -1392,6 +1404,27 @@ export default function MapComponent({
                 </div>
             )}
 
+            {isLiveDataView && oilLiveOverlaysEnabled && oilLiveLayers.vessels && liveDataVesselStatus && (
+                <div
+                    className="pointer-events-none absolute left-3 right-3 top-3 z-[640] sm:left-6 sm:max-w-xl"
+                    role="status"
+                >
+                    <div className="rounded-2xl border border-sky-500/35 bg-sky-500/12 px-4 py-3 text-[10px] font-semibold leading-snug text-sky-950 shadow-lg dark:text-sky-50">
+                        <p className="font-black uppercase tracking-widest text-[9px] text-sky-700 dark:text-sky-200">
+                            {t('מעקב מכליות (נתונים חיים)', 'Live Data vessel watch')}
+                        </p>
+                        <p className="mt-1">
+                            {t(liveDataVesselStatus.headlineHe, liveDataVesselStatus.headlineEn)}
+                        </p>
+                        {liveDataVesselStatus.detailEn && liveDataVesselStatus.detailHe && (
+                            <p className="mt-1 opacity-90">
+                                {t(liveDataVesselStatus.detailHe, liveDataVesselStatus.detailEn)}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {isOilAndGasView &&
                 isMaritimeLayerEnabled &&
                 maritimeFeed?.aisstream_persian_gulf_coverage_gap && (
@@ -1404,8 +1437,8 @@ export default function MapComponent({
                     </p>
                     <p className="mt-1">
                         {t(
-                            'AISStream מדלג על המפרץ — הפעילו הצג מיקומי הדגמה בפאנל כלי השיט או הריצו maritime-worker.',
-                            'AISStream skips the Gulf — enable Show demo positions in the vessel panel or run maritime-worker.',
+                            'AISStream מדלג על המפרץ — הריצו maritime-worker והרחיבו watches; בדקו סטטוס סנכרון ב־Maritime Watch.',
+                            'AISStream skips the Gulf — run maritime-worker and expand watches; check sync status in Maritime Watch.',
                         )}
                     </p>
                 </div>
@@ -1421,6 +1454,14 @@ export default function MapComponent({
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
+                </div>
+            )}
+            {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveEntityClick && (
+                <div className="absolute left-4 top-4 z-[960] pointer-events-auto sm:left-6">
+                    <LiveDataMapCompanySearch
+                        onEntityClick={onOilLiveEntityClick}
+                        onMapFlyTo={onLiveDataMapFlyTo}
+                    />
                 </div>
             )}
             {isLiveDataView && oilLiveOverlaysEnabled && (
@@ -1451,6 +1492,8 @@ export default function MapComponent({
                         onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
                         macroTradeEnabled={liveDataMacroTradeOn}
                         onMacroTradeChange={onLiveDataMacroTradeChange}
+                        governmentAisCoverageEnabled={governmentAisCoverageEnabled}
+                        onGovernmentAisCoverageChange={setGovernmentAisCoverageEnabled}
                     />
                 </div>
             )}
@@ -1534,32 +1577,6 @@ export default function MapComponent({
                             )}
                         </div>
 
-                        <label
-                            htmlFor="mining-include-coastal-demo"
-                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2.5 dark:border-white/10 dark:bg-white/[0.03]"
-                        >
-                            <Checkbox
-                                id="mining-include-coastal-demo"
-                                checked={includeCoastalDemoVessels}
-                                onCheckedChange={(value) => setIncludeCoastalDemoVessels(value === true)}
-                                className="mt-0.5"
-                            />
-                            <span className="min-w-0 text-[9px] leading-snug text-slate-600 dark:text-slate-300">
-                                <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                    {t(
-                                        'הצג מיקומי הדגמה כשה־AIS דליל (מפרץ + חופי אפריקה)',
-                                        'Show demo positions where AIS feed is sparse (Gulf + Africa coasts)',
-                                    )}
-                                </span>
-                                <span className="mt-0.5 block text-slate-500 dark:text-slate-400">
-                                    {t(
-                                        'שולח include_coastal_demo=1 לשרת; נשמר בדפדפן. כבו לתצוגת מאגר בלבד.',
-                                        'Sends include_coastal_demo=1 to the API; saved in the browser. Turn off for snapshot-only.',
-                                    )}
-                                </span>
-                            </span>
-                        </label>
-
                         {isMaritimeLayerEnabled && (
                             <>
                                 <div className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
@@ -1593,8 +1610,8 @@ export default function MapComponent({
                                 {maritimeViewportAisGap && (
                                     <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
                                         {t(
-                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את maritime-worker, או סמן «מיקומי הדגמה» לתצוגה סינתטית.',
-                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand maritime-worker watches or enable demo positions in the checkbox above.',
+                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את maritime-worker watches או בדוק סטטוס סנכרון למטה.',
+                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand maritime-worker watches or check sync status below.',
                                         )}
                                     </p>
                                 )}
@@ -1608,52 +1625,6 @@ export default function MapComponent({
                                 {maritimeClusterClarification && (
                                     <p className="text-[9px] leading-snug text-slate-500 dark:text-slate-400">
                                         {maritimeClusterClarification}
-                                    </p>
-                                )}
-
-                                {(((maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0) ||
-                                    maritimeFeed?.persian_gulf_demo_synthetic) && (
-                                    <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
-                                        {(maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0 && (
-                                            <span className="block font-semibold text-cyan-950 dark:text-cyan-50">
-                                                {t(
-                                                    `אזורי הדגמה: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
-                                                    `Demo regions: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
-                                                )}
-                                            </span>
-                                        )}
-                                        <span className="mt-1 block">
-                                            {(() => {
-                                                const mode = maritimeFeed?.persian_gulf_demo_mode;
-                                                if (mode === 'api_opt_in') {
-                                                    return includeCoastalDemoVessels
-                                                        ? t(
-                                                              'נקודות סינתטיות/קובץ הדגמה (בקשת משתמש include_coastal_demo) לצד כלי שיט אמיתיים מהמאגר — לא AIS חי באותם תיבות.',
-                                                              'Synthetic / seed-file demo positions (your include_coastal_demo opt-in) appear alongside real snapshot vessels—not live AIS in those boxes.',
-                                                          )
-                                                        : t(
-                                                              'נקודות סינתטיות במפרץ (בקשת משתמש) לצד כלי שיט אמיתיים אחרים מהמאגר — לא AIS חי מהמפרץ.',
-                                                              'Synthetic Gulf demo markers (your opt-in) appear alongside other real snapshot vessels in this feed—not live Gulf AIS.',
-                                                          );
-                                                }
-                                                if (mode === 'env_coverage_gap') {
-                                                    return t(
-                                                        'נקודות הדגמה במפרץ (MARITIME_GULF_DEMO_SEED + פער AISStream) — לא AIS חי מהמפרץ.',
-                                                        'Gulf demo positions (MARITIME_GULF_DEMO_SEED + AISStream gap)—not live Gulf AIS.',
-                                                    );
-                                                }
-                                                if (mode === 'env_coastal_sparse') {
-                                                    return t(
-                                                        'נקודות הדגמה (MARITIME_COASTAL_DEMO_SEED) לתיבות יעד דלילות — לא AIS חי משוחזר.',
-                                                        'Demo positions (MARITIME_COASTAL_DEMO_SEED) for sparse target boxes—not restored live AIS.',
-                                                    );
-                                                }
-                                                return t(
-                                                    'נקודות הדגמה — לא AIS חי באותם אזורים; שאר הסימנים עלולים להיות AIS אמיתי מהמאגר.',
-                                                    'Demo positions—not live AIS in those areas; other markers may still be real snapshot AIS.',
-                                                );
-                                            })()}
-                                        </span>
                                     </p>
                                 )}
 
@@ -2116,6 +2087,9 @@ export default function MapComponent({
                             layers={oilLiveLayers}
                             tradeFlowGroup={oilLiveTradeFlowGroup}
                             viewport={liveDataMapViewport}
+                            coverageSources={
+                                governmentAisCoverageEnabled ? GOVERNMENT_AIS_COVERAGE_SOURCES : undefined
+                            }
                             onStatsChange={onOilLiveStatsChange}
                             onEntityClick={onOilLiveEntityClick}
                         />

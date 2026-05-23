@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRightLeft,
@@ -9,6 +9,7 @@ import {
   Loader2,
   Radio,
   Route,
+  Workflow,
   X,
 } from 'lucide-react';
 import {
@@ -33,10 +34,14 @@ import {
   watchOpportunity,
 } from './liveDataWorkflow';
 import { buildRoutePlannerHintsFromCargo } from './liveDataRoutePrefill';
+import TradingWorkflowPanel from './TradingWorkflowPanel';
+import { tradingWorkflowContextFromEntity } from './tradingWorkflowState';
 
 export type OilLiveEntityKind = 'opportunity' | 'terminal' | 'vessel' | 'company' | 'cargo';
 
-type DrawerTab = 'deal_pack' | 'overview' | 'mcr' | 'imports_exports';
+export type OilLiveDrawerTab = 'deal_pack' | 'overview' | 'mcr' | 'imports_exports' | 'workflow';
+
+type DrawerTab = OilLiveDrawerTab;
 
 export interface OilLiveEntityDrawerProps {
   entityKind: OilLiveEntityKind;
@@ -56,6 +61,8 @@ export interface OilLiveEntityDrawerProps {
   onHighlightOnMap?: (selection: CompanyImportsExportsHighlight) => void;
   /** Open another cargo (MCR) in this same drawer from the I/E tab. */
   onOpenCargo?: (cargoId: string, label?: string) => void;
+  /** Map entry: open directly on Trading workflow tab (MAD-46 §8). */
+  initialDrawerTab?: OilLiveDrawerTab;
 }
 
 function formatVolumeBand(record: {
@@ -86,6 +93,7 @@ export default function OilLiveEntityDrawer({
   onCreateDealRoom,
   onHighlightOnMap,
   onOpenCargo,
+  initialDrawerTab,
 }: OilLiveEntityDrawerProps) {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -93,15 +101,22 @@ export default function OilLiveEntityDrawer({
   const [watchLoading, setWatchLoading] = useState(false);
   const resolvedOppId = opportunityId ?? (entityKind === 'opportunity' ? entityId : undefined);
   const showImportsExportsTab = entityKind === 'company' || entityKind === 'terminal';
-  const defaultTab: DrawerTab =
-    entityKind === 'cargo'
-      ? 'mcr'
-      : resolvedOppId
-        ? 'deal_pack'
-        : showImportsExportsTab
-          ? 'imports_exports'
-          : 'overview';
-  const [tab, setTab] = useState<DrawerTab>(defaultTab);
+  const defaultTab: DrawerTab = useMemo(
+    () =>
+      entityKind === 'cargo'
+        ? 'mcr'
+        : resolvedOppId
+          ? 'deal_pack'
+          : showImportsExportsTab
+            ? 'imports_exports'
+            : 'overview',
+    [entityKind, resolvedOppId, showImportsExportsTab],
+  );
+  const [tab, setTab] = useState<DrawerTab>(initialDrawerTab ?? defaultTab);
+
+  useEffect(() => {
+    setTab(initialDrawerTab ?? defaultTab);
+  }, [entityKind, entityId, initialDrawerTab, defaultTab]);
 
   const { data: cargoRecord, isLoading: cargoLoading } = useQuery({
     queryKey: ['oil-live-cargo-record', entityId],
@@ -126,6 +141,14 @@ export default function OilLiveEntityDrawer({
   });
 
   const cargoOppId = cargoRecord?.opportunity_id ?? resolvedOppId;
+  const workflowContext = tradingWorkflowContextFromEntity({
+    entityKind,
+    entityId,
+    opportunityId: resolvedOppId,
+    hasEvidence:
+      (cargoRecord?.evidence_chain?.length ?? 0) > 0 ||
+      (cargoRecord?.sources?.length ?? 0) > 0,
+  });
   const watches = watchlistsData ?? [];
   const watchTarget = opportunityRow ? opportunityWatchTarget(opportunityRow) : null;
   const alreadyWatching =
@@ -212,8 +235,19 @@ export default function OilLiveEntityDrawer({
         </div>
       </div>
 
-      {(resolvedOppId || entityKind === 'cargo' || showImportsExportsTab) && (
-        <div className="shrink-0 flex gap-1 px-4 py-2 border-b border-black/5 dark:border-white/10 flex-wrap">
+      <div className="shrink-0 flex gap-1 px-4 py-2 border-b border-black/5 dark:border-white/10 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setTab('workflow')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase ${
+              tab === 'workflow'
+                ? 'bg-indigo-500 text-white'
+                : 'text-slate-500 hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            <Workflow className="w-3.5 h-3.5" />
+            {t('תהליך מסחר', 'Workflow')}
+          </button>
           {entityKind === 'cargo' && (
             <button
               type="button"
@@ -268,11 +302,12 @@ export default function OilLiveEntityDrawer({
               {t('סקירה', 'Overview')}
             </button>
           )}
-        </div>
-      )}
+      </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {tab === 'imports_exports' && showImportsExportsTab ? (
+        {tab === 'workflow' ? (
+          <TradingWorkflowPanel context={workflowContext} />
+        ) : tab === 'imports_exports' && showImportsExportsTab ? (
           <CompanyImportsExportsTab
             entityKind={entityKind === 'company' ? 'company' : 'terminal'}
             entityId={entityId}

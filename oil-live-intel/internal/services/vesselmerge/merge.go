@@ -12,8 +12,10 @@ package vesselmerge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -94,8 +96,20 @@ type MergedVesselPosition struct {
 
 // QueryOptions controls the map-facing merged read.
 type QueryOptions struct {
-	FreshnessMinutes int
-	Sources          []string
+	FreshnessMinutes    int
+	Sources             []string
+	PrioritizePetroleum bool // bbox queries: rank tankers/cargo before applying limit
+}
+
+// ListResult is the map-facing vessel list with cap diagnostics.
+type ListResult struct {
+	Vessels         []map[string]any
+	TotalAvailable  int
+	ReturnedCount   int
+	CapApplied      bool
+	ShipTypeCounts  map[string]int
+	Limit           int
+	SourceMode      string
 }
 
 // TableReady reports whether the observations table exists.
@@ -137,12 +151,45 @@ func MergedPositionsEnabled() bool {
 // ListMergedVesselsInBbox returns one position per MMSI inside bbox using per-source
 // latest observation and display precedence. bbox is [minLon, minLat, maxLon, maxLat].
 func ListMergedVesselsInBbox(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
-	return ListMergedVessels(ctx, pool, bbox, bboxOK, limit, QueryOptions{FreshnessMinutes: 1440})
+	result, err := ListMergedVesselsWithMeta(ctx, pool, bbox, bboxOK, limit, QueryOptions{
+		FreshnessMinutes:    1440,
+		PrioritizePetroleum: bboxOK,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Vessels, nil
+}
+
+// ListMergedVesselsWithMeta returns merged vessels plus cap / ship-type diagnostics.
+func ListMergedVesselsWithMeta(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int, opts QueryOptions) (ListResult, error) {
+	vessels, err := listMergedVessels(ctx, pool, bbox, bboxOK, limit, opts)
+	if err != nil {
+		return ListResult{}, err
+	}
+	limit = ClampLimit(limit)
+	if opts.PrioritizePetroleum && bboxOK {
+		return applyPetroleumCap(vessels, limit, "multi_source_observations"), nil
+	}
+	total := len(vessels)
+	return ListResult{
+		Vessels:        vessels,
+		TotalAvailable: total,
+		ReturnedCount:  total,
+		CapApplied:     false,
+		ShipTypeCounts: countShipTypes(vessels),
+		Limit:          limit,
+		SourceMode:     "multi_source_observations",
+	}, nil
 }
 
 // ListMergedVessels returns one position per MMSI inside bbox using per-source
 // latest observation and display precedence. bbox is [minLon, minLat, maxLon, maxLat].
 func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int, opts QueryOptions) ([]map[string]any, error) {
+	return listMergedVessels(ctx, pool, bbox, bboxOK, limit, opts)
+}
+
+func listMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, bboxOK bool, limit int, opts QueryOptions) ([]map[string]any, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("nil pool")
 	}
@@ -150,6 +197,10 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 	freshnessMinutes := opts.FreshnessMinutes
 	if freshnessMinutes <= 0 {
 		freshnessMinutes = 1440
+	}
+	sqlLimit := limit
+	if opts.PrioritizePetroleum && bboxOK {
+		sqlLimit = maxVesselLimit
 	}
 
 	q := `
@@ -168,7 +219,8 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		    COALESCE(o.position_time, o.observed_at) AS position_time,
 		    COALESCE(o.received_at, o.ingested_at) AS received_at,
 		    o.confidence,
-		    o.source_url
+		    o.source_url,
+		    o.raw
 		  FROM oil_vessel_position_observations o
 		  WHERE COALESCE(o.position_time, o.observed_at) > now() - ($1 || ' minutes')::interval`
 	args := []any{freshnessMinutes}
@@ -211,12 +263,12 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		)
 		SELECT DISTINCT ON (r.vessel_key)
 		  r.mmsi, r.source, r.data_source, r.source_type, r.imo, r.lat, r.lng, r.sog, r.cog,
-		  r.vessel_name, r.position_time, r.received_at, r.confidence, r.source_url,
-		  v.name, v.tanker_class, v.crude_capable, v.product_tanker
+		  r.vessel_name, r.position_time, r.received_at, r.confidence, r.source_url, r.raw,
+		  v.name, v.vessel_type, v.tanker_class, v.crude_capable, v.product_tanker
 		FROM ranked r
 		LEFT JOIN oil_vessels v ON v.mmsi = r.mmsi
 		ORDER BY r.vessel_key, r.src_rank ASC, r.position_time DESC`
-	q += fmt.Sprintf(` LIMIT %d`, limit)
+	q += fmt.Sprintf(` LIMIT %d`, sqlLimit)
 
 	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
@@ -231,25 +283,28 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		var imo *string
 		var lat, lng float64
 		var sog, cog, confidence *float64
-		var vesselName, name, tclass *string
+		var vesselName, name, vtype, tclass *string
 		var sourceURL *string
+		var raw []byte
 		var observed time.Time
 		var received *time.Time
 		var crude, product *bool
 		if err := rows.Scan(&mmsi, &source, &dataSource, &sourceType, &imo, &lat, &lng, &sog, &cog,
-			&vesselName, &observed, &received, &confidence, &sourceURL,
-			&name, &tclass, &crude, &product); err != nil {
+			&vesselName, &observed, &received, &confidence, &sourceURL, &raw,
+			&name, &vtype, &tclass, &crude, &product); err != nil {
 			return nil, err
 		}
 		displayName := name
 		if displayName == nil && vesselName != nil {
 			displayName = vesselName
 		}
+		shipTypeCode, shipTypeLabel := shipTypeFromRaw(raw)
 		item := map[string]any{
 			"mmsi": mmsi, "ts": observed, "position_time": observed, "lat": lat, "lng": lng,
 			"source": source, "data_source": dataSource, "source_type": sourceType,
 			"imo": imo, "name": displayName, "vessel_name": displayName,
-			"tanker_class": tclass, "crude_capable": crude, "product_tanker": product,
+			"vessel_type": vtype, "tanker_class": tclass, "crude_capable": crude, "product_tanker": product,
+			"ship_type_code": shipTypeCode, "ship_type_label": shipTypeLabel,
 			"confidence": confidence, "source_url": sourceURL,
 			"freshness_seconds": int(time.Since(observed).Seconds()),
 		}
@@ -265,6 +320,58 @@ func ListMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func applyPetroleumCap(vessels []map[string]any, limit int, sourceMode string) ListResult {
+	sort.SliceStable(vessels, func(i, j int) bool {
+		pi := petroleumPriorityFromItem(vessels[i])
+		pj := petroleumPriorityFromItem(vessels[j])
+		if pi != pj {
+			return pi > pj
+		}
+		ti, _ := vessels[i]["position_time"].(time.Time)
+		tj, _ := vessels[j]["position_time"].(time.Time)
+		return ti.After(tj)
+	})
+	total := len(vessels)
+	allCounts := countShipTypes(vessels)
+	if limit > 0 && total > limit {
+		vessels = vessels[:limit]
+	}
+	return ListResult{
+		Vessels:        vessels,
+		TotalAvailable: total,
+		ReturnedCount:  len(vessels),
+		CapApplied:     total > limit,
+		ShipTypeCounts: allCounts,
+		Limit:          limit,
+		SourceMode:     sourceMode,
+	}
+}
+
+func countShipTypes(vessels []map[string]any) map[string]int {
+	counts := map[string]int{}
+	for _, item := range vessels {
+		category := shipTypeCategoryFromItem(item)
+		counts[category]++
+	}
+	return counts
+}
+
+func shipTypeFromRaw(raw []byte) (*int, string) {
+	if len(raw) == 0 {
+		return nil, ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, ""
+	}
+	code := intPtrFromAny(payload["ship_type_code"])
+	label, _ := payload["ship_type_label"].(string)
+	if label == "" {
+		label, _ = payload["ShipType"].(string)
+	}
+	return code, label
 }
 
 // PickBest picks the highest-precedence observation for one MMSI (for tests).

@@ -135,6 +135,35 @@ describe('LiveDataSearchBar', () => {
     expect(screen.queryByTestId('live-data-search-unavailable')).toBeNull();
   });
 
+  it('shows degraded banner when postgres fallback is active', async () => {
+    const onHitClick = vi.fn();
+    const { fn } = makeSearchFn({
+      response: {
+        hits: [
+          {
+            type: 'company',
+            id: 'co-1',
+            score: 2,
+            source: { name: 'Acme', country: 'US' },
+          },
+        ],
+        total: 1,
+        took_ms: 5,
+        query: 'acme',
+        degraded: 'postgres',
+      },
+    });
+    render(<LiveDataSearchBar onHitClick={onHitClick} searchFn={fn} types={['company']} />);
+    const input = screen.getByTestId('live-data-search-input');
+    fireEvent.focus(input);
+    await typeAndFlushDebounce(input, 'acme');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-data-search-degraded')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('live-data-search-hit-company')).toBeInTheDocument();
+  });
+
   it('shows the "Search unavailable" state when ES is down (503 envelope)', async () => {
     const onHitClick = vi.fn();
     const { fn } = makeSearchFn({ failWith: 'unavailable' });

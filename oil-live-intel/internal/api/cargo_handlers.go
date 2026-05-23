@@ -22,7 +22,7 @@ func (s *Server) ListCargoRecordsMap(w http.ResponseWriter, r *http.Request) {
 	}
 	commodity := r.URL.Query().Get("commodity")
 	minConf := queryFloat(r, "min_confidence", 0.55)
-	excludeSeed := queryBool(r, "exclude_seed", true)
+	excludeSeed := queryBool(r, "exclude_seed", s.Config.DisableDemoSeed)
 	limit := queryInt(r, "limit", 200)
 	if limit > 2000 {
 		limit = 2000
@@ -117,7 +117,7 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 	country := r.URL.Query().Get("country")
 	mmsi := r.URL.Query().Get("mmsi")
 	minConf := queryFloat(r, "min_confidence", 0.0)
-	excludeSeed := queryBool(r, "exclude_seed", false)
+	excludeSeed := queryBool(r, "exclude_seed", s.Config.DisableDemoSeed)
 	limit := queryInt(r, "limit", 50)
 
 	q := `

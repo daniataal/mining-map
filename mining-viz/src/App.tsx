@@ -44,7 +44,6 @@ import OilMaritimePanel from './components/OilMaritimePanel';
 import {
   DEFAULT_VESSEL_FILTERS,
   prefetchMaritimeVesselSnapshot,
-  readMaritimeIncludeCoastalDemoPreference,
   type VesselFilters,
 } from './lib/vessels';
 import IntelligenceSearchBox from './components/IntelligenceSearchBox';
@@ -81,7 +80,7 @@ import PlatformHealthChip from './components/PlatformHealthChip';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
 import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
-import { LIVE_DATA_HUB_CENTER } from './features/live-data/liveDataMapDefaults';
+import { LIVE_DATA_HUB_CENTER, LIVE_DATA_DEFAULT_LAYERS, LIVE_DATA_VESSEL_FILTERS } from './features/live-data/liveDataMapDefaults';
 import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
@@ -254,14 +253,7 @@ export default function App() {
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [oilLiveProductFilter, setOilLiveProductFilter] = useState('all');
   const [oilLiveTerminalSearch, setOilLiveTerminalSearch] = useState('');
-  const [oilLiveLayers, setOilLiveLayers] = useState({
-    terminals: true,
-    vessels: true,
-    corridors: true,
-    opportunities: true,
-    tradeFlows: false,
-    coverage: true,
-  });
+  const [oilLiveLayers, setOilLiveLayers] = useState({ ...LIVE_DATA_DEFAULT_LAYERS });
   const [oilLiveTradeFlowGroup, setOilLiveTradeFlowGroup] = useState<
     'company_pair' | 'country_pair'
   >('company_pair');
@@ -270,6 +262,7 @@ export default function App() {
     vessels: number;
     opportunities: number;
     corridors: number;
+    vesselMeta?: import('./api/oilLiveApi').OilLiveVesselMeta | null;
   } | null>(null);
   const [liveDataMacroTradeOn, setLiveDataMacroTradeOn] = useState(true);
   const [oilLiveEntity, setOilLiveEntity] = useState<OilLiveEntityClickPayload | null>(null);
@@ -975,9 +968,9 @@ export default function App() {
   }, [viewMode, isLiveDataSidebar]);
 
   useEffect(() => {
-    if (isLiveDataSidebar) {
-      setIsMaritimeLayerEnabled(false);
-    }
+    if (!isLiveDataSidebar) return;
+    setIsMaritimeLayerEnabled(false);
+    setVesselFilters(LIVE_DATA_VESSEL_FILTERS);
   }, [isLiveDataSidebar]);
 
   useEffect(() => {
@@ -994,7 +987,6 @@ export default function App() {
       maxVessels: Number(maritimeMaxVessels) || 15000,
       captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
-      includeCoastalDemo: readMaritimeIncludeCoastalDemoPreference(),
     });
   }, [username, maritimeMapViewActive, isLiveDataSidebar, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
@@ -1406,7 +1398,10 @@ export default function App() {
                   licensesFetchPending={
                     viewMode !== 'route_planner' &&
                     (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                    (isLoading || (viewMode === 'oil_and_gas' && isStorageLoading)) &&
+                    ((isLoading && rawData.length === 0) ||
+                      (viewMode === 'oil_and_gas' &&
+                        isStorageLoading &&
+                        (storageTerminalResponse?.entities?.length ?? 0) === 0)) &&
                     !fetchError &&
                     !(viewMode === 'oil_and_gas' && storageError)
                   }
@@ -1473,6 +1468,7 @@ export default function App() {
                   onOilLiveStatsChange={isLiveDataSidebar ? setOilLiveCoverageStats : undefined}
                   onOilLiveEntityClick={isLiveDataSidebar ? handleOilLiveEntityClick : undefined}
                   onOilLiveDismiss={isLiveDataSidebar ? handleOilLiveDismiss : undefined}
+                  onLiveDataMapFlyTo={isLiveDataSidebar ? handleLiveDataMapFlyTo : undefined}
                   liveDataFlyTrigger={isLiveDataSidebar ? liveDataFlyTrigger : 0}
                   liveDataFlyTarget={isLiveDataSidebar ? liveDataFlyTarget : null}
                   eiaHistoricMapEnabled={isHistoricSidebar && historicSidebarMap.enabled}
@@ -1535,6 +1531,7 @@ export default function App() {
                       opportunityId={oilLiveEntity.opportunityId}
                       title={oilLiveEntity.title}
                       subtitle={oilLiveEntity.subtitle}
+                      initialDrawerTab={oilLiveEntity.initialDrawerTab}
                       onClose={handleOilLiveDismiss}
                       onOpenRoutePlanner={handleOpenRoutePlannerFromLiveData}
                       onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
