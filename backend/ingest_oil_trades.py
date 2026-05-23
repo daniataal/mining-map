@@ -367,6 +367,10 @@ UPSERT_SQL = """
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON CONFLICT (reporter_m49, partner_m49, hs_code, flow_type, year)
     DO UPDATE SET
+        reporter        = EXCLUDED.reporter,
+        reporter_iso2   = EXCLUDED.reporter_iso2,
+        partner         = EXCLUDED.partner,
+        hs_description  = EXCLUDED.hs_description,
         trade_value_usd = EXCLUDED.trade_value_usd,
         net_weight_kg   = EXCLUDED.net_weight_kg,
         data_source     = EXCLUDED.data_source,

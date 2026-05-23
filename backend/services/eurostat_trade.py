@@ -15,17 +15,17 @@ EUROSTAT_ENABLED = (os.getenv("EUROSTAT_SYNC_ENABLED") or "true").strip().lower(
     "off",
 }
 
-# EU27 extra-EU imports of crude oil (example dataset; macro aggregates)
-_DATASET = os.getenv("EUROSTAT_DATASET", "DS-045409")
+# EU intra/extra trade by member state and product group (JSON-stat; public REST)
+_DATASET = os.getenv("EUROSTAT_DATASET", "EXT_LT_INTRATRD")
 _BASE = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
 
 _DIM_REPORTER = frozenset({"geo", "reporter", "rep", "reporter_iso", "geopolitical_entity"})
 _DIM_PARTNER = frozenset({"partner", "part", "partner_geo", "partner_country"})
 _DIM_TIME = frozenset({"time", "time_period", "period"})
 _DIM_PRODUCT = frozenset(
-    {"product", "hs", "hs6", "hs4", "sitc", "cpa", "prod", "indic_et", "commodity", "nomenclature"}
+    {"product", "hs", "hs6", "hs4", "sitc", "cpa", "prod", "commodity", "nomenclature"}
 )
-_DIM_FLOW = frozenset({"flow", "indic", "trade_flow", "indicators"})
+_DIM_FLOW = frozenset({"flow", "indic", "indic_et", "trade_flow", "indicators"})
 
 _DEFAULT_HS = "2709"
 _DEFAULT_HS_DESC = "Petroleum oils, crude (Eurostat macro)"
@@ -89,10 +89,10 @@ def _dim_role(dim_id: str) -> str:
         return "partner"
     if key in _DIM_TIME:
         return "year"
-    if key in _DIM_PRODUCT:
-        return "hs"
     if key in _DIM_FLOW:
         return "flow"
+    if key in _DIM_PRODUCT or key.startswith(("hs", "sitc", "cpa", "cn", "prod_")):
+        return "hs"
     return "other"
 
 
@@ -310,49 +310,48 @@ def _parse_eurostat_json(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return _parse_eurostat_flat(payload)
 
 
+def _eurostat_m49_codes(row: dict[str, Any]) -> tuple[str, str]:
+    """Stable dedupe keys for oil_trade_flows UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)."""
+    dims = (row.get("raw") or {}).get("dimensions") or {}
+    reporter_m49 = str(dims.get("geo") or row.get("reporter_iso2") or "EU27")[:10]
+    partner_m49 = str(dims.get("partner") or "").strip()[:10]
+    if not partner_m49:
+        partner = (row.get("partner") or "").strip()
+        if partner.lower() in {"extra-eu", "world"}:
+            partner_m49 = "0"
+        elif len(partner) <= 10 and partner.isascii() and partner.replace(" ", "").isalnum():
+            partner_m49 = partner.replace(" ", "")[:10]
+        else:
+            partner_m49 = "XEU"
+    return reporter_m49, partner_m49
+
+
+def _to_ingest_row(row: dict[str, Any]) -> dict[str, Any]:
+    reporter_m49, partner_m49 = _eurostat_m49_codes(row)
+    value = row.get("trade_value_usd")
+    return {
+        "reporter": row.get("reporter") or "European Union",
+        "reporter_m49": reporter_m49,
+        "reporter_iso2": row.get("reporter_iso2") or "EU",
+        "partner": row.get("partner") or "Extra-EU",
+        "partner_m49": partner_m49,
+        "hs_code": row.get("hs_code") or _DEFAULT_HS,
+        "hs_description": row.get("hs_description") or _DEFAULT_HS_DESC,
+        "flow_type": (row.get("flow_type") or "M")[:1],
+        "year": int(row.get("year") or 2023),
+        "trade_value_usd": int(value) if value is not None else None,
+        "data_source": "eurostat",
+    }
+
+
 def _upsert_oil_trade_flows(conn: Any, rows: list[dict[str, Any]]) -> int:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS oil_trade_flows (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                data_source TEXT,
-                reporter TEXT,
-                reporter_iso2 TEXT,
-                partner TEXT,
-                hs_code TEXT,
-                hs_description TEXT,
-                flow_type TEXT,
-                year INT,
-                trade_value_usd NUMERIC,
-                net_weight_kg NUMERIC,
-                raw JSONB,
-                ingested_at TIMESTAMPTZ DEFAULT now()
-            );
-            """
-        )
-        n = 0
-        for row in rows:
-            cur.execute(
-                """
-                INSERT INTO oil_trade_flows (
-                    data_source, reporter, reporter_iso2, partner, hs_code, hs_description,
-                    flow_type, year, trade_value_usd, raw
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                ON CONFLICT DO NOTHING;
-                """,
-                (
-                    row.get("data_source", "eurostat"),
-                    row.get("reporter"),
-                    row.get("reporter_iso2"),
-                    row.get("partner"),
-                    row.get("hs_code"),
-                    row.get("hs_description"),
-                    row.get("flow_type"),
-                    row.get("year"),
-                    row.get("trade_value_usd"),
-                    json.dumps(row.get("raw") or {}),
-                ),
-            )
-            n += cur.rowcount
-    return n
+    if not rows:
+        return 0
+    try:
+        from backend.ingest_oil_trades import ensure_table, upsert_rows
+    except ImportError:
+        from ingest_oil_trades import ensure_table, upsert_rows  # type: ignore
+
+    ensure_table(conn)
+    ingest_rows = [_to_ingest_row(row) for row in rows]
+    return upsert_rows(conn, ingest_rows)
