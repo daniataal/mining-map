@@ -49,6 +49,9 @@ type syncStatusSummary struct {
 	EurostatTradeFlowCount        int            `json:"eurostat_trade_flow_count"`
 	LastEurostatSyncAt            any            `json:"last_eurostat_sync_at"`
 	LastEurostatSyncStatus        *string        `json:"last_eurostat_sync_status"`
+	JodiSnapshotCount             int            `json:"jodi_snapshot_count"`
+	LastJodiSyncAt                any            `json:"last_jodi_sync_at"`
+	LastJodiSyncStatus            *string        `json:"last_jodi_sync_status"`
 	Disclaimer                    string         `json:"disclaimer"`
 }
 
@@ -56,10 +59,10 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	var terminalCount, cargoCount, portCallCount, companyCount int
 	var corridorFull, corridorPartial, openOpps int
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
-	var oilTradeFlows, eiaHistoric, tradeManifests, eurostatTradeFlows int
+	var oilTradeFlows, eiaHistoric, tradeManifests, eurostatTradeFlows, jodiSnapshots int
 	var liveVessels, liveAisPortCalls, vesselObservations, coverageWatchZones, coverageGapZones int
-	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat *time.Time
-	var lastComtradeStatus, lastEurostatStatus *string
+	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat, lastJodi *time.Time
+	var lastComtradeStatus, lastEurostatStatus, lastJodiStatus *string
 
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_terminals`).Scan(&terminalCount)
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_companies`).Scan(&companyCount)
@@ -95,6 +98,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	eurostatTradeFlows = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM oil_trade_flows WHERE data_source = 'eurostat'
 	`)
+	jodiSnapshots = countTable(ctx, pool, `SELECT COUNT(*)::int FROM jodi_oil_snapshots`)
 	eiaHistoric = countTable(ctx, pool, `SELECT COUNT(*)::int FROM eia_historic_imports`)
 	tradeManifests = countTable(ctx, pool, `SELECT COUNT(*)::int FROM trade_manifest_rows`)
 	vesselObservations = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_vessel_position_observations`)
@@ -142,6 +146,10 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT value, metadata->>'status' FROM oil_live_sync_state
 		WHERE key = 'last_eurostat_sync'
 	`).Scan(&lastEurostat, &lastEurostatStatus) //nolint:errcheck — row may be absent
+	_ = pool.QueryRow(ctx, `
+		SELECT value, metadata->>'status' FROM oil_live_sync_state
+		WHERE key = 'last_jodi_sync'
+	`).Scan(&lastJodi, &lastJodiStatus) //nolint:errcheck — row may be absent
 
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
@@ -171,6 +179,9 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		LastComtradeSyncStatus:        lastComtradeStatus,
 		LastEurostatSyncAt:            formatTimePtr(lastEurostat),
 		LastEurostatSyncStatus:        lastEurostatStatus,
+		JodiSnapshotCount:             jodiSnapshots,
+		LastJodiSyncAt:                formatTimePtr(lastJodi),
+		LastJodiSyncStatus:            lastJodiStatus,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted.",
 	}
 }
