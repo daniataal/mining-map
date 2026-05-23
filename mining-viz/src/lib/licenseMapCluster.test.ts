@@ -3,6 +3,7 @@ import {
   clusterTargetZoom,
   clusterExpandPaddingDeg,
   shouldRenderServerLicenseCluster,
+  serverClusterFlyBounds,
   MIN_SERVER_LICENSE_CLUSTER_COUNT,
 } from './licenseMapCluster';
 import type { MiningLicense } from '../types';
@@ -17,6 +18,15 @@ describe('licenseMapCluster', () => {
 
     it('stays at 9 or above', () => {
       expect(clusterTargetZoom(2)).toBe(9);
+    });
+  });
+
+  describe('serverClusterFlyBounds', () => {
+    it('pads around grid cell center', () => {
+      const item = { mapClusterGridDeg: 4.0, mapClusterCount: 50 } as MiningLicense;
+      const box = serverClusterFlyBounds(10, -90, item);
+      expect(box.north - box.south).toBeCloseTo(4.4, 1);
+      expect(box.east - box.west).toBeCloseTo(4.4, 1);
     });
   });
 

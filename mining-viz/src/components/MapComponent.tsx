@@ -1,4 +1,15 @@
-import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+    lazy,
+    startTransition,
+    Suspense,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -71,7 +82,12 @@ import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
-import { clusterTargetZoom, isServerLicenseCluster } from '../lib/licenseMapCluster';
+import {
+    clusterTargetZoom,
+    isServerLicenseCluster,
+    LICENSE_MAP_DEFAULT_ZOOM,
+    serverClusterFlyBounds,
+} from '../lib/licenseMapCluster';
 import {
   createLicenseClusterIconFactory,
   createServerLicenseClusterIcon,
@@ -363,18 +379,20 @@ function ClusterGroupRefBridge({
             if (children.length > 1) {
                 L.DomEvent.stopPropagation(event);
                 const bounds = L.latLngBounds(children.map((m) => m.getLatLng()));
-                const targetZoom = Math.max(
+                const fitMaxZoom = Math.max(
                     clusterTargetZoom(map.getZoom()),
                     Math.min(
                         LICENSE_CLUSTER_FIT_MAX_ZOOM,
                         map.getBoundsZoom(bounds.pad(0.12)) ?? clusterTargetZoom(map.getZoom()),
                     ),
                 );
-                map.fitBounds(bounds.pad(0.15), {
-                    maxZoom: LICENSE_CLUSTER_FIT_MAX_ZOOM,
-                    duration: 0.35,
+                map.flyToBounds(bounds.pad(0.15), {
+                    maxZoom: fitMaxZoom,
+                    duration: 0.55,
+                    padding: [32, 32],
                 });
-                onLicenseMapZoomChange?.(targetZoom);
+                const syncZoom = () => onLicenseMapZoomChange?.(map.getZoom());
+                map.once('moveend', syncZoom);
             }
         };
         if (group) {
@@ -438,18 +456,25 @@ const LicenseClusterFlyEffect = ({
             onComplete();
             return;
         }
+        const flyBox = serverClusterFlyBounds(lat, lng, cluster);
+        const bounds = L.latLngBounds(
+            [flyBox.south, flyBox.west],
+            [flyBox.north, flyBox.east],
+        );
         const targetZoom = clusterTargetZoom(map.getZoom());
-        // Request individual licenses immediately; bbox syncs on moveend from the real viewport.
-        onLicenseMapZoomChange?.(targetZoom);
-        map.flyTo([lat, lng], targetZoom, { duration: 0.4 });
+        map.flyToBounds(bounds, {
+            maxZoom: Math.min(LICENSE_CLUSTER_FIT_MAX_ZOOM, targetZoom + 1),
+            duration: 0.55,
+            padding: [36, 36],
+        });
         const done = () => {
-            const bounds = map.getBounds();
-            if (bounds.isValid() && onLicenseMapViewportChange) {
+            const mapBounds = map.getBounds();
+            if (mapBounds.isValid() && onLicenseMapViewportChange) {
                 onLicenseMapViewportChange({
-                    south: Number(bounds.getSouth().toFixed(4)),
-                    west: Number(bounds.getWest().toFixed(4)),
-                    north: Number(bounds.getNorth().toFixed(4)),
-                    east: Number(bounds.getEast().toFixed(4)),
+                    south: Number(mapBounds.getSouth().toFixed(4)),
+                    west: Number(mapBounds.getWest().toFixed(4)),
+                    north: Number(mapBounds.getNorth().toFixed(4)),
+                    east: Number(mapBounds.getEast().toFixed(4)),
                 });
             }
             onLicenseMapZoomChange?.(map.getZoom());
@@ -1204,14 +1229,18 @@ export default function MapComponent({
         [isDark],
     );
 
-    const renderedMarkers = useMemo(() => {
-        if (!showLicenseMarkers) return null;
-        return mapDisplayData.map((item) => {
-            if (item._displayLat == null || item._displayLng == null) return null;
+    const { serverClusterMarkers, licensePointMarkers } = useMemo(() => {
+        if (!showLicenseMarkers) {
+            return { serverClusterMarkers: null as ReactNode, licensePointMarkers: null as ReactNode };
+        }
+        const server: ReactNode[] = [];
+        const points: ReactNode[] = [];
+        for (const item of mapDisplayData) {
+            if (item._displayLat == null || item._displayLng == null) continue;
             const markerIcon = licenseMarkerIcons.get(item.id);
-            if (!markerIcon) return null;
-
-            return (
+            if (!markerIcon) continue;
+            const isServerCluster = isServerLicenseCluster(item);
+            const marker = (
                 <Marker
                     key={item.id}
                     position={[item._displayLat, item._displayLng]}
@@ -1227,7 +1256,7 @@ export default function MapComponent({
                         click: (e) => {
                             L.DomEvent.stopPropagation(e);
                             onSelectMaritimeVessel(null);
-                            if (isServerLicenseCluster(item)) {
+                            if (isServerCluster) {
                                 setSelectedItem(null);
                                 setPendingLicenseClusterFly(item);
                                 return;
@@ -1236,34 +1265,43 @@ export default function MapComponent({
                         },
                     }}
                 >
-                    {isServerLicenseCluster(item) ? (
-                      <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-                        <span className="text-[10px] font-black uppercase text-white tracking-widest">
-                          Zoom in — {item.mapClusterCount ?? ''} licenses
-                        </span>
-                      </Tooltip>
+                    {isServerCluster ? (
+                        <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                            <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                                Zoom in — {item.mapClusterCount ?? ''} licenses
+                            </span>
+                        </Tooltip>
                     ) : (
-                    <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-                        <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                            <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
-                            {item.entitySubtype && (
-                              <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
-                                {item.entitySubtype.replaceAll('_', ' ')}
-                              </p>
-                            )}
-                            {item._wasJittered && (
-                              <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
-                            )}
-                        </div>
-                    </Tooltip>
+                        <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                            <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                                    {item.company}
+                                </span>
+                                {item.entitySubtype && (
+                                    <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
+                                        {item.entitySubtype.replaceAll('_', ' ')}
+                                    </p>
+                                )}
+                                {item._wasJittered && (
+                                    <span className="ml-1 text-[8px] font-bold text-amber-400">
+                                        ≈ approx ({item._collocatedCount})
+                                    </span>
+                                )}
+                            </div>
+                        </Tooltip>
                     )}
                 </Marker>
             );
-        });
+            if (isServerCluster) server.push(marker);
+            else points.push(marker);
+        }
+        return {
+            serverClusterMarkers: server.length ? server : null,
+            licensePointMarkers: points.length ? points : null,
+        };
     }, [
         licenseMarkerIcons,
         mapDisplayData,
-        userAnnotations,
         onSelectMaritimeVessel,
         setSelectedItem,
         showLicenseMarkers,
@@ -1886,7 +1924,7 @@ export default function MapComponent({
                   ? 3
                   : viewModeKey === 'route_planner'
                     ? 4
-                    : 7
+                    : LICENSE_MAP_DEFAULT_ZOOM
               } 
               className="w-full h-full"
               zoomControl={false}
@@ -2151,9 +2189,13 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
+                {showLicenseMarkers && serverClusterMarkers && (
+                    <LayerGroup>{serverClusterMarkers}</LayerGroup>
+                )}
                 {showLicenseMarkers &&
+                    licensePointMarkers &&
                     (suppressLicenseClusters ? (
-                        <LayerGroup>{renderedMarkers}</LayerGroup>
+                        <LayerGroup>{licensePointMarkers}</LayerGroup>
                     ) : (
                         <MarkerClusterGroup
                             showCoverageOnHover={false}
@@ -2175,7 +2217,7 @@ export default function MapComponent({
                                 onSingleMarkerClusterClick={handleSingleClusterMarkerClick}
                                 onLicenseMapZoomChange={onLicenseMapZoomChange}
                             />
-                            {renderedMarkers}
+                            {licensePointMarkers}
                         </MarkerClusterGroup>
                     ))}
                 {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (

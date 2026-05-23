@@ -21,8 +21,26 @@ export function clusterExpandPaddingDeg(item: MiningLicense): number {
   return 0.35;
 }
 
+/** Match MapComponent default zoom for license views (must align API zoom with map). */
+export const LICENSE_MAP_DEFAULT_ZOOM = 7;
+
 export function clusterTargetZoom(currentZoom: number): number {
   return Math.max(Math.min(currentZoom + 3, 12), 9);
+}
+
+/** Leaflet bounds for flying into a server grid cell (degrees). */
+export function serverClusterFlyBounds(
+  lat: number,
+  lng: number,
+  item: MiningLicense,
+): { south: number; west: number; north: number; east: number } {
+  const pad = clusterExpandPaddingDeg(item);
+  return {
+    south: lat - pad,
+    west: lng - pad,
+    north: lat + pad,
+    east: lng + pad,
+  };
 }
 
 export function shouldRenderServerLicenseCluster(item: MiningLicense): boolean {
