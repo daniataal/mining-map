@@ -1367,6 +1367,17 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
                 "status": "skipped",
                 "error": str(exc),
             }
+        try:
+            try:
+                from backend.services.ingest.barentswatch_ais_sync import sync_barentswatch_ais
+            except ImportError:
+                from services.ingest.barentswatch_ais_sync import sync_barentswatch_ais
+            summary["steps"]["barentswatch_ais"] = sync_barentswatch_ais(conn)
+        except Exception as exc:
+            summary["steps"]["barentswatch_ais"] = {
+                "status": "skipped",
+                "error": str(exc),
+            }
         summary["steps"]["ted"] = {"events": _mirror_ted_notices(cur)}
         summary["steps"]["gov_awards"] = {"events": _mirror_gov_awards(cur)}
         summary["steps"]["opportunity_links"] = _ensure_demo_opportunities(cur)

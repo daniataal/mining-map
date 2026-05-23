@@ -76,7 +76,7 @@ fi
 agent_home="/paperclip/instances/default/agents/pending/opencode-home"
 if [[ -n "$agent_id" ]]; then
   agent_home="$(paperclip_opencode_agent_home "$agent_id")"
-  paperclip_prepare_opencode_agent_home "$agent_id"
+  paperclip_prepare_opencode_agent_home "$agent_id" 1
 fi
 
 export AGENT_HOME="$agent_home"
@@ -84,14 +84,16 @@ patch_body="$(python3 <<'PY'
 import json, os
 
 raw = os.environ["MODEL_TAG"].strip()
-model = raw if "/" in raw else f"ollama/{raw}"
+while raw.startswith("ollama/ollama/"):
+    raw = raw[len("ollama/"):]
+model = raw if raw.startswith("ollama/") else f"ollama/{raw}"
 minimal = json.loads(os.environ["MINIMAL_JSON"])
 home = os.environ["AGENT_HOME"]
 hb = int(os.environ.get("HEARTBEAT_SEC", "0") or "0")
 
 env = {
     "HOME": {"type": "plain", "value": home},
-    "XDG_CONFIG_HOME": {"type": "plain", "value": "/paperclip/.config"},
+    "XDG_CONFIG_HOME": {"type": "plain", "value": f"{home}/.config"},
     "XDG_DATA_HOME": {"type": "plain", "value": "/paperclip/.local/share"},
     "OLLAMA_HOST": {"type": "plain", "value": os.environ["OLLAMA_BASE"]},
     "GEMINI_API_KEY": {"type": "plain", "value": ""},

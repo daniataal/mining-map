@@ -27,7 +27,9 @@ type SearchResponse struct {
 	Total  int64       `json:"total"`
 	TookMs int         `json:"took_ms"`
 	Query  string      `json:"query"`
-	Error  string      `json:"error,omitempty"`
+	// Degraded is "postgres" when Elasticsearch was unavailable and company hits came from PG ILIKE.
+	Degraded string `json:"degraded,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // SearchHealth is the response of GET /api/oil-live/search/health.
@@ -51,12 +53,21 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	types := search.ParseTypesParam(r.URL.Query().Get("types"))
 
 	resp := SearchResponse{Query: q, Hits: []SearchHit{}}
+	start := time.Now()
 
 	if q == "" {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	if s.SearchClient == nil {
+		if pgHits, pgTotal, ok := s.trySearchCompaniesPG(r, q, types, limit); ok {
+			resp.Hits = pgHits
+			resp.Total = pgTotal
+			resp.Degraded = "postgres"
+			resp.TookMs = int(time.Since(start) / time.Millisecond)
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
 		resp.Error = "search_unavailable"
 		writeJSON(w, http.StatusServiceUnavailable, resp)
 		return
@@ -65,7 +76,6 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	start := time.Now()
 	// Fan out one query per requested type, in parallel. ES has a multi-index
 	// search but we want per-type field weights, so per-index requests are
 	// simpler and still bounded.
@@ -113,6 +123,14 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	if failed && len(allHits) == 0 {
+		if pgHits, pgTotal, ok := s.trySearchCompaniesPG(r, q, types, limit); ok {
+			resp.Hits = pgHits
+			resp.Total = pgTotal
+			resp.Degraded = "postgres"
+			resp.TookMs = int(time.Since(start) / time.Millisecond)
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
 		resp.Error = "search_unavailable"
 		writeJSON(w, http.StatusServiceUnavailable, resp)
 		return
@@ -162,6 +180,103 @@ func (s *Server) SearchHealthHandler(w http.ResponseWriter, r *http.Request) {
 		Status:  "ok",
 		Indices: counts,
 	})
+}
+
+func typesIncludeCompany(types []search.EntityType) bool {
+	for _, t := range types {
+		if t == search.TypeCompany {
+			return true
+		}
+	}
+	return false
+}
+
+// trySearchCompaniesPG returns company hits from oil_companies when ES is down.
+func (s *Server) trySearchCompaniesPG(
+	r *http.Request,
+	q string,
+	types []search.EntityType,
+	limit int,
+) ([]SearchHit, int64, bool) {
+	if s.Pool == nil || !typesIncludeCompany(types) {
+		return nil, 0, false
+	}
+	hits, total, err := s.searchCompaniesPG(r, q, limit)
+	if err != nil || len(hits) == 0 {
+		return nil, 0, false
+	}
+	return hits, total, true
+}
+
+// searchCompaniesPG ILIKE-matches oil_companies and attaches the latest MCR
+// corridor load point (when present) so the map can fly to a related location.
+func (s *Server) searchCompaniesPG(r *http.Request, q string, limit int) ([]SearchHit, int64, error) {
+	pattern := "%" + q + "%"
+	const countQ = `
+		SELECT COUNT(*)::int FROM oil_companies c
+		WHERE c.confidence >= 0
+		  AND (c.name ILIKE $1 OR c.normalized_name ILIKE $1)`
+	var total int
+	if err := s.Pool.QueryRow(r.Context(), countQ, pattern).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	const listQ = `
+		SELECT c.id::text, c.name, c.country, c.confidence,
+		       m.corridor_load_lat, m.corridor_load_lng
+		FROM oil_companies c
+		LEFT JOIN LATERAL (
+			SELECT corridor_load_lat, corridor_load_lng
+			FROM meridian_cargo_records
+			WHERE (shipper_company_id = c.id OR consignee_company_id = c.id)
+			  AND corridor_load_lat IS NOT NULL AND corridor_load_lng IS NOT NULL
+			ORDER BY updated_at DESC
+			LIMIT 1
+		) m ON true
+		WHERE c.confidence >= 0
+		  AND (c.name ILIKE $1 OR c.normalized_name ILIKE $1)
+		ORDER BY c.confidence DESC, c.name
+		LIMIT $2`
+	rows, err := s.Pool.Query(r.Context(), listQ, pattern, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var hits []SearchHit
+	for rows.Next() {
+		var id, name, country string
+		var confidence float64
+		var loadLat, loadLng *float64
+		if err := rows.Scan(&id, &name, &country, &confidence, &loadLat, &loadLng); err != nil {
+			return nil, 0, err
+		}
+		src := map[string]any{
+			"id":         id,
+			"name":       name,
+			"country":    country,
+			"confidence": confidence,
+		}
+		if loadLat != nil && loadLng != nil {
+			src["corridor_load"] = map[string]any{"lat": *loadLat, "lon": *loadLng}
+		}
+		raw, err := json.Marshal(src)
+		if err != nil {
+			return nil, 0, err
+		}
+		score := confidence * 10
+		if score <= 0 {
+			score = 1
+		}
+		hits = append(hits, SearchHit{
+			Type:   string(search.TypeCompany),
+			ID:     id,
+			Score:  score,
+			Source: raw,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return hits, int64(total), nil
 }
 
 // sortHitsByScoreDesc is a small in-place merge — kept inline so we don't

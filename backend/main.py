@@ -3697,9 +3697,20 @@ def create_license(item: LicenseCreate):
 import requests
 
 MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "http://host.docker.internal:3001/api/v1/ingest")
-MARKETPLACE_API_KEY = os.getenv("MARKETPLACE_API_KEY", "demo-key")
+
+try:
+    from backend.services.marketplace_export import marketplace_export_configured
+except ImportError:
+    from services.marketplace_export import marketplace_export_configured
+
 
 def export_license_to_marketplace(license_data: dict):
+    if not marketplace_export_configured():
+        print(
+            "EXPORT SKIPPED: MARKETPLACE_API_KEY is unset or demo-key "
+            "(configure a real key for production marketplace export)."
+        )
+        return False
     print(f"Attempting export for license {license_data['id']}...")
     try:
         # Map fields to Marketplace Seller Object
@@ -4721,33 +4732,27 @@ def analyze_document_with_ai(request: AIDocumentRequest):
 
     result = _run_provider_cascade(system_prompt, user_prompt)
     if result is None or not result.get("content"):
-        return {
-            "status": "success",
-            "extracted": True,
-            "license_id_reference": f"REF-{request.license_id}-MOCK",
-            "royalty_rate": "5.5% Gross Revenue Royalty",
-            "environmental_rating": "Risk-Alert",
-            "environmental_rationale": "High water-usage noted in concession zone, requiring secondary EPA audit.",
-            "annual_work_commitment": "$2,500,000 USD Exploration Target",
-            "local_content_requirement": "Min. 60% of local sub-contractors sourced in region",
-            "provider": "Mock (API key fallback)",
-            "model": "stub-v1"
-        }
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "error_code": "AI_UPSTREAM_UNAVAILABLE",
+                "message": "Document intelligence providers are offline or timed out.",
+                "extracted": False,
+            },
+        )
 
     parsed = _extract_json_object(result["content"])
     if not parsed or not parsed.get("extracted"):
-        return {
-            "status": "success",
-            "extracted": True,
-            "license_id_reference": f"REF-{request.license_id}-MOCK",
-            "royalty_rate": "5.5% Gross Revenue Royalty",
-            "environmental_rating": "Risk-Alert",
-            "environmental_rationale": "High water-usage noted in concession zone, requiring secondary EPA audit.",
-            "annual_work_commitment": "$2,500,000 USD Exploration Target",
-            "local_content_requirement": "Min. 60% of local sub-contractors sourced in region",
-            "provider": result.get("provider") if result else "Mock",
-            "model": result.get("model") if result else "stub-v1"
-        }
+        return JSONResponse(
+            status_code=422,
+            content={
+                "status": "error",
+                "error_code": "NO_EXTRACTABLE_SIGNAL",
+                "message": "No contract parameters could be extracted from the document.",
+                "extracted": False,
+            },
+        )
 
     return {
         "status": "success",
@@ -5761,14 +5766,6 @@ def get_maritime_vessels(
     capture_window_seconds: int = 10,
     scope: str = "all_vessels",
     offset: int = 0,
-    include_gulf_demo: bool = False,
-    include_coastal_demo: bool = Query(
-        False,
-        description=(
-            "When true, merges Hormuz + Africa-adjacent synthetic demo positions (server must allow demo seeding). "
-            "See MARITIME_COASTAL_DEMO_SEED / MARITIME_GULF_DEMO_SEED. Overrides sparse-only merge for all coastal demo regions."
-        ),
-    ),
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
@@ -5789,8 +5786,6 @@ def get_maritime_vessels(
             vessel_scope=scope,
             bbox=bbox,
             offset=offset,
-            include_gulf_demo=include_gulf_demo,
-            include_coastal_demo=include_coastal_demo,
         )
     except Exception as exc:
         return {

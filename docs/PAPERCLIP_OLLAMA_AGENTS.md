@@ -21,7 +21,8 @@ Small **local** models for Paperclip chores (triage, short docs, status comments
 | `cursor` | Cursor Engineer — primary repo work |
 | `openclaw_gateway` | Research + Obsidian (separate from these specialists) |
 | `cursor` | **CEO (default)** + Cursor Engineer — `paperclip-ceo-cursor.sh` |
-| `gemini_local` | CEO when `CURSOR_CEO=0` and `OLLAMA_CEO=0` |
+| `gemini_local` | **Avoid** — free tier ~20 req/day on `gemini-2.5-flash` |
+| **Antigravity Engineer** | `opencode_local` + Ollama — `bash scripts/paperclip-antigravity-ollama.sh` |
 
 MCP in Cursor (`mining-map/.cursor/mcp.json`) talks to Paperclip; specialists run **inside** Paperclip wakes, not in the IDE.
 
@@ -33,6 +34,21 @@ MCP in Cursor (`mining-map/.cursor/mcp.json`) talks to Paperclip; specialists ru
 | **Paperclip Docs** | `qwen2.5:3b` | `opencode_local` | `.paperclip/agents/docs-writer/AGENTS.md` | Issue doc / acceptance markdown |
 | **Paperclip Status** | `phi3:mini` | `opencode_local` | `.paperclip/agents/status/AGENTS.md` | Progress comment, light PATCH |
 | **Paperclip Diagnose** | `llama3.2:3b` | `opencode_local` | `.paperclip/agents/diagnose/AGENTS.md` | Single-file / error triage |
+
+## Architect (fleet health lane)
+
+| Agent name | Model | Role | Instructions |
+|------------|-------|------|--------------|
+| **Meridian Architect (Ollama)** | `qwen2.5:3b` | `researcher` | `.paperclip/agents/architect/AGENTS.md` |
+
+Verifies agents/adapters, `paperclip2` branch, failed runs; opens remediation issues for CEO. Not product implementation.
+
+```bash
+ollama pull qwen2.5:3b
+bash scripts/paperclip-ollama-architect.sh
+```
+
+Checklist: [.paperclip/MAD-ARCHITECT-CHECKLIST.md](../.paperclip/MAD-ARCHITECT-CHECKLIST.md).
 
 ## CTO (architecture lane)
 
@@ -48,6 +64,20 @@ bash scripts/paperclip-ollama-cto.sh
 ```
 
 Checklist: [.paperclip/MAD-CTO-CHECKLIST.md](../.paperclip/MAD-CTO-CHECKLIST.md). After first hire, add the printed agent UUID to `~/ai-agent-stack/scripts/paperclip-ceo-delegation.md`.
+
+## Product Manager (Codex CLI)
+
+| Agent name | Model | Adapter | Instructions |
+|------------|-------|---------|--------------|
+| **Codex Product Manager** | `gpt-5.3-codex-spark` | `codex_local` | `.paperclip/agents/product-manager/AGENTS.md` |
+
+Playbook: [.paperclip/PRODUCT-MANAGEMENT.md](../.paperclip/PRODUCT-MANAGEMENT.md) — backlog rubric, Phase 1 epics, issue templates.
+
+```bash
+bash scripts/paperclip-codex-pm.sh
+```
+
+Auth: `OPENAI_API_KEY` in `~/ai-agent-stack/.env` **or** `docker exec -it paperclip-safe codex login` (uses managed `codex-home`).
 
 Example PATCH body: `.paperclip/agents/example-opencode-agent-patch.json`.
 
@@ -150,15 +180,37 @@ After running the script:
 
 Do **not** point specialists at full-repo Meridian heartbeats (Live Data ingest, graph-sync, etc.).
 
+## CEO hiring + Mac fleet caps
+
+CEO (Cursor) **may** hire agents via `paperclipApiRequest` → `POST /api/companies/{id}/agent-hires` when under cap.
+
+| Doc | Purpose |
+|-----|---------|
+| [.paperclip/CEO-FLEET-LIMITS.md](../.paperclip/CEO-FLEET-LIMITS.md) | Hard limits (agents, Ollama RAM, timers, API discipline) |
+| [.paperclip/agents/ceo/CEO-HIRE-TEMPLATE.json](../.paperclip/agents/ceo/CEO-HIRE-TEMPLATE.json) | Minimal hire body (3B models, heartbeat 0) |
+
+Check fleet before hire:
+
+```bash
+bash scripts/paperclip-fleet-status.sh
+bash scripts/paperclip-fleet-status.sh --check   # exit 1 if blocked
+```
+
+Env overrides in `~/ai-agent-stack/.env`: `PAPERCLIP_FLEET_MAX_TOTAL`, `PAPERCLIP_FLEET_MAX_OLLAMA`, `PAPERCLIP_FLEET_MAX_HEARTBEAT_AGENTS`.
+
+**Prefer** assigning existing agents or `paperclip-ollama-specialists.sh` over API sprawl.
+
 ## Cursor MCP (IDE)
 
-`mining-map/.cursor/mcp.json` runs Paperclip MCP via Docker. Tools include `paperclipListAgents`, `paperclipGetAgent`, `paperclipApiRequest` — there is **no** “create agent” MCP tool; use the bash script or UI.
+`mining-map/.cursor/mcp.json` runs Paperclip MCP via Docker. Tools include `paperclipListAgents`, `paperclipGetAgent`, `paperclipApiRequest` — use `paperclipApiRequest` for `agent-hires` when CEO is under fleet cap; see `CEO-FLEET-LIMITS.md`.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `parseBoolean is not defined` on opencode_local | Re-run `bash ~/ai-agent-stack/scripts/paperclip-adapter-runtime-patch.sh` then **new run** (not Retry) |
+| `parseBoolean is not defined` on opencode_local | `bash scripts/paperclip-fix-adapters.sh` then **new run** (not Retry) |
+| CEO `EACCES` on `cursor-home/.config` | Same `paperclip-fix-adapters.sh` (permissions + adapter patch) |
+| Issues stuck `blocked` / stranded recovery | CEO follows `.paperclip/CEO-RECOVERY.md` → `todo` + reassign after fix |
 | `connection refused` to Ollama from container | Ollama running on Mac; `OLLAMA_BASE_URL=http://host.docker.internal:11434` |
 | OpenCode picks wrong model | Re-run `bash ~/ai-agent-stack/scripts/paperclip-opencode-providers.sh` |
 | Huge token use | Re-run `paperclip-minimal-context.sh` path: `paperclip_install_minimal_skill` |
@@ -182,7 +234,7 @@ Paperclip talks to the **OpenClaw gateway** (`openclaw_gateway` adapter). The ga
 Fix (local Ollama, free):
 
 ```bash
-ollama pull llama3.2
+ollama pull llama3.2:3b
 bash scripts/paperclip-openclaw-fix.sh
 ```
 
@@ -194,7 +246,7 @@ Groq free tier allows **~6k TPM**; OpenRouter free keys have **low credits**. Th
 
 | Setting | Groq Fast Analyst | OpenRouter Engineer |
 |---------|-------------------|---------------------|
-| Default model | `groq/llama-3.1-8b-instant` | `openrouter/meta-llama/llama-3.2-3b-instruct:free` |
+| Default model | `groq/llama-3.1-8b-instant` | `openrouter/qwen/qwen3-coder:free` (fallback: `meta-llama/llama-3.2-3b-instruct:free` + bash denied) |
 | Skill | `paperclip-minimal` (~1 KB) only | same |
 | Session resume | **off** | **off** |
 | Wake payload | compact (truncated) | compact |

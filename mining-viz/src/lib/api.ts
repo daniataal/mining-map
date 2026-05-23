@@ -1185,10 +1185,6 @@ export {
   useMaritimeVessels,
   prefetchMaritimeVesselSnapshot,
   fetchMaritimeVesselSnapshot,
-  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
-  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
-  readMaritimeIncludeGulfDemoPreference,
-  readMaritimeIncludeCoastalDemoPreference,
 } from './vessels/useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
 

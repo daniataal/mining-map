@@ -6,9 +6,19 @@ const OIL_INTEL_BASE = (import.meta.env.VITE_OIL_INTEL_BASE as string | undefine
 export type OilLiveMapResponse = {
   terminals: OilTerminal[];
   vessels: OilLiveVessel[];
+  vessel_meta?: OilLiveVesselMeta;
   events: OilPortCall[];
   cards: OilIntelligenceCard[];
   companies: OilCompany[];
+};
+
+export type OilLiveVesselMeta = {
+  total_available?: number;
+  returned_count?: number;
+  cap_applied?: boolean;
+  ship_type_counts?: Record<string, number>;
+  limit?: number;
+  source_mode?: string;
 };
 
 export type OilTerminal = {
@@ -1035,6 +1045,8 @@ export type OilLiveSearchResponse = {
   total: number;
   took_ms: number;
   query: string;
+  /** When "postgres", Elasticsearch was down and company hits came from PG ILIKE. */
+  degraded?: string;
   /** When set (typically "search_unavailable"), the UI shows a degraded
    * "Search unavailable" state inline instead of throwing. */
   error?: string;
@@ -1104,6 +1116,7 @@ export async function getOilLiveSearch(
       total: typeof data.total === 'number' ? data.total : 0,
       took_ms: typeof data.took_ms === 'number' ? data.took_ms : 0,
       query: typeof data.query === 'string' ? data.query : q,
+      degraded: typeof data.degraded === 'string' ? data.degraded : undefined,
       error: data.error,
     };
   } catch {

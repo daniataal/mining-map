@@ -20,9 +20,10 @@ func (s *Server) ListVessels(w http.ResponseWriter, r *http.Request) {
 	freshness := queryInt(r, "freshness_minutes", defaultVesselFreshnessMinutes)
 	sources := parseCSVParam(r.URL.Query().Get("sources"))
 
-	items, err := vesselmerge.ListMergedVessels(r.Context(), s.Pool, bbox, bboxOK, limit, vesselmerge.QueryOptions{
-		FreshnessMinutes: freshness,
-		Sources:          sources,
+	result, err := vesselmerge.ListMergedVesselsWithMeta(r.Context(), s.Pool, bbox, bboxOK, limit, vesselmerge.QueryOptions{
+		FreshnessMinutes:    freshness,
+		Sources:             sources,
+		PrioritizePetroleum: bboxOK,
 	})
 	if err != nil {
 		fallback, fallbackErr := s.listLiveVessels(r, bbox, bboxOK, limit)
@@ -44,11 +45,16 @@ func (s *Server) ListVessels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONCached(w, http.StatusOK, map[string]any{
-		"vessels":           items,
-		"count":             len(items),
+		"vessels":           result.Vessels,
+		"count":             result.ReturnedCount,
+		"total_available":   result.TotalAvailable,
+		"returned_count":    result.ReturnedCount,
+		"cap_applied":       result.CapApplied,
+		"ship_type_counts":  result.ShipTypeCounts,
+		"limit":             result.Limit,
 		"freshness_minutes": freshness,
 		"sources":           sources,
-		"source_mode":       "multi_source_observations",
+		"source_mode":       result.SourceMode,
 		"limitations": []string{
 			"Open AIS coverage is partial; sparse regions are coverage gaps, not proof of no vessel activity.",
 			"AIS is a movement signal only and does not confirm supplier or receiver.",

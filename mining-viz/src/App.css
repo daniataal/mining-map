@@ -1293,6 +1293,17 @@
   background: #1d4ed8;
 }
 
+.oil-live-popup-btn--outline {
+  margin-top: 6px;
+  background: transparent;
+  color: #2563eb;
+  border: 1px solid #2563eb;
+}
+
+.oil-live-popup-btn--outline:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
 @keyframes pulse-glow {
   0% {
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.4), inset 0 0 5px rgba(59, 130, 246, 0.2);

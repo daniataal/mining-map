@@ -1723,12 +1723,26 @@ async def _collect_ais_snapshot(
     }
 
 
+def _maritime_demo_seeding_allowed() -> bool:
+    """
+    Dev-only master switch for synthetic coastal/Gulf demo positions.
+
+    Production and customer-facing API paths keep this off (unset / 0). Local demos require
+    MARITIME_ALLOW_DEMO_SEED=1 plus MARITIME_*_DEMO_SEED — never exposed via Caddy/prod compose.
+    """
+    return os.getenv("MARITIME_ALLOW_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
+
+
 def _maritime_gulf_demo_env() -> bool:
+    if not _maritime_demo_seeding_allowed():
+        return False
     return os.getenv("MARITIME_GULF_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _maritime_coastal_demo_env() -> bool:
-    """Unified Gulf + Africa sparse-region demo seed (server-side)."""
+    """Unified Gulf + Africa sparse-region demo seed (server-side, dev-only)."""
+    if not _maritime_demo_seeding_allowed():
+        return False
     return os.getenv("MARITIME_COASTAL_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
 
 
@@ -1777,6 +1791,13 @@ def maritime_coastal_demo_merge_decision(
     merge_gulf = False
     merge_africa = False
 
+    if not _maritime_demo_seeding_allowed():
+        return {
+            "merge_gulf": False,
+            "merge_africa_region_ids": [],
+            "reference_ingest_ok": ref_ok,
+        }
+
     if include_coastal_demo:
         merge_gulf = True
         merge_africa = True
@@ -1824,7 +1845,9 @@ def _load_africa_coastal_demo_seed_rows() -> list[dict[str, Any]]:
 
 
 def _should_merge_persian_gulf_demo_rows(*, include_gulf_demo: bool, demo_env: bool, coverage_gap: bool) -> bool:
-    """Explicit API opt-in always wins; otherwise env-gated merge only when AISStream gap heuristic fires."""
+    """Dev-only: explicit opt-in or env-gated merge when AISStream gap heuristic fires."""
+    if not _maritime_demo_seeding_allowed():
+        return False
     if include_gulf_demo:
         return True
     return bool(demo_env and coverage_gap)
@@ -1891,11 +1914,12 @@ def _build_maritime_vessel_feed_from_rows(
     normalized_window: int,
     normalized_offset: int,
     normalized_bbox: Optional[tuple[float, float, float, float]],
-    include_gulf_demo: bool,
-    include_coastal_demo: bool,
     data_source: str = "postgres",
     cache_age_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
+    include_gulf_demo = False
+    include_coastal_demo = False
+
     worker_ok = (status or {}).get("status") == "ok"
     gulf_c = count_maritime_rows_in_bbox(all_rows, PERSIAN_GULF_CORE_BBOX)
     north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
@@ -2007,9 +2031,7 @@ def _build_maritime_vessel_feed_from_rows(
     response["coastal_demo_regions"] = coastal_demo_regions
     response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
     if gulf_demo_rows:
-        if include_coastal_demo or include_gulf_demo:
-            pg_mode = "api_opt_in"
-        elif env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
+        if env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
             pg_mode = "env_coastal_sparse"
         elif env_gulf and coverage_gap:
             pg_mode = "env_coverage_gap"
@@ -2020,19 +2042,7 @@ def _build_maritime_vessel_feed_from_rows(
     response["persian_gulf_demo_mode"] = pg_mode
     response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
     if demo_rows:
-        if include_coastal_demo:
-            demo_note = (
-                "Coastal sparse-feed demo: synthetic Gulf and Africa-adjacent positions merged because "
-                "include_coastal_demo=1 was requested; these are not live AIS for those boxes. Other rows may "
-                "still be real persisted AIS snapshot positions."
-            )
-        elif include_gulf_demo:
-            demo_note = (
-                "Persian Gulf Hormuz demo: synthetic positions merged because include_gulf_demo was requested; "
-                "these are not live AIS positions for the Gulf. Other vessels in this response may still be "
-                "real persisted AIS snapshot positions."
-            )
-        elif env_coastal:
+        if env_coastal:
             demo_note = (
                 "Coastal sparse-feed demo: synthetic positions merged while MARITIME_COASTAL_DEMO_SEED is enabled "
                 "for low-coverage Hormuz and/or Africa-adjacent reference boxes; this does not represent restored "
@@ -2057,8 +2067,6 @@ def get_maritime_vessel_feed(
     vessel_scope: str = "oil_tankers",
     bbox: Optional[tuple[float, float, float, float]] = None,
     offset: int = 0,
-    include_gulf_demo: bool = False,
-    include_coastal_demo: bool = False,
 ) -> dict[str, Any]:
     normalized_scope = _normalize_vessel_scope(vessel_scope)
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
@@ -2091,8 +2099,6 @@ def get_maritime_vessel_feed(
                     normalized_window=normalized_window,
                     normalized_offset=normalized_offset,
                     normalized_bbox=normalized_bbox,
-                    include_gulf_demo=include_gulf_demo,
-                    include_coastal_demo=include_coastal_demo,
                     data_source="postgres_bbox",
                     cache_age_seconds=None,
                 )
@@ -2121,8 +2127,6 @@ def get_maritime_vessel_feed(
             normalized_window=normalized_window,
             normalized_offset=normalized_offset,
             normalized_bbox=normalized_bbox,
-            include_gulf_demo=include_gulf_demo,
-            include_coastal_demo=include_coastal_demo,
             data_source=data_source,
             cache_age_seconds=cache_age,
         )

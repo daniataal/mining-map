@@ -8,7 +8,7 @@
 |------|--------|-------|
 | **Unified map** | Done | Terminals, vessels, corridors, opportunity markers on main map. Default fly-to Gulf hub bbox (24–55°E, 12–32°N) on tab entry. |
 | **Intel drawer** | Done | Tabs: Intelligence, Opportunities, Cargo, Companies, Alerts. Product filter. Coverage health banner. |
-| **Meridian Cargo Records (MCR)** | Done | Cargo ledger; row click opens left drawer with full MCR + evidence. CSV export. Seed-data toggle. |
+| **Meridian Cargo Records (MCR)** | Done | Cargo ledger; row click opens left drawer with full MCR + evidence. CSV export. **Include seed data** toggle dev/localhost only (`VITE_ALLOW_SEED_DATA_TOGGLE` or `import.meta.env.DEV`). |
 | **Deal Execution Pack** | Done | Left drawer from map/opportunity/cargo. Deal-pack API + inline economics/margin sheet. |
 | **Companies + contacts** | Done | Save to Suppliers, per-company agent, batch enrich via `POST /api/admin/oil-live/enrich-contacts?limit=20`. |
 | **Graph sync CTA** | Done | Empty states link to admin graph-sync. |
@@ -463,10 +463,18 @@ Both should return a `sync` object with `terminal_count`, `cargo_record_count`, 
 
 ## Cargo seed data filter
 
-Graph-sync may insert demo **seed port calls** (`source=seed_port_calls`) when AIS data is sparse. Cargo rows derived from those port calls show an amber **Demo seed** badge.
+Graph-sync may insert demo **seed port calls** (`source=seed_port_calls`) when AIS data is sparse **only when** `OIL_LIVE_DISABLE_DEMO_SEED=0` (dev). Production compose sets `OIL_LIVE_DISABLE_DEMO_SEED=1`, so graph-sync and oil-live-intel startup skip demo corridors and MT DEMO STAR.
 
-- **Default (production feel):** Cargo tab hides seed-derived rows. Toggle **Include seed data** to show them.
-- **API:** `GET /api/oil-live/cargo-records?exclude_seed=true` (used by the UI when the toggle is off).
+| Surface | Production default | Dev override |
+|---------|-------------------|--------------|
+| Graph-sync `seed_port_calls` step | Skipped (`OIL_LIVE_DISABLE_DEMO_SEED=1`) | `OIL_LIVE_DISABLE_DEMO_SEED=0` |
+| oil-live-intel startup demo port calls | Skipped (same env) | Same |
+| Cargo list API | `exclude_seed` defaults **true** when demo seed disabled | `exclude_seed=false` or omit |
+| Live Data UI | No **Include seed data** checkbox | localhost / `VITE_ALLOW_SEED_DATA_TOGGLE=1` |
+| Provenance badges | Hides `seed_port_calls`; inferred MCR still labelled **Synthetic** | Shows seed badge when toggle enabled |
+
+- **API:** `GET /api/oil-live/cargo-records?exclude_seed=true` (default in prod via `OIL_LIVE_DISABLE_DEMO_SEED=1`).
+- **Purge existing demo rows (admin):** `POST /api/admin/oil-live/purge-demo-seed` with `X-Admin-Token`.
 
 ---
 
@@ -533,7 +541,8 @@ Use this before shipping Live Data to users or a demo environment.
 ### Security & secrets
 
 - [ ] `ADMIN_TOKEN` set in production (admin routes reject requests without `X-Admin-Token`)
-- [ ] No demo seeds in production UI unless intentional (`MARITIME_GULF_DEMO_SEED=0`, Cargo **Include seed data** off by default)
+- [ ] No demo seeds in production UI unless intentional: `OIL_LIVE_DISABLE_DEMO_SEED=1`, `MARITIME_GULF_DEMO_SEED=0`, `MARITIME_COASTAL_DEMO_SEED=0`, `MARITIME_ALLOW_DEMO_SEED` unset; Cargo **Include seed data** absent in prod build
+- [ ] `MARKETPLACE_API_KEY` unset or a real key — **never** `demo-key` (export skipped when unset/demo)
 - [ ] API keys (AIS, Census, Comtrade) in env / secrets — not committed
 
 ### Data population

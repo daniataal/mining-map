@@ -59,13 +59,21 @@ func (s *Server) Map(w http.ResponseWriter, r *http.Request) {
 		limit = min(limit, 250)
 	}
 	terminals, _ := s.listTerminals(r, bbox, bboxOK, limit)
-	vessels, _ := s.listLiveVessels(r, bbox, bboxOK, limit)
+	vesselResult, _ := s.listLiveVesselsWithMeta(r, bbox, bboxOK, limit)
 	events, _ := s.listRecentPortCalls(r, limit/2)
 	cards, _ := s.listIntelligence(r, limit/2)
 	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4, 0)
 	writeJSONCached(w, http.StatusOK, map[string]any{
 		"terminals": terminals,
-		"vessels":   vessels,
+		"vessels":   vesselResult.Vessels,
+		"vessel_meta": map[string]any{
+			"total_available":  vesselResult.TotalAvailable,
+			"returned_count":   vesselResult.ReturnedCount,
+			"cap_applied":      vesselResult.CapApplied,
+			"ship_type_counts": vesselResult.ShipTypeCounts,
+			"limit":            vesselResult.Limit,
+			"source_mode":      vesselResult.SourceMode,
+		},
 		"events":    events,
 		"cards":     cards,
 		"companies": companies,

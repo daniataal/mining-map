@@ -1,4 +1,5 @@
 import { useI18n } from '../../lib/i18n';
+import { shouldShowProvenanceBadge } from './liveDataDevFeatures';
 
 export type OilLiveProvenanceKind = 'seed_port_calls' | 'synthetic' | 'live_ais' | string;
 
@@ -30,7 +31,7 @@ type Props = {
 
 export default function OilLiveProvenanceBadge({ kind, className = '' }: Props) {
   const { t } = useI18n();
-  if (!kind || kind === 'unknown') return null;
+  if (!shouldShowProvenanceBadge(kind)) return null;
   const style = STYLES[kind] ?? {
     bg: 'bg-slate-500/10',
     text: 'text-slate-600 dark:text-slate-300',

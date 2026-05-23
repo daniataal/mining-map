@@ -83,14 +83,55 @@ func scanTerminalRows(rows pgx.Rows) ([]map[string]any, error) {
 }
 
 func (s *Server) listLiveVessels(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
+	result, err := s.listLiveVesselsWithMeta(r, bbox, bboxOK, limit)
+	if err != nil {
+		return nil, err
+	}
+	return result.Vessels, nil
+}
+
+func (s *Server) listLiveVesselsWithMeta(r *http.Request, bbox [4]float64, bboxOK bool, limit int) (vesselmerge.ListResult, error) {
 	ctx := r.Context()
+	limit = vesselmerge.ClampLimit(limit)
 	if vesselmerge.MergedPositionsEnabled() && s.Pool != nil &&
 		vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.HasRows(ctx, s.Pool) {
-		merged, err := vesselmerge.ListMergedVesselsInBbox(ctx, s.Pool, bbox, bboxOK, limit)
+		result, err := vesselmerge.ListMergedVesselsWithMeta(ctx, s.Pool, bbox, bboxOK, limit, vesselmerge.QueryOptions{
+			FreshnessMinutes:    1440,
+			PrioritizePetroleum: bboxOK,
+		})
 		if err == nil {
-			return merged, nil
+			return result, nil
 		}
 	}
+	vessels, err := s.listLegacyLiveVessels(r, bbox, bboxOK, limit)
+	if err != nil {
+		return vesselmerge.ListResult{}, err
+	}
+	return vesselmerge.ListResult{
+		Vessels:        vessels,
+		TotalAvailable: len(vessels),
+		ReturnedCount:  len(vessels),
+		CapApplied:     false,
+		ShipTypeCounts: countLegacyShipTypes(vessels),
+		Limit:          limit,
+		SourceMode:     "legacy_oil_ais_positions",
+	}, nil
+}
+
+func countLegacyShipTypes(vessels []map[string]any) map[string]int {
+	counts := map[string]int{}
+	for _, item := range vessels {
+		tclass, _ := item["tanker_class"].(string)
+		if tclass != "" {
+			counts["tanker"]++
+			continue
+		}
+		counts["unknown"]++
+	}
+	return counts
+}
+
+func (s *Server) listLegacyLiveVessels(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
 	q := `
 		SELECT DISTINCT ON (p.mmsi) p.mmsi, p.ts, p.lat, p.lon, p.speed, p.course, p.draft_m, p.destination,
 			v.name, v.tanker_class, v.crude_capable, v.product_tanker
