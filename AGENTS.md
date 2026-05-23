@@ -4,6 +4,8 @@
 **Product:** Meridian (MadSan Global Intelligence) — commodity trade enablement, not a map toy.  
 **Operational detail:** [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md), [docs/BOL_DATA_STRATEGY.md](docs/BOL_DATA_STRATEGY.md), [docs/LIVE_DATA.md](docs/LIVE_DATA.md).
 
+**Paperclip (agents):** Local Ollama specialists — [docs/PAPERCLIP_OLLAMA_AGENTS.md](docs/PAPERCLIP_OLLAMA_AGENTS.md); Cursor CLI config — [docs/LIVE_DATA.md](docs/LIVE_DATA.md) (§ Paperclip / Cursor CLI). CEO runbook: [.paperclip/MAD-16-CEO-CHECKLIST.md](.paperclip/MAD-16-CEO-CHECKLIST.md).
+
 ---
 
 ## North star
