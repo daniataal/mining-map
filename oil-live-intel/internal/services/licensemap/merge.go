@@ -14,7 +14,9 @@ type clusterCell struct {
 }
 
 func clusterCellKey(lat, lng, gridDeg float64) (int, int) {
-	return int(math.Round(lat / gridDeg)), int(math.Round(lng / gridDeg))
+	// SQL centers cells at FLOOR(coord/g)*g + g/2 — invert that for neighbor merge keys.
+	half := gridDeg / 2
+	return int(math.Floor((lat - half) / gridDeg)), int(math.Floor((lng - half) / gridDeg))
 }
 
 // MergeClusters combines neighboring grid bubbles to reduce overlap at continental zoom.

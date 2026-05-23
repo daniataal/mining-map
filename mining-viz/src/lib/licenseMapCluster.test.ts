@@ -12,14 +12,14 @@ import type { MiningLicense } from '../types';
 
 describe('licenseMapCluster', () => {
   describe('clusterTargetZoom', () => {
-    it('increases zoom by 3, capped at 12, floored at 9', () => {
-      expect(clusterTargetZoom(5)).toBe(9);
-      expect(clusterTargetZoom(9)).toBe(12);
-      expect(clusterTargetZoom(11)).toBe(12);
+    it('increases zoom by 2, capped at 10, floored at drill threshold', () => {
+      expect(clusterTargetZoom(5)).toBe(7);
+      expect(clusterTargetZoom(8)).toBe(10);
+      expect(clusterTargetZoom(11)).toBe(10);
     });
 
-    it('stays at 9 or above', () => {
-      expect(clusterTargetZoom(2)).toBe(9);
+    it('stays at drill threshold or above', () => {
+      expect(clusterTargetZoom(2)).toBe(7);
       expect(clusterTargetZoom(2)).toBeGreaterThanOrEqual(SERVER_CLUSTER_MIN_DRILL_ZOOM);
     });
   });
@@ -27,7 +27,7 @@ describe('licenseMapCluster', () => {
   describe('planClusterDrillFly', () => {
     it('uses center fly for wide continental clusters', () => {
       const plan = planClusterDrillFly(4, 12, 3);
-      expect(plan).toEqual({ mode: 'center', zoom: 9 });
+      expect(plan).toEqual({ mode: 'center', zoom: 7 });
     });
 
     it('uses bounds fly when fit zoom reaches drill threshold', () => {

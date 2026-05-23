@@ -4,8 +4,8 @@ import "testing"
 
 func TestMergeClustersCombinesNeighbors(t *testing.T) {
 	clusters := []ClusterMarker{
-		{ID: "cluster:0:0", Lat: 0, Lng: 0, MapClusterCount: 10, Sector: "mining"},
-		{ID: "cluster:6:0", Lat: 6, Lng: 0, MapClusterCount: 20, Sector: "mining"},
+		{ID: "cluster:3:3", Lat: 3, Lng: 3, MapClusterCount: 10, Sector: "mining"},
+		{ID: "cluster:9:3", Lat: 9, Lng: 3, MapClusterCount: 20, Sector: "mining"},
 	}
 	merged := MergeClusters(clusters, 6.0)
 	if len(merged) != 1 {

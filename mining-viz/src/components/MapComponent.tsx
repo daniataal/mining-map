@@ -71,7 +71,7 @@ import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
 import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
 import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
-import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner';
+import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
 import { getOilLiveSyncStatus } from '../api/oilLiveApi';
 import { LIVE_DATA_HUB_BOUNDS, LIVE_DATA_DEFAULT_LAYERS, GOVERNMENT_AIS_COVERAGE_SOURCES, viewportOverlapsPersianGulfHub } from '../features/live-data/liveDataMapDefaults';
@@ -461,7 +461,7 @@ const MapEffect = ({
     return null;
 };
 
-/** Fly into a server-side license cluster; sync zoom/bbox from map on moveend (zoom ≥ 8 → points). */
+/** Fly into a server-side license cluster; sync zoom/bbox from map on moveend (zoom ≥ 7 → points). */
 const LicenseClusterFlyEffect = ({
     cluster,
     onLicenseMapZoomChange,
@@ -532,11 +532,11 @@ const LicenseClusterFlyEffect = ({
         };
         map.stop();
         if (flyPlan.mode === 'center') {
-            map.flyTo([lat, lng], flyPlan.zoom, { duration: 0.55 });
+            map.flyTo([lat, lng], flyPlan.zoom, { duration: 0.75 });
         } else {
             map.flyToBounds(bounds, {
                 maxZoom: flyPlan.maxZoom,
-                duration: 0.55,
+                duration: 0.75,
                 padding: [36, 36],
             });
         }
