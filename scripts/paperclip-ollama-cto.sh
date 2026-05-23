@@ -61,6 +61,7 @@ bash "$AI_STACK/scripts/paperclip-opencode-providers.sh"
 paperclip_install_minimal_skill "$AI_STACK"
 
 export MINIMAL_JSON="$(paperclip_minimal_adapter_json)"
+export PAPERCLIP_GIT_BRANCH="${PAPERCLIP_GIT_BRANCH:-paperclip2}"
 export OLLAMA_BASE CEO_ID HEARTBEAT_SEC AGENT_NAME MODEL_TAG ICON
 
 agent_id=""
@@ -96,6 +97,7 @@ env = {
     "GEMINI_API_KEY": {"type": "plain", "value": ""},
     "GOOGLE_API_KEY": {"type": "plain", "value": ""},
     "ANTHROPIC_API_KEY": {"type": "plain", "value": ""},
+    "PAPERCLIP_GIT_BRANCH": {"type": "plain", "value": os.environ.get("PAPERCLIP_GIT_BRANCH", "paperclip2")},
 }
 
 adapter = {
