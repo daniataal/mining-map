@@ -20,7 +20,7 @@
 | **Route planner deep link** | Done | Deal pack + cargo drawer → **Open in Route Planner** pre-fills load/discharge from MCR port names. |
 | **Company dossier link** | Done | Shipper/consignee + saved companies → opens existing license dossier when `supplier_id` is set. |
 | **USITC macro trade** | Done | `backend/services/usitc_dataweb.py` on graph-sync (`USITC_DATAWEB_API_KEY`). |
-| **Eurostat COMEXT (macro)** | Done | `backend/services/eurostat_trade.py` on graph-sync (`EUROSTAT_SYNC_ENABLED`, `EUROSTAT_DATASET`); no API key — public REST. |
+| **Eurostat COMEXT (macro)** | Done | `backend/services/eurostat_trade.py` on graph-sync (`EUROSTAT_SYNC_ENABLED`, `EUROSTAT_DATASET`); no API key — public REST; count in Live Data coverage grid. |
 | **EIA crude imports + refinery throughput** | Done | `backend/services/eia_imports.py` on graph-sync; new `oil_refinery_throughput` table; `EIA_API_KEY` optional (step skipped if unset). |
 | **EIA historic company imports (files)** | Done | `backend/services/eia_historic_imports.py` + Live Data tab **Historic (EIA)**; user-provided `impa*.xls/xlsx` only (not live AIS). |
 | **OpenSanctions screening** | Done | `backend/services/opensanctions_screening.py` on graph-sync; non-blocking UI chip; key optional. |
@@ -94,6 +94,7 @@ Optional query param: `rebuild_synthetic_bol=false` to skip the hourly MCR rebui
 
 **What graph-sync does:**
 
+0. Ensure commercial-graph DDL when needed (migrations `008`/`010`/`011`/`018` via `ensure_commercial_graph_tables` — **`018`** adds `oil_trade_flows_macro_source_unique` on `(reporter_m49, partner_m49, hs_code, flow_type, year, data_source)` so Eurostat/Census/USITC/Comtrade rows do not overwrite each other)
 1. Import OSM storage terminals (up to `OIL_GRAPH_STORAGE_IMPORT_CAP`, default 15k)
 2. Index petroleum licenses → companies + events ([LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md) for CSV bulk ingest)
 3. Mirror Comtrade/EIA/Census/USITC/Eurostat macro trade → `oil_trade_flows` + commercial events
@@ -112,6 +113,20 @@ docker compose up -d oil-live-graph-sync-worker eia-historic-sync-worker uk-trad
 # Copy EIA files to VM:
 # VM_HOST=user@host ./scripts/rsync-eia-downloads-to-vm.sh
 ```
+
+### Macro trade flows (Postgres, macro tier)
+
+Stored by graph-sync in `oil_trade_flows` (dedupe per `data_source`). Query via Python backend:
+
+```bash
+# EU Eurostat COMEXT rows (not company BOLs)
+curl -sf "http://localhost:8080/api/oil/flows?data_source=eurostat&hs=2709&limit=20" | jq .
+# U.S. Census / USITC macro
+curl -sf "http://localhost:8080/api/oil/flows?data_source=census_api&limit=10" | jq .
+curl -sf "http://localhost:8080/api/oil/flows?data_source=usitc_dataweb&limit=10" | jq .
+```
+
+Live Data intel drawer **In database** grid includes **Eurostat (EU)** (`eurostat_trade_flow_count` from `GET /api/oil-live/sync-status`).
 
 ### Synthetic cargo only (no full sync)
 
@@ -207,7 +222,7 @@ docker compose up -d oil-live-intel-worker
 | `EIA_API_KEY` | U.S. EIA petroleum volumes; also drives the new **EIA crude imports** + **refinery throughput** graph-sync steps (`backend/services/eia_imports.py`). Both skip cleanly when unset. |
 | `USITC_DATAWEB_API_KEY` | U.S. HS import/export flows via USITC DataWeb on graph-sync | Free DataWeb account; step skipped if unset. Production deploy writes this from GitHub secret `USITC_DATAWEB_API_KEY` via `.github/workflows/docker-image.yml`. |
 | `EUROSTAT_SYNC_ENABLED` | EU27 extra-EU crude macro flows on graph-sync (`eurostat_trade` step) | Default **on** (`true`). Set `false`/`0`/`off` to skip. No API key — [Eurostat REST](https://ec.europa.eu/eurostat/web/main/data/web-services). `docker-compose.prod.yml` sets `EUROSTAT_SYNC_ENABLED=true` on **backend** / `oil-live-graph-sync-worker`. Verify: `curl …/graph-sync \| jq '.steps.eurostat_trade'`. |
-| `EUROSTAT_DATASET` | Eurostat JSON-stat dataset code | Default `DS-045409` (EU extra-EU crude aggregate). Rows upsert into `oil_trade_flows` with `data_source=eurostat`, `bol_tier=macro` (`backend/services/eurostat_trade.py`). |
+| `EUROSTAT_DATASET` | Eurostat JSON-stat dataset code | Default `EXT_LT_INTRATRD` (EU intra/extra trade by member state and product group). Parser maps `geo` / `partner` / `time` / `TIME_PERIOD` / `sitc*` / `product` dimensions. Rows upsert into `oil_trade_flows` with `data_source=eurostat`, `bol_tier=macro` (`backend/services/eurostat_trade.py`). |
 | `OPENSANCTIONS_API_KEY` | Optional — higher-rate-limit OpenSanctions tier. Public API works without it. The graph-sync screening step (`backend/services/opensanctions_screening.py`) writes `oil_companies.sanctions_status` + `sanctions_matches` and never auto-blocks the UI. |
 | `OPENSANCTIONS_BATCH_LIMIT` | Rows screened per graph-sync run (default 50). |
 | `GLEIF_BATCH_LIMIT` | Rows enriched per graph-sync run by `backend/services/gleif_batch.py` (default 100); writes `oil_companies.lei` + `lei_record_id`. |
