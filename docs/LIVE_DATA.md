@@ -119,8 +119,8 @@ docker compose up -d oil-live-graph-sync-worker eia-historic-sync-worker uk-trad
 Stored by graph-sync in `oil_trade_flows` (dedupe per `data_source`). Query via Python backend:
 
 ```bash
-# EU Eurostat COMEXT rows (not company BOLs)
-curl -sf "http://localhost:8080/api/oil/flows?data_source=eurostat&hs=2709&limit=20" | jq .
+# EU Eurostat COMEXT rows (not company BOLs); each row includes bol_tier, source_record_url, raw when stored
+curl -sf "http://localhost:8080/api/oil/flows?data_source=eurostat&hs=2709&limit=20" | jq '.data[0] | {reporter,partner,year,data_source,bol_tier,source_record_url,raw}'
 # U.S. Census / USITC macro
 curl -sf "http://localhost:8080/api/oil/flows?data_source=census_api&limit=10" | jq .
 curl -sf "http://localhost:8080/api/oil/flows?data_source=usitc_dataweb&limit=10" | jq .

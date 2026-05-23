@@ -6202,9 +6202,17 @@ def get_oil_flows(
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
 
+        try:
+            from backend.services.entity_trade_flows import _column_exists, _enrich_flow_item
+        except ImportError:
+            from services.entity_trade_flows import _column_exists, _enrich_flow_item
+
+        include_raw = _column_exists(c, "oil_trade_flows", "raw")
+        raw_col = ", raw" if include_raw else ""
+
         c.execute(
             f"""SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
-                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at
+                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at{raw_col}
                 FROM oil_trade_flows
                 {where}
                 ORDER BY year DESC, trade_value_usd DESC NULLS LAST
@@ -6212,11 +6220,7 @@ def get_oil_flows(
             params,
         )
         rows = c.fetchall()
-        data = []
-        for row in rows:
-            item = dict(row)
-            item["bol_tier"] = "macro"
-            data.append(item)
+        data = [_enrich_flow_item(dict(row)) for row in rows]
 
         return {
             "data": data,
