@@ -56,5 +56,18 @@ class TestQueryStoredTradeFlows(unittest.TestCase):
         self.assertEqual(rows[0]["year"], 2023)
 
 
+class TestMacroSourceRecordUrl(unittest.TestCase):
+    def test_eurostat_verify_url(self) -> None:
+        try:
+            from backend.services.entity_trade_flows import _macro_source_record_url
+        except ImportError:
+            from services.entity_trade_flows import _macro_source_record_url  # type: ignore
+
+        url = _macro_source_record_url("eurostat")
+        self.assertIsNotNone(url)
+        self.assertIn("eurostat", url or "")
+        self.assertIn("databrowser", url or "")
+
+
 if __name__ == "__main__":
     unittest.main()

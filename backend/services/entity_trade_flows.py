@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Optional
 
@@ -87,17 +88,18 @@ def _jodi_rows_to_flow_dicts(rows: Any) -> list[dict[str, Any]]:
         else:
             country, product, indicator, period, value = row[0], row[1], row[2], row[3], row[4]
         out.append(
-            {
-                "reporter": country,
-                "partner": indicator or "JODI aggregate",
-                "hs_code": "2709",
-                "hs_description": product or "JODI oil supply/demand",
-                "flow_type": "M",
-                "year": _parse_year_from_period(period) or 0,
-                "trade_value_usd": float(value) if value is not None else None,
-                "data_source": "jodi",
-                "bol_tier": "macro",
-            }
+            _enrich_flow_item(
+                {
+                    "reporter": country,
+                    "partner": indicator or "JODI aggregate",
+                    "hs_code": "2709",
+                    "hs_description": product or "JODI oil supply/demand",
+                    "flow_type": "M",
+                    "year": _parse_year_from_period(period) or 0,
+                    "trade_value_usd": float(value) if value is not None else None,
+                    "data_source": "jodi",
+                }
+            )
         )
     return out
 
@@ -108,6 +110,37 @@ def _table_exists(cur: Any, name: str) -> bool:
         (name,),
     )
     return cur.fetchone() is not None
+
+
+def _column_exists(cur: Any, table: str, column: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        """,
+        (table, column),
+    )
+    return cur.fetchone() is not None
+
+
+def _macro_source_record_url(data_source: str | None) -> str | None:
+    ds = (data_source or "").strip().lower()
+    if ds == "eurostat":
+        code = os.getenv("EUROSTAT_DATASET", "EXT_LT_INTRATRD").strip()
+        return f"https://ec.europa.eu/eurostat/databrowser/view/{code}?lang=en"
+    if ds in {"census_api", "usitc_dataweb"}:
+        return "https://api.census.gov/data/key_signup.html" if ds == "census_api" else "https://dataweb.usitc.gov/"
+    if "comtrade" in ds:
+        return "https://comtradeplus.un.org/"
+    return None
+
+
+def _enrich_flow_item(item: dict[str, Any]) -> dict[str, Any]:
+    item["bol_tier"] = item.get("bol_tier") or "macro"
+    item["source_record_url"] = item.get("source_record_url") or _macro_source_record_url(
+        item.get("data_source")
+    )
+    return item
 
 
 def query_stored_trade_flows(
@@ -122,11 +155,12 @@ def query_stored_trade_flows(
     country_l = country.strip().lower()
     out: list[dict[str, Any]] = []
     with conn.cursor() as cur:
+        include_raw = _column_exists(cur, "oil_trade_flows", "raw")
+        raw_col = ", raw" if include_raw else ""
         cur.execute(
-            """
+            f"""
             SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
-                   flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at,
-                   'oil_trade_flows' AS _table
+                   flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at{raw_col}
             FROM oil_trade_flows
             WHERE hs_code = ANY(%s)
               AND (
@@ -142,7 +176,7 @@ def query_stored_trade_flows(
             (list(hs_codes), f"%{country_l}%", f"%{country_l}%", limit),
         )
         rows = cur.fetchall()
-        out.extend(_rows_to_flow_dicts(rows))
+        out.extend(_rows_to_flow_dicts(rows, include_raw=include_raw))
 
         if _table_exists(cur, "commodity_trade_flows"):
             cur.execute(
@@ -159,7 +193,7 @@ def query_stored_trade_flows(
                 (f"%{country_l}%", f"%{country_l[:2]}%", list(hs_codes), limit),
             )
             rows2 = cur.fetchall()
-            out.extend(_rows_to_flow_dicts(rows2))
+            out.extend(_rows_to_flow_dicts(rows2, include_raw=False))
 
         if _table_exists(cur, "jodi_oil_snapshots"):
             cur.execute(
@@ -177,7 +211,7 @@ def query_stored_trade_flows(
     return out[:limit]
 
 
-def _rows_to_flow_dicts(rows: Any) -> list[dict[str, Any]]:
+def _rows_to_flow_dicts(rows: Any, *, include_raw: bool = False) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows or []:
         if isinstance(row, dict):
@@ -197,8 +231,12 @@ def _rows_to_flow_dicts(rows: Any) -> list[dict[str, Any]]:
                 "data_source": row[10],
                 "ingested_at": row[11].isoformat() if hasattr(row[11], "isoformat") else row[11],
             }
-        item["bol_tier"] = "macro"
-        out.append(item)
+            if include_raw and len(row) > 12:
+                raw = row[12]
+                if raw is not None and not isinstance(raw, dict):
+                    raw = None
+                item["raw"] = raw
+        out.append(_enrich_flow_item(item))
     return out
 
 
@@ -265,8 +303,16 @@ def collect_entity_trade_flows(
     }
 
 
+def _flow_for_api(flow: dict[str, Any]) -> dict[str, Any]:
+    out = dict(flow)
+    if flow.get("source_record_url"):
+        out["sourceRecordUrl"] = flow["source_record_url"]
+    return out
+
+
 def serialize_entity_trade_flows_response(payload: dict[str, Any]) -> dict[str, Any]:
     """CamelCase keys for frontend."""
+    flows = [_flow_for_api(f) for f in (payload.get("flows") or [])]
     return {
         "entityId": payload.get("entityId"),
         "entityKind": payload.get("entityKind"),
@@ -274,7 +320,7 @@ def serialize_entity_trade_flows_response(payload: dict[str, Any]) -> dict[str, 
         "country": payload.get("country"),
         "commodity": payload.get("commodity"),
         "hsCodes": payload.get("hs_codes") or [],
-        "flows": payload.get("flows") or [],
+        "flows": flows,
         "flowCount": payload.get("flow_count", len(payload.get("flows") or [])),
         "provenance": payload.get("provenance"),
         "limitations": payload.get("limitations") or [],
