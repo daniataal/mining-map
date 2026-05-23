@@ -29,6 +29,43 @@ class TestParseEurostatJson(unittest.TestCase):
         rows = _parse_eurostat_json({"value": value})
         self.assertEqual(len(rows), 500)
 
+    def test_dimensional_json_stat(self) -> None:
+        payload = {
+            "id": ["geo", "partner", "TIME_PERIOD"],
+            "size": [1, 2, 2],
+            "dimension": {
+                "geo": {
+                    "category": {
+                        "index": {"EU27_2020": 0},
+                        "label": {"EU27_2020": "European Union - 27 countries"},
+                    }
+                },
+                "partner": {
+                    "category": {
+                        "index": {"RU": 0, "NO": 1},
+                        "label": {"RU": "Russia", "NO": "Norway"},
+                    }
+                },
+                "TIME_PERIOD": {
+                    "category": {
+                        "index": {"2023": 0, "2024": 1},
+                        "label": {"2023": "2023", "2024": "2024"},
+                    }
+                },
+            },
+            "value": {"0": 100.0, "1": 200.0, "2": 150.0, "3": 250.0},
+        }
+        rows = _parse_eurostat_json(payload)
+        self.assertEqual(len(rows), 4)
+        # JSON-stat: last dimension (TIME_PERIOD) varies fastest
+        by_partner_year = {(r["partner"], r["year"]): r for r in rows}
+        self.assertEqual(by_partner_year[("Russia", 2023)]["trade_value_usd"], 100_000.0)
+        self.assertEqual(by_partner_year[("Russia", 2024)]["trade_value_usd"], 200_000.0)
+        self.assertEqual(by_partner_year[("Norway", 2023)]["trade_value_usd"], 150_000.0)
+        self.assertEqual(by_partner_year[("Norway", 2024)]["trade_value_usd"], 250_000.0)
+        self.assertEqual(rows[0]["reporter_iso2"], "EU")
+        self.assertIn("partner", rows[0]["raw"]["dimensions"])
+
 
 class TestSyncSkippedWhenDisabled(unittest.TestCase):
     def test_disabled_returns_skipped(self) -> None:
