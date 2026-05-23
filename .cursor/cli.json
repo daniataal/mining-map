@@ -1,6 +1,10 @@
 {
   "permissions": {
-    "allow": ["Shell(**)", "Mcp(**)"],
+    "allow": [
+      "Shell(**)",
+      "Mcp(**)"
+    ],
     "deny": []
   }
 }
+

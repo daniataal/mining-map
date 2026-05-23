@@ -68,6 +68,47 @@ class TestMacroSourceRecordUrl(unittest.TestCase):
         self.assertIn("eurostat", url or "")
         self.assertIn("databrowser", url or "")
 
+    def test_enrich_eurostat_flow(self) -> None:
+        try:
+            from backend.services.entity_trade_flows import _enrich_flow_item, _flow_for_api
+        except ImportError:
+            from services.entity_trade_flows import _enrich_flow_item, _flow_for_api  # type: ignore
+
+        item = _enrich_flow_item(
+            {
+                "reporter": "Germany",
+                "partner": "Russia",
+                "data_source": "eurostat",
+                "year": 2022,
+                "raw": {"eurostat_key": "0", "dimensions": {"geo": ["DE"]}},
+            }
+        )
+        self.assertEqual(item["bol_tier"], "macro")
+        self.assertIn("eurostat", item["source_record_url"] or "")
+        api = _flow_for_api(item)
+        self.assertIn("sourceRecordUrl", api)
+        self.assertEqual(api.get("raw"), {"eurostat_key": "0", "dimensions": {"geo": ["DE"]}})
+
+    def test_oil_flows_list_shape_snake_case(self) -> None:
+        """GET /api/oil/flows uses _enrich_flow_item (snake_case), not dossier camelCase."""
+        try:
+            from backend.services.entity_trade_flows import _enrich_flow_item
+        except ImportError:
+            from services.entity_trade_flows import _enrich_flow_item  # type: ignore
+
+        item = _enrich_flow_item(
+            {
+                "reporter": "Germany",
+                "data_source": "eurostat",
+                "year": 2022,
+                "raw": {"stored": True},
+            }
+        )
+        self.assertIn("source_record_url", item)
+        self.assertNotIn("sourceRecordUrl", item)
+        self.assertEqual(item.get("bol_tier"), "macro")
+        self.assertEqual(item.get("raw"), {"stored": True})
+
 
 if __name__ == "__main__":
     unittest.main()

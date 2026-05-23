@@ -132,6 +132,8 @@ def _macro_source_record_url(data_source: str | None) -> str | None:
         return "https://api.census.gov/data/key_signup.html" if ds == "census_api" else "https://dataweb.usitc.gov/"
     if "comtrade" in ds:
         return "https://comtradeplus.un.org/"
+    if ds == "jodi":
+        return "https://www.jodidata.org/"
     return None
 
 
@@ -304,9 +306,10 @@ def collect_entity_trade_flows(
 
 
 def _flow_for_api(flow: dict[str, Any]) -> dict[str, Any]:
-    out = dict(flow)
-    if flow.get("source_record_url"):
-        out["sourceRecordUrl"] = flow["source_record_url"]
+    out = {k: v for k, v in flow.items() if k != "source_record_url"}
+    url = flow.get("source_record_url")
+    if url:
+        out["sourceRecordUrl"] = url
     return out
 
 
