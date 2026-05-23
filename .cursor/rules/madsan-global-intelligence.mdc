@@ -72,7 +72,7 @@ Prioritize:
 - open/free data sources
 - PostGIS/geospatial support
 - clean UI for human due diligence
-- Obsidian brain notes
+- Obsidian brain (`~/ai-agent-stack/obsidian-vault`, index `MADSAN_BRAIN.md`) — see `obsidian-brain.mdc`
 - Paperclip/OpenClaw/Cursor workflow
 
 Avoid:
