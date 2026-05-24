@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildRoutePlannerHintsFromOpportunity,
   buildRoutePlannerHintsFromCargo,
   matchPortPreset,
 } from './liveDataRoutePrefill';
-import type { MeridianCargoRecord } from '../../api/oilLiveApi';
+import type { MeridianCargoRecord, OilOpportunity } from '../../api/oilLiveApi';
 
 describe('liveDataRoutePrefill', () => {
   it('matchPortPreset resolves Rotterdam from MCR-style name', () => {
@@ -32,5 +33,26 @@ describe('liveDataRoutePrefill', () => {
     expect(hints.load_port_name).toBe('Port of Houston');
     expect(hints.discharge_port_name).toBe('Rotterdam');
     expect(hints.commodity_family).toBe('crude');
+  });
+
+  it('buildRoutePlannerHintsFromOpportunity prefers Deal Radar route prefill', () => {
+    const opp: OilOpportunity = {
+      id: 'opp-1',
+      opportunity_type: 'supplier_buyer_route_candidate',
+      terminal_name: 'Fallback Terminal',
+      terminal_country: 'Fallback Country',
+      route_prefill: {
+        load_port_name: 'Tema',
+        load_country: 'Ghana',
+        discharge_port_name: 'Rotterdam',
+        discharge_country: 'Netherlands',
+        commodity_family: 'diesel',
+      },
+    };
+    const hints = buildRoutePlannerHintsFromOpportunity(opp);
+    expect(hints.load_port_name).toBe('Tema');
+    expect(hints.discharge_port_name).toBe('Rotterdam');
+    expect(hints.commodity_family).toBe('diesel');
+    expect(hints.opportunity_id).toBe('opp-1');
   });
 });

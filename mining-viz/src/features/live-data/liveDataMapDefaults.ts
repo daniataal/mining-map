@@ -1,6 +1,8 @@
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 import type { VesselFilters } from '../../lib/vessels/types';
 
+export type LiveDataLensMode = 'deal' | 'infrastructure' | 'raw';
+
 /** Default Live Data map view — Gulf / Middle East oil hub corridor. */
 export const LIVE_DATA_HUB_BBOX = {
   west: 24,
@@ -33,20 +35,81 @@ export const BARENTSWATCH_VERIFY_BBOX = {
   north: 71,
 } as const;
 
-/** Deal Lens default: terminals, MCR corridors, aggregate trade pairs, opportunities, and coverage. */
+export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibility> = {
+  deal: {
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+    tradeFlows: true,
+    coverage: false,
+  },
+  infrastructure: {
+    terminals: true,
+    vessels: true,
+    corridors: false,
+    opportunities: true,
+    tradeFlows: false,
+    coverage: false,
+  },
+  raw: {
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+    tradeFlows: true,
+    coverage: true,
+  },
+};
+
+/** Deal Lens default: execution leads with only connector terminals/vessels. */
 export const LIVE_DATA_DEFAULT_LAYERS: OilLiveLayerVisibility = {
+  ...LIVE_DATA_LENS_LAYERS.deal,
+};
+
+/** Historical alias used by Oil & Gas Live tab entry. */
+export const LIVE_DATA_OIL_GAS_TAB_LAYERS: OilLiveLayerVisibility = {
+  ...LIVE_DATA_LENS_LAYERS.deal,
+};
+
+export const LIVE_DATA_LENS_COPY: Record<
+  LiveDataLensMode,
+  { labelEn: string; labelHe: string; hintEn: string; hintHe: string }
+> = {
+  deal: {
+    labelEn: 'Deal Lens',
+    labelHe: 'עדשת עסקה',
+    hintEn: 'Best leads, corridors, connector vessels, and next actions.',
+    hintHe: 'לידים מובילים, מסדרונות, כלי שיט מחברים ופעולה הבאה.',
+  },
+  infrastructure: {
+    labelEn: 'Infrastructure Lens',
+    labelHe: 'עדשת תשתית',
+    hintEn: 'Tank farms, terminals, ports, pipelines, and nearby execution assets.',
+    hintHe: 'חוות מיכלים, מסופים, נמלים, צינורות ונכסי ביצוע סמוכים.',
+  },
+  raw: {
+    labelEn: 'Raw Data Lens',
+    labelHe: 'עדשת דאטה גולמי',
+    hintEn: 'AIS, MCR, macro corridors, coverage, and diagnostics.',
+    hintHe: 'AIS, MCR, מסדרונות מאקרו, כיסוי ודיאגנוסטיקה.',
+  },
+};
+
+export const LIVE_DATA_LENS_ORDER: LiveDataLensMode[] = ['deal', 'infrastructure', 'raw'];
+
+export function layersForLiveDataLens(mode: LiveDataLensMode): OilLiveLayerVisibility {
+  return { ...LIVE_DATA_LENS_LAYERS[mode] };
+}
+
+/** @deprecated Use LIVE_DATA_LENS_LAYERS.raw for analyst-heavy mode. */
+export const LIVE_DATA_RAW_LAYERS: OilLiveLayerVisibility = {
   terminals: true,
-  vessels: false,
+  vessels: true,
   corridors: true,
   opportunities: true,
   tradeFlows: true,
   coverage: true,
-};
-
-/** MAD-74: Oil & Gas → Live tab — tanker AIS on by default (still capped, not global maritime). */
-export const LIVE_DATA_OIL_GAS_TAB_LAYERS: OilLiveLayerVisibility = {
-  ...LIVE_DATA_DEFAULT_LAYERS,
-  vessels: true,
 };
 
 /** MAD-95: EIA historic arcs on Live Data map — off until user toggles Historic group. */

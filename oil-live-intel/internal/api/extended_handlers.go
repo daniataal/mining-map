@@ -163,8 +163,11 @@ func (s *Server) OpportunityEconomics(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ListOpportunities(w http.ResponseWriter, r *http.Request) {
 	minConf := queryFloat(r, "min_confidence", 0.55)
+	minDealScore := queryFloat(r, "min_deal_score", 0)
 	limit := queryInt(r, "limit", 50)
 	excludeDemo := queryBool(r, "exclude_demo", s.Config.DisableDemoSeed)
+	dealSignal := strings.TrimSpace(r.URL.Query().Get("deal_signal"))
+	commodity := strings.TrimSpace(r.URL.Query().Get("commodity"))
 	fetchLimit := limit * 4
 	if fetchLimit < 120 {
 		fetchLimit = 120
@@ -172,7 +175,14 @@ func (s *Server) ListOpportunities(w http.ResponseWriter, r *http.Request) {
 	if fetchLimit > 500 {
 		fetchLimit = 500
 	}
-	items, err := opportunity.List(r.Context(), s.Pool, minConf, fetchLimit, excludeDemo)
+	items, err := opportunity.ListFiltered(r.Context(), s.Pool, opportunity.ListFilters{
+		MinConfidence: minConf,
+		MinDealScore:  minDealScore,
+		Limit:         fetchLimit,
+		ExcludeDemo:   excludeDemo,
+		DealSignal:    dealSignal,
+		Commodity:     commodity,
+	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

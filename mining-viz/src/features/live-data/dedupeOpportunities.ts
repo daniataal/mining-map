@@ -44,12 +44,14 @@ export function dedupeOpportunities(
   for (const opp of list) {
     const fp = fingerprint(opp);
     const prev = best.get(fp);
-    if (!prev || (opp.confidence ?? 0) > (prev.confidence ?? 0)) {
+    if (!prev || (opp.deal_score ?? opp.confidence ?? 0) > (prev.deal_score ?? prev.confidence ?? 0)) {
       best.set(fp, opp);
     }
   }
 
-  const deduped = [...best.values()].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+  const deduped = [...best.values()].sort(
+    (a, b) => (b.deal_score ?? b.confidence ?? 0) - (a.deal_score ?? a.confidence ?? 0),
+  );
   const out: OilOpportunity[] = [];
   const seenTerm = new Set<string>();
   const seenCountry = new Set<string>();

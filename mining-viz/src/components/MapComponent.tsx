@@ -75,7 +75,13 @@ import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
 import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
 import { getOilLiveSyncStatus } from '../api/oilLiveApi';
-import { LIVE_DATA_HUB_BOUNDS, LIVE_DATA_DEFAULT_LAYERS, GOVERNMENT_AIS_COVERAGE_SOURCES, viewportOverlapsPersianGulfHub } from '../features/live-data/liveDataMapDefaults';
+import {
+  LIVE_DATA_HUB_BOUNDS,
+  LIVE_DATA_DEFAULT_LAYERS,
+  GOVERNMENT_AIS_COVERAGE_SOURCES,
+  viewportOverlapsPersianGulfHub,
+  type LiveDataLensMode,
+} from '../features/live-data/liveDataMapDefaults';
 import { resolveLiveDataVesselStatus } from '../features/live-data/liveDataVesselStatus';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
@@ -309,6 +315,8 @@ interface MapComponentProps {
   oilLiveOverlaysEnabled?: boolean;
   oilLiveProductFilter?: string;
   oilLiveTerminalSearch?: string;
+  oilLiveLens?: LiveDataLensMode;
+  onOilLiveLensChange?: (lens: LiveDataLensMode) => void;
   oilLiveLayers?: OilLiveLayerVisibility;
   onOilLiveLayersChange?: (layers: OilLiveLayerVisibility) => void;
   oilLiveTradeFlowGroup?: 'company_pair' | 'country_pair';
@@ -803,6 +811,8 @@ export default function MapComponent({
   oilLiveOverlaysEnabled = false,
   oilLiveProductFilter = 'all',
   oilLiveTerminalSearch = '',
+  oilLiveLens = 'deal',
+  onOilLiveLensChange,
   oilLiveLayers = LIVE_DATA_DEFAULT_LAYERS,
   onOilLiveLayersChange,
   oilLiveTradeFlowGroup = 'company_pair',
@@ -1678,6 +1688,8 @@ export default function MapComponent({
                     <LiveDataMapLayersPanel
                         layers={oilLiveLayers}
                         onLayersChange={onOilLiveLayersChange}
+                        lensMode={oilLiveLens}
+                        onLensModeChange={onOilLiveLensChange}
                         coverageStats={oilLiveCoverageStats}
                         syncStatus={oilLiveSyncStatus}
                         allMaritimeEnabled={isMaritimeLayerEnabled}
@@ -2288,6 +2300,7 @@ export default function MapComponent({
                             mapZoom={overlayMapZoom}
                             productFilter={oilLiveProductFilter}
                             terminalSearch={oilLiveTerminalSearch}
+                            lensMode={oilLiveLens}
                             layers={oilLiveLayers}
                             tradeFlowGroup={oilLiveTradeFlowGroup}
                             viewport={liveDataMapViewport}

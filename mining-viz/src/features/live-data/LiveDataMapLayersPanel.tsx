@@ -3,13 +3,20 @@ import { useI18n } from '../../lib/i18n';
 import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 
-import { OIL_LIVE_MAP_VESSEL_FETCH_CAP } from './liveDataMapDefaults';
+import {
+  LIVE_DATA_LENS_COPY,
+  LIVE_DATA_LENS_ORDER,
+  OIL_LIVE_MAP_VESSEL_FETCH_CAP,
+  type LiveDataLensMode,
+} from './liveDataMapDefaults';
 import { resolveLiveDataVesselStatus } from './liveDataVesselStatus';
 import { canToggleGovernmentAisCoverage } from './liveDataDevFeatures';
 
 export type LiveDataMapLayersPanelProps = {
   layers: OilLiveLayerVisibility;
   onLayersChange: (layers: OilLiveLayerVisibility) => void;
+  lensMode?: LiveDataLensMode;
+  onLensModeChange?: (mode: LiveDataLensMode) => void;
   coverageStats?: {
     terminals: number;
     vessels: number;
@@ -81,6 +88,8 @@ const LAYER_META = [
 export default function LiveDataMapLayersPanel({
   layers,
   onLayersChange,
+  lensMode = 'deal',
+  onLensModeChange,
   coverageStats,
   allMaritimeEnabled,
   onAllMaritimeChange,
@@ -106,6 +115,9 @@ export default function LiveDataMapLayersPanel({
   }
 
   const tradeFlowsOn = Boolean(layers.tradeFlows);
+  const currentLens = LIVE_DATA_LENS_COPY[lensMode];
+  const showRawControls = lensMode === 'raw';
+  const showLayerGrid = lensMode !== 'deal';
   const coverageNeedsAttention =
     syncStatus != null &&
     ((syncStatus.coverage_gap_watch_zone_count ?? 0) > 0 || syncStatus.live_vessel_count === 0);
@@ -139,11 +151,49 @@ export default function LiveDataMapLayersPanel({
 
       <div className="space-y-3 px-4 pb-4 pt-3">
         <p className="text-base leading-relaxed text-slate-600 dark:text-slate-300">
-          {t(
-            'מציג שכבות עסקה שימושיות במסך אחד: מסופים, מכליות, MCR, זוגות סחר וכיסוי AIS.',
-            'Shows deal-useful layers in one smooth canvas pass: terminals, tankers, MCRs, trade pairs, and AIS coverage.',
-          )}
+          {t(currentLens.hintHe, currentLens.hintEn)}
         </p>
+
+        <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label={t('עדשת מפה', 'Map lens')}>
+          {LIVE_DATA_LENS_ORDER.map((mode) => {
+            const meta = LIVE_DATA_LENS_COPY[mode];
+            const active = lensMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onLensModeChange?.(mode)}
+                className={`rounded-xl px-2 py-2 text-left transition-colors ${
+                  active
+                    ? 'border border-amber-500/50 bg-amber-500/20 text-slate-950 dark:text-white'
+                    : 'border border-black/10 bg-white/70 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-300'
+                }`}
+              >
+                <span className="block text-[10px] font-black uppercase tracking-wide">
+                  {t(meta.labelHe, meta.labelEn)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {lensMode === 'deal' && (
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-950 dark:text-emerald-100">
+            {t(
+              'מצב ברירת המחדל: מציג רק לידים, מסדרונות, ומסופים/כלי שיט שמחברים לעסקה. שכבות AIS ודיאגנוסטיקה גולמיות נשארות ב-Raw Data.',
+              'Default mode: shows leads, corridors, and only terminals/vessels that connect to execution. Raw AIS and diagnostics stay in Raw Data.',
+            )}
+          </div>
+        )}
+
+        {lensMode === 'infrastructure' && (
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:text-sky-100">
+            {t(
+              'תשתית היא שכבת ביצוע: חוות מיכלים, מסופים, נמלים, צינורות וכלי שיט סמוכים שעוזרים להבין אם מסלול מסחרי אפשרי.',
+              'Infrastructure is execution context: storage, terminals, ports, pipelines, and nearby vessels that explain whether a commercial route is feasible.',
+            )}
+          </div>
+        )}
 
         {coverageStats && (
           <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
@@ -175,7 +225,7 @@ export default function LiveDataMapLayersPanel({
           </p>
         )}
 
-        {layers.vessels && (
+        {showRawControls && layers.vessels && (
           <div
             className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
             role="status"
@@ -200,7 +250,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {syncStatus && (
+        {showRawControls && syncStatus && (
           <div
             className={`rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
               layers.coverage
@@ -241,7 +291,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2">
+        {showLayerGrid && <div className="grid grid-cols-2 gap-2">
           {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {
             const on = layers[key];
             const coverageHighlight = key === 'coverage' && coverageNeedsAttention && !on;
@@ -266,9 +316,9 @@ export default function LiveDataMapLayersPanel({
               </button>
             );
           })}
-        </div>
+        </div>}
 
-        {onEiaHistoricChange && (
+        {showRawControls && onEiaHistoricChange && (
           <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
             <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300 mb-2">
               {t('היסטורי', 'Historic')}
@@ -301,7 +351,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {onMacroTradeChange && (
+        {showRawControls && onMacroTradeChange && (
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-500/30 bg-slate-500/5 px-3 py-2">
             <input
               type="checkbox"
@@ -316,7 +366,7 @@ export default function LiveDataMapLayersPanel({
           </label>
         )}
 
-        <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+        {showRawControls && <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="checkbox"
@@ -368,9 +418,9 @@ export default function LiveDataMapLayersPanel({
               </div>
             </span>
           </label>
-        </div>
+        </div>}
 
-        {canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
+        {showRawControls && canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
             <label className="flex cursor-pointer items-start gap-2.5">
               <input
@@ -394,7 +444,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
+        {showRawControls && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="checkbox"
@@ -419,7 +469,7 @@ export default function LiveDataMapLayersPanel({
               </span>
             </span>
           </label>
-        </div>
+        </div>}
       </div>
     </div>
   );

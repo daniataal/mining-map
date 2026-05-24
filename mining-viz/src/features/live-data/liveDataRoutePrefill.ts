@@ -1,4 +1,4 @@
-import type { MeridianCargoRecord } from '../../api/oilLiveApi';
+import type { LiveDataRoutePrefillPayload, MeridianCargoRecord, OilOpportunity } from '../../api/oilLiveApi';
 import {
   MARITIME_HUB_PRESETS,
   WORLD_TRADE_PRESETS,
@@ -111,6 +111,30 @@ export function buildRoutePlannerHintsFromCargo(record: MeridianCargoRecord): Li
     discharge_lng: record.corridor_discharge_lng,
     commodity_family: record.commodity_family,
     opportunity_id: record.opportunity_id,
+  };
+}
+
+function num(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+export function buildRoutePlannerHintsFromOpportunity(opp: OilOpportunity): LiveDataRouteHints {
+  const raw: LiveDataRoutePrefillPayload = opp.route_prefill ?? {};
+  return {
+    load_port_name: str(raw.load_port_name) ?? opp.terminal_name,
+    load_country: str(raw.load_country) ?? opp.terminal_country,
+    discharge_port_name: str(raw.discharge_port_name),
+    discharge_country: str(raw.discharge_country),
+    load_lat: num(raw.load_lat),
+    load_lng: num(raw.load_lng),
+    discharge_lat: num(raw.discharge_lat),
+    discharge_lng: num(raw.discharge_lng),
+    commodity_family: str(raw.commodity_family),
+    opportunity_id: opp.id,
   };
 }
 

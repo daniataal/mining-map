@@ -25,6 +25,7 @@ func (s *Server) MapLayers(w http.ResponseWriter, r *http.Request) {
 	layers := parseMapLayerSet(r.URL.Query().Get("layers"))
 	commodity := r.URL.Query().Get("commodity")
 	dealSignal := r.URL.Query().Get("dealSignal")
+	minDealScore := queryFloat(r, "min_deal_score", 0)
 	excludeSeed := queryBool(r, "exclude_seed", s.Config.DisableDemoSeed)
 
 	points := make([]map[string]any, 0, limit)
@@ -56,7 +57,7 @@ func (s *Server) MapLayers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if layers["opportunities"] {
-		oppPoints, err := s.listMapLayerOpportunities(r, bbox, 0.55, min(limit, 120), excludeSeed)
+		oppPoints, err := s.listMapLayerOpportunities(r, bbox, 0.55, minDealScore, min(limit, 120), excludeSeed, dealSignal)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -200,19 +201,30 @@ func (s *Server) listMapLayerOpportunities(
 	r *http.Request,
 	bbox [4]float64,
 	minConf float64,
+	minDealScore float64,
 	limit int,
 	excludeSeed bool,
+	dealSignal string,
 ) ([]map[string]any, error) {
 	q := `
 		SELECT o.id, o.opportunity_type, o.title, o.hypothesis, o.confidence,
 			COALESCE(jsonb_array_length(o.evidence), 0) AS source_count,
-			o.terminal_id::text, t.name, t.country, ST_Y(t.geom::geometry), ST_X(t.geom::geometry)
+			o.terminal_id::text, t.name, t.country, ST_Y(t.geom::geometry), ST_X(t.geom::geometry),
+			COALESCE(o.deal_score, o.confidence)::float8,
+			COALESCE(o.source_tiers, ARRAY['synthetic']::text[]) AS source_tiers,
+			COALESCE(o.signal_json->>'signal_kind', o.opportunity_type) AS signal_kind
 		FROM oil_opportunities o
 		JOIN oil_terminals t ON t.id = o.terminal_id
 		LEFT JOIN oil_port_calls pc ON pc.id = o.port_call_id
 		WHERE o.status = 'open'
 		  AND o.confidence >= $1
+		  AND COALESCE(o.deal_score, o.confidence) >= $8
 		  AND t.geom && ST_MakeEnvelope($2,$3,$4,$5,4326)
+		  AND (
+		    $9 = ''
+		    OR o.opportunity_type = $9
+		    OR COALESCE(o.signal_json->>'signal_kind', '') = $9
+		  )
 		  AND (
 		    $7 = false
 		    OR (
@@ -223,10 +235,10 @@ func (s *Server) listMapLayerOpportunities(
 		      AND COALESCE(pc.metadata::text, '') NOT ILIKE '%seed_port_calls%'
 		    )
 		  )
-		ORDER BY o.confidence DESC, o.created_at DESC
+		ORDER BY COALESCE(o.deal_score, o.confidence) DESC, o.confidence DESC, o.created_at DESC
 		LIMIT $6
 	`
-	rows, err := s.Pool.Query(r.Context(), q, minConf, bbox[0], bbox[1], bbox[2], bbox[3], limit, excludeSeed)
+	rows, err := s.Pool.Query(r.Context(), q, minConf, bbox[0], bbox[1], bbox[2], bbox[3], limit, excludeSeed, minDealScore, strings.TrimSpace(dealSignal))
 	if err != nil {
 		return nil, err
 	}
@@ -240,8 +252,15 @@ func (s *Server) listMapLayerOpportunities(
 		var confidence float64
 		var sourceCount int
 		var lat, lng float64
-		if err := rows.Scan(&id, &otype, &title, &hypothesis, &confidence, &sourceCount, &terminalID, &terminalName, &country, &lat, &lng); err != nil {
+		var dealScore float64
+		var tiers []string
+		var signalKind string
+		if err := rows.Scan(&id, &otype, &title, &hypothesis, &confidence, &sourceCount, &terminalID, &terminalName, &country, &lat, &lng, &dealScore, &tiers, &signalKind); err != nil {
 			return nil, err
+		}
+		tier := "synthetic"
+		if len(tiers) > 0 && strings.TrimSpace(tiers[0]) != "" {
+			tier = strings.TrimSpace(tiers[0])
 		}
 		out = append(out, map[string]any{
 			"id":           id.String(),
@@ -250,11 +269,13 @@ func (s *Server) listMapLayerOpportunities(
 			"lng":          lng,
 			"title":        title,
 			"subtitle":     hypothesis,
-			"tier":         "synthetic",
+			"tier":         tier,
 			"confidence":   confidence,
 			"source_count": sourceCount,
-			"deal_score":   confidence,
-			"style_key":    otype,
+			"deal_score":   dealScore,
+			"style_key":    "deal_radar",
+			"signal_kind":  signalKind,
+			"source_tiers": tiers,
 			"ref_id":       id.String(),
 			"terminal_id":  terminalID,
 			"terminal":     terminalName,
