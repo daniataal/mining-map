@@ -380,11 +380,19 @@ interface MapComponentProps {
 
 /** Max markers before we always zoom instead of spiderfy (spiderfy disabled anyway). */
 const LICENSE_CLUSTER_FIT_MAX_ZOOM = 14;
+const LICENSE_CANVAS_CLUSTER_MAX_ZOOM = 13;
+const LICENSE_CANVAS_CLUSTER_MIN_COUNT = 10;
+const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = 14;
 const LICENSE_CANVAS_CLUSTER_KINDS: readonly LiveDealFeatureKind[] = [
     'license',
     'refinery',
     'oil_field',
 ];
+
+type PendingLicenseClusterFly = MiningLicense & {
+    _clientCluster?: boolean;
+    _clientClusterBounds?: MaritimeViewportBounds;
+};
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup timing. */
 function ClusterGroupRefBridge({
@@ -484,7 +492,7 @@ const LicenseClusterFlyEffect = ({
     onLicenseClusterDrillComplete,
     onComplete,
 }: {
-    cluster: MiningLicense | null;
+    cluster: PendingLicenseClusterFly | null;
     onLicenseMapZoomChange?: (zoom: number) => void;
     onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
     onLicenseClusterDrillComplete?: () => void;
@@ -511,7 +519,11 @@ const LicenseClusterFlyEffect = ({
             onCompleteRef.current();
             return;
         }
-        const flyBox = serverClusterFlyBounds(lat, lng, clusterItem);
+        const isClientCluster =
+            clusterItem._clientCluster === true || clusterItem.id.startsWith('client-cluster:');
+        const flyBox = isClientCluster && clusterItem._clientClusterBounds
+            ? clusterItem._clientClusterBounds
+            : serverClusterFlyBounds(lat, lng, clusterItem);
         const bounds = L.latLngBounds(
             [flyBox.south, flyBox.west],
             [flyBox.north, flyBox.east],
@@ -527,8 +539,13 @@ const LicenseClusterFlyEffect = ({
             if (finished) return;
             finished = true;
             let zoom = map.getZoom();
-            if (zoom < SERVER_CLUSTER_MIN_DRILL_ZOOM) {
-                const targetZoom = clusterTargetZoom(zoom);
+            const minDrillZoom = isClientCluster
+                ? LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM
+                : SERVER_CLUSTER_MIN_DRILL_ZOOM;
+            if (zoom < minDrillZoom) {
+                const targetZoom = isClientCluster
+                    ? LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM
+                    : clusterTargetZoom(zoom);
                 map.setView([lat, lng], targetZoom, { animate: false });
                 zoom = map.getZoom();
             }
@@ -546,7 +563,9 @@ const LicenseClusterFlyEffect = ({
             onCompleteRef.current();
         };
         map.stop();
-        if (flyPlan.mode === 'center') {
+        if (isClientCluster) {
+            map.flyTo([lat, lng], LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM, { duration: 0.5 });
+        } else if (flyPlan.mode === 'center') {
             map.flyTo([lat, lng], flyPlan.zoom, { duration: 0.75 });
         } else {
             map.flyToBounds(bounds, {
@@ -914,7 +933,7 @@ export default function MapComponent({
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
     const [licenseViewport, setLicenseViewport] = useState<MaritimeViewportBounds | null>(null);
-    const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<MiningLicense | null>(
+    const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<PendingLicenseClusterFly | null>(
         null,
     );
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
@@ -1506,7 +1525,9 @@ export default function MapComponent({
                     mapClusterCount: count,
                     mapClusterGridDeg: span,
                     entityKind: 'license',
-                } as MiningLicense);
+                    _clientCluster: true,
+                    _clientClusterBounds: bounds,
+                } as PendingLicenseClusterFly);
                 return;
             }
             const item = feature.data as MiningLicense | undefined;
@@ -2396,7 +2417,9 @@ export default function MapComponent({
                         onFeatureClick={handleLicenseCanvasFeatureClick}
                         clusterPoints
                         clusterKinds={LICENSE_CANVAS_CLUSTER_KINDS}
-                        clusterMaxZoom={13}
+                        clusterMaxZoom={LICENSE_CANVAS_CLUSTER_MAX_ZOOM}
+                        clusterMinCount={LICENSE_CANVAS_CLUSTER_MIN_COUNT}
+                        isDark={isDark}
                     />
                 )}
                 {showLicenseMarkers &&

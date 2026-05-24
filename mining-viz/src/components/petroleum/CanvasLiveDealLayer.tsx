@@ -13,6 +13,8 @@ export interface CanvasLiveDealLayerProps {
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
+  clusterMinCount?: number;
+  isDark?: boolean;
 }
 
 function createCanvasLiveDealLayer(
@@ -26,6 +28,8 @@ function createCanvasLiveDealLayer(
     clusterPoints: props.clusterPoints,
     clusterKinds: props.clusterKinds,
     clusterMaxZoom: props.clusterMaxZoom,
+    clusterMinCount: props.clusterMinCount,
+    isDark: props.isDark,
   });
   layer.setFeatures(props.features);
   if (props.layerApiRef) {
@@ -51,12 +55,16 @@ function updateCanvasLiveDealLayer(
   if (
     props.clusterPoints !== prevProps.clusterPoints ||
     props.clusterKinds !== prevProps.clusterKinds ||
-    props.clusterMaxZoom !== prevProps.clusterMaxZoom
+    props.clusterMaxZoom !== prevProps.clusterMaxZoom ||
+    props.clusterMinCount !== prevProps.clusterMinCount ||
+    props.isDark !== prevProps.isDark
   ) {
     layer.setClusterOptions({
       clusterPoints: props.clusterPoints,
       clusterKinds: props.clusterKinds,
       clusterMaxZoom: props.clusterMaxZoom,
+      clusterMinCount: props.clusterMinCount,
+      isDark: props.isDark,
     });
   }
 }

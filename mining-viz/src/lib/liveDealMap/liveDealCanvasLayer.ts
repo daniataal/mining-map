@@ -18,6 +18,8 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
+  clusterMinCount?: number;
+  isDark?: boolean;
 }
 
 const MAX_CANVAS_DPR = 2;
@@ -46,6 +48,11 @@ function colorForFeature(feature: LiveDealMapFeature): string {
 }
 
 function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: boolean): number {
+  if (feature.kind === 'server_cluster') {
+    const count = feature.sourceCount ?? 0;
+    const size = count < 10 ? 36 : count < 100 ? 44 : 52;
+    return (size / 2) + (selected ? 3 : 0);
+  }
   const base =
     feature.kind === 'opportunity'
       ? 8
@@ -100,9 +107,59 @@ function drawPoint(
   y: number,
   radius: number,
   selected: boolean,
+  isDark = true,
 ): void {
   if (feature.kind === 'vessel') {
     drawVessel(ctx, x, y, radius + 1, feature.heading ?? 0, selected);
+    return;
+  }
+
+  if (feature.kind === 'server_cluster') {
+    ctx.save();
+    
+    // Draw outer glow shadow
+    ctx.shadowColor = isDark ? 'rgba(59, 130, 246, 0.5)' : 'rgba(30, 64, 175, 0.3)';
+    ctx.shadowBlur = selected ? 16 : 10;
+    
+    // Background fill
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = isDark ? 'rgba(59, 130, 246, 0.2)' : 'rgba(37, 99, 235, 0.14)';
+    ctx.fill();
+    
+    // Inset glow simulation
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(x, y, radius - 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.05)';
+    ctx.fill();
+
+    // Border stroke
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = isDark ? 'rgba(59, 130, 246, 0.6)' : 'rgba(29, 78, 216, 0.75)';
+    ctx.lineWidth = isDark ? 1.2 : 2.0;
+    ctx.stroke();
+
+    // Extra selection ring
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    
+    // Label text
+    ctx.font = '900 11px system-ui, -apple-system, sans-serif';
+    ctx.fillStyle = isDark ? '#ffffff' : '#1e3a8a';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = feature.sourceCount != null && feature.sourceCount > 999 ? '999+' : String(feature.sourceCount ?? '');
+    ctx.fillText(label, x, y + 0.5);
+
+    ctx.restore();
     return;
   }
 
@@ -129,15 +186,6 @@ function drawPoint(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', x, y + 0.5);
-  }
-
-  if (feature.kind === 'server_cluster') {
-    ctx.font = '900 10px system-ui, sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = feature.sourceCount != null && feature.sourceCount > 999 ? '999+' : String(feature.sourceCount ?? '');
-    ctx.fillText(label, x, y + 0.5);
   }
 
   if (selected) {
@@ -258,6 +306,8 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _clusterPoints = false;
   private _clusterKinds: readonly LiveDealFeatureKind[] | undefined;
   private _clusterMaxZoom = 13;
+  private _clusterMinCount = 2;
+  private _isDark = true;
 
   constructor(options: CanvasLiveDealLayerOptions) {
     super(options);
@@ -267,6 +317,8 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._clusterPoints = Boolean(options.clusterPoints);
     this._clusterKinds = options.clusterKinds;
     this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
+    this._clusterMinCount = options.clusterMinCount ?? 2;
+    this._isDark = options.isDark !== false;
   }
 
   setFeatures(features: LiveDealMapFeature[]): void {
@@ -298,20 +350,28 @@ export class CanvasLiveDealLayer extends L.Layer {
     clusterPoints?: boolean;
     clusterKinds?: readonly LiveDealFeatureKind[];
     clusterMaxZoom?: number;
+    clusterMinCount?: number;
+    isDark?: boolean;
   }): void {
     const nextClusterPoints = Boolean(options.clusterPoints);
     const nextClusterKinds = options.clusterKinds;
     const nextClusterMaxZoom = options.clusterMaxZoom ?? 13;
+    const nextClusterMinCount = options.clusterMinCount ?? 2;
+    const nextIsDark = options.isDark !== false;
     if (
       this._clusterPoints === nextClusterPoints &&
       this._clusterKinds === nextClusterKinds &&
-      this._clusterMaxZoom === nextClusterMaxZoom
+      this._clusterMaxZoom === nextClusterMaxZoom &&
+      this._clusterMinCount === nextClusterMinCount &&
+      this._isDark === nextIsDark
     ) {
       return;
     }
     this._clusterPoints = nextClusterPoints;
     this._clusterKinds = nextClusterKinds;
     this._clusterMaxZoom = nextClusterMaxZoom;
+    this._clusterMinCount = nextClusterMinCount;
+    this._isDark = nextIsDark;
     this._lastPaintKey = '';
     this._scheduleRedraw();
   }
@@ -416,6 +476,7 @@ export class CanvasLiveDealLayer extends L.Layer {
       clusterPoints: this._clusterPoints,
       clusterKinds: this._clusterKinds,
       clusterMaxZoom: this._clusterMaxZoom,
+      clusterMinCount: this._clusterMinCount,
     });
     this._lodSubsampling = pointPlan.lodSubsampling;
 
@@ -448,7 +509,15 @@ export class CanvasLiveDealLayer extends L.Layer {
       return;
     }
     const point = map.latLngToContainerPoint([feature.lat, feature.lng]);
-    drawPoint(ctx, feature, point.x, point.y, radiusForPoint(feature, map.getZoom(), selected), selected);
+    drawPoint(
+      ctx,
+      feature,
+      point.x,
+      point.y,
+      radiusForPoint(feature, map.getZoom(), selected),
+      selected,
+      this._isDark
+    );
   }
 
   private _findAtPoint(point: L.Point): LiveDealMapFeature | null {
