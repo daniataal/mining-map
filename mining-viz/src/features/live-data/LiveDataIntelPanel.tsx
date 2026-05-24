@@ -45,6 +45,8 @@ import {
   Download,
   CircleHelp,
   Search,
+  Route,
+  ExternalLink,
 } from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
@@ -66,6 +68,12 @@ import { firstVerifyUrl } from '../../lib/verifySourceUrl';
 import CollapsibleSection from '../../components/ui/CollapsibleSection';
 import { getTradeManifests } from '../../api/oilLiveApi';
 import { canShowSeedDataToggle } from './liveDataDevFeatures';
+import { buildRoutePlannerHintsFromOpportunity } from './liveDataRoutePrefill';
+import {
+  LIVE_DATA_LENS_COPY,
+  LIVE_DATA_LENS_ORDER,
+  type LiveDataLensMode,
+} from './liveDataMapDefaults';
 
 const DISCLAIMER_EN =
   'Inferred from public/free data only. Not a confirmed private transaction, buyer, seller, or cargo grade.';
@@ -122,6 +130,28 @@ function ExpandableBulletList({
   );
 }
 
+function percent(value: number | undefined, fallback = 0): number {
+  return Math.round(((value ?? fallback) || 0) * 100);
+}
+
+function actionLabel(action: unknown): string {
+  if (action && typeof action === 'object') {
+    const label = (action as { label?: unknown }).label;
+    if (typeof label === 'string' && label.trim()) return label;
+  }
+  return '';
+}
+
+function hintLabel(hint: unknown): string {
+  if (!hint || typeof hint !== 'object') return '';
+  const rec = hint as Record<string, unknown>;
+  const role = typeof rec.role === 'string' ? rec.role : '';
+  const name = typeof rec.name === 'string' ? rec.name : '';
+  const country = typeof rec.country === 'string' ? rec.country : '';
+  if (role && name) return `${role}: ${name}${country ? ` · ${country}` : ''}`;
+  return [name, country].filter(Boolean).join(' · ');
+}
+
 type Tab = 'feed' | 'companies' | 'opportunities' | 'cargo' | 'alerts';
 
 export type LiveDataIntelPanelProps = {
@@ -138,6 +168,9 @@ export type LiveDataIntelPanelProps = {
   onOpenOpportunity?: (opportunityId: string, title?: string) => void;
   onOpenCargoRecord?: (record: MeridianCargoRecord) => void;
   onOpenCompanyDossier?: (companyId: string) => void;
+  onOpenRoutePlanner?: (hints: Record<string, unknown>) => void;
+  liveDataLens?: LiveDataLensMode;
+  onLiveDataLensChange?: (lens: LiveDataLensMode) => void;
   /**
    * Dispatched when a user clicks a hit in the Elasticsearch-backed search
    * dropdown. The parent app reuses this for the existing entity-drawer
@@ -164,11 +197,14 @@ export default function LiveDataIntelPanel({
   onOpenOpportunity,
   onOpenCargoRecord,
   onOpenCompanyDossier,
+  onOpenRoutePlanner,
+  liveDataLens = 'deal',
+  onLiveDataLensChange,
   onOpenLiveEntity,
   onMapFlyTo,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<Tab>('feed');
+  const [tab, setTab] = useState<Tab>('opportunities');
   const [selectedCard, setSelectedCard] = useState<OilIntelligenceCard | null>(null);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   const [companyContacts, setCompanyContacts] = useState<Record<string, OilContact[]>>({});
@@ -200,6 +236,7 @@ export default function LiveDataIntelPanel({
   });
 
   const queryClient = useQueryClient();
+  const activeLensCopy = LIVE_DATA_LENS_COPY[liveDataLens];
 
   const { data: watchlistsData } = useQuery({
     queryKey: ['oil-live-watchlists'],
@@ -253,8 +290,15 @@ export default function LiveDataIntelPanel({
   });
 
   const { data: opportunitiesData } = useQuery({
-    queryKey: ['oil-live-opportunities', 0.55],
-    queryFn: async () => (await getOilOpportunities(0.55)).opportunities,
+    queryKey: ['oil-live-opportunities', 0.55, productFilter],
+    queryFn: async () =>
+      (
+        await getOilOpportunities(0.55, {
+          commodity: productFilter === 'all' ? undefined : productFilter,
+          min_deal_score: 0.45,
+          limit: 80,
+        })
+      ).opportunities,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
   });
@@ -375,7 +419,7 @@ export default function LiveDataIntelPanel({
     { key: 'vessels', label: t('מכליות', 'Tankers'), value: coverageStats?.vessels ?? 0 },
     {
       key: 'opportunities',
-      label: t('הזדמנויות', 'Opportunities'),
+      label: t('רדאר עסקאות', 'Deal Radar'),
       value: coverageStats?.opportunities ?? 0,
     },
     {
@@ -691,6 +735,9 @@ export default function LiveDataIntelPanel({
         'title',
         'opportunity_type',
         'confidence',
+        'deal_score',
+        'source_tiers',
+        'signal_kind',
         'hypothesis',
         'terminal_id',
         'terminal_name',
@@ -701,6 +748,9 @@ export default function LiveDataIntelPanel({
         o.title ?? '',
         o.opportunity_type ?? '',
         o.confidence != null ? String(o.confidence) : '',
+        o.deal_score != null ? String(o.deal_score) : '',
+        o.source_tiers?.join('|') ?? '',
+        o.signal_kind ?? '',
         o.hypothesis ?? '',
         o.terminal_id ?? '',
         o.terminal_name ?? '',
@@ -779,7 +829,7 @@ export default function LiveDataIntelPanel({
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-black uppercase tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
             <Radio className="w-5 h-5 text-sky-500" />
-            {t('נתונים חיים', 'Live Data')}
+            {t('רדאר עסקאות', 'Deal Radar')}
           </h2>
           <button
             type="button"
@@ -791,6 +841,31 @@ export default function LiveDataIntelPanel({
           >
             <CircleHelp className="h-4 w-4" />
           </button>
+        </div>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+          {t(activeLensCopy.hintHe, activeLensCopy.hintEn)}
+        </p>
+        <div className="mt-3 grid grid-cols-3 gap-1.5" role="tablist" aria-label={t('מצב עבודה', 'Work mode')}>
+          {LIVE_DATA_LENS_ORDER.map((lens) => {
+            const meta = LIVE_DATA_LENS_COPY[lens];
+            const active = liveDataLens === lens;
+            return (
+              <button
+                key={lens}
+                type="button"
+                onClick={() => onLiveDataLensChange?.(lens)}
+                className={`rounded-xl px-2 py-2 text-left transition-colors ${
+                  active
+                    ? 'border border-sky-500/40 bg-sky-500/15 text-slate-950 dark:text-white'
+                    : 'border border-black/10 bg-white/80 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-300'
+                }`}
+              >
+                <span className="block text-[10px] font-black uppercase leading-tight">
+                  {t(meta.labelHe, meta.labelEn)}
+                </span>
+              </button>
+            );
+          })}
         </div>
         {liveDataHelpOpen && (
           <div className="mt-2 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-sm leading-relaxed text-slate-800 dark:text-slate-200">
@@ -830,7 +905,7 @@ export default function LiveDataIntelPanel({
           </div>
         )}
         <CollapsibleSection
-          defaultOpen
+          defaultOpen={false}
           className="mt-3 rounded-xl border border-cyan-600/30 bg-cyan-500/10 px-3 py-3"
           title={
             <p className={`${LABEL} text-cyan-900 dark:text-cyan-200`}>
@@ -994,10 +1069,12 @@ export default function LiveDataIntelPanel({
 
       </div>
 
-      <div className="shrink-0 sticky top-0 z-10 border-b border-black/5 bg-slate-50/98 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/98">
+        <div className="shrink-0 sticky top-0 z-10 border-b border-black/5 bg-slate-50/98 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-slate-950/98">
         <LiveDataSearchBar onHitClick={handleSearchHit} className="mb-3" />
         <p className={`${LABEL} text-slate-600 dark:text-slate-400 mb-2`}>
-          {t('לשכבות מפה — השתמשו בפאנל שכבות בפינה השמאלית', 'Map layers — use the panel at bottom-left of the map')}
+          {liveDataLens === 'deal'
+            ? t('בחרו ליד ואז בנו מסלול / פתחו חבילת עסקה', 'Pick a lead, then build route / open deal pack')
+            : t('שכבות מפה זמינות בפאנל בפינה השמאלית', 'Map layers are available in the bottom-left panel')}
         </p>
         <div className="flex gap-2 flex-wrap">
           {(['feed', 'opportunities', 'cargo', 'companies', 'alerts'] as const).map((tabKey) => (
@@ -1012,7 +1089,7 @@ export default function LiveDataIntelPanel({
               {tabKey === 'feed' && t('מודיעין', 'Intelligence')}
               {tabKey === 'opportunities' && (
                 <>
-                  {t('הזדמנויות', 'Opportunities')}
+                  {t('רדאר עסקאות', 'Deal Radar')}
                   {opportunities.length > 0 && (
                     <span className="rounded-full bg-emerald-600/20 px-1.5 text-[10px] font-black text-emerald-800 dark:text-emerald-200">
                       {opportunities.length}
@@ -1243,6 +1320,14 @@ export default function LiveDataIntelPanel({
             const econ = oppEconomics[opp.id];
             const expanded = expandedOpp === opp.id;
             const watchTarget = opportunityWatchTarget(opp);
+            const score = opp.deal_score ?? opp.confidence ?? 0;
+            const sourceTiers = opp.source_tiers?.length ? opp.source_tiers : ['inferred'];
+            const why = (((opp.signal?.why_this_matters as unknown[] | undefined) ?? opp.evidence ?? []) as unknown[])
+              .map((line) => String(line))
+              .filter(Boolean);
+            const actions = (opp.recommended_actions ?? []).map(actionLabel).filter(Boolean).slice(0, 5);
+            const counterpartyHints = (opp.counterparty_hints ?? []).map(hintLabel).filter(Boolean).slice(0, 2);
+            const infrastructureHints = (opp.infrastructure_hints ?? []).map(hintLabel).filter(Boolean).slice(0, 2);
             const onWatchlist =
               watchTarget != null &&
               isOnWatchlist(watchlistsData ?? [], watchTarget.watch_type, watchTarget.watch_ref);
@@ -1252,24 +1337,69 @@ export default function LiveDataIntelPanel({
                 className={OPP_CARD}
               >
                 <div className="flex justify-between gap-3 items-start">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug flex-1 min-w-0">
-                    {opp.title}
-                  </h3>
-                  <span className="shrink-0 text-xs font-black px-2.5 py-1 rounded-full bg-emerald-600/15 text-emerald-900 dark:text-emerald-200">
-                    {Math.round((opp.confidence ?? 0) * 100)}% {t('ביטחון', 'confidence')}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                      {opp.signal_kind?.replaceAll('_', ' ') ?? opp.opportunity_type.replaceAll('_', ' ')}
+                    </p>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                      {opp.title}
+                    </h3>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className="block text-lg font-black text-emerald-700 dark:text-emerald-300 tabular-nums">
+                      {percent(score)}%
+                    </span>
+                    <span className="text-[9px] font-black uppercase text-slate-500">
+                      {t('ציון עסקה', 'deal score')}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {sourceTiers.map((tier) => (
+                    <span
+                      key={tier}
+                      className="rounded-full border border-emerald-600/20 bg-white/70 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-900 dark:bg-slate-950/50 dark:text-emerald-200"
+                    >
+                      {tier}
+                    </span>
+                  ))}
+                  {opp.confidence != null && (
+                    <span className="rounded-full border border-slate-500/20 bg-white/70 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 dark:bg-slate-950/50 dark:text-slate-300">
+                      {percent(opp.confidence)}% {t('ביטחון', 'confidence')}
+                    </span>
+                  )}
                 </div>
                 <p className={`${MUTED} mt-2`}>{opp.hypothesis}</p>
-                {opp.profit_checklist && opp.profit_checklist.length > 0 && (
+                {why.length > 0 && (
                   <div className="mt-3">
-                    <p className={`${LABEL} mb-1`}>{t('ראיות', 'Evidence')}</p>
-                    <ExpandableBulletList items={opp.profit_checklist} limit={4} />
+                    <p className={`${LABEL} mb-1`}>{t('למה זה חשוב', 'Why this matters')}</p>
+                    <ExpandableBulletList items={why} limit={3} />
                   </div>
                 )}
-                {opp.evidence && opp.evidence.length > 0 && (
-                  <div className="mt-2">
-                    <ExpandableBulletList items={opp.evidence} limit={3} />
+                {(counterpartyHints.length > 0 || infrastructureHints.length > 0) && (
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+                    {counterpartyHints.length > 0 && (
+                      <div className="rounded-lg border border-emerald-600/15 bg-white/65 px-2 py-1.5 dark:bg-slate-950/40">
+                        <span className="font-black uppercase text-emerald-700 dark:text-emerald-300">
+                          {t('צדדים', 'Parties')}
+                        </span>{' '}
+                        {counterpartyHints.join(' · ')}
+                      </div>
+                    )}
+                    {infrastructureHints.length > 0 && (
+                      <div className="rounded-lg border border-sky-600/15 bg-white/65 px-2 py-1.5 dark:bg-slate-950/40">
+                        <span className="font-black uppercase text-sky-700 dark:text-sky-300">
+                          {t('תשתית', 'Infrastructure')}
+                        </span>{' '}
+                        {infrastructureHints.join(' · ')}
+                      </div>
+                    )}
                   </div>
+                )}
+                {actions.length > 0 && (
+                  <p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    {actions.join(' · ')}
+                  </p>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {watchTarget && (
@@ -1296,8 +1426,29 @@ export default function LiveDataIntelPanel({
                       className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-bold uppercase hover:bg-emerald-500"
                     >
                       <Package className="w-3.5 h-3.5" />
-                      {t('חבילת עסקה', 'Deal pack')}
+                      {t('פתח חבילת עסקה', 'Open deal pack')}
                     </button>
+                  )}
+                  {onOpenRoutePlanner && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenRoutePlanner(buildRoutePlannerHintsFromOpportunity(opp))}
+                      className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-2 rounded-lg border border-sky-500/40 text-[10px] font-bold uppercase text-sky-800 dark:text-sky-200 hover:bg-sky-500/10"
+                    >
+                      <Route className="w-3.5 h-3.5" />
+                      {t('בנה מסלול', 'Build route')}
+                    </button>
+                  )}
+                  {firstVerifyUrl(opp) && (
+                    <a
+                      href={firstVerifyUrl(opp)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 min-h-[36px] px-3 py-2 rounded-lg border border-violet-500/40 text-[10px] font-bold uppercase text-violet-800 dark:text-violet-200 hover:bg-violet-500/10"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      {t('אמת מקור', 'Verify source')}
+                    </a>
                   )}
                 </div>
                 <button

@@ -126,6 +126,12 @@ export default function DealExecutionPack({
   const pack = data as DealPack;
 
   const routeHints: LiveDataRouteHints = (() => {
+    if (pack.route_prefill && Object.keys(pack.route_prefill).length > 0) {
+      return {
+        ...(pack.route_prefill as LiveDataRouteHints),
+        opportunity_id: opportunityId,
+      };
+    }
     const mcr = pack.cargo_records?.[0];
     if (mcr) return buildRoutePlannerHintsFromCargo(mcr);
     const terminal = pack.terminal as { name?: string; port?: string; country?: string } | undefined;
@@ -161,6 +167,40 @@ export default function DealExecutionPack({
       </div>
 
       <p className="text-[10px] text-amber-800 dark:text-amber-200">{pack.disclaimer}</p>
+
+      {(pack.deal_score != null || (pack.source_tiers?.length ?? 0) > 0) && (
+        <section className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              {t('רדאר עסקה', 'Deal Radar')}
+            </p>
+            {pack.deal_score != null && (
+              <span className="text-lg font-black text-emerald-700 dark:text-emerald-300">
+                {Math.round(pack.deal_score * 100)}%
+              </span>
+            )}
+          </div>
+          {(pack.source_tiers?.length ?? 0) > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {pack.source_tiers!.map((tier) => (
+                <span
+                  key={tier}
+                  className="rounded-full bg-white px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-800 dark:bg-slate-950 dark:text-emerald-200"
+                >
+                  {tier}
+                </span>
+              ))}
+            </div>
+          )}
+          {Array.isArray(pack.signal?.why_this_matters) && (
+            <ul className="mt-2 list-disc pl-4 text-[10px] leading-relaxed text-slate-600 dark:text-slate-300">
+              {(pack.signal!.why_this_matters as string[]).slice(0, 3).map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {benchmarks?.benchmarks && benchmarks.benchmarks.length > 0 && (
         <div className="rounded-lg border border-slate-200 dark:border-white/10 p-2 space-y-1">

@@ -67,6 +67,14 @@ describe('dedupeOpportunities', () => {
     expect(out.some((o) => o.id === 'low')).toBe(false);
   });
 
+  it('uses deal_score before confidence for Deal Radar ordering', () => {
+    const rows = [
+      opp({ id: 'confidence-winner', opportunity_type: 'x', terminal_id: 't1', confidence: 0.95, deal_score: 0.4 }),
+      opp({ id: 'deal-winner', opportunity_type: 'x', terminal_id: 't2', confidence: 0.7, deal_score: 0.9 }),
+    ];
+    expect(dedupeOpportunities(rows, 10)[0].id).toBe('deal-winner');
+  });
+
   it('respects maxOut cap', () => {
     const rows = Array.from({ length: 20 }, (_, i) =>
       opp({

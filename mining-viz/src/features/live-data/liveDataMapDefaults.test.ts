@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   LIVE_DATA_DEFAULT_LAYERS,
+  LIVE_DATA_LENS_LAYERS,
+  layersForLiveDataLens,
   LIVE_DATA_OIL_GAS_TAB_LAYERS,
   LIVE_DATA_VESSEL_FILTERS,
   GOVERNMENT_AIS_COVERAGE_SOURCES,
@@ -8,14 +10,22 @@ import {
 } from './liveDataMapDefaults';
 
 describe('liveDataMapDefaults', () => {
-  it('keeps vessels off by default on Live Data entry', () => {
-    expect(LIVE_DATA_DEFAULT_LAYERS.vessels).toBe(false);
+  it('defaults Live Data to Deal Lens connector layers', () => {
+    expect(LIVE_DATA_DEFAULT_LAYERS.vessels).toBe(true);
     expect(LIVE_DATA_DEFAULT_LAYERS.terminals).toBe(true);
+    expect(LIVE_DATA_DEFAULT_LAYERS.coverage).toBe(false);
+    expect(LIVE_DATA_DEFAULT_LAYERS.opportunities).toBe(true);
   });
 
-  it('enables vessels on Oil & Gas Live tab entry (MAD-74)', () => {
+  it('keeps Oil & Gas Live tab aligned with Deal Lens', () => {
     expect(LIVE_DATA_OIL_GAS_TAB_LAYERS.vessels).toBe(true);
     expect(LIVE_DATA_OIL_GAS_TAB_LAYERS.terminals).toBe(true);
+  });
+
+  it('keeps raw data lens as the analyst-heavy layer set', () => {
+    expect(LIVE_DATA_LENS_LAYERS.raw.coverage).toBe(true);
+    expect(LIVE_DATA_LENS_LAYERS.raw.corridors).toBe(true);
+    expect(layersForLiveDataLens('deal')).not.toBe(LIVE_DATA_LENS_LAYERS.deal);
   });
 
   it('defaults all-maritime ship filters to tankers and cargo', () => {

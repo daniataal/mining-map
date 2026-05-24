@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,28 +13,36 @@ import (
 )
 
 type checklistItem struct {
-	ID      string `json:"id"`
-	Label   string `json:"label"`
-	Status  string `json:"status"` // green | amber | red
-	Weight  int    `json:"weight"`
-	Detail  string `json:"detail,omitempty"`
-	Action  string `json:"action,omitempty"`
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Status string `json:"status"` // green | amber | red
+	Weight int    `json:"weight"`
+	Detail string `json:"detail,omitempty"`
+	Action string `json:"action,omitempty"`
 }
 
 // Pack is the aggregated Deal Execution Pack for an opportunity.
 type Pack struct {
-	OpportunityID     string           `json:"opportunity_id"`
-	Title             string           `json:"title"`
-	Hypothesis        string           `json:"hypothesis,omitempty"`
-	ReadinessScore    float64          `json:"readiness_score"`
-	ReadinessPct      int              `json:"readiness_pct"`
-	Checklist         []checklistItem  `json:"checklist"`
-	CargoRecords      []map[string]any `json:"cargo_records"`
-	PortCall          map[string]any   `json:"port_call,omitempty"`
-	Terminal          map[string]any   `json:"terminal,omitempty"`
-	Economics         map[string]any   `json:"economics,omitempty"`
-	ProfitChecklist   []string         `json:"profit_checklist,omitempty"`
-	Disclaimer        string           `json:"disclaimer"`
+	OpportunityID       string           `json:"opportunity_id"`
+	Title               string           `json:"title"`
+	Hypothesis          string           `json:"hypothesis,omitempty"`
+	DealScore           float64          `json:"deal_score,omitempty"`
+	Signal              map[string]any   `json:"signal,omitempty"`
+	RoutePrefill        map[string]any   `json:"route_prefill,omitempty"`
+	SourceTiers         []string         `json:"source_tiers,omitempty"`
+	FreshnessAt         *time.Time       `json:"freshness_at,omitempty"`
+	RecommendedActions  []any            `json:"recommended_actions,omitempty"`
+	CounterpartyHints   []any            `json:"counterparty_hints,omitempty"`
+	InfrastructureHints []any            `json:"infrastructure_hints,omitempty"`
+	ReadinessScore      float64          `json:"readiness_score"`
+	ReadinessPct        int              `json:"readiness_pct"`
+	Checklist           []checklistItem  `json:"checklist"`
+	CargoRecords        []map[string]any `json:"cargo_records"`
+	PortCall            map[string]any   `json:"port_call,omitempty"`
+	Terminal            map[string]any   `json:"terminal,omitempty"`
+	Economics           map[string]any   `json:"economics,omitempty"`
+	ProfitChecklist     []string         `json:"profit_checklist,omitempty"`
+	Disclaimer          string           `json:"disclaimer"`
 }
 
 // Build aggregates opportunity context into a deal execution pack.
@@ -44,17 +53,34 @@ func Build(ctx context.Context, pool *pgxpool.Pool, opportunityID uuid.UUID) (Pa
 	var mmsi *int64
 	var profitPC []byte
 	var evidence []byte
+	var dealScore float64
+	var signalJSON, routeJSON []byte
+	var sourceTiers []string
+	var freshness *time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT title, hypothesis, terminal_id, port_call_id, mmsi, profit_checklist, evidence
+		SELECT title, hypothesis, terminal_id, port_call_id, mmsi, profit_checklist, evidence,
+			COALESCE(deal_score, confidence)::float8,
+			COALESCE(signal_json, '{}'::jsonb),
+			COALESCE(route_prefill_json, '{}'::jsonb),
+			COALESCE(source_tiers, ARRAY['synthetic']::text[]),
+			freshness_at
 		FROM oil_opportunities WHERE id = $1 AND status = 'open'
-	`, opportunityID).Scan(&title, &hypothesis, &terminalID, &portCallID, &mmsi, &profitPC, &evidence)
+	`, opportunityID).Scan(&title, &hypothesis, &terminalID, &portCallID, &mmsi, &profitPC, &evidence, &dealScore, &signalJSON, &routeJSON, &sourceTiers, &freshness)
 	if err != nil {
 		return pack, fmt.Errorf("opportunity not found")
 	}
 	pack.OpportunityID = opportunityID.String()
 	pack.Title = title
 	pack.Hypothesis = hypothesis
+	pack.DealScore = dealScore
+	pack.SourceTiers = sourceTiers
+	pack.FreshnessAt = freshness
 	_ = json.Unmarshal(profitPC, &pack.ProfitChecklist)
+	_ = json.Unmarshal(signalJSON, &pack.Signal)
+	_ = json.Unmarshal(routeJSON, &pack.RoutePrefill)
+	pack.RecommendedActions = signalList(pack.Signal, "recommended_actions")
+	pack.CounterpartyHints = signalList(pack.Signal, "counterparty_hints")
+	pack.InfrastructureHints = signalList(pack.Signal, "infrastructure_hints")
 	pack.Disclaimer = "Deal readiness from inferred public data only — not confirmed transactions or legal BOLs."
 
 	checklist := defaultChecklist()
@@ -212,4 +238,14 @@ func scoreChecklist(items []checklistItem) (float64, int) {
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func signalList(signal map[string]any, key string) []any {
+	if signal == nil {
+		return nil
+	}
+	if items, ok := signal[key].([]any); ok {
+		return items
+	}
+	return nil
 }

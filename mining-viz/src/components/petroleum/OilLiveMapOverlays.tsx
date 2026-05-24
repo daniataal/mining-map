@@ -26,6 +26,7 @@ import type {
 } from '../../features/live-data/OilLiveEntityDrawer';
 import { dedupeOpportunities } from '../../features/live-data/dedupeOpportunities';
 import { LIVE_DATA_DEFAULT_LAYERS } from '../../features/live-data/liveDataMapDefaults';
+import type { LiveDataLensMode } from '../../features/live-data/liveDataMapDefaults';
 import {
   commodityMatchesFilter,
   terminalMatchesSearch,
@@ -110,6 +111,7 @@ type Props = {
   mapZoom?: number;
   productFilter?: string;
   terminalSearch?: string;
+  lensMode?: LiveDataLensMode;
   layers?: OilLiveLayerVisibility;
   tradeFlowGroup?: 'company_pair' | 'country_pair';
   viewport?: MaritimeViewportBounds | null;
@@ -214,6 +216,7 @@ function OilLiveMapOverlays({
   mapZoom = 5,
   productFilter = 'all',
   terminalSearch = '',
+  lensMode = 'deal',
   layers = LIVE_DATA_DEFAULT_LAYERS,
   tradeFlowGroup = 'company_pair',
   viewport,
@@ -232,7 +235,7 @@ function OilLiveMapOverlays({
   const mapLayersActive = layers.terminals || layers.vessels;
   const effectiveTradeFlowGroup: 'company_pair' | 'country_pair' =
     mapZoom < 8 ? 'country_pair' : tradeFlowGroup;
-  const oppQueryKey = ['oil-live-opportunities', 0.55] as const;
+  const oppQueryKey = ['oil-live-opportunities', 0.55, productFilter] as const;
 
   const { data: mapData } = useQuery({
     queryKey: ['oil-live-map', bbox, Math.floor(mapZoom)],
@@ -287,7 +290,12 @@ function OilLiveMapOverlays({
 
   const { data: oppsData } = useQuery({
     queryKey: oppQueryKey,
-    queryFn: () => getOilOpportunities(0.55),
+    queryFn: () =>
+      getOilOpportunities(0.55, {
+        commodity: productFilter === 'all' ? undefined : productFilter,
+        min_deal_score: 0.45,
+        limit: 80,
+      }),
     enabled: enabled && layers.opportunities,
     staleTime: 120_000,
     refetchOnWindowFocus: false,
@@ -458,6 +466,39 @@ function OilLiveMapOverlays({
     return m;
   }, [dedupedOpportunities]);
 
+  const dealConnectorTerminalIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const opp of dedupedOpportunities) {
+      if (opp.terminal_id) ids.add(opp.terminal_id);
+    }
+    for (const record of filteredCargoRecords) {
+      const terminalId = (record as MeridianCargoRecord & { load_terminal_id?: string }).load_terminal_id;
+      if (terminalId) ids.add(terminalId);
+    }
+    return ids;
+  }, [dedupedOpportunities, filteredCargoRecords]);
+
+  const dealConnectorMmsis = useMemo(() => {
+    const ids = new Set<number>();
+    for (const opp of dedupedOpportunities) {
+      if (typeof opp.mmsi === 'number') ids.add(opp.mmsi);
+    }
+    for (const record of filteredCargoRecords) {
+      if (typeof record.mmsi === 'number') ids.add(record.mmsi);
+    }
+    return ids;
+  }, [dedupedOpportunities, filteredCargoRecords]);
+
+  const visibleTerminalCount =
+    lensMode === 'deal'
+      ? terminals.filter((term) => dealConnectorTerminalIds.has(term.id)).length
+      : terminals.length;
+
+  const visibleVesselCount =
+    lensMode === 'deal'
+      ? vessels.filter((vessel) => dealConnectorMmsis.has(vessel.mmsi)).length
+      : vessels.length;
+
   const canvasFeatures = useMemo<LiveDealMapFeature[]>(() => {
     const features: LiveDealMapFeature[] = [];
 
@@ -569,6 +610,7 @@ function OilLiveMapOverlays({
 
     if (layers.terminals) {
       for (const term of terminals) {
+        if (lensMode === 'deal' && !dealConnectorTerminalIds.has(term.id)) continue;
         const opportunity = opportunityByTerminalId.get(term.id);
         features.push({
           shape: 'point',
@@ -598,6 +640,7 @@ function OilLiveMapOverlays({
 
     if (layers.vessels) {
       for (const vessel of vessels) {
+        if (lensMode === 'deal' && !dealConnectorMmsis.has(vessel.mmsi)) continue;
         features.push({
           shape: 'point',
           uid: `vessel:${vessel.mmsi}`,
@@ -636,11 +679,11 @@ function OilLiveMapOverlays({
           lng: marker.lng,
           title: marker.title,
           subtitle: opportunity?.hypothesis,
-          tier: 'synthetic',
+          tier: opportunity?.source_tiers?.[0] ?? 'synthetic',
           confidence: opportunity?.confidence,
           sourceCount: opportunity?.evidence?.length ?? 0,
-          dealScore: opportunity?.confidence ?? 0.8,
-          styleKey: opportunity?.opportunity_type ?? 'opportunity',
+          dealScore: opportunity?.deal_score ?? opportunity?.confidence ?? 0.8,
+          styleKey: 'deal_radar',
           payload: {
             entityKind: 'opportunity',
             entityId: marker.oppId,
@@ -655,7 +698,10 @@ function OilLiveMapOverlays({
     return features;
   }, [
     corridors,
+    dealConnectorMmsis,
+    dealConnectorTerminalIds,
     dedupedOpportunities,
+    lensMode,
     layers.corridors,
     layers.opportunities,
     layers.terminals,
@@ -774,8 +820,11 @@ function OilLiveMapOverlays({
       const opportunity = selected.opportunity;
       return (
         <div className="oil-live-popup-body">
-          <OilLiveProvenanceBadge kind="synthetic" className="mb-1" />
+          <OilLiveProvenanceBadge kind={opportunity?.source_tiers?.[0] ?? 'synthetic'} className="mb-1" />
           <strong>{selectedFeature.title}</strong>
+          {opportunity?.deal_score != null && (
+            <p>Deal score {(opportunity.deal_score * 100).toFixed(0)}%</p>
+          )}
           {opportunity?.confidence != null && (
             <p>Confidence {(opportunity.confidence * 100).toFixed(0)}%</p>
           )}
@@ -1017,15 +1066,15 @@ function OilLiveMapOverlays({
   useEffect(() => {
     if (!onStatsChange) return;
     onStatsChange({
-      terminals: terminals.length,
-      vessels: vessels.length,
+      terminals: visibleTerminalCount,
+      vessels: visibleVesselCount,
       opportunities: opportunityMarkers.length,
       corridors: corridors.length,
       vesselMeta: mapData?.vessel_meta ?? null,
     });
   }, [
-    terminals.length,
-    vessels.length,
+    visibleTerminalCount,
+    visibleVesselCount,
     opportunityMarkers.length,
     corridors.length,
     mapData?.vessel_meta,

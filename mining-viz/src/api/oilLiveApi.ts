@@ -545,12 +545,40 @@ export type OilOpportunity = {
   vessel_name?: string;
   hypothesis?: string;
   confidence?: number;
+  mmsi?: number;
+  deal_score?: number;
+  signal_kind?: string;
+  signal?: Record<string, unknown>;
+  source_tiers?: string[];
+  freshness_at?: string | null;
+  recommended_actions?: Array<{ id?: string; label?: string; kind?: string } | Record<string, unknown>>;
+  route_prefill?: LiveDataRoutePrefillPayload;
+  counterparty_hints?: Array<Record<string, unknown>>;
+  infrastructure_hints?: Array<Record<string, unknown>>;
   evidence?: string[];
   profit_checklist?: string[];
   terminal_id?: string;
   terminal_name?: string;
   terminal_country?: string;
   disclaimer?: string;
+};
+
+export type LiveDataRoutePrefillPayload = {
+  load_port_name?: string;
+  load_country?: string;
+  discharge_port_name?: string;
+  discharge_country?: string;
+  load_lat?: number;
+  load_lng?: number;
+  discharge_lat?: number;
+  discharge_lng?: number;
+  commodity_family?: string;
+  opportunity_id?: string;
+  terminal_id?: string;
+  source_mcr_id?: string;
+  vessel_name?: string;
+  mmsi?: number;
+  [key: string]: unknown;
 };
 
 export type CargoRecordsFilters = {
@@ -624,6 +652,10 @@ export function normalizeOilOpportunitiesPayload(raw: unknown): OilOpportunity[]
 export type GetOilOpportunitiesOptions = {
   /** Omit demo-seeded rows (default true). Pass false to include demo opportunities. */
   exclude_demo?: boolean;
+  deal_signal?: string;
+  commodity?: string;
+  min_deal_score?: number;
+  limit?: number;
 };
 
 export async function getOilOpportunities(
@@ -634,6 +666,10 @@ export async function getOilOpportunities(
   const params = new URLSearchParams();
   params.set('min_confidence', String(minConfidence));
   if (excludeDemo) params.set('exclude_demo', 'true');
+  if (options.deal_signal) params.set('deal_signal', options.deal_signal);
+  if (options.commodity && options.commodity !== 'all') params.set('commodity', options.commodity);
+  if (options.min_deal_score != null) params.set('min_deal_score', String(options.min_deal_score));
+  if (options.limit != null) params.set('limit', String(options.limit));
   const res = await fetch(oilUrl(`/api/oil-live/opportunities?${params}`));
   if (!res.ok) throw new Error(`oil-live opportunities ${res.status}`);
   const data = await res.json();
@@ -774,6 +810,14 @@ export type DealExecutionPack = {
   opportunity_id: string;
   title?: string;
   hypothesis?: string;
+  deal_score?: number;
+  signal?: Record<string, unknown>;
+  route_prefill?: LiveDataRoutePrefillPayload;
+  source_tiers?: string[];
+  freshness_at?: string | null;
+  recommended_actions?: Array<Record<string, unknown>>;
+  counterparty_hints?: Array<Record<string, unknown>>;
+  infrastructure_hints?: Array<Record<string, unknown>>;
   readiness_score?: number;
   readiness_pct?: number;
   checklist?: Array<{
@@ -856,6 +900,13 @@ export type OilDealPackWorkflow = {
 export type OilDealPack = {
   opportunity_id: string;
   opportunity?: OilOpportunity;
+  deal_score?: number;
+  signal?: Record<string, unknown>;
+  route_prefill?: LiveDataRoutePrefillPayload;
+  source_tiers?: string[];
+  recommended_actions?: Array<Record<string, unknown>>;
+  counterparty_hints?: Array<Record<string, unknown>>;
+  infrastructure_hints?: Array<Record<string, unknown>>;
   readiness_score?: number;
   readiness_items?: DealReadinessItem[];
   synthetic_cargo?: MeridianCargoRecord[];

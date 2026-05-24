@@ -93,10 +93,10 @@ import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMa
 import type { HistoricArcSelection } from './features/live-data/HistoricArcDetailDrawer';
 import {
   LIVE_DATA_HUB_CENTER,
-  LIVE_DATA_DEFAULT_LAYERS,
   LIVE_DATA_EIA_HISTORIC_DEFAULT_YEAR,
-  LIVE_DATA_OIL_GAS_TAB_LAYERS,
   LIVE_DATA_VESSEL_FILTERS,
+  layersForLiveDataLens,
+  type LiveDataLensMode,
 } from './features/live-data/liveDataMapDefaults';
 import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
@@ -276,7 +276,8 @@ export default function App() {
   const [prioritizePetroleumVessels, setPrioritizePetroleumVessels] = useState(false);
   const [oilLiveProductFilter, setOilLiveProductFilter] = useState('all');
   const [oilLiveTerminalSearch, setOilLiveTerminalSearch] = useState('');
-  const [oilLiveLayers, setOilLiveLayers] = useState({ ...LIVE_DATA_OIL_GAS_TAB_LAYERS });
+  const [oilLiveLens, setOilLiveLens] = useState<LiveDataLensMode>('deal');
+  const [oilLiveLayers, setOilLiveLayers] = useState(() => layersForLiveDataLens('deal'));
   const [oilLiveTradeFlowGroup, setOilLiveTradeFlowGroup] = useState<
     'company_pair' | 'country_pair'
   >('company_pair');
@@ -992,6 +993,15 @@ export default function App() {
     });
   }, []);
 
+  const handleOilLiveLensChange = useCallback((lens: LiveDataLensMode) => {
+    setOilLiveLens(lens);
+    setOilLiveLayers(layersForLiveDataLens(lens));
+    setOilLiveTradeFlowGroup(lens === 'raw' ? 'country_pair' : 'company_pair');
+    setLiveDataMacroTradeOn(lens !== 'infrastructure');
+    setLiveDataEiaHistoricOn(false);
+    setIsMaritimeLayerEnabled(lens === 'raw');
+  }, []);
+
   useEffect(() => {
     const apiBase = API_BASE;
 
@@ -1248,6 +1258,9 @@ export default function App() {
                     onOpenOpportunity={handleOpenOilLiveOpportunity}
                     onOpenCargoRecord={handleOpenOilLiveCargo}
                     onOpenCompanyDossier={handleOpenOilLiveCompanyDossier}
+                    onOpenRoutePlanner={handleOpenRoutePlannerFromLiveData}
+                    liveDataLens={oilLiveLens}
+                    onLiveDataLensChange={handleOilLiveLensChange}
                     onOpenLiveEntity={handleOilLiveEntityClick}
                     onMapFlyTo={handleLiveDataMapFlyTo}
                   />
@@ -1579,6 +1592,8 @@ export default function App() {
                   oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}
                   oilLiveTerminalSearch={oilLiveTerminalSearch}
+                  oilLiveLens={oilLiveLens}
+                  onOilLiveLensChange={isLiveDataSidebar ? handleOilLiveLensChange : undefined}
                   oilLiveLayers={oilLiveLayers}
                   onOilLiveLayersChange={isLiveDataSidebar ? setOilLiveLayers : undefined}
                   oilLiveTradeFlowGroup={oilLiveTradeFlowGroup}
