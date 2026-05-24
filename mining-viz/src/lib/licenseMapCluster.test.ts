@@ -12,10 +12,11 @@ import type { MiningLicense } from '../types';
 
 describe('licenseMapCluster', () => {
   describe('clusterTargetZoom', () => {
-    it('increases zoom by 2, capped at 10, floored at drill threshold', () => {
+    it('increases zoom by 2, capped at 13, floored at drill threshold', () => {
       expect(clusterTargetZoom(5)).toBe(7);
       expect(clusterTargetZoom(8)).toBe(10);
-      expect(clusterTargetZoom(11)).toBe(10);
+      expect(clusterTargetZoom(12)).toBe(13);
+      expect(clusterTargetZoom(14)).toBe(13);
     });
 
     it('stays at drill threshold or above', () => {

@@ -1,4 +1,5 @@
 import type {
+  LiveDealFeatureKind,
   LiveDealMapFeature,
   LiveDealPointFeature,
   LiveDealViewport,
@@ -51,6 +52,37 @@ function gridDegreesForZoom(zoom: number): number {
   return 0.25;
 }
 
+function clientClusterGridDegreesForZoom(zoom: number): number {
+  if (zoom < 7) return 1.1;
+  if (zoom < 9) return 0.45;
+  if (zoom < 11) return 0.12;
+  if (zoom < 13) return 0.035;
+  return 0;
+}
+
+export type LiveDealClientClusterData = {
+  clientCluster: true;
+  count: number;
+  bounds: LiveDealViewport;
+  sourceIds: string[];
+  sourceUids: string[];
+};
+
+export interface LiveDealPointFeatureDrawOptions {
+  clusterPoints?: boolean;
+  clusterKinds?: readonly LiveDealFeatureKind[];
+  clusterMinCount?: number;
+  clusterMaxZoom?: number;
+}
+
+export function isLiveDealClientClusterData(value: unknown): value is LiveDealClientClusterData {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      (value as LiveDealClientClusterData).clientCluster === true,
+  );
+}
+
 export function planLiveDealPointDraw(
   features: readonly LiveDealMapFeature[],
   viewport: LiveDealViewport,
@@ -92,4 +124,141 @@ export function planLiveDealPointDraw(
     if (selected >= 0 && !draw.includes(selected)) draw.push(selected);
   }
   return { drawIndices: draw, lodSubsampling: true };
+}
+
+export function planLiveDealPointFeatureDraw(
+  features: readonly LiveDealMapFeature[],
+  viewport: LiveDealViewport,
+  zoom: number,
+  selectedUid?: string | null,
+  options: LiveDealPointFeatureDrawOptions = {},
+): { drawFeatures: LiveDealPointFeature[]; lodSubsampling: boolean } {
+  const visible: number[] = [];
+  for (let i = 0; i < features.length; i += 1) {
+    const feature = features[i];
+    if (feature.shape === 'point' && pointInViewport(feature, viewport)) {
+      visible.push(i);
+    }
+  }
+
+  const clusterMaxZoom = options.clusterMaxZoom ?? 13;
+  const clusterGrid = options.clusterPoints && zoom < clusterMaxZoom
+    ? clientClusterGridDegreesForZoom(zoom)
+    : 0;
+
+  if (!options.clusterPoints || clusterGrid <= 0) {
+    const plan = planLiveDealPointDraw(features, viewport, zoom, selectedUid);
+    return {
+      drawFeatures: plan.drawIndices
+        .map((index) => features[index])
+        .filter((feature): feature is LiveDealPointFeature => feature?.shape === 'point'),
+      lodSubsampling: plan.lodSubsampling,
+    };
+  }
+
+  const clusterKinds = new Set(options.clusterKinds ?? ['license']);
+  const minCount = Math.max(2, options.clusterMinCount ?? 2);
+  const selectedIndex = selectedUid
+    ? features.findIndex((feature) => feature.uid === selectedUid)
+    : -1;
+  const passthrough: number[] = [];
+  const groups = new Map<string, number[]>();
+
+  for (const index of visible) {
+    const feature = features[index] as LiveDealPointFeature;
+    if (!clusterKinds.has(feature.kind)) {
+      passthrough.push(index);
+      continue;
+    }
+    const key = `${Math.floor(feature.lat / clusterGrid)}:${Math.floor(feature.lng / clusterGrid)}:${feature.kind}`;
+    const group = groups.get(key);
+    if (group) group.push(index);
+    else groups.set(key, [index]);
+  }
+
+  const drawFeatures: LiveDealPointFeature[] = passthrough.map((index) => features[index] as LiveDealPointFeature);
+  let clustered = false;
+
+  for (const indices of groups.values()) {
+    if (indices.length < minCount) {
+      drawFeatures.push(...indices.map((index) => features[index] as LiveDealPointFeature));
+      continue;
+    }
+
+    clustered = true;
+    let latSum = 0;
+    let lngSum = 0;
+    let maxConfidence = 0;
+    let maxDealScore = 0;
+    let sourceCount = 0;
+    let south = Number.POSITIVE_INFINITY;
+    let west = Number.POSITIVE_INFINITY;
+    let north = Number.NEGATIVE_INFINITY;
+    let east = Number.NEGATIVE_INFINITY;
+    const sourceIds: string[] = [];
+    const sourceUids: string[] = [];
+    const first = features[indices[0]] as LiveDealPointFeature;
+
+    for (const index of indices) {
+      const feature = features[index] as LiveDealPointFeature;
+      latSum += feature.lat;
+      lngSum += feature.lng;
+      maxConfidence = Math.max(maxConfidence, feature.confidence ?? 0);
+      maxDealScore = Math.max(maxDealScore, feature.dealScore ?? 0);
+      sourceCount += feature.sourceCount ?? 0;
+      south = Math.min(south, feature.lat);
+      west = Math.min(west, feature.lng);
+      north = Math.max(north, feature.lat);
+      east = Math.max(east, feature.lng);
+      if (sourceIds.length < 100) sourceIds.push(feature.id);
+      if (sourceUids.length < 100) sourceUids.push(feature.uid);
+    }
+
+    const count = indices.length;
+    drawFeatures.push({
+      shape: 'point',
+      uid: `client-cluster:${first.kind}:${Math.round(zoom * 10) / 10}:${sourceUids.slice(0, 6).join(':')}:${count}`,
+      id: `client-cluster:${first.kind}:${sourceIds.slice(0, 6).join(':')}:${count}`,
+      kind: 'server_cluster',
+      lat: latSum / count,
+      lng: lngSum / count,
+      title: `${count} ${first.kind === 'license' ? 'licenses' : 'items'}`,
+      subtitle: 'Zoom in for individual records',
+      tier: 'aggregate',
+      confidence: maxConfidence || undefined,
+      sourceCount: count,
+      dealScore: maxDealScore || undefined,
+      styleKey: 'client_cluster',
+      data: {
+        clientCluster: true,
+        count,
+        bounds: { south, west, north, east },
+        sourceIds,
+        sourceUids,
+      } satisfies LiveDealClientClusterData,
+    });
+  }
+
+  if (selectedIndex >= 0 && features[selectedIndex]?.shape === 'point') {
+    const selected = features[selectedIndex] as LiveDealPointFeature;
+    if (!drawFeatures.some((feature) => feature.uid === selected.uid)) {
+      drawFeatures.push(selected);
+    }
+  }
+
+  const cap = liveDealPointCapForZoom(zoom);
+  if (Number.isFinite(cap) && drawFeatures.length > cap) {
+    const selected = selectedUid
+      ? drawFeatures.find((feature) => feature.uid === selectedUid)
+      : undefined;
+    const trimmed = [...drawFeatures]
+      .sort((a, b) => liveDealFeaturePriority(b) - liveDealFeaturePriority(a))
+      .slice(0, cap);
+    if (selected && !trimmed.some((feature) => feature.uid === selected.uid)) {
+      trimmed.push(selected);
+    }
+    return { drawFeatures: trimmed, lodSubsampling: true };
+  }
+
+  return { drawFeatures, lodSubsampling: clustered || visible.length !== drawFeatures.length };
 }

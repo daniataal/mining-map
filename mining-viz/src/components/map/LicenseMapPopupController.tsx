@@ -24,6 +24,7 @@ export type LicenseMapPopupControllerProps = {
   mapFlyTrigger: number;
   markerRefs: React.MutableRefObject<Record<string, L.Marker>>;
   clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
+  preferCoordinatePopup?: boolean;
   userAnnotations: Record<string, UserAnnotation>;
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   deleteLicense: (id: string) => void;
@@ -43,6 +44,7 @@ export default function LicenseMapPopupController({
   mapFlyTrigger,
   markerRefs,
   clusterGroupRef,
+  preferCoordinatePopup = false,
   userAnnotations,
   updateAnnotation,
   deleteLicense,
@@ -124,7 +126,7 @@ export default function LicenseMapPopupController({
     ],
   );
 
-  const openAtSelectedMarker = useCallback(() => {
+  const openAtSelectedMarker = useCallback((forceCoordinate = false) => {
     const item = selectedItemRef.current;
     if (!item) return;
 
@@ -135,7 +137,7 @@ export default function LicenseMapPopupController({
     const container = ensureContainer();
     const popup = ensurePopup();
     const marker = markerRefs.current[item.id];
-    const latlng = marker?.getLatLng?.() ?? L.latLng(lat, lng);
+    const latlng = forceCoordinate ? L.latLng(lat, lng) : (marker?.getLatLng?.() ?? L.latLng(lat, lng));
 
     if (popup.isOpen()) {
       popup.setLatLng(latlng);
@@ -190,6 +192,10 @@ export default function LicenseMapPopupController({
 
     const finishOpen = () => {
       if (cancelled) return;
+      if (preferCoordinatePopup) {
+        openAtSelectedMarker(true);
+        return;
+      }
       const attemptOpen = (triesLeft: number) => {
         if (cancelled) return;
         const item = selectedItemRef.current;
@@ -199,7 +205,7 @@ export default function LicenseMapPopupController({
           (item._displayLng ?? item.lng) != null;
         const hasMarker = item != null && Boolean(markerRefs.current[item.id]);
         if (hasCoords && (hasMarker || triesLeft <= 0)) {
-          openAtSelectedMarker();
+          openAtSelectedMarker(false);
           return;
         }
         if (triesLeft > 0) {
@@ -209,7 +215,9 @@ export default function LicenseMapPopupController({
       raf1 = requestAnimationFrame(() => attemptOpen(8));
     };
 
-    if (sidebarFly) {
+    if (preferCoordinatePopup) {
+      finishOpen();
+    } else if (sidebarFly) {
       moveendHandler = finishOpen;
       map.once('moveend', moveendHandler);
     } else {
@@ -238,6 +246,7 @@ export default function LicenseMapPopupController({
     ensureContainer,
     renderPopupContent,
     openAtSelectedMarker,
+    preferCoordinatePopup,
   ]);
 
   // Follow spiderfied marker position without tearing down the popup.

@@ -2,7 +2,7 @@ import type { MutableRefObject } from 'react';
 import { createElementObject, createLayerComponent } from '@react-leaflet/core';
 import type { Layer } from 'leaflet';
 import { CanvasLiveDealLayer } from '../../lib/liveDealMap/liveDealCanvasLayer';
-import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
+import type { LiveDealFeatureKind, LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
 
 export interface CanvasLiveDealLayerProps {
   features: LiveDealMapFeature[];
@@ -10,6 +10,9 @@ export interface CanvasLiveDealLayerProps {
   selectedUid: string | null;
   onFeatureClick: (feature: LiveDealMapFeature) => void;
   layerApiRef?: MutableRefObject<CanvasLiveDealLayer | null>;
+  clusterPoints?: boolean;
+  clusterKinds?: readonly LiveDealFeatureKind[];
+  clusterMaxZoom?: number;
 }
 
 function createCanvasLiveDealLayer(
@@ -20,6 +23,9 @@ function createCanvasLiveDealLayer(
     mapZoom: props.mapZoom,
     selectedUid: props.selectedUid,
     onFeatureClick: props.onFeatureClick,
+    clusterPoints: props.clusterPoints,
+    clusterKinds: props.clusterKinds,
+    clusterMaxZoom: props.clusterMaxZoom,
   });
   layer.setFeatures(props.features);
   if (props.layerApiRef) {
@@ -41,6 +47,17 @@ function updateCanvasLiveDealLayer(
   if (props.selectedUid !== prevProps.selectedUid) layer.setSelectedUid(props.selectedUid);
   if (props.onFeatureClick !== prevProps.onFeatureClick) {
     layer.setOnFeatureClick(props.onFeatureClick);
+  }
+  if (
+    props.clusterPoints !== prevProps.clusterPoints ||
+    props.clusterKinds !== prevProps.clusterKinds ||
+    props.clusterMaxZoom !== prevProps.clusterMaxZoom
+  ) {
+    layer.setClusterOptions({
+      clusterPoints: props.clusterPoints,
+      clusterKinds: props.clusterKinds,
+      clusterMaxZoom: props.clusterMaxZoom,
+    });
   }
 }
 

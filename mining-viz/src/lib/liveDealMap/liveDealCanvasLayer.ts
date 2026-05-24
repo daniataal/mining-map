@@ -1,9 +1,10 @@
 import L from 'leaflet';
 import {
   liveDealFeaturePriority,
-  planLiveDealPointDraw,
+  planLiveDealPointFeatureDraw,
 } from './liveDealMapLod';
 import type {
+  LiveDealFeatureKind,
   LiveDealArcFeature,
   LiveDealMapFeature,
   LiveDealPointFeature,
@@ -14,6 +15,9 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   mapZoom: number;
   selectedUid: string | null;
   onFeatureClick?: (feature: LiveDealMapFeature) => void;
+  clusterPoints?: boolean;
+  clusterKinds?: readonly LiveDealFeatureKind[];
+  clusterMaxZoom?: number;
 }
 
 const MAX_CANVAS_DPR = 2;
@@ -251,12 +255,18 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _lastDpr = 0;
   private _drawnFeatures: LiveDealMapFeature[] = [];
   private _lodSubsampling = false;
+  private _clusterPoints = false;
+  private _clusterKinds: readonly LiveDealFeatureKind[] | undefined;
+  private _clusterMaxZoom = 13;
 
   constructor(options: CanvasLiveDealLayerOptions) {
     super(options);
     this._mapZoom = options.mapZoom;
     this._selectedUid = options.selectedUid;
     this._onFeatureClick = options.onFeatureClick;
+    this._clusterPoints = Boolean(options.clusterPoints);
+    this._clusterKinds = options.clusterKinds;
+    this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
   }
 
   setFeatures(features: LiveDealMapFeature[]): void {
@@ -282,6 +292,28 @@ export class CanvasLiveDealLayer extends L.Layer {
 
   setOnFeatureClick(handler: ((feature: LiveDealMapFeature) => void) | undefined): void {
     this._onFeatureClick = handler;
+  }
+
+  setClusterOptions(options: {
+    clusterPoints?: boolean;
+    clusterKinds?: readonly LiveDealFeatureKind[];
+    clusterMaxZoom?: number;
+  }): void {
+    const nextClusterPoints = Boolean(options.clusterPoints);
+    const nextClusterKinds = options.clusterKinds;
+    const nextClusterMaxZoom = options.clusterMaxZoom ?? 13;
+    if (
+      this._clusterPoints === nextClusterPoints &&
+      this._clusterKinds === nextClusterKinds &&
+      this._clusterMaxZoom === nextClusterMaxZoom
+    ) {
+      return;
+    }
+    this._clusterPoints = nextClusterPoints;
+    this._clusterKinds = nextClusterKinds;
+    this._clusterMaxZoom = nextClusterMaxZoom;
+    this._lastPaintKey = '';
+    this._scheduleRedraw();
   }
 
   getLastDrawCount(): number {
@@ -380,7 +412,11 @@ export class CanvasLiveDealLayer extends L.Layer {
     ctx.clearRect(0, 0, size.x, size.y);
 
     const viewport = this._viewport(map);
-    const pointPlan = planLiveDealPointDraw(this._features, viewport, map.getZoom(), this._selectedUid);
+    const pointPlan = planLiveDealPointFeatureDraw(this._features, viewport, map.getZoom(), this._selectedUid, {
+      clusterPoints: this._clusterPoints,
+      clusterKinds: this._clusterKinds,
+      clusterMaxZoom: this._clusterMaxZoom,
+    });
     this._lodSubsampling = pointPlan.lodSubsampling;
 
     const selected: LiveDealMapFeature[] = [];
@@ -390,9 +426,8 @@ export class CanvasLiveDealLayer extends L.Layer {
         (feature.uid === this._selectedUid ? selected : normal).push(feature);
       }
     }
-    for (const index of pointPlan.drawIndices) {
-      const feature = this._features[index];
-      if (feature) (feature.uid === this._selectedUid ? selected : normal).push(feature);
+    for (const feature of pointPlan.drawFeatures) {
+      (feature.uid === this._selectedUid ? selected : normal).push(feature);
     }
 
     const drawn = [...normal, ...selected];

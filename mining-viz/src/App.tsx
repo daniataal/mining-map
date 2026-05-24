@@ -225,7 +225,6 @@ export default function App() {
   const {
     data: rawData = [],
     isLoading,
-    isFetching,
     error: fetchError,
   } = useLicensesForMap({
     sector: licenseSector,
@@ -239,10 +238,7 @@ export default function App() {
     () => rawData.some((row) => (row.mapClusterCount ?? 0) > 0),
     [rawData],
   );
-  const licensesMapSecondaryStatus = useMemo(() => {
-    if (!isFetching || isLoading || rawData.length === 0) return null;
-    return t('מרענן מאגר רישיונות…', 'Refreshing license bundle…');
-  }, [isFetching, isLoading, rawData.length, t]);
+  const licensesMapSecondaryStatus = null;
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
     data: storageTerminalResponse,
@@ -1220,12 +1216,7 @@ export default function App() {
               loading={
                 viewMode === 'ports'
                   ? isPortsLoading
-                  : Boolean(
-                      (isLoading && rawData.length === 0) ||
-                        (viewMode === 'oil_and_gas' &&
-                          isStorageLoading &&
-                          (storageTerminalResponse?.entities?.length ?? 0) === 0),
-                    )
+                  : Boolean(isLoading && rawData.length === 0)
               }
               userAnnotations={userAnnotations}
               selectedItem={selectedItem}
@@ -1526,23 +1517,11 @@ export default function App() {
                   licensesFetchPending={
                     viewMode !== 'route_planner' &&
                     (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
-                    ((isLoading && rawData.length === 0) ||
-                      (viewMode === 'oil_and_gas' &&
-                        isStorageLoading &&
-                        (storageTerminalResponse?.entities?.length ?? 0) === 0)) &&
-                    !fetchError &&
-                    !(viewMode === 'oil_and_gas' && storageError)
-                  }
-                  licensesRefetching={
-                    viewMode !== 'route_planner' &&
-                    (viewMode === 'global' ||
-                      viewMode === 'mining' ||
-                      viewMode === 'oil_and_gas') &&
-                    isFetching &&
-                    !isLoading &&
-                    rawData.length > 0 &&
+                    isLoading &&
+                    rawData.length === 0 &&
                     !fetchError
                   }
+                  licensesRefetching={false}
                   licensesSecondaryStatus={
                     viewMode === 'route_planner' ? null : licensesMapSecondaryStatus
                   }

@@ -28,7 +28,7 @@ export const LICENSE_MAP_DEFAULT_ZOOM = 7;
 export const SERVER_CLUSTER_MIN_DRILL_ZOOM = 7;
 
 export function clusterTargetZoom(currentZoom: number): number {
-  return Math.min(Math.max(currentZoom + 2, SERVER_CLUSTER_MIN_DRILL_ZOOM), 10);
+  return Math.min(Math.max(currentZoom + 2, SERVER_CLUSTER_MIN_DRILL_ZOOM), 13);
 }
 
 export type ClusterDrillFlyPlan =
