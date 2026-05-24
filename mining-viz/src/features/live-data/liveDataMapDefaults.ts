@@ -33,13 +33,13 @@ export const BARENTSWATCH_VERIFY_BBOX = {
   north: 71,
 } as const;
 
-/** UX spec MAD-46: terminals/corridors on; vessels opt-in; no global AIS on entry. */
+/** Deal Lens default: terminals, MCR corridors, aggregate trade pairs, opportunities, and coverage. */
 export const LIVE_DATA_DEFAULT_LAYERS: OilLiveLayerVisibility = {
   terminals: true,
   vessels: false,
   corridors: true,
   opportunities: true,
-  tradeFlows: false,
+  tradeFlows: true,
   coverage: true,
 };
 

@@ -12,6 +12,49 @@ export type OilLiveMapResponse = {
   companies: OilCompany[];
 };
 
+export type OilLiveMapLayerPoint = {
+  id: string;
+  kind: 'terminal' | 'vessel' | 'opportunity' | 'cargo' | string;
+  lat: number;
+  lng: number;
+  title?: string;
+  subtitle?: string;
+  tier?: OilLiveProvenance;
+  confidence?: number;
+  source_count?: number;
+  deal_score?: number;
+  style_key?: string;
+  ref_id?: string;
+};
+
+export type OilLiveMapLayerArc = {
+  id: string;
+  kind: 'cargo' | 'trade_flow' | string;
+  positions: Array<[number, number]>;
+  title?: string;
+  subtitle?: string;
+  tier?: OilLiveProvenance;
+  confidence?: number;
+  source_count?: number;
+  deal_score?: number;
+  style_key?: string;
+  ref_id?: string;
+};
+
+export type OilLiveMapLayersResponse = {
+  points: OilLiveMapLayerPoint[];
+  arcs: OilLiveMapLayerArc[];
+  coverage: unknown[];
+  meta: {
+    bbox?: string;
+    zoom?: number;
+    limit?: number;
+    lod?: string;
+    counts?: Record<string, number>;
+    disclaimer?: string;
+  };
+};
+
 export type OilLiveVesselMeta = {
   total_available?: number;
   returned_count?: number;
@@ -380,6 +423,26 @@ export async function getOilLiveMap(bbox?: string, zoom?: number): Promise<OilLi
   if (zoom != null && Number.isFinite(zoom)) params.set('zoom', String(zoom));
   const res = await fetch(oilUrl(`/api/oil-live/map?${params.toString()}`));
   if (!res.ok) throw new Error(`oil-live map ${res.status}`);
+  return res.json();
+}
+
+export async function getOilLiveMapLayers(options: {
+  bbox: string;
+  zoom?: number;
+  layers?: string[];
+  commodity?: string;
+  dealSignal?: string;
+  limit?: number;
+}): Promise<OilLiveMapLayersResponse> {
+  const params = new URLSearchParams();
+  params.set('bbox', options.bbox);
+  params.set('limit', String(options.limit ?? (options.zoom != null && options.zoom < 8 ? 250 : 500)));
+  if (options.zoom != null && Number.isFinite(options.zoom)) params.set('zoom', String(options.zoom));
+  if (options.layers?.length) params.set('layers', options.layers.join(','));
+  if (options.commodity) params.set('commodity', options.commodity);
+  if (options.dealSignal) params.set('dealSignal', options.dealSignal);
+  const res = await fetch(oilUrl(`/api/oil-live/map-layers?${params.toString()}`));
+  if (!res.ok) throw new Error(`oil-live map-layers ${res.status}`);
   return res.json();
 }
 

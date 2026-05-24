@@ -128,10 +128,10 @@ export default function LiveDataMapLayersPanel({
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-black uppercase tracking-widest text-amber-500">
-              {t('שכבות מפת נתונים חיים', 'Live Data map layers')}
+              {t('עדשת עסקאות חיות', 'Live Deal Lens')}
             </p>
             <p className="text-base leading-snug text-slate-700 dark:text-slate-200">
-              {t('מסופים · מכליות · כיסוי · מסדרונות', 'Terminals · tankers · coverage · corridors')}
+              {t('ספקים · קונים · מסלולים · תשתית', 'Suppliers · buyers · routes · infrastructure')}
             </p>
           </div>
         </div>
@@ -140,8 +140,8 @@ export default function LiveDataMapLayersPanel({
       <div className="space-y-3 px-4 pb-4 pt-3">
         <p className="text-base leading-relaxed text-slate-600 dark:text-slate-300">
           {t(
-            'שכבת כלי השיט מציגה מיקומי מכליות/נפט ליד מסופים. כבו אם המפה איטית.',
-            'Vessel layer shows oil/tanker positions near terminals. Turn off if the map is slow.',
+            'מציג שכבות עסקה שימושיות במסך אחד: מסופים, מכליות, MCR, זוגות סחר וכיסוי AIS.',
+            'Shows deal-useful layers in one smooth canvas pass: terminals, tankers, MCRs, trade pairs, and AIS coverage.',
           )}
         </p>
 
