@@ -1,17 +1,12 @@
 import { useMemo } from 'react';
-import L from 'leaflet';
-import { LayerGroup, LayersControl, Marker, Tooltip } from 'react-leaflet';
+import { LayerGroup, LayersControl } from 'react-leaflet';
 import type { MiningLicense } from '../../types';
 import { useI18n } from '../../lib/i18n';
 import {
-  formatStorageOperatorLabel,
-  formatStorageOwnerLabel,
-  formatStorageSourceLabel,
-  formatStorageSubstanceLabel,
-  STORAGE_OPERATOR_UNTAGGED,
   storageTankFarmsLayerShouldMount,
 } from '../../lib/storageTankFarmsLayer';
-import { createStorageTerminalMapIcon, createTankFarmMapIcon } from './refineryMapIcon';
+import CanvasLiveDealLayer from './CanvasLiveDealLayer';
+import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
 
 interface StorageTankFarmsMapLayerProps {
   entities: MiningLicense[];
@@ -29,10 +24,34 @@ export default function StorageTankFarmsMapLayer({
   onSelect,
 }: StorageTankFarmsMapLayerProps) {
   const { t } = useI18n();
-  const terminalIcon = useMemo(() => createStorageTerminalMapIcon(false), []);
-  const tankFarmIcon = useMemo(() => createTankFarmMapIcon(false), []);
-  const selectedTerminalIcon = useMemo(() => createStorageTerminalMapIcon(true), []);
-  const selectedTankFarmIcon = useMemo(() => createTankFarmMapIcon(true), []);
+  const placemarks = useMemo(
+    () =>
+      entities.filter(
+        (item): item is MiningLicense & { lat: number; lng: number } =>
+          item.lat != null && item.lng != null,
+      ),
+    [entities],
+  );
+  const features = useMemo<LiveDealMapFeature[]>(
+    () =>
+      placemarks.map((item) => ({
+        shape: 'point',
+        uid: `storage:${item.id}`,
+        id: item.id,
+        kind: item.entitySubtype === 'tank_farm' ? 'tank_farm' : 'storage_terminal',
+        lat: item.lat,
+        lng: item.lng,
+        title: item.company,
+        subtitle: [item.operatorName, item.ownerName, item.country].filter(Boolean).join(' · '),
+        tier: item.recordOrigin ?? item.sourceKind ?? 'inferred',
+        confidence: item.confidenceScore ?? item.geoConfidence ?? undefined,
+        sourceCount: item.sourceLabels?.length ?? item.evidenceCount ?? 0,
+        dealScore: item.confidenceScore ?? 0.6,
+        styleKey: item.entitySubtype ?? 'storage_terminal',
+        data: item,
+      })),
+    [placemarks],
+  );
 
   if (!storageTankFarmsLayerShouldMount(enabled, mapZoom)) return null;
 
@@ -40,74 +59,19 @@ export default function StorageTankFarmsMapLayer({
     'מסופי אחסון / טנקים (OSM + מקורות)',
     'Storage / tank farms (OSM + reference)',
   );
-  const placemarks = entities.filter(
-    (item): item is MiningLicense & { lat: number; lng: number } =>
-      item.lat != null && item.lng != null,
-  );
 
   return (
     <LayersControl.Overlay checked name={layerLabel}>
       <LayerGroup>
-        {placemarks.map((item) => {
-          const isTankFarm = item.entitySubtype === 'tank_farm';
-          const selected = item.id === selectedId;
-          const icon = isTankFarm
-            ? selected
-              ? selectedTankFarmIcon
-              : tankFarmIcon
-            : selected
-              ? selectedTerminalIcon
-              : terminalIcon;
-
-          return (
-            <Marker
-              key={item.id}
-              position={[item.lat, item.lng]}
-              icon={icon}
-              zIndexOffset={selected ? 800 : 400}
-              eventHandlers={{
-                click: (e) => {
-                  L.DomEvent.stopPropagation(e);
-                  onSelect(item);
-                },
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -18]} opacity={1}>
-                <div className="bg-slate-950 border border-cyan-500/30 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md max-w-[220px]">
-                  <span className="text-[10px] font-black uppercase text-white tracking-widest break-words">
-                    {item.company}
-                  </span>
-                  {item.entitySubtype && (
-                    <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
-                      {item.entitySubtype.replaceAll('_', ' ')}
-                    </p>
-                  )}
-                  <p className="mt-1 text-[8px] text-slate-300 break-words">
-                    {t('מפעיל', 'Operator')}: {formatStorageOperatorLabel(item.operatorName, t('לא מתויג', STORAGE_OPERATOR_UNTAGGED))}
-                  </p>
-                  {formatStorageOwnerLabel(item.ownerName) && (
-                    <p className="text-[8px] text-slate-400 break-words">
-                      {t('בעלים', 'Owner')}: {item.ownerName}
-                    </p>
-                  )}
-                  {formatStorageSubstanceLabel(item) && (
-                    <p className="text-[8px] text-slate-400 break-words">
-                      {t('חומר', 'Substance')}: {formatStorageSubstanceLabel(item)}
-                    </p>
-                  )}
-                  {item.capacityText && (
-                    <p className="text-[8px] text-slate-400 break-words">
-                      {t('קיבולת', 'Capacity')}: {item.capacityText}
-                    </p>
-                  )}
-                  <p className="text-[8px] text-cyan-400/90 break-words">
-                    {t('מקור', 'Source')}: {formatStorageSourceLabel(item)}
-                  </p>
-                </div>
-              </Tooltip>
-            </Marker>
-          );
-        })}
+        <CanvasLiveDealLayer
+          features={features}
+          mapZoom={mapZoom ?? 5}
+          selectedUid={selectedId ? `storage:${selectedId}` : null}
+          onFeatureClick={(feature) => {
+            const item = feature.data as MiningLicense | undefined;
+            if (item) onSelect(item);
+          }}
+        />
       </LayerGroup>
     </LayersControl.Overlay>
   );

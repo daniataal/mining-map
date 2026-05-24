@@ -55,6 +55,7 @@ import {
 import { buildMaritimeStatusMessages } from '../lib/vessels/maritimeFeedStatus';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
+import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
@@ -108,6 +109,7 @@ import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerM
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
+import type { LiveDealMapFeature } from '../lib/liveDealMap/liveDealMapTypes';
 import {
   countriesWithVisibleLicenses,
   countryLicenseCounts,
@@ -982,6 +984,7 @@ export default function MapComponent({
       !isRoutePlannerView &&
       (!isLiveDataView || countryFocusActive);
     const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers;
+    const useCanvasLicenseMarkers = isLicenseMapView && !suppressLicenseClusters;
 
     const { mapDisplayData, licenseMarkersCapped } = useMemo(() => {
         let data = displayData;
@@ -1001,7 +1004,12 @@ export default function MapComponent({
         }
 
         const serverClusterMode = data.some(isServerLicenseCluster);
-        if (showLicenseMarkers && !serverClusterMode && data.length > LICENSE_MAP_DOM_MARKER_CAP) {
+        if (
+            showLicenseMarkers &&
+            !useCanvasLicenseMarkers &&
+            !serverClusterMode &&
+            data.length > LICENSE_MAP_DOM_MARKER_CAP
+        ) {
             const markerViewport = isMobileDevice ? currentVisibleViewport : licenseViewport;
             const capped = capMarkersInViewport(
                 data,
@@ -1021,6 +1029,7 @@ export default function MapComponent({
         currentVisibleViewport,
         licenseViewport,
         showLicenseMarkers,
+        useCanvasLicenseMarkers,
     ]);
 
     useEffect(() => {
@@ -1259,12 +1268,79 @@ export default function MapComponent({
         return countryBorderPathStyle;
     }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
+    const licenseServerClusterMode = useMemo(
+        () => mapDisplayData.some(isServerLicenseCluster),
+        [mapDisplayData],
+    );
+
+    const licenseCanvasFeatures = useMemo<LiveDealMapFeature[]>(() => {
+        if (!showLicenseMarkers || !useCanvasLicenseMarkers || licenseServerClusterMode) return [];
+        return mapDisplayData
+            .filter((item) => item._displayLat != null && item._displayLng != null)
+            .map((item) => {
+                const annotation = userAnnotations[item.id] || {};
+                const commodity = annotation.commodity || item.commodity || '';
+                const color = getMarkerColor(
+                    commodity,
+                    annotation.status,
+                    item.sector,
+                    item.entitySubtype,
+                );
+                const refineryPin = isRefineryEntity(item);
+                const oilFieldPin = !refineryPin && isOilFieldEntity(item);
+                const kind =
+                    item.entitySubtype === 'tank_farm'
+                        ? 'tank_farm'
+                        : item.entityKind === 'storage_terminal' ||
+                            item.entitySubtype === 'storage_terminal' ||
+                            item.entitySubtype === 'storage_tank'
+                          ? 'storage_terminal'
+                          : refineryPin
+                            ? 'refinery'
+                            : oilFieldPin
+                              ? 'oil_field'
+                              : 'license';
+                return {
+                    shape: 'point',
+                    uid: `license:${item.id}`,
+                    id: item.id,
+                    kind,
+                    lat: item._displayLat!,
+                    lng: item._displayLng!,
+                    title: item.company,
+                    subtitle: [item.commodity, item.country, item.licenseType].filter(Boolean).join(' · '),
+                    tier: item.recordOrigin ?? item.sourceKind ?? 'open_data',
+                    confidence: item.confidenceScore ?? item.geoConfidence ?? undefined,
+                    sourceCount: item.evidenceCount ?? item.sourceLabels?.length ?? 0,
+                    dealScore:
+                        item.confidenceScore ??
+                        (item.status?.toLowerCase?.().includes('operat') ? 0.75 : 0.5),
+                    styleKey:
+                        commodity.toLowerCase().includes('gold')
+                            ? 'gold'
+                            : refineryPin
+                              ? 'refinery'
+                              : oilFieldPin
+                                ? 'oil_field'
+                                : item.entitySubtype ?? color,
+                    data: item,
+                } satisfies LiveDealMapFeature;
+            });
+    }, [
+        licenseServerClusterMode,
+        mapDisplayData,
+        showLicenseMarkers,
+        useCanvasLicenseMarkers,
+        userAnnotations,
+    ]);
+
     const licenseMarkerIcons = useMemo(() => {
         const cache = markerIconCacheRef.current;
         const icons = new Map<string, L.DivIcon>();
         const validIds = new Set<string>();
         for (const item of mapDisplayData) {
             if (item._displayLat == null || item._displayLng == null) continue;
+            if (useCanvasLicenseMarkers && !isServerLicenseCluster(item)) continue;
             validIds.add(item.id);
             const annotation = userAnnotations[item.id] || {};
             const color = getMarkerColor(
@@ -1296,7 +1372,7 @@ export default function MapComponent({
         }
         cache.prune(validIds);
         return icons;
-    }, [mapDisplayData, userAnnotations, isDark]);
+    }, [mapDisplayData, userAnnotations, isDark, useCanvasLicenseMarkers]);
 
     const licenseClusterIconCreate = useMemo(
         () => createLicenseClusterIconFactory(isDark),
@@ -1309,7 +1385,7 @@ export default function MapComponent({
         }
         const server: ReactNode[] = [];
         const points: ReactNode[] = [];
-        const serverClusterMode = mapDisplayData.some(isServerLicenseCluster);
+        const serverClusterMode = licenseServerClusterMode;
         for (const item of mapDisplayData) {
             if (item._displayLat == null || item._displayLng == null) continue;
             const markerIcon = licenseMarkerIcons.get(item.id);
@@ -1377,11 +1453,22 @@ export default function MapComponent({
         };
     }, [
         licenseMarkerIcons,
+        licenseServerClusterMode,
         mapDisplayData,
         onSelectMaritimeVessel,
         setSelectedItem,
         showLicenseMarkers,
     ]);
+
+    const handleLicenseCanvasFeatureClick = useCallback(
+        (feature: LiveDealMapFeature) => {
+            const item = feature.data as MiningLicense | undefined;
+            if (!item) return;
+            onSelectMaritimeVessel(null);
+            setSelectedItem(item);
+        },
+        [onSelectMaritimeVessel, setSelectedItem],
+    );
 
     const handleMaritimeVesselClick = useCallback(
         (vessel: MaritimeVessel) => {
@@ -2243,7 +2330,16 @@ export default function MapComponent({
                 {showLicenseMarkers && serverClusterMarkers && (
                     <LayerGroup>{serverClusterMarkers}</LayerGroup>
                 )}
+                {licenseCanvasFeatures.length > 0 && (
+                    <CanvasLiveDealLayer
+                        features={licenseCanvasFeatures}
+                        mapZoom={overlayMapZoom}
+                        selectedUid={selectedItem ? `license:${selectedItem.id}` : null}
+                        onFeatureClick={handleLicenseCanvasFeatureClick}
+                    />
+                )}
                 {showLicenseMarkers &&
+                    !useCanvasLicenseMarkers &&
                     licensePointMarkers &&
                     (suppressLicenseClusters ? (
                         <LayerGroup>{licensePointMarkers}</LayerGroup>

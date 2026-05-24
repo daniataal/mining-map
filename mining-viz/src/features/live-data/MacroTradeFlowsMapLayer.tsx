@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { LayerGroup, Polyline } from 'react-leaflet';
 import { bezierMidpoint, type LatLngTuple } from '../../lib/corridorGeometry';
 import { countryCentroid } from '../../lib/countryCentroids';
 import type { MacroTradeFlow } from '../../api/oilLiveApi';
+import CanvasLiveDealLayer from '../../components/petroleum/CanvasLiveDealLayer';
+import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
 
 export type MacroTradeFlowArc = {
   key: string;
@@ -55,27 +56,44 @@ const MACRO_COLOR = '#64748b';
 
 export default function MacroTradeFlowsMapLayer({ enabled, flows }: Props) {
   const arcs = useMemo(() => flowsToMacroArcs(flows), [flows]);
+  const features = useMemo<LiveDealMapFeature[]>(
+    () =>
+      arcs.map((arc, idx) => {
+        const weight = Math.min(5, 1.5 + Math.log10(Math.max(arc.trade_value_usd, 1)) * 0.35);
+        const pts = bezierMidpoint(arc.load, arc.discharge, idx);
+        return {
+          shape: 'arc',
+          uid: `macro-flow:${arc.key}`,
+          id: arc.key,
+          kind: 'trade_flow',
+          positions: pts,
+          popupLat: pts[1]?.[0] ?? arc.load[0],
+          popupLng: pts[1]?.[1] ?? arc.load[1],
+          title: `${arc.partner} → ${arc.reporter}`,
+          subtitle: `${arc.hs_code || 'HS'} · $${Math.round(arc.trade_value_usd).toLocaleString()}`,
+          tier: 'macro',
+          confidence: 0.65,
+          sourceCount: 1,
+          dealScore: Math.min(1, Math.log10(Math.max(arc.trade_value_usd, 1)) / 10),
+          styleKey: arc.hs_code,
+          color: MACRO_COLOR,
+          weight,
+          opacity: 0.55,
+          dashArray: '4 6',
+          data: arc,
+        };
+      }),
+    [arcs],
+  );
 
   if (!enabled || arcs.length === 0) return null;
 
   return (
-    <LayerGroup>
-      {arcs.map((arc, idx) => {
-        const weight = Math.min(5, 1.5 + Math.log10(Math.max(arc.trade_value_usd, 1)) * 0.35);
-        const pts = bezierMidpoint(arc.load, arc.discharge, idx);
-        return (
-          <Polyline
-            key={arc.key}
-            positions={pts}
-            pathOptions={{
-              color: MACRO_COLOR,
-              weight,
-              opacity: 0.55,
-              dashArray: '4 6',
-            }}
-          />
-        );
-      })}
-    </LayerGroup>
+    <CanvasLiveDealLayer
+      features={features}
+      mapZoom={5}
+      selectedUid={null}
+      onFeatureClick={() => {}}
+    />
   );
 }
