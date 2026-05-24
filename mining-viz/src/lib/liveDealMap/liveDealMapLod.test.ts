@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { planLiveDealPointDraw } from './liveDealMapLod';
+import {
+  isLiveDealClientClusterData,
+  planLiveDealPointDraw,
+  planLiveDealPointFeatureDraw,
+} from './liveDealMapLod';
 import type { LiveDealMapFeature } from './liveDealMapTypes';
 
 const viewport = { south: -10, west: -10, north: 10, east: 10 };
@@ -55,5 +59,23 @@ describe('planLiveDealPointDraw', () => {
 
     const plan = planLiveDealPointDraw(crowded, viewport, 4, 'v-219');
     expect(plan.drawIndices.map((i) => crowded[i].uid)).toContain('v-219');
+  });
+
+  it('turns dense license cells into clickable aggregate features', () => {
+    const crowded = Array.from({ length: 30 }, (_, index) =>
+      point(`license-${index}`, 'license', 5 + index * 0.001, -1 + index * 0.001),
+    );
+
+    const plan = planLiveDealPointFeatureDraw(crowded, viewport, 7, null, {
+      clusterPoints: true,
+      clusterKinds: ['license'],
+    });
+
+    expect(plan.lodSubsampling).toBe(true);
+    expect(plan.drawFeatures).toHaveLength(1);
+    const cluster = plan.drawFeatures[0];
+    expect(cluster.kind).toBe('server_cluster');
+    expect(cluster.sourceCount).toBe(30);
+    expect(isLiveDealClientClusterData(cluster.data)).toBe(true);
   });
 });

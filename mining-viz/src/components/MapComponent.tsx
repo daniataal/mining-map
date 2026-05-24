@@ -78,7 +78,6 @@ import { getOilLiveSyncStatus } from '../api/oilLiveApi';
 import { LIVE_DATA_HUB_BOUNDS, LIVE_DATA_DEFAULT_LAYERS, GOVERNMENT_AIS_COVERAGE_SOURCES, viewportOverlapsPersianGulfHub } from '../features/live-data/liveDataMapDefaults';
 import { resolveLiveDataVesselStatus } from '../features/live-data/liveDataVesselStatus';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
-import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
 import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
@@ -109,7 +108,8 @@ import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerM
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
-import type { LiveDealMapFeature } from '../lib/liveDealMap/liveDealMapTypes';
+import { isLiveDealClientClusterData } from '../lib/liveDealMap/liveDealMapLod';
+import type { LiveDealFeatureKind, LiveDealMapFeature } from '../lib/liveDealMap/liveDealMapTypes';
 import {
   countriesWithVisibleLicenses,
   countryLicenseCounts,
@@ -372,6 +372,11 @@ interface MapComponentProps {
 
 /** Max markers before we always zoom instead of spiderfy (spiderfy disabled anyway). */
 const LICENSE_CLUSTER_FIT_MAX_ZOOM = 14;
+const LICENSE_CANVAS_CLUSTER_KINDS: readonly LiveDealFeatureKind[] = [
+    'license',
+    'refinery',
+    'oil_field',
+];
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup timing. */
 function ClusterGroupRefBridge({
@@ -571,6 +576,9 @@ const MapClickHandler = ({
 }) => {
     useMapEvents({
         click(e) {
+            if ((e.originalEvent as MouseEvent & { __liveDealCanvasHandled?: boolean }).__liveDealCanvasHandled) {
+                return;
+            }
             if (routePlannerPickRole && onRoutePlannerMapPick) {
                 onRoutePlannerMapPick(e.latlng.lat, e.latlng.lng, routePlannerPickRole);
                 return;
@@ -1462,12 +1470,41 @@ export default function MapComponent({
 
     const handleLicenseCanvasFeatureClick = useCallback(
         (feature: LiveDealMapFeature) => {
+            if (feature.shape === 'point' && feature.kind === 'server_cluster' && isLiveDealClientClusterData(feature.data)) {
+                const { bounds, count } = feature.data;
+                const span = Math.max(
+                    Math.abs(bounds.north - bounds.south),
+                    Math.abs(bounds.east - bounds.west),
+                    0.05,
+                );
+                onSelectMaritimeVessel(null);
+                setSelectedItem(null);
+                setPendingLicenseClusterFly({
+                    id: feature.uid,
+                    company: `${count} licenses`,
+                    licenseType: 'Cluster',
+                    commodity: '',
+                    status: 'Active',
+                    date: null,
+                    country: '',
+                    region: '',
+                    sector: isOilAndGasView ? 'oil_and_gas' : 'mining',
+                    lat: feature.lat,
+                    lng: feature.lng,
+                    _displayLat: feature.lat,
+                    _displayLng: feature.lng,
+                    mapClusterCount: count,
+                    mapClusterGridDeg: span,
+                    entityKind: 'license',
+                } as MiningLicense);
+                return;
+            }
             const item = feature.data as MiningLicense | undefined;
             if (!item) return;
             onSelectMaritimeVessel(null);
             setSelectedItem(item);
         },
-        [onSelectMaritimeVessel, setSelectedItem],
+        [isOilAndGasView, onSelectMaritimeVessel, setSelectedItem],
     );
 
     const handleMaritimeVesselClick = useCallback(
@@ -2150,6 +2187,13 @@ export default function MapComponent({
                     mapFlyTrigger={mapFlyTrigger}
                     markerRefs={markerRefs}
                     clusterGroupRef={clusterGroupRef}
+                    preferCoordinatePopup={
+                        Boolean(
+                            selectedItem &&
+                            useCanvasLicenseMarkers &&
+                            licenseCanvasFeatures.some((feature) => feature.id === selectedItem.id),
+                        )
+                    }
                     userAnnotations={userAnnotations}
                     updateAnnotation={updateAnnotation}
                     deleteLicense={deleteLicense}
@@ -2273,7 +2317,7 @@ export default function MapComponent({
                     )}
                     {showInfrastructureLayers && onGroundVisible && !isLiveDataView && (
                         <OsmPetroleumMapLayers
-                            bbox={infrastructureMapBbox ?? WORLD_PETROLEUM_PRELOAD_BBOX}
+                            bbox={infrastructureMapBbox}
                             enabled
                             layerVisibility={infrastructureLayerVisibility}
                             forcedLayers={infrastructureForcedLayers}
@@ -2284,13 +2328,14 @@ export default function MapComponent({
                     {isOilAndGasView && onGroundVisible && (
                         <>
                             <PetroleumMapLayers
-                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                bbox={oilGasMapViewport}
                                 mapZoom={petroleumDetailZoom}
                                 enabled={isOilAndGasView && onGroundVisible}
                             />
                             <OsmPetroleumMapLayers
-                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                bbox={oilGasMapViewport}
                                 enabled={isOilAndGasView && onGroundVisible}
+                                mapZoom={petroleumDetailZoom}
                             />
                             <StorageTankFarmsMapLayer
                                 entities={storageEntities}
@@ -2336,6 +2381,9 @@ export default function MapComponent({
                         mapZoom={overlayMapZoom}
                         selectedUid={selectedItem ? `license:${selectedItem.id}` : null}
                         onFeatureClick={handleLicenseCanvasFeatureClick}
+                        clusterPoints
+                        clusterKinds={LICENSE_CANVAS_CLUSTER_KINDS}
+                        clusterMaxZoom={13}
                     />
                 )}
                 {showLicenseMarkers &&

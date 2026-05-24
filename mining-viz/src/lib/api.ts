@@ -1210,11 +1210,16 @@ export const useStorageTerminals = (enabled = true) => {
   return useQuery<StorageTerminalResponse>({
     queryKey: ['storage-terminals'],
     queryFn: async () => {
-      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals');
+      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
+        timeout: 12_000,
+      });
       return data;
     },
     enabled,
     staleTime: 30 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 };
 
