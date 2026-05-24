@@ -27,6 +27,15 @@ function colorForFeature(feature: LiveDealMapFeature): string {
   if (feature.shape === 'arc' && feature.color) return feature.color;
   if (feature.kind === 'opportunity') return '#10b981';
   if (feature.kind === 'terminal') return '#38bdf8';
+  if (feature.kind === 'storage_terminal') return '#06b6d4';
+  if (feature.kind === 'tank_farm') return '#f97316';
+  if (feature.kind === 'refinery') return '#fb923c';
+  if (feature.kind === 'oil_field') return '#1e40af';
+  if (feature.kind === 'license') {
+    if (feature.styleKey?.startsWith('#')) return feature.styleKey;
+    return feature.styleKey === 'gold' ? '#facc15' : '#64748b';
+  }
+  if (feature.kind === 'server_cluster') return '#2563eb';
   if (feature.kind === 'vessel') return '#f59e0b';
   if (feature.kind === 'trade_flow') return '#a855f7';
   return '#fb923c';
@@ -36,11 +45,19 @@ function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: b
   const base =
     feature.kind === 'opportunity'
       ? 8
+      : feature.kind === 'server_cluster'
+        ? 11
       : feature.kind === 'terminal'
         ? 6.5
+        : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
+          ? 6.5
+          : feature.kind === 'refinery' || feature.kind === 'oil_field'
+            ? 6
         : feature.kind === 'cargo'
           ? 6
-          : 5.5;
+          : feature.kind === 'license'
+            ? 5.5
+            : 5.5;
   const zoomBoost = zoom >= 9 ? 1.5 : zoom >= 7 ? 0.75 : 0;
   return base + zoomBoost + (selected ? 3 : 0);
 }
@@ -108,6 +125,15 @@ function drawPoint(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', x, y + 0.5);
+  }
+
+  if (feature.kind === 'server_cluster') {
+    ctx.font = '900 10px system-ui, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = feature.sourceCount != null && feature.sourceCount > 999 ? '999+' : String(feature.sourceCount ?? '');
+    ctx.fillText(label, x, y + 0.5);
   }
 
   if (selected) {
@@ -426,7 +452,10 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _onMapClick = (event: L.LeafletMouseEvent): void => {
     const hit = this._findAtPoint(event.containerPoint);
     if (!hit) return;
-    if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
+    if (event.originalEvent) {
+      (event.originalEvent as MouseEvent & { __liveDealCanvasHandled?: boolean }).__liveDealCanvasHandled = true;
+      L.DomEvent.stopPropagation(event.originalEvent);
+    }
     this._onFeatureClick?.(hit);
   };
 

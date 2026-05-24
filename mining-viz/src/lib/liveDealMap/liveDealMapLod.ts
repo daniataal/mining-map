@@ -19,10 +19,18 @@ export function liveDealFeaturePriority(feature: LiveDealPointFeature): number {
   const kindWeight =
     feature.kind === 'opportunity'
       ? 500
+      : feature.kind === 'server_cluster'
+        ? 480
       : feature.kind === 'terminal'
         ? 400
+        : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
+          ? 380
+          : feature.kind === 'refinery' || feature.kind === 'oil_field'
+            ? 360
         : feature.kind === 'cargo'
           ? 320
+          : feature.kind === 'license'
+            ? 300
           : feature.kind === 'vessel'
             ? 260
             : 100;

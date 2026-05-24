@@ -12,7 +12,6 @@ import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/p
 import { infrastructureLayerShouldRender } from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
-import { createRefineryMapIcon } from './refineryMapIcon';
 import {
   pipelineSubstancePopupLayerId,
   splitOsmPipelineFeatures,
@@ -135,6 +134,7 @@ function OsmPipelineGeoJson({
     () => ({ type: 'FeatureCollection' as const, features }),
     [features],
   );
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.3 }), []);
 
   return (
     <LayersControl.Overlay checked={defaultVisible} name={label}>
@@ -143,6 +143,7 @@ function OsmPipelineGeoJson({
           key={label}
           data={geojson}
           style={style}
+          renderer={canvasRenderer}
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
             bindOsmFeatureInteraction(
@@ -220,7 +221,7 @@ function OsmLayerOverlay({
     () => data ?? { type: 'FeatureCollection' as const, features: [] },
     [data],
   );
-  const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.3 }), []);
 
   if (layerId === 'pipelines') {
     return (
@@ -242,8 +243,13 @@ function OsmLayerOverlay({
           key={`osm-${layerId}`}
           data={geojson}
           style={style}
+          renderer={canvasRenderer}
           pointToLayer={(_feature, latlng) =>
-            L.marker(latlng, { icon: refineryIcon })
+            L.circleMarker(latlng, {
+              renderer: canvasRenderer,
+              radius: layerId === 'refineries' ? 5 : 4,
+              ...style,
+            })
           }
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;

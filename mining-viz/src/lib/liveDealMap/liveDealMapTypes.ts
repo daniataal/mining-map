@@ -3,7 +3,14 @@ export type LiveDealFeatureKind =
   | 'vessel'
   | 'opportunity'
   | 'cargo'
-  | 'trade_flow';
+  | 'trade_flow'
+  | 'license'
+  | 'server_cluster'
+  | 'storage_terminal'
+  | 'tank_farm'
+  | 'refinery'
+  | 'oil_field'
+  | 'infrastructure';
 
 export type LiveDealTier =
   | 'live'

@@ -12,7 +12,6 @@ import {
 } from '../../lib/petroleumLayers';
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
-import { createRefineryMapIcon } from './refineryMapIcon';
 import { shouldIncludeInOilGasPipelineLayer } from '../../lib/pipelineSubstance';
 
 const LAYER_STYLE: Record<PetroleumLayerId, PathOptions> = {
@@ -57,7 +56,7 @@ function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: Petro
       }),
     };
   }, [data, layerId]);
-  const refineryIcon = useMemo(() => createRefineryMapIcon(false), []);
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.3 }), []);
 
   return (
     <LayersControl.Overlay checked={DEFAULT_PETROLEUM_LAYER_VISIBILITY[layerId]} name={label}>
@@ -66,11 +65,17 @@ function PetroleumLayerOverlay({ layerId, label, bbox, mapZoom, enabled }: Petro
           key={layerId}
           data={geojson}
           style={style}
+          renderer={canvasRenderer}
           pointToLayer={(feature, latlng) => {
             if (layerId === 'refineries') {
-              return L.marker(latlng, { icon: refineryIcon });
+              return L.circleMarker(latlng, {
+                renderer: canvasRenderer,
+                radius: 5,
+                ...style,
+              });
             }
             return L.circleMarker(latlng, {
+              renderer: canvasRenderer,
               radius: 4,
               ...style,
             });
