@@ -1,0 +1,6 @@
+---
+description: Truthful and performant map/front-end behavior.
+globs: "mining-viz/src/**/*.{ts,tsx}"
+alwaysApply: false
+---
+Use approved Go APIs for new permanent maritime behavior. Do not claim complete global or Middle East coverage. Render dense global layers efficiently, never with unbounded feature payloads or huge DOM marker lists. Display provider freshness and coverage limitations; run TypeScript validation.

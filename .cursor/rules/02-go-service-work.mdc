@@ -1,0 +1,6 @@
+---
+description: Rules for Go service implementation.
+globs: "oil-live-intel/**/*.go"
+alwaysApply: false
+---
+Extend existing Go architecture and production tables where appropriate; do not duplicate paths. Run `gofmt` and relevant `go test ./...`, separating pre-existing failures. Keep frontend API contracts truthful and stable. Maritime durable data should use existing oil-live tables unless a reviewed migration changes them.
