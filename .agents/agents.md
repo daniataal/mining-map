@@ -148,3 +148,9 @@ All agents work inside the existing repository. Read `.agents/context/PLATFORM_V
 - Recommend public-source integrations only after checking licensing, access terms, freshness and relevance.
 
 **Must not:** label AI inference as verified fact.
+
+## Permanent Go Backend Migration Rule
+
+Every agent must read `.agents/context/BACKEND_GO_MIGRATION_MANDATE.md` before proposing or implementing backend, worker, provider, database/API-path or architecture changes.
+
+The platform long-term backend target is Go. Existing Python/FastAPI code is transitional. Do not introduce new permanent Python production services or endpoints when the capability can be implemented in the Go backend architecture. Any unavoidable temporary Python bridge must be explicitly documented with its Go replacement and removal plan.

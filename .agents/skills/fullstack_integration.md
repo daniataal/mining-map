@@ -19,3 +19,7 @@ Deliver an approved feature through the actual backend, frontend, data and Docke
 - Do not hide or replace global data when applying view filters.
 - Do not add duplicate services for data already present in the database.
 - Any new integration must expose provider status/freshness and fail safely.
+
+## Go backend target constraint
+
+The long-term backend target is Go. When integrating frontend/data/runtime features, connect to existing or newly approved Go APIs wherever feasible. Do not approve new permanent Python backend services merely because Python code already exists in the repository.

@@ -20,3 +20,11 @@ Modify the existing Python backend safely and consistently with its discovered f
 - Raw data, enriched fields and AI inference must be distinguishable.
 - Never return “no activity” where the real status is “no recent data coverage.”
 - Preserve identifiers and source timestamps needed for dossiers and audits.
+
+## Mandatory Go migration decision gate
+
+Before modifying backend functionality, read `.agents/context/BACKEND_GO_MIGRATION_MANDATE.md`.
+
+- Prefer implementing new production API/worker/domain capability in the existing or future Go backend path.
+- If touching Python is unavoidable for compatibility or temporary bridging, document why, identify the Go target, define cutover/removal criteria and avoid expanding it into a permanent subsystem.
+- For maritime functionality, prefer the existing Go `oil-live-intel` architecture over new Python services.

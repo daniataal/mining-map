@@ -110,3 +110,7 @@ Right now, prioritize the intelligence foundation:
 - Preserve raw source provenance and make inference/uncertainty visible.
 - Design for global scale and human due-diligence usability.
 - Explain how meaningful architecture decisions support the eventual intelligence-to-transaction platform.
+
+## Backend implementation direction: Go migration mandate
+
+The platform long-term backend target is Go. Current Python/FastAPI implementation may remain temporarily during controlled migration, but new core production backend capabilities should be implemented in, or migrated toward, Go. Read `.agents/context/BACKEND_GO_MIGRATION_MANDATE.md` before backend architecture or implementation work.
