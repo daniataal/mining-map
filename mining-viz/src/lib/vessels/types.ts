@@ -1,6 +1,17 @@
 /** Vessel / AIS types — separate from mining license data. */
 
 export type MaritimeVesselScope = 'oil_tankers' | 'all_vessels';
+export type MaritimeTankerView =
+  | 'worldwide'
+  | 'middle_east'
+  | 'persian_gulf'
+  | 'strait_of_hormuz'
+  | 'gulf_of_oman'
+  | 'fujairah'
+  | 'dubai_jebel_ali'
+  | 'ras_tanura'
+  | 'qatar_ras_laffan'
+  | 'kuwait_iraq_terminals';
 
 export interface MaritimeViewportBounds {
   south: number;
@@ -99,6 +110,24 @@ export interface MaritimeVessel {
   ais_metadata?: Record<string, unknown>;
   ais_messages?: Record<string, AisMessageEnvelope>;
   last_seen_at?: string | null;
+  is_tanker?: boolean | null;
+  region_tags?: string[];
+  provider?: string | null;
+  coverage_confidence?: 'open_ais_recent' | 'limited_terrestrial_ais' | string | null;
+}
+
+export interface AisCoverageStatus {
+  provider?: string;
+  region?: string;
+  stream_status?: string;
+  last_received_regional_position_at?: string | null;
+  vessels_observed_last_hour?: number;
+  tankers_observed_last_hour?: number;
+  heartbeat_status?: string;
+  coverage_warning?: boolean;
+  warning_text?: string | null;
+  recent_region_position_frames?: number;
+  metrics?: Record<string, unknown>[];
 }
 
 export interface MaritimeVesselFeedResponse {
@@ -145,6 +174,7 @@ export interface MaritimeVesselFeedResponse {
   persian_gulf_demo_mode?: 'env_coverage_gap' | 'env_coastal_sparse' | null;
   /** Public tracker for AISStream Persian Gulf coverage (for UI banner link). */
   maritime_aisstream_issue_url?: string | null;
+  coverage?: AisCoverageStatus;
 }
 
 export interface VesselFilters {

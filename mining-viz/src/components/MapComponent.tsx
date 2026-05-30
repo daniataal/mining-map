@@ -36,7 +36,7 @@ import L from 'leaflet';
 import 'leaflet.markercluster';
 import 'leaflet/dist/leaflet.css';
 import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeTankerView, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
@@ -46,7 +46,6 @@ import {
   toVesselDrawRecords,
   planVesselLodDraw,
   LOD_FULL_DETAIL_ZOOM,
-  VESSEL_SHIP_TYPE_OPTIONS,
   MARITIME_LEGEND_KEYS,
   VESSEL_CATEGORY_COLORS,
   VESSEL_LEGEND_T,
@@ -209,6 +208,29 @@ const PORTS_MAP_RENDER_LIMIT = 3000;
 const MARITIME_MAX_VESSEL_OPTIONS = ['1000', '2000', '5000', '10000', '15000'];
 
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['10', '15', '25', '30'];
+const MARITIME_TANKER_VIEW_OPTIONS: { value: MaritimeTankerView; labelHe: string; labelEn: string }[] = [
+    { value: 'worldwide', labelHe: 'מכליות בעולם', labelEn: 'Worldwide Tankers' },
+    { value: 'middle_east', labelHe: 'מזרח תיכון', labelEn: 'Middle East' },
+    { value: 'persian_gulf', labelHe: 'המפרץ הפרסי', labelEn: 'Persian Gulf' },
+    { value: 'strait_of_hormuz', labelHe: 'הורמוז', labelEn: 'Hormuz' },
+    { value: 'gulf_of_oman', labelHe: 'מפרץ עומאן', labelEn: 'Gulf of Oman' },
+    { value: 'fujairah', labelHe: "פוג'יירה", labelEn: 'Fujairah' },
+    { value: 'dubai_jebel_ali', labelHe: 'דובאי / ג׳בל עלי', labelEn: 'Dubai / Jebel Ali' },
+    { value: 'ras_tanura', labelHe: 'ראס תנורה', labelEn: 'Ras Tanura' },
+    { value: 'qatar_ras_laffan', labelHe: 'קטאר / ראס לפאן', labelEn: 'Qatar / Ras Laffan' },
+    { value: 'kuwait_iraq_terminals', labelHe: 'כווית / עיראק', labelEn: 'Kuwait / Iraq terminals' },
+];
+const MARITIME_TANKER_VIEW_BOUNDS: Partial<Record<MaritimeTankerView, [[number, number], [number, number]]>> = {
+    middle_east: [[16.0, 46.0], [31.5, 62.0]],
+    persian_gulf: [[23.5, 47.5], [30.8, 56.8]],
+    strait_of_hormuz: [[25.3, 55.9], [27.0, 57.3]],
+    gulf_of_oman: [[22.0, 56.0], [26.8, 61.5]],
+    fujairah: [[24.85, 56.20], [25.45, 56.75]],
+    dubai_jebel_ali: [[24.80, 54.70], [25.45, 55.45]],
+    ras_tanura: [[26.30, 49.70], [27.20, 50.40]],
+    qatar_ras_laffan: [[24.5, 50.5], [27.0, 52.4]],
+    kuwait_iraq_terminals: [[28.5, 47.5], [30.8, 49.9]],
+};
 
 const getMarkerColor = (
   commodity?: string,
@@ -710,6 +732,29 @@ const LiveDataMapFly = ({
     return null;
 };
 
+const TankerViewFlyEffect = ({
+    active,
+    view,
+}: {
+    active: boolean;
+    view: MaritimeTankerView;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!active || view === 'worldwide') return;
+        const boundsSpec = MARITIME_TANKER_VIEW_BOUNDS[view];
+        if (!boundsSpec) return;
+        const bounds = L.latLngBounds(boundsSpec);
+        if (!bounds.isValid()) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            map.flyToBounds(bounds, { padding: [48, 48], maxZoom: 8, duration: 0.9 });
+        }, 80);
+        return () => window.clearTimeout(timer);
+    }, [active, map, view]);
+    return null;
+};
+
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
@@ -933,11 +978,12 @@ export default function MapComponent({
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
     const [licenseViewport, setLicenseViewport] = useState<MaritimeViewportBounds | null>(null);
+    const [maritimeTankerView, setMaritimeTankerView] = useState<MaritimeTankerView>('worldwide');
     const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<PendingLicenseClusterFly | null>(
         null,
     );
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
-    const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
+    const vesselLayerLabel = t('מכליות (AIS)', 'Tankers (AIS)');
     const handleMaritimeLayerActiveChange = useCallback(
         (active: boolean) => {
             setIsMaritimeLayerEnabled(active);
@@ -957,8 +1003,7 @@ export default function MapComponent({
         },
         [onLicenseMapZoomChange],
     );
-    const vesselApiScope =
-        prioritizePetroleumVessels && isOilAndGasView ? ('oil_tankers' as const) : ('all_vessels' as const);
+    const vesselApiScope: MaritimeVesselScope = 'oil_tankers';
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
@@ -975,7 +1020,8 @@ export default function MapComponent({
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
-        viewport: maritimeViewport,
+        view: maritimeTankerView,
+        viewport: null,
     });
     const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
     const maritimeBboxTotal =
@@ -987,8 +1033,11 @@ export default function MapComponent({
         maritimeFeed?.total_available ??
         maritimeSnapshotVessels.length;
     const maritimeVesselsInViewport = useMemo(
-        () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
-        [maritimeSnapshotVessels, maritimeViewport],
+        () =>
+            vesselApiScope === 'oil_tankers'
+                ? maritimeSnapshotVessels
+                : filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
+        [maritimeSnapshotVessels, maritimeViewport, vesselApiScope],
     );
     const maritimeVessels = useMemo(() => {
         const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
@@ -1810,6 +1859,55 @@ export default function MapComponent({
                             )}
                         </div>
 
+                        <div>
+                            <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                {t('שכבת כלי שיט', 'Vessel Layer')}
+                            </p>
+                            <Select
+                                value={maritimeTankerView}
+                                onValueChange={(value) => {
+                                    setMaritimeTankerView(value as MaritimeTankerView);
+                                    setIsMaritimeLayerEnabled(true);
+                                }}
+                            >
+                                <SelectTrigger className="h-9 w-full rounded-xl border-black/10 bg-white/80 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/80">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                    {MARITIME_TANKER_VIEW_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {t(option.labelHe, option.labelEn)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-600 dark:text-cyan-300">
+                                    {t('מכליות בלבד', 'Tankers only')}
+                                </Badge>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setOilAndGasDisplayMode('on_ground_only')}
+                                    className="h-7 rounded-lg px-2 text-[8px] font-black uppercase tracking-widest text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+                                >
+                                    {t('מסופי נפט', 'Oil Terminals')}
+                                </Button>
+                            </div>
+                            <p className="mt-1.5 text-[9px] leading-snug text-slate-500 dark:text-slate-500">
+                                {maritimeTankerView === 'worldwide'
+                                    ? t(
+                                          'קורא מכליות שמורות מכל העולם; בחירת תצוגה לא משנה את ה-worker.',
+                                          'Reads stored worldwide tankers; changing view never changes the collector.'
+                                      )
+                                    : t(
+                                          'קורא מכליות שמורות באזור הנבחר ומקרב את המפה לשם.',
+                                          'Reads stored tankers in the selected region and flies the map there.'
+                                      )}
+                            </p>
+                        </div>
+
                         {isMaritimeLayerEnabled && (
                             <>
                                 <div className="flex items-center justify-between gap-2 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2 dark:border-white/10 dark:bg-white/[0.03]">
@@ -1838,6 +1936,29 @@ export default function MapComponent({
                                     <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-800 dark:text-amber-200">
                                         {maritimeSparseWarning}
                                     </p>
+                                )}
+
+                                {maritimeFeed?.coverage?.warning_text && (
+                                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
+                                        {maritimeFeed.coverage.warning_text}
+                                    </p>
+                                )}
+
+                                {maritimeFeed?.coverage && (
+                                    <div className="grid grid-cols-2 gap-1.5 text-[8px] font-black uppercase tracking-widest">
+                                        <Badge className="justify-center border-none bg-slate-950/10 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                            {t('זרם', 'Stream')} {maritimeFeed.coverage.stream_status || 'unknown'}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-slate-950/10 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                            {t('Heartbeat', 'Heartbeat')} {maritimeFeed.coverage.heartbeat_status || 'unknown'}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                                            {t('מכליות שעה', 'Tankers 1h')} {maritimeFeed.coverage.tankers_observed_last_hour ?? 0}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                                            {t('כלי שיט שעה', 'Vessels 1h')} {maritimeFeed.coverage.vessels_observed_last_hour ?? 0}
+                                        </Badge>
+                                    </div>
                                 )}
 
                                 {maritimeViewportAisGap && (
@@ -1945,7 +2066,7 @@ export default function MapComponent({
                                                 className="h-8 rounded-lg border-black/10 bg-white/80 text-[10px] dark:border-white/10 dark:bg-slate-950/80"
                                             />
                                             <div className="flex flex-wrap gap-1">
-                                                {VESSEL_SHIP_TYPE_OPTIONS.map((typeLabel) => {
+                                                {(['Tanker'] as const).map((typeLabel) => {
                                                     const active = vesselFilters.shipTypes.includes(typeLabel);
                                                     return (
                                                         <button
@@ -2069,7 +2190,12 @@ export default function MapComponent({
                                                 {maritimeFeed?.source || t('ממתין לטעינה', 'Waiting to load')}
                                             </p>
                                             <p className="text-[9px] text-slate-500">
-                                                {maritimeFeed?.geography_mode === 'viewport_bbox'
+                                                {maritimeFeed?.geography_mode === 'stored_view_filter'
+                                                    ? t(
+                                                          'סינון תצוגה על בסיס הנתונים השמורים — לא משנה את גבולות ה-ingest.',
+                                                          'Stored-data view filter — does not change ingest boundaries.'
+                                                      )
+                                                    : maritimeFeed?.geography_mode === 'viewport_bbox'
                                                     ? t('מבוסס על גבולות המפה הנוכחיים', 'Using the current map bounds')
                                                     : maritimeFeed?.geography_mode === 'sampled_viewport_regions'
                                                         ? t(
@@ -2257,6 +2383,10 @@ export default function MapComponent({
                 {isLiveDataView && (
                     <LiveDataMapFly trigger={liveDataFlyTrigger} target={liveDataFlyTarget} />
                 )}
+                <TankerViewFlyEffect
+                    active={isMaritimeMapView && isMaritimeLayerEnabled}
+                    view={maritimeTankerView}
+                />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">

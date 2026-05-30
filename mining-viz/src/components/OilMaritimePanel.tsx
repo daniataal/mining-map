@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { MaritimeVessel } from '../lib/vessels/types';
+import { API_BASE } from '../lib/api';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -62,6 +64,24 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
   const { t } = useI18n();
   const [rawOpen, setRawOpen] = useState(false);
   const groups = useMemo(() => buildVesselFieldGroups(vessel), [vessel]);
+  const trackQuery = useQuery({
+    queryKey: ['tanker-track', vessel.mmsi, 24],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE}/api/vessels/tankers/${vessel.mmsi}/track?hours=24`);
+      if (!response.ok) throw new Error('Track failed');
+      return (await response.json()) as {
+        points?: {
+          received_at?: string;
+          latitude?: number;
+          longitude?: number;
+          speed_over_ground?: number | null;
+          course_over_ground?: number | null;
+        }[];
+      };
+    },
+    enabled: Boolean(vessel.mmsi),
+    staleTime: 60_000,
+  });
   const hasRawAis =
     Object.keys(vessel.ais_messages ?? {}).length > 0 || Object.keys(vessel.ais_metadata ?? {}).length > 0;
 
@@ -98,6 +118,37 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
             </p>
           </div>
         )}
+
+        <section className="space-y-2 rounded-2xl border border-black/5 bg-black/[0.02] p-4 dark:border-white/5 dark:bg-white/[0.03]">
+          <h4 className="text-[9px] font-black uppercase tracking-widest text-cyan-500">
+            {t('מסלול אחרון', 'Recent track')}
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="rounded-xl bg-white/60 px-3 py-2 dark:bg-slate-900/70">
+              <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">
+                {t('נקודות', 'Points')}
+              </p>
+              <p className="text-[11px] font-bold text-slate-900 dark:text-white">
+                {trackQuery.data?.points?.length ?? (trackQuery.isLoading ? '...' : 0)}
+              </p>
+            </div>
+            {(trackQuery.data?.points ?? []).slice(-3).map((point, idx) => (
+              <div key={`${point.received_at}-${idx}`} className="rounded-xl bg-white/60 px-3 py-2 dark:bg-slate-900/70">
+                <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">
+                  {point.received_at ? new Date(point.received_at).toLocaleTimeString() : 'UTC'}
+                </p>
+                <p className="text-[10px] font-semibold text-slate-900 dark:text-white">
+                  {point.latitude?.toFixed(3)}, {point.longitude?.toFixed(3)}
+                </p>
+              </div>
+            ))}
+          </div>
+          {trackQuery.isError && (
+            <p className="text-[9px] text-amber-600 dark:text-amber-300">
+              {t('לא ניתן לטעון מסלול כרגע.', 'Recent track is unavailable right now.')}
+            </p>
+          )}
+        </section>
 
         {hasRawAis && (
           <section className="rounded-2xl border border-black/5 dark:border-white/5 overflow-hidden">

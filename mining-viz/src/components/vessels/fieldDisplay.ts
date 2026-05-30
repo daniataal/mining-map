@@ -108,6 +108,9 @@ export function buildVesselFieldGroups(vessel: MaritimeVessel): { title: string;
       title: 'Feed',
       rows: [
         { key: 'source', label: 'Source', value: fmt(vessel.source_label) },
+        { key: 'provider', label: 'Provider', value: fmt(vessel.provider) },
+        { key: 'coverage_confidence', label: 'Coverage confidence', value: fmt(vessel.coverage_confidence) },
+        { key: 'region_tags', label: 'Region tags', value: fmt((vessel.region_tags ?? []).join(', ')) },
         { key: 'last_message_type', label: 'Last message type', value: fmt(vessel.last_message_type) },
         { key: 'message_types', label: 'Message types seen', value: fmt((vessel.message_types_seen ?? []).join(', ')) },
         { key: 'last_message_at', label: 'Last message at', value: fmt(vessel.last_message_at) },

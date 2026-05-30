@@ -148,7 +148,7 @@ docker compose up -d maritime-worker oil-live-intel-worker
 - **oil-live-intel-worker** → terminal geofence port calls → intelligence cards + WebSocket
 - **graph-sync vessel mirror** → `oil_vessel_position_observations` so `/api/oil-live/vessels`, `/api/oil-live/coverage`, and `/api/oil-live/source-health` can label freshness, source, confidence, and coverage gaps.
 
-AISStream is an open/community source with uneven geography. Meridian must not treat it as global satellite AIS. Persian Gulf, Red Sea/Suez, West Africa, East Africa, South Africa, and Tangier/Gibraltar are tracked as `maritime_watch_zones`; when no fresh open AIS is present, the UI shows a coverage gap rather than implying no vessels are there.
+AISStream is an open/community source with uneven geography. Meridian must not treat it as global satellite AIS. Persian Gulf, Red Sea/Suez, West Africa, East Africa, South Africa, and Tangier/Gibraltar are tracked as `maritime_watch_zones`; when no fresh open AIS is present, the UI shows a coverage gap rather than implying no vessels are there. Middle East data coverage is currently limited/absent from the connected AIS source and supplemental provider evaluation is pending.
 
 Open-only expansion path:
 
