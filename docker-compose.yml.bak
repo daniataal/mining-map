@@ -121,6 +121,53 @@ services:
       start_period: 30s
 
   # maritime-worker: continuous AIS ingest (start with: docker compose up -d maritime-worker)
+  maritime-worker:
+    build:
+      context: ./backend
+    container_name: mining-maritime-worker
+    restart: always
+    command: ["python", "maritime_worker.py"]
+    mem_limit: ${MARITIME_WORKER_MEM_LIMIT:-1g}
+    env_file:
+      - path: .env
+        required: false
+      - path: backend.env
+        required: false
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-30}
+      - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-25}
+      - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-15000}
+      - MARITIME_WORKER_SCOPE=${MARITIME_WORKER_SCOPE:-all_vessels}
+      - MARITIME_WORKER_WATCH_MODE=${MARITIME_WORKER_WATCH_MODE:-all_regions}
+      - MARITIME_ALWAYS_ON_REGION_IDS=${MARITIME_ALWAYS_ON_REGION_IDS:-persian_gulf,arabian_gulf,malacca,east_mediterranean}
+      - MARITIME_GULF_SUPPLEMENT_MAX_VESSELS=${MARITIME_GULF_SUPPLEMENT_MAX_VESSELS:-4000}
+      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-0}
+      - MARITIME_AIS_SEED_FILE=${MARITIME_AIS_SEED_FILE:-}
+      - AIS_MAX_VESSELS=${AIS_MAX_VESSELS:-15000}
+      - AIS_MAX_CAPTURE_WINDOW_SECONDS=${AIS_MAX_CAPTURE_WINDOW_SECONDS:-30}
+      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-600}
+      - MARITIME_SNAPSHOT_TTL_SEC=${MARITIME_SNAPSHOT_TTL_SEC:-600}
+      - MARITIME_SNAPSHOT_REDIS_KEY=${MARITIME_SNAPSHOT_REDIS_KEY:-maritime:snapshot:global}
+      - MARITIME_SNAPSHOT_RETENTION_SECONDS=${MARITIME_SNAPSHOT_RETENTION_SECONDS:-86400}
+      - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
+      # AISStream upstream TLS cert may expire; auto-fallback retries without verify (see maritime_ssl.py).
+      - MARITIME_SSL_VERIFY=${MARITIME_SSL_VERIFY:-1}
+      - MARITIME_SSL_AUTO_FALLBACK=${MARITIME_SSL_AUTO_FALLBACK:-1}
+      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   license-sync-worker:
     build:
       context: ./backend
@@ -167,6 +214,31 @@ services:
       db:
         condition: service_healthy
 
+  petroleum-osm-worker:
+    build:
+      context: ./backend
+    container_name: mining-petroleum-osm-worker
+    restart: always
+    command: ["python", "petroleum_osm_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - PETROLEUM_OSM_SYNC_ENABLED=${PETROLEUM_OSM_SYNC_ENABLED:-true}
+      - PETROLEUM_OSM_SYNC_INTERVAL_SECONDS=${PETROLEUM_OSM_SYNC_INTERVAL_SECONDS:-86400}
+      - PETROLEUM_OSM_SYNC_BACKOFF_SECONDS=${PETROLEUM_OSM_SYNC_BACKOFF_SECONDS:-3600}
+      - PETROLEUM_OSM_TILE_SLEEP_SECONDS=${PETROLEUM_OSM_TILE_SLEEP_SECONDS:-2.0}
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_TIMEOUT_SECONDS=${STORAGE_OVERPASS_TIMEOUT_SECONDS:-120}
+      - STORAGE_OVERPASS_RETRY_ATTEMPTS=${STORAGE_OVERPASS_RETRY_ATTEMPTS:-3}
+      - STORAGE_OVERPASS_TILE_WORKERS=${STORAGE_OVERPASS_TILE_WORKERS:-3}
+      - STORAGE_SKIP_LIVE_OVERPASS=${STORAGE_SKIP_LIVE_OVERPASS:-true}
+    depends_on:
+      db:
+        condition: service_healthy
 
   ted-procurement-worker:
     build:
@@ -285,6 +357,66 @@ services:
       db:
         condition: service_healthy
 
+  sweden-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-sweden-mining-worker
+    restart: always
+    command: ["python", "sweden_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - SGU_MINING_SYNC_ENABLED=${SGU_MINING_SYNC_ENABLED:-true}
+      - SGU_SYNC_INTERVAL_SECONDS=${SGU_SYNC_INTERVAL_SECONDS:-604800}
+      - SGU_SYNC_BACKOFF_SECONDS=${SGU_SYNC_BACKOFF_SECONDS:-3600}
+      - SGU_USER_AGENT=${SGU_USER_AGENT:-MeridianMiningMap/1.0 (SGU open data)}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  arcgis-probe-worker:
+    build:
+      context: ./backend
+    container_name: mining-arcgis-probe-worker
+    restart: always
+    command: ["python", "arcgis_probe_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - PROBE_SYNC_ENABLED=${PROBE_SYNC_ENABLED:-true}
+      - PROBE_SYNC_INTERVAL_SECONDS=${PROBE_SYNC_INTERVAL_SECONDS:-604800}
+      - PROBE_SYNC_BACKOFF_SECONDS=${PROBE_SYNC_BACKOFF_SECONDS:-3600}
+      - KZ_ARCGIS_PROBE_URL=${KZ_ARCGIS_PROBE_URL:-}
+      - PH_MGB_ARCGIS_TOKEN=${PH_MGB_ARCGIS_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kazakhstan-mining-worker:
+    build:
+      context: ./backend
+    container_name: mining-kazakhstan-mining-worker
+    restart: always
+    command: ["python", "kazakhstan_mining_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - KZ_EGOV_API_KEY=${KZ_EGOV_API_KEY:-}
+      - KZ_EGOV_API_BASE=${KZ_EGOV_API_BASE:-https://data.egov.kz/api/v4}
+      - KZ_EGOV_SYNC_INTERVAL_SECONDS=${KZ_EGOV_SYNC_INTERVAL_SECONDS:-86400}
+      - KZ_EGOV_SYNC_BACKOFF_SECONDS=${KZ_EGOV_SYNC_BACKOFF_SECONDS:-3600}
+    depends_on:
+      db:
+        condition: service_healthy
 
   redis:
     image: redis:alpine

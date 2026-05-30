@@ -70,6 +70,20 @@ func (s *Server) GetVesselDossier(w http.ResponseWriter, r *http.Request) {
 		"parties": parties,
 		"disclaimer": "AIS and inferred port activity do not confirm supplier or receiver. MCR rows are synthetic hypotheses from public sources.",
 	}
+
+	// ShipVault registry enrichment — additive, gracefully absent.
+	if s.ShipVaultSvc != nil {
+		imoStr := extractIMOFromMeta(vesselMeta)
+		if imoStr != "" {
+			enrichment, err := s.ShipVaultSvc.EnrichVessel(ctx, s.Pool, mmsi, imoStr, false)
+			if err != nil {
+				s.Log.Debug().Err(err).Int64("mmsi", mmsi).Str("imo", imoStr).Msg("shipvault enrichment skipped")
+			} else {
+				out["shipvault_profile"] = enrichment
+			}
+		}
+	}
+
 	if len(portCalls) == 0 && position == nil && len(cargoRows) == 0 {
 		out["empty_state"] = "no_stored_rows_for_mmsi"
 	}
@@ -106,6 +120,55 @@ func (s *Server) lookupVesselRegistry(ctx context.Context, mmsi int64) (map[stri
 	}
 	return item, nil
 }
+
+// extractIMOFromMeta safely pulls the IMO string out of the vessel registry map.
+func extractIMOFromMeta(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	switch v := meta["imo"].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case *string:
+		if v != nil {
+			return strings.TrimSpace(*v)
+		}
+	}
+	return ""
+}
+
+// RefreshVesselEnrichment forces a re-fetch from ShipVault, bypassing the cache TTL.
+// POST /api/oil-live/vessels/{mmsi}/refresh-enrichment
+func (s *Server) RefreshVesselEnrichment(w http.ResponseWriter, r *http.Request) {
+	if s.ShipVaultSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "ShipVault enrichment not configured")
+		return
+	}
+	mmsi, err := strconv.ParseInt(chi.URLParam(r, "mmsi"), 10, 64)
+	if err != nil || mmsi <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid mmsi")
+		return
+	}
+	ctx := r.Context()
+	vesselMeta, _ := s.lookupVesselRegistry(ctx, mmsi)
+	imoStr := extractIMOFromMeta(vesselMeta)
+	if imoStr == "" {
+		writeErr(w, http.StatusUnprocessableEntity, "vessel has no IMO number; cannot enrich via ShipVault")
+		return
+	}
+	enrichment, err := s.ShipVaultSvc.EnrichVessel(ctx, s.Pool, mmsi, imoStr, true)
+	if err != nil {
+		s.Log.Warn().Err(err).Int64("mmsi", mmsi).Str("imo", imoStr).Msg("shipvault refresh failed")
+		writeErr(w, http.StatusBadGateway, "ShipVault fetch failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mmsi":             mmsi,
+		"imo":              imoStr,
+		"shipvault_profile": enrichment,
+	})
+}
+
 
 func (s *Server) lookupVesselLatestPosition(ctx context.Context, mmsi int64) (map[string]any, error) {
 	if vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.MergedPositionsEnabled() {
@@ -577,6 +640,8 @@ func extractSourceLinks(evidence, metadata []byte) []map[string]string {
 
 func extractURLs(text string) []string {
 	var out []string
+	text = strings.ReplaceAll(text, `"`, " ")
+	text = strings.ReplaceAll(text, `\`, " ")
 	for _, part := range strings.Fields(text) {
 		part = strings.Trim(part, `",[]{}`)
 		if strings.HasPrefix(part, "http://") || strings.HasPrefix(part, "https://") {

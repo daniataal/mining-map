@@ -1373,7 +1373,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
                 from services.vessel_position_observations import (
                     mirror_maritime_redis_snapshot,
                 )
-            summary["steps"]["vessel_position_mirror"] = mirror_maritime_redis_snapshot(conn)
+            # Vessel position mirror removed - natively handled by Go Worker
         except Exception as exc:
             summary["steps"]["vessel_position_mirror"] = {
                 "status": "skipped",

@@ -16,6 +16,7 @@ import (
 
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/services/search"
+	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
 	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
@@ -28,6 +29,9 @@ type Server struct {
 	// SearchClient is optional — when nil, /api/oil-live/search returns
 	// {"error":"search_unavailable"} so the UI degrades gracefully.
 	SearchClient search.Client
+	// ShipVaultSvc is optional — when nil, vessel dossier omits
+	// the shipvault_profile block without error.
+	ShipVaultSvc *shipvault.Service
 }
 
 var upgrader = websocket.Upgrader{

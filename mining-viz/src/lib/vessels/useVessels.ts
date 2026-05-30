@@ -60,21 +60,15 @@ export async function fetchMaritimeVesselSnapshot(
   options: MaritimeSnapshotFetchOptions,
 ): Promise<MaritimeVesselFeedResponse> {
   const params = new URLSearchParams({
-    max_vessels: String(options.maxVessels),
-    capture_window_seconds: String(options.captureWindowSeconds),
-    scope: options.scope,
-    offset: '0',
+    limit: String(options.maxVessels),
   });
   const vp = options.viewport;
   if (vp) {
-    params.set('south', String(vp.south));
-    params.set('west', String(vp.west));
-    params.set('north', String(vp.north));
-    params.set('east', String(vp.east));
+    params.set('bbox', `${vp.west},${vp.south},${vp.east},${vp.north}`);
   }
 
-  // Use the existing production read path
-  const response = await fetch(`${API_BASE}/api/maritime/vessels?${params.toString()}`);
+  // Use the native Go endpoint
+  const response = await fetch(`${API_BASE}/api/oil-live/vessels/live?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Vessel feed failed (${response.status})`);
   }

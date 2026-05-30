@@ -33,6 +33,7 @@ func RunAISIngestor(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, 
 		}
 		if err := runAISCycle(ctx, pool, cfg, log); err != nil {
 			log.Warn().Err(err).Msg("ais cycle failed; retry in 30s")
+			_ = ais.UpdateSourceHealth(ctx, pool, 0, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -65,7 +66,19 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 	cycleCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
+	_ = ais.UpdateSourceHealth(ctx, pool, 0, nil)
+
+	var frameCount int
+	var lastHealthUpdate time.Time = time.Now()
+
 	return ais.RunStreamWithTLSFallback(cycleCtx, sub, func(ctx context.Context, u *ais.Update) error {
+		frameCount++
+		if time.Since(lastHealthUpdate) > 15*time.Second {
+			_ = ais.UpdateSourceHealth(ctx, pool, frameCount, nil)
+			frameCount = 0
+			lastHealthUpdate = time.Now()
+		}
+
 		term := index.Match(u.Lat, u.Lon)
 		nearSulfur := term != nil && term.HasSulfur
 		if !ais.IsRelevantVessel(u.ShipTypeCode, u.ShipTypeLabel, u.Name, nearSulfur) {

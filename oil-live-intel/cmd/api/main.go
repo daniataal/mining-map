@@ -13,6 +13,7 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/db"
 	"github.com/mining-map/oil-live-intel/internal/seed"
 	"github.com/mining-map/oil-live-intel/internal/services/search"
+	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/utils"
 )
 
@@ -50,12 +51,29 @@ func main() {
 		}
 	}
 
+	// ShipVault vessel enrichment is optional — initialised only when credentials
+	// are present. The service performs an initial token fetch synchronously so
+	// that any credential errors surface at startup rather than on first request.
+	var shipVaultSvc *shipvault.Service
+	if cfg.ShipVaultEnabled {
+		shipVaultSvc = shipvault.NewService(
+			cfg.ShipVaultBaseURL,
+			cfg.ShipVaultBearerToken,
+			cfg.ShipVaultCacheTTLDays,
+			log,
+		)
+		log.Info().Msg("ShipVault vessel enrichment enabled")
+	} else {
+		log.Info().Msg("ShipVault vessel enrichment disabled (set SHIPVAULT_BEARER_TOKEN to enable)")
+	}
+
 	srv := &api.Server{
 		Pool:         pool,
 		Log:          log,
 		Config:       cfg,
 		Hub:          api.NewHub(),
 		SearchClient: searchClient,
+		ShipVaultSvc: shipVaultSvc,
 	}
 	router := api.NewRouter(srv)
 
