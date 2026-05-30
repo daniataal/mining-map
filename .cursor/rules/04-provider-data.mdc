@@ -1,0 +1,6 @@
+---
+description: Provider, provenance and storage constraints.
+globs: "{backend/**,oil-live-intel/**,docs/**}"
+alwaysApply: false
+---
+Locate actual existing providers, tables and workers before adding anything. Provider proposals require official terms, target-area coverage evidence, fields/latency, dedupe and integration fit. Missing observations are not proof of missing real-world activity. No provider integration until approved.

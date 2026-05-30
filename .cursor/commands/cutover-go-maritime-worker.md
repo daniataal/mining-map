@@ -1,0 +1,2 @@
+# Complete Go Maritime Ownership and Retire Redundant Python Worker
+Read `AGENTS.md` and an approved source-of-truth report. Keep durable data. Move required provider-health/status ownership to Go, trace active Redis/Python consumers, validate UI/API/durable writes, then remove the redundant Python websocket service only if safe. Do not drop `maritime_source_health`, add providers or touch unrelated Python domains. Stop before commit with tests and rollback.
