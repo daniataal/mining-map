@@ -15,3 +15,12 @@ When the user invokes `/implementfeature <approved feature>`:
 9. Save an implementation handoff report with tests and rollback instructions.
 
 Preserve working features; do not silently rewrite unrelated systems.
+
+## Mandatory Go backend gate
+
+Before implementing a feature that touches backend APIs, ingestion, workers, provider adapters, query layers or domain services:
+
+1. Read `.agents/context/BACKEND_GO_MIGRATION_MANDATE.md`.
+2. Determine whether the implementation belongs in Go.
+3. Reject new permanent Python production subsystems unless human-approved as an explicitly temporary bridge.
+4. Include in the handoff: `GO_MIGRATION_ALIGNMENT`, `PYTHON_TECHNICAL_DEBT_ADDED_OR_REMOVED`, and any temporary bridge removal plan.

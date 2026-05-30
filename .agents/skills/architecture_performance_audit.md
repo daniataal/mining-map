@@ -42,3 +42,7 @@ Each recommendation must include:
 - Acceptance test.
 - Expected performance/correctness benefit.
 - Risk and dependency.
+
+## Required Go migration assessment
+
+Every architecture audit must evaluate the controlled migration from the existing Python/FastAPI backend toward Go. Identify current Python responsibilities, existing Go capabilities, duplicate paths, recommended Go domain boundaries, migration sequencing, parity tests, cutover/rollback and Python removal milestones.
