@@ -1705,8 +1705,8 @@ export default function MapComponent({
                     </p>
                     <p className="mt-1">
                         {t(
-                            'AISStream מדלג על המפרץ — הריצו maritime-worker והרחיבו watches; בדקו סטטוס סנכרון ב־Maritime Watch.',
-                            'AISStream skips the Gulf — run maritime-worker and expand watches; check sync status in Maritime Watch.',
+                            'AISStream מדלג על המפרץ — הריצו oil-live-intel-worker והרחיבו watches; בדקו סטטוס סנכרון ב־Maritime Watch.',
+                            'AISStream skips the Gulf — run oil-live-intel-worker and expand watches; check sync status in Maritime Watch.',
                         )}
                     </p>
                 </div>
@@ -1964,8 +1964,8 @@ export default function MapComponent({
                                 {maritimeViewportAisGap && (
                                     <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
                                         {t(
-                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את maritime-worker watches או בדוק סטטוס סנכרון למטה.',
-                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand maritime-worker watches or check sync status below.',
+                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את oil-live-intel-worker watches או בדוק סטטוס סנכרון למטה.',
+                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand oil-live-intel-worker watches or check sync status below.',
                                         )}
                                     </p>
                                 )}

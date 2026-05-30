@@ -23,15 +23,20 @@ export function resolveLiveAisBanner(
 ): LiveAisBanner {
   const workerErr = (options.platformHealth?.maritime_worker?.last_error ?? '').trim();
   const workerStatus = (options.platformHealth?.maritime_worker?.status ?? '').toLowerCase();
-  const keyMissing = options.platformHealth?.maritime_snapshot?.available === false && !workerErr;
+  const keyMissing =
+    options.platformHealth?.maritime_worker?.status === 'not_configured' ||
+    (options.platformHealth?.ais_positions_fresh === false &&
+      !workerErr &&
+      workerStatus !== 'ok' &&
+      workerStatus !== 'connecting');
 
   if (workerStatus === 'stale_error') {
     return {
       kind: 'tls_expired',
       messageHe:
-        'אין AIS חי — סטטוס ingest ישן (תעודת AISStream תקפה). הפעילו מחדש maritime-worker ו-oil-live-intel-worker.',
+        'אין AIS חי — סטטוס ingest ישן (תעודת AISStream תקפה). הפעילו מחדש oil-live-intel-worker.',
       messageEn:
-        'No live AIS — stale ingest status (AISStream TLS is valid upstream). Force-recreate maritime-worker and oil-live-intel-worker.',
+        'No live AIS — stale ingest status (AISStream TLS is valid upstream). Force-recreate oil-live-intel-worker.',
     };
   }
 
@@ -39,9 +44,9 @@ export function resolveLiveAisBanner(
     return {
       kind: 'tls_expired',
       messageHe:
-        'אין AIS חי — שגיאת TLS של AISStream. פרטים בשורת מצב הפלטפורמה; הפעילו מחדש maritime-worker עם MARITIME_SSL_AUTO_FALLBACK=1.',
+        'אין AIS חי — שגיאת TLS של AISStream. פרטים בשורת מצב הפלטפורמה; הפעילו מחדש oil-live-intel-worker עם MARITIME_SSL_AUTO_FALLBACK=1.',
       messageEn:
-        'No live AIS — AISStream TLS error. See the platform status bar; recreate maritime-worker with MARITIME_SSL_AUTO_FALLBACK=1.',
+        'No live AIS — AISStream TLS error. See the platform status bar; recreate oil-live-intel-worker with MARITIME_SSL_AUTO_FALLBACK=1.',
     };
   }
 
@@ -50,8 +55,8 @@ export function resolveLiveAisBanner(
       workerErr.length > 140 ? `${workerErr.slice(0, 140)}…` : workerErr;
     return {
       kind: 'worker_error',
-      messageHe: `maritime-worker: ${short}`,
-      messageEn: `maritime-worker: ${short}`,
+      messageHe: `oil-live-intel-worker: ${short}`,
+      messageEn: `oil-live-intel-worker: ${short}`,
     };
   }
 
@@ -59,9 +64,9 @@ export function resolveLiveAisBanner(
     return {
       kind: 'key_missing',
       messageHe:
-        'אין AIS חי — הגדירו AISSTREAM_API_KEY ב-backend.env והפעילו maritime-worker + oil-live-intel-worker.',
+        'אין AIS חי — הגדירו AISSTREAM_API_KEY ב-backend.env והפעילו oil-live-intel-worker.',
       messageEn:
-        'No live AIS — set AISSTREAM_API_KEY in backend.env and start maritime-worker + oil-live-intel-worker.',
+        'No live AIS — set AISSTREAM_API_KEY in backend.env and start oil-live-intel-worker.',
     };
   }
 
@@ -81,8 +86,8 @@ export function resolveLiveAisBanner(
   return {
     kind: 'no_vessels',
     messageHe:
-      'אין מכליות חיות בתצוגה — ודאו ש-maritime-worker ו-oil-live-intel-worker רצים (docker compose ps). נתוני הדגמה מושבתים.',
+      'אין מכליות חיות בתצוגה — ודאו ש-oil-live-intel-worker רץ (docker compose ps oil-live-intel-worker). נתוני הדגמה מושבתים.',
     messageEn:
-      'No live tankers in view — ensure maritime-worker and oil-live-intel-worker are running (docker compose ps). Demo data is disabled.',
+      'No live tankers in view — ensure oil-live-intel-worker is running (docker compose ps oil-live-intel-worker). Demo data is disabled.',
   };
 }

@@ -9,8 +9,8 @@ Branch: `paperclip2`. Strangler pattern: Go read paths in `oil-live-intel`, Pyth
 | **backend** (FastAPI) | `backend/main.py` | `GET /licenses` (bbox, zoom clusters, map markers) | `mining-viz` `useLicensesForMap`, `MapComponent` | **First port (this issue):** low-zoom clusters → Go |
 | **backend** | `backend/services/license_map_perf.py` | Grid LOD helpers for `/licenses` | `main.py`, `petroleum_osm_store.py` | Ported to `oil-live-intel/internal/services/licensemap/` |
 | **backend** | `backend/services/petroleum_osm_store.py` | Petroleum OSM bbox reads | Oil/Gas map layers | **Next candidate:** pipeline/infra bbox |
-| **backend** | `backend/services/maritime_intel.py` | AIS snapshot, coastal demo merge | `maritime_worker`, map overlays | Keep Python worker; reads already partially in Go |
-| **oil-live-intel** (Go) | `internal/api/router.go` | `/api/oil-live/map`, terminals, cargo, search | Live Data tab, Caddy `/api/oil-live/*` | Already Go — extend, do not rewrite |
+| **backend** | `backend/services/maritime_intel.py` | Geo helpers for route planner; legacy vessel feed retired | `port_logistics`, storage | **Done:** context/stats/vessels → Go; geo helpers remain |
+| **oil-live-intel** (Go) | `internal/api/router.go`, `internal/services/maritimecontext/` | `/api/oil-live/vessels/live`, `/maritime/context`, `/maritime/stats`, coverage | Live Data, Oil & Gas, dossier | **Maritime source of truth** |
 | **Workers** (Python) | `*_worker.py`, `oil_live_graph_sync.py` | Ingest → Postgres | Cron / compose | **Stay Python** unless profiled CPU-bound |
 
 ## First port recommendation

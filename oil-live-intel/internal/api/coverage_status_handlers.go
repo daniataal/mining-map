@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const coverageRegionFreshnessHours = 3
+
 func (s *Server) CoverageStatus(w http.ResponseWriter, r *http.Request) {
 	region := r.URL.Query().Get("region")
 	if region == "" {
@@ -37,26 +39,33 @@ func (s *Server) CoverageStatus(w http.ResponseWriter, r *http.Request) {
 		hasBbox = true
 	}
 
+	freshnessHours := coverageRegionFreshnessHours
+	if region == "worldwide_available_observations" {
+		freshnessHours = 24
+	}
+
 	var vesselCount, tankerCount int
 	var latestOverall, latestRegion *time.Time
 
-	// Count worldwide latest
-	_ = s.Pool.QueryRow(r.Context(), "SELECT MAX(received_at) FROM oil_ais_positions").Scan(&latestOverall)
+	_ = s.Pool.QueryRow(r.Context(), "SELECT MAX(ts) FROM oil_ais_positions").Scan(&latestOverall)
 
 	query := `
-		SELECT count(distinct p.mmsi), 
-		       count(distinct case when v.tanker_class IS NOT NULL OR v.product_tanker = true OR v.crude_capable = true then p.mmsi else null end), 
-		       max(p.received_at)
+		SELECT count(distinct p.mmsi),
+		       count(distinct case when v.tanker_class IS NOT NULL OR v.product_tanker = true OR v.crude_capable = true then p.mmsi else null end),
+		       max(p.ts)
 		FROM oil_ais_positions p
 		LEFT JOIN oil_vessels v ON p.mmsi = v.mmsi
-		WHERE p.received_at > now() - interval '24 hours'
-	`
+		WHERE p.ts > now() - make_interval(hours => $1)`
+	args := []any{freshnessHours}
+	if hasBbox {
+		query += ` AND p.lat >= $2 AND p.lat <= $3 AND p.lon >= $4 AND p.lon <= $5`
+		args = append(args, minLat, maxLat, minLon, maxLon)
+	}
 	var err error
 	if hasBbox {
-		query += " AND ST_Intersects(p.geom, ST_MakeEnvelope($1, $2, $3, $4, 4326))"
-		err = s.Pool.QueryRow(r.Context(), query, minLon, minLat, maxLon, maxLat).Scan(&vesselCount, &tankerCount, &latestRegion)
+		err = s.Pool.QueryRow(r.Context(), query, args...).Scan(&vesselCount, &tankerCount, &latestRegion)
 	} else {
-		err = s.Pool.QueryRow(r.Context(), query).Scan(&vesselCount, &tankerCount, &latestRegion)
+		err = s.Pool.QueryRow(r.Context(), query, args...).Scan(&vesselCount, &tankerCount, &latestRegion)
 	}
 
 	if err != nil {
@@ -65,8 +74,12 @@ func (s *Server) CoverageStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := map[string]any{
-		"provider":                      "aisstream",
-		"region":                        region,
+		"provider":                "aisstream",
+		"region":                  region,
+		"freshness_hours":         freshnessHours,
+		"vessels_observed_recent": vesselCount,
+		"tankers_observed_recent": tankerCount,
+		// Legacy aliases for existing UI clients
 		"vessels_observed_last_hour":    vesselCount,
 		"tankers_observed_last_hour":    tankerCount,
 		"latest_overall_observation_at": latestOverall,

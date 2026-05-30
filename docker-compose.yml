@@ -120,7 +120,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # maritime-worker: continuous AIS ingest (start with: docker compose up -d maritime-worker)
+  # Live AIS ingest: oil-live-intel-worker (Go) — start with: docker compose up -d oil-live-intel-worker
   license-sync-worker:
     build:
       context: ./backend

@@ -356,71 +356,10 @@ def upsert_observation(
 
 
 def mirror_maritime_redis_snapshot(conn: Any, limit: int = 5000) -> dict[str, Any]:
-    """
-    Mirror latest maritime-worker Redis snapshot into observations (data_source=maritime_redis).
-    Does not touch rows from other data_source values.
-    """
-    try:
-        from backend.services.maritime_snapshot import get_global_maritime_snapshot
-    except ImportError:
-        from services.maritime_snapshot import get_global_maritime_snapshot
-
-    with conn.cursor() as cur:
-        if not _table_exists(cur):
-            return {
-                "status": "skipped",
-                "reason": f"{TABLE} missing — start oil-live-intel to apply migration 014",
-                "upserted": 0,
-            }
-
-    payload = get_global_maritime_snapshot()
-    rows = payload.get("rows") if isinstance(payload, dict) else None
-    if not rows:
-        return {"status": "skipped", "reason": "redis_empty", "upserted": 0}
-
-    batch_rows: list[dict[str, Any]] = []
-    for row in list(rows)[: max(1, limit)]:
-        if not isinstance(row, dict):
-            continue
-        mmsi = _parse_mmsi(row.get("mmsi"))
-        lat = row.get("lat")
-        lng = row.get("lng")
-        if mmsi is None or lat is None or lng is None:
-            continue
-        try:
-            lat_f = float(lat)
-            lng_f = float(lng)
-        except (TypeError, ValueError):
-            continue
-        observed_at = _parse_observed_at(row)
-        sog_f = _parse_optional_float(row.get("speed_knots") or row.get("speed"))
-        cog_f = _parse_optional_float(row.get("course") or row.get("course_over_ground"))
-        batch_rows.append(
-            {
-                "mmsi": mmsi,
-                "data_source": DATA_SOURCE_MARITIME_REDIS,
-                "source_record_id": f"redis:{mmsi}",
-                "lat": lat_f,
-                "lng": lng_f,
-                "observed_at": observed_at,
-                "sog": sog_f,
-                "cog": cog_f,
-                "vessel_name": row.get("vessel_name"),
-                "imo": row.get("imo"),
-                "source_type": SOURCE_TYPE_COMMUNITY_AIS,
-                "confidence": 0.55,
-                "source_url": AISSTREAM_DOC_URL,
-                "raw": {
-                    "snapshot": row,
-                    "coverage_note": (
-                        "Mirrored from the open maritime-worker snapshot; open AIS is partial "
-                        "and does not prove supplier/receiver."
-                    ),
-                },
-            }
-        )
-
-    upserted = batch_upsert_observations(conn, batch_rows)
-    coverage_result = refresh_coverage_cells(conn)
-
-    return {"status": "ok", "upserted": upserted, "limit": limit, "coverage_cells": coverage_result}
+    """Retired — live AIS is ingested by oil-live-intel-worker into oil_ais_positions."""
+    _ = (conn, limit)
+    return {
+        "status": "retired",
+        "reason": "Python maritime-worker Redis snapshot writer removed",
+        "upserted": 0,
+    }

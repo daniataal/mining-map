@@ -35,8 +35,8 @@ export default function OilGasOnboardingTip({ active }: { active: boolean }) {
           <ul className="list-disc ps-4 space-y-1 font-semibold leading-snug">
             <li>
               {t(
-                'הפעילו שכבת כלי שיט (AIS). אם המפרץ נראה ריק, הריצו maritime-worker ובדקו סטטוס סנכרון ב־Maritime Watch.',
-                'Enable the vessel (AIS) layer. If the Gulf looks empty, run maritime-worker and check sync status in Maritime Watch.',
+                'הפעילו שכבת כלי שיט (AIS). אם המפרץ נראה ריק, הריצו oil-live-intel-worker ובדקו סטטוס סנכרון ב־Maritime Watch.',
+                'Enable the vessel (AIS) layer. If the Gulf looks empty, run oil-live-intel-worker and check sync status in Maritime Watch.',
               )}
             </li>
             <li>

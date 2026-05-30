@@ -1364,21 +1364,13 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
             conn, limit=opensanctions_limit
         )
         summary["steps"]["port_calls"] = {"events": _mirror_port_calls(cur)}
-        try:
-            try:
-                from backend.services.vessel_position_observations import (
-                    mirror_maritime_redis_snapshot,
-                )
-            except ImportError:
-                from services.vessel_position_observations import (
-                    mirror_maritime_redis_snapshot,
-                )
-            # Vessel position mirror removed - natively handled by Go Worker
-        except Exception as exc:
-            summary["steps"]["vessel_position_mirror"] = {
-                "status": "skipped",
-                "error": str(exc),
-            }
+        summary["steps"]["vessel_position_mirror"] = {
+            "status": "retired",
+            "detail": (
+                "Python maritime-worker Redis snapshot writer removed; "
+                "oil-live-intel-worker owns durable AIS ingest."
+            ),
+        }
         try:
             try:
                 from backend.services.ingest.barentswatch_ais_sync import sync_barentswatch_ais
