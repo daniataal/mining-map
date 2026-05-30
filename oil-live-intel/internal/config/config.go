@@ -27,6 +27,14 @@ type Config struct {
 	AISAutoTLSFallback      bool
 	ElasticsearchURL        string
 	SearchIndexerInterval   int
+
+	// ShipVault vessel registry enrichment (optional).
+	// When ShipVaultEnabled=true, the dossier API fetches owner, builder,
+	// name history and estimated value on-demand and caches in Postgres.
+	ShipVaultEnabled        bool
+	ShipVaultBearerToken    string
+	ShipVaultCacheTTLDays   int
+	ShipVaultBaseURL        string
 }
 
 func Load() Config {
@@ -53,6 +61,12 @@ func Load() Config {
 		AISAutoTLSFallback:     aisAutoTLSFallback(),
 		ElasticsearchURL:       strings.TrimRight(env("ELASTICSEARCH_URL", "http://elasticsearch:9200"), "/"),
 		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
+
+		// ShipVault: enabled automatically when the bearer token is present.
+		ShipVaultBearerToken:    env("SHIPVAULT_BEARER_TOKEN", ""),
+		ShipVaultCacheTTLDays:   envInt("SHIPVAULT_CACHE_TTL_DAYS", 7),
+		ShipVaultBaseURL:        strings.TrimRight(env("SHIPVAULT_BASE_URL", "https://shipvaultapi-gjb8c.ondigitalocean.app"), "/"),
+		ShipVaultEnabled: env("SHIPVAULT_BEARER_TOKEN", "") != "",
 	}
 }
 

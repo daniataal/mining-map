@@ -63,3 +63,30 @@ func nullableDraft(ok bool, v float64) any {
 	}
 	return v
 }
+
+// UpdateSourceHealth updates maritime_source_health for the AIS provider.
+func UpdateSourceHealth(ctx context.Context, pool *pgxpool.Pool, observationCount int, lastError error) error {
+	status := "ok"
+	limitations := []string{}
+	if lastError != nil {
+		status = "error"
+		limitations = append(limitations, lastError.Error())
+	}
+	
+	_, err := pool.Exec(ctx, `
+		INSERT INTO maritime_source_health (
+			source, source_type, display_name, status, coverage_tier,
+			last_observation_at, observation_count, limitations, updated_at
+		) VALUES (
+			'aisstream', 'ais', 'AISStream Community', $1, 'open_partial',
+			CASE WHEN $2 > 0 THEN now() ELSE NULL END, $2, $3, now()
+		)
+		ON CONFLICT (source) DO UPDATE SET
+			status = EXCLUDED.status,
+			last_observation_at = COALESCE(EXCLUDED.last_observation_at, maritime_source_health.last_observation_at),
+			observation_count = maritime_source_health.observation_count + EXCLUDED.observation_count,
+			limitations = EXCLUDED.limitations,
+			updated_at = EXCLUDED.updated_at
+	`, status, observationCount, limitations)
+	return err
+}

@@ -19,8 +19,24 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/health", s.Health)
 		api.Get("/sync-status", s.SyncStatus)
 		api.Get("/map", s.Map)
+		api.Get("/map/country-borders", s.CountryBorders)
+		api.Get("/map/petroleum-osm/layers", s.OSMLayersCatalog)
+		api.Get("/map/petroleum-osm/layers/{layer_id}", s.OSMLayerGeoJSON)
 		api.Get("/map-layers", s.MapLayers)
+
+		// Licenses
+		api.Get("/licenses", s.ListLicenses)
+		api.Post("/licenses", s.CreateLicense)
+		api.Put("/licenses/{id}", s.UpdateLicense)
+		api.Delete("/licenses/{id}", s.DeleteLicense)
+		api.Post("/licenses/batch-delete", s.BatchDeleteLicenses)
+		api.Post("/licenses/import-text", s.ImportLicensesText)
+		api.Post("/licenses/import", s.ImportLicenses)
+		api.Get("/licenses/export", s.ExportLicenses)
+		api.Get("/licenses/{id}/files", s.GetLicenseFiles)
+		api.Post("/licenses/{id}/files", s.UploadLicenseFile)
 		api.Get("/licenses/map", s.LicenseMapClusters)
+
 		api.Get("/coverage", s.VesselCoverage)
 		api.Get("/coverage/status", s.CoverageStatus)
 		api.Get("/source-health", s.SourceHealth)
@@ -32,6 +48,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/vessels/live", s.LiveVessels)
 		api.Get("/vessels/{mmsi}", s.GetVessel)
 		api.Get("/vessels/{mmsi}/dossier", s.GetVesselDossier)
+		api.Post("/vessels/{mmsi}/refresh-enrichment", s.RefreshVesselEnrichment)
 		api.Get("/port-calls/recent", s.RecentPortCalls)
 		api.Get("/port-calls/{id}", s.GetPortCall)
 		api.Get("/port-calls/{id}/explain", s.ExplainPortCall)
@@ -72,5 +89,19 @@ func NewRouter(s *Server) http.Handler {
 		api.Post("/internal/trade-sync", s.TriggerTradeSync)
 		api.Post("/internal/synthetic-bol-rebuild", s.TriggerSyntheticBolRebuild)
 	})
+
+	dossier := NewDossierHandler(s.Pool)
+	r.Route("/entities", func(api chi.Router) {
+		api.Get("/{entity_id}/contacts", dossier.GetEntityContacts)
+		api.Get("/{entity_id}/dd/latest", dossier.GetLatestDDReport)
+		api.Get("/{entity_id}/legal-events", dossier.GetLegalEvents)
+		api.Get("/{entity_id}/gov-procurement", dossier.GetGovProcurement)
+		api.Get("/{entity_id}/relationships", dossier.GetEntityRelationships)
+		api.Get("/{entity_id}/trade-flows", dossier.GetEntityTradeFlows)
+		api.Get("/{entity_id}/satellite-site", dossier.GetSatelliteSites)
+		api.Get("/{entity_id}/goldbod-license", dossier.GetGoldbodLicenses)
+		api.Get("/{entity_id}/eu-procurement", dossier.GetEUProcurement)
+	})
+
 	return r
 }
