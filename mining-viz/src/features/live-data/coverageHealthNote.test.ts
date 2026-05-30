@@ -18,6 +18,6 @@ describe('coverageViewVsDbNote', () => {
     });
     expect(note?.en).toContain('0 in current map bbox');
     expect(note?.en).toContain('22,000');
-    expect(note?.en).toContain('maritime-worker');
+    expect(note?.en).toContain('oil-live-intel-worker');
   });
 });

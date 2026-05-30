@@ -40,6 +40,8 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/coverage", s.VesselCoverage)
 		api.Get("/coverage/status", s.CoverageStatus)
 		api.Get("/source-health", s.SourceHealth)
+		api.Get("/maritime/context", s.MaritimeContext)
+		api.Get("/maritime/stats", s.MaritimeStats)
 		api.Get("/terminals", s.ListTerminals)
 		api.Get("/terminals/{id}/logistics-hints", s.LogisticsHints)
 		api.Get("/terminals/{id}", s.GetTerminal)

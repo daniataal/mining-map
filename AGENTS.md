@@ -17,7 +17,7 @@ Previous inspection found:
 - Tanker classification already exists where observations exist.
 - The connected AIS source has effectively no Persian Gulf / Hormuz / Gulf of Oman observations; the UI must describe this as limited provider coverage, not no real traffic.
 - Go `oil-live-intel-worker` writes durable live maritime data.
-- Python `mining-maritime-worker` historically established another AIS websocket and wrote legacy Redis snapshot/health data, creating duplicate upstream consumption and split health ownership.
+- Python `mining-maritime-worker` was retired; **oil-live-intel-worker** is the sole live AIS ingest path (Postgres + `maritime_source_health`).
 - Safe retirement of the Python worker requires Go ownership of useful health/status and verification that no active UI consumer still requires the legacy snapshot.
 
 ## Always follow

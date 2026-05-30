@@ -5699,39 +5699,29 @@ def platform_health():
     """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
     try:
         from backend.services.platform_health import build_platform_health
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
         from services.platform_health import build_platform_health
-    try:
-        from backend.services.maritime_snapshot import get_snapshot_meta
-        from backend.services.maritime_intel import get_maritime_stats
-    except ImportError:
-        from services.maritime_snapshot import get_snapshot_meta
-        from services.maritime_intel import get_maritime_stats
+        from services.maritime_go_proxy import proxy_oil_live_get
 
     return build_platform_health(
         redis_enabled=REDIS_ENABLED,
         redis_ping=cache.get_client,
-        get_snapshot_meta=get_snapshot_meta,
-        get_maritime_stats=get_maritime_stats,
+        get_maritime_stats=lambda: proxy_oil_live_get("/api/oil-live/maritime/stats"),
         get_oil_live_health=_probe_oil_live_health,
     )
 
 
 @app.get("/api/maritime/snapshot")
 def get_maritime_snapshot_meta():
-    """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
-    try:
-        try:
-            from backend.services.maritime_snapshot import get_snapshot_meta
-        except ImportError:
-            from services.maritime_snapshot import get_snapshot_meta
-        return get_snapshot_meta()
-    except Exception as exc:
-        return {
-            "available": False,
-            "source": None,
-            "error": str(exc),
-        }
+    """Deprecated — Redis snapshot writer retired; live AIS is in Postgres via oil-live-intel-worker."""
+    return {
+        "available": False,
+        "stale": True,
+        "writer": "retired",
+        "redirect": "/api/oil-live/maritime/stats",
+        "note": "Use /api/oil-live/vessels/live for the vessel map layer.",
+    }
 
 
 @app.get("/api/maritime/stats")
@@ -5741,23 +5731,15 @@ def get_maritime_stats_endpoint(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Debug counts for persisted AIS snapshots and worker ingest health."""
+    """Proxy to Go-owned AIS stats (Postgres + maritime_source_health)."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_stats
-        except ImportError:
-            from services.maritime_intel import get_maritime_stats
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_stats(bbox=bbox)
-    except Exception as exc:
-        return {
-            "stored_vessel_count": 0,
-            "snapshot_vessel_count": 0,
-            "aisstream_configured": False,
-            "worker": {"status": "error", "last_error": str(exc)},
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    return proxy_oil_live_get("/api/oil-live/maritime/stats", params)
 
 
 @app.get("/api/maritime/vessels")
@@ -5771,44 +5753,34 @@ def get_maritime_vessels(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Optional AIS maritime layer for oil and gas mode, served from worker snapshots."""
+    """Deprecated proxy — forwards to /api/oil-live/vessels/live."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_vessel_feed
-        except ImportError:
-            from services.maritime_intel import get_maritime_vessel_feed
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_vessel_feed(
-            max_vessels=max_vessels,
-            capture_window_seconds=capture_window_seconds,
-            vessel_scope=scope,
-            bbox=bbox,
-            offset=offset,
-        )
-    except Exception as exc:
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {"limit": max(1, min(int(max_vessels), 2000))}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    payload = proxy_oil_live_get("/api/oil-live/vessels/live", params)
+    if payload.get("proxy_error"):
         return {
             "vessels": [],
-            "source": "maritime_intel_error",
-            "data_as_of": datetime.utcnow().isoformat(),
-            "live_positions_enabled": False,
-            "limitations": [f"Maritime vessel feed failed: {exc}"],
-            "scope": "oil_tankers" if scope != "all_vessels" else "all_vessels",
-            "capture_window_seconds": capture_window_seconds,
+            "source": "oil_live_proxy_error",
+            "limitations": [str(payload.get("error") or "Go vessel feed unavailable")],
+            "scope": scope,
             "max_vessels": max_vessels,
-            "offset": offset,
-            "total_available": 0,
-            "returned_count": 0,
-            "cap_applied": False,
-            "geography_mode": "viewport_bbox" if all(value is not None for value in (south, west, north, east)) else "default_regions",
-            "geography_note": None,
-            "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
-            "effective_bbox_count": 0,
-            "region_labels": [],
-            "coastal_demo_regions": [],
-            "coastal_demo_synthetic": False,
         }
+    vessels = payload.get("vessels") if isinstance(payload.get("vessels"), list) else []
+    return {
+        **payload,
+        "vessels": vessels,
+        "source": "oil-live-intel",
+        "deprecated_route": "/api/maritime/vessels",
+        "canonical_route": "/api/oil-live/vessels/live",
+        "scope": scope,
+        "offset": offset,
+        "returned_count": len(vessels),
+    }
 
 
 @app.get("/api/maritime/context")
@@ -5830,38 +5802,25 @@ def get_maritime_context(
     evidence and counterparty proxies, not true bill-of-lading coverage.
     """
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_context as build_maritime_context
-        except ImportError:
-            from services.maritime_intel import get_maritime_context as build_maritime_context
-        codes = _resolve_codes(country) if country else {}
-        return build_maritime_context(
-            company=company,
-            country=country,
-            country_iso2=codes.get("iso2", ""),
-            commodity=commodity,
-            lat=lat,
-            lng=lng,
-            vessel_name=vessel_name,
-            mmsi=mmsi,
-            imo=imo,
-            destination=destination,
-        )
-    except Exception as exc:
-        return {
-            "source_labels": [],
-            "data_as_of": datetime.utcnow().isoformat(),
-            "company_links": [],
-            "nearest_ports": [],
-            "evidence": [],
-            "identity": None,
-            "relationships": [],
-            "counterparty_proxies": [],
-            "bol_coverage_note": (
-                "Bill-of-lading buyer/seller coverage is not reliably available from free/open sources."
-            ),
-            "limitations": [f"Maritime context failed: {exc}"],
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    codes = _resolve_codes(country) if country else {}
+    return proxy_oil_live_get(
+        "/api/oil-live/maritime/context",
+        {
+            "company": company,
+            "country": country,
+            "country_iso2": codes.get("iso2", ""),
+            "commodity": commodity,
+            "lat": lat,
+            "lng": lng,
+            "vessel_name": vessel_name,
+            "mmsi": mmsi,
+            "imo": imo,
+            "destination": destination,
+        },
+    )
 
 
 @app.get("/api/storage/terminals")

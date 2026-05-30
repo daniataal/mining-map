@@ -181,8 +181,8 @@ export function liveDataSyncBannerMessage(
       };
     case 'empty':
       return {
-        en: 'Ledger empty — run graph-sync and maritime-worker.',
-        he: 'מאגר ריק — הריצו graph-sync ו-maritime-worker.',
+        en: 'Ledger empty — run graph-sync and oil-live-intel-worker.',
+        he: 'מאגר ריק — הריצו graph-sync ו-oil-live-intel-worker.',
       };
     case 'degraded':
       return {

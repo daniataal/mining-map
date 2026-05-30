@@ -1196,7 +1196,7 @@ export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true)
   return useQuery<MaritimeContextResponse>({
     queryKey: ['maritime-context', params],
     queryFn: async () => {
-      const { data } = await apiClient.get<MaritimeContextResponse>('/api/maritime/context', {
+      const { data } = await apiClient.get<MaritimeContextResponse>('/api/oil-live/maritime/context', {
         params,
       });
       return data;

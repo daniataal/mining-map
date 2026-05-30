@@ -13,19 +13,19 @@ Free, explainable oil **live intelligence** service for the mining-map platform.
 
 ## Live AIS pipeline (Phases 6–8)
 
-**Two AIS paths (by design):**
+**Single live AIS path (Go):**
 
 | Service | Role | Map layer |
 |---------|------|-----------|
-| `maritime-worker` (Python) | Global AIS snapshot → Redis | Canvas vessel layer (Oil & Gas + Live Data when enabled) |
-| `oil-live-intel-worker` (Go) | Terminal geofence port calls + `oil_ais_positions` + WebSocket | Oil Live overlay markers + port-call intel |
+| `oil-live-intel-worker` (Go) | AISStream → `oil_ais_positions`, `oil_vessels`, port calls, `maritime_source_health` | `/api/oil-live/vessels/live` |
+| `oil-live-intel` (Go API) | Vessels, coverage, maritime context, stats | Caddy `/api/oil-live/*` |
 
-**No duplicate DB writes:** `maritime-worker` stores snapshots in **Redis** only (Python `/api/maritime/vessels`). `oil-live-intel-worker` is the sole writer to `oil_ais_positions` and live `oil_port_calls` (metadata `source=live_ais`). Graph-sync seed port calls use `source=seed_port_calls`.
+Legacy Python `maritime-worker` and Redis snapshot are **retired**. Python `/api/maritime/*` proxies to Go for backward compatibility.
 
-Live Data auto-enables the maritime canvas layer and oil-live overlay vessels when you open the tab. For live positions you need `AISSTREAM_API_KEY` in repo-root `.env` (or `backend.env`) **and** both workers running:
+For live positions set `AISSTREAM_API_KEY` in repo-root `.env` (or `backend.env`) and run:
 
 ```bash
-docker compose up -d maritime-worker oil-live-intel oil-live-intel-worker
+docker compose up -d oil-live-intel oil-live-intel-worker
 ```
 
 When `AISSTREAM_API_KEY` is set and `ENABLE_AIS=true`:

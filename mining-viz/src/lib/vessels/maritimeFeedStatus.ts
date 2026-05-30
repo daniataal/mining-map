@@ -145,9 +145,9 @@ export function buildMaritimeStatusMessages(
   > = {
     key_missing: {
       detailHe:
-        'מפתח AISStream חסר ב-backend. הוסף AISSTREAM_API_KEY ל-backend.env או ל-.env בשורש הפרויקט, ואז הפעל מחדש את backend ו-maritime-worker.',
+        'מפתח AISStream חסר ב-backend. הוסף AISSTREAM_API_KEY ל-backend.env או ל-.env בשורש הפרויקט, ואז הפעל מחדש את backend ו-oil-live-intel-worker.',
       detailEn:
-        'AISStream API key is missing in the backend. Add AISSTREAM_API_KEY to backend.env or the repo-root .env, then recreate backend and maritime-worker.',
+        'AISStream API key is missing in the backend. Add AISSTREAM_API_KEY to backend.env or the repo-root .env, then recreate backend and oil-live-intel-worker.',
       sparseHe:
         'מפתח AISStream חסר. הגדר AISSTREAM_API_KEY ב-backend.env (פרודקשן) או ב-.env (מקומי).',
       sparseEn:
@@ -155,32 +155,32 @@ export function buildMaritimeStatusMessages(
     },
     worker_down: {
       detailHe:
-        'אין צילום AIS עדכני. הפעל docker compose up -d maritime-worker וודא שה-worker רץ (docker compose ps maritime-worker).',
+        'אין צילום AIS עדכני. הפעל docker compose up -d oil-live-intel-worker וודא שה-worker רץ (docker compose ps oil-live-intel-worker).',
       detailEn:
-        'No fresh AIS snapshot. Run docker compose up -d maritime-worker and confirm it is running (docker compose ps maritime-worker).',
+        'No fresh AIS snapshot. Run docker compose up -d oil-live-intel-worker and confirm it is running (docker compose ps oil-live-intel-worker).',
       sparseHe:
-        'מאגר כלי השיט ריק או ישן — הפעל maritime-worker (docker compose up -d maritime-worker).',
+        'מאגר כלי השיט ריק או ישן — הפעל oil-live-intel-worker (docker compose up -d oil-live-intel-worker).',
       sparseEn:
-        'Vessel feed is empty or stale — start maritime-worker (docker compose up -d maritime-worker).',
+        'Vessel feed is empty or stale — start oil-live-intel-worker (docker compose up -d oil-live-intel-worker).',
     },
     snapshot_empty: {
       detailHe:
-        'maritime-worker רץ אך המאגר עדיין דליל. המתן מחזורי לכידה (כ-30–60 שניות) או בדוק /api/maritime/stats.',
+        'oil-live-intel-worker רץ אך המאגר עדיין דליל. המתן מחזורי לכידה (כ-30–60 שניות) או בדוק /api/oil-live/maritime/stats.',
       detailEn:
-        'maritime-worker is running but the feed is still sparse. Wait for ingest cycles (~30–60s) or check /api/maritime/stats.',
+        'oil-live-intel-worker is running but the feed is still sparse. Wait for ingest cycles (~30–60s) or check /api/oil-live/maritime/stats.',
       sparseHe:
-        'מאגר דליל — ה-worker עשוי להיות בתחילת ריצה; המתן מחזור ingest או בדוק לוגי maritime-worker.',
+        'מאגר דליל — ה-worker עשוי להיות בתחילת ריצה; המתן מחזור ingest או בדוק לוגי oil-live-intel-worker.',
       sparseEn:
-        'Sparse feed — worker may still be warming up; wait for an ingest cycle or check maritime-worker logs.',
+        'Sparse feed — worker may still be warming up; wait for an ingest cycle or check oil-live-intel-worker logs.',
     },
     snapshot_stale: {
       detailHe:
-        'צילום AIS ישן מדי. בדוק ש-maritime-worker רץ וש-AISSTREAM_API_KEY תקין (לוגים: docker compose logs maritime-worker --tail 50).',
+        'צילום AIS ישן מדי. בדוק ש-oil-live-intel-worker רץ וש-AISSTREAM_API_KEY תקין (לוגים: docker compose logs oil-live-intel-worker --tail 50).',
       detailEn:
-        'AIS snapshot is too old. Ensure maritime-worker is running and AISSTREAM_API_KEY is valid (docker compose logs maritime-worker --tail 50).',
+        'AIS snapshot is too old. Ensure oil-live-intel-worker is running and AISSTREAM_API_KEY is valid (docker compose logs oil-live-intel-worker --tail 50).',
       sparseHe:
-        'צילום ישן — הפעל מחדש maritime-worker אם הוא נעצר.',
-      sparseEn: 'Stale snapshot — restart maritime-worker if it stopped.',
+        'צילום ישן — הפעל מחדש oil-live-intel-worker אם הוא נעצר.',
+      sparseEn: 'Stale snapshot — restart oil-live-intel-worker if it stopped.',
     },
   };
 

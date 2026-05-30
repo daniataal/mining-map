@@ -157,9 +157,9 @@ export function buildVesselAlerts(input: BuildVesselAlertsInput): VesselAlert[] 
       titleEn: 'AIS feed unavailable — API key missing',
       titleHe: 'מעקב AIS לא זמין — חסר מפתח API',
       messageEn:
-        'AISStream is not configured on the backend. Add AISSTREAM_API_KEY and restart maritime-worker before vessel proximity alerts can use live positions.',
+        'AISStream is not configured on the backend. Add AISSTREAM_API_KEY and restart oil-live-intel-worker before vessel proximity alerts can use live positions.',
       messageHe:
-        'AISStream לא מוגדר ב-backend. הוסיפו AISSTREAM_API_KEY והפעילו מחדש את maritime-worker לפני שאותות קרבה יכולים להשתמש במיקומים חיים.',
+        'AISStream לא מוגדר ב-backend. הוסיפו AISSTREAM_API_KEY והפעילו מחדש את oil-live-intel-worker לפני שאותות קרבה יכולים להשתמש במיקומים חיים.',
       sourceLabel: 'AISStream config',
       observedAt: dataAsOf,
     });
@@ -171,10 +171,10 @@ export function buildVesselAlerts(input: BuildVesselAlertsInput): VesselAlert[] 
       titleEn: 'AIS snapshot unavailable',
       titleHe: 'צילום AIS לא זמין',
       messageEn:
-        'maritime-worker is not producing a fresh vessel snapshot. Proximity alerts rely on persisted AIS rows and may be empty until the worker recovers.',
+        'oil-live-intel-worker is not producing fresh AIS positions in Postgres. Proximity alerts rely on persisted AIS rows and may be empty until the worker recovers.',
       messageHe:
-        'maritime-worker לא מייצר צילום כלי שיט עדכני. התרעות קרבה מסתמכות על שורות AIS שמורות ועשויות להיות ריקות עד שה-worker יחזור.',
-      sourceLabel: 'maritime-worker',
+        'oil-live-intel-worker לא מייצר צילום כלי שיט עדכני. התרעות קרבה מסתמכות על שורות AIS שמורות ועשויות להיות ריקות עד שה-worker יחזור.',
+      sourceLabel: 'oil-live-intel-worker',
       observedAt: feed?.worker && typeof feed.worker === 'object'
         ? String((feed.worker as { last_success_at?: unknown }).last_success_at ?? dataAsOf ?? '')
         : dataAsOf,
@@ -241,9 +241,9 @@ export function buildVesselAlerts(input: BuildVesselAlertsInput): VesselAlert[] 
       titleEn: 'No live AIS in this viewport',
       titleHe: 'אין AIS חי בתצוגה זו',
       messageEn:
-        'The global vessel feed is healthy but no live AIS rows were observed in the bbox around this license. Pan the map or expand maritime-worker watches if you expect traffic here.',
+        'The global vessel feed is healthy but no live AIS rows were observed in the bbox around this license. Pan the map or expand oil-live-intel-worker watches if you expect traffic here.',
       messageHe:
-        'מאגר כלי השיט הגלובלי תקין אך לא נצפו שורות AIS חיות בתיבה סביב רישיון זה. הזיזו את המפה או הרחיבו את אזורי maritime-worker אם מצפים לתנועה כאן.',
+        'מאגר כלי השיט הגלובלי תקין אך לא נצפו שורות AIS חיות בתיבה סביב רישיון זה. הזיזו את המפה או הרחיבו את אזורי oil-live-intel-worker אם מצפים לתנועה כאן.',
       sourceLabel: 'AIS viewport',
       observedAt: dataAsOf,
     });
