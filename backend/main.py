@@ -2503,20 +2503,18 @@ def read_licenses(
         safe_limit = max(1, min(int(limit or 10000), 15000))
         sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
         country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
-        exists_sql = f"""
-            SELECT EXISTS (
-                SELECT 1 FROM licenses
-                WHERE {sector_sql}
-                  AND ({country_sql})
-                  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-            )
-        """
-        c.execute(exists_sql, tuple(sector_params + country_params))
-        has_row = c.fetchone() or {}
-        has_preferred_live_rows = bool(has_row.get("exists"))
         open_clause = ""
-        if prefer_open_data and has_preferred_live_rows:
-            open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+        if prefer_open_data:
+            open_clause = f""" AND (
+                LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                OR country IS NULL
+                OR country NOT IN (
+                    SELECT country FROM licenses 
+                    WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                    AND country IS NOT NULL
+                    AND {sector_sql}
+                )
+            ) """
         columns = _license_api_columns_sql()
         per_country_cap = len(requested_countries) > 1
         if per_country_cap:
@@ -2571,20 +2569,21 @@ def read_licenses(
             min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
             sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
             country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
-            exists_sql = f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM licenses
-                    WHERE {sector_sql}
-                      AND ({country_sql})
-                      AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-                )
-            """
-            c.execute(exists_sql, tuple(sector_params + country_params))
-            has_row = c.fetchone() or {}
-            has_preferred_live_rows = bool(has_row.get("exists"))
             open_clause = ""
-            if prefer_open_data and has_preferred_live_rows:
-                open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+            if prefer_open_data:
+                open_clause = f""" AND (
+                    LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                    OR country IS NULL
+                    OR country NOT IN (
+                        SELECT country FROM licenses 
+                        WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                        AND country IS NOT NULL
+                        AND {sector_sql}
+                    )
+                ) """
+            
+            # Keep a dummy variable so later references don't break
+            has_preferred_live_rows = False
 
             if grid_deg is not None:
                 clusters = query_license_clusters(
@@ -2600,6 +2599,7 @@ def read_licenses(
                     grid_deg=grid_deg,
                     open_clause=open_clause,
                     limit=license_cluster_limit_for_zoom(zoom, int(limit or 800)),
+                    zoom=zoom,
                 )
                 conn.close()
                 payload = {"mode": "clusters", "clusters": clusters, "zoom": zoom, "grid_degrees": grid_deg}

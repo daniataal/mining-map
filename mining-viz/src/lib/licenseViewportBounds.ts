@@ -41,7 +41,12 @@ export function quantizeLicenseViewportBounds(
   bounds: LicenseViewportBounds,
 ): LicenseViewportBounds {
   const normalized = normalizeLicenseViewportBounds(bounds);
-  const step = 0.25;
+  const span = Math.max(
+    Math.abs(normalized.north - normalized.south),
+    Math.abs(normalized.east - normalized.west),
+  );
+  // At close zoom levels (tiny span), use a very fine quantization grid to prevent points disappearing during pans.
+  const step = span < 0.05 ? 0.005 : span < 0.2 ? 0.02 : 0.25;
   const q = (n: number) => Math.round(n / step) * step;
   return {
     south: q(normalized.south),

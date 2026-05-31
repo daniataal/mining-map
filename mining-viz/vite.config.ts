@@ -31,6 +31,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      '/api/map/country-borders': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/map\/country-borders/, '/api/oil-live/map/country-borders'),
+      },
       '/api/oil-live': {
         target: oilIntelProxyTarget,
         changeOrigin: true,

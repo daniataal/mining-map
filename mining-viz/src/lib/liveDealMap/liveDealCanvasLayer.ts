@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import { drawLicenseClusterBubble } from '../licenseClusterStyle';
 import {
   liveDealFeaturePriority,
   planLiveDealPointFeatureDraw,
@@ -107,6 +108,7 @@ function drawPoint(
   y: number,
   radius: number,
   selected: boolean,
+  hovered: boolean,
   isDark = true,
 ): void {
   if (feature.kind === 'vessel') {
@@ -115,51 +117,9 @@ function drawPoint(
   }
 
   if (feature.kind === 'server_cluster') {
-    ctx.save();
-    
-    // Draw outer glow shadow
-    ctx.shadowColor = isDark ? 'rgba(59, 130, 246, 0.5)' : 'rgba(30, 64, 175, 0.3)';
-    ctx.shadowBlur = selected ? 16 : 10;
-    
-    // Background fill
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = isDark ? 'rgba(59, 130, 246, 0.2)' : 'rgba(37, 99, 235, 0.14)';
-    ctx.fill();
-    
-    // Inset glow simulation
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    ctx.arc(x, y, radius - 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.05)';
-    ctx.fill();
-
-    // Border stroke
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = isDark ? 'rgba(59, 130, 246, 0.6)' : 'rgba(29, 78, 216, 0.75)';
-    ctx.lineWidth = isDark ? 1.2 : 2.0;
-    ctx.stroke();
-
-    // Extra selection ring
-    if (selected) {
-      ctx.beginPath();
-      ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    
-    // Label text
-    ctx.font = '900 11px system-ui, -apple-system, sans-serif';
-    ctx.fillStyle = isDark ? '#ffffff' : '#1e3a8a';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = feature.sourceCount != null && feature.sourceCount > 999 ? '999+' : String(feature.sourceCount ?? '');
-    ctx.fillText(label, x, y + 0.5);
-
-    ctx.restore();
+    const count = feature.sourceCount ?? 0;
+    const label = count > 999 ? '999+' : count > 1 ? String(count) : '';
+    drawLicenseClusterBubble(ctx, x, y, radius, label, isDark, selected, hovered);
     return;
   }
 
@@ -294,6 +254,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _features: LiveDealMapFeature[] = [];
   private _mapZoom = 5;
   private _selectedUid: string | null = null;
+  private _hoveredUid: string | null = null;
   private _onFeatureClick?: (feature: LiveDealMapFeature) => void;
   private _raf = 0;
   private _lastPaintKey = '';
@@ -442,6 +403,7 @@ export class CanvasLiveDealLayer extends L.Layer {
       this._mapZoom,
       this._dataEpoch,
       this._selectedUid ?? '',
+      this._hoveredUid ?? '',
     ].join('|');
   }
 
@@ -481,19 +443,25 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._lodSubsampling = pointPlan.lodSubsampling;
 
     const selected: LiveDealMapFeature[] = [];
+    const hovered: LiveDealMapFeature[] = [];
     const normal: LiveDealMapFeature[] = [];
     for (const feature of this._features) {
       if (feature.shape === 'arc') {
-        (feature.uid === this._selectedUid ? selected : normal).push(feature);
+        if (feature.uid === this._selectedUid) selected.push(feature);
+        else if (feature.uid === this._hoveredUid) hovered.push(feature);
+        else normal.push(feature);
       }
     }
     for (const feature of pointPlan.drawFeatures) {
-      (feature.uid === this._selectedUid ? selected : normal).push(feature);
+      if (feature.uid === this._selectedUid) selected.push(feature);
+      else if (feature.uid === this._hoveredUid) hovered.push(feature);
+      else normal.push(feature);
     }
 
-    const drawn = [...normal, ...selected];
-    for (const feature of normal) this._drawFeature(ctx, map, feature);
-    for (const feature of selected) this._drawFeature(ctx, map, feature, true);
+    const drawn = [...normal, ...hovered, ...selected];
+    for (const feature of normal) this._drawFeature(ctx, map, feature, false, false);
+    for (const feature of hovered) this._drawFeature(ctx, map, feature, false, true);
+    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === this._hoveredUid);
     this._drawnFeatures = drawn;
     this._lastPaintKey = paintKey;
   }
@@ -503,6 +471,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     map: L.Map,
     feature: LiveDealMapFeature,
     selected = false,
+    hovered = false,
   ): void {
     if (feature.shape === 'arc') {
       drawArc(ctx, map, feature, selected);
@@ -514,8 +483,9 @@ export class CanvasLiveDealLayer extends L.Layer {
       feature,
       point.x,
       point.y,
-      radiusForPoint(feature, map.getZoom(), selected),
+      radiusForPoint(feature, map.getZoom(), selected || hovered),
       selected,
+      hovered,
       this._isDark
     );
   }
@@ -568,9 +538,21 @@ export class CanvasLiveDealLayer extends L.Layer {
     if (!map) return;
     const hit = this._findAtPoint(event.containerPoint);
     map.getContainer().style.cursor = hit ? 'pointer' : '';
+
+    const nextHoveredUid = hit ? hit.uid : null;
+    if (this._hoveredUid !== nextHoveredUid) {
+      this._hoveredUid = nextHoveredUid;
+      this._lastPaintKey = '';
+      this._scheduleRedraw();
+    }
   };
 
   private _onMapMouseOut = (): void => {
     this._map?.getContainer().style.removeProperty('cursor');
+    if (this._hoveredUid !== null) {
+      this._hoveredUid = null;
+      this._lastPaintKey = '';
+      this._scheduleRedraw();
+    }
   };
 }

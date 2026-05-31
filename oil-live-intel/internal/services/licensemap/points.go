@@ -51,19 +51,16 @@ func QueryPoints(ctx context.Context, pool *pgxpool.Pool, q PointQuery) ([]model
 
 	openClause := ""
 	if q.PreferOpenData {
-		existsSQL := fmt.Sprintf(`
-			SELECT EXISTS (
-				SELECT 1 FROM licenses
-				WHERE %s AND (%s)
-				  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-			)`, sectorSQL, countrySQL)
-		var hasPreferred bool
-		if err := pool.QueryRow(ctx, existsSQL, args...).Scan(&hasPreferred); err != nil {
-			return nil, err
-		}
-		if hasPreferred {
-			openClause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
-		}
+		openClause = fmt.Sprintf(` AND (
+			LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+			OR country IS NULL
+			OR country NOT IN (
+				SELECT country FROM licenses 
+				WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+				AND country IS NOT NULL
+				AND %s
+			)
+		)`, sectorSQL)
 	}
 
 	columns := `id, company, license_type, commodity, status, date_issued, country, region, 

@@ -47,7 +47,12 @@ import {
   LICENSE_COUNTRY_FETCH_HUB,
   licenseViewportBoundsFromGeoJson,
 } from './countryBounds';
-import { MIN_SERVER_LICENSE_CLUSTER_COUNT } from './licenseMapCluster';
+import {
+  collapseServerClustersInViewport,
+  LICENSE_MAP_GO_ENABLED,
+  MIN_SERVER_LICENSE_CLUSTER_COUNT,
+  SERVER_CLUSTER_MIN_DRILL_ZOOM,
+} from './licenseMapCluster';
 import { getStoredMiningToken } from './miningAuth';
 import { MAP_VIEWPORT_DEBOUNCE_MS } from './mapViewportDebounce';
 
@@ -439,6 +444,8 @@ async function fetchLicensesViewportFromApi(
 ): Promise<MiningLicense[]> {
   const { sector, bounds, countries, mapZoom, signal } = options;
   const fetchBounds = quantizeLicenseViewportBounds(bounds);
+  const zoomRounded =
+    mapZoom != null && Number.isFinite(mapZoom) ? Math.round(mapZoom * 10) / 10 : null;
   const params: Record<string, string | number | boolean> = {
     prefer_open_data: true,
     limit: LICENSE_VIEWPORT_LIMIT,
@@ -450,13 +457,37 @@ async function fetchLicensesViewportFromApi(
   };
   if (sector) params.sector = sector;
   if (countries?.length) params.countries = countries.join(',');
-  if (mapZoom != null && Number.isFinite(mapZoom)) params.zoom = Math.round(mapZoom * 10) / 10;
-  const { data } = await apiClient.get<unknown>('/licenses', {
-    signal,
-    timeout: 60_000,
-    params,
-  });
-  return parseLicensesResponse(data);
+  if (zoomRounded != null) params.zoom = zoomRounded;
+
+  const useGoMapPath =
+    LICENSE_MAP_GO_ENABLED &&
+    zoomRounded != null &&
+    zoomRounded < SERVER_CLUSTER_MIN_DRILL_ZOOM;
+  const paths = useGoMapPath
+    ? ['/api/oil-live/licenses/map', '/licenses']
+    : ['/licenses'];
+
+  let lastError: unknown;
+  for (const path of paths) {
+    const requestParams = { ...params };
+    if (path.endsWith('/map')) delete requestParams.map;
+    try {
+      const { data } = await apiClient.get<unknown>(path, {
+        signal,
+        timeout: 60_000,
+        params: requestParams,
+      });
+      return collapseServerClustersInViewport(
+        await parseLicensesResponse(data),
+        fetchBounds,
+        zoomRounded ?? undefined,
+      );
+    } catch (err) {
+      lastError = err;
+      if (isCancel(err)) throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Licenses request failed'));
 }
 
 /** Background warm-up for Oil & Gas tab / Historic sidebar (avoids cold fetch on sector switch). */
@@ -514,6 +545,7 @@ export function useLicensesForMap(options: {
     queryKey: [
       'licenses',
       'viewport',
+      LICENSE_MAP_GO_ENABLED ? 'go' : 'py',
       sector,
       countriesKey,
       countryFocusBboxOnly ? 'focus-bbox' : 'scoped',

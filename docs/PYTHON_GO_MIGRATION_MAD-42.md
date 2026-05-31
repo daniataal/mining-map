@@ -45,12 +45,12 @@ Env (optional, future cutover):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `VITE_LICENSE_MAP_GO` | `0` | Frontend: cluster fetches via Go |
+| `VITE_LICENSE_MAP_GO` | on (unset or `1`) | Frontend: cluster fetches via Go; set `0` for Python fallback |
 | `LICENSE_MAP_GO_ENABLED` | — | Documented alias for ops runbooks |
 
 ## Cutover plan (no big-bang)
 
 1. **Now:** Go endpoint live; Python unchanged; parity unit tests on grid helpers.
 2. **Next PR:** Shadow-compare cluster counts Python vs Go on staging bbox set.
-3. **Cutover:** `VITE_LICENSE_MAP_GO=1` for zoom `< 7` only; keep Python for points and admin.
+3. **Cutover:** `VITE_LICENSE_MAP_GO` defaults on (opt out with `=0`); zoom `< 7` cluster fetches use `/api/oil-live/licenses/map`; Python remains fallback for points and admin.
 4. **Later:** Port petroleum OSM bbox or `/api/oil-live/map` terminal merge if profiling warrants.
