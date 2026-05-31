@@ -6,6 +6,8 @@ import { planVesselLodDraw } from './vesselDisplayLod';
 export interface CanvasVesselLayerOptions extends L.LayerOptions {
   mapZoom: number;
   selectedId: string | null;
+  /** When true, rasterize and hit-test only the selected vessel (if any). */
+  focusMode?: boolean;
   onVesselClick?: (vessel: MaritimeVessel) => void;
   formatTooltip?: (vessel: MaritimeVessel) => HTMLElement | string;
 }
@@ -73,6 +75,7 @@ export class CanvasVesselLayer extends L.Layer {
   private _vesselById = new Map<string, MaritimeVessel>();
   private _mapZoom = 5;
   private _selectedId: string | null = null;
+  private _focusMode = false;
   private _selectedIndex = -1;
   private _onVesselClick?: (vessel: MaritimeVessel) => void;
   private _formatTooltip?: (vessel: MaritimeVessel) => HTMLElement | string;
@@ -98,6 +101,7 @@ export class CanvasVesselLayer extends L.Layer {
     super(options);
     this._mapZoom = options.mapZoom;
     this._selectedId = options.selectedId;
+    this._focusMode = options.focusMode ?? false;
     this._onVesselClick = options.onVesselClick;
     this._formatTooltip = options.formatTooltip;
   }
@@ -125,6 +129,13 @@ export class CanvasVesselLayer extends L.Layer {
       record.isSelected = record.id === id;
     }
     this._recomputeSelectedIndex();
+    this._lastPaintKey = '';
+    this._scheduleRedraw();
+  }
+
+  setFocusMode(focusMode: boolean): void {
+    if (this._focusMode === focusMode) return;
+    this._focusMode = focusMode;
     this._lastPaintKey = '';
     this._scheduleRedraw();
   }
@@ -251,6 +262,22 @@ export class CanvasVesselLayer extends L.Layer {
     return next;
   }
 
+  /** Focus mode: only the selected chevron is painted and hit-tested. */
+  private _indicesForFrame(map: L.Map, records: VesselDrawRecord[]): number[] {
+    if (this._focusMode && this._selectedId) {
+      const focused: number[] = [];
+      for (let i = 0; i < records.length; i += 1) {
+        if (records[i].id === this._selectedId) focused.push(i);
+      }
+      if (focused.length > 0) return focused;
+      if (this._selectedIndex >= 0) return [this._selectedIndex];
+      return [];
+    }
+    let draw = this._computeDrawIndices(map, records);
+    draw = this._ensureSelectedInDraw(draw, records);
+    return draw;
+  }
+
   private _rebuildHitGrid(cssW: number, cssH: number, draw: number[], pixels: Float32Array): void {
     this._hitBuckets.clear();
     this._hitCols = Math.max(1, Math.ceil(cssW / HIT_CELL_PX));
@@ -289,6 +316,7 @@ export class CanvasVesselLayer extends L.Layer {
       zMap.toFixed(3),
       this._mapZoom,
       this._dataEpoch,
+      this._focusMode ? '1' : '0',
       this._selectedId ?? '',
     ].join('|');
   }
@@ -332,8 +360,7 @@ export class CanvasVesselLayer extends L.Layer {
       return;
     }
 
-    let draw = this._computeDrawIndices(map, records);
-    draw = this._ensureSelectedInDraw(draw, records);
+    const draw = this._indicesForFrame(map, records);
     this._lastDrawCount = draw.length;
 
     if (paintKey === this._lastPaintKey && this._pixelXY.length === n * 2) {

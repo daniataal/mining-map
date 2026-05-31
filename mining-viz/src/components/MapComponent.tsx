@@ -53,6 +53,8 @@ import {
 } from '../lib/vessels';
 import { buildMaritimeStatusMessages } from '../lib/vessels/maritimeFeedStatus';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
+import MaritimeVesselFocusLayers from './vessels/MaritimeVesselFocusLayers';
+import MaritimeFocusLegend from './vessels/MaritimeFocusLegend';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
@@ -1070,6 +1072,15 @@ export default function MapComponent({
         const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
         return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
     }, [maritimeVesselsInViewport, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
+    const maritimeFocusMode = Boolean(selectedMaritimeVessel);
+    const maritimeVesselsForCanvas = useMemo(() => {
+        if (!maritimeFocusMode || !selectedMaritimeVessel) return maritimeVessels;
+        const byId = maritimeVessels.find((v) => v.id === selectedMaritimeVessel.id);
+        if (byId) return [byId];
+        const mmsi = String(selectedMaritimeVessel.mmsi ?? '').trim();
+        const byMmsi = mmsi ? maritimeVessels.find((v) => String(v.mmsi) === mmsi) : undefined;
+        return [byMmsi ?? selectedMaritimeVessel];
+    }, [maritimeVessels, maritimeFocusMode, selectedMaritimeVessel]);
     const maritimeStatusMessages = useMemo(
         () =>
             buildMaritimeStatusMessages(maritimeFeed, {
@@ -1156,8 +1167,13 @@ export default function MapComponent({
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
     const maritimeDrawRecords = useMemo(
-        () => toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
-        [maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id],
+        () =>
+            toVesselDrawRecords(
+                maritimeVesselsForCanvas,
+                maritimeMapZoom,
+                selectedMaritimeVessel?.id ?? maritimeVesselsForCanvas[0]?.id ?? null,
+            ),
+        [maritimeVesselsForCanvas, maritimeMapZoom, selectedMaritimeVessel?.id],
     );
 
     const maritimeLodEstimate = useMemo(() => {
@@ -1172,8 +1188,15 @@ export default function MapComponent({
         if (!vesselsVisible || !isMaritimeLayerEnabled) return;
         const layer = canvasVesselLayerRef.current;
         if (!layer) return;
-        layer.setVessels(maritimeVessels, maritimeDrawRecords);
-    }, [vesselsVisible, isMaritimeLayerEnabled, maritimeVessels, maritimeDrawRecords]);
+        layer.setFocusMode(maritimeFocusMode);
+        layer.setVessels(maritimeVesselsForCanvas, maritimeDrawRecords);
+    }, [
+        vesselsVisible,
+        isMaritimeLayerEnabled,
+        maritimeFocusMode,
+        maritimeVesselsForCanvas,
+        maritimeDrawRecords,
+    ]);
 
     useLayoutEffect(() => {
         pushVesselsToCanvas();
@@ -2432,6 +2455,9 @@ export default function MapComponent({
                 {isMaritimeMapView && (
                     <MaritimeFleetSelectionFly vessel={selectedMaritimeVessel} />
                 )}
+                {isMaritimeMapView && selectedMaritimeVessel && isMaritimeLayerEnabled && (
+                    <MaritimeVesselFocusLayers vessel={selectedMaritimeVessel} />
+                )}
                 <TankerViewFlyEffect
                     active={isMaritimeMapView && isMaritimeLayerEnabled}
                     view={maritimeTankerView}
@@ -2504,6 +2530,11 @@ export default function MapComponent({
                             layers={oilLiveLayers}
                             tradeFlowGroup={oilLiveTradeFlowGroup}
                             viewport={liveDataMapViewport}
+                            focusVesselMmsi={
+                                maritimeFocusMode && selectedMaritimeVessel?.mmsi != null
+                                    ? Number(selectedMaritimeVessel.mmsi)
+                                    : null
+                            }
                             coverageSources={
                                 governmentAisCoverageEnabled ? GOVERNMENT_AIS_COVERAGE_SOURCES : undefined
                             }
@@ -2569,6 +2600,7 @@ export default function MapComponent({
                                     layerApiRef={canvasVesselLayerRef}
                                     mapZoom={maritimeMapZoom}
                                     selectedId={selectedMaritimeVessel?.id ?? null}
+                                    focusMode={maritimeFocusMode}
                                     onVesselClick={handleMaritimeVesselClick}
                                     formatTooltip={formatMaritimeVesselTooltip}
                                     onLayerReady={handleCanvasVesselLayerReady}
@@ -2654,6 +2686,11 @@ export default function MapComponent({
             </MapContainer>
             {isRoutePlannerView && routePlannerOverlay && routePlannerOverlay.legs.length > 0 && (
               <RouteLegend className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,240px)]" />
+            )}
+            {isMaritimeMapView && selectedMaritimeVessel && isMaritimeLayerEnabled && (
+              <div className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,280px)] pointer-events-none">
+                <MaritimeFocusLegend vessel={selectedMaritimeVessel} />
+              </div>
             )}
         </div>
     );

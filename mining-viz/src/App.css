@@ -1732,3 +1732,68 @@
     width: min(96vw, 100%) !important;
   }
 }
+
+/* Maritime vessel focus mode — track + indicative route legend */
+.maritime-focus-legend {
+  padding: 0.65rem 0.85rem;
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  color: #e2e8f0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.maritime-focus-legend__title {
+  margin: 0 0 0.35rem;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #22d3ee;
+}
+
+.maritime-focus-legend__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.maritime-focus-legend__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.maritime-focus-legend__swatch {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 0.2rem;
+  margin-top: 0.35rem;
+  border-radius: 1px;
+}
+
+.maritime-focus-legend__swatch--track {
+  background: #22d3ee;
+}
+
+.maritime-focus-legend__swatch--projected {
+  background: repeating-linear-gradient(
+    90deg,
+    #c084fc 0,
+    #c084fc 5px,
+    transparent 5px,
+    transparent 8px
+  );
+}
+
+.maritime-focus-legend__hint {
+  margin: 0.45rem 0 0;
+  font-size: 9px;
+  color: #94a3b8;
+}

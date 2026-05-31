@@ -1054,6 +1054,34 @@ export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
   return res.json();
 }
 
+export type VesselTrackPoint = {
+  received_at?: string;
+  latitude?: number;
+  longitude?: number;
+  speed_over_ground?: number | null;
+  course_over_ground?: number | null;
+};
+
+export type VesselTrackResponse = {
+  points?: VesselTrackPoint[];
+  unavailable?: boolean;
+  mmsi?: number;
+  hours?: number;
+};
+
+/** Recent AIS positions for one MMSI (bounded hours, server-side query). */
+export async function getVesselTrack(mmsi: string | number, hours = 24): Promise<VesselTrackResponse> {
+  const mmsiStr = String(mmsi ?? '').trim();
+  if (!mmsiStr) return { points: [] };
+  const h = Math.min(168, Math.max(1, hours));
+  const res = await fetch(
+    oilUrl(`/api/oil-live/vessels/${encodeURIComponent(mmsiStr)}/track?hours=${h}`),
+  );
+  if (res.status === 404) return { points: [], unavailable: true };
+  if (!res.ok) throw new Error(`Track unavailable (${res.status})`);
+  return res.json() as Promise<VesselTrackResponse>;
+}
+
 export async function getVesselDossier(
   mmsi: string | number,
   opts: { mcr_limit?: number; mcr_offset?: number; port_call_limit?: number; exclude_seed?: boolean } = {},
