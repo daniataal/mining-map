@@ -240,6 +240,100 @@ export type VesselDossierResponse = {
   parties: VesselDossierParty[];
   disclaimer?: string;
   empty_state?: string;
+  /** ShipVault registry enrichment — present only when SHIPVAULT_* env vars are configured. */
+  shipvault_profile?: ShipVaultProfile;
+};
+
+/** One entry in a vessel's historical name list. */
+export type ShipVaultNameEntry = {
+  name: string;
+  from_date?: string;
+  to_date?: string;
+};
+
+/** One vessel in an owner's fleet. */
+export type ShipVaultFleetItem = {
+  imo?: string;
+  mmsi?: string;
+  name?: string;
+  type?: string;
+  dwt?: number;
+  gt?: number;
+  built?: number;
+  yard?: string;
+  shipvault_vessel_id?: string;
+};
+
+export type ShipVaultCompanyDetail = {
+  shipvault_company_id?: string;
+  name?: string;
+  country?: string;
+  city?: string;
+  parent_name?: string;
+  parent_company_id?: string;
+  fleet_size?: number;
+  total_dwt?: number;
+  total_gt?: number;
+  avg_age_years?: number;
+  fleet?: ShipVaultFleetItem[];
+};
+
+export type ShipVaultYardDetail = {
+  shipvault_yard_id?: string;
+  name?: string;
+  country?: string;
+  location?: string;
+  vessels_built?: ShipVaultFleetItem[];
+};
+
+export type ShipVaultVesselDetail = ShipVaultVesselProfile & {
+  length_m?: number;
+  beam_m?: number;
+  depth_m?: number;
+  net_tonnage?: number;
+  propulsion?: string;
+  engine_power_kw?: number;
+  status?: string;
+  yard_id?: string;
+  yard_name?: string;
+  events?: Record<string, unknown>[];
+};
+
+/** Company/owner profile returned by ShipVault. */
+export type ShipVaultOwnerProfile = {
+  shipvault_company_id?: string;
+  name?: string;
+  country?: string;
+  fleet_size?: number;
+  fleet?: ShipVaultFleetItem[];
+};
+
+/** Enriched vessel identity data from ShipVault (owner, builder, name history, value). */
+export type ShipVaultVesselProfile = {
+  shipvault_vessel_id?: string;
+  imo?: string;
+  name?: string;
+  flag?: string;
+  vessel_class?: string;
+  gross_tonnage?: number;
+  deadweight_tons?: number;
+  build_year?: number;
+  builder?: string;
+  owner_company_id?: string;
+  owner_name?: string;
+  operator_name?: string;
+  estimated_value_usd?: number;
+  name_history?: ShipVaultNameEntry[];
+};
+
+/** Combined enrichment result attached to the vessel dossier response. */
+export type ShipVaultProfile = {
+  vessel?: ShipVaultVesselProfile;
+  owner_profile?: ShipVaultOwnerProfile;
+  cached_at?: string;
+  data_source?: string;
+  enrichment_tier?: string;
+  disclaimer?: string;
 };
 
 export type OilIntelligenceCard = {
@@ -305,8 +399,13 @@ export type OilCompaniesResponse = {
   limit: number;
 };
 
-function oilUrl(path: string) {
+/** Same-origin when unset; direct to VITE_OIL_INTEL_BASE when set (e.g. :8095). */
+export function oilLiveApiUrl(path: string) {
   return `${OIL_INTEL_BASE}${path}`;
+}
+
+function oilUrl(path: string) {
+  return oilLiveApiUrl(path);
 }
 
 function authHeaders(): HeadersInit {
@@ -955,6 +1054,34 @@ export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
   return res.json();
 }
 
+export type VesselTrackPoint = {
+  received_at?: string;
+  latitude?: number;
+  longitude?: number;
+  speed_over_ground?: number | null;
+  course_over_ground?: number | null;
+};
+
+export type VesselTrackResponse = {
+  points?: VesselTrackPoint[];
+  unavailable?: boolean;
+  mmsi?: number;
+  hours?: number;
+};
+
+/** Recent AIS positions for one MMSI (bounded hours, server-side query). */
+export async function getVesselTrack(mmsi: string | number, hours = 24): Promise<VesselTrackResponse> {
+  const mmsiStr = String(mmsi ?? '').trim();
+  if (!mmsiStr) return { points: [] };
+  const h = Math.min(168, Math.max(1, hours));
+  const res = await fetch(
+    oilUrl(`/api/oil-live/vessels/${encodeURIComponent(mmsiStr)}/track?hours=${h}`),
+  );
+  if (res.status === 404) return { points: [], unavailable: true };
+  if (!res.ok) throw new Error(`Track unavailable (${res.status})`);
+  return res.json() as Promise<VesselTrackResponse>;
+}
+
 export async function getVesselDossier(
   mmsi: string | number,
   opts: { mcr_limit?: number; mcr_offset?: number; port_call_limit?: number; exclude_seed?: boolean } = {},
@@ -973,6 +1100,123 @@ export async function getVesselDossier(
     throw new Error((data as { error?: string }).error || `oil-live vessel dossier ${res.status}`);
   }
   return res.json();
+}
+
+/**
+ * Force a fresh ShipVault enrichment fetch for a vessel, bypassing the 7-day cache.
+ * Returns the updated shipvault_profile block.
+ */
+/** ShipVault registry enrichment for map maritime panel (requires IMO on vessel or ?imo=). */
+export async function getVesselShipVault(
+  mmsi: string | number,
+  opts?: { imo?: string; force_refresh?: boolean },
+): Promise<{ mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile }> {
+  const params = new URLSearchParams();
+  if (opts?.imo) params.set('imo', opts.imo);
+  if (opts?.force_refresh) params.set('force_refresh', 'true');
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(
+      `/api/oil-live/vessels/${encodeURIComponent(String(mmsi))}/shipvault${qs ? `?${qs}` : ''}`,
+    ),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `shipvault ${res.status}`);
+  }
+  return data as { mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile };
+}
+
+export async function refreshVesselEnrichment(
+  mmsi: string | number,
+): Promise<{ mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile }> {
+  const res = await fetch(
+    oilUrl(`/api/oil-live/vessels/${encodeURIComponent(String(mmsi))}/refresh-enrichment`),
+    { method: 'POST' },
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `refresh-enrichment ${res.status}`);
+  }
+  return data;
+}
+
+export async function getShipVaultCompany(
+  companyId: string,
+  opts?: { name?: string },
+): Promise<{ company: ShipVaultCompanyDetail }> {
+  const params = new URLSearchParams();
+  if (opts?.name) params.set('name', opts.name);
+  const qs = params.toString();
+  const id = companyId.trim() || '_';
+  const res = await fetch(
+    oilUrl(`/api/oil-live/shipvault/companies/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `shipvault company ${res.status}`);
+  }
+  return data as { company: ShipVaultCompanyDetail };
+}
+
+export async function getShipVaultYard(
+  yardId: string,
+  opts?: { name?: string },
+): Promise<{ yard: ShipVaultYardDetail }> {
+  const params = new URLSearchParams();
+  if (opts?.name) params.set('name', opts.name);
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/shipvault/yards/${encodeURIComponent(yardId || '_')}${qs ? `?${qs}` : ''}`),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `shipvault yard ${res.status}`);
+  }
+  return data as { yard: ShipVaultYardDetail };
+}
+
+export async function getVesselShipVaultDetail(
+  mmsi: string | number,
+  opts?: { imo?: string; vessel_id?: string },
+): Promise<{ mmsi: number; imo?: string; detail?: ShipVaultVesselDetail }> {
+  const params = new URLSearchParams();
+  if (opts?.imo) params.set('imo', opts.imo);
+  if (opts?.vessel_id) params.set('vessel_id', opts.vessel_id);
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(
+      `/api/oil-live/vessels/${encodeURIComponent(String(mmsi))}/shipvault/detail${qs ? `?${qs}` : ''}`,
+    ),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `shipvault detail ${res.status}`);
+  }
+  return data as { mmsi: number; imo?: string; detail?: ShipVaultVesselDetail };
+}
+
+export async function lookupVesselByIMO(imo: string): Promise<{
+  mmsi: number;
+  imo: string;
+  name?: string;
+  lat?: number;
+  lng?: number;
+  position_time?: string;
+}> {
+  const res = await fetch(oilUrl(`/api/oil-live/vessels/lookup?imo=${encodeURIComponent(imo)}`));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `vessel lookup ${res.status}`);
+  }
+  return data as {
+    mmsi: number;
+    imo: string;
+    name?: string;
+    lat?: number;
+    lng?: number;
+    position_time?: string;
+  };
 }
 
 export async function getCargoRecordsMap(

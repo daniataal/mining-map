@@ -7,26 +7,46 @@ import (
 )
 
 type Config struct {
-	Port                    string
-	DatabaseURL             string
-	AISStreamAPIKey         string
-	EIAAPIKey               string
-	ComtradeAPIKey          string
-	EnableAIS               bool
-	EnableEIA               bool
-	EnableComtrade          bool
-	EnableOSMImport         bool
-	ExistingBackendURL      string
-	SupplierCreateEndpoint  string
-	SeedOnStartup           bool
-	DisableDemoSeed         bool
-	APIBaseURL              string
-	InternalBroadcastKey    string
-	AISPositionRetainHours  int
-	AISInsecureTLS          bool
-	AISAutoTLSFallback      bool
-	ElasticsearchURL        string
-	SearchIndexerInterval   int
+	Port                   string
+	DatabaseURL            string
+	AISStreamAPIKey        string
+	EIAAPIKey              string
+	ComtradeAPIKey         string
+	EnableAIS              bool
+	EnableEIA              bool
+	EnableComtrade         bool
+	EnableOSMImport        bool
+	ExistingBackendURL     string
+	SupplierCreateEndpoint string
+	SeedOnStartup          bool
+	DisableDemoSeed        bool
+	APIBaseURL             string
+	InternalBroadcastKey   string
+	AISPositionRetainHours int
+	AISInsecureTLS         bool
+	AISAutoTLSFallback     bool
+	ElasticsearchURL       string
+	SearchIndexerInterval  int
+
+	// ShipVault vessel registry enrichment (optional).
+	// When ShipVaultEnabled=true, the dossier API fetches owner, builder,
+	// name history and estimated value on-demand and caches in Postgres.
+	ShipVaultEnabled        bool
+	ShipVaultBearerToken    string
+	ShipVaultRefreshToken   string
+	ShipVaultSessionJSON    string
+	ShipVaultEmail          string
+	ShipVaultPassword       string
+	ShipVaultFirebaseAPIKey string
+	ShipVaultAppOriginURL   string
+	ShipVaultCacheTTLDays      int
+	ShipVaultBaseURL           string
+	ShipVaultBootstrapAllowed  bool
+}
+
+// ShipVaultConfigured reports whether ShipVault should run (env credentials or DB refresh token).
+func (c Config) ShipVaultConfigured(hasDBRefreshToken bool) bool {
+	return c.ShipVaultEnabled || hasDBRefreshToken
 }
 
 func Load() Config {
@@ -53,7 +73,34 @@ func Load() Config {
 		AISAutoTLSFallback:     aisAutoTLSFallback(),
 		ElasticsearchURL:       strings.TrimRight(env("ELASTICSEARCH_URL", "http://elasticsearch:9200"), "/"),
 		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
+
+		// ShipVault: enabled when any supported credential is present.
+		ShipVaultBearerToken:    env("SHIPVAULT_BEARER_TOKEN", ""),
+		ShipVaultRefreshToken:   env("SHIPVAULT_REFRESH_TOKEN", ""),
+		ShipVaultSessionJSON:    env("SHIPVAULT_SESSION_JSON", ""),
+		ShipVaultEmail:          env("SHIPVAULT_EMAIL", ""),
+		ShipVaultPassword:       env("SHIPVAULT_PASSWORD", ""),
+		ShipVaultFirebaseAPIKey: env("SHIPVAULT_FIREBASE_API_KEY", ""),
+		ShipVaultAppOriginURL:   strings.TrimRight(env("SHIPVAULT_APP_ORIGIN_URL", "https://app.shipvault.io"), "/"),
+		ShipVaultCacheTTLDays:   envInt("SHIPVAULT_CACHE_TTL_DAYS", 7),
+		ShipVaultBaseURL:          strings.TrimRight(env("SHIPVAULT_BASE_URL", "https://shipvaultapi-gjb8c.ondigitalocean.app"), "/"),
+		ShipVaultEnabled:          shipVaultEnabled(),
+		ShipVaultBootstrapAllowed: envBool("SHIPVAULT_BOOTSTRAP_ALLOWED", false),
 	}
+}
+
+func shipVaultEnabled() bool {
+	if strings.TrimSpace(env("SHIPVAULT_BEARER_TOKEN", "")) != "" {
+		return true
+	}
+	if strings.TrimSpace(env("SHIPVAULT_REFRESH_TOKEN", "")) != "" {
+		return true
+	}
+	if strings.TrimSpace(env("SHIPVAULT_SESSION_JSON", "")) != "" {
+		return true
+	}
+	return strings.TrimSpace(env("SHIPVAULT_EMAIL", "")) != "" &&
+		strings.TrimSpace(env("SHIPVAULT_PASSWORD", "")) != ""
 }
 
 func envInt(key string, fallback int) int {

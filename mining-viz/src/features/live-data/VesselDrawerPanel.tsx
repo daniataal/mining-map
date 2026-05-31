@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Anchor, ExternalLink, Loader2, Ship } from 'lucide-react';
+import ShipVaultRegistryPanel from '../../components/vessels/ShipVaultRegistryPanel';
 import {
   getVesselDossier,
+  refreshVesselEnrichment,
   type MeridianCargoRecord,
   type OilPortCall,
   type VesselDossierParty,
@@ -10,7 +12,7 @@ import {
 import { useI18n } from '../../lib/i18n';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 
-type VesselDrawerTab = 'overview' | 'mcr';
+type VesselDrawerTab = 'overview' | 'mcr' | 'registry';
 
 type Props = {
   mmsi: string;
@@ -161,6 +163,7 @@ function McrRow({
 
 export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenCompanyDossier }: Props) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<VesselDrawerTab>('overview');
   const [mcrOffset, setMcrOffset] = useState(0);
   const mcrLimit = 20;
@@ -171,8 +174,20 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
     staleTime: 30_000,
   });
 
+  const refreshMutation = useMutation({
+    mutationFn: () => refreshVesselEnrichment(mmsi),
+    onSuccess: (refreshed) => {
+      queryClient.setQueryData(
+        ['oil-live-vessel-dossier', mmsi, mcrOffset],
+        (old: typeof data) =>
+          old ? { ...old, shipvault_profile: refreshed.shipvault_profile } : old,
+      );
+    },
+  });
+
   const mcrTotal = data?.cargo_records.total ?? 0;
   const hasMcr = mcrTotal > 0;
+  const hasRegistry = !!data?.shipvault_profile;
 
   return (
     <div className="space-y-4 text-[11px]">
@@ -199,6 +214,19 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
         >
           {t('מטען MCR', 'MCR')} {hasMcr ? `(${mcrTotal})` : ''}
         </button>
+        {hasRegistry && (
+          <button
+            type="button"
+            onClick={() => setTab('registry')}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase ${
+              tab === 'registry'
+                ? 'bg-violet-500 text-white'
+                : 'text-slate-500 hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            {t('מאגר', 'Registry')}
+          </button>
+        )}
       </div>
 
       {isLoading && (
@@ -355,6 +383,14 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
             </>
           )}
         </section>
+      )}
+      {data && tab === 'registry' && data.shipvault_profile && (
+        <ShipVaultRegistryPanel
+          profile={data.shipvault_profile}
+          mmsi={String(mmsi)}
+          onRefresh={() => refreshMutation.mutate()}
+          isRefreshing={refreshMutation.isPending}
+        />
       )}
     </div>
   );

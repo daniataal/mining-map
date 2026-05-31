@@ -180,11 +180,14 @@ export function planLiveDealPointFeatureDraw(
   let clustered = false;
 
   for (const indices of groups.values()) {
-    if (indices.length < minCount) {
+    const first = features[indices[0]] as LiveDealPointFeature;
+    const forceLicenseCluster =
+      first.kind === 'license' && zoom < 8 && clusterKinds.has('license');
+
+    if (indices.length < minCount && !forceLicenseCluster) {
       drawFeatures.push(...indices.map((index) => features[index] as LiveDealPointFeature));
       continue;
     }
-
     clustered = true;
     let latSum = 0;
     let lngSum = 0;
@@ -197,7 +200,6 @@ export function planLiveDealPointFeatureDraw(
     let east = Number.NEGATIVE_INFINITY;
     const sourceIds: string[] = [];
     const sourceUids: string[] = [];
-    const first = features[indices[0]] as LiveDealPointFeature;
 
     for (const index of indices) {
       const feature = features[index] as LiveDealPointFeature;

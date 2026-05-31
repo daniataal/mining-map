@@ -616,6 +616,7 @@ export interface MaritimeContextResponse {
 export type {
   MaritimeVessel,
   MaritimeVesselScope,
+  MaritimeTankerView,
   MaritimeViewportBounds,
   MaritimeVesselFeedResponse,
   VesselFilters,
@@ -799,4 +800,3 @@ export interface WorldCoverageResponse {
   countries: WorldCoverageCountry[];
   sources: SourceCatalogEntry[];
 }
-

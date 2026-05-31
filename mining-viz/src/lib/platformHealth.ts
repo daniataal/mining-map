@@ -34,6 +34,7 @@ export interface PlatformHealthResponse {
     recovery_hint?: string | null;
     aisstream_tls_valid_until?: string | null;
   };
+  ais_positions_fresh?: boolean;
   oil_live_intel?: {
     ok?: boolean | null;
     error?: string | null;
@@ -82,7 +83,7 @@ export function shortenMaritimeWorkerError(raw: string | undefined | null): stri
   ) {
     return (
       'AISStream TLS error (stream.aisstream.io). ' +
-      'Upstream cert may be renewed — force-recreate maritime-worker + oil-live-intel-worker with MARITIME_SSL_AUTO_FALLBACK=1.'
+      'Upstream cert may be renewed — force-recreate oil-live-intel-worker with MARITIME_SSL_AUTO_FALLBACK=1.'
     );
   }
   return err.length > 160 ? `${err.slice(0, 160)}…` : err;
@@ -94,19 +95,25 @@ export function platformHealthIssues(payload: PlatformHealthResponse | undefined
   if (payload.redis?.enabled && payload.redis.ok === false) {
     issues.push(payload.redis.error || 'Redis unreachable');
   }
+  const aisFresh = payload.ais_positions_fresh === true;
   const snap = payload.maritime_snapshot;
-  if (snap && snap.available === false) {
+  const snapWriter = (snap as { writer?: string } | undefined)?.writer;
+  if (!aisFresh && snap && snap.available === false && snapWriter !== 'retired') {
     issues.push('Maritime vessel snapshot not in Redis yet');
-  } else if (snap?.stale) {
-    issues.push('Maritime snapshot is stale — start maritime-worker');
+  } else if (!aisFresh && snap?.stale && snapWriter !== 'retired') {
+    issues.push('Live AIS ingest may be stale — check oil-live-intel-worker');
   }
   const workerStatus = payload.maritime_worker?.status;
   if (workerStatus === 'stale_error') {
     const hint =
       payload.maritime_worker?.recovery_hint?.trim() ||
-      'AISStream TLS is valid but ingest status is stale — recreate maritime-worker.';
+      'AISStream TLS is valid but ingest status is stale — recreate oil-live-intel-worker.';
     issues.push(hint);
-  } else if (workerStatus && !['ok', 'running', 'idle'].includes(workerStatus)) {
+  } else if (
+    !aisFresh &&
+    workerStatus &&
+    !['ok', 'running', 'idle', 'connecting'].includes(workerStatus)
+  ) {
     const shortErr = shortenMaritimeWorkerError(payload.maritime_worker?.last_error);
     issues.push(
       shortErr

@@ -8,7 +8,6 @@ try:
     from backend.services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
     from backend.services.eu_procurement_store import ensure_eu_procurement_tables, list_sync_runs as list_ted_sync_runs
     from backend.services.gov_procurement_store import ensure_gov_procurement_tables, list_sync_runs as list_gov_sync_runs
-    from backend.services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
     from backend.services.ingest.philippines_mgb_arcgis_probe import (
         get_latest_probe as get_ph_probe,
         run_and_persist_probe as run_ph_probe,
@@ -26,7 +25,6 @@ except ImportError:
     from services.comtrade_sync_store import ensure_comtrade_sync_tables, list_sync_runs
     from services.eu_procurement_store import ensure_eu_procurement_tables, list_sync_runs as list_ted_sync_runs
     from services.gov_procurement_store import ensure_gov_procurement_tables, list_sync_runs as list_gov_sync_runs
-    from services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
     from services.ingest.philippines_mgb_arcgis_probe import (
         get_latest_probe as get_ph_probe,
         run_and_persist_probe as run_ph_probe,
@@ -40,6 +38,18 @@ except ImportError:
     from services.petroleum_osm_sync_store import ensure_petroleum_osm_sync_tables, list_sync_runs as list_osm_sync_runs
     from services.sync_alert_store import count_unread_alerts, ensure_sync_alert_tables
     from services.sync_sla import build_source_sla_dashboard
+
+try:
+    from backend.services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
+except ImportError:
+    try:
+        from services.ingest.kazakhstan_arcgis_probe import get_latest_probe as get_kz_probe, run_and_persist_probe as run_kz_probe
+    except ImportError:
+        def get_kz_probe(_conn):  # type: ignore[misc]
+            return {"status": "unavailable", "message": "Kazakhstan ArcGIS probe module not installed"}
+
+        def run_kz_probe(_conn):  # type: ignore[misc]
+            return get_kz_probe(_conn)
 
 _NORDIC_SOURCE_IDS = (
     "norway_npd_production_licences_current",

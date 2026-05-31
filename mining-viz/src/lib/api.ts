@@ -43,11 +43,17 @@ import {
   writeLicenseBundleCache,
   type LicenseBundleMode,
 } from './licenseBundleCache';
+import { normalizeMaritimeContextResponse } from './maritimeContextNormalize';
 import {
   LICENSE_COUNTRY_FETCH_HUB,
   licenseViewportBoundsFromGeoJson,
 } from './countryBounds';
-import { MIN_SERVER_LICENSE_CLUSTER_COUNT } from './licenseMapCluster';
+import {
+  collapseServerClustersInViewport,
+  LICENSE_MAP_GO_ENABLED,
+  MIN_SERVER_LICENSE_CLUSTER_COUNT,
+  SERVER_CLUSTER_MIN_DRILL_ZOOM,
+} from './licenseMapCluster';
 import { getStoredMiningToken } from './miningAuth';
 import { MAP_VIEWPORT_DEBOUNCE_MS } from './mapViewportDebounce';
 
@@ -439,6 +445,8 @@ async function fetchLicensesViewportFromApi(
 ): Promise<MiningLicense[]> {
   const { sector, bounds, countries, mapZoom, signal } = options;
   const fetchBounds = quantizeLicenseViewportBounds(bounds);
+  const zoomRounded =
+    mapZoom != null && Number.isFinite(mapZoom) ? Math.round(mapZoom * 10) / 10 : null;
   const params: Record<string, string | number | boolean> = {
     prefer_open_data: true,
     limit: LICENSE_VIEWPORT_LIMIT,
@@ -450,13 +458,37 @@ async function fetchLicensesViewportFromApi(
   };
   if (sector) params.sector = sector;
   if (countries?.length) params.countries = countries.join(',');
-  if (mapZoom != null && Number.isFinite(mapZoom)) params.zoom = Math.round(mapZoom * 10) / 10;
-  const { data } = await apiClient.get<unknown>('/licenses', {
-    signal,
-    timeout: 60_000,
-    params,
-  });
-  return parseLicensesResponse(data);
+  if (zoomRounded != null) params.zoom = zoomRounded;
+
+  const useGoMapPath =
+    LICENSE_MAP_GO_ENABLED &&
+    zoomRounded != null &&
+    zoomRounded < SERVER_CLUSTER_MIN_DRILL_ZOOM;
+  const paths = useGoMapPath
+    ? ['/api/oil-live/licenses/map', '/licenses']
+    : ['/licenses'];
+
+  let lastError: unknown;
+  for (const path of paths) {
+    const requestParams = { ...params };
+    if (path.endsWith('/map')) delete requestParams.map;
+    try {
+      const { data } = await apiClient.get<unknown>(path, {
+        signal,
+        timeout: 60_000,
+        params: requestParams,
+      });
+      return collapseServerClustersInViewport(
+        await parseLicensesResponse(data),
+        fetchBounds,
+        zoomRounded ?? undefined,
+      );
+    } catch (err) {
+      lastError = err;
+      if (isCancel(err)) throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Licenses request failed'));
 }
 
 /** Background warm-up for Oil & Gas tab / Historic sidebar (avoids cold fetch on sector switch). */
@@ -514,6 +546,7 @@ export function useLicensesForMap(options: {
     queryKey: [
       'licenses',
       'viewport',
+      LICENSE_MAP_GO_ENABLED ? 'go' : 'py',
       sector,
       countriesKey,
       countryFocusBboxOnly ? 'focus-bbox' : 'scoped',
@@ -1173,10 +1206,53 @@ export interface MaritimeContextQuery {
   lat?: number;
   lng?: number;
   vessel_name?: string;
-  mmsi?: string;
-  imo?: string;
+  mmsi?: string | number;
+  imo?: string | number;
   destination?: string;
 }
+
+function maritimeContextField(value: string | number | null | undefined): string {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+export { normalizeMaritimeContextResponse } from './maritimeContextNormalize';
+
+export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
+  const normalized = useMemo(
+    () => ({
+      company: maritimeContextField(params.company),
+      country: maritimeContextField(params.country),
+      commodity: maritimeContextField(params.commodity),
+      vessel_name: maritimeContextField(params.vessel_name),
+      mmsi: maritimeContextField(params.mmsi),
+      imo: maritimeContextField(params.imo),
+      destination: maritimeContextField(params.destination),
+      lat: params.lat,
+      lng: params.lng,
+    }),
+    [params],
+  );
+
+  const hasUsefulQuery =
+    Boolean(normalized.company) ||
+    Boolean(normalized.country) ||
+    Boolean(normalized.vessel_name) ||
+    Boolean(normalized.mmsi) ||
+    Boolean(normalized.imo);
+
+  return useQuery<MaritimeContextResponse>({
+    queryKey: ['maritime-context', normalized],
+    queryFn: async () => {
+      const { data } = await apiClient.get<MaritimeContextResponse>('/api/oil-live/maritime/context', {
+        params: normalized,
+      });
+      return normalizeMaritimeContextResponse(data);
+    },
+    enabled: enabled && hasUsefulQuery,
+    staleTime: 2 * 60_000,
+  });
+};
 
 export {
   useMaritimeVessels,
@@ -1184,27 +1260,6 @@ export {
   fetchMaritimeVesselSnapshot,
 } from './vessels/useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
-
-export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
-  const hasUsefulQuery =
-    Boolean(params.company?.trim()) ||
-    Boolean(params.country?.trim()) ||
-    Boolean(params.vessel_name?.trim()) ||
-    Boolean(params.mmsi?.trim()) ||
-    Boolean(params.imo?.trim());
-
-  return useQuery<MaritimeContextResponse>({
-    queryKey: ['maritime-context', params],
-    queryFn: async () => {
-      const { data } = await apiClient.get<MaritimeContextResponse>('/api/maritime/context', {
-        params,
-      });
-      return data;
-    },
-    enabled: enabled && hasUsefulQuery,
-    staleTime: 2 * 60_000,
-  });
-};
 
 export const useStorageTerminals = (enabled = true) => {
   return useQuery<StorageTerminalResponse>({

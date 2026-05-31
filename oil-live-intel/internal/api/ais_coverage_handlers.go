@@ -32,7 +32,7 @@ func (s *Server) ListVessels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSONCached(w, http.StatusOK, map[string]any{
-			"vessels":           fallback,
+			"vessels":           nonNilMapSlice(fallback),
 			"count":             len(fallback),
 			"freshness_minutes": freshness,
 			"sources":           sources,
@@ -45,7 +45,7 @@ func (s *Server) ListVessels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONCached(w, http.StatusOK, map[string]any{
-		"vessels":           result.Vessels,
+		"vessels":           nonNilMapSlice(result.Vessels),
 		"count":             result.ReturnedCount,
 		"total_available":   result.TotalAvailable,
 		"returned_count":    result.ReturnedCount,
@@ -319,7 +319,7 @@ func (s *Server) querySourceHealth(r *http.Request) ([]map[string]any, error) {
 			"observation_count":   observationCount,
 			"vessel_count":        vesselCount,
 			"last_observation_at": formatTimePtr(lastObs),
-			"limitations":         limitations,
+			"limitations":         nonNilStringSlice(limitations),
 			"source_url":          sourceURL,
 			"metadata":            jsonRawOrEmpty(metadata),
 		})

@@ -107,53 +107,65 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 
 	openClause := ""
 	if q.PreferOpenData {
-		existsSQL := fmt.Sprintf(`
-			SELECT EXISTS (
-				SELECT 1 FROM licenses
-				WHERE %s AND (%s)
-				  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-			)`, sectorSQL, countrySQL)
-		var hasPreferred bool
-		if err := pool.QueryRow(ctx, existsSQL, args...).Scan(&hasPreferred); err != nil {
-			return nil, err
-		}
-		if hasPreferred {
-			openClause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
-		}
+		openClause = fmt.Sprintf(` AND (
+			LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+			OR country IS NULL
+			OR country NOT IN (
+				SELECT country FROM licenses 
+				WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+				AND country IS NOT NULL
+				AND %s
+			)
+		)`, sectorSQL)
 	}
 
 	n := len(args)
+	gIdx := n + 1
+	halfIdx := n + 2
+	minLatIdx := n + 3
+	maxLatIdx := n + 4
+	minLngIdx := n + 5
+	maxLngIdx := n + 6
+	minCntIdx := n + 7
+	limitIdx := n + 8
+	// Subquery keeps PostgreSQL happy: SELECT may reference bucket columns only after GROUP BY.
 	sql := fmt.Sprintf(`
 		SELECT
-			(FLOOR(lat / $%d) * $%d + $%d / 2.0)::float AS lat,
-			(FLOOR(lng / $%d) * $%d + $%d / 2.0)::float AS lng,
+			(lat_bucket * $%d + $%d / 2.0)::float AS lat,
+			(lng_bucket * $%d + $%d / 2.0)::float AS lng,
 			COUNT(*)::int AS cnt,
-			MAX(country) AS country,
-			MAX(COALESCE(sector, 'mining')) AS sector
-		FROM licenses
-		WHERE %s
-		  AND (%s)
-		  AND lat IS NOT NULL AND lng IS NOT NULL
-		  AND lat BETWEEN -90 AND 90
-		  AND lng BETWEEN -180 AND 180
-		  AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
-		  AND lat BETWEEN $%d AND $%d
-		  AND lng BETWEEN $%d AND $%d
-		  %s
-		GROUP BY FLOOR(lat / $%d), FLOOR(lng / $%d)
+			country,
+			MAX(sector) AS sector
+		FROM (
+			SELECT
+				FLOOR(lat / $%d)::bigint AS lat_bucket,
+				FLOOR(lng / $%d)::bigint AS lng_bucket,
+				country,
+				COALESCE(sector, 'mining') AS sector
+			FROM licenses
+			WHERE %s
+			  AND (%s)
+			  AND lat IS NOT NULL AND lng IS NOT NULL
+			  AND lat BETWEEN -90 AND 90
+			  AND lng BETWEEN -180 AND 180
+			  AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
+			  AND lat BETWEEN $%d AND $%d
+			  AND lng BETWEEN $%d AND $%d
+			  %s
+		) bucketed
+		GROUP BY lat_bucket, lng_bucket, country
 		HAVING COUNT(*) >= $%d
 		ORDER BY cnt DESC
 		LIMIT $%d
-	`, n+1, n+2, n+3, n+4, n+5, n+6,
+	`, gIdx, halfIdx, gIdx, halfIdx, gIdx, gIdx,
 		sectorSQL, countrySQL,
-		n+7, n+8, n+9, n+10,
+		minLatIdx, maxLatIdx, minLngIdx, maxLngIdx,
 		openClause,
-		n+11, n+12,
-		n+13,
-		n+14)
+		minCntIdx,
+		limitIdx)
 
 	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, g, g, g/2, g, g, g/2, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, g, g, minCnt, safeLimit)
+	queryArgs = append(queryArgs, g, g/2, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, minCnt, safeLimit)
 
 	rows, err := pool.Query(ctx, sql, queryArgs...)
 	if err != nil {
@@ -181,7 +193,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 			sec = *sector
 		}
 		out = append(out, ClusterMarker{
-			ID:                fmt.Sprintf("cluster:%.4f:%.4f", lat, lng),
+			ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", c, lat, lng),
 			Company:           fmt.Sprintf("%d licenses", cnt),
 			LicenseType:       "Cluster",
 			Commodity:         "",
@@ -197,7 +209,8 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 			EntityKind:        "license",
 		})
 	}
-	return MergeClusters(out, g), rows.Err()
+	merged := MergeClusters(out, g)
+	return CollapseClustersTightViewport(merged, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, q.Zoom), rows.Err()
 }
 
 // ValidBBox returns false for degenerate boxes.

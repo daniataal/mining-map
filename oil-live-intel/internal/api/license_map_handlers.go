@@ -36,7 +36,7 @@ func (s *Server) LicenseMapClusters(w http.ResponseWriter, r *http.Request) {
 			"mode":     "points",
 			"fallback": "python",
 			"endpoint": "/licenses",
-			"hint":     "Go scaffold covers low-zoom clusters (zoom < 7); point mode remains on Python until cutover.",
+			"hint":     "Go scaffold covers low-zoom clusters (zoom < 8); point mode remains on Python until cutover.",
 		})
 		return
 	}

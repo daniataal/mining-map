@@ -46,6 +46,7 @@ import FilterPanel from './components/FilterPanel';
 import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
 import { LICENSE_MAP_DEFAULT_ZOOM } from './lib/licenseMapCluster';
 import OilMaritimePanel from './components/OilMaritimePanel';
+import { resolveFleetVesselSelection } from './lib/vessels/resolveFleetVessel';
 import {
   DEFAULT_VESSEL_FILTERS,
   prefetchMaritimeVesselSnapshot,
@@ -269,6 +270,15 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
+
+  useEffect(() => {
+    if (!selectedMaritimeVessel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedMaritimeVessel(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedMaritimeVessel]);
   const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
   const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
   const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('15000');
@@ -1678,7 +1688,19 @@ export default function App() {
             )}
             {maritimeMapViewActive && selectedMaritimeVessel && !isDossierOpen && (
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
-                <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
+                <OilMaritimePanel
+                  key={selectedMaritimeVessel.id || String(selectedMaritimeVessel.mmsi)}
+                  vessel={selectedMaritimeVessel}
+                  onClose={() => setSelectedMaritimeVessel(null)}
+                  onSelectVessel={async (pick) => {
+                    const resolved = await resolveFleetVesselSelection(pick);
+                    if (!resolved) {
+                      throw new Error('Vessel not found in live feed or registry lookup.');
+                    }
+                    setSelectedMaritimeVessel(resolved);
+                    return resolved;
+                  }}
+                />
               </div>
             )}
             {(viewMode === 'mining' || viewMode === 'global') &&

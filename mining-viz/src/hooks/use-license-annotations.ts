@@ -17,6 +17,11 @@ export { isAnnotationsAuthError } from '../lib/annotationsAuth';
 const LOCAL_STORAGE_KEY = 'mining_user_data';
 const MIGRATION_FLAG_KEY = 'mining_annotations_migrated_v1';
 
+/** Client-only license IDs are not persisted in Postgres. */
+function isLocalOnlyLicenseId(licenseId: string): boolean {
+  return licenseId.startsWith('user_csv:') || licenseId.startsWith('local:');
+}
+
 export type UseLicenseAnnotationsOptions = {
   /** Called when the server rejects the stored JWT (expired / invalid). */
   onAuthInvalid?: () => void;
@@ -107,6 +112,7 @@ export function useLicenseAnnotations(
         const alreadyMigrated = localStorage.getItem(MIGRATION_FLAG_KEY) === '1';
         if (!alreadyMigrated && Object.keys(local).length > 0) {
           for (const [licenseId, annotation] of Object.entries(local)) {
+            if (isLocalOnlyLicenseId(licenseId)) continue;
             const serverAnn = server[licenseId] || {};
             const localOnly = { ...annotation };
             for (const key of Object.keys(serverAnn)) {
@@ -140,7 +146,7 @@ export function useLicenseAnnotations(
 
   const persistToServer = useCallback(
     (licenseId: string, annotation: UserAnnotation) => {
-      if (!token?.trim()) return;
+      if (!token?.trim() || isLocalOnlyLicenseId(licenseId)) return;
       const existing = pendingWrites.current.get(licenseId);
       if (existing) clearTimeout(existing);
       const timer = setTimeout(async () => {

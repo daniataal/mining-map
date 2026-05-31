@@ -39,6 +39,11 @@ func main() {
 	if cfg.EnableAIS {
 		go workers.RunAISIngestor(ctx, pool, cfg, log)
 	}
+	go workers.RunPetroleumOSMSync(ctx, pool)
+	go workers.StartSwedenSGUSyncLoop(ctx, pool)
+	go workers.StartKazakhstanEgovSyncLoop(ctx, pool)
+	go workers.StartArcGISProbesSyncLoop(ctx, pool)
+	go workers.StartGraphSyncGoStepsLoop(ctx, pool)
 
 	log.Info().
 		Bool("ais", cfg.EnableAIS).

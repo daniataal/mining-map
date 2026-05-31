@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mining-map/oil-live-intel/internal/services/ais"
 )
 
 const (
@@ -103,13 +105,13 @@ type QueryOptions struct {
 
 // ListResult is the map-facing vessel list with cap diagnostics.
 type ListResult struct {
-	Vessels         []map[string]any
-	TotalAvailable  int
-	ReturnedCount   int
-	CapApplied      bool
-	ShipTypeCounts  map[string]int
-	Limit           int
-	SourceMode      string
+	Vessels        []map[string]any
+	TotalAvailable int
+	ReturnedCount  int
+	CapApplied     bool
+	ShipTypeCounts map[string]int
+	Limit          int
+	SourceMode     string
 }
 
 // TableReady reports whether the observations table exists.
@@ -264,7 +266,8 @@ func listMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		SELECT DISTINCT ON (r.vessel_key)
 		  r.mmsi, r.source, r.data_source, r.source_type, r.imo, r.lat, r.lng, r.sog, r.cog,
 		  r.vessel_name, r.position_time, r.received_at, r.confidence, r.source_url, r.raw,
-		  v.name, v.vessel_type, v.tanker_class, v.crude_capable, v.product_tanker
+		  v.name, v.imo AS registry_imo, v.callsign, v.metadata AS vessel_metadata,
+		  v.vessel_type, v.tanker_class, v.crude_capable, v.product_tanker
 		FROM ranked r
 		LEFT JOIN oil_vessels v ON v.mmsi = r.mmsi
 		ORDER BY r.vessel_key, r.src_rank ASC, r.position_time DESC`
@@ -280,18 +283,18 @@ func listMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 	for rows.Next() {
 		var mmsi int64
 		var source, dataSource, sourceType string
-		var imo *string
+		var imo, registryImo, callsign *string
 		var lat, lng float64
 		var sog, cog, confidence *float64
 		var vesselName, name, vtype, tclass *string
 		var sourceURL *string
-		var raw []byte
+		var raw, vesselMeta []byte
 		var observed time.Time
 		var received *time.Time
 		var crude, product *bool
 		if err := rows.Scan(&mmsi, &source, &dataSource, &sourceType, &imo, &lat, &lng, &sog, &cog,
 			&vesselName, &observed, &received, &confidence, &sourceURL, &raw,
-			&name, &vtype, &tclass, &crude, &product); err != nil {
+			&name, &registryImo, &callsign, &vesselMeta, &vtype, &tclass, &crude, &product); err != nil {
 			return nil, err
 		}
 		displayName := name
@@ -317,6 +320,11 @@ func listMergedVessels(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64,
 		if cog != nil {
 			item["course"] = *cog
 		}
+		registryIMO := registryImo
+		if registryIMO == nil {
+			registryIMO = imo
+		}
+		ais.EnrichLiveVesselMap(item, registryIMO, callsign, vesselMeta, raw)
 		out = append(out, item)
 	}
 	return out, rows.Err()

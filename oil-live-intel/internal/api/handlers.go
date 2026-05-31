@@ -16,6 +16,7 @@ import (
 
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/services/search"
+	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
 	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
@@ -28,6 +29,9 @@ type Server struct {
 	// SearchClient is optional — when nil, /api/oil-live/search returns
 	// {"error":"search_unavailable"} so the UI degrades gracefully.
 	SearchClient search.Client
+	// ShipVaultSvc is optional — when nil, vessel dossier omits
+	// the shipvault_profile block without error.
+	ShipVaultSvc *shipvault.Service
 }
 
 var upgrader = websocket.Upgrader{
@@ -153,7 +157,7 @@ func (s *Server) LiveVessels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"vessels": items})
+	writeJSON(w, http.StatusOK, map[string]any{"vessels": nonNilMapSlice(items)})
 }
 
 func (s *Server) GetVessel(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +341,7 @@ func (s *Server) GetCompanyShipments(w http.ResponseWriter, r *http.Request) {
 			"load_port_name": loadPort, "load_country": loadCountry,
 			"discharge_hint": discharge, "discharge_country": discCountry,
 			"volume_best_estimate": volBest, "volume_unit": volUnit,
-			"event_date": formatTimePtr(eventDate),
+			"event_date":        formatTimePtr(eventDate),
 			"corridor_load_lat": loadLat, "corridor_load_lng": loadLng,
 			"corridor_discharge_lat": discLat, "corridor_discharge_lng": discLng,
 			"evidence_chain": evChain, "sources": srcList,
