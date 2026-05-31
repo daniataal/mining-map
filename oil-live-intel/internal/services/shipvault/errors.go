@@ -12,6 +12,8 @@ func MapEnrichmentError(err error) (status int, message string) {
 	}
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "company not found for name"):
+		return http.StatusNotFound, strings.TrimPrefix(msg, "shipvault 404: ")
 	case strings.Contains(msg, "shipvault 404"):
 		return http.StatusNotFound, "No ShipVault registry match for this IMO"
 	case strings.Contains(msg, "no IMO number"):

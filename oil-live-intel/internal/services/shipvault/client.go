@@ -392,18 +392,22 @@ func (s *Service) GetCompany(ctx context.Context, companyID string) (map[string]
 }
 
 // GetFleet fetches the fleet list for a company.
+// Upstream: GET /api/companies/fleet/{companyID}?page=1&pageSize=200 (bare JSON array).
 func (s *Service) GetFleet(ctx context.Context, companyID string) ([]map[string]any, error) {
-	var raw struct {
-		Data  []map[string]any `json:"data"`
-		Items []map[string]any `json:"items"`
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return nil, fmt.Errorf("empty company id")
 	}
-	if err := s.doRequest(ctx, "/api/companies/"+companyID+"/fleet?page=1&pageSize=200", &raw); err != nil {
+	var raw json.RawMessage
+	path := fmt.Sprintf("/api/companies/fleet/%s?page=1&pageSize=200", url.PathEscape(companyID))
+	if err := s.doRequest(ctx, path, &raw); err != nil {
 		return nil, err
 	}
-	if len(raw.Data) > 0 {
-		return raw.Data, nil
+	rows := parseShipSearchPayload(raw).vesselRows()
+	if len(rows) == 0 {
+		return nil, nil
 	}
-	return raw.Items, nil
+	return rows, nil
 }
 
 // EnrichVessel checks the DB cache, fetches from ShipVault on cache miss,

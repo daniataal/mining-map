@@ -30,6 +30,22 @@ function pickString(...values: unknown[]): string {
   return '';
 }
 
+function isEmptyDisplayValue(value: string): boolean {
+  return value === '—' || value.trim() === '';
+}
+
+/** Same as buildVesselFieldGroups but drops groups/rows with no displayed values. */
+export function buildVesselFieldGroupsFiltered(
+  vessel: MaritimeVessel,
+): { title: string; rows: VesselFieldRow[] }[] {
+  return buildVesselFieldGroups(vessel)
+    .map((group) => ({
+      ...group,
+      rows: group.rows.filter((row) => !isEmptyDisplayValue(row.value)),
+    }))
+    .filter((group) => group.rows.length > 0);
+}
+
 export function buildVesselFieldGroups(vessel: MaritimeVessel): { title: string; rows: VesselFieldRow[] }[] {
   const dims = vessel.dimensions;
   const eta = vessel.eta;
