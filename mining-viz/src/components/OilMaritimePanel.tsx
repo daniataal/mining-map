@@ -4,9 +4,9 @@ import type { MaritimeVessel } from '../lib/vessels/types';
 import {
   getVesselShipVault,
   getVesselShipVaultDetail,
-  oilLiveApiUrl,
   refreshVesselEnrichment,
 } from '../api/oilLiveApi';
+import { useVesselTrack } from '../hooks/useVesselTrack';
 import ShipVaultRegistryPanel from './vessels/ShipVaultRegistryPanel';
 import ShipVaultCompanyPanel from './vessels/ShipVaultCompanyPanel';
 import ShipVaultYardPanel from './vessels/ShipVaultYardPanel';
@@ -73,19 +73,6 @@ function VesselBadges({ vessel }: { vessel: MaritimeVessel }) {
       )}
     </div>
   );
-}
-
-interface VesselTrackPoint {
-  received_at?: string;
-  latitude?: number;
-  longitude?: number;
-  speed_over_ground?: number | null;
-  course_over_ground?: number | null;
-}
-
-interface VesselTrackResponse {
-  points?: VesselTrackPoint[];
-  unavailable?: boolean;
 }
 
 type ShipVaultOverlay =
@@ -168,22 +155,7 @@ export default function OilMaritimePanel({ vessel, onClose, onSelectVessel }: Oi
     return msg || t('שגיאת ShipVault', 'ShipVault error');
   }, [shipVaultQuery.error, t]);
 
-  const trackQuery = useQuery<VesselTrackResponse>({
-    queryKey: ['vessel-track', vessel.mmsi, 24],
-    queryFn: async () => {
-      const mmsi = String(vessel.mmsi ?? '').trim();
-      if (!mmsi) return { points: [] };
-      const response = await fetch(
-        oilLiveApiUrl(`/api/oil-live/vessels/${encodeURIComponent(mmsi)}/track?hours=24`),
-      );
-      if (response.status === 404) return { points: [], unavailable: true };
-      if (!response.ok) throw new Error(`Track unavailable (${response.status})`);
-      return (await response.json()) as VesselTrackResponse;
-    },
-    enabled: Boolean(vessel.mmsi) && tab === 'position',
-    staleTime: 60_000,
-    retry: false,
-  });
+  const trackQuery = useVesselTrack(vessel.mmsi, 24, Boolean(vessel.mmsi) && tab === 'position');
 
   const hasRawAis =
     Object.keys(vessel.ais_messages ?? {}).length > 0 || Object.keys(vessel.ais_metadata ?? {}).length > 0;
@@ -401,7 +373,11 @@ function TrackSummary({
   trackQuery,
   t,
 }: {
-  trackQuery: { isLoading: boolean; isError: boolean; data?: VesselTrackResponse };
+  trackQuery: {
+    isLoading: boolean;
+    isError: boolean;
+    data?: { points?: { received_at?: string; latitude?: number; longitude?: number }[]; unavailable?: boolean };
+  };
   t: (he: string, en: string) => string;
 }) {
   return (

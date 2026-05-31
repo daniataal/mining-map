@@ -270,6 +270,15 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [selectedItem, setSelectedItem] = useState<MiningLicense | null>(null);
   const [selectedMaritimeVessel, setSelectedMaritimeVessel] = useState<MaritimeVessel | null>(null);
+
+  useEffect(() => {
+    if (!selectedMaritimeVessel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedMaritimeVessel(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedMaritimeVessel]);
   const [isMaritimeLayerEnabled, setIsMaritimeLayerEnabled] = useState(false);
   const [vesselFilters, setVesselFilters] = useState<VesselFilters>(DEFAULT_VESSEL_FILTERS);
   const [maritimeMaxVessels, setMaritimeMaxVessels] = useState('15000');
