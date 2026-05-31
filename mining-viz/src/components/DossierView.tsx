@@ -1614,8 +1614,8 @@ Output requirements:
                     <Card className="p-6 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
                       <p className="text-[10px] text-slate-500">
                         {t(
-                          'אין כלי שיט AIS שמורים בטווח. נסו להרחיב את maritime-worker או לבדוק כיסוי המפרץ.',
-                          'No persisted AIS vessels in range. Expand maritime-worker watches or check Gulf coverage.',
+                          'אין כלי שיט AIS שמורים בטווח. נסו להרחיב את oil-live-intel-worker או לבדוק כיסוי המפרץ.',
+                          'No persisted AIS vessels in range. Expand oil-live-intel-worker watches or check Gulf coverage.',
                         )}
                       </p>
                     </Card>

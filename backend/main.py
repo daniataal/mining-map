@@ -2503,20 +2503,18 @@ def read_licenses(
         safe_limit = max(1, min(int(limit or 10000), 15000))
         sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
         country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
-        exists_sql = f"""
-            SELECT EXISTS (
-                SELECT 1 FROM licenses
-                WHERE {sector_sql}
-                  AND ({country_sql})
-                  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-            )
-        """
-        c.execute(exists_sql, tuple(sector_params + country_params))
-        has_row = c.fetchone() or {}
-        has_preferred_live_rows = bool(has_row.get("exists"))
         open_clause = ""
-        if prefer_open_data and has_preferred_live_rows:
-            open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+        if prefer_open_data:
+            open_clause = f""" AND (
+                LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                OR country IS NULL
+                OR country NOT IN (
+                    SELECT country FROM licenses 
+                    WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                    AND country IS NOT NULL
+                    AND {sector_sql}
+                )
+            ) """
         columns = _license_api_columns_sql()
         per_country_cap = len(requested_countries) > 1
         if per_country_cap:
@@ -2571,20 +2569,21 @@ def read_licenses(
             min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
             sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
             country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
-            exists_sql = f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM licenses
-                    WHERE {sector_sql}
-                      AND ({country_sql})
-                      AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-                )
-            """
-            c.execute(exists_sql, tuple(sector_params + country_params))
-            has_row = c.fetchone() or {}
-            has_preferred_live_rows = bool(has_row.get("exists"))
             open_clause = ""
-            if prefer_open_data and has_preferred_live_rows:
-                open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+            if prefer_open_data:
+                open_clause = f""" AND (
+                    LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                    OR country IS NULL
+                    OR country NOT IN (
+                        SELECT country FROM licenses 
+                        WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                        AND country IS NOT NULL
+                        AND {sector_sql}
+                    )
+                ) """
+            
+            # Keep a dummy variable so later references don't break
+            has_preferred_live_rows = False
 
             if grid_deg is not None:
                 clusters = query_license_clusters(
@@ -2600,6 +2599,7 @@ def read_licenses(
                     grid_deg=grid_deg,
                     open_clause=open_clause,
                     limit=license_cluster_limit_for_zoom(zoom, int(limit or 800)),
+                    zoom=zoom,
                 )
                 conn.close()
                 payload = {"mode": "clusters", "clusters": clusters, "zoom": zoom, "grid_degrees": grid_deg}
@@ -5699,39 +5699,29 @@ def platform_health():
     """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
     try:
         from backend.services.platform_health import build_platform_health
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
         from services.platform_health import build_platform_health
-    try:
-        from backend.services.maritime_snapshot import get_snapshot_meta
-        from backend.services.maritime_intel import get_maritime_stats
-    except ImportError:
-        from services.maritime_snapshot import get_snapshot_meta
-        from services.maritime_intel import get_maritime_stats
+        from services.maritime_go_proxy import proxy_oil_live_get
 
     return build_platform_health(
         redis_enabled=REDIS_ENABLED,
         redis_ping=cache.get_client,
-        get_snapshot_meta=get_snapshot_meta,
-        get_maritime_stats=get_maritime_stats,
+        get_maritime_stats=lambda: proxy_oil_live_get("/api/oil-live/maritime/stats"),
         get_oil_live_health=_probe_oil_live_health,
     )
 
 
 @app.get("/api/maritime/snapshot")
 def get_maritime_snapshot_meta():
-    """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
-    try:
-        try:
-            from backend.services.maritime_snapshot import get_snapshot_meta
-        except ImportError:
-            from services.maritime_snapshot import get_snapshot_meta
-        return get_snapshot_meta()
-    except Exception as exc:
-        return {
-            "available": False,
-            "source": None,
-            "error": str(exc),
-        }
+    """Deprecated — use /api/oil-live/maritime/stats and /api/oil-live/vessels/live (Caddy rewrites legacy paths)."""
+    return {
+        "available": False,
+        "stale": True,
+        "writer": "retired",
+        "redirect": "/api/oil-live/maritime/stats",
+        "note": "Use /api/oil-live/vessels/live for the vessel map layer.",
+    }
 
 
 @app.get("/api/maritime/stats")
@@ -5741,23 +5731,15 @@ def get_maritime_stats_endpoint(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Debug counts for persisted AIS snapshots and worker ingest health."""
+    """Deprecated — canonical: GET /api/oil-live/maritime/stats. Thin proxy for backend:8000 direct access."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_stats
-        except ImportError:
-            from services.maritime_intel import get_maritime_stats
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_stats(bbox=bbox)
-    except Exception as exc:
-        return {
-            "stored_vessel_count": 0,
-            "snapshot_vessel_count": 0,
-            "aisstream_configured": False,
-            "worker": {"status": "error", "last_error": str(exc)},
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    return proxy_oil_live_get("/api/oil-live/maritime/stats", params)
 
 
 @app.get("/api/maritime/vessels")
@@ -5771,44 +5753,34 @@ def get_maritime_vessels(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Optional AIS maritime layer for oil and gas mode, served from worker snapshots."""
+    """Deprecated — canonical: GET /api/oil-live/vessels/live (param limit, not max_vessels)."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_vessel_feed
-        except ImportError:
-            from services.maritime_intel import get_maritime_vessel_feed
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_vessel_feed(
-            max_vessels=max_vessels,
-            capture_window_seconds=capture_window_seconds,
-            vessel_scope=scope,
-            bbox=bbox,
-            offset=offset,
-        )
-    except Exception as exc:
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {"limit": max(1, min(int(max_vessels), 2000))}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    payload = proxy_oil_live_get("/api/oil-live/vessels/live", params)
+    if payload.get("proxy_error"):
         return {
             "vessels": [],
-            "source": "maritime_intel_error",
-            "data_as_of": datetime.utcnow().isoformat(),
-            "live_positions_enabled": False,
-            "limitations": [f"Maritime vessel feed failed: {exc}"],
-            "scope": "oil_tankers" if scope != "all_vessels" else "all_vessels",
-            "capture_window_seconds": capture_window_seconds,
+            "source": "oil_live_proxy_error",
+            "limitations": [str(payload.get("error") or "Go vessel feed unavailable")],
+            "scope": scope,
             "max_vessels": max_vessels,
-            "offset": offset,
-            "total_available": 0,
-            "returned_count": 0,
-            "cap_applied": False,
-            "geography_mode": "viewport_bbox" if all(value is not None for value in (south, west, north, east)) else "default_regions",
-            "geography_note": None,
-            "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
-            "effective_bbox_count": 0,
-            "region_labels": [],
-            "coastal_demo_regions": [],
-            "coastal_demo_synthetic": False,
         }
+    vessels = payload.get("vessels") if isinstance(payload.get("vessels"), list) else []
+    return {
+        **payload,
+        "vessels": vessels,
+        "source": "oil-live-intel",
+        "deprecated_route": "/api/maritime/vessels",
+        "canonical_route": "/api/oil-live/vessels/live",
+        "scope": scope,
+        "offset": offset,
+        "returned_count": len(vessels),
+    }
 
 
 @app.get("/api/maritime/context")
@@ -5824,44 +5796,31 @@ def get_maritime_context(
     destination: str = "",
 ):
     """
-    Open/free maritime context for oil & gas screening.
+    Deprecated — canonical: GET /api/oil-live/maritime/context.
 
-    This endpoint is explicit about scope: it returns vessel/company/port/news
-    evidence and counterparty proxies, not true bill-of-lading coverage.
+    Open/free maritime context for oil & gas screening (vessel/company/port/news;
+    not bill-of-lading coverage).
     """
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_context as build_maritime_context
-        except ImportError:
-            from services.maritime_intel import get_maritime_context as build_maritime_context
-        codes = _resolve_codes(country) if country else {}
-        return build_maritime_context(
-            company=company,
-            country=country,
-            country_iso2=codes.get("iso2", ""),
-            commodity=commodity,
-            lat=lat,
-            lng=lng,
-            vessel_name=vessel_name,
-            mmsi=mmsi,
-            imo=imo,
-            destination=destination,
-        )
-    except Exception as exc:
-        return {
-            "source_labels": [],
-            "data_as_of": datetime.utcnow().isoformat(),
-            "company_links": [],
-            "nearest_ports": [],
-            "evidence": [],
-            "identity": None,
-            "relationships": [],
-            "counterparty_proxies": [],
-            "bol_coverage_note": (
-                "Bill-of-lading buyer/seller coverage is not reliably available from free/open sources."
-            ),
-            "limitations": [f"Maritime context failed: {exc}"],
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    codes = _resolve_codes(country) if country else {}
+    return proxy_oil_live_get(
+        "/api/oil-live/maritime/context",
+        {
+            "company": company,
+            "country": country,
+            "country_iso2": codes.get("iso2", ""),
+            "commodity": commodity,
+            "lat": lat,
+            "lng": lng,
+            "vessel_name": vessel_name,
+            "mmsi": mmsi,
+            "imo": imo,
+            "destination": destination,
+        },
+    )
 
 
 @app.get("/api/storage/terminals")

@@ -10,11 +10,19 @@ except ImportError:
     from services.ai_providers import get_ai_provider_status  # type: ignore[no-redef]
 
 
+def _retired_maritime_snapshot_meta() -> dict[str, Any]:
+    return {
+        "available": False,
+        "stale": True,
+        "writer": "retired",
+        "note": "Live AIS is ingested by oil-live-intel-worker into oil_ais_positions.",
+    }
+
+
 def build_platform_health(
     *,
     redis_enabled: bool,
     redis_ping,
-    get_snapshot_meta,
     get_maritime_stats,
     get_oil_live_health=None,
 ) -> dict[str, Any]:
@@ -31,12 +39,13 @@ def build_platform_health(
             except Exception as exc:
                 redis_error = str(exc)
 
-    maritime_snapshot: dict[str, Any] = {"available": False}
+    maritime_snapshot: dict[str, Any] = _retired_maritime_snapshot_meta()
     maritime_worker: dict[str, Any] = {"status": "unknown"}
+    ais_positions_fresh = False
     try:
-        maritime_snapshot = get_snapshot_meta()
         stats = get_maritime_stats()
         maritime_worker = stats.get("worker") if isinstance(stats.get("worker"), dict) else {"status": "unknown"}
+        ais_positions_fresh = bool(stats.get("ais_positions_fresh"))
         if isinstance(stats.get("redis_snapshot"), dict):
             maritime_snapshot = {**maritime_snapshot, **stats["redis_snapshot"]}
     except Exception as exc:
@@ -56,14 +65,13 @@ def build_platform_health(
                 **maritime_worker,
                 "status": "stale_error",
                 "recovery_hint": (
-                    "AISStream TLS is valid upstream; maritime-worker last_error is stale. "
-                    "Force-recreate maritime-worker and oil-live-intel-worker after setting AISSTREAM_API_KEY."
+                    "AISStream TLS is valid upstream; last ingest error is stale. "
+                    "Force-recreate oil-live-intel-worker after setting AISSTREAM_API_KEY."
                 ),
                 "aisstream_tls_valid_until": tls_detail,
             }
             worker_status = "stale_error"
-    worker_healthy = worker_status in {"ok", "running", "idle"}
-    snapshot_ok = bool(maritime_snapshot.get("available")) and not bool(maritime_snapshot.get("stale"))
+    worker_healthy = worker_status in {"ok", "running", "idle", "connecting"}
 
     oil_live_intel: dict[str, Any] = {"ok": None, "error": None, "terminal_count": None, "url": None}
     if get_oil_live_health is not None:
@@ -74,7 +82,7 @@ def build_platform_health(
 
     ai_providers = get_ai_provider_status()
     oil_live_ok = oil_live_intel.get("ok") is not False
-    platform_ok = redis_ok and (worker_healthy or snapshot_ok) and oil_live_ok
+    platform_ok = redis_ok and (worker_healthy or ais_positions_fresh) and oil_live_ok
     status = "ok" if platform_ok and ai_providers.get("ready") else "degraded"
 
     return {
@@ -87,6 +95,7 @@ def build_platform_health(
         "ai_providers": ai_providers,
         "maritime_snapshot": maritime_snapshot,
         "maritime_worker": maritime_worker,
+        "ais_positions_fresh": ais_positions_fresh,
         "oil_live_intel": oil_live_intel,
         "status": status,
     }

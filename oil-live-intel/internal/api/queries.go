@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mining-map/oil-live-intel/internal/services/ais"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
 	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
@@ -134,7 +135,7 @@ func countLegacyShipTypes(vessels []map[string]any) map[string]int {
 func (s *Server) listLegacyLiveVessels(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
 	q := `
 		SELECT DISTINCT ON (p.mmsi) p.mmsi, p.ts, p.lat, p.lon, p.speed, p.course, p.draft_m, p.destination,
-			v.name, v.tanker_class, v.crude_capable, v.product_tanker
+			v.name, v.imo, v.callsign, v.metadata, v.tanker_class, v.crude_capable, v.product_tanker, p.raw
 		FROM oil_ais_positions p
 		LEFT JOIN oil_vessels v ON v.mmsi = p.mmsi
 		WHERE p.ts > now() - interval '24 hours'`
@@ -155,9 +156,10 @@ func (s *Server) listLegacyLiveVessels(r *http.Request, bbox [4]float64, bboxOK 
 		var ts time.Time
 		var lat, lon float64
 		var speed, course, draft *float64
-		var dest, name, tclass *string
+		var dest, name, imo, callsign, tclass *string
 		var crude, product *bool
-		if err := rows.Scan(&mmsi, &ts, &lat, &lon, &speed, &course, &draft, &dest, &name, &tclass, &crude, &product); err != nil {
+		var vesselMeta, raw []byte
+		if err := rows.Scan(&mmsi, &ts, &lat, &lon, &speed, &course, &draft, &dest, &name, &imo, &callsign, &vesselMeta, &tclass, &crude, &product, &raw); err != nil {
 			return nil, err
 		}
 		item := map[string]any{
@@ -174,6 +176,7 @@ func (s *Server) listLegacyLiveVessels(r *http.Request, bbox [4]float64, bboxOK 
 		if draft != nil {
 			item["draft_m"] = *draft
 		}
+		ais.EnrichLiveVesselMap(item, imo, callsign, vesselMeta, raw)
 		out = append(out, item)
 	}
 	return out, nil
@@ -237,7 +240,7 @@ func (s *Server) getPortCall(r *http.Request, id string) (map[string]any, error)
 		"estimated_volume_barrels": vol, "confidence": conf, "status": status,
 		"evidence": ev, "metadata": metaMap,
 		"data_provenance": inferPortCallProvenance(evidence, metadata),
-		"disclaimer": "Inferred from public/free data. Not a confirmed private transaction.",
+		"disclaimer":      "Inferred from public/free data. Not a confirmed private transaction.",
 	}, nil
 }
 

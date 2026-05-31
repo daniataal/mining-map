@@ -11,7 +11,7 @@
  *   * `Supplier.origin_license_id` lines up with `MiningLicense.id` from the
  *     existing `/licenses` endpoint.
  *   * `RouteLeg.vessel_ref` lines up with `MaritimeVessel.mmsi` / `imo`
- *     returned by `/api/maritime/vessels`.
+ *     returned by `/api/oil-live/vessels/live`.
  *   * `LocationRef.locode` lines up with the UN/LOCODE values surfaced by
  *     `/api/logistics/ports` and `/api/storage/terminals`.
  */

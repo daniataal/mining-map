@@ -115,6 +115,8 @@ type Props = {
   layers?: OilLiveLayerVisibility;
   tradeFlowGroup?: 'company_pair' | 'country_pair';
   viewport?: MaritimeViewportBounds | null;
+  /** When set (maritime focus mode), only this MMSI is drawn on the Live Data vessel layer. */
+  focusVesselMmsi?: number | null;
   /** When set, filters GET /coverage to these open AIS sources (e.g. barentswatch). */
   coverageSources?: readonly string[];
   onStatsChange?: (stats: {
@@ -220,6 +222,7 @@ function OilLiveMapOverlays({
   layers = LIVE_DATA_DEFAULT_LAYERS,
   tradeFlowGroup = 'company_pair',
   viewport,
+  focusVesselMmsi = null,
   coverageSources,
   onStatsChange,
   onEntityClick,
@@ -338,10 +341,14 @@ function OilLiveMapOverlays({
     const extra = Object.values(liveVessels).filter(
       (v) => !base.some((b) => b.mmsi === v.mmsi),
     );
-    return [...merged, ...extra].filter(
+    let list = [...merged, ...extra].filter(
       (v) => v.lat != null && v.lng != null && inViewport(v.lat, v.lng, viewport),
     );
-  }, [mapData?.vessels, liveVessels, viewport]);
+    if (focusVesselMmsi != null && Number.isFinite(focusVesselMmsi)) {
+      list = list.filter((v) => v.mmsi === focusVesselMmsi);
+    }
+    return list;
+  }, [mapData?.vessels, liveVessels, viewport, focusVesselMmsi]);
 
   const filteredCargoRecords = useMemo(() => {
     return (cargoData?.cargo_records ?? []).filter((r) =>

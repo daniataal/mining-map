@@ -24,8 +24,76 @@ export function clusterExpandPaddingDeg(item: MiningLicense): number {
 /** Match MapComponent default zoom for license views (must align API zoom with map). */
 export const LICENSE_MAP_DEFAULT_ZOOM = 7;
 
-/** Server grid mode ends below this zoom (matches backend license_grid_degrees z >= 7). */
-export const SERVER_CLUSTER_MIN_DRILL_ZOOM = 7;
+/** Server grid mode ends below this zoom (matches backend license_grid_degrees z >= 8). */
+export const SERVER_CLUSTER_MIN_DRILL_ZOOM = 8;
+
+/** Merge server grid clusters into one solo-style bubble for country/regional zoom. */
+export function collapseServerClustersInViewport(
+  rows: MiningLicense[],
+  bounds: { south: number; north: number; west: number; east: number } | null,
+  mapZoom: number | undefined,
+): MiningLicense[] {
+  const clusters = rows.filter(isServerLicenseCluster);
+  if (clusters.length <= 1) return rows;
+  if (mapZoom == null || mapZoom >= SERVER_CLUSTER_MIN_DRILL_ZOOM) return rows;
+  const span = bounds
+    ? Math.max(bounds.north - bounds.south, bounds.east - bounds.west)
+    : 0;
+  if (span <= 0 || span >= 22) return rows;
+
+  let total = 0;
+  let wlat = 0;
+  let wlng = 0;
+  let country = '';
+  let sector = 'mining';
+  let grid = clusters[0].mapClusterGridDeg ?? 8;
+  for (const row of clusters) {
+    const n = row.mapClusterCount ?? 0;
+    const lat = row._displayLat ?? row.lat ?? 0;
+    const lng = row._displayLng ?? row.lng ?? 0;
+    total += n;
+    wlat += lat * n;
+    wlng += lng * n;
+    if (!country && row.country) country = row.country;
+    if (row.sector) sector = row.sector;
+  }
+  if (total <= 0) return rows;
+  const lat = wlat / total;
+  const lng = wlng / total;
+  const merged: MiningLicense = {
+    id: `cluster:${lat.toFixed(4)}:${lng.toFixed(4)}`,
+    company: `${total} licenses`,
+    licenseType: 'Cluster',
+    commodity: '',
+    status: 'Active',
+    date: null,
+    country,
+    region: '',
+    sector: sector as MiningLicense['sector'],
+    lat,
+    lng,
+    mapClusterCount: total,
+    mapClusterGridDeg: grid,
+    entityKind: 'license',
+    _displayLat: lat,
+    _displayLng: lng,
+  };
+  return [merged];
+}
+
+/**
+ * Low-zoom clusters via Go `/api/oil-live/licenses/map` (MAD-42).
+ * Default on; opt out with VITE_LICENSE_MAP_GO=0 or false.
+ */
+export function resolveLicenseMapGoEnabled(
+  raw: string | undefined = import.meta.env.VITE_LICENSE_MAP_GO,
+): boolean {
+  if (raw === '0' || raw === 'false') return false;
+  if (raw === '1' || raw === 'true') return true;
+  return true;
+}
+
+export const LICENSE_MAP_GO_ENABLED = resolveLicenseMapGoEnabled();
 
 export function clusterTargetZoom(currentZoom: number): number {
   return Math.min(Math.max(currentZoom + 2, SERVER_CLUSTER_MIN_DRILL_ZOOM), 13);

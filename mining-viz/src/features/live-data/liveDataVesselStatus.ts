@@ -57,9 +57,9 @@ export function resolveLiveDataVesselStatus(options: {
 
   if (gulfSparse) {
     detailEn =
-      'Open AIS is sparse in the Persian Gulf — empty map does not mean no traffic. Enable AIS coverage layer or run maritime-worker; demo seeds are off.';
+      'Open AIS is sparse in the Persian Gulf — empty map does not mean no traffic. Enable AIS coverage layer or run oil-live-intel-worker; demo seeds are off.';
     detailHe =
-      'AIS פתוח דליל במפרץ הפרסי — מפה ריקה לא אומרת שאין תנועה. הפעילו שכבת כיסוי AIS או maritime-worker; נתוני הדגמה כבויים.';
+      'AIS פתוח דליל במפרץ הפרסי — מפה ריקה לא אומרת שאין תנועה. הפעילו שכבת כיסוי AIS או oil-live-intel-worker; נתוני הדגמה כבויים.';
   } else if (sparseInView && gapZones > 0) {
     detailEn = `No tankers in this view; ${gapZones} AIS gap watch zone(s) in the ledger — check the coverage layer.`;
     detailHe = `אין מכליות בתצוגה; ${gapZones} אזור(י) חוסר AIS במאגר — בדקו שכבת כיסוי.`;

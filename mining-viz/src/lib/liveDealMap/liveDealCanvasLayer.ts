@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import { drawLicenseClusterBubble } from '../licenseClusterStyle';
 import {
   liveDealFeaturePriority,
   planLiveDealPointFeatureDraw,
@@ -18,6 +19,8 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
+  clusterMinCount?: number;
+  isDark?: boolean;
 }
 
 const MAX_CANVAS_DPR = 2;
@@ -46,6 +49,11 @@ function colorForFeature(feature: LiveDealMapFeature): string {
 }
 
 function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: boolean): number {
+  if (feature.kind === 'server_cluster') {
+    const count = feature.sourceCount ?? 0;
+    const size = count < 10 ? 36 : count < 100 ? 44 : 52;
+    return (size / 2) + (selected ? 3 : 0);
+  }
   const base =
     feature.kind === 'opportunity'
       ? 8
@@ -100,9 +108,18 @@ function drawPoint(
   y: number,
   radius: number,
   selected: boolean,
+  hovered: boolean,
+  isDark = true,
 ): void {
   if (feature.kind === 'vessel') {
     drawVessel(ctx, x, y, radius + 1, feature.heading ?? 0, selected);
+    return;
+  }
+
+  if (feature.kind === 'server_cluster') {
+    const count = feature.sourceCount ?? 0;
+    const label = count > 999 ? '999+' : count > 1 ? String(count) : '';
+    drawLicenseClusterBubble(ctx, x, y, radius, label, isDark, selected, hovered);
     return;
   }
 
@@ -129,15 +146,6 @@ function drawPoint(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('!', x, y + 0.5);
-  }
-
-  if (feature.kind === 'server_cluster') {
-    ctx.font = '900 10px system-ui, sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = feature.sourceCount != null && feature.sourceCount > 999 ? '999+' : String(feature.sourceCount ?? '');
-    ctx.fillText(label, x, y + 0.5);
   }
 
   if (selected) {
@@ -246,6 +254,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _features: LiveDealMapFeature[] = [];
   private _mapZoom = 5;
   private _selectedUid: string | null = null;
+  private _hoveredUid: string | null = null;
   private _onFeatureClick?: (feature: LiveDealMapFeature) => void;
   private _raf = 0;
   private _lastPaintKey = '';
@@ -258,6 +267,8 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _clusterPoints = false;
   private _clusterKinds: readonly LiveDealFeatureKind[] | undefined;
   private _clusterMaxZoom = 13;
+  private _clusterMinCount = 2;
+  private _isDark = true;
 
   constructor(options: CanvasLiveDealLayerOptions) {
     super(options);
@@ -267,6 +278,8 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._clusterPoints = Boolean(options.clusterPoints);
     this._clusterKinds = options.clusterKinds;
     this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
+    this._clusterMinCount = options.clusterMinCount ?? 2;
+    this._isDark = options.isDark !== false;
   }
 
   setFeatures(features: LiveDealMapFeature[]): void {
@@ -298,20 +311,28 @@ export class CanvasLiveDealLayer extends L.Layer {
     clusterPoints?: boolean;
     clusterKinds?: readonly LiveDealFeatureKind[];
     clusterMaxZoom?: number;
+    clusterMinCount?: number;
+    isDark?: boolean;
   }): void {
     const nextClusterPoints = Boolean(options.clusterPoints);
     const nextClusterKinds = options.clusterKinds;
     const nextClusterMaxZoom = options.clusterMaxZoom ?? 13;
+    const nextClusterMinCount = options.clusterMinCount ?? 2;
+    const nextIsDark = options.isDark !== false;
     if (
       this._clusterPoints === nextClusterPoints &&
       this._clusterKinds === nextClusterKinds &&
-      this._clusterMaxZoom === nextClusterMaxZoom
+      this._clusterMaxZoom === nextClusterMaxZoom &&
+      this._clusterMinCount === nextClusterMinCount &&
+      this._isDark === nextIsDark
     ) {
       return;
     }
     this._clusterPoints = nextClusterPoints;
     this._clusterKinds = nextClusterKinds;
     this._clusterMaxZoom = nextClusterMaxZoom;
+    this._clusterMinCount = nextClusterMinCount;
+    this._isDark = nextIsDark;
     this._lastPaintKey = '';
     this._scheduleRedraw();
   }
@@ -382,6 +403,7 @@ export class CanvasLiveDealLayer extends L.Layer {
       this._mapZoom,
       this._dataEpoch,
       this._selectedUid ?? '',
+      this._hoveredUid ?? '',
     ].join('|');
   }
 
@@ -416,23 +438,30 @@ export class CanvasLiveDealLayer extends L.Layer {
       clusterPoints: this._clusterPoints,
       clusterKinds: this._clusterKinds,
       clusterMaxZoom: this._clusterMaxZoom,
+      clusterMinCount: this._clusterMinCount,
     });
     this._lodSubsampling = pointPlan.lodSubsampling;
 
     const selected: LiveDealMapFeature[] = [];
+    const hovered: LiveDealMapFeature[] = [];
     const normal: LiveDealMapFeature[] = [];
     for (const feature of this._features) {
       if (feature.shape === 'arc') {
-        (feature.uid === this._selectedUid ? selected : normal).push(feature);
+        if (feature.uid === this._selectedUid) selected.push(feature);
+        else if (feature.uid === this._hoveredUid) hovered.push(feature);
+        else normal.push(feature);
       }
     }
     for (const feature of pointPlan.drawFeatures) {
-      (feature.uid === this._selectedUid ? selected : normal).push(feature);
+      if (feature.uid === this._selectedUid) selected.push(feature);
+      else if (feature.uid === this._hoveredUid) hovered.push(feature);
+      else normal.push(feature);
     }
 
-    const drawn = [...normal, ...selected];
-    for (const feature of normal) this._drawFeature(ctx, map, feature);
-    for (const feature of selected) this._drawFeature(ctx, map, feature, true);
+    const drawn = [...normal, ...hovered, ...selected];
+    for (const feature of normal) this._drawFeature(ctx, map, feature, false, false);
+    for (const feature of hovered) this._drawFeature(ctx, map, feature, false, true);
+    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === this._hoveredUid);
     this._drawnFeatures = drawn;
     this._lastPaintKey = paintKey;
   }
@@ -442,13 +471,23 @@ export class CanvasLiveDealLayer extends L.Layer {
     map: L.Map,
     feature: LiveDealMapFeature,
     selected = false,
+    hovered = false,
   ): void {
     if (feature.shape === 'arc') {
       drawArc(ctx, map, feature, selected);
       return;
     }
     const point = map.latLngToContainerPoint([feature.lat, feature.lng]);
-    drawPoint(ctx, feature, point.x, point.y, radiusForPoint(feature, map.getZoom(), selected), selected);
+    drawPoint(
+      ctx,
+      feature,
+      point.x,
+      point.y,
+      radiusForPoint(feature, map.getZoom(), selected || hovered),
+      selected,
+      hovered,
+      this._isDark
+    );
   }
 
   private _findAtPoint(point: L.Point): LiveDealMapFeature | null {
@@ -499,9 +538,21 @@ export class CanvasLiveDealLayer extends L.Layer {
     if (!map) return;
     const hit = this._findAtPoint(event.containerPoint);
     map.getContainer().style.cursor = hit ? 'pointer' : '';
+
+    const nextHoveredUid = hit ? hit.uid : null;
+    if (this._hoveredUid !== nextHoveredUid) {
+      this._hoveredUid = nextHoveredUid;
+      this._lastPaintKey = '';
+      this._scheduleRedraw();
+    }
   };
 
   private _onMapMouseOut = (): void => {
     this._map?.getContainer().style.removeProperty('cursor');
+    if (this._hoveredUid !== null) {
+      this._hoveredUid = null;
+      this._lastPaintKey = '';
+      this._scheduleRedraw();
+    }
   };
 }
