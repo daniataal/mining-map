@@ -6,6 +6,9 @@
 	rewrite /api/petroleum/osm-layers* /api/oil-live/map/petroleum-osm/layers{path}
 	rewrite /api/licenses* /api/oil-live/licenses{path}
 	rewrite /licenses* /api/oil-live/licenses{path}
+	rewrite /api/maritime/stats* /api/oil-live/maritime/stats{path}
+	rewrite /api/maritime/context* /api/oil-live/maritime/context{path}
+	rewrite /api/maritime/vessels* /api/oil-live/vessels/live{path}
 
 	# Go Backend for Live Intel and Licenses
 	handle /api/oil-live/* {

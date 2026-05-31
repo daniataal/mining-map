@@ -213,7 +213,7 @@ func FindNearestPorts(countryISO2 string, lat, lng *float64, limit int) []map[st
 	}
 	rows, _ := loadUNLOCODEPorts(false)
 	if len(rows) == 0 {
-		return nil
+		return []map[string]any{}
 	}
 	country := strings.ToUpper(strings.TrimSpace(countryISO2))
 	scoped := make([]PortRow, 0, len(rows))

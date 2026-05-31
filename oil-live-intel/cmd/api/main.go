@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,29 +52,34 @@ func main() {
 		}
 	}
 
-	// ShipVault vessel enrichment is optional — initialised only when credentials
-	// are present. The service performs an initial token fetch synchronously so
-	// that any credential errors surface at startup rather than on first request.
-	var shipVaultSvc *shipvault.Service
-	if cfg.ShipVaultEnabled {
-		shipVaultSvc = shipvault.NewService(
-			cfg.ShipVaultBaseURL,
-			cfg.ShipVaultBearerToken,
-			cfg.ShipVaultCacheTTLDays,
-			log,
-		)
-		log.Info().Msg("ShipVault vessel enrichment enabled")
-	} else {
-		log.Info().Msg("ShipVault vessel enrichment disabled (set SHIPVAULT_BEARER_TOKEN to enable)")
-	}
-
 	srv := &api.Server{
 		Pool:         pool,
 		Log:          log,
 		Config:       cfg,
 		Hub:          api.NewHub(),
 		SearchClient: searchClient,
-		ShipVaultSvc: shipVaultSvc,
+	}
+
+	// ShipVault: env bootstrap and/or Postgres-persisted refresh token (Google OAuth via DevTools).
+	dbRefresh, dbErr := shipvault.LoadRefreshToken(ctx, pool)
+	if dbErr != nil {
+		log.Warn().Err(dbErr).Msg("ShipVault credential load failed")
+	}
+	envBootstrap := strings.TrimSpace(cfg.ShipVaultRefreshToken) != "" ||
+		strings.TrimSpace(cfg.ShipVaultSessionJSON) != ""
+	switch {
+	case cfg.ShipVaultConfigured(dbRefresh != ""):
+		if _, err := srv.InitShipVault(ctx); err != nil {
+			log.Warn().Err(err).Msg("ShipVault init failed; enrichment disabled")
+		} else if dbRefresh != "" && !envBootstrap {
+			log.Info().Msg("ShipVault: persistent auth from DB")
+		} else if envBootstrap {
+			log.Info().Msg("ShipVault: bootstrapped from env — refresh token persisted to DB; remove SHIPVAULT_REFRESH_TOKEN/SESSION_JSON from .env when ready")
+		}
+	case cfg.ShipVaultBootstrapAllowed:
+		log.Info().Msg("ShipVault: bootstrap needed — POST /api/oil-live/admin/shipvault/bootstrap once with refreshToken")
+	default:
+		log.Info().Msg("ShipVault: bootstrap needed — set SHIPVAULT_REFRESH_TOKEN or persist via admin bootstrap")
 	}
 	router := api.NewRouter(srv)
 

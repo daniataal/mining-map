@@ -1678,7 +1678,11 @@ export default function App() {
             )}
             {maritimeMapViewActive && selectedMaritimeVessel && !isDossierOpen && (
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
-                <OilMaritimePanel vessel={selectedMaritimeVessel} onClose={() => setSelectedMaritimeVessel(null)} />
+                <OilMaritimePanel
+                  key={selectedMaritimeVessel.id || String(selectedMaritimeVessel.mmsi)}
+                  vessel={selectedMaritimeVessel}
+                  onClose={() => setSelectedMaritimeVessel(null)}
+                />
               </div>
             )}
             {(viewMode === 'mining' || viewMode === 'global') &&

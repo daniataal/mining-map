@@ -152,8 +152,23 @@ func floatFromAnyOptional(v any) (float64, bool) {
 
 func strFromAny(values ...any) string {
 	for _, v := range values {
-		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-			return strings.TrimSpace(s)
+		switch t := v.(type) {
+		case string:
+			if strings.TrimSpace(t) != "" {
+				return strings.TrimSpace(t)
+			}
+		case float64:
+			if t > 0 {
+				return strconv.FormatInt(int64(t), 10)
+			}
+		case int:
+			if t > 0 {
+				return strconv.Itoa(t)
+			}
+		case int64:
+			if t > 0 {
+				return strconv.FormatInt(t, 10)
+			}
 		}
 	}
 	return ""

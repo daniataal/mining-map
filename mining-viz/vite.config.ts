@@ -9,6 +9,12 @@ const oilIntelProxyTarget =
   process.env.VITE_OIL_INTEL_PROXY ||
   'http://localhost:8095';
 
+/** Python backend upstream (Docker: backend:8000; host dev: localhost:8000). */
+const backendProxyTarget =
+  process.env.BACKEND_PROXY_TARGET ||
+  process.env.VITE_BACKEND_PROXY ||
+  'http://localhost:8000';
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -36,6 +42,45 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/map\/country-borders/, '/api/oil-live/map/country-borders'),
       },
+      '/api/maritime/stats': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/maritime\/stats/, '/api/oil-live/maritime/stats'),
+      },
+      '/api/maritime/context': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/maritime\/context/, '/api/oil-live/maritime/context'),
+      },
+      '/api/maritime/vessels': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/maritime\/vessels/, '/api/oil-live/vessels/live'),
+      },
+      '/api/licenses/annotations': {
+        target: backendProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
+      '/api/licenses': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+        router(req) {
+          if ((req.url ?? '').includes('/annotations')) {
+            return backendProxyTarget;
+          }
+          return oilIntelProxyTarget;
+        },
+        rewrite(path) {
+          if (path.includes('/annotations')) {
+            return path;
+          }
+          return path.replace(/^\/api\/licenses/, '/api/oil-live/licenses');
+        },
+      },
       '/api/oil-live': {
         target: oilIntelProxyTarget,
         changeOrigin: true,
@@ -44,37 +89,38 @@ export default defineConfig({
         ws: true,
       },
       '/licenses': {
-        target: 'http://backend:8000',
+        target: oilIntelProxyTarget,
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/licenses/, '/api/oil-live/licenses'),
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/api': {
-        target: 'http://backend:8000',
+        target: backendProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/auth': {
-        target: 'http://backend:8000',
+        target: backendProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/activity': {
-        target: 'http://backend:8000',
+        target: backendProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/docs': {
-        target: 'http://backend:8000',
+        target: backendProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/openapi.json': {
-        target: 'http://backend:8000',
+        target: backendProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,

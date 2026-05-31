@@ -1,25 +1,22 @@
 // Package shipvault provides an HTTP client for the ShipVault vessel registry API.
 //
-// Auth model: ShipVault uses Firebase Google OAuth in its web app. Since OAuth
-// tokens cannot be obtained programmatically without a browser, we accept a
-// pre-copied Bearer token via the SHIPVAULT_BEARER_TOKEN env var.
+// Auth model: ShipVault's web app uses Firebase Authentication. Programmatic access
+// uses Firebase REST:
+//   - Login: identitytoolkit.googleapis.com/v1/accounts:signInWithPassword
+//   - Refresh: securetoken.googleapis.com/v1/token
+//
+// Auth priority: SHIPVAULT_BEARER_TOKEN (manual) > SHIPVAULT_REFRESH_TOKEN or
+// SHIPVAULT_SESSION_JSON (DevTools) > SHIPVAULT_EMAIL/PASSWORD (Firebase login).
+// SHIPVAULT_FIREBASE_API_KEY is optional — discovered from app.shipvault.io when unset.
 //
 // Token lifecycle: Firebase JWTs expire after ~1 hour, but our Postgres cache
-// (vessel_enrichment_cache) has a configurable TTL (default 30 days). Most
-// vessel lookups are served from cache — the live token is only needed when a
-// vessel has never been fetched before, or when force-refreshing.
-//
-// How to get a fresh token:
-//  1. Open https://app.shipvault.io in your browser.
-//  2. Open DevTools → Network tab.
-//  3. Click any vessel.
-//  4. Find the request to shipvaultapi-gjb8c.ondigitalocean.app.
-//  5. Copy the value of the "Authorization" header (everything after "Bearer ").
-//  6. Set SHIPVAULT_BEARER_TOKEN=<paste here> in your .env and restart oil-live-intel.
+// (vessel_enrichment_cache) has a configurable TTL (default 7 days). Most vessel
+// lookups are served from cache — the live token is only needed on cache miss or
+// force-refresh.
 //
 // Usage:
 //
-//	svc := shipvault.NewService(cfg, log)
+//	svc, mode, err := shipvault.NewService(opts, log)
 //	result, err := svc.EnrichVessel(ctx, pool, mmsi, imo, false)
 package shipvault
 
@@ -29,8 +26,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,21 +35,23 @@ import (
 )
 
 const (
-	httpTimeout         = 15 * time.Second
-	defaultCacheTTLDays = 30 // longer default since token refresh is manual
+	httpTimeout             = 15 * time.Second
+	defaultCacheTTLDays     = 30 // longer default since token refresh is manual
+	defaultShipVaultOrigin  = "https://www.shipvault.com"
+	defaultShipVaultReferer = "https://www.shipvault.com/"
+	defaultShipVaultUA      = "Mozilla/5.0 (compatible; oil-live-intel/1.0; +https://www.shipvault.com)"
 )
 
-// Service is a thread-safe ShipVault client that uses a static Bearer token.
-// The token can be hot-swapped at runtime via UpdateToken without restarting.
+// Service is a thread-safe ShipVault client with optional Firebase auto-auth.
+// Manual tokens can be hot-swapped at runtime via UpdateToken without restarting.
 type Service struct {
-	baseURL  string
-	cacheTTL time.Duration
-	log      zerolog.Logger
-
-	mu    sync.RWMutex
-	token string // current Bearer token (may be empty if never set)
-
-	httpClient *http.Client
+	baseURL             string
+	cacheTTL            time.Duration
+	log                 zerolog.Logger
+	authMode            AuthMode
+	tokenProv           tokenProvider
+	httpClient          *http.Client
+	persistRefreshToken RefreshTokenPersister
 }
 
 // VesselProfile is the structured data returned by GetVessel.
@@ -109,61 +108,118 @@ type EnrichmentResult struct {
 	Disclaimer     string          `json:"disclaimer"`
 }
 
-// NewService creates a new ShipVault service using a static Bearer token.
-// bearerToken is the raw JWT (without the "Bearer " prefix).
-func NewService(
-	baseURL, bearerToken string,
-	cacheTTLDays int,
-	log zerolog.Logger,
-) *Service {
-	ttl := time.Duration(cacheTTLDays) * 24 * time.Hour
+// NewService creates a ShipVault client. Auto-auth performs an initial Firebase login
+// so credential errors surface at startup rather than on the first enrichment request.
+func NewService(opts ServiceOptions, log zerolog.Logger) (*Service, AuthMode, error) {
+	ttl := time.Duration(opts.CacheTTLDays) * 24 * time.Hour
 	if ttl <= 0 {
 		ttl = time.Duration(defaultCacheTTLDays) * 24 * time.Hour
 	}
+
+	mode := ResolveAuthMode(opts)
+	svcLog := log.With().Str("service", "shipvault").Logger()
 	svc := &Service{
-		baseURL:    baseURL,
-		cacheTTL:   ttl,
-		log:        log.With().Str("service", "shipvault").Logger(),
-		httpClient: &http.Client{Timeout: httpTimeout},
-		token:      strings.TrimPrefix(strings.TrimSpace(bearerToken), "Bearer "),
+		baseURL:             opts.BaseURL,
+		cacheTTL:            ttl,
+		log:                 svcLog,
+		authMode:            mode,
+		httpClient:          &http.Client{Timeout: httpTimeout},
+		persistRefreshToken: opts.PersistRefreshToken,
 	}
-	if svc.token != "" {
-		svc.log.Info().Msg("ShipVault token loaded from SHIPVAULT_BEARER_TOKEN")
-	} else {
-		svc.log.Warn().Msg("ShipVault service started with no token — enrichment will be skipped for uncached vessels until SHIPVAULT_BEARER_TOKEN is set")
+
+	switch mode {
+	case AuthManual:
+		tok := strings.TrimPrefix(strings.TrimSpace(opts.BearerToken), "Bearer ")
+		svc.tokenProv = &staticTokenProvider{bearer: tok}
+		svc.log.Info().Str("auth", mode.String()).Msg("ShipVault enrichment configured")
+	case AuthRefresh, AuthAuto:
+		apiKey, err := resolveFirebaseAPIKey(context.Background(), opts, svc.httpClient)
+		if err != nil {
+			return nil, mode, fmt.Errorf("shipvault firebase api key: %w", err)
+		}
+		fb := newFirebaseAuth(opts.Email, opts.Password, apiKey, svcLog)
+		if opts.PersistRefreshToken != nil {
+			fb.onRefreshTokenPersist = func(rt string) {
+				if err := opts.PersistRefreshToken(context.Background(), rt); err != nil {
+					svcLog.Warn().Err(err).Msg("shipvault refresh token persist failed")
+				}
+			}
+		}
+		svc.tokenProv = fb
+		if err := bootstrapFirebaseAuth(context.Background(), fb, opts); err != nil {
+			return nil, mode, fmt.Errorf("shipvault firebase bootstrap: %w", err)
+		}
+		svc.log.Info().Str("auth", mode.String()).Bool("firebase_key_discovered", strings.TrimSpace(opts.FirebaseAPIKey) == "").Msg("ShipVault enrichment configured")
+	case AuthDisabled:
+		svc.log.Info().Str("auth", mode.String()).Msg("ShipVault enrichment not configured")
 	}
-	return svc
+
+	return svc, mode, nil
 }
 
-// UpdateToken hot-swaps the Bearer token without restarting the service.
-// This is called by the admin token-update endpoint.
+// AuthMode reports how credentials are supplied.
+func (s *Service) AuthMode() AuthMode { return s.authMode }
+
+// UpdateToken hot-swaps to a manual Bearer token without restarting the service.
 func (s *Service) UpdateToken(tok string) {
 	tok = strings.TrimPrefix(strings.TrimSpace(tok), "Bearer ")
-	s.mu.Lock()
-	s.token = tok
-	s.mu.Unlock()
-	s.log.Info().Msg("ShipVault Bearer token updated")
+	s.authMode = AuthManual
+	s.tokenProv = &staticTokenProvider{bearer: tok}
+	s.log.Info().Str("auth", AuthManual.String()).Msg("ShipVault Bearer token updated")
 }
 
-// HasToken reports whether a non-empty Bearer token is loaded.
+// HasToken reports whether a usable Bearer token is available.
 func (s *Service) HasToken() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.token != ""
+	if s.tokenProv == nil {
+		return false
+	}
+	return s.tokenProv.hasToken()
 }
 
-// currentToken returns the current bearer token (thread-safe).
-func (s *Service) currentToken() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.token
+// PersistedRefreshToken returns the Firebase refresh token when using refresh/session auth.
+func (s *Service) PersistedRefreshToken() string {
+	fb, ok := s.tokenProv.(*firebaseAuth)
+	if !ok || fb == nil {
+		return ""
+	}
+	return fb.refreshTokenValue()
+}
+
+// BootstrapRefreshToken replaces the refresh token, exchanges it for a JWT, and persists when configured.
+func (s *Service) BootstrapRefreshToken(ctx context.Context, refreshToken string) error {
+	refreshToken = strings.TrimSpace(refreshToken)
+	if refreshToken == "" {
+		return fmt.Errorf("empty refresh token")
+	}
+	fb, ok := s.tokenProv.(*firebaseAuth)
+	if !ok || fb == nil {
+		return fmt.Errorf("shipvault service is not using refresh-token auth")
+	}
+	fb.setRefreshToken(refreshToken)
+	if err := fb.refreshWithToken(ctx); err != nil {
+		return err
+	}
+	if s.persistRefreshToken != nil {
+		if err := s.persistRefreshToken(ctx, refreshToken); err != nil {
+			return fmt.Errorf("persist refresh token: %w", err)
+		}
+	}
+	return nil
 }
 
 // doRequest performs an authenticated GET request to the ShipVault API.
 func (s *Service) doRequest(ctx context.Context, path string, out any) error {
-	tok := s.currentToken()
-	if tok == "" {
-		return fmt.Errorf("no ShipVault token — set SHIPVAULT_BEARER_TOKEN in .env")
+	return s.doRequestRetry(ctx, path, out, false)
+}
+
+func (s *Service) doRequestRetry(ctx context.Context, path string, out any, retried bool) error {
+	if s.tokenProv == nil {
+		return fmt.Errorf("no ShipVault token — set SHIPVAULT_BEARER_TOKEN, SHIPVAULT_REFRESH_TOKEN, SHIPVAULT_SESSION_JSON, or SHIPVAULT_EMAIL/PASSWORD")
+	}
+
+	tok, err := s.tokenProv.token(ctx)
+	if err != nil {
+		return fmt.Errorf("shipvault auth: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL+path, nil)
@@ -171,21 +227,32 @@ func (s *Service) doRequest(ctx context.Context, path string, out any) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("App", "web")
+	req.Header.Set("app", "web")
 	req.Header.Set("Authorization", "Bearer "+tok)
+	// ShipVault returns 202 {} without browser-origin headers; mirror the web app.
+	req.Header.Set("Origin", defaultShipVaultOrigin)
+	req.Header.Set("Referer", defaultShipVaultReferer)
+	req.Header.Set("User-Agent", defaultShipVaultUA)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("shipvault http: %w", err)
+		return fmt.Errorf("shipvault upstream unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("shipvault 401: token expired — copy a fresh token from DevTools and set SHIPVAULT_BEARER_TOKEN")
+		if !retried && (s.authMode == AuthAuto || s.authMode == AuthRefresh) {
+			s.tokenProv.invalidate()
+			return s.doRequestRetry(ctx, path, out, true)
+		}
+		if s.authMode == AuthManual {
+			return fmt.Errorf("shipvault 401: manual token expired — paste a new SHIPVAULT_BEARER_TOKEN or set SHIPVAULT_REFRESH_TOKEN from DevTools (Network → sign-in or securetoken → refreshToken field)")
+		}
+		return fmt.Errorf("shipvault 401: unauthorized — update SHIPVAULT_REFRESH_TOKEN or SHIPVAULT_SESSION_JSON from DevTools, or paste SHIPVAULT_BEARER_TOKEN")
 	case http.StatusNotFound:
 		return fmt.Errorf("shipvault 404: vessel/company not found")
-	case http.StatusOK:
+	case http.StatusOK, http.StatusAccepted:
 		return json.NewDecoder(resp.Body).Decode(out)
 	default:
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -193,13 +260,117 @@ func (s *Service) doRequest(ctx context.Context, path string, out any) error {
 	}
 }
 
-// GetVesselByIMO fetches vessel details from ShipVault by IMO number.
+// shipSearchResponse is the paginated payload from GET /api/units/shipsearch/{imo}.
+type shipSearchResponse struct {
+	Data       []map[string]any `json:"data"`
+	Items      []map[string]any `json:"items"`
+	Results    []map[string]any `json:"results"`
+	Total      int              `json:"total"`
+	TotalCount int              `json:"totalCount"`
+}
+
+func shipSearchPath(imo string) string {
+	q := url.Values{}
+	q.Set("page", "1")
+	q.Set("pageSize", "50")
+	q.Set("sortColumn", "name")
+	q.Set("sortDir", "ASC")
+	return fmt.Sprintf("/api/units/shipsearch/%s?%s", url.PathEscape(strings.TrimSpace(imo)), q.Encode())
+}
+
+func (r shipSearchResponse) vesselRows() []map[string]any {
+	switch {
+	case len(r.Data) > 0:
+		return r.Data
+	case len(r.Items) > 0:
+		return r.Items
+	default:
+		return r.Results
+	}
+}
+
+func pickShipSearchVessel(resp shipSearchResponse, imo string) map[string]any {
+	rows := resp.vesselRows()
+	if len(rows) == 0 {
+		return nil
+	}
+	imoNorm := strings.TrimSpace(imo)
+	for _, row := range rows {
+		if imoString(row, "imo", "IMO", "imo_number") == imoNorm {
+			return row
+		}
+	}
+	return rows[0]
+}
+
+// GetVesselByIMO fetches vessel details from ShipVault by IMO via shipsearch.
 func (s *Service) GetVesselByIMO(ctx context.Context, imo string) (map[string]any, error) {
-	var raw map[string]any
-	if err := s.doRequest(ctx, "/api/vessels?imo="+imo, &raw); err != nil {
+	var raw json.RawMessage
+	if err := s.doRequest(ctx, shipSearchPath(imo), &raw); err != nil {
 		return nil, err
 	}
-	return raw, nil
+	resp := parseShipSearchPayload(raw)
+	vessel := pickShipSearchVessel(resp, imo)
+	if vessel == nil {
+		return nil, fmt.Errorf("shipvault 404: no vessel match for IMO %s", imo)
+	}
+	return vessel, nil
+}
+
+func parseShipSearchPayload(raw json.RawMessage) shipSearchResponse {
+	if len(raw) == 0 {
+		return shipSearchResponse{}
+	}
+	body := bytesTrimSpace(raw)
+	if len(body) == 0 || bytesEqual(body, []byte("{}")) || bytesEqual(body, []byte("null")) {
+		return shipSearchResponse{}
+	}
+	// ShipVault shipsearch often returns a bare JSON array (text/plain body).
+	if len(body) > 0 && body[0] == '[' {
+		var rows []map[string]any
+		if err := json.Unmarshal(body, &rows); err == nil && len(rows) > 0 {
+			return shipSearchResponse{Data: rows}
+		}
+	}
+	// Some endpoints double-encode JSON as a string.
+	if len(body) > 0 && body[0] == '"' {
+		var inner string
+		if err := json.Unmarshal(body, &inner); err == nil && strings.TrimSpace(inner) != "" {
+			return parseShipSearchPayload(json.RawMessage(inner))
+		}
+	}
+	var direct shipSearchResponse
+	if err := json.Unmarshal(body, &direct); err == nil && len(direct.vesselRows()) > 0 {
+		return direct
+	}
+	var wrapped struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		var nested shipSearchResponse
+		if json.Unmarshal(wrapped.Data, &nested) == nil && len(nested.vesselRows()) > 0 {
+			return nested
+		}
+		var rows []map[string]any
+		if json.Unmarshal(wrapped.Data, &rows) == nil && len(rows) > 0 {
+			return shipSearchResponse{Data: rows}
+		}
+	}
+	var one map[string]any
+	if err := json.Unmarshal(body, &one); err == nil {
+		if imoString(one, "imo", "IMO", "imo_number") != "" || strField(one, "name", "vesselName", "vessel_name", "parentname") != "" {
+			return shipSearchResponse{Data: []map[string]any{one}}
+		}
+	}
+	return direct
+}
+
+func bytesTrimSpace(b []byte) []byte {
+	return []byte(strings.TrimSpace(string(b)))
+}
+
+func bytesEqual(a, b []byte) bool {
+	return string(a) == string(b)
 }
 
 // GetVesselByVesselID fetches vessel details by ShipVault's internal vessel ID.
@@ -296,18 +467,34 @@ func parseVesselProfile(raw map[string]any, imo string) *VesselProfile {
 		return &VesselProfile{IMO: imo}
 	}
 	v := &VesselProfile{IMO: imo, Raw: raw}
-	v.ShipVaultVesselID = strField(raw, "id", "vessel_id", "_id")
-	v.Name = strField(raw, "name", "vessel_name")
-	v.Flag = strField(raw, "flag", "flag_state", "flag_code")
-	v.VesselClass = strField(raw, "vessel_type", "type", "ship_type", "class")
-	v.Builder = strField(raw, "builder", "shipbuilder", "shipyard")
-	v.OperatorName = strField(raw, "operator", "operator_name", "commercial_manager")
-	v.OwnerCompanyID = strField(raw, "owner_id", "owner_company_id", "registered_owner_id", "company_id")
-	v.OwnerName = strField(raw, "owner", "owner_name", "registered_owner")
-	v.EstimatedValueUSD = floatField(raw, "estimated_value", "value_usd", "market_value")
-	v.GrossTonnage = floatField(raw, "gross_tonnage", "gt")
-	v.DeadweightTons = floatField(raw, "deadweight", "dwt", "deadweight_tons")
-	v.BuildYear = intField(raw, "year_built", "build_year", "built")
+	v.ShipVaultVesselID = strField(raw, "id", "vessel_id", "unit_id", "parentid", "_id")
+	v.Name = strField(raw, "name", "vessel_name", "vesselName", "shipName", "parentname")
+	v.Flag = strField(raw, "flag", "flag_state", "flag_code", "flagState", "flagCode")
+	v.VesselClass = strField(raw, "vessel_type", "vesselType", "type", "ship_type", "shipType", "class", "groupname", "groupName")
+	v.Builder = strField(raw, "builder", "shipbuilder", "shipyard", "shipBuilder")
+	v.OperatorName = strField(raw, "operator", "operator_name", "operatorName", "commercial_manager", "commercialManager")
+	v.OwnerCompanyID = strField(raw, "owner_id", "ownerId", "owner_company_id", "registered_owner_id", "registeredOwnerId", "company_id", "companyId")
+	v.OwnerName = strField(raw, "owner", "owner_name", "ownerName", "registered_owner", "registeredOwner")
+	if v.OwnerCompanyID == "" {
+		if ownerObj, ok := raw["owner"].(map[string]any); ok {
+			v.OwnerCompanyID = strField(ownerObj, "id", "company_id", "companyId")
+			if v.OwnerName == "" {
+				v.OwnerName = strField(ownerObj, "name", "company_name", "companyName")
+			}
+		}
+	}
+	if v.OwnerCompanyID == "" {
+		if regObj, ok := raw["registeredOwner"].(map[string]any); ok {
+			v.OwnerCompanyID = strField(regObj, "id", "company_id", "companyId")
+			if v.OwnerName == "" {
+				v.OwnerName = strField(regObj, "name", "company_name", "companyName")
+			}
+		}
+	}
+	v.EstimatedValueUSD = floatField(raw, "estimated_value", "value_usd", "market_value", "value")
+	v.GrossTonnage = floatField(raw, "gross_tonnage", "grossTonnage", "gt")
+	v.DeadweightTons = floatField(raw, "deadweight", "dwt", "deadweight_tons", "deadweightTons", "tdw")
+	v.BuildYear = intField(raw, "year_built", "build_year", "yearBuilt", "built")
 
 	if hist := sliceField(raw, "name_history", "names", "previous_names"); hist != nil {
 		for _, item := range hist {
@@ -355,6 +542,26 @@ func parseCompanyProfile(raw map[string]any, companyID string, fleetRaw []map[st
 
 // ─── field-extraction helpers ────────────────────────────────────────────────
 
+func imoString(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			switch n := v.(type) {
+			case string:
+				return strings.TrimSpace(n)
+			case float64:
+				return fmt.Sprintf("%.0f", n)
+			case int:
+				return fmt.Sprintf("%d", n)
+			case int64:
+				return fmt.Sprintf("%d", n)
+			case json.Number:
+				return strings.TrimSpace(n.String())
+			}
+		}
+	}
+	return ""
+}
+
 func strField(m map[string]any, keys ...string) string {
 	for _, k := range keys {
 		if v, ok := m[k]; ok {
@@ -362,6 +569,14 @@ func strField(m map[string]any, keys ...string) string {
 			case string:
 				return strings.TrimSpace(s)
 			case fmt.Stringer:
+				return strings.TrimSpace(s.String())
+			case float64:
+				return fmt.Sprintf("%.0f", s)
+			case int:
+				return fmt.Sprintf("%d", s)
+			case int64:
+				return fmt.Sprintf("%d", s)
+			case json.Number:
 				return strings.TrimSpace(s.String())
 			}
 		}

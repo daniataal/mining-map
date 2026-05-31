@@ -320,6 +320,7 @@ services:
       VITE_API_BASE: ${VITE_API_BASE:-}
       VITE_ROUTE_SERVICE_URL: ${VITE_ROUTE_SERVICE_URL:-}
       OIL_INTEL_PROXY_TARGET: http://oil-live-intel:8095
+      BACKEND_PROXY_TARGET: http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
@@ -331,6 +332,15 @@ services:
       context: ./oil-live-intel
     container_name: oil-live-intel
     restart: unless-stopped
+    # Docker embedded DNS (127.0.0.11) can fail external lookups ("server misbehaving");
+    # keep it first for compose service names (db), fall back to public resolvers.
+    dns:
+      - 127.0.0.11
+      - 8.8.8.8
+      - 1.1.1.1
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "8095:8095"
     environment:
@@ -349,6 +359,9 @@ services:
       OIL_INTEL_INTERNAL_KEY: ${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
       OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-true}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      # ShipVault registry enrichment — secrets (EMAIL/PASSWORD/FIREBASE_API_KEY/BEARER_TOKEN) via env_file only.
+      SHIPVAULT_BASE_URL: ${SHIPVAULT_BASE_URL:-https://shipvaultapi-gjb8c.ondigitalocean.app}
+      SHIPVAULT_CACHE_TTL_DAYS: ${SHIPVAULT_CACHE_TTL_DAYS:-7}
     healthcheck:
       test:
         [
@@ -386,6 +399,15 @@ services:
       ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
       OIL_INTEL_SEED_ON_STARTUP: "false"
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      # Go graph-sync cold steps (Python oil-live-graph-sync-worker remains orchestrator):
+      OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS: ${OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS:-false}
+      OIL_GRAPH_SYNC_GO_LICENSES: ${OIL_GRAPH_SYNC_GO_LICENSES:-false}
+      OIL_GRAPH_SYNC_GO_TRADE_FLOWS: ${OIL_GRAPH_SYNC_GO_TRADE_FLOWS:-false}
+      OIL_GRAPH_SYNC_GO_PORT_CALLS: ${OIL_GRAPH_SYNC_GO_PORT_CALLS:-false}
+      OIL_GRAPH_SYNC_GO_TED: ${OIL_GRAPH_SYNC_GO_TED:-false}
+      OIL_GRAPH_SYNC_GO_GOV_AWARDS: ${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-false}
+      OIL_GRAPH_SYNC_INTERVAL_SECONDS: ${OIL_GRAPH_SYNC_INTERVAL_SECONDS:-86400}
+      OIL_GRAPH_SYNC_BACKOFF_SECONDS: ${OIL_GRAPH_SYNC_BACKOFF_SECONDS:-3600}
     depends_on:
       db:
         condition: service_healthy

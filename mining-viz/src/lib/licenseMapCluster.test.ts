@@ -3,6 +3,7 @@ import {
   clusterTargetZoom,
   clusterExpandPaddingDeg,
   planClusterDrillFly,
+  resolveLicenseMapGoEnabled,
   shouldRenderServerLicenseCluster,
   serverClusterFlyBounds,
   MIN_SERVER_LICENSE_CLUSTER_COUNT,
@@ -11,6 +12,20 @@ import {
 import type { MiningLicense } from '../types';
 
 describe('licenseMapCluster', () => {
+  describe('resolveLicenseMapGoEnabled', () => {
+    it('defaults on when unset', () => {
+      expect(resolveLicenseMapGoEnabled(undefined)).toBe(true);
+      expect(resolveLicenseMapGoEnabled('')).toBe(true);
+    });
+
+    it('opts out only for 0 or false', () => {
+      expect(resolveLicenseMapGoEnabled('0')).toBe(false);
+      expect(resolveLicenseMapGoEnabled('false')).toBe(false);
+      expect(resolveLicenseMapGoEnabled('1')).toBe(true);
+      expect(resolveLicenseMapGoEnabled('true')).toBe(true);
+    });
+  });
+
   describe('clusterTargetZoom', () => {
     it('increases zoom by 2, capped at 13, floored at drill threshold', () => {
       expect(clusterTargetZoom(5)).toBe(8);

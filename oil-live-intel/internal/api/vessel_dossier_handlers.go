@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
 
@@ -60,14 +61,14 @@ func (s *Server) GetVesselDossier(w http.ResponseWriter, r *http.Request) {
 		"mmsi":       mmsi,
 		"vessel":     vesselMeta,
 		"position":   position,
-		"port_calls": portCalls,
+		"port_calls": nonNilMapSlice(portCalls),
 		"cargo_records": map[string]any{
-			"items":  cargoRows,
+			"items":  nonNilMapSlice(cargoRows),
 			"total":  mcrTotal,
 			"limit":  mcrLimit,
 			"offset": mcrOffset,
 		},
-		"parties": parties,
+		"parties":    nonNilMapSlice(parties),
 		"disclaimer": "AIS and inferred port activity do not confirm supplier or receiver. MCR rows are synthetic hypotheses from public sources.",
 	}
 
@@ -137,6 +138,43 @@ func extractIMOFromMeta(meta map[string]any) string {
 	return ""
 }
 
+// GetVesselShipVault returns ShipVault registry enrichment for a vessel (cached in Postgres).
+// GET /api/oil-live/vessels/{mmsi}/shipvault
+func (s *Server) GetVesselShipVault(w http.ResponseWriter, r *http.Request) {
+	if s.ShipVaultSvc == nil {
+		writeErr(w, http.StatusServiceUnavailable, "ShipVault enrichment not configured")
+		return
+	}
+	mmsi, err := strconv.ParseInt(chi.URLParam(r, "mmsi"), 10, 64)
+	if err != nil || mmsi <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid mmsi")
+		return
+	}
+	ctx := r.Context()
+	vesselMeta, _ := s.lookupVesselRegistry(ctx, mmsi)
+	imoStr := extractIMOFromMeta(vesselMeta)
+	if imoStr == "" {
+		imoStr = strings.TrimSpace(r.URL.Query().Get("imo"))
+	}
+	if imoStr == "" {
+		writeErr(w, http.StatusUnprocessableEntity, "vessel has no IMO number; cannot enrich via ShipVault")
+		return
+	}
+	forceRefresh := queryBool(r, "force_refresh", false)
+	enrichment, err := s.ShipVaultSvc.EnrichVessel(ctx, s.Pool, mmsi, imoStr, forceRefresh)
+	if err != nil {
+		status, msg := shipvault.MapEnrichmentError(err)
+		s.Log.Debug().Err(err).Int64("mmsi", mmsi).Str("imo", imoStr).Int("status", status).Msg("shipvault enrichment failed")
+		writeErr(w, status, msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mmsi":              mmsi,
+		"imo":               imoStr,
+		"shipvault_profile": enrichment,
+	})
+}
+
 // RefreshVesselEnrichment forces a re-fetch from ShipVault, bypassing the cache TTL.
 // POST /api/oil-live/vessels/{mmsi}/refresh-enrichment
 func (s *Server) RefreshVesselEnrichment(w http.ResponseWriter, r *http.Request) {
@@ -158,17 +196,17 @@ func (s *Server) RefreshVesselEnrichment(w http.ResponseWriter, r *http.Request)
 	}
 	enrichment, err := s.ShipVaultSvc.EnrichVessel(ctx, s.Pool, mmsi, imoStr, true)
 	if err != nil {
-		s.Log.Warn().Err(err).Int64("mmsi", mmsi).Str("imo", imoStr).Msg("shipvault refresh failed")
-		writeErr(w, http.StatusBadGateway, "ShipVault fetch failed: "+err.Error())
+		status, msg := shipvault.MapEnrichmentError(err)
+		s.Log.Warn().Err(err).Int64("mmsi", mmsi).Str("imo", imoStr).Int("status", status).Msg("shipvault refresh failed")
+		writeErr(w, status, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"mmsi":             mmsi,
-		"imo":              imoStr,
+		"mmsi":              mmsi,
+		"imo":               imoStr,
 		"shipvault_profile": enrichment,
 	})
 }
-
 
 func (s *Server) lookupVesselLatestPosition(ctx context.Context, mmsi int64) (map[string]any, error) {
 	if vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.MergedPositionsEnabled() {
@@ -383,10 +421,10 @@ func (s *Server) listPortCallsForMMSI(ctx context.Context, mmsi int64, limit int
 			"event_type": event, "product_family_inferred": family,
 			"estimated_volume_barrels": vol, "confidence": conf, "status": status,
 			"bol_tier": portCallBolTier(provenance), "data_provenance": provenance,
-			"evidence": parseEvidenceList(evidence),
-			"metadata": parseMetadataMap(metadata),
+			"evidence":     parseEvidenceList(evidence),
+			"metadata":     parseMetadataMap(metadata),
 			"source_links": extractSourceLinks(evidence, metadata),
-			"disclaimer": "Inferred from public/free data. Not a confirmed private transaction.",
+			"disclaimer":   "Inferred from public/free data. Not a confirmed private transaction.",
 		}
 		out = append(out, item)
 	}
@@ -487,6 +525,12 @@ func (s *Server) listCargoForMMSI(ctx context.Context, mmsi int64, limit, offset
 		var evChain, srcList any
 		_ = json.Unmarshal(evidenceChain, &evChain)
 		_ = json.Unmarshal(sources, &srcList)
+		if evChain == nil {
+			evChain = []any{}
+		}
+		if srcList == nil {
+			srcList = []any{}
+		}
 		item := map[string]any{
 			"id": id.String(), "synthetic_bol_id": bolID, "recipe": recipe,
 			"commodity_family": family, "confidence": conf, "triangulation_score": tri,
@@ -584,13 +628,15 @@ func deriveVesselParties(cargoRows []map[string]any) []map[string]any {
 			add("consignee", consignee, cid, tier, prov, conf, lei, sanctions, cargoID, bolID)
 		}
 	}
-	return parties
+	return nonNilMapSlice(parties)
 }
 
 func parseEvidenceList(evidence []byte) []any {
 	var ev []any
-	_ = json.Unmarshal(evidence, &ev)
-	return ev
+	if len(evidence) > 0 {
+		_ = json.Unmarshal(evidence, &ev)
+	}
+	return nonNilAnySlice(ev)
 }
 
 func parseMetadataMap(metadata []byte) map[string]any {
@@ -635,7 +681,7 @@ func extractSourceLinks(evidence, metadata []byte) []map[string]string {
 			}
 		}
 	}
-	return links
+	return nonNilStringMapSlice(links)
 }
 
 func extractURLs(text string) []string {

@@ -114,7 +114,7 @@ def merge_license_clusters(
         lng = wlng / total
         merged.append(
             {
-                "id": f"cluster:{round(lat, 4)}:{round(lng, 4)}",
+                "id": f"cluster:{country}:{round(lat, 4)}:{round(lng, 4)}",
                 "company": f"{total} licenses",
                 "licenseType": "Cluster",
                 "commodity": "",
@@ -209,7 +209,7 @@ def query_license_clusters(
             continue
         out.append(
             {
-                "id": f"cluster:{round(float(lat), 4)}:{round(float(lng), 4)}",
+                "id": f"cluster:{country}:{round(float(lat), 4)}:{round(float(lng), 4)}",
                 "company": f"{int(cnt)} licenses",
                 "licenseType": "Cluster",
                 "commodity": "",
@@ -287,7 +287,7 @@ def _merge_cluster_rows(clusters: list[dict[str, Any]]) -> dict[str, Any]:
     lat = wlat / total
     lng = wlng / total
     return {
-        "id": f"cluster:{round(lat, 4)}:{round(lng, 4)}",
+        "id": f"cluster:{country}:{round(lat, 4)}:{round(lng, 4)}",
         "company": f"{total} licenses",
         "licenseType": "Cluster",
         "commodity": "",

@@ -1,6 +1,7 @@
 package maritimecontext
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -14,6 +15,22 @@ func normalizeToken(s string) string {
 
 func cleanText(s string) string {
 	return strings.TrimSpace(s)
+}
+
+// identityFieldText reads a Wikidata identity field, skipping nil and "<nil>" string artifacts.
+func identityFieldText(identity map[string]any, key string) string {
+	if identity == nil {
+		return ""
+	}
+	v, ok := identity[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s := cleanText(fmt.Sprint(v))
+	if s == "" || strings.EqualFold(s, "<nil>") {
+		return ""
+	}
+	return s
 }
 
 func nowISO() string {
@@ -41,6 +58,22 @@ func containsAny(hay string, terms ...string) bool {
 		}
 	}
 	return false
+}
+
+// ensureMapSlice guarantees JSON arrays serialize as [] instead of null.
+func ensureMapSlice(v []map[string]any) []map[string]any {
+	if v == nil {
+		return []map[string]any{}
+	}
+	return v
+}
+
+// ensureStringSlice guarantees JSON arrays serialize as [] instead of null.
+func ensureStringSlice(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
 }
 
 func buildGDELTQuery(company, country, commodity, vesselName string) string {

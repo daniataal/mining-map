@@ -42,6 +42,21 @@ GRAPH_SYNC_ENABLED = (os.getenv("OIL_GRAPH_SYNC_ENABLED") or "true").strip().low
 }
 
 
+def _graph_sync_go_step_enabled(step: str) -> bool:
+    """True when oil-live-intel-worker owns this cold graph-sync step."""
+    key = f"OIL_GRAPH_SYNC_GO_{step.strip().upper()}"
+    return (os.getenv(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _graph_sync_go_skip_payload(step: str) -> dict[str, Any]:
+    return {
+        "status": "skipped",
+        "reason": "go_worker",
+        "implementation": "go",
+        "detail": f"oil-live-intel-worker owns {step} when {('OIL_GRAPH_SYNC_GO_' + step.upper())}=true",
+    }
+
+
 def _demo_seed_disabled() -> bool:
     """True when OIL_LIVE_DISABLE_DEMO_SEED is unset or truthy (default: real data only)."""
     return (os.getenv("OIL_LIVE_DISABLE_DEMO_SEED", "1") or "1").strip().lower() in (
@@ -1339,10 +1354,19 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         else:
             summary["steps"]["storage_terminals"] = _import_storage_terminals(cur)
         summary["steps"]["petroleum_osm_storage"] = _ensure_petroleum_osm_storage_layer(conn)
-        summary["steps"]["licenses"] = _index_licenses(cur)
-        summary["steps"]["terminal_operators"] = _index_terminal_operators(cur)
+        if _graph_sync_go_step_enabled("licenses"):
+            summary["steps"]["licenses"] = _graph_sync_go_skip_payload("licenses")
+        else:
+            summary["steps"]["licenses"] = _index_licenses(cur)
+        if _graph_sync_go_step_enabled("terminal_operators"):
+            summary["steps"]["terminal_operators"] = _graph_sync_go_skip_payload("terminal_operators")
+        else:
+            summary["steps"]["terminal_operators"] = _index_terminal_operators(cur)
         summary["steps"]["seed_port_calls"] = _seed_port_calls_if_sparse(cur)
-        summary["steps"]["trade_flows"] = {"events": _mirror_trade_flows(cur)}
+        if _graph_sync_go_step_enabled("trade_flows"):
+            summary["steps"]["trade_flows"] = _graph_sync_go_skip_payload("trade_flows")
+        else:
+            summary["steps"]["trade_flows"] = {"events": _mirror_trade_flows(cur)}
         summary["steps"]["census_trade"] = _sync_census_trade_flows(conn)
         summary["steps"]["usitc_trade"] = _sync_usitc_trade_flows(conn)
         # Phase 4b — EIA crude imports + refinery throughput (macro tier, country-level).
@@ -1363,7 +1387,11 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["opensanctions_screening"] = _run_opensanctions_batch(
             conn, limit=opensanctions_limit
         )
-        summary["steps"]["port_calls"] = {"events": _mirror_port_calls(cur)}
+        summary["steps"]["port_calls"] = (
+            _graph_sync_go_skip_payload("port_calls")
+            if _graph_sync_go_step_enabled("port_calls")
+            else {"events": _mirror_port_calls(cur)}
+        )
         summary["steps"]["vessel_position_mirror"] = {
             "status": "retired",
             "detail": (
@@ -1382,8 +1410,16 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
                 "status": "skipped",
                 "error": str(exc),
             }
-        summary["steps"]["ted"] = {"events": _mirror_ted_notices(cur)}
-        summary["steps"]["gov_awards"] = {"events": _mirror_gov_awards(cur)}
+        summary["steps"]["ted"] = (
+            _graph_sync_go_skip_payload("ted")
+            if _graph_sync_go_step_enabled("ted")
+            else {"events": _mirror_ted_notices(cur)}
+        )
+        summary["steps"]["gov_awards"] = (
+            _graph_sync_go_skip_payload("gov_awards")
+            if _graph_sync_go_step_enabled("gov_awards")
+            else {"events": _mirror_gov_awards(cur)}
+        )
         summary["steps"]["opportunity_links"] = _ensure_demo_opportunities(cur)
     conn.commit()
     if rebuild_synthetic_bol:

@@ -1590,9 +1590,13 @@ export default function MapComponent({
     const handleMaritimeVesselClick = useCallback(
         (vessel: MaritimeVessel) => {
             setSelectedItem(null);
-            onSelectMaritimeVessel(vessel);
+            const resolved =
+                maritimeVessels.find((entry) => entry.id === vessel.id) ??
+                maritimeVessels.find((entry) => String(entry.mmsi) === String(vessel.mmsi)) ??
+                vessel;
+            onSelectMaritimeVessel(resolved);
         },
-        [onSelectMaritimeVessel, setSelectedItem],
+        [maritimeVessels, onSelectMaritimeVessel, setSelectedItem],
     );
 
     const handleSingleClusterMarkerClick = useCallback(

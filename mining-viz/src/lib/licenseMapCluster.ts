@@ -81,10 +81,19 @@ export function collapseServerClustersInViewport(
   return [merged];
 }
 
-/** Low-zoom clusters served from Go oil-live-intel (opt in with VITE_LICENSE_MAP_GO=1). */
-export const LICENSE_MAP_GO_ENABLED =
-  import.meta.env.VITE_LICENSE_MAP_GO === '1' ||
-  import.meta.env.VITE_LICENSE_MAP_GO === 'true';
+/**
+ * Low-zoom clusters via Go `/api/oil-live/licenses/map` (MAD-42).
+ * Default on; opt out with VITE_LICENSE_MAP_GO=0 or false.
+ */
+export function resolveLicenseMapGoEnabled(
+  raw: string | undefined = import.meta.env.VITE_LICENSE_MAP_GO,
+): boolean {
+  if (raw === '0' || raw === 'false') return false;
+  if (raw === '1' || raw === 'true') return true;
+  return true;
+}
+
+export const LICENSE_MAP_GO_ENABLED = resolveLicenseMapGoEnabled();
 
 export function clusterTargetZoom(currentZoom: number): number {
   return Math.min(Math.max(currentZoom + 2, SERVER_CLUSTER_MIN_DRILL_ZOOM), 13);
