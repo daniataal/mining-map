@@ -15,7 +15,7 @@ func FetchGDELTEvidence(company, country, commodity, vesselName string, limit in
 	}
 	query := buildGDELTQuery(company, country, commodity, vesselName)
 	if query == "" {
-		return nil
+		return []map[string]any{}
 	}
 	params := url.Values{}
 	params.Set("query", query)
@@ -26,21 +26,21 @@ func FetchGDELTEvidence(company, country, commodity, vesselName string, limit in
 	client := &http.Client{Timeout: defaultHTTPTimeout}
 	req, err := http.NewRequest(http.MethodGet, gdeltDocURL+"?"+params.Encode(), nil)
 	if err != nil {
-		return nil
+		return []map[string]any{}
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "meridian-oil-live-intel/1.0")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil
+		return []map[string]any{}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return nil
+		return []map[string]any{}
 	}
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil
+		return []map[string]any{}
 	}
 	articles, _ := payload["articles"].([]any)
 	out := make([]map[string]any, 0, len(articles))

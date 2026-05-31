@@ -102,7 +102,9 @@ export default function EntityRelationshipPanel({
           label: role.replaceAll('_', ' '),
           badgeClass: 'bg-slate-500/10 text-slate-300',
         },
-        items: [...items].sort((a, b) => a.targetName.localeCompare(b.targetName)),
+        items: [...items].sort((a, b) =>
+          (a.targetName ?? '').localeCompare(b.targetName ?? '', undefined, { sensitivity: 'base' }),
+        ),
       }));
   }, [relationships]);
 
@@ -146,7 +148,7 @@ export default function EntityRelationshipPanel({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-black text-slate-900 dark:text-white break-words">
-                        {relationship.targetName}
+                        {relationship.targetName || relationship.targetEntityRef || 'Unknown entity'}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {relationship.ownershipPct != null && (

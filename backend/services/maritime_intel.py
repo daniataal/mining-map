@@ -20,7 +20,7 @@ AISSTREAM_PERSIAN_GULF_ISSUE_URL = "https://github.com/aisstream/aisstream/issue
 
 # --- Maritime AIS provider notes (ADR) ---
 # Live AIS ingest: oil-live-intel-worker (Go) → oil_ais_positions + maritime_source_health.
-# Legacy /api/maritime/vessels may still read Redis snapshot or maritime_vessel_snapshots when present;
+# Legacy /api/maritime/* HTTP routes proxy to Go; vessel map reads use /api/oil-live/vessels/live.
 # the UI vessel layer uses /api/oil-live/vessels/live (Go).
 #
 # Alternatives (not wired unless MARITIME_AIS_PROVIDER changes from default):

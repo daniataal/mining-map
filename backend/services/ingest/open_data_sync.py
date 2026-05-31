@@ -834,7 +834,11 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
 try:
     from backend.services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
 except ImportError:
-    from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+    try:
+        from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+    except ImportError:
+        def optional_kazakhstan_petroleum_source():
+            return None
 
 _kz_petroleum = optional_kazakhstan_petroleum_source()
 if _kz_petroleum is not None:

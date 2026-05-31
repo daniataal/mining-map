@@ -25,7 +25,7 @@ Branch: `paperclip2`. Strangler pattern: Go read paths in `oil-live-intel`, Pyth
 
 ## Running Go alongside Python
 
-Caddy already routes `/api/oil-live/*` → `oil-live-intel:8095` and `/licenses*` → `backend:8000` ([Caddyfile](../Caddyfile)).
+Caddy routes `/api/oil-live/*`, `/licenses*`, and legacy `/api/maritime/stats|context` → `oil-live-intel:8095` ([Caddyfile](../Caddyfile)). License CRUD annotations stay on Python `backend:8000`.
 
 ```bash
 # Local / compose
@@ -37,8 +37,7 @@ curl -sS 'http://127.0.0.1:8080/api/oil-live/licenses/map?min_lat=-35&max_lat=35
 # Parity — Python (same bbox)
 curl -sS 'http://127.0.0.1:8080/licenses?min_lat=-35&max_lat=35&min_lng=-20&max_lng=55&zoom=4&map=1&limit=120' | jq 'if type=="object" then .mode else "array" end'
 
-# Map UI still uses Python until frontend flag:
-# VITE_LICENSE_MAP_GO=1 → mining-viz calls /api/oil-live/licenses/map for zoom < 7
+# Map UI (zoom < 7): mining-viz calls /api/oil-live/licenses/map by default (opt out: VITE_LICENSE_MAP_GO=0)
 ```
 
 Env (optional, future cutover):
@@ -52,5 +51,5 @@ Env (optional, future cutover):
 
 1. **Now:** Go endpoint live; Python unchanged; parity unit tests on grid helpers.
 2. **Next PR:** Shadow-compare cluster counts Python vs Go on staging bbox set.
-3. **Cutover:** `VITE_LICENSE_MAP_GO` defaults on (opt out with `=0`); zoom `< 7` cluster fetches use `/api/oil-live/licenses/map`; Python remains fallback for points and admin.
+3. **Cutover (done):** `VITE_LICENSE_MAP_GO` defaults on (opt out with `=0`); zoom `< 7` cluster fetches use `/api/oil-live/licenses/map`; Python `/licenses` remains fallback in the fetch chain and for point mode + admin.
 4. **Later:** Port petroleum OSM bbox or `/api/oil-live/map` terminal merge if profiling warrants.

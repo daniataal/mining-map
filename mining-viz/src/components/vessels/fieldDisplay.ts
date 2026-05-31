@@ -13,6 +13,23 @@ function fmt(value: unknown, fallback = '—'): string {
   return String(value);
 }
 
+function fmtObservedAt(value: unknown): string {
+  const text = pickString(value);
+  if (!text) return '—';
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.toLocaleString();
+}
+
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
 export function buildVesselFieldGroups(vessel: MaritimeVessel): { title: string; rows: VesselFieldRow[] }[] {
   const dims = vessel.dimensions;
   const eta = vessel.eta;
@@ -35,7 +52,7 @@ export function buildVesselFieldGroups(vessel: MaritimeVessel): { title: string;
       rows: [
         { key: 'lat', label: 'Latitude', value: vessel.lat.toFixed(5) },
         { key: 'lng', label: 'Longitude', value: vessel.lng.toFixed(5) },
-        { key: 'observed_at', label: 'Observed (UTC)', value: fmt(new Date(vessel.observed_at).toLocaleString()) },
+        { key: 'observed_at', label: 'Observed (UTC)', value: fmtObservedAt(vessel.observed_at) },
         { key: 'position_accuracy', label: 'Position accuracy', value: fmt(vessel.position_accuracy) },
         { key: 'nearest_port', label: 'Nearest port', value: fmt(vessel.nearest_port?.name) },
         { key: 'unlocode', label: 'UN/LOCODE', value: fmt(vessel.nearest_port?.unlocode) },

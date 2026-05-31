@@ -13,7 +13,7 @@ import (
 func loadFromCache(ctx context.Context, pool *pgxpool.Pool, imo string) (*EnrichmentResult, error) {
 	var (
 		ownerName, ownerCompanyID, operatorName, builder, vesselClass, flag *string
-		buildYear                                                            *int
+		buildYear                                                           *int
 		grossTonnage, deadweightTons, estimatedValueUSD                     *float64
 		nameHistoryJSON, fleetListJSON, ownerProfileJSON, rawVesselJSON     []byte
 		updatedAt                                                           time.Time

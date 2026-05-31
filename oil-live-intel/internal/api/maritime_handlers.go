@@ -60,6 +60,9 @@ func (s *Server) MaritimeStats(w http.ResponseWriter, r *http.Request) {
 	if workerStatus == "error" && len(limitations) > 0 {
 		lastErr = limitations[0]
 	}
+	if limitations == nil {
+		limitations = []string{}
+	}
 	if displayName == "" {
 		displayName = "AISStream"
 	}

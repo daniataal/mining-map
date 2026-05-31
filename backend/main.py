@@ -5714,7 +5714,7 @@ def platform_health():
 
 @app.get("/api/maritime/snapshot")
 def get_maritime_snapshot_meta():
-    """Deprecated — Redis snapshot writer retired; live AIS is in Postgres via oil-live-intel-worker."""
+    """Deprecated — use /api/oil-live/maritime/stats and /api/oil-live/vessels/live (Caddy rewrites legacy paths)."""
     return {
         "available": False,
         "stale": True,
@@ -5731,7 +5731,7 @@ def get_maritime_stats_endpoint(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Proxy to Go-owned AIS stats (Postgres + maritime_source_health)."""
+    """Deprecated — canonical: GET /api/oil-live/maritime/stats. Thin proxy for backend:8000 direct access."""
     try:
         from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
@@ -5753,7 +5753,7 @@ def get_maritime_vessels(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Deprecated proxy — forwards to /api/oil-live/vessels/live."""
+    """Deprecated — canonical: GET /api/oil-live/vessels/live (param limit, not max_vessels)."""
     try:
         from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
@@ -5796,10 +5796,10 @@ def get_maritime_context(
     destination: str = "",
 ):
     """
-    Open/free maritime context for oil & gas screening.
+    Deprecated — canonical: GET /api/oil-live/maritime/context.
 
-    This endpoint is explicit about scope: it returns vessel/company/port/news
-    evidence and counterparty proxies, not true bill-of-lading coverage.
+    Open/free maritime context for oil & gas screening (vessel/company/port/news;
+    not bill-of-lading coverage).
     """
     try:
         from backend.services.maritime_go_proxy import proxy_oil_live_get

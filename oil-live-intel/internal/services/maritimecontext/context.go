@@ -48,17 +48,17 @@ func BuildContext(in ContextInput) map[string]any {
 		limitations = append(limitations, "No open vessel ownership/operator match was found in Wikidata for the provided IMO/MMSI.")
 	}
 	return map[string]any{
-		"source_labels":        sourceLabels,
+		"source_labels":        ensureStringSlice(sourceLabels),
 		"data_as_of":           nowISO(),
-		"company_links":        companyLinks,
-		"nearest_ports":        nearestPorts,
-		"evidence":             evidence,
+		"company_links":        ensureMapSlice(companyLinks),
+		"nearest_ports":        ensureMapSlice(nearestPorts),
+		"evidence":             ensureMapSlice(evidence),
 		"identity":             identity,
-		"relationships":        relationships,
-		"counterparty_proxies": counterpartyProxies,
+		"relationships":        ensureMapSlice(relationships),
+		"counterparty_proxies": ensureMapSlice(counterpartyProxies),
 		"bol_coverage_note": ("True bill-of-lading buyer/seller data is usually commercial or government-restricted. " +
 			"This MVP exposes open proxies and raw evidence instead of pretending to have full B/L coverage."),
-		"limitations": limitations,
+		"limitations": ensureStringSlice(limitations),
 	}
 }
 
@@ -78,7 +78,7 @@ func buildMaritimeRelationships(identity map[string]any, vesselName, imo, mmsi s
 	}
 	out := make([]map[string]any, 0, 2)
 	for _, relType := range []string{"owner", "operator"} {
-		target := cleanText(fmt.Sprint(identity[relType]))
+		target := identityFieldText(identity, relType)
 		if target == "" {
 			continue
 		}

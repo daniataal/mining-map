@@ -1,11 +1,17 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MaritimeVessel } from '../lib/vessels/types';
-import { API_BASE } from '../lib/api';
+import {
+  getVesselShipVault,
+  oilLiveApiUrl,
+  refreshVesselEnrichment,
+} from '../api/oilLiveApi';
+import ShipVaultRegistryPanel from './vessels/ShipVaultRegistryPanel';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import MaritimeContextPanel from './MaritimeContextPanel';
+import PanelErrorBoundary from './PanelErrorBoundary';
 import { useI18n } from '../lib/i18n';
 import { buildVesselFieldGroups } from './vessels/fieldDisplay';
 import {
@@ -60,27 +66,84 @@ function VesselBadges({ vessel }: { vessel: MaritimeVessel }) {
   );
 }
 
+interface VesselTrackPoint {
+  received_at?: string;
+  latitude?: number;
+  longitude?: number;
+  speed_over_ground?: number | null;
+  course_over_ground?: number | null;
+}
+
+interface VesselTrackResponse {
+  points?: VesselTrackPoint[];
+  unavailable?: boolean;
+}
+
 export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelProps) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [rawOpen, setRawOpen] = useState(false);
   const groups = useMemo(() => buildVesselFieldGroups(vessel), [vessel]);
-  const trackQuery = useQuery({
-    queryKey: ['tanker-track', vessel.mmsi, 24],
+  const imo = String(vessel.imo ?? '').trim();
+  const mmsiStr = String(vessel.mmsi ?? '').trim();
+
+  const shipVaultQuery = useQuery({
+    queryKey: ['vessel-shipvault', mmsiStr, imo],
+    queryFn: () => getVesselShipVault(mmsiStr, imo ? { imo } : undefined),
+    enabled: Boolean(mmsiStr && imo),
+    staleTime: 86_400_000,
+    retry: false,
+  });
+
+  const refreshShipVault = useMutation({
+    mutationFn: () => refreshVesselEnrichment(mmsiStr),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['vessel-shipvault', mmsiStr, imo], data);
+    },
+  });
+
+  const shipVaultErrorText = useMemo(() => {
+    if (!shipVaultQuery.error) return null;
+    const msg = String((shipVaultQuery.error as Error)?.message || shipVaultQuery.error);
+    if (/registry match|404/i.test(msg)) {
+      return t(
+        'אין התאמה במאגר ShipVault ל-IMO זה.',
+        'No ShipVault registry match for this IMO.',
+      );
+    }
+    if (/not configured|503/i.test(msg)) {
+      return t(
+        'ShipVault לא מוגדר בשרת — נדרש bootstrap של refresh token.',
+        'ShipVault is not configured on the server — bootstrap a Firebase refresh token.',
+      );
+    }
+    if (/auth|401|token|expired/i.test(msg)) {
+      return t(
+        'אימות ShipVault נכשל — עדכן bearer token או bootstrap refresh token מ-DevTools.',
+        'ShipVault authentication failed — update bearer token or bootstrap refresh token from DevTools.',
+      );
+    }
+    return msg || t('שגיאת ShipVault', 'ShipVault error');
+  }, [shipVaultQuery.error, t]);
+  const trackQuery = useQuery<VesselTrackResponse>({
+    queryKey: ['vessel-track', vessel.mmsi, 24],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE}/api/vessels/tankers/${vessel.mmsi}/track?hours=24`);
-      if (!response.ok) throw new Error('Track failed');
-      return (await response.json()) as {
-        points?: {
-          received_at?: string;
-          latitude?: number;
-          longitude?: number;
-          speed_over_ground?: number | null;
-          course_over_ground?: number | null;
-        }[];
-      };
+      const mmsi = String(vessel.mmsi ?? '').trim();
+      if (!mmsi) return { points: [] };
+      const response = await fetch(
+        oilLiveApiUrl(`/api/oil-live/vessels/${encodeURIComponent(mmsi)}/track?hours=24`),
+      );
+      if (response.status === 404) {
+        return { points: [], unavailable: true };
+      }
+      if (!response.ok) {
+        throw new Error(`Track unavailable (${response.status})`);
+      }
+      return (await response.json()) as VesselTrackResponse;
     },
     enabled: Boolean(vessel.mmsi),
     staleTime: 60_000,
+    retry: false,
   });
   const hasRawAis =
     Object.keys(vessel.ais_messages ?? {}).length > 0 || Object.keys(vessel.ais_metadata ?? {}).length > 0;
@@ -101,6 +164,10 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
         </Button>
       </div>
 
+      <PanelErrorBoundary
+        key={String(vessel.mmsi ?? vessel.id)}
+        title="Vessel details unavailable"
+      >
       <div className="p-5 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
         {groups.map((group) => (
           <section key={group.title} className="space-y-2">
@@ -143,9 +210,29 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
               </div>
             ))}
           </div>
-          {trackQuery.isError && (
+          {trackQuery.isLoading && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 animate-pulse">
+              {[0, 1, 2].map((idx) => (
+                <div key={idx} className="h-12 rounded-xl bg-white/40 dark:bg-slate-900/50" />
+              ))}
+            </div>
+          )}
+          {!trackQuery.isLoading && trackQuery.data?.unavailable && (
+            <p className="text-[9px] text-amber-600 dark:text-amber-300">
+              {t('מסלול לא זמין', 'Track unavailable')}
+            </p>
+          )}
+          {!trackQuery.isLoading && trackQuery.isError && (
             <p className="text-[9px] text-amber-600 dark:text-amber-300">
               {t('לא ניתן לטעון מסלול כרגע.', 'Recent track is unavailable right now.')}
+            </p>
+          )}
+          {!trackQuery.isLoading &&
+            !trackQuery.isError &&
+            !trackQuery.data?.unavailable &&
+            (trackQuery.data?.points?.length ?? 0) === 0 && (
+            <p className="text-[9px] text-slate-500">
+              {t('אין נקודות מסלול ב-24 השעות האחרונות.', 'No track points in the last 24 hours.')}
             </p>
           )}
         </section>
@@ -172,18 +259,47 @@ export default function OilMaritimePanel({ vessel, onClose }: OilMaritimePanelPr
           </section>
         )}
 
-        <MaritimeContextPanel
-          query={{
-            vessel_name: vessel.vessel_name,
-            mmsi: vessel.mmsi,
-            imo: vessel.imo || '',
-            destination: vessel.destination || '',
-            lat: vessel.lat,
-            lng: vessel.lng,
-          }}
-          section="all"
-        />
+        {imo && (
+          <section className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
+            {shipVaultQuery.isLoading && (
+              <p className="text-[9px] text-slate-500">{t('טוען מאגר…', 'Loading registry…')}</p>
+            )}
+            {shipVaultErrorText && (
+              <p className="text-[9px] text-amber-600 dark:text-amber-300">
+                {shipVaultErrorText}
+              </p>
+            )}
+            {shipVaultQuery.data?.shipvault_profile && (
+              <ShipVaultRegistryPanel
+                profile={shipVaultQuery.data.shipvault_profile}
+                mmsi={mmsiStr}
+                compact
+                onRefresh={() => refreshShipVault.mutate()}
+                isRefreshing={refreshShipVault.isPending}
+              />
+            )}
+          </section>
+        )}
+
+        <PanelErrorBoundary
+          key={`maritime-context-${vessel.mmsi ?? vessel.id}`}
+          title="Maritime intelligence unavailable"
+        >
+          <MaritimeContextPanel
+            key={`maritime-context-panel-${vessel.mmsi ?? vessel.id}`}
+            query={{
+              vessel_name: vessel.vessel_name,
+              mmsi: vessel.mmsi,
+              imo: vessel.imo || '',
+              destination: vessel.destination || '',
+              lat: vessel.lat,
+              lng: vessel.lng,
+            }}
+            section={shipVaultQuery.data?.shipvault_profile ? 'counterparties' : 'all'}
+          />
+        </PanelErrorBoundary>
       </div>
+      </PanelErrorBoundary>
     </Card>
   );
 }

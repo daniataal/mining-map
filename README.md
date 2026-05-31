@@ -54,7 +54,7 @@ Start the AIS ingest worker (required for dense vessel maps):
 
 ```bash
 docker compose up -d maritime-worker
-curl -s http://localhost:8000/api/maritime/stats | python3 -m json.tool
+curl -s http://localhost:8080/api/oil-live/maritime/stats | python3 -m json.tool
 ```
 
 Useful `.env` overrides for denser maps:
@@ -68,7 +68,7 @@ Useful `.env` overrides for denser maps:
 Persian Gulf empty map check:
 
 ```bash
-curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
+curl -s 'http://localhost:8080/api/oil-live/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
 ```
 
 If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.

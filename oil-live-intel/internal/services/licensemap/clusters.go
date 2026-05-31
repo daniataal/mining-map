@@ -193,7 +193,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 			sec = *sector
 		}
 		out = append(out, ClusterMarker{
-			ID:                fmt.Sprintf("cluster:%.4f:%.4f", lat, lng),
+			ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", c, lat, lng),
 			Company:           fmt.Sprintf("%d licenses", cnt),
 			LicenseType:       "Cluster",
 			Commodity:         "",

@@ -359,8 +359,13 @@ export type OilCompaniesResponse = {
   limit: number;
 };
 
-function oilUrl(path: string) {
+/** Same-origin when unset; direct to VITE_OIL_INTEL_BASE when set (e.g. :8095). */
+export function oilLiveApiUrl(path: string) {
   return `${OIL_INTEL_BASE}${path}`;
+}
+
+function oilUrl(path: string) {
+  return oilLiveApiUrl(path);
 }
 
 function authHeaders(): HeadersInit {
@@ -1033,6 +1038,27 @@ export async function getVesselDossier(
  * Force a fresh ShipVault enrichment fetch for a vessel, bypassing the 7-day cache.
  * Returns the updated shipvault_profile block.
  */
+/** ShipVault registry enrichment for map maritime panel (requires IMO on vessel or ?imo=). */
+export async function getVesselShipVault(
+  mmsi: string | number,
+  opts?: { imo?: string; force_refresh?: boolean },
+): Promise<{ mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile }> {
+  const params = new URLSearchParams();
+  if (opts?.imo) params.set('imo', opts.imo);
+  if (opts?.force_refresh) params.set('force_refresh', 'true');
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(
+      `/api/oil-live/vessels/${encodeURIComponent(String(mmsi))}/shipvault${qs ? `?${qs}` : ''}`,
+    ),
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `shipvault ${res.status}`);
+  }
+  return data as { mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile };
+}
+
 export async function refreshVesselEnrichment(
   mmsi: string | number,
 ): Promise<{ mmsi: number; imo?: string; shipvault_profile?: ShipVaultProfile }> {

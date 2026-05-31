@@ -107,7 +107,7 @@ func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
 		lat := wlat / float64(total)
 		lng := wlng / float64(total)
 		out = append(out, ClusterMarker{
-			ID:                fmt.Sprintf("cluster:%.4f:%.4f", lat, lng),
+			ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", country, lat, lng),
 			Company:           fmt.Sprintf("%d licenses", total),
 			LicenseType:       "Cluster",
 			Commodity:         "",
@@ -186,7 +186,7 @@ func mergeClusterMarkers(clusters []ClusterMarker) []ClusterMarker {
 	lat := wlat / float64(total)
 	lng := wlng / float64(total)
 	return []ClusterMarker{{
-		ID:                fmt.Sprintf("cluster:%.4f:%.4f", lat, lng),
+		ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", country, lat, lng),
 		Company:           fmt.Sprintf("%d licenses", total),
 		LicenseType:       "Cluster",
 		Commodity:         "",
