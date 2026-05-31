@@ -707,6 +707,33 @@ const CountryFocusBoundsFly = ({
     return null;
 };
 
+const MaritimeFleetSelectionFly = ({
+    vessel,
+}: {
+    vessel: MaritimeVessel | null;
+}) => {
+    const map = useMap();
+    const lastFlownIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!vessel) {
+            lastFlownIdRef.current = null;
+            return;
+        }
+        const src = (vessel.source_label ?? '').toLowerCase();
+        if (!src.includes('shipvault')) return;
+        const lat = vessel.lat;
+        const lng = vessel.lng;
+        if (lat == null || lng == null || (lat === 0 && lng === 0)) return;
+        if (lastFlownIdRef.current === vessel.id) return;
+        lastFlownIdRef.current = vessel.id;
+        const timer = window.setTimeout(() => {
+            map.flyTo([lat, lng], Math.max(map.getZoom(), 8), { duration: 0.85 });
+        }, 120);
+        return () => window.clearTimeout(timer);
+    }, [vessel, map]);
+    return null;
+};
+
 const LiveDataMapFly = ({
     trigger,
     target,
@@ -1180,6 +1207,21 @@ export default function MapComponent({
     useEffect(() => {
         if (!selectedMaritimeVessel) return;
         if (maritimeVessels.some((vessel) => vessel.id === selectedMaritimeVessel.id)) return;
+
+        const mmsi = String(selectedMaritimeVessel.mmsi ?? '').trim();
+        if (mmsi && mmsi !== '0') {
+            const feedByMmsi = maritimeVessels.find((vessel) => String(vessel.mmsi) === mmsi);
+            if (feedByMmsi) {
+                if (feedByMmsi.id !== selectedMaritimeVessel.id) {
+                    onSelectMaritimeVessel(feedByMmsi);
+                }
+                return;
+            }
+        }
+
+        const src = (selectedMaritimeVessel.source_label ?? '').toLowerCase();
+        if (src.includes('shipvault') || src === 'registry') return;
+
         onSelectMaritimeVessel(null);
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
@@ -2386,6 +2428,9 @@ export default function MapComponent({
                 />
                 {isLiveDataView && (
                     <LiveDataMapFly trigger={liveDataFlyTrigger} target={liveDataFlyTarget} />
+                )}
+                {isMaritimeMapView && (
+                    <MaritimeFleetSelectionFly vessel={selectedMaritimeVessel} />
                 )}
                 <TankerViewFlyEffect
                     active={isMaritimeMapView && isMaritimeLayerEnabled}
