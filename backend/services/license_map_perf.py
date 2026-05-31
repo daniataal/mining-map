@@ -14,16 +14,16 @@ def license_grid_degrees(zoom: Optional[float]) -> Optional[float]:
         z = float(zoom)
     except (TypeError, ValueError):
         return None
-    # z >= 7: bbox points + client MarkerClusterGroup (avoids grid soup).
-    if z >= 7:
+    # z >= 8: bbox points + client clustering (server grid through z=7).
+    if z >= 8:
         return None
     if z < 3:
         return 16.0
     if z < 4:
         return 12.0
-    if z < 5:
+    if z < 8:
         return 8.0
-    return 6.0
+    return None
 
 
 def license_cluster_min_count(grid_deg: float) -> int:
@@ -80,7 +80,8 @@ def merge_license_clusters(
                     continue
                 for i in members:
                     for j in neighbor:
-                        union(i, j)
+                        if clusters[i].get("country") == clusters[j].get("country"):
+                            union(i, j)
 
     groups: dict[int, list[int]] = {}
     for idx in range(len(clusters)):
@@ -148,6 +149,7 @@ def query_license_clusters(
     grid_deg: float,
     open_clause: str,
     limit: int = 800,
+    zoom: Optional[float] = None,
 ) -> list[dict[str, Any]]:
     """Aggregate licenses into viewport grid cells for low-zoom map paint."""
     safe_limit = max(1, min(int(limit or 800), 2000))
@@ -157,7 +159,7 @@ def query_license_clusters(
             (FLOOR(lat / %s) * %s + %s / 2.0)::float AS lat,
             (FLOOR(lng / %s) * %s + %s / 2.0)::float AS lng,
             COUNT(*)::int AS cnt,
-            MAX(country) AS country,
+            country,
             MAX(COALESCE(sector, 'mining')) AS sector
         FROM licenses
         WHERE {sector_sql}
@@ -169,7 +171,7 @@ def query_license_clusters(
           AND lat BETWEEN %s AND %s
           AND lng BETWEEN %s AND %s
           {open_clause}
-        GROUP BY FLOOR(lat / %s), FLOOR(lng / %s)
+        GROUP BY FLOOR(lat / %s), FLOOR(lng / %s), country
         HAVING COUNT(*) >= %s
         ORDER BY cnt DESC
         LIMIT %s
@@ -223,7 +225,83 @@ def query_license_clusters(
                 "entityKind": "license",
             }
         )
-    return merge_license_clusters(out, grid_deg=g)
+    merged = merge_license_clusters(out, grid_deg=g)
+    return collapse_clusters_tight_viewport(
+        merged,
+        min_lat=min_lat,
+        max_lat=max_lat,
+        min_lng=min_lng,
+        max_lng=max_lng,
+        zoom=zoom,
+    )
+
+
+def collapse_clusters_tight_viewport(
+    clusters: list[dict[str, Any]],
+    *,
+    min_lat: float,
+    max_lat: float,
+    min_lng: float,
+    max_lng: float,
+    zoom: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """Merge clusters into one bubble for country/regional zoom (z < 8)."""
+    if len(clusters) <= 1:
+        return clusters
+    span = max(max_lat - min_lat, max_lng - min_lng)
+    z = float(zoom) if zoom is not None else 99.0
+    grid = float(clusters[0].get("mapClusterGridDeg") or 0)
+    should_collapse = (z < 8 and 0 < span < 22) or (grid > 0 and span < grid * 1.5)
+    if not should_collapse:
+        return clusters
+
+    by_country: dict[str, list[dict[str, Any]]] = {}
+    for c in clusters:
+        country = c.get("country") or ""
+        by_country.setdefault(country, []).append(c)
+
+    out = []
+    for cc in by_country.values():
+        out.append(_merge_cluster_rows(cc))
+    return out
+
+
+def _merge_cluster_rows(clusters: list[dict[str, Any]]) -> dict[str, Any]:
+    total = 0
+    wlat = 0.0
+    wlng = 0.0
+    country = ""
+    sector = "mining"
+    grid = float(clusters[0].get("mapClusterGridDeg") or 0)
+    for row in clusters:
+        cnt = int(row.get("mapClusterCount") or 0)
+        total += cnt
+        wlat += float(row["lat"]) * cnt
+        wlng += float(row["lng"]) * cnt
+        if not country and row.get("country"):
+            country = str(row["country"])
+        if row.get("sector"):
+            sector = str(row["sector"])
+    if total <= 0:
+        return clusters[0]
+    lat = wlat / total
+    lng = wlng / total
+    return {
+        "id": f"cluster:{round(lat, 4)}:{round(lng, 4)}",
+        "company": f"{total} licenses",
+        "licenseType": "Cluster",
+        "commodity": "",
+        "status": "Active",
+        "date": None,
+        "country": country,
+        "region": "",
+        "sector": sector,
+        "lat": lat,
+        "lng": lng,
+        "mapClusterCount": total,
+        "mapClusterGridDeg": grid,
+        "entityKind": "license",
+    }
 
 
 def simplify_tolerance_for_zoom(zoom: Optional[float]) -> float:

@@ -404,7 +404,7 @@ interface MapComponentProps {
 const LICENSE_CLUSTER_FIT_MAX_ZOOM = 14;
 const LICENSE_CANVAS_CLUSTER_MAX_ZOOM = 13;
 const LICENSE_CANVAS_CLUSTER_MIN_COUNT = 10;
-const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = 14;
+const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = 16;
 const LICENSE_CANVAS_CLUSTER_KINDS: readonly LiveDealFeatureKind[] = [
     'license',
     'refinery',

@@ -17,16 +17,19 @@ func TestGridDegreesLowZoom(t *testing.T) {
 	if g := GridDegrees(floatPtr(4)); g == nil || *g != 8.0 {
 		t.Fatalf("zoom 4: got %v", g)
 	}
-	if g := GridDegrees(floatPtr(5)); g == nil || *g != 6.0 {
+	if g := GridDegrees(floatPtr(5)); g == nil || *g != 8.0 {
 		t.Fatalf("zoom 5: got %v", g)
 	}
-	if g := GridDegrees(floatPtr(6)); g == nil || *g != 6.0 {
+	if g := GridDegrees(floatPtr(6)); g == nil || *g != 8.0 {
 		t.Fatalf("zoom 6: got %v", g)
+	}
+	if g := GridDegrees(floatPtr(7)); g == nil || *g != 8.0 {
+		t.Fatalf("zoom 7: got %v", g)
 	}
 }
 
 func TestGridDegreesDetailZoom(t *testing.T) {
-	for _, z := range []float64{7, 8, 12} {
+	for _, z := range []float64{8, 12} {
 		if GridDegrees(floatPtr(z)) != nil {
 			t.Fatalf("zoom %v should be nil", z)
 		}

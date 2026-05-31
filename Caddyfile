@@ -2,13 +2,13 @@
 :80 {
 	encode gzip zstd
 
-	rewrite /api/map/country-borders /api/oil-live/map/country-borders
-	uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
-	uri replace /api/licenses /api/oil-live/licenses
-	uri replace /licenses /api/oil-live/licenses
+	rewrite /api/map/country-borders* /api/oil-live/map/country-borders{path}
+	rewrite /api/petroleum/osm-layers* /api/oil-live/map/petroleum-osm/layers{path}
+	rewrite /api/licenses* /api/oil-live/licenses{path}
+	rewrite /licenses* /api/oil-live/licenses{path}
 
 	# Go Backend for Live Intel and Licenses
-	handle_path /api/oil-live/* {
+	handle /api/oil-live/* {
 		reverse_proxy oil-live-intel:8095 {
 			transport http {
 				read_timeout 0
@@ -16,6 +16,13 @@
 			}
 		}
 	}
+	handle /api/licenses/annotations {
+		reverse_proxy backend:8000
+	}
+	handle /api/licenses/*/annotations {
+		reverse_proxy backend:8000
+	}
+
 	handle_path /api/licenses* {
 		rewrite * /api/oil-live/licenses{path}
 		reverse_proxy oil-live-intel:8095 {

@@ -3,13 +3,13 @@ package licensemap
 
 import "math"
 
-// GridDegrees returns server-side cluster grid size; nil means individual points (z >= 7).
+// GridDegrees returns server-side cluster grid size; nil means individual points (z >= 8).
 func GridDegrees(zoom *float64) *float64 {
 	if zoom == nil {
 		return nil
 	}
 	z := *zoom
-	if z >= 7 {
+	if z >= 8 {
 		return nil
 	}
 	if z < 3 {
@@ -20,12 +20,11 @@ func GridDegrees(zoom *float64) *float64 {
 		g := 12.0
 		return &g
 	}
-	if z < 5 {
+	if z < 8 {
 		g := 8.0
 		return &g
 	}
-	g := 6.0
-	return &g
+	return nil
 }
 
 // ClusterMinCount drops singleton grid cells; coarse cells need more licenses.

@@ -13,12 +13,13 @@ def test_license_grid_degrees_low_zoom():
     assert license_grid_degrees(2) == 16.0
     assert license_grid_degrees(3) == 12.0
     assert license_grid_degrees(4) == 8.0
-    assert license_grid_degrees(5) == 6.0
-    assert license_grid_degrees(6) == 6.0
+    assert license_grid_degrees(5) == 8.0
+    assert license_grid_degrees(6) == 8.0
+    assert license_grid_degrees(7) == 8.0
 
 
 def test_license_grid_degrees_detail_zoom():
-    assert license_grid_degrees(7) is None
+    assert license_grid_degrees(8) is None
     assert license_grid_degrees(8) is None
     assert license_grid_degrees(12) is None
     assert license_grid_degrees(None) is None
