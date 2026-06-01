@@ -8,7 +8,7 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
 echo "=== Phase 1 sign-off (automated) ==="
 
 cd oil-live-intel
-go test ./internal/api/... ./internal/services/licensemap/... ./internal/services/opportunity/... ./internal/services/ais/... ./internal/services/opportunity/...
+go test ./internal/api/... ./internal/services/licensemap/... ./internal/services/opportunity/... ./internal/services/ais/... ./internal/seed/...
 cd "$ROOT/mining-viz"
 npm run build
 
@@ -30,7 +30,24 @@ if command -v jq >/dev/null 2>&1; then
   curl -sf "$BASE_URL/api/oil-live/sync-status" | jq -e '.trade_manifest_row_count != null' >/dev/null
   curl -sf "$BASE_URL/api/oil-live/sync-status" | jq -e '.manifest_by_tier != null' >/dev/null
   echo "OK: sync-status manifest_by_tier present"
+  curl -sf "$BASE_URL/api/oil-live/sync-status" | jq -e '(.watch_zone_observations_24h | type) == "array"' >/dev/null
+  echo "OK: sync-status watch_zone_observations_24h present"
+  n=$(curl -sf "$BASE_URL/api/oil-live/scenarios/hormuz_disruption_v1/digest" | jq '(.top_corridors | length) // 0')
+  if [[ "${PHASE1_REQUIRE_HORMUZ_CORRIDORS:-}" == "1" && "$n" -lt 1 ]]; then
+    echo "FAIL: hormuz top_corridors empty — run ./scripts/seed_hormuz_crisis_demo.sh"
+    exit 1
+  fi
+  if [[ "$n" -ge 1 ]]; then
+    echo "OK: hormuz digest top_corridors count=$n"
+  else
+    echo "WARN: hormuz top_corridors empty (dev: ./scripts/seed_hormuz_crisis_demo.sh)"
+  fi
+fi
+
+if [[ -x "$ROOT/backend/.venv/bin/python" ]]; then
+  "$ROOT/backend/.venv/bin/python" -m pytest "$ROOT/backend/tests/test_trade_manifest_ingest.py" -q
+  echo "OK: trade manifest ingest tests"
 fi
 
 echo "=== Automated Phase 1 gates passed ==="
-echo "Manual: docs/PHASE1_EXIT_CRITERIA.md trader journey rows 1-9 in browser on $BASE_URL"
+echo "Manual: docs/PHASE1_BROWSER_CHECKLIST.md on $BASE_URL"

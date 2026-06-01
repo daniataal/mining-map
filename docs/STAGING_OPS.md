@@ -26,4 +26,15 @@ curl -s "$BASE_URL/api/oil-live/sync-status" | jq '.demo_cargo_record_count, .pr
 ./scripts/phase1_signoff.sh
 ```
 
-Product still runs manual rows in [PHASE1_EXIT_CRITERIA.md](./PHASE1_EXIT_CRITERIA.md).
+Product still runs manual rows in [PHASE1_BROWSER_CHECKLIST.md](./PHASE1_BROWSER_CHECKLIST.md) and [PHASE1_EXIT_CRITERIA.md](./PHASE1_EXIT_CRITERIA.md).
+
+## Dev: Crisis desk corridors
+
+When Hormuz digest `top_corridors` is empty in local dev:
+
+```bash
+./scripts/seed_hormuz_crisis_demo.sh
+PHASE1_REQUIRE_HORMUZ_CORRIDORS=1 ./scripts/phase1_signoff.sh
+```
+
+Do **not** run the SQL seed in production (`OIL_LIVE_DISABLE_DEMO_SEED=1`).

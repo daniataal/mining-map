@@ -18,6 +18,7 @@
 | Execute | [EXECUTE_RFQ_COMPLIANCE_SPIKE.md](../docs/EXECUTE_RFQ_COMPLIANCE_SPIKE.md) |
 | Ops glue | `BRAZIL_MANIFEST_CSV_DIR` on graph-sync worker; `ingest_brazil_manifests_dev.sh` |
 | UI | Intel panel AIS-by-zone strip; crisis digest `top_corridors` |
+| Dev seed | `seed_hormuz_crisis_demo.sh` + Go `EnsureHormuzCrisisDemoMCR` |
 | CI | platform-health runs opportunity + ais Go tests |
 
 ## Verification (2026-06-01, branch `new-branch-develop`)
@@ -25,7 +26,7 @@
 | Gate | Result | Notes |
 |------|--------|-------|
 | `docker compose build oil-live-intel && up -d` | **PASS** | Service healthy on `:8095`; Caddy proxy `:8080` |
-| Hormuz digest `top_corridors` | **0** | Empty array `[]` — no `mcr_corridor_aggregates_country` rows in scenario bbox with `product_filter=crude`; API OK |
+| Hormuz digest `top_corridors` | **3** (after `./scripts/seed_hormuz_crisis_demo.sh`) | Demo MCR seed; prod stays empty unless real data in bbox |
 | `watch_zone_observations_24h` | **3** | Persian Gulf, Gulf of Oman, Oman approaches — all `has_gap: true` (expected sparse AIS) |
 | `./scripts/phase1_signoff.sh` | **PASS** | Go api/licensemap/opportunity/ais, vite build, platform smoke, license parity |
 | `platform_map_smoke.sh` | **PASS** | Asserts `top_corridors` key on digest |
@@ -41,6 +42,7 @@ backend/.venv/bin/python -m pytest backend/tests/test_trade_manifest_ingest.py -
 
 ## Manual (product)
 
+- [ ] [PHASE1_BROWSER_CHECKLIST.md](../docs/PHASE1_BROWSER_CHECKLIST.md) (rows 1–9 + Crisis desk)
 - [ ] [PHASE1_EXIT_CRITERIA.md](../docs/PHASE1_EXIT_CRITERIA.md) rows 1–9 in browser
 - [ ] Live Data → **Crisis desk** lens → Hormuz digest + top plays
 - [ ] Staging: `VITE_LICENSE_MAP_SHADOW_METRICS=1`
