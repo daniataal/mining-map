@@ -46,13 +46,18 @@ func graphSyncGoGovAwardsEnabled() bool {
 	return graphSyncGoFlagEnabled("GOV_AWARDS")
 }
 
+func graphSyncGoPetroleumOsmStorageEnabled() bool {
+	return graphSyncGoFlagEnabled("PETROLEUM_OSM_STORAGE")
+}
+
 func anyGraphSyncGoStepEnabled() bool {
 	return graphSyncGoTerminalOperatorsEnabled() ||
 		graphSyncGoLicensesEnabled() ||
 		graphSyncGoTradeFlowsEnabled() ||
 		graphSyncGoPortCallsEnabled() ||
 		graphSyncGoTEDEnabled() ||
-		graphSyncGoGovAwardsEnabled()
+		graphSyncGoGovAwardsEnabled() ||
+		graphSyncGoPetroleumOsmStorageEnabled()
 }
 
 func (g *GraphSyncGoSteps) runStep(
@@ -173,6 +178,29 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 			}
 			log.Info().Int("events", result.Events).Msg("[graph-sync-go] gov_awards done")
 			return map[string]any{"events": result.Events}, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if graphSyncGoPetroleumOsmStorageEnabled() {
+		log.Info().Msg("[graph-sync-go] running petroleum_osm_storage step…")
+		err := g.runStep(ctx, "graphsync_petroleum_osm_storage", func(ctx context.Context) (map[string]any, error) {
+			result, err := graphsync.EnsurePetroleumOsmStorageLayer(ctx, g.Pool)
+			if err != nil {
+				return nil, err
+			}
+			log.Info().
+				Str("status", result.Status).
+				Bool("cached", result.Cached).
+				Msg("[graph-sync-go] petroleum_osm_storage done")
+			return map[string]any{
+				"status":   result.Status,
+				"reason":   result.Reason,
+				"layer_id": result.LayerID,
+				"cached":   result.Cached,
+			}, nil
 		})
 		if err != nil && firstErr == nil {
 			firstErr = err

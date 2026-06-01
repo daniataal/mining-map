@@ -35,7 +35,7 @@ ImportYeti and similar “US import search” tools surface **company-level ship
 
 | Layer | Module / service | Output | BOL-like? |
 |-------|------------------|--------|-----------|
-| **AIS port calls** | `maritime-worker`, `oil-live-intel-worker` | `oil_port_calls`, vessel ↔ terminal timing | Movement evidence, not consignee |
+| **AIS port calls** | `oil-live-intel-worker` (Go AIS ingest) | `oil_port_calls`, vessel ↔ terminal timing | Movement evidence, not consignee |
 | **UN Comtrade** | `comtrade_scheduled_sync.py`, graph-sync mirror | `oil_trade_flows` (`data_source=comtrade`) | Macro corridor validation |
 | **U.S. Census trade** | `census_trade.py` → graph-sync step `census_trade` | `oil_trade_flows` (`data_source=census_api`) | U.S. bilateral HS 2709/2710/2711 |
 | **USITC DataWeb** | `usitc_dataweb.py` | `oil_trade_flows` (`data_source=usitc_dataweb`) | U.S. HS flows + tariff context |

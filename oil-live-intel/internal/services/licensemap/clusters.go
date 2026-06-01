@@ -11,20 +11,20 @@ import (
 
 // ClusterMarker is the slim JSON shape for low-zoom license grid cells (parity with Python).
 type ClusterMarker struct {
-	ID                string   `json:"id"`
-	Company           string   `json:"company"`
-	LicenseType       string   `json:"licenseType"`
-	Commodity         string   `json:"commodity"`
-	Status            string   `json:"status"`
-	Date              *string  `json:"date"`
-	Country           string   `json:"country"`
-	Region            string   `json:"region"`
-	Sector            string   `json:"sector"`
-	Lat               float64  `json:"lat"`
-	Lng               float64  `json:"lng"`
-	MapClusterCount   int      `json:"mapClusterCount"`
-	MapClusterGridDeg float64  `json:"mapClusterGridDeg"`
-	EntityKind        string   `json:"entityKind"`
+	ID                string  `json:"id"`
+	Company           string  `json:"company"`
+	LicenseType       string  `json:"licenseType"`
+	Commodity         string  `json:"commodity"`
+	Status            string  `json:"status"`
+	Date              *string `json:"date"`
+	Country           string  `json:"country"`
+	Region            string  `json:"region"`
+	Sector            string  `json:"sector"`
+	Lat               float64 `json:"lat"`
+	Lng               float64 `json:"lng"`
+	MapClusterCount   int     `json:"mapClusterCount"`
+	MapClusterGridDeg float64 `json:"mapClusterGridDeg"`
+	EntityKind        string  `json:"entityKind"`
 }
 
 // ClusterQuery bounds and filters for license grid aggregation.
@@ -121,25 +121,26 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 
 	n := len(args)
 	gIdx := n + 1
-	halfIdx := n + 2
-	minLatIdx := n + 3
-	maxLatIdx := n + 4
-	minLngIdx := n + 5
-	maxLngIdx := n + 6
-	minCntIdx := n + 7
-	limitIdx := n + 8
-	// Subquery keeps PostgreSQL happy: SELECT may reference bucket columns only after GROUP BY.
+	minLatIdx := n + 2
+	maxLatIdx := n + 3
+	minLngIdx := n + 4
+	maxLngIdx := n + 5
+	minCntIdx := n + 6
+	limitIdx := n + 7
+	// Median license coords per grid cell (not geometric cell center — avoids Gulf placement when bbox includes ocean).
 	sql := fmt.Sprintf(`
 		SELECT
-			(lat_bucket * $%d + $%d / 2.0)::float AS lat,
-			(lng_bucket * $%d + $%d / 2.0)::float AS lng,
+			(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lat))::float AS lat,
+			(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lng))::float AS lng,
 			COUNT(*)::int AS cnt,
 			country,
 			MAX(sector) AS sector
 		FROM (
 			SELECT
-				FLOOR(lat / $%d)::bigint AS lat_bucket,
-				FLOOR(lng / $%d)::bigint AS lng_bucket,
+				lat,
+				lng,
+				FLOOR((lat - $%d) / $%d)::bigint AS lat_bucket,
+				FLOOR((lng - $%d) / $%d)::bigint AS lng_bucket,
 				country,
 				COALESCE(sector, 'mining') AS sector
 			FROM licenses
@@ -157,7 +158,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 		HAVING COUNT(*) >= $%d
 		ORDER BY cnt DESC
 		LIMIT $%d
-	`, gIdx, halfIdx, gIdx, halfIdx, gIdx, gIdx,
+	`, minLatIdx, gIdx, minLngIdx, gIdx,
 		sectorSQL, countrySQL,
 		minLatIdx, maxLatIdx, minLngIdx, maxLngIdx,
 		openClause,
@@ -165,7 +166,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 		limitIdx)
 
 	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, g, g/2, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, minCnt, safeLimit)
+	queryArgs = append(queryArgs, g, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, minCnt, safeLimit)
 
 	rows, err := pool.Query(ctx, sql, queryArgs...)
 	if err != nil {
@@ -192,6 +193,7 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 		if sector != nil && *sector != "" {
 			sec = *sector
 		}
+		lat, lng = RefineClusterLandPosition(lat, lng, c)
 		out = append(out, ClusterMarker{
 			ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", c, lat, lng),
 			Company:           fmt.Sprintf("%d licenses", cnt),
@@ -209,8 +211,16 @@ func QueryClusters(ctx context.Context, pool *pgxpool.Pool, q ClusterQuery) ([]C
 			EntityKind:        "license",
 		})
 	}
-	merged := MergeClusters(out, g)
-	return CollapseClustersTightViewport(merged, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, q.Zoom), rows.Err()
+	merged := MergeClusters(out, g, q.MinLat, q.MinLng)
+	snapped := make([]ClusterMarker, len(merged))
+	for i, c := range merged {
+		lat, lng := snapClusterToViewport(c.Lat, c.Lng, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, g)
+		lat, lng = RefineClusterLandPosition(lat, lng, c.Country)
+		c.Lat = lat
+		c.Lng = lng
+		snapped[i] = c
+	}
+	return CollapseClustersTightViewport(snapped, q.MinLat, q.MaxLat, q.MinLng, q.MaxLng, q.Zoom), rows.Err()
 }
 
 // ValidBBox returns false for degenerate boxes.

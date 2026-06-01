@@ -6,21 +6,8 @@ import (
 	"sort"
 )
 
-type clusterCell struct {
-	lat, lng float64
-	count    int
-	country  string
-	sector   string
-}
-
-func clusterCellKey(lat, lng, gridDeg float64) (int, int) {
-	// SQL centers cells at FLOOR(coord/g)*g + g/2 — invert that for neighbor merge keys.
-	half := gridDeg / 2
-	return int(math.Floor((lat - half) / gridDeg)), int(math.Floor((lng - half) / gridDeg))
-}
-
 // MergeClusters combines neighboring grid bubbles to reduce overlap at continental zoom.
-func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
+func MergeClusters(clusters []ClusterMarker, gridDeg, originLat, originLng float64) []ClusterMarker {
 	if len(clusters) < 2 || gridDeg <= 0 {
 		return clusters
 	}
@@ -45,7 +32,7 @@ func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
 
 	cells := map[[2]int][]int{}
 	for idx, c := range clusters {
-		latKey, lngKey := clusterCellKey(c.Lat, c.Lng, gridDeg)
+		latKey, lngKey := clusterCellKey(c.Lat, c.Lng, gridDeg, originLat, originLng)
 		key := [2]int{latKey, lngKey}
 		cells[key] = append(cells[key], idx)
 	}
@@ -84,15 +71,13 @@ func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
 			continue
 		}
 		total := 0
-		wlat := 0.0
-		wlng := 0.0
 		country := ""
 		sector := "mining"
+		group := make([]ClusterMarker, 0, len(members))
 		for _, idx := range members {
 			c := clusters[idx]
 			total += c.MapClusterCount
-			wlat += c.Lat * float64(c.MapClusterCount)
-			wlng += c.Lng * float64(c.MapClusterCount)
+			group = append(group, c)
 			if country == "" && c.Country != "" {
 				country = c.Country
 			}
@@ -104,8 +89,12 @@ func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
 			out = append(out, clusters[members[0]])
 			continue
 		}
-		lat := wlat / float64(total)
-		lng := wlng / float64(total)
+		lat, lng, ok := dominantClusterCenter(group)
+		if !ok {
+			out = append(out, clusters[members[0]])
+			continue
+		}
+		lat, lng = RefineClusterLandPosition(lat, lng, country)
 		out = append(out, ClusterMarker{
 			ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", country, lat, lng),
 			Company:           fmt.Sprintf("%d licenses", total),
@@ -130,6 +119,9 @@ func MergeClusters(clusters []ClusterMarker, gridDeg float64) []ClusterMarker {
 	return out
 }
 
+// maxViewportClusterMergeTotal avoids one misleading mega-bubble (e.g. country focus at z 6–7).
+const maxViewportClusterMergeTotal = 400
+
 // CollapseClustersTightViewport merges clusters into one bubble for country/regional zoom (z < 8).
 func CollapseClustersTightViewport(
 	clusters []ClusterMarker,
@@ -149,30 +141,34 @@ func CollapseClustersTightViewport(
 	if !shouldCollapse {
 		return clusters
 	}
-	
+
 	byCountry := map[string][]ClusterMarker{}
 	for _, c := range clusters {
 		byCountry[c.Country] = append(byCountry[c.Country], c)
 	}
-	
+
 	var out []ClusterMarker
 	for _, cc := range byCountry {
-		out = append(out, mergeClusterMarkers(cc)...)
+		total := 0
+		for _, c := range cc {
+			total += c.MapClusterCount
+		}
+		if total > maxViewportClusterMergeTotal {
+			out = append(out, cc...)
+			continue
+		}
+		out = append(out, mergeClusterMarkers(cc, minLat, maxLat, minLng, maxLng)...)
 	}
 	return out
 }
 
-func mergeClusterMarkers(clusters []ClusterMarker) []ClusterMarker {
+func mergeClusterMarkers(clusters []ClusterMarker, minLat, maxLat, minLng, maxLng float64) []ClusterMarker {
 	total := 0
-	wlat := 0.0
-	wlng := 0.0
 	country := ""
 	sector := "mining"
 	grid := clusters[0].MapClusterGridDeg
 	for _, c := range clusters {
 		total += c.MapClusterCount
-		wlat += c.Lat * float64(c.MapClusterCount)
-		wlng += c.Lng * float64(c.MapClusterCount)
 		if country == "" && c.Country != "" {
 			country = c.Country
 		}
@@ -183,8 +179,12 @@ func mergeClusterMarkers(clusters []ClusterMarker) []ClusterMarker {
 	if total <= 0 {
 		return clusters
 	}
-	lat := wlat / float64(total)
-	lng := wlng / float64(total)
+	lat, lng, ok := dominantClusterCenter(clusters)
+	if !ok {
+		return clusters
+	}
+	lat, lng = snapClusterToViewport(lat, lng, minLat, maxLat, minLng, maxLng, grid)
+	lat, lng = RefineClusterLandPosition(lat, lng, country)
 	return []ClusterMarker{{
 		ID:                fmt.Sprintf("cluster:%s:%.4f:%.4f", country, lat, lng),
 		Company:           fmt.Sprintf("%d licenses", total),

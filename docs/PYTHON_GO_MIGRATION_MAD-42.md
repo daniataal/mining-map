@@ -6,7 +6,7 @@ Branch: `paperclip2`. Strangler pattern: Go read paths in `oil-live-intel`, Pyth
 
 | Service | Path | Map-related endpoints / role | Callers | Migration note |
 |---------|------|------------------------------|---------|----------------|
-| **backend** (FastAPI) | `backend/main.py` | `GET /licenses` (bbox, zoom clusters, map markers) | `mining-viz` `useLicensesForMap`, `MapComponent` | **First port (this issue):** low-zoom clusters → Go |
+| **backend** (FastAPI) | `backend/main.py` | `GET /licenses` (bbox, zoom clusters, map markers) | `mining-viz` `useLicensesForMap`, `MapComponent` | **Read path cut over:** Go `/api/oil-live/licenses` + `/licenses/map`; Python fallback only |
 | **backend** | `backend/services/license_map_perf.py` | Grid LOD helpers for `/licenses` | `main.py`, `petroleum_osm_store.py` | Ported to `oil-live-intel/internal/services/licensemap/` |
 | **backend** | `backend/services/petroleum_osm_store.py` | Petroleum OSM bbox reads | Oil/Gas map layers | **Next candidate:** pipeline/infra bbox |
 | **backend** | `backend/services/maritime_intel.py` | Geo helpers for route planner; legacy vessel feed retired | `port_logistics`, storage | **Done:** context/stats/vessels → Go; geo helpers remain |
@@ -19,7 +19,7 @@ Branch: `paperclip2`. Strangler pattern: Go read paths in `oil-live-intel`, Pyth
 
 - Highest pan/zoom traffic on unified map (27k+ license rows).
 - Pure SQL aggregation; no dossier provenance in cluster cells.
-- Python remains authoritative for point mode (`zoom >= 7`), CRUD, annotations, import.
+- Python remains authoritative for CRUD, annotations, import; map **read** (clusters + points) is Go when `VITE_LICENSE_MAP_GO` is on (default).
 
 **Go endpoint (parallel, safe cutover):** `GET /api/oil-live/licenses/map` — same JSON shape as Python `{"mode":"clusters",...}`.
 
@@ -37,7 +37,9 @@ curl -sS 'http://127.0.0.1:8080/api/oil-live/licenses/map?min_lat=-35&max_lat=35
 # Parity — Python (same bbox)
 curl -sS 'http://127.0.0.1:8080/licenses?min_lat=-35&max_lat=35&min_lng=-20&max_lng=55&zoom=4&map=1&limit=120' | jq 'if type=="object" then .mode else "array" end'
 
-# Map UI (zoom < 7): mining-viz calls /api/oil-live/licenses/map by default (opt out: VITE_LICENSE_MAP_GO=0)
+# Map UI: mining-viz calls Go /api/oil-live/licenses/map (zoom < 8) and /api/oil-live/licenses (point mode); opt out: VITE_LICENSE_MAP_GO=0
+# Smoke: BASE_URL=http://127.0.0.1:8080 ./scripts/platform_map_smoke.sh
+# Parity: BASE_URL=http://127.0.0.1:8080 ./scripts/license_map_parity.sh
 ```
 
 Env (optional, future cutover):

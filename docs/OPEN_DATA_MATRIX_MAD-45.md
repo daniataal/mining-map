@@ -33,8 +33,8 @@ Legend — **Tier:** `live` | `historic` | `macro` | `synthetic` | `inferred` | 
 
 | Source ID | Source | License | Refresh | Key fields | Match keys | Tier | In repo |
 |-----------|--------|---------|---------|------------|------------|------|---------|
-| `aisstream` | AISStream WebSocket | Commercial API ToS; key required | Real-time (~30s) | `mmsi`, `imo`, `name`, `lat`, `lng`, `sog`, `cog`, `destination` | `imo:NNNNNNN` → `mmsi` fallback (`vesselmerge.VesselIdentityKey`) | `live` | Yes — `maritime-worker`, `oil_ais_positions` |
-| `maritime_redis` | Redis global snapshot | Internal mirror | 1–5 min | Same as AIS + `data_source` | `imo:` / `mmsi` | `live` | Yes — `vessel_position_observations` |
+| `aisstream` | AISStream WebSocket | Commercial API ToS; key required | Real-time (~30s) | `mmsi`, `imo`, `name`, `lat`, `lng`, `sog`, `cog`, `destination` | `imo:NNNNNNN` → `mmsi` fallback (`vesselmerge.VesselIdentityKey`) | `live` | Yes — `oil-live-intel-worker`, `oil_ais_positions` |
+| `maritime_redis` | Redis global snapshot (retired) | — | — | Same as AIS + `data_source` | `imo:` / `mmsi` | `live` | Historical rows only — Python `maritime-worker` removed |
 | `oil_vessels` | Vessel registry (seed + AIS backfill) | App + public AIS | On graph-sync | `mmsi`, `imo`, `name`, `tanker_class`, `dwt` | `imo`, `mmsi`, normalized `name` | `live` / `inferred` | Yes — `oil-live-intel` |
 | `port_calls` | Geofenced berth events | Derived from AIS | Per port call | `mmsi`, `imo`, `terminal_id`, `event_type`, `draft`, `event_at` | `mmsi` + `terminal_id` + time window | `live` / `inferred` | Yes — `oil_port_calls` |
 | `aishub` | AISHub (contributor) | Free with receiver share | Planned | `mmsi`, `imo`, position | `imo`, `mmsi` | `live` | **Gap** — documented in DATA_SOURCES |

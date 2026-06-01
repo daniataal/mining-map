@@ -78,6 +78,15 @@ export function LiveDataSyncStatusBanner({
       {demoNote && kind !== 'demo_only' && (
         <p className="mt-1 text-[9px] opacity-85 leading-snug">{demoNote}</p>
       )}
+      {(syncStatus?.graph_sync_steps?.length ?? 0) > 0 && (
+        <p className="mt-1.5 text-[9px] opacity-90 leading-snug">
+          {t('שלבי סנכרון אחרונים', 'Recent graph-sync steps')}:{' '}
+          {syncStatus!.graph_sync_steps!
+            .slice(0, 4)
+            .map((s) => `${s.key.replace(/^graph_sync_step_|^graphsync_/, '')} (${s.status})`)
+            .join(' · ')}
+        </p>
+      )}
       {syncStatus?.disclaimer && kind === 'ok' && (
         <p className="mt-1 text-[9px] opacity-70 leading-snug">{syncStatus.disclaimer}</p>
       )}

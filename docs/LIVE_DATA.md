@@ -289,8 +289,13 @@ curl -sf http://localhost:8095/api/oil-live/sync-status | jq .
 curl -sf http://localhost:8080/api/oil-live/health | jq .
 curl -sf http://localhost:8080/api/oil-live/sync-status | jq .
 
+# 3b) Map routing smoke (Caddy → Go licenses, maritime, OSM petroleum, search)
+BASE_URL=http://127.0.0.1:8080 ./scripts/platform_map_smoke.sh
+BASE_URL=http://127.0.0.1:8080 ./scripts/license_map_parity.sh
+BASE_URL=http://127.0.0.1:8080 ./scripts/license_bundle_parity.sh
+
 # 4) Platform health (includes oil_live_intel probe from backend)
-curl -sf http://localhost:8000/api/health | jq '.oil_live_intel, .maritime_worker'
+curl -sf http://localhost:8000/api/health | jq '.oil_live_intel, .maritime_worker'  # maritime_worker = Go oil-live-intel-worker health (not legacy Python container)
 
 # 5) One-time graph population (replace token; takes several minutes)
 curl -sf -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
@@ -462,6 +467,30 @@ curl -sf http://localhost:8095/api/oil-live/health | jq '.sync'
 ```
 
 Both should return a `sync` object with `terminal_count`, `cargo_record_count`, etc.
+
+### License map (Go read path + staging)
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/platform_map_smoke.sh` | Caddy routing: sync-status, Go `licenses/map` + point mode, maritime, petroleum OSM, search health |
+| `scripts/license_map_parity.sh` | Viewport bbox: compare row counts on Go vs Python `/licenses` |
+| `scripts/license_bundle_parity.sh` | No-bbox bundle (Historic sidebar): compare Go vs Python per `sector` |
+
+```bash
+BASE_URL=http://127.0.0.1:8080 ./scripts/platform_map_smoke.sh
+BASE_URL=http://127.0.0.1:8080 ./scripts/license_map_parity.sh
+BASE_URL=http://127.0.0.1:8080 ./scripts/license_bundle_parity.sh
+```
+
+**Shadow metrics (staging only):** set `VITE_LICENSE_MAP_SHADOW_METRICS=1` on the frontend build (or use Vite dev — enabled automatically in `import.meta.env.DEV`). Each license fetch records Go vs Python path, latency, and whether the client fell back; entries appear in the browser console as `[license-map-shadow]` and in-memory via `getLicenseMapShadowMetrics()` (ring buffer, last 50). Remove Python `/licenses` from the fetch chain only after parity scripts stay green for ~14 days **and** the shadow ring shows no `usedFallback: true` entries in production-like traffic. See `mining-viz/src/lib/api.ts` and [PYTHON_GO_MIGRATION_MAD-42.md](./PYTHON_GO_MIGRATION_MAD-42.md).
+
+| Env | Default | Notes |
+|-----|---------|-------|
+| `VITE_LICENSE_MAP_GO` | on | Low-zoom clusters + Go point reads; `0` forces Python-only |
+| `VITE_LICENSE_MAP_SHADOW_METRICS` | off (prod) | `1` + rebuild frontend to log fallback parity on staging |
+| `VITE_LICENSE_MAP_GO_STRICT` | off | `1` removes Python `/licenses` fallback (use only after shadow + parity green ~14d) |
+
+**CI:** PRs run `.github/workflows/platform-health.yml` — Go tests, `mining-viz` build, manifest ingest tests, and `scripts/platform_map_smoke.sh` + `license_bundle_parity.sh` with `SMOKE_SKIP_IF_DOWN=1` when no compose stack is present.
 
 ---
 

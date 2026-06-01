@@ -6,6 +6,7 @@ import {
   type OilLiveSearchHit,
   type OilLiveSearchResponse,
 } from '../../api/oilLiveApi';
+import CustomsOpenTierBadge from './CustomsOpenTierBadge';
 
 /**
  * Safe, no-throw translation helper. The hook-based useI18n() throws when
@@ -331,8 +332,15 @@ export default function LiveDataSearchBar({
                       >
                         <Icon className="mt-0.5 w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className="min-w-0 flex-1">
-                          <span className="block font-semibold text-slate-900 dark:text-white truncate">
-                            {hitTitle(hit)}
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-slate-900 dark:text-white truncate">
+                              {hitTitle(hit)}
+                            </span>
+                            {hit.type === 'manifest' && (
+                              <CustomsOpenTierBadge
+                                tier={String(hit.source?.bol_tier ?? 'customs_open')}
+                              />
+                            )}
                           </span>
                           {hitSubtitle(hit) && (
                             <span className="block text-[10px] text-slate-500 truncate">

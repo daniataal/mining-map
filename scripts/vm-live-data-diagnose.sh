@@ -58,7 +58,7 @@ container_env() {
 
 section "Compose services ($COMPOSE_FILE)"
 if "${COMPOSE[@]}" ps --status running 2>/dev/null | grep -qE 'backend|oil-live-intel'; then
-  "${COMPOSE[@]}" ps backend oil-live-intel oil-live-graph-sync-worker maritime-worker caddy frontend 2>/dev/null || \
+  "${COMPOSE[@]}" ps backend oil-live-intel oil-live-intel-worker oil-live-graph-sync-worker caddy frontend 2>/dev/null || \
     "${COMPOSE[@]}" ps 2>/dev/null || true
 else
   warn "docker compose ps failed or no running services — is the stack up?"
