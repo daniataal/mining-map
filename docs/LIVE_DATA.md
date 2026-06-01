@@ -490,6 +490,8 @@ BASE_URL=http://127.0.0.1:8080 ./scripts/license_bundle_parity.sh
 | `VITE_LICENSE_MAP_SHADOW_METRICS` | off (prod) | `1` + rebuild frontend to log fallback parity on staging |
 | `VITE_LICENSE_MAP_GO_STRICT` | off | `1` removes Python `/licenses` fallback (use only after shadow + parity green ~14d) |
 
+Full cutover checklist: [LICENSE_MAP_CUTOVER_GATE.md](./LICENSE_MAP_CUTOVER_GATE.md).
+
 **CI:** PRs run `.github/workflows/platform-health.yml` — Go tests, `mining-viz` build, manifest ingest tests, and `scripts/platform_map_smoke.sh` + `license_bundle_parity.sh` with `SMOKE_SKIP_IF_DOWN=1` when no compose stack is present.
 
 ---

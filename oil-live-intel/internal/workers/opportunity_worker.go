@@ -42,6 +42,11 @@ func runOpportunityOnce(ctx context.Context, pool *pgxpool.Pool, cfg config.Conf
 		log.Info().Int("created", n).Msg("opportunities scanned")
 		runAlertOnce(ctx, pool, cfg, log)
 	}
+	if u, err := opportunity.BatchRescoreOpenOpportunities(ctx, pool); err != nil {
+		log.Warn().Err(err).Msg("opportunity batch rescore failed")
+	} else if u > 0 {
+		log.Info().Int("updated", u).Msg("opportunities rescored")
+	}
 }
 
 func runAlertOnce(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log zerolog.Logger) {

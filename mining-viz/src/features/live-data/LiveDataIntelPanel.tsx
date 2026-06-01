@@ -51,6 +51,8 @@ import {
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
 import TradeManifestUploadPanel from './TradeManifestUploadPanel';
+import CustomsOpenTierBadge from './CustomsOpenTierBadge';
+import LiveDataCrisisDeskPanel from './LiveDataCrisisDeskPanel';
 import LiveDataSearchBar, { type LiveDataSearchHitClick } from './LiveDataSearchBar';
 import { dedupeOpportunities } from './dedupeOpportunities';
 import { downloadCsv } from '../../lib/csvExport';
@@ -179,7 +181,7 @@ export type LiveDataIntelPanelProps = {
    * above (cargo → onOpenCargoRecord, company → onOpenCompanyDossier).
    */
   onOpenLiveEntity?: (entity: {
-    entityKind: 'cargo' | 'company' | 'terminal' | 'vessel';
+    entityKind: 'cargo' | 'company' | 'terminal' | 'vessel' | 'manifest';
     entityId: string;
     title?: string;
     subtitle?: string;
@@ -488,6 +490,12 @@ export default function LiveDataIntelPanel({
     },
   ] as const;
 
+  const customsOpenManifestCount = useMemo(() => {
+    const tiers = syncStatus?.manifest_by_tier ?? [];
+    const row = tiers.find((t) => t.bol_tier?.trim().toLowerCase() === 'customs_open');
+    return row?.count ?? 0;
+  }, [syncStatus?.manifest_by_tier]);
+
   const globalCoverageBanner = useMemo(() => {
     if (!syncStatus || syncStatusUnreachable) return null;
     const tiers = (syncStatus.mcr_by_tier ?? [])
@@ -791,12 +799,14 @@ export default function LiveDataIntelPanel({
         return;
       }
       if (hit.type === 'manifest') {
-        if (hit.source_record_url) {
-          window.open(hit.source_record_url, '_blank', 'noopener,noreferrer');
+        if (!onOpenLiveEntity) {
+          if (hit.source_record_url) {
+            window.open(hit.source_record_url, '_blank', 'noopener,noreferrer');
+          }
+          toast.info(
+            `${hit.title}${hit.bol_tier ? ` (${hit.bol_tier})` : ''} — ${t('אמת במקור', 'Verify at source')}`,
+          );
         }
-        toast.info(
-          `${hit.title}${hit.bol_tier ? ` (${hit.bol_tier})` : ''} — ${t('אמת במקור', 'Verify at source')}`,
-        );
         return;
       }
       // Terminal / vessel without a parent handler: surface a tip so the
@@ -845,7 +855,7 @@ export default function LiveDataIntelPanel({
         <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
           {t(activeLensCopy.hintHe, activeLensCopy.hintEn)}
         </p>
-        <div className="mt-3 grid grid-cols-3 gap-1.5" role="tablist" aria-label={t('מצב עבודה', 'Work mode')}>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-1.5" role="tablist" aria-label={t('מצב עבודה', 'Work mode')}>
           {LIVE_DATA_LENS_ORDER.map((lens) => {
             const meta = LIVE_DATA_LENS_COPY[lens];
             const active = liveDataLens === lens;
@@ -867,6 +877,9 @@ export default function LiveDataIntelPanel({
             );
           })}
         </div>
+        {liveDataLens === 'crisis' && (
+          <LiveDataCrisisDeskPanel onOpenOpportunity={onOpenOpportunity} />
+        )}
         {liveDataHelpOpen && (
           <div className="mt-2 rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-sm leading-relaxed text-slate-800 dark:text-slate-200">
             <p className={`${LABEL} text-sky-800 dark:text-sky-200 mb-1.5`}>
@@ -987,12 +1000,46 @@ export default function LiveDataIntelPanel({
                 <p className="text-xl font-black tabular-nums leading-none text-cyan-950 dark:text-cyan-50">
                   {value}
                 </p>
+                {key === 'manifests' && !syncStatusUnreachable && !syncStatusPending && (
+                  <div className="mt-1 flex flex-col items-center gap-1">
+                    <CustomsOpenTierBadge tier="customs_open" className="text-[8px]" />
+                    <p className="text-[9px] font-semibold text-cyan-800 dark:text-cyan-200 tabular-nums">
+                      {t('מכס פתוח', 'customs_open')}: {customsOpenManifestCount}
+                    </p>
+                  </div>
+                )}
                 <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
                   {label}
                 </p>
               </div>
             ))}
           </div>
+          {(syncStatus?.trade_manifest_row_count ?? 0) > 0 && (
+            <p className="mt-2 text-[10px] leading-relaxed text-cyan-900/85 dark:text-cyan-100/85">
+              {t(
+                'מניפסטים פתוחים (UK HMRC ודומה) — לא ImportYeti / BOL בתשלום. אמתו tier ו-source_record_url.',
+                'Open manifests (UK HMRC-style) — not paid ImportYeti/BOL. Verify tier and source_record_url.',
+              )}
+            </p>
+          )}
+          {(syncStatus?.watch_zone_observations_24h?.length ?? 0) > 0 && (
+            <div className="mt-2 space-y-1">
+              <p className="text-[9px] font-black uppercase text-cyan-800 dark:text-cyan-200">
+                {t('כיסוי AIS לפי אזור (24ש)', 'AIS by watch zone (24h)')}
+              </p>
+              <ul className="max-h-28 overflow-y-auto text-[9px] text-cyan-900/90 dark:text-cyan-100/90 space-y-0.5">
+                {syncStatus!.watch_zone_observations_24h!.map((z) => (
+                  <li key={z.zone_id} className="flex justify-between gap-2">
+                    <span className="truncate">{z.name}</span>
+                    <span className="shrink-0 tabular-nums">
+                      {z.observation_count}
+                      {z.has_gap ? ` · ${t('פער', 'gap')}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {(lastGraphSyncLabel || lastCargoSyncLabel) && (
             <p className="mt-2 text-xs leading-relaxed text-cyan-900/90 dark:text-cyan-100/90">
               {lastGraphSyncLabel && (

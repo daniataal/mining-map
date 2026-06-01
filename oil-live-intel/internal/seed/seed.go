@@ -196,7 +196,7 @@ func applyDemoSeeds(ctx context.Context, pool *pgxpool.Pool, terminalIDs map[str
 		return fmt.Errorf("insert demo opportunity: %w", err)
 	}
 
-	return nil
+	return EnsureHormuzCrisisDemoMCR(ctx, pool)
 }
 
 func defaultProfitChecklist() []string {

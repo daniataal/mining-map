@@ -36,9 +36,16 @@ import {
 import { buildRoutePlannerHintsFromCargo } from './liveDataRoutePrefill';
 import TradingWorkflowPanel from './TradingWorkflowPanel';
 import VesselDrawerPanel from './VesselDrawerPanel';
+import TradeManifestDrawerPanel from './TradeManifestDrawerPanel';
 import { tradingWorkflowContextFromEntity } from './tradingWorkflowState';
 
-export type OilLiveEntityKind = 'opportunity' | 'terminal' | 'vessel' | 'company' | 'cargo';
+export type OilLiveEntityKind =
+  | 'opportunity'
+  | 'terminal'
+  | 'vessel'
+  | 'company'
+  | 'cargo'
+  | 'manifest';
 
 export type OilLiveDrawerTab = 'deal_pack' | 'overview' | 'mcr' | 'imports_exports' | 'workflow';
 
@@ -103,6 +110,7 @@ export default function OilLiveEntityDrawer({
   const resolvedOppId = opportunityId ?? (entityKind === 'opportunity' ? entityId : undefined);
   const showImportsExportsTab = entityKind === 'company' || entityKind === 'terminal';
   const isVesselDrawer = entityKind === 'vessel';
+  const isManifestDrawer = entityKind === 'manifest';
   const defaultTab: DrawerTab = useMemo(
     () =>
       entityKind === 'cargo'
@@ -554,6 +562,8 @@ export default function OilLiveEntityDrawer({
             onOpenCargo={onOpenCargo}
             onOpenCompanyDossier={onOpenCompanyDossier}
           />
+        ) : isManifestDrawer ? (
+          <TradeManifestDrawerPanel manifestId={entityId} title={title} />
         ) : (
           <div className="space-y-3 text-[11px] text-slate-500">
             <p>

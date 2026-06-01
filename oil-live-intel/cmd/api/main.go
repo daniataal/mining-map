@@ -37,6 +37,9 @@ func main() {
 			log.Warn().Err(err).Msg("seed failed")
 		}
 	}
+	if err := seed.EnsureHormuzCrisisDemoMCR(ctx, pool); err != nil {
+		log.Warn().Err(err).Msg("hormuz crisis demo MCR seed failed")
+	}
 
 	// Elasticsearch is optional — the search endpoint degrades to
 	// {"error":"search_unavailable"} (HTTP 503) when the client cannot be

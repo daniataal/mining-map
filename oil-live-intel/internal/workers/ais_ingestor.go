@@ -57,8 +57,18 @@ func runAISCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 	if err != nil {
 		return err
 	}
-	boxes := ais.BuildTerminalBoxes(lats, lons, terminalBufferDeg)
-	log.Info().Int("terminals", index.Count()).Int("boxes", len(boxes)).Msg("ais ingestor subscribing")
+	terminalBoxes := ais.BuildTerminalBoxes(lats, lons, terminalBufferDeg)
+	watchBoxes, werr := ais.LoadWatchZoneBoxes(ctx, pool)
+	if werr != nil {
+		log.Warn().Err(werr).Msg("maritime_watch_zones load failed; terminal boxes only")
+		watchBoxes = nil
+	}
+	boxes := ais.MergeBoundingBoxes(watchBoxes, terminalBoxes)
+	log.Info().
+		Int("terminals", index.Count()).
+		Int("watch_zone_boxes", len(watchBoxes)).
+		Int("subscription_boxes", len(boxes)).
+		Msg("ais ingestor subscribing (watch zones prioritized)")
 
 	tracker := portcall.NewTracker(pool, index)
 	sub := ais.Subscription{APIKey: cfg.AISStreamAPIKey, BoundingBoxes: boxes}

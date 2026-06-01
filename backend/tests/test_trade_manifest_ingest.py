@@ -12,6 +12,7 @@ import pytest
 from backend.services.trade_manifest_ingest import (
     UK_SYNC_ENABLED,
     _ingest_single_csv,
+    sync_brazil_open_trade_rows,
     sync_uk_open_trade_rows,
 )
 
@@ -51,3 +52,22 @@ def test_ingest_csv_dir_empty_when_missing(mock_conn):
     from backend.services.trade_manifest_ingest import _ingest_manifest_csv_dir
 
     assert _ingest_manifest_csv_dir(conn, "/nonexistent/path/xyz", data_source="uk_hmrc_open", tier="customs_open") == 0
+
+
+def test_brazil_sync_disabled(monkeypatch, mock_conn):
+    conn, _ = mock_conn
+    monkeypatch.setenv("BRAZIL_TRADE_MANIFEST_SYNC_ENABLED", "0")
+    out = sync_brazil_open_trade_rows(conn)
+    assert out["status"] == "skipped"
+
+
+def test_brazil_sample_csv_customs_open(mock_conn):
+    conn, cur = mock_conn
+    sample = (
+        Path(__file__).resolve().parents[2] / "data" / "brazil_trade_manifests" / "sample_open_trade.csv"
+    )
+    if not sample.is_file():
+        pytest.skip("brazil sample csv missing")
+    n = _ingest_single_csv(conn, sample, data_source="brazil_comex_open", tier="customs_open")
+    assert n >= 1
+    assert cur.execute.called

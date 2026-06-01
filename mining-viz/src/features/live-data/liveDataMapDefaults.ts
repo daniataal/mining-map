@@ -1,7 +1,7 @@
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
 import type { VesselFilters } from '../../lib/vessels/types';
 
-export type LiveDataLensMode = 'deal' | 'infrastructure' | 'raw';
+export type LiveDataLensMode = 'deal' | 'infrastructure' | 'raw' | 'crisis';
 
 /** Default Live Data map view — Gulf / Middle East oil hub corridor. */
 export const LIVE_DATA_HUB_BBOX = {
@@ -60,6 +60,14 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     tradeFlows: true,
     coverage: true,
   },
+  crisis: {
+    terminals: true,
+    vessels: true,
+    corridors: true,
+    opportunities: true,
+    tradeFlows: true,
+    coverage: true,
+  },
 };
 
 /** Deal Lens default: execution leads with only connector terminals/vessels. */
@@ -94,9 +102,28 @@ export const LIVE_DATA_LENS_COPY: Record<
     hintEn: 'AIS, MCR, macro corridors, coverage, and diagnostics.',
     hintHe: 'AIS, MCR, מסדרונות מאקרו, כיסוי ודיאגנוסטיקה.',
   },
+  crisis: {
+    labelEn: 'Crisis desk',
+    labelHe: 'שולחן משבר',
+    hintEn: 'Hormuz-style scenario digest, coverage honesty, ranked plays.',
+    hintHe: 'תרחיש הורמוז, כנות כיסוי AIS, הצעות מדורגות.',
+  },
 };
 
-export const LIVE_DATA_LENS_ORDER: LiveDataLensMode[] = ['deal', 'infrastructure', 'raw'];
+export const LIVE_DATA_LENS_ORDER: LiveDataLensMode[] = [
+  'deal',
+  'crisis',
+  'infrastructure',
+  'raw',
+];
+
+/** Default bbox when Crisis desk lens is selected (Hormuz disruption v1). */
+export const CRISIS_HORMUZ_BBOX = {
+  west: 48,
+  south: 12,
+  east: 62,
+  north: 31,
+} as const;
 
 export function layersForLiveDataLens(mode: LiveDataLensMode): OilLiveLayerVisibility {
   return { ...LIVE_DATA_LENS_LAYERS[mode] };

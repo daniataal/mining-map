@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +41,7 @@ type syncStatusSummary struct {
 	McrCorridorCompanyPairCount   int            `json:"mcr_corridor_company_pair_count"`
 	TopCorridors                  []TopCorridor  `json:"top_corridors"`
 	McrByTier                     []McrTierCount         `json:"mcr_by_tier"`
+	ManifestByTier                []McrTierCount         `json:"manifest_by_tier"`
 	OilTradeFlowsBySource         []TradeFlowSourceCount `json:"oil_trade_flows_by_source"`
 	OilTradeFlowCount             int                    `json:"oil_trade_flow_count"`
 	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
@@ -64,6 +66,7 @@ type syncStatusSummary struct {
 	ProductionCargoRecordCount    int            `json:"production_cargo_record_count"`
 	LastVesselObservationAt       any                    `json:"last_vessel_observation_at"`
 	GraphSyncSteps                []GraphSyncStepOutcome `json:"graph_sync_steps,omitempty"`
+	WatchZoneObservations24h      []WatchZoneObservation24h `json:"watch_zone_observations_24h,omitempty"`
 	Disclaimer                    string                 `json:"disclaimer"`
 }
 
@@ -161,6 +164,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 
 	topCorridors := queryTopCorridors(ctx, pool)
 	mcrByTier := queryMcrByTier(ctx, pool)
+	manifestByTier := queryManifestByTier(ctx, pool)
 	oilFlowsBySource := queryOilTradeFlowsBySource(ctx, pool)
 
 	_ = pool.QueryRow(ctx, `
@@ -188,6 +192,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	`).Scan(&lastVesselObs)
 
 	graphSteps := queryGraphSyncSteps(ctx, pool)
+	watchZoneObs := queryWatchZoneObservations24h(ctx, pool)
 
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
@@ -202,6 +207,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		McrCorridorCompanyPairCount:   mcrCorridorCompanyPairs,
 		TopCorridors:                  topCorridors,
 		McrByTier:                     mcrByTier,
+		ManifestByTier:                manifestByTier,
 		OilTradeFlowsBySource:         oilFlowsBySource,
 		OilTradeFlowCount:             oilTradeFlows,
 		EurostatTradeFlowCount:        eurostatTradeFlows,
@@ -226,6 +232,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		ProductionCargoRecordCount:    productionCargo,
 		LastVesselObservationAt:       formatTimePtr(lastVesselObs),
 		GraphSyncSteps:                graphSteps,
+		WatchZoneObservations24h:      watchZoneObs,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted; demo/seed rows reported separately.",
 	}
 }
@@ -255,13 +262,23 @@ func queryOilTradeFlowsBySource(ctx context.Context, pool *pgxpool.Pool) []Trade
 }
 
 func queryMcrByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {
+	return queryBolTierCounts(ctx, pool, "meridian_cargo_records")
+}
+
+func queryManifestByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {
+	return queryBolTierCounts(ctx, pool, "trade_manifest_rows")
+}
+
+func queryBolTierCounts(ctx context.Context, pool *pgxpool.Pool, table string) []McrTierCount {
 	out := []McrTierCount{}
-	rows, err := pool.Query(ctx, `
+	// table name is fixed internal constant — not user input.
+	sql := fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(TRIM(bol_tier), ''), 'inferred') AS tier, COUNT(*)::int
-		FROM meridian_cargo_records
+		FROM %s
 		GROUP BY 1
 		ORDER BY 2 DESC
-	`)
+	`, table)
+	rows, err := pool.Query(ctx, sql)
 	if err != nil {
 		return out
 	}

@@ -1267,6 +1267,17 @@ def _sync_uk_trade_manifests(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_brazil_trade_manifests(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.trade_manifest_ingest import sync_brazil_open_trade_rows
+    except ImportError:
+        from services.trade_manifest_ingest import sync_brazil_open_trade_rows
+    try:
+        return sync_brazil_open_trade_rows(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _run_gleif_batch(conn: Any, *, limit: int) -> dict[str, Any]:
     try:
         from backend.services.gleif_batch import enrich_companies_with_lei
@@ -1404,6 +1415,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)
         summary["steps"]["trade_manifest_uk"] = _sync_uk_trade_manifests(conn)
+        summary["steps"]["trade_manifest_brazil"] = _sync_brazil_trade_manifests(conn)
         # Phase 4c — LEI + Wikidata batch enrichment for oil_companies.
         summary["steps"]["gleif_batch"] = _run_gleif_batch(conn, limit=gleif_limit)
         summary["steps"]["wikidata_enrich"] = _run_wikidata_batch(
