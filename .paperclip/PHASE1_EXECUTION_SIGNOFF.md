@@ -1,6 +1,6 @@
 # Meridian balanced roadmap — implementation sign-off
 
-**Branch:** `new-branch-develop` (re-run gates before merge)  
+**Branch:** `new-branch-develop` — pushed to `origin` (2026-06-01, commits `cfede6a` + `da0b446`)  
 **Date:** 2026-06-01
 
 ## Shipped (master plan todos)
