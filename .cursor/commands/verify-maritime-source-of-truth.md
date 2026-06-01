@@ -1,0 +1,2 @@
+# Verify Maritime Source of Truth
+Read `AGENTS.md`. Perform non-destructive inspection only. Prove which services connect to AIS and write `oil_ais_positions`, `oil_vessels`, `oil_port_calls`, `maritime_source_health` and any Redis snapshots. Produce `cursor_agent_reports/maritime_ingestion_source_of_truth.md` ending with current connector/writer/health ownership, duplication, safe Go milestone, cutover and rollback.

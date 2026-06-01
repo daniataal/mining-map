@@ -7,8 +7,12 @@ pyjwt
 requests
 passlib
 websockets
+certifi
 mapbox-vector-tile
 redis
 searoute>=1.4.0
 reportlab>=4.0.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
 

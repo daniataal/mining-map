@@ -3,6 +3,7 @@ import {
   MaritimeContextQuery,
   useMaritimeContext,
 } from '../lib/api';
+import { normalizeMaritimeContextResponse } from '../lib/maritimeContextNormalize';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -92,21 +93,22 @@ export default function MaritimeContextPanel({
 
   if (!data) return null;
 
+  const ctx = normalizeMaritimeContextResponse(data);
   const showOwners = visibleSections.has('owners');
   const showCounterparties = visibleSections.has('counterparties');
   const showEvidence = visibleSections.has('evidence');
-  const normalizedRelationships = data.relationships || [];
+  const normalizedRelationships = ctx.relationships;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {data.source_labels.map((label) => (
+        {ctx.source_labels.map((label) => (
           <Badge key={label} className="bg-cyan-500/10 text-cyan-400 border-none text-[8px] font-black uppercase">
             {label}
           </Badge>
         ))}
         <span className="text-[9px] text-slate-500 uppercase tracking-widest ml-auto">
-          {t('עודכן', 'Updated')} {fmtSeenAt(data.data_as_of)}
+          {t('עודכן', 'Updated')} {fmtSeenAt(ctx.data_as_of)}
         </span>
       </div>
 
@@ -114,10 +116,39 @@ export default function MaritimeContextPanel({
         <Card className="bg-white/5 border-white/5 rounded-3xl p-5">
           <div className="flex items-center gap-3 mb-4">
             <IconBuilding className="w-4 h-4 text-cyan-400" />
-            <h4 className="text-[11px] font-black uppercase tracking-widest text-cyan-400">
-              {t('בעלות ורישום', 'Ownership & Registry')}
-            </h4>
+            <div>
+              <h4 className="text-[11px] font-black uppercase tracking-widest text-cyan-400">
+                {t('בעלות ורישום', 'Ownership & Registry')}
+              </h4>
+              <p className="text-[9px] text-slate-500 mt-0.5">
+                {t(
+                  'הצלבה אוטומטית: MMSI/IMO → Wikidata → קישורי חברה',
+                  'Auto cross-check: MMSI/IMO → Wikidata → company profile links',
+                )}
+              </p>
+            </div>
           </div>
+
+          {ctx.identity && (ctx.identity.owner || ctx.identity.operator) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              {ctx.identity.operator && (
+                <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4 md:col-span-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-cyan-400 mb-1">
+                    {t('מפעיל (מאומת פתוח)', 'Operator (open match)')}
+                  </p>
+                  <p className="text-sm font-bold text-slate-100">{ctx.identity.operator}</p>
+                </div>
+              )}
+              {ctx.identity.owner && (
+                <div className="rounded-2xl border border-white/5 bg-black/10 p-4 md:col-span-2">
+                  <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                    {t('בעלים', 'Owner')}
+                  </p>
+                  <p className="text-sm font-bold text-slate-100">{ctx.identity.owner}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {normalizedRelationships.length > 0 ? (
             <div className="mb-4">
@@ -141,28 +172,28 @@ export default function MaritimeContextPanel({
             </div>
           )}
 
-          {data.identity && (
+          {ctx.identity && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
               <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
                 <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Flag</p>
-                <p className="text-sm font-bold text-slate-100">{data.identity.flag || 'Unknown'}</p>
+                <p className="text-sm font-bold text-slate-100">{ctx.identity.flag || 'Unknown'}</p>
               </div>
               <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
                 <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Registry Port</p>
-                <p className="text-sm font-bold text-slate-100">{data.identity.registry_port || 'Unknown'}</p>
+                <p className="text-sm font-bold text-slate-100">{ctx.identity.registry_port || 'Unknown'}</p>
               </div>
               <div className="rounded-2xl border border-white/5 bg-black/10 p-4 md:col-span-2">
                 <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1">Match Quality</p>
                 <p className="text-sm font-bold text-slate-100">
-                  {data.identity.matched_by || 'Open match'} · {fmtConfidence(data.identity.confidence)}
+                  {ctx.identity.matched_by || 'Open match'} · {fmtConfidence(ctx.identity.confidence)}
                 </p>
               </div>
             </div>
           )}
 
-          {data.company_links.length > 0 ? (
+          {ctx.company_links.length > 0 ? (
             <div className="space-y-2">
-              {data.company_links.map((link) => (
+              {ctx.company_links.map((link) => (
                 <a
                   key={`${link.label}-${link.url}`}
                   href={link.url}
@@ -194,7 +225,20 @@ export default function MaritimeContextPanel({
           </div>
 
           <div className="space-y-3">
-            {data.nearest_ports.map((port) => (
+            {ctx.nearest_ports.length === 0 && ctx.counterparty_proxies.length === 0 ? (
+              <div className="rounded-2xl border border-white/5 bg-black/10 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">
+                  {t('אין נמלים או צדדים נגדיים', 'No ports or counterparty proxies')}
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  {t(
+                    'לא נמצאו נמלים קרובים או פרוקסי צדדים נגדיים בנתונים הפתוחים.',
+                    'No nearby ports or counterparty proxies were found in open data for this vessel.',
+                  )}
+                </p>
+              </div>
+            ) : null}
+            {ctx.nearest_ports.map((port) => (
               <div key={`${port.unlocode || port.name}-${port.lat}-${port.lng}`} className="rounded-2xl border border-white/5 bg-black/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -217,7 +261,7 @@ export default function MaritimeContextPanel({
               </div>
             ))}
 
-            {data.counterparty_proxies.map((proxy) => (
+            {ctx.counterparty_proxies.map((proxy) => (
               <div key={proxy.id} className="rounded-2xl border border-white/5 bg-black/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -244,7 +288,7 @@ export default function MaritimeContextPanel({
             <p className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-1">
               {t('מגבלת BOL', 'BOL limitation')}
             </p>
-            <p className="text-[10px] text-slate-400 leading-relaxed">{data.bol_coverage_note}</p>
+            <p className="text-[10px] text-slate-400 leading-relaxed">{ctx.bol_coverage_note}</p>
           </div>
         </Card>
       )}
@@ -258,9 +302,9 @@ export default function MaritimeContextPanel({
             </h4>
           </div>
 
-          {data.evidence.length > 0 ? (
+          {ctx.evidence.length > 0 ? (
             <div className="space-y-3">
-              {data.evidence.map((item) => (
+              {ctx.evidence.map((item) => (
                 <a
                   key={item.id}
                   href={item.url}
@@ -315,7 +359,7 @@ export default function MaritimeContextPanel({
             <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">
               {t('היקף הכיסוי', 'Coverage notes')}
             </p>
-            {data.limitations.map((item, index) => (
+            {ctx.limitations.map((item, index) => (
               <p key={`${item}-${index}`} className="text-[10px] text-slate-400 leading-relaxed">
                 {item}
               </p>

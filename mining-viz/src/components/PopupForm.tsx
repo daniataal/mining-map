@@ -1,6 +1,17 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useI18n } from '../lib/i18n';
-import { getLicenseHeroImageUrl } from '../lib/licenseHeroImage';
+import { getLicenseHeroImageUrl, isOilAndGasLicense } from '../lib/licenseHeroImage';
+import {
+  buildOilGasLicensePopupModel,
+  shouldUseOilGasLicensePopup,
+} from '../lib/oilGasLicensePopup';
+import OilGasLicensePopupSections from './popup/OilGasLicensePopupSections';
+import {
+  formatStorageOperatorLabel,
+  formatStorageOwnerLabel,
+  formatStorageSubstanceLabel,
+  STORAGE_OPERATOR_UNTAGGED,
+} from '../lib/storageTankFarmsLayer';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -35,9 +46,13 @@ function PopupForm({
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
     const isGold = commodity.includes('gold');
-    const isOilGas =
-      (item.sector || '').toLowerCase().includes('oil') ||
-      /oil|gas|petroleum|lng|lpg|crude|refiner|diesel/.test(commodity);
+    const isOilGas = isOilAndGasLicense(item.sector, item.commodity || annotation.commodity);
+    const useOilGasPopup = shouldUseOilGasLicensePopup(item);
+    const oilGasModel = useMemo(
+      () => (useOilGasPopup ? buildOilGasLicensePopupModel(item) : null),
+      [useOilGasPopup, item]
+    );
+    const isStorageTerminal = item.entityKind === 'storage_terminal';
     const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
     const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
     const entityAccent = getEntityAccent(item.entityKind);
@@ -49,7 +64,7 @@ function PopupForm({
 
     return (
         <div
-          className={`flex flex-col ${isOilGas ? 'w-[360px]' : 'w-[320px]'} bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]`}
+          className={`flex flex-col ${useOilGasPopup ? 'w-[380px]' : isOilGas ? 'w-[360px]' : 'w-[320px]'} bg-white dark:bg-slate-950 border border-black/10 dark:border-white/10 overflow-hidden text-slate-800 dark:text-slate-100 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)]`}
         >
             <div className="relative h-44 w-full overflow-hidden group">
                 <img
@@ -114,12 +129,18 @@ function PopupForm({
                             {formatEntityKind(item.entityKind)}
                           </Badge>
                         )}
-                        {item.entitySubtype && (
-                          <Badge className="text-[8px] font-bold uppercase border border-white/10 bg-white/5 text-slate-300">
-                            {item.entitySubtype.replaceAll('_', ' ')}
+                        {useOilGasPopup && oilGasModel ? (
+                          <Badge className="text-[8px] font-bold uppercase border border-orange-500/30 bg-orange-500/15 text-orange-300">
+                            {oilGasModel.badgeLabel}
                           </Badge>
+                        ) : (
+                          item.entitySubtype && (
+                            <Badge className="text-[8px] font-bold uppercase border border-white/10 bg-white/5 text-slate-300">
+                              {item.entitySubtype.replaceAll('_', ' ')}
+                            </Badge>
+                          )
                         )}
-                        {isOilGas && (
+                        {isOilGas && !useOilGasPopup && (
                           <Badge className="text-[8px] font-bold uppercase border border-orange-500/30 bg-orange-500/15 text-orange-300">
                             {t('נפט וגז', 'Oil & Gas')}
                           </Badge>
@@ -144,9 +165,30 @@ function PopupForm({
                         {locationLine || item.region || '—'}
                       </p>
                     </div>
-                    {item.operatorName && item.operatorName !== item.company && (
+                    {isStorageTerminal ? (
                       <p className="mt-1 text-[10px] text-slate-400 break-words">
-                        {t('מפעיל', 'Operator')}: {item.operatorName}
+                        {t('מפעיל', 'Operator')}:{' '}
+                        {formatStorageOperatorLabel(
+                          item.operatorName,
+                          t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                        )}
+                      </p>
+                    ) : (
+                      item.operatorName &&
+                      item.operatorName !== item.company && (
+                        <p className="mt-1 text-[10px] text-slate-400 break-words">
+                          {t('מפעיל', 'Operator')}: {item.operatorName}
+                        </p>
+                      )
+                    )}
+                    {isStorageTerminal && formatStorageOwnerLabel(item.ownerName) && (
+                      <p className="text-[10px] text-slate-400 break-words">
+                        {t('בעלים', 'Owner')}: {item.ownerName}
+                      </p>
+                    )}
+                    {isStorageTerminal && formatStorageSubstanceLabel(item) && (
+                      <p className="text-[10px] text-slate-400 break-words">
+                        {t('חומר', 'Substance')}: {formatStorageSubstanceLabel(item)}
                       </p>
                     )}
                   </div>
@@ -205,6 +247,9 @@ function PopupForm({
                   </Button>
                 )}
 
+                {useOilGasPopup && oilGasModel ? (
+                  <OilGasLicensePopupSections model={oilGasModel} />
+                ) : (
                 <div className="grid grid-cols-2 gap-px bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-lg mt-5 overflow-hidden">
                     <div className="p-3 flex flex-col items-center justify-center min-h-[50px] text-center">
                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t("סטטוס", "Status")}</span>
@@ -233,6 +278,39 @@ function PopupForm({
                          {' · '}{item.licenseType || 'ML'}
                        </span>
                     </div>
+                    {isStorageTerminal && (
+                      <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                          {t('מפעיל', 'Operator')}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">
+                          {formatStorageOperatorLabel(
+                            item.operatorName,
+                            t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {isStorageTerminal && formatStorageOwnerLabel(item.ownerName) && (
+                      <div className="p-3 border-t border-l border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                          {t('בעלים', 'Owner')}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">
+                          {item.ownerName}
+                        </span>
+                      </div>
+                    )}
+                    {isStorageTerminal && formatStorageSubstanceLabel(item) && (
+                      <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                          {t('חומר', 'Substance')}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">
+                          {formatStorageSubstanceLabel(item)}
+                        </span>
+                      </div>
+                    )}
                     {isOilGas && item.sector && (
                       <div className="p-3 border-t border-black/5 dark:border-white/5 flex flex-col items-center justify-center min-h-[50px] text-center col-span-2">
                         <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('סקטור', 'Sector')}</span>
@@ -251,6 +329,7 @@ function PopupForm({
                       </div>
                     )}
                 </div>
+                )}
 
                 <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">
                   ID: #{item.id.slice(0, 8)}
@@ -287,6 +366,8 @@ function formatSourceKindLabel(sourceKind?: string | null): string | null {
       return 'User CSV';
     case 'bundled_json':
       return 'Bundled fallback';
+    case 'curated_reference':
+      return 'Curated reference';
     default:
       return null;
   }

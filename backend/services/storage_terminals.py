@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,11 +24,25 @@ except ImportError:
     from services.maritime_intel import find_nearest_ports
 
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OVERPASS_TIMEOUT_SECONDS = 20
+STORAGE_TERMINALS_LAYER_ID = "storage_terminals"
+OVERPASS_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_TIMEOUT_SECONDS", "120"))
+OVERPASS_QUERY_TIMEOUT_SECONDS = int(os.getenv("STORAGE_OVERPASS_QUERY_TIMEOUT_SECONDS", "90"))
+OVERPASS_RETRY_ATTEMPTS = int(os.getenv("STORAGE_OVERPASS_RETRY_ATTEMPTS", "3"))
+OVERPASS_RETRY_DELAY_SECONDS = float(os.getenv("STORAGE_OVERPASS_RETRY_DELAY_SECONDS", "4"))
+STORAGE_SKIP_LIVE_OVERPASS = (os.getenv("STORAGE_SKIP_LIVE_OVERPASS") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 STORAGE_CACHE_TTL_SECONDS = 60 * 60 * 12
 MAX_NEARBY_PORT_DISTANCE_KM = 250.0
-MAX_TILE_WORKERS = 5
+MAX_TILE_WORKERS = int(os.getenv("STORAGE_OVERPASS_TILE_WORKERS", "3"))
+BULK_SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "oil_terminals_seed_bulk.json"
+DEFAULT_OVERPASS_URLS: tuple[str, ...] = (
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+)
 
 WORLD_TILES: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
     ("north_america_west", (7.0, -170.0, 72.0, -95.0)),
@@ -44,6 +59,12 @@ WORLD_TILES: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
 )
 
 KEYWORD_RE = re.compile(r"(terminal|tank\s*farm|tankfarm|depot|storage)", re.I)
+PETROLEUM_SUBSTANCE_RE = re.compile(
+    r"(oil|petroleum|diesel|gasoline|petrol|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)",
+    re.I,
+)
+MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT = 4
+MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT = 10
 
 
 def _now_iso() -> str:
@@ -126,12 +147,47 @@ def _commodity_hints_from_tags(tags: dict[str, Any]) -> list[str]:
     return hints
 
 
+def _petroleum_tag_haystack(tags: dict[str, Any]) -> str:
+    return " | ".join(
+        _clean_text(tags.get(key))
+        for key in (
+            "substance",
+            "content",
+            "product",
+            "products",
+            "storage_tank",
+            "industrial",
+            "description",
+        )
+    ).lower()
+
+
+def _has_petroleum_substance(tags: dict[str, Any]) -> bool:
+    return bool(PETROLEUM_SUBSTANCE_RE.search(_petroleum_tag_haystack(tags)))
+
+
+def _extract_operator_owner(tags: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    operator = _clean_text(tags.get("operator")) or None
+    owner = _clean_text(tags.get("owner")) or None
+    return operator, owner
+
+
+def _substance_from_tags(tags: dict[str, Any]) -> Optional[str]:
+    for key in ("substance", "content", "product", "products"):
+        value = _clean_text(tags.get(key))
+        if value:
+            return value
+    return None
+
+
 def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
     industrial = _normalize_token(tags.get("industrial"))
+    man_made = _normalize_token(tags.get("man_made"))
     name = _clean_text(tags.get("name"))
     operator = _clean_text(tags.get("operator"))
+    owner = _clean_text(tags.get("owner"))
     description = _clean_text(tags.get("description"))
-    haystack = " ".join(part for part in (name, operator, description) if part).lower()
+    haystack = " ".join(part for part in (name, operator, owner, description) if part).lower()
 
     if industrial == "petroleum terminal":
         return (
@@ -145,11 +201,48 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
             0.9,
             "Explicit OSM facility tag industrial=tank_farm.",
         )
+    if industrial == "fuel":
+        return (
+            "fuel_depot",
+            0.82,
+            "Explicit OSM fuel depot (industrial=fuel).",
+        )
+    if man_made == "storage tank":
+        if _has_petroleum_substance(tags):
+            if operator or owner or name:
+                return (
+                    "storage_tank",
+                    0.72,
+                    "Mapped petroleum storage tank with operator, owner, or site name context.",
+                )
+            return (
+                "storage_tank",
+                0.58,
+                "Mapped petroleum storage tank; may be one tank within a larger site.",
+            )
+        if KEYWORD_RE.search(haystack):
+            return (
+                "storage_tank",
+                0.62,
+                "Storage tank name/description suggests petroleum storage, but substance tags are missing.",
+            )
+    if man_made == "silo" and _has_petroleum_substance(tags):
+        return (
+            "storage_tank",
+            0.6,
+            "Oil/petroleum silo mapped in OpenStreetMap.",
+        )
     if "tank farm" in haystack or "tankfarm" in haystack:
         return (
             "tank_farm",
             0.78,
             "Facility name/description suggests a tank farm, but the terminal tag is not explicit.",
+        )
+    if "fuel depot" in haystack or "petroleum depot" in haystack:
+        return (
+            "fuel_depot",
+            0.7,
+            "Facility name/description suggests a fuel depot, but industrial=fuel is not explicit.",
         )
     if industrial in {"oil", "gas"} and KEYWORD_RE.search(haystack):
         return (
@@ -167,6 +260,10 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
 def _format_license_type(subtype: str) -> str:
     if subtype == "tank_farm":
         return "Tank Farm"
+    if subtype == "fuel_depot":
+        return "Fuel Depot"
+    if subtype == "storage_tank":
+        return "Storage Tank"
     return "Storage Terminal"
 
 
@@ -355,15 +452,49 @@ def resolve_country(lat: float, lng: float) -> tuple[str, str]:
     return "Unknown", ""
 
 
+def _overpass_urls() -> tuple[str, ...]:
+    candidates = [
+        os.getenv("STORAGE_OVERPASS_URL", "").strip(),
+        os.getenv("OVERPASS_URL", "").strip(),
+        *DEFAULT_OVERPASS_URLS,
+    ]
+    if os.getenv("OVERPASS_INCLUDE_DE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}:
+        candidates.append("https://overpass-api.de/api/interpreter")
+    return tuple(dict.fromkeys(url for url in candidates if url))
+
+
+def _db_connect():
+    import psycopg2
+
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return psycopg2.connect(database_url, connect_timeout=5)
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "5432")),
+        database=os.getenv("DB_NAME", "mining_db"),
+        user=os.getenv("DB_USER", "postgres"),
+        password=os.getenv("DB_PASSWORD", "password"),
+        connect_timeout=5,
+    )
+
+
 def build_overpass_query(bbox: tuple[float, float, float, float]) -> str:
     south, west, north, east = bbox
     bbox_text = f"{south},{west},{north},{east}"
+    petroleum_substance = "^(oil|petroleum|diesel|gasoline|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)"
     return f"""
-[out:json][timeout:45];
+[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];
 (
   nwr["industrial"="petroleum_terminal"]({bbox_text});
   nwr["industrial"="tank_farm"]({bbox_text});
+  nwr["industrial"="fuel"]({bbox_text});
   nwr["industrial"~"^(oil|gas)$"]["name"~"(terminal|tank\\s*farm|tankfarm|depot|storage)",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["substance"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["product"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["content"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="silo"]["substance"~"{petroleum_substance}",i]({bbox_text});
+  nwr["man_made"="silo"]["product"~"{petroleum_substance}",i]({bbox_text});
 );
 out center tags qt;
 """.strip()
@@ -371,17 +502,191 @@ out center tags qt;
 
 def fetch_overpass_elements(bbox: tuple[float, float, float, float]) -> list[dict[str, Any]]:
     body = urlencode({"data": build_overpass_query(bbox)}).encode("utf-8")
-    req = Request(
-        OVERPASS_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": "mining-map-storage-terminals/1.0",
-        },
-    )
-    with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
-        payload = json.load(response)
-    return payload.get("elements", []) if isinstance(payload, dict) else []
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "User-Agent": "mining-map-storage-terminals/1.0",
+    }
+    errors: list[str] = []
+    for overpass_url in _overpass_urls():
+        for attempt in range(max(1, OVERPASS_RETRY_ATTEMPTS)):
+            req = Request(overpass_url, data=body, headers=headers)
+            try:
+                with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
+                    payload = json.load(response)
+                return payload.get("elements", []) if isinstance(payload, dict) else []
+            except Exception as exc:
+                errors.append(f"{overpass_url}#{attempt + 1}: {exc}")
+                if attempt + 1 < OVERPASS_RETRY_ATTEMPTS:
+                    time.sleep(OVERPASS_RETRY_DELAY_SECONDS * (attempt + 1))
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return []
+
+
+def _element_from_db_row(
+    osm_type: str,
+    osm_id: int,
+    tags: dict[str, Any],
+    geom_json: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    geom_type = geom_json.get("type")
+    coords = geom_json.get("coordinates")
+    lat = lng = None
+    if geom_type == "Point" and isinstance(coords, list) and len(coords) >= 2:
+        lng, lat = float(coords[0]), float(coords[1])
+    if lat is None or lng is None:
+        return None
+    return {
+        "type": osm_type,
+        "id": osm_id,
+        "tags": tags,
+        "lat": lat,
+        "lon": lng,
+    }
+
+
+def _load_bulk_osm_seed_elements() -> list[dict[str, Any]]:
+    if not BULK_SEED_PATH.is_file():
+        return []
+    try:
+        payload = json.loads(BULK_SEED_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("entities") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    elements: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        osm_type = row.get("osm_type")
+        osm_id = row.get("osm_id")
+        lat = _safe_float(row.get("lat"))
+        lng = _safe_float(row.get("lng"))
+        if not osm_type or osm_id is None or lat is None or lng is None:
+            continue
+        elements.append(
+            {
+                "type": osm_type,
+                "id": int(osm_id),
+                "lat": lat,
+                "lon": lng,
+                "tags": row.get("tags") if isinstance(row.get("tags"), dict) else {},
+            }
+        )
+    return elements
+
+
+def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[str]]:
+    try:
+        from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+    except ImportError:
+        from services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+
+    conn = _db_connect()
+    try:
+        ensure_petroleum_osm_tables(conn)
+        stats = layer_feature_stats(conn, STORAGE_TERMINALS_LAYER_ID)
+        if int(stats.get("feature_count") or 0) <= 0:
+            return [], None
+        fetched_at = stats.get("last_fetched_at")
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json
+                FROM petroleum_osm_features
+                WHERE layer_id = %s
+                ORDER BY osm_id;
+                """,
+                (STORAGE_TERMINALS_LAYER_ID,),
+            )
+            rows = cur.fetchall()
+        elements: list[dict[str, Any]] = []
+        for osm_type, osm_id, tags_raw, geom_json in rows:
+            tags = tags_raw if isinstance(tags_raw, dict) else {}
+            if isinstance(tags_raw, str):
+                try:
+                    tags = json.loads(tags_raw)
+                except json.JSONDecodeError:
+                    tags = {}
+            geom = geom_json if isinstance(geom_json, dict) else json.loads(geom_json or "{}")
+            element = _element_from_db_row(str(osm_type), int(osm_id), tags, geom)
+            if element:
+                elements.append(element)
+        return elements, fetched_at if isinstance(fetched_at, str) else None
+    finally:
+        conn.close()
+
+
+def _should_load_bulk_seed(db_elements: list[dict[str, Any]], osm_entity_count: int) -> bool:
+    if osm_entity_count >= MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT and db_elements:
+        return not _db_snapshot_is_globally_complete(db_elements)
+    return osm_entity_count < MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT
+
+
+def _append_bulk_seed_entities(
+    all_entities: list[dict[str, Any]],
+    fetched_at: str,
+    data_source: str,
+    warnings: list[str],
+) -> tuple[str, int]:
+    bulk_elements = _load_bulk_osm_seed_elements()
+    if not bulk_elements:
+        return data_source, 0
+    existing_ids = {entity.get("id") for entity in all_entities}
+    bulk_added = 0
+    for element in bulk_elements:
+        normalized = normalize_storage_terminal(element, fetched_at)
+        if normalized and normalized["id"] not in existing_ids:
+            normalized["sourceId"] = "osm_bulk_seed_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (offline bulk seed)"
+            all_entities.append(normalized)
+            existing_ids.add(normalized["id"])
+            bulk_added += 1
+    if bulk_added:
+        if data_source in {"bulk_seed", "database"}:
+            data_source = "bulk_seed" if data_source == "bulk_seed" else f"{data_source}+bulk_seed"
+        else:
+            data_source = f"{data_source}+bulk_seed" if data_source != "overpass" else "bulk_seed"
+        warnings.append(
+            f"Loaded {bulk_added} storage terminals from offline OSM bulk seed fallback."
+        )
+    return data_source, bulk_added
+
+
+def _load_db_snapshot_entities(
+    db_elements: list[dict[str, Any]],
+    fetched_at: str,
+) -> list[dict[str, Any]]:
+    entities: list[dict[str, Any]] = []
+    for element in db_elements:
+        normalized = normalize_storage_terminal(element, fetched_at)
+        if normalized:
+            normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+            entities.append(normalized)
+    return entities
+    if entities:
+        return True
+    if warnings and len(warnings) >= len(WORLD_TILES):
+        return False
+    return True
+
+
+def _db_snapshot_is_globally_complete(elements: list[dict[str, Any]]) -> bool:
+    """Reject tiny regional DB snapshots that would hide live global Overpass coverage."""
+    if len(elements) < MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT:
+        return False
+    countries: set[str] = set()
+    for element in elements:
+        lat = _safe_float(element.get("lat"))
+        lng = _safe_float(element.get("lon"))
+        if lat is None or lng is None:
+            continue
+        country, _ = resolve_country(lat, lng)
+        if country != "Unknown":
+            countries.add(country)
+    return len(countries) >= MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT
 
 
 def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Optional[dict[str, Any]]:
@@ -401,11 +706,13 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
 
     display_name = _display_name(tags, subtype)
     capacity_text = _parse_capacity_text(tags)
-    operator = _clean_text(tags.get("operator")) or None
+    operator, owner = _extract_operator_owner(tags)
+    substance_text = _substance_from_tags(tags)
     commodity_hints = _commodity_hints_from_tags(tags)
 
-    if not display_name and not operator and not capacity_text:
-        return None
+    if not display_name and not operator and not owner and not capacity_text:
+        if subtype not in {"storage_tank", "fuel_depot"} or confidence < 0.55:
+            return None
 
     country, country_iso2 = resolve_country(lat, lng)
     region = _region_from_tags(tags)
@@ -427,12 +734,14 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         confidence = min(0.98, confidence + 0.01)
     if operator:
         confidence = min(0.98, confidence + 0.01)
+    if owner and not operator:
+        confidence = min(0.96, confidence + 0.005)
 
-    facility_name = display_name or "Unnamed Storage Terminal"
+    facility_name = display_name or operator or owner or "Unnamed Storage Terminal"
     evidence = [
         {
             "id": f"osm:{element.get('type')}:{element.get('id')}:facility",
-            "title": f"OSM mapped as {tags.get('industrial') or subtype}",
+            "title": f"OSM mapped as {tags.get('industrial') or tags.get('man_made') or subtype}",
             "url": _build_osm_object_url(str(element.get("type")), int(element.get("id"))),
             "source_label": "OpenStreetMap",
             "evidence_type": "osm_tag",
@@ -461,7 +770,7 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         "id": f"osm:{element.get('type')}:{element.get('id')}",
         "company": facility_name,
         "licenseType": _format_license_type(subtype),
-        "commodity": ", ".join(commodity_hints) if commodity_hints else "petroleum",
+        "commodity": ", ".join(commodity_hints) if commodity_hints else (substance_text or "petroleum"),
         "status": "Mapped open infrastructure",
         "date": None,
         "country": country,
@@ -472,13 +781,15 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         "recordOrigin": "open_data",
         "sourceId": "osm_overpass_storage_terminals",
         "sourceName": "OpenStreetMap via Overpass",
-        "sourceUrl": OVERPASS_URL,
+        "sourceUrl": _overpass_urls()[0] if _overpass_urls() else "",
         "sourceRecordUrl": _build_osm_object_url(str(element.get("type")), int(element.get("id"))),
         "sourceUpdatedAt": fetched_at,
         "lastSyncedAt": fetched_at,
         "entityKind": "storage_terminal",
         "entitySubtype": subtype,
         "operatorName": operator,
+        "ownerName": owner,
+        "substanceText": substance_text,
         "commodityHints": commodity_hints,
         "capacityText": capacity_text,
         "confidenceScore": round(confidence, 2),
@@ -511,12 +822,22 @@ def _summary_entity(entity: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def _source_bucket(entity: dict[str, Any]) -> str:
+    if entity.get("sourceKind") == "curated_reference" or str(entity.get("id", "")).startswith("curated_storage_"):
+        return "curated_reference"
+    if str(entity.get("id", "")).startswith("osm:"):
+        return "osm"
+    return "other"
+
+
 def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
     countries = {entity["country"] for entity in entities if _clean_text(entity.get("country")) and entity["country"] != "Unknown"}
     by_subtype: dict[str, int] = {}
     by_country: dict[str, int] = {}
+    by_source: dict[str, int] = {}
     high_confidence = 0
     with_operator = 0
+    with_owner = 0
     with_capacity = 0
     with_nearby_port = 0
     for entity in entities:
@@ -524,10 +845,14 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         by_subtype[subtype] = by_subtype.get(subtype, 0) + 1
         country = entity.get("country") or "Unknown"
         by_country[country] = by_country.get(country, 0) + 1
+        source_bucket = _source_bucket(entity)
+        by_source[source_bucket] = by_source.get(source_bucket, 0) + 1
         if float(entity.get("confidenceScore") or 0.0) >= 0.8:
             high_confidence += 1
         if entity.get("operatorName"):
             with_operator += 1
+        if entity.get("ownerName"):
+            with_owner += 1
         if entity.get("capacityText"):
             with_capacity += 1
         if entity.get("nearbyPort"):
@@ -541,10 +866,12 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(entities),
         "countries": len(countries),
         "with_operator": with_operator,
+        "with_owner": with_owner,
         "with_capacity": with_capacity,
         "with_nearby_port": with_nearby_port,
         "high_confidence": high_confidence,
         "by_subtype": by_subtype,
+        "by_source": by_source,
         "top_countries": top_countries,
     }
 
@@ -557,6 +884,9 @@ def _fresh_cache() -> Optional[dict[str, Any]]:
 
 
 def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
+    previous_cache = dict(_storage_cache["response"]) if _storage_cache.get("response") else None
+    previous_loaded_at = float(_storage_cache.get("loaded_at") or 0.0)
+
     if not force_refresh:
         cached = _fresh_cache()
         if cached is not None:
@@ -569,24 +899,110 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     fetched_at = _now_iso()
     warnings: list[str] = []
     all_entities: list[dict[str, Any]] = []
+    data_source = "overpass"
+    db_elements: list[dict[str, Any]] = []
+    db_fetched_at: Optional[str] = None
+    osm_entity_count = 0
 
-    with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
-        futures = {
-            executor.submit(fetch_overpass_elements, bbox): tile_name
-            for tile_name, bbox in WORLD_TILES
-        }
-        for future in as_completed(futures):
-            tile_name = futures[future]
-            try:
-                elements = future.result()
-                for element in elements:
-                    normalized = normalize_storage_terminal(element, fetched_at)
-                    if normalized:
-                        all_entities.append(normalized)
-            except Exception as exc:
-                warnings.append(f"{tile_name}: {exc}")
+    db_elements, db_fetched_at = _load_storage_terminals_from_db()
 
-    entities = _dedupe_entities(all_entities)
+    use_db_only = (
+        not force_refresh
+        and bool(db_elements)
+        and _db_snapshot_is_globally_complete(db_elements)
+    )
+
+    if use_db_only:
+        data_source = "database"
+        fetched_at = db_fetched_at or fetched_at
+        for element in db_elements:
+            normalized = normalize_storage_terminal(element, fetched_at)
+            if normalized:
+                normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+                normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+                all_entities.append(normalized)
+        osm_entity_count = len(all_entities)
+    elif STORAGE_SKIP_LIVE_OVERPASS:
+        data_source = "bulk_seed"
+        warnings.append(
+            "Live Overpass skipped (STORAGE_SKIP_LIVE_OVERPASS) — using petroleum_osm_features, bulk seed, and curated reference."
+        )
+    else:
+        with ThreadPoolExecutor(max_workers=min(MAX_TILE_WORKERS, len(WORLD_TILES))) as executor:
+            futures = {
+                executor.submit(fetch_overpass_elements, bbox): tile_name
+                for tile_name, bbox in WORLD_TILES
+            }
+            for future in as_completed(futures):
+                tile_name = futures[future]
+                try:
+                    elements = future.result()
+                    for element in elements:
+                        normalized = normalize_storage_terminal(element, fetched_at)
+                        if normalized:
+                            all_entities.append(normalized)
+                except Exception as exc:
+                    warnings.append(f"{tile_name}: {exc}")
+
+        osm_entity_count = len(
+            [entity for entity in all_entities if str(entity.get("id", "")).startswith("osm:")]
+        )
+
+        if not osm_entity_count and db_elements:
+            data_source = "database"
+            fetched_at = db_fetched_at or fetched_at
+            warnings.append(
+                "Live Overpass returned no normalized storage entities; using persisted petroleum_osm_features snapshot."
+            )
+            all_entities = _load_db_snapshot_entities(db_elements, fetched_at)
+            osm_entity_count = len(all_entities)
+        elif db_elements and not use_db_only and osm_entity_count:
+            warnings.append(
+                "Persisted petroleum_osm_features snapshot was regional/incomplete; refreshed from live Overpass world tiles."
+            )
+
+        if _should_load_bulk_seed(db_elements, osm_entity_count):
+            data_source, bulk_added = _append_bulk_seed_entities(
+                all_entities, fetched_at, data_source, warnings
+            )
+            osm_entity_count += bulk_added
+
+    if STORAGE_SKIP_LIVE_OVERPASS and _should_load_bulk_seed(db_elements, osm_entity_count):
+        if db_elements and osm_entity_count == 0:
+            data_source = "database"
+            fetched_at = db_fetched_at or fetched_at
+            all_entities.extend(_load_db_snapshot_entities(db_elements, fetched_at))
+            osm_entity_count = len(
+                [entity for entity in all_entities if str(entity.get("id", "")).startswith("osm:")]
+            )
+        if _should_load_bulk_seed(db_elements, osm_entity_count):
+            data_source, bulk_added = _append_bulk_seed_entities(
+                all_entities, fetched_at, data_source, warnings
+            )
+            osm_entity_count += bulk_added
+
+    try:
+        from backend.services.storage_terminals_seed import (
+            drop_curated_near_osm_duplicates,
+            load_curated_storage_terminals,
+        )
+    except ImportError:
+        from services.storage_terminals_seed import (  # type: ignore
+            drop_curated_near_osm_duplicates,
+            load_curated_storage_terminals,
+        )
+
+    curated_entities = load_curated_storage_terminals(fetched_at)
+    if curated_entities:
+        all_entities.extend(curated_entities)
+        if data_source == "database":
+            data_source = "database+curated"
+        elif data_source == "overpass":
+            data_source = "overpass+curated"
+        elif data_source == "bulk_seed":
+            data_source = "bulk_seed+curated"
+
+    entities = drop_curated_near_osm_duplicates(_dedupe_entities(all_entities))
     entities.sort(
         key=lambda item: (
             -(float(item.get("confidenceScore") or 0.0)),
@@ -597,28 +1013,60 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
 
     response = {
         "entities": entities,
-        "source_labels": ["OpenStreetMap", "Overpass", "UN/LOCODE"],
+        "source_labels": ["OpenStreetMap", "Overpass", "Curated reference", "UN/LOCODE"],
+        "data_source": data_source,
         "data_as_of": fetched_at,
         "coverage_note": (
-            "Global coverage is live from OpenStreetMap/Overpass, but only where mappers explicitly tag petroleum terminals, tank farms, "
-            "or clearly named oil/gas storage facilities. This is useful open infrastructure context, not an official global storage registry."
+            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of major "
+            "petroleum storage hubs (FOIZ, Ras Tanura, Jurong, US Gulf, Cushing, etc.). Includes petroleum terminals, "
+            "tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
         ),
         "limitations": [
             "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
-            "Individual man_made=storage_tank objects are intentionally not treated as standalone terminals unless the site itself is mapped as a facility.",
+            "Curated reference rows (sourceKind=curated_reference) are approximate hub centroids from public operator pages — not audited tank counts or capacities.",
+            "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
+            "Operator and owner values on OSM rows come only from OSM tags — missing tags are shown as untagged, never inferred.",
             "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
             "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
+            "If you still see only a small regional cluster (e.g. Rotterdam-only), the backend may be serving a stale in-memory cache or an old regional petroleum_osm DB snapshot — call GET /api/storage/terminals?force_refresh=true or redeploy after petroleum_osm_sync.",
         ]
         + warnings,
         "stats": _build_stats(entities),
     }
 
-    _storage_cache["loaded_at"] = time.time()
-    _storage_cache["response"] = response
+    if _should_cache_storage_response(entities, warnings):
+        _storage_cache["loaded_at"] = time.time()
+        _storage_cache["response"] = response
+    elif force_refresh and previous_cache:
+        warnings.append(
+            "Live refresh failed; serving previous in-memory storage snapshot without overwriting cache."
+        )
+        stale = dict(previous_cache)
+        stale["cached"] = True
+        stale["data_source"] = stale.get("data_source", "cache") + "+stale_refresh"
+        stale_limitations = list(stale.get("limitations") or [])
+        stale_limitations.extend(warnings)
+        stale["limitations"] = stale_limitations
+        return {
+            **stale,
+            "entities": [_summary_entity(entity) for entity in stale.get("entities", [])],
+        }
+    elif force_refresh:
+        _storage_cache["loaded_at"] = previous_loaded_at
+        _storage_cache["response"] = previous_cache
+
     return {
         **response,
         "entities": [_summary_entity(entity) for entity in entities],
     }
+
+
+def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: list[str]) -> bool:
+    if entities:
+        return True
+    if warnings and len(warnings) >= len(WORLD_TILES):
+        return False
+    return True
 
 
 def get_storage_terminal_details(terminal_id: str) -> Optional[dict[str, Any]]:

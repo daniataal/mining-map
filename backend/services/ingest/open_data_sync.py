@@ -525,6 +525,45 @@ def _colombia_anm_titulo_vigente_source() -> ArcGISOpenDataSource:
     )
 
 
+def _mexico_inecc_region(attrs: dict[str, Any]) -> str:
+    return _join_parts(attrs.get("MUNICIPIO"), attrs.get("NOM_ENT")) or "Mexico"
+
+
+def _mexico_inecc_concesiones_mineras_source() -> ArcGISOpenDataSource:
+    return ArcGISOpenDataSource(
+        source_id="mexico_inecc_concesiones_mineras",
+        source_name="Mexico INECC — Mining concessions (Atlas Minero)",
+        layer_url="https://mapas.inecc.gob.mx/ArcGIS/rest/services/Atlas_Minero_Mercurio/MapServer/22",
+        sector="mining",
+        country="Mexico",
+        external_id_fields=("TITULO", "OBJECTID"),
+        company_fields=("TITULAR",),
+        commodity_fields=("SUST1", "SUST2", "SUST3"),
+        license_type_fields=("NOMBRELOTE",),
+        status_fields=(),
+        issued_fields=(),
+        updated_fields=(),
+        region_builder=_mexico_inecc_region,
+        default_commodity="Minerals",
+        default_license_type="Concesión minera",
+        default_status="Registered",
+        order_by="OBJECTID DESC",
+        max_records=2000,
+        page_size=1000,
+        sync_contacts=False,
+        metadata={
+            "kind": "official_arcgis_registry",
+            "coverage": "americas",
+            "jurisdiction_scope": "country",
+            "jurisdiction_label": "Mexico",
+            "summary_note": (
+                "INECC Atlas Minero Mercurio MapServer layer 22 (national mining concessions); "
+                "public ArcGIS query verified 2026-05 (~25k features; sync capped at 2000/run)."
+            ),
+        },
+    )
+
+
 def _peru_ingemmet_derechos_mineros_source() -> ArcGISOpenDataSource:
     return ArcGISOpenDataSource(
         source_id="peru_ingemmet_derechos_mineros",
@@ -785,6 +824,7 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
     _norway_production_licences_current_source(),
     _finland_active_mining_areas_source(),
     _colombia_anm_titulo_vigente_source(),
+    _mexico_inecc_concesiones_mineras_source(),
     _peru_ingemmet_derechos_mineros_source(),
     _queensland_mineral_tenement_source(),
     _usgs_mrds_global_source(),
@@ -794,7 +834,11 @@ OPEN_DATA_SOURCES: tuple[ArcGISOpenDataSource, ...] = (
 try:
     from backend.services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
 except ImportError:
-    from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+    try:
+        from services.ingest.kazakhstan_arcgis_probe import optional_kazakhstan_petroleum_source
+    except ImportError:
+        def optional_kazakhstan_petroleum_source():
+            return None
 
 _kz_petroleum = optional_kazakhstan_petroleum_source()
 if _kz_petroleum is not None:
@@ -1486,7 +1530,9 @@ def fetch_arcgis_features(source: ArcGISOpenDataSource) -> list[dict[str, Any]]:
         all_features.extend(features[:batch_size])
         offset += len(features)
         if not payload.get("exceededTransferLimit"):
-            break
+            # Some MapServers omit exceededTransferLimit but still honor resultOffset.
+            if len(features) < batch_size:
+                break
         if source.request_pause_seconds > 0:
             time.sleep(source.request_pause_seconds)
     return all_features
@@ -1840,6 +1886,10 @@ def sync_open_data_sources(
                     summary["sync_runs"].append(run_entry)
             except Exception as exc:
                 summary["errors"].append(f"{source.source_id}: {exc}")
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 if run_id is not None:
                     try:
                         finish_license_sync_run(
@@ -1848,11 +1898,15 @@ def sync_open_data_sources(
                             status="error",
                             error=str(exc),
                         )
+                        conn.commit()
                         summary["sync_runs"].append(
                             {"run_id": run_id, "source_id": source.source_id, "status": "error"}
                         )
                     except Exception:
-                        pass
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
         return summary
     finally:
         if own_connection and conn is not None:
@@ -1915,6 +1969,17 @@ def _query_source_stats(conn: Any) -> dict[str, dict[str, Any]]:
 @functools.lru_cache(maxsize=1)
 def get_source_registry_index() -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
+    try:
+        from backend.services.ingest.gem_extraction_tracker_import import (
+            SOURCE_ID as GEM_TRACKER_SOURCE_ID,
+            get_source_registry_entry as gem_tracker_registry_entry,
+        )
+    except ImportError:
+        from services.ingest.gem_extraction_tracker_import import (  # type: ignore
+            SOURCE_ID as GEM_TRACKER_SOURCE_ID,
+            get_source_registry_entry as gem_tracker_registry_entry,
+        )
+    registry[GEM_TRACKER_SOURCE_ID] = gem_tracker_registry_entry()
     for source in OPEN_DATA_SOURCES:
         kind = _clean_text(source.metadata.get("kind")) or "official_arcgis_registry"
         if kind == "official_arcgis_registry":

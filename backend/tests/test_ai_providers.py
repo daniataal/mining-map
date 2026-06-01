@@ -6,11 +6,34 @@ from backend.services.ai_providers import (
 )
 
 
+def test_env_secret_accepts_github_style_aliases(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_AI_API_KEY", "gsk-from-github")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_AI_API_KEY", "sk-or-alias")
+
+    assert _env_secret("GROQ_API_KEY") == "gsk-from-github"
+    assert _env_secret("OPENROUTER_API_KEY") == "sk-or-alias"
+
+
 def test_env_secret_ignores_unresolved_template_placeholders(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "{{Secrets.GROQ_AI_API_KEY}}")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-realish")
     assert _env_secret("GROQ_API_KEY") == ""
     assert _env_secret("OPENROUTER_API_KEY") == "sk-or-realish"
+
+
+def test_get_ai_provider_status_reports_alias_as_configured(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_AI_API_KEY", "gsk-alias")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_AI_API_KEY", raising=False)
+    monkeypatch.setenv("DISABLE_POLLINATIONS_FALLBACK", "1")
+
+    status = get_ai_provider_status()
+
+    assert status["groq"] == "configured"
+    assert status["ready"] is True
 
 
 def test_get_ai_provider_status_reports_configured_and_env(monkeypatch):

@@ -1,0 +1,2 @@
+# Audit Existing Platform
+Read `AGENTS.md`. Use inspection/planning only. Inspect git state, Compose/runtime, Python backend, Go services, database/schema, providers/workers, map UI and performance risks. Produce `cursor_agent_reports/00_platform_baseline.md`, `01_architecture_audit.md`, `02_database_and_data_coverage.md`, `03_performance_risk_register.md`, and `04_prioritized_execution_plan.md`. No implementation, provider addition or destructive action.

@@ -18,6 +18,7 @@ from backend.services import legal_intel
 from backend.services.legal_intel import (
     collect_legal_events,
     fetch_courtlistener_events,
+    fetch_opensanctions_adverse_events,
     normalize_legal_events,
     serialize_legal_event,
 )
@@ -106,17 +107,54 @@ class CourtListenerAdapterTests(unittest.TestCase):
         events = fetch_courtlistener_events(company_name="ACME", api_key="")
         self.assertEqual(events, [])
 
-    def test_returns_empty_when_disabled(self):
+    def test_normalises_hits_when_key_and_http_injected(self):
         events = fetch_courtlistener_events(
             company_name="ACME",
             api_key="fake-token",
             http_get=lambda *a, **kw: SimpleNamespace(status_code=200, json=lambda: {"results": [{"caseName": "x"}]}),
         )
-        # The injected http_get returns one result with no env disable flag,
-        # so the adapter should normalise the rows.
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["case_title"], "x")
         self.assertEqual(events[0]["discovered_by"], "court_listener")
+
+
+class OpenSanctionsAdapterTests(unittest.TestCase):
+    def test_returns_empty_when_no_key(self):
+        events = fetch_opensanctions_adverse_events(company_name="ACME Corp", api_key="")
+        self.assertEqual(events, [])
+
+    def test_normalises_match_results_when_http_injected(self):
+        payload = {
+            "responses": {
+                "q": {
+                    "results": [
+                        {
+                            "id": "NK-test123",
+                            "caption": "ACME Holdings Ltd",
+                            "score": 0.88,
+                            "target": True,
+                            "first_seen": "2024-01-15",
+                            "properties": {"topics": ["sanction", "debarment"]},
+                            "datasets": ["us_ofac_sdn", "eu_fsf"],
+                        }
+                    ]
+                }
+            }
+        }
+
+        events = fetch_opensanctions_adverse_events(
+            company_name="ACME Corp",
+            country="Ghana",
+            api_key="fake-key",
+            http_post=lambda *a, **kw: SimpleNamespace(status_code=200, json=lambda: payload),
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertIn("ACME Holdings Ltd", events[0]["case_title"])
+        self.assertEqual(events[0]["role"], "regulatory_target")
+        self.assertEqual(events[0]["discovered_by"], "opensanctions")
+        self.assertEqual(events[0]["source_type"], "opensanctions")
+        self.assertIn("opensanctions.org/entities/NK-test123", events[0]["source_url"])
 
 
 class CollectLegalEventsTests(unittest.TestCase):

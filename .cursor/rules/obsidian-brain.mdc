@@ -1,0 +1,53 @@
+---
+description: Obsidian company brain + Paperclip task handoff for Meridian
+alwaysApply: true
+---
+
+# Obsidian brain + Paperclip
+
+Paperclip owns **tasks and status**. Obsidian owns **durable company knowledge**. Git owns **code**.
+
+## Vault location
+
+| Context | Path |
+|---------|------|
+| Mac (Obsidian app) | `~/ai-agent-stack/obsidian-vault` |
+| Containers (Paperclip, OpenClaw) | `/workspace/obsidian-vault` |
+| Brain index | `MADSAN_BRAIN.md` at vault root |
+
+Never store secrets, API keys, `.env` contents, SSH keys, or credentials in the vault.
+
+## Before coding (Paperclip checkout or user task)
+
+1. Read `MADSAN_BRAIN.md` for links to relevant notes.
+2. If the task names a country, company, or data source, skim:
+   - `06_Company-Dossiers/`
+   - `08_Data-Sources/`
+   - `05_Research/`
+3. Read repo `AGENTS.md` and operational docs (`docs/DATA_SOURCES.md`, `docs/LIVE_DATA.md`) for implementation work.
+4. Run `git branch --show-current` and `git status --short`.
+5. **Paperclip agent wakes:** checkout branch **`paperclip2`** only (see `.paperclip/GIT-BRANCH.md`). Human Cursor IDE sessions: stay on your current branch unless the user asks to switch.
+
+## During work
+
+- Prefer **issue documents and comments** in Paperclip for task-scoped progress (`paperclipUpsertIssueDocument`, `paperclipAddComment`).
+- Put **reusable** findings in Obsidian (research, decisions, runbooks)—not raw code diffs.
+
+## After shipping (required when closing a Paperclip issue)
+
+1. Post a Paperclip comment with: files touched, how to verify, issue id, branch name.
+2. Optional: upsert issue document key `disposition` with the same markdown.
+3. If the work changed strategy, data-source policy, or ops procedure, add or update a short note under:
+   - `12_Decisions/` — what we decided and why
+   - `10_Runbooks/` — how to repeat the operation
+   - `08_Data-Sources/` — new or changed open-data sources (link + license tier)
+
+## What does not belong in Obsidian
+
+- Full git diffs or per-commit churn
+- Unredacted PII from manifests or user uploads
+- Anything from `.env` or secret stores
+
+## Paperclip MCP
+
+When Paperclip MCP is available, use it to checkout, comment, and update issue status. Do not invent issue ids.

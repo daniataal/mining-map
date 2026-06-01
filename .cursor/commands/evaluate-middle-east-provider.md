@@ -1,0 +1,2 @@
+# Evaluate Middle East Maritime Provider
+Read `AGENTS.md`. Do research only, no integration. Evaluate sources for Gulf/Hormuz identified tanker observations and separate SAR corroboration. Require official terms, coverage evidence, fields/latency, quote/pricing evidence or state quote required, and integration into existing Go maritime/storage/health architecture. Produce `cursor_agent_reports/middle_east_provider_strategy.md`.

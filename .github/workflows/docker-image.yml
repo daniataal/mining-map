@@ -4,67 +4,107 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
   pull_request:
     branches: [ "main" ]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".paperclip/**"
 
 jobs:
-  build:
+  meta:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
       build_number: ${{ steps.version.outputs.build_number }}
       short_sha: ${{ steps.version.outputs.short_sha }}
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+      - name: Set Build Version
+        id: version
+        run: |
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+  build:
+    needs: meta
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: backend
+            context: ./backend
+            image: dannyatalla/mining-backend
+          - service: frontend
+            context: ./mining-viz
+            image: dannyatalla/mining-frontend
+          - service: oil-live-intel
+            context: ./oil-live-intel
+            image: dannyatalla/oil-live-intel
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-    - name: Set Build Version
-      id: version
-      run: |
-        echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-        echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Build and Push Backend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./backend
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          dannyatalla/mining-backend:latest
-          dannyatalla/mining-backend:v${{ github.run_number }}
-          dannyatalla/mining-backend:${{ steps.version.outputs.short_sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Build and Push Frontend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./mining-viz
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          dannyatalla/mining-frontend:latest
-          dannyatalla/mining-frontend:v${{ github.run_number }}
-          dannyatalla/mining-frontend:${{ steps.version.outputs.short_sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Build and Push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:v${{ github.run_number }}
+            ${{ matrix.image }}:${{ needs.meta.outputs.short_sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+  validate:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production compose YAML
+        run: |
+          touch backend.env
+          export VERSION_TAG=v${{ needs.meta.outputs.build_number }}
+          docker compose -f docker-compose.prod.yml config --quiet
+
+  # Deploy job — required GitHub secrets (repository Settings → Secrets):
+  #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (build job)
+  #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH to production VM
+  #   AISSTREAM_API_KEY, ADMIN_TOKEN — maritime + admin CSV import
+  #   GROQ_AI_API_KEY or GROQ_API_KEY, OPENROUTER_AI_API_KEY or OPENROUTER_API_KEY
+  #   MAPBOX_ACCESS_TOKEN or MAPBOX_TOKEN — petroleum Mapbox tiles
+  #   COMTRADE_API_KEY (optional COMTRADE_API_KEY_SECONDARY)
+  #   EIA_API_KEY, CENSUS_API_KEY, USITC_DATAWEB_API_KEY — trade / graph sync
+  #   OIL_INTEL_INTERNAL_KEY — shared auth between backend and oil-live-intel (required in prod)
+  #   SECRET_KEY — JWT/session signing for backend (required in prod)
+  #   KZ_EGOV_API_KEY, OPENSANCTIONS_API_KEY, COURTLISTENER_API_KEY — optional ingest
+  #   SYNC_ALERT_WEBHOOK_URL — optional drift alerts
+  # VM: full stack ~4–6 GB RAM. One-time host sysctl for Elasticsearch:
+  #   sudo sysctl -w vm.max_map_count=262144
   deploy:
-    needs: build
+    needs: [meta, build, validate]
     # if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/changebackend-and-makeitwork!'
     runs-on: ubuntu-latest
     steps:
@@ -104,6 +144,16 @@ jobs:
         source: ${{ steps.csv_import.outputs.csv_path }}
         target: /tmp/
 
+    - name: Upload production compose and Caddyfile to remote VM
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.REMOTE_HOST }}
+        username: ${{ secrets.REMOTE_USER }}
+        port: 22
+        key: ${{ secrets.REMOTE_SSH_KEY }}
+        source: docker-compose.prod.yml,Caddyfile
+        target: /tmp/mining-map-deploy/
+
     - name: Deploy to remote server
       uses: appleboy/ssh-action@v1.1.0
       env:
@@ -121,13 +171,22 @@ jobs:
         MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
         COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
         COMTRADE_API_KEY_SECONDARY: ${{ secrets.COMTRADE_API_KEY_SECONDARY }}
-        VERSION_TAG: v${{ needs.build.outputs.build_number }}
+        EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+        USITC_DATAWEB_API_KEY: ${{ secrets.USITC_DATAWEB_API_KEY }}
+        KZ_EGOV_API_KEY: ${{ secrets.KZ_EGOV_API_KEY }}
+        OPENSANCTIONS_API_KEY: ${{ secrets.OPENSANCTIONS_API_KEY }}
+        COURTLISTENER_API_KEY: ${{ secrets.COURTLISTENER_API_KEY }}
+        SYNC_ALERT_WEBHOOK_URL: ${{ secrets.SYNC_ALERT_WEBHOOK_URL }}
+        OIL_INTEL_INTERNAL_KEY: ${{ secrets.OIL_INTEL_INTERNAL_KEY }}
+        SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        VERSION_TAG: v${{ needs.meta.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,CENSUS_API_KEY,USITC_DATAWEB_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL,OIL_INTEL_INTERNAL_KEY,SECRET_KEY
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -140,7 +199,15 @@ jobs:
           MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
           COMTRADE_EFFECTIVE="${COMTRADE_API_KEY:-}"
 
-          # Persist runtime env for backend + workers (env_file: backend.env).
+          # Install checked-in production compose + Caddyfile (replaces inline heredoc).
+          if [ -f /tmp/mining-map-deploy/docker-compose.prod.yml ]; then
+            sudo mv /tmp/mining-map-deploy/docker-compose.prod.yml /opt/mining-map/docker-compose.prod.yml
+          fi
+          if [ -f /tmp/mining-map-deploy/Caddyfile ]; then
+            sudo mv /tmp/mining-map-deploy/Caddyfile /opt/mining-map/Caddyfile
+          fi
+
+          # Persist runtime env for backend + workers + oil-live (env_file: backend.env).
           {
             printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
             printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
@@ -153,6 +220,24 @@ jobs:
               printf 'COMTRADE_API_KEY_SECONDARY=%s\n' "$COMTRADE_API_KEY_SECONDARY"
             fi
             printf 'COMTRADE_SYNC_ENABLED=true\n'
+            printf 'EIA_API_KEY=%s\n' "${EIA_API_KEY:-}"
+            printf 'CENSUS_API_KEY=%s\n' "${CENSUS_API_KEY:-}"
+            printf 'USITC_DATAWEB_API_KEY=%s\n' "${USITC_DATAWEB_API_KEY:-}"
+            printf 'KZ_EGOV_API_KEY=%s\n' "${KZ_EGOV_API_KEY:-}"
+            printf 'OPENSANCTIONS_API_KEY=%s\n' "${OPENSANCTIONS_API_KEY:-}"
+            printf 'COURTLISTENER_API_KEY=%s\n' "${COURTLISTENER_API_KEY:-}"
+            if [ -n "${SYNC_ALERT_WEBHOOK_URL:-}" ]; then
+              printf 'SYNC_ALERT_WEBHOOK_URL=%s\n' "$SYNC_ALERT_WEBHOOK_URL"
+            fi
+            printf 'OIL_INTEL_INTERNAL_KEY=%s\n' "${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}"
+            printf 'SECRET_KEY=%s\n' "${SECRET_KEY:-}"
+            printf 'OIL_LIVE_DISABLE_DEMO_SEED=1\n'
+            printf 'OIL_INTEL_SEED_ON_STARTUP=false\n'
+            printf 'ELASTICSEARCH_URL=http://elasticsearch:9200\n'
+            printf 'MARITIME_GULF_DEMO_SEED=0\n'
+            printf 'MARITIME_COASTAL_DEMO_SEED=0\n'
+            printf 'SEC_EDGAR_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
+            printf 'GLEIF_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
           } | sudo tee backend.env >/dev/null
 
           # Move uploaded CSV (if present) into a stable, writable location.
@@ -168,216 +253,9 @@ jobs:
             fi
           fi
 
-          # Create the modern split-service docker-compose.yml
-          cat <<EOF | sudo tee docker-compose.yml
-          services:
-            backend:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-backend
-              restart: always
-              env_file:
-                - backend.env
-              ports:
-                - "8000:8000"
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - GROQ_API_KEY
-                - OPENROUTER_API_KEY
-                - AI_HTTP_TIMEOUT_SECONDS
-                - AI_HTTP_MAX_RETRIES
-                - AI_ANALYSIS_DEADLINE_SECONDS
-                - AI_ENRICHMENT_DEADLINE_SECONDS
-                - POLLINATIONS_HTTP_TIMEOUT_SECONDS
-                - POLLINATIONS_HTTP_MAX_RETRIES
-                - DISABLE_POLLINATIONS_FALLBACK
-                - COMTRADE_API_KEY
-                - COMTRADE_API_KEY_SECONDARY
-                - COMTRADE_SYNC_ENABLED=true
-                - REDIS_HOST=redis
-                - REDIS_PORT=6379
-              healthcheck:
-                test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)"]
-                interval: 15s
-                timeout: 8s
-                retries: 5
-                start_period: 180s
-              depends_on:
-                db:
-                  condition: service_healthy
-                redis:
-                  condition: service_started
-
-            maritime-worker:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-maritime-worker
-              restart: always
-              command: ["python", "maritime_worker.py"]
-              env_file:
-                - backend.env
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - MARITIME_WORKER_INTERVAL_SECONDS=60
-                - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25
-                - MARITIME_WORKER_MAX_VESSELS=15000
-                - MARITIME_WORKER_WATCH_MODE=all_regions
-                - MARITIME_WORKER_SCOPE=all_vessels
-                - MARITIME_SNAPSHOT_TTL_SECONDS=300
-                - REDIS_HOST=redis
-                - REDIS_PORT=6379
-              depends_on:
-                db:
-                  condition: service_healthy
-                redis:
-                  condition: service_started
-
-            license-sync-worker:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-license-sync-worker
-              restart: always
-              command: ["python", "license_daily_sync_worker.py"]
-              env_file:
-                - backend.env
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - LICENSE_DAILY_SYNC_INTERVAL_SECONDS=86400
-                - LICENSE_DAILY_SYNC_BACKOFF_SECONDS=600
-                - REDIS_HOST=redis
-                - REDIS_PORT=6379
-              depends_on:
-                db:
-                  condition: service_healthy
-                redis:
-                  condition: service_started
-
-            comtrade-sync-worker:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-comtrade-sync-worker
-              restart: always
-              command: ["python", "comtrade_sync_worker.py"]
-              env_file:
-                - backend.env
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - COMTRADE_API_KEY
-                - COMTRADE_API_KEY_SECONDARY
-                - COMTRADE_SYNC_ENABLED=true
-                - COMTRADE_SYNC_INTERVAL_SECONDS=86400
-                - COMTRADE_SYNC_BACKOFF_SECONDS=3600
-                - COMTRADE_SYNC_SLEEP_SECONDS=1.2
-              depends_on:
-                db:
-                  condition: service_healthy
-
-            gov-procurement-sync-worker:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-gov-procurement-sync-worker
-              restart: always
-              command: ["python", "gov_procurement_sync_worker.py"]
-              env_file:
-                - backend.env
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - GOV_PROCUREMENT_SYNC_ENABLED=true
-                - GOV_PROCUREMENT_SYNC_INTERVAL_SECONDS=604800
-                - GOV_PROCUREMENT_SYNC_BACKOFF_SECONDS=3600
-                - GOV_PROCUREMENT_SYNC_MAX_PAGES_PER_PROFILE=3
-                - GOV_PROCUREMENT_SYNC_SLEEP_SECONDS=0.25
-              depends_on:
-                db:
-                  condition: service_healthy
-
-            arcgis-probe-worker:
-              image: dannyatalla/mining-backend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-arcgis-probe-worker
-              restart: always
-              command: ["python", "arcgis_probe_sync_worker.py"]
-              env_file:
-                - backend.env
-              environment:
-                - DB_HOST=db
-                - DB_PORT=5432
-                - DB_NAME=mining_db
-                - DB_USER=postgres
-                - DB_PASSWORD=password
-                - PROBE_SYNC_ENABLED=true
-                - PROBE_SYNC_INTERVAL_SECONDS=604800
-                - PROBE_SYNC_BACKOFF_SECONDS=3600
-              depends_on:
-                db:
-                  condition: service_healthy
-
-            redis:
-              image: redis:alpine
-              platform: linux/arm64
-              container_name: mining-redis
-              restart: always
-              ports:
-                - "6379:6379"
-
-            frontend:
-              image: dannyatalla/mining-frontend:$VERSION_TAG
-              platform: linux/arm64
-              container_name: mining-frontend
-              restart: always
-              ports:
-                - "5173:5173"
-              environment:
-                - VITE_API_BASE=http://${REMOTE_HOST}:8000
-              depends_on:
-                backend:
-                  condition: service_healthy
-
-            db:
-              image: dannyatalla/mining-db:latest
-              platform: linux/arm64
-              container_name: mining-db
-              restart: always
-              environment:
-                POSTGRES_DB: mining_db
-                POSTGRES_USER: postgres
-                POSTGRES_PASSWORD: password
-              volumes:
-                - postgres_data:/var/lib/postgresql/data
-              healthcheck:
-                test: ["CMD-SHELL", "pg_isready -U postgres -d mining_db"]
-                interval: 5s
-                timeout: 5s
-                retries: 5
-
-          volumes:
-            postgres_data:
-          EOF
-
-          # Pull and Restart
-          sudo docker compose pull
-
-          # Export runtime names for compose `environment: - VAR` passthrough (sudo -E).
+          # Pull and restart full production stack (docker-compose.prod.yml from repo).
+          export VERSION_TAG="${VERSION_TAG}"
+          export VITE_API_BASE="http://${REMOTE_HOST}:8000"
           export GROQ_API_KEY="${GROQ_EFFECTIVE}"
           export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
           export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"
@@ -386,13 +264,17 @@ jobs:
           export COMTRADE_API_KEY_SECONDARY="${COMTRADE_API_KEY_SECONDARY:-}"
           export COMTRADE_SYNC_ENABLED=true
           export DISABLE_POLLINATIONS_FALLBACK=1
+          export OIL_INTEL_INTERNAL_KEY="${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}"
+          export SECRET_KEY="${SECRET_KEY:-}"
+          export EIA_API_KEY="${EIA_API_KEY:-}"
           export AI_HTTP_TIMEOUT_SECONDS="${AI_HTTP_TIMEOUT_SECONDS:-18}"
           export AI_HTTP_MAX_RETRIES="${AI_HTTP_MAX_RETRIES:-1}"
           export AI_ANALYSIS_DEADLINE_SECONDS="${AI_ANALYSIS_DEADLINE_SECONDS:-45}"
           export AI_ENRICHMENT_DEADLINE_SECONDS="${AI_ENRICHMENT_DEADLINE_SECONDS:-20}"
           export POLLINATIONS_HTTP_TIMEOUT_SECONDS="${POLLINATIONS_HTTP_TIMEOUT_SECONDS:-12}"
           export POLLINATIONS_HTTP_MAX_RETRIES="${POLLINATIONS_HTTP_MAX_RETRIES:-0}"
-          sudo -E docker compose up -d --remove-orphans
+          sudo -E docker compose -f docker-compose.prod.yml pull
+          sudo -E docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
           # Wait until /licenses returns 200
           BACKEND_READY="false"
@@ -406,7 +288,32 @@ jobs:
             sleep 2
           done
 
-          sudo docker compose exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','COMTRADE_API_KEY','COMTRADE_API_KEY_SECONDARY','COMTRADE_SYNC_ENABLED','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+          sudo docker compose -f docker-compose.prod.yml exec -T backend python -c "import os; keys=('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK','MAPBOX_ACCESS_TOKEN','AISSTREAM_API_KEY','COMTRADE_API_KEY','COMTRADE_API_KEY_SECONDARY','COMTRADE_SYNC_ENABLED','OIL_INTEL_INTERNAL_KEY','SECRET_KEY','OIL_INTEL_API_URL','ROUTE_SERVICE_URL','AI_HTTP_TIMEOUT_SECONDS','AI_HTTP_MAX_RETRIES','AI_ANALYSIS_DEADLINE_SECONDS','AI_ENRICHMENT_DEADLINE_SECONDS','POLLINATIONS_HTTP_TIMEOUT_SECONDS','POLLINATIONS_HTTP_MAX_RETRIES'); [print(f'{key}={\"SET\" if os.getenv(key) else \"MISSING\"}') for key in keys]"
+
+          if [ "$BACKEND_READY" = "true" ] && [ -n "${ADMIN_TOKEN}" ]; then
+            EXPORT_STATUS=$(curl -sS -o /opt/mining-map/data/licenses_export.csv -w "%{http_code}" \
+              -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              "http://localhost:8000/api/admin/licenses/export?format=csv")
+            echo "DB license export status: $EXPORT_STATUS"
+          fi
+
+          OIL_LIVE_READY="false"
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:8095/api/oil-live/health >/dev/null 2>&1; then
+              OIL_LIVE_READY="true"
+              break
+            fi
+            sleep 2
+          done
+          echo "oil-live-intel ready: $OIL_LIVE_READY"
+
+          if [ "$BACKEND_READY" = "true" ] && [ "$OIL_LIVE_READY" = "true" ] && [ -n "${ADMIN_TOKEN}" ]; then
+            nohup curl -sS --max-time 600 -o /tmp/oil_graph_sync_response.json -w "%{http_code}" \
+              -X POST "http://localhost:8000/api/admin/oil-live/graph-sync" \
+              -H "X-Admin-Token: ${ADMIN_TOKEN}" \
+              >/tmp/oil_graph_sync_http_code.txt 2>&1 &
+            echo "Started background graph-sync (check /tmp/oil_graph_sync_response.json and mining-oil-live-graph-sync-worker logs)"
+          fi
 
           if [ "$BACKEND_READY" = "true" ] && [ "${AUTO_IMPORT_LICENSES_CSV}" = "true" ] && [ -f /opt/mining-map/data/licenses_export.csv ] && [ -n "${ADMIN_TOKEN}" ]; then
             IMPORT_STATUS=$(curl -sS -o /tmp/licenses_import_response.json -w "%{http_code}" \

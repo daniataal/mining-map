@@ -1,0 +1,5 @@
+---
+description: Meridian mission and safe brownfield engineering constraints.
+alwaysApply: true
+---
+Read `AGENTS.md` before architecture, data, provider, maritime, map or due-diligence work. Inspect before changing. Preserve working systems. Separate evidence, inference and missing coverage. Do not expose secrets or perform destructive operations without explicit approval. Provide tests and rollback for implementations.

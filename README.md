@@ -2,6 +2,8 @@
 
 A full-stack intelligence platform for visualizing mining licenses on an interactive map.
 
+**AI agents and product direction:** see [AGENTS.md](AGENTS.md) for the Meridian commodity-trading north star (open data, Live Data, deal execution).
+
 ## ✨ New Features
 *   **Secure Authentication**: Map interactions are locked until login.
 *   **Admin Panel**: Create new users and monitor system activity.
@@ -48,28 +50,28 @@ If you see **"Database error"** or permissions issues:
 
 If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
 
-Start the AIS ingest worker (required for dense vessel maps):
+Start the Go AIS ingest worker (required for dense vessel maps):
 
 ```bash
-docker compose up -d maritime-worker
-curl -s http://localhost:8000/api/maritime/stats | python3 -m json.tool
+docker compose up -d oil-live-intel-worker
+curl -s http://localhost:8080/api/oil-live/maritime/stats | python3 -m json.tool
 ```
 
-Useful `.env` overrides for denser maps:
+Useful `.env` overrides:
 
-- `MARITIME_WORKER_WATCH_MODE=all_regions` (default) — subscribes to every curated box including West/South/East Africa
-- `MARITIME_WORKER_WATCH_MODE=global` — single world bounding box (heaviest)
-- `MARITIME_WORKER_MAX_VESSELS=15000` and `MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25`
-- `MARITIME_ALWAYS_ON_REGION_IDS=persian_gulf,arabian_gulf,malacca,east_mediterranean` — high-traffic boxes stay subscribed in rotating mode
-- `MARITIME_AIS_SEED_FILE=/path/to/vessels.json` — optional cold-start JSON (`{"vessels": [...]}`)
+- `AISSTREAM_API_KEY` — required for live AIS (same key for `oil-live-intel-worker`)
+- `OIL_INTEL_ENABLE_AIS=true` — enable AIS ingest in the Go worker (default on in compose)
+- `MARITIME_SSL_AUTO_FALLBACK=1` — retry once if AISStream TLS fails (default on)
 
 Persian Gulf empty map check:
 
 ```bash
-curl -s 'http://localhost:8000/api/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
+curl -s 'http://localhost:8080/api/oil-live/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
 ```
 
-If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
+If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild after worker code changes: `docker compose build oil-live-intel-worker && docker compose up -d --no-deps oil-live-intel-worker`.
+
+If worker logs mention `stream.aisstream.io` and `certificate has expired`, check whether upstream renewed the cert (May 2026+). The worker auto-retries once with `MARITIME_SSL_AUTO_FALLBACK=1` (default). After renewal, force-recreate `oil-live-intel-worker` to clear stale ingest status. Dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`.
 
 ### Remote PostGIS Recovery
 
@@ -91,6 +93,17 @@ python3 -c "from backend.services.ingest.open_data_sync import sync_open_data_so
 ```
 
 - **Endpoint smoke checks** (no DB): confirm ArcGIS layers return counts, e.g. Norway NPD layer ~1809 features, Finland Tukes active mining areas ~30, Queensland mineral tenement ~5309.
+
+### Storage / tank farms (Oil & Gas view)
+
+`GET /api/storage/terminals` merges two free sources:
+
+1. **OpenStreetMap via Overpass** — 11 world tiles (`WORLD_TILES` in `backend/services/storage_terminals.py`), default mirror `https://overpass.kumi.systems/api/interpreter`. Queries `industrial=petroleum_terminal|tank_farm|fuel`, petroleum-tagged `man_made=storage_tank` / `silo`, and related name patterns. Results may also be persisted by `petroleum_osm_sync_worker` into `petroleum_osm_features` (`layer_id=storage_terminals`).
+2. **Curated reference seed** — `data/storage_terminals_seed.json` (~50 major global hubs: FOIZ, Ras Tanura, Jurong, US Gulf, Cushing, etc.) with `sourceKind=curated_reference` and approximate hub-centroid coordinates from public operator pages.
+
+If the map still shows only a small regional cluster (e.g. ~15 Rotterdam tanks), likely causes: **stale in-memory cache** (12 h TTL), **regional-only DB snapshot** (rejected when &lt;10 features or &lt;4 countries — live Overpass is used instead), or **old deployed bundle**. Refresh with `GET /api/storage/terminals?force_refresh=true` and redeploy after petroleum OSM sync changes.
+
+Optional env: `STORAGE_OVERPASS_URL`, `OVERPASS_URL`, `STORAGE_OVERPASS_TIMEOUT_SECONDS` (see `.env.example`).
 
 ### Deploy-time fallback CSV auto-import
 

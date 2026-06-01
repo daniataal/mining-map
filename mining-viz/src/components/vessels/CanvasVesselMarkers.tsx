@@ -7,10 +7,13 @@ import { CanvasVesselLayer } from '../../lib/vessels/canvasVesselLayer';
 export interface CanvasVesselMarkersProps {
   mapZoom: number;
   selectedId: string | null;
+  focusMode?: boolean;
   onVesselClick: (vessel: MaritimeVessel) => void;
   formatTooltip: (vessel: MaritimeVessel) => HTMLElement | string;
   /** Filled when the Leaflet layer is constructed; parent pushes AIS rows via `setVessels` to avoid React diffing huge arrays. */
   layerApiRef?: MutableRefObject<CanvasVesselLayer | null>;
+  /** Called when the canvas layer is mounted so the parent can flush pending AIS rows. */
+  onLayerReady?: () => void;
 }
 
 function createCanvasVesselLayer(
@@ -20,6 +23,7 @@ function createCanvasVesselLayer(
   const layer = new CanvasVesselLayer({
     mapZoom: props.mapZoom,
     selectedId: props.selectedId,
+    focusMode: props.focusMode ?? false,
     onVesselClick: props.onVesselClick,
     formatTooltip: props.formatTooltip,
   });
@@ -29,6 +33,7 @@ function createCanvasVesselLayer(
       if (props.layerApiRef?.current === layer) props.layerApiRef.current = null;
     });
   }
+  queueMicrotask(() => props.onLayerReady?.());
   return createElementObject(layer, context);
 }
 
@@ -48,6 +53,9 @@ function updateCanvasVesselLayer(
   }
   if (props.selectedId !== prevProps.selectedId) {
     layer.setSelectedId(props.selectedId);
+  }
+  if ((props.focusMode ?? false) !== (prevProps.focusMode ?? false)) {
+    layer.setFocusMode(props.focusMode ?? false);
   }
 }
 

@@ -7,14 +7,19 @@ Respects Overpass rate limits via tile chunking and in-memory TTL cache.
 from __future__ import annotations
 
 import json
+import os
 import time
+
+try:
+    from backend.services.pipeline_substance import classify_pipeline_substance
+except ImportError:
+    from services.pipeline_substance import classify_pipeline_substance  # type: ignore
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_TIMEOUT_SECONDS = 45
 CACHE_TTL_SECONDS = 60 * 60 * 12
 MAX_TILE_WORKERS = 4
@@ -45,6 +50,11 @@ OSM_LAYERS: dict[str, dict[str, Any]] = {
         "geometry": "point",
         "overpass_filter": 'nwr["industrial"="refinery"]',
     },
+    "storage_terminals": {
+        "label": "Petroleum storage terminals (OSM)",
+        "geometry": "point",
+        "overpass_filter": "",
+    },
 }
 
 _layer_cache: dict[str, dict[str, Any]] = {}
@@ -58,7 +68,25 @@ def _bbox_key(bbox: tuple[float, float, float, float]) -> str:
     return ",".join(f"{v:.4f}" for v in bbox)
 
 
+def _overpass_urls() -> tuple[str, ...]:
+    candidates = [
+        os.getenv("OVERPASS_URL", "").strip(),
+        os.getenv("STORAGE_OVERPASS_URL", "").strip(),
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+    if os.getenv("OVERPASS_INCLUDE_DE_FALLBACK", "").strip().lower() in {"1", "true", "yes"}:
+        candidates.append("https://overpass-api.de/api/interpreter")
+    return tuple(dict.fromkeys(url for url in candidates if url))
+
+
 def build_overpass_query(layer_id: str, bbox: tuple[float, float, float, float]) -> str:
+    if layer_id == "storage_terminals":
+        try:
+            from backend.services.storage_terminals import build_overpass_query as build_storage_query
+        except ImportError:
+            from services.storage_terminals import build_overpass_query as build_storage_query
+        return build_storage_query(bbox)
+
     meta = OSM_LAYERS[layer_id]
     south, west, north, east = bbox
     bbox_text = f"{south},{west},{north},{east}"
@@ -73,18 +101,30 @@ out geom qt;
 
 
 def fetch_overpass_elements(layer_id: str, bbox: tuple[float, float, float, float]) -> list[dict[str, Any]]:
+    if layer_id == "storage_terminals":
+        try:
+            from backend.services.storage_terminals import fetch_overpass_elements as fetch_storage_elements
+        except ImportError:
+            from services.storage_terminals import fetch_overpass_elements as fetch_storage_elements
+        return fetch_storage_elements(bbox)
+
     body = urlencode({"data": build_overpass_query(layer_id, bbox)}).encode("utf-8")
-    req = Request(
-        OVERPASS_URL,
-        data=body,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
-        payload = json.load(response)
-    return payload.get("elements", []) if isinstance(payload, dict) else []
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "User-Agent": USER_AGENT,
+    }
+    errors: list[str] = []
+    for overpass_url in _overpass_urls():
+        req = Request(overpass_url, data=body, headers=headers)
+        try:
+            with urlopen(req, timeout=OVERPASS_TIMEOUT_SECONDS) as response:
+                payload = json.load(response)
+            return payload.get("elements", []) if isinstance(payload, dict) else []
+        except Exception as exc:
+            errors.append(f"{overpass_url}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return []
 
 
 def _element_center(element: dict[str, Any]) -> Optional[tuple[float, float]]:
@@ -134,11 +174,50 @@ def _feature_in_bbox(feature: dict[str, Any], bbox: tuple[float, float, float, f
     return True
 
 
+# OSM tags surfaced on map popups and persisted in petroleum_osm_features.
+_PIPELINE_POPUP_TAG_KEYS: tuple[str, ...] = (
+    "name",
+    "operator",
+    "owner",
+    "substance",
+    "diameter",
+    "capacity",
+    "voltage",
+    "ref",
+    "network",
+    "location",
+    "start_date",
+    "end_date",
+    "usage",
+    "type",
+    "description",
+    "wikipedia",
+    "wikidata",
+    "man_made",
+    "industrial",
+)
+
+
+def _pipeline_tags_for_properties(tags: dict[str, Any]) -> dict[str, Any]:
+    """Copy operational OSM tags (and diameter:* variants) into GeoJSON properties."""
+    out: dict[str, Any] = {}
+    for key in _PIPELINE_POPUP_TAG_KEYS:
+        value = tags.get(key)
+        if value is not None and str(value).strip():
+            out[key] = value
+    for key, value in tags.items():
+        if not key.startswith("diameter"):
+            continue
+        if value is not None and str(value).strip():
+            out[key] = value
+    return out
+
+
 def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict[str, Any]]:
     tags = element.get("tags") or {}
     etype = element.get("type")
     osm_id = element.get("id")
-    name = tags.get("name") or tags.get("operator") or f"OSM {etype} {osm_id}"
+    name = tags.get("name") or tags.get("operator") or tags.get("owner") or f"OSM {etype} {osm_id}"
 
     if layer_id == "pipelines" and etype == "way":
         geometry = element.get("geometry") or []
@@ -148,7 +227,7 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
         if len(coordinates) < 2:
             return None
         geom = {"type": "LineString", "coordinates": coordinates}
-    elif layer_id == "refineries":
+    elif layer_id in {"refineries", "storage_terminals"}:
         center = _element_center(element)
         if not center:
             return None
@@ -157,22 +236,32 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
     else:
         return None
 
+    pipeline_tags = _pipeline_tags_for_properties(tags) if layer_id == "pipelines" else {}
+    pipeline_substance = (
+        classify_pipeline_substance(tags) if layer_id == "pipelines" else None
+    )
+    properties: dict[str, Any] = {
+        "name": name,
+        "layer_id": layer_id,
+        "osm_type": etype,
+        "osm_id": osm_id,
+        "source": "openstreetmap",
+        "attribution": "© OpenStreetMap contributors (ODbL)",
+        **pipeline_tags,
+    }
+    if pipeline_substance is not None:
+        properties["pipeline_substance"] = pipeline_substance
+    if layer_id == "refineries":
+        for key in ("operator", "owner", "industrial", "description", "wikipedia", "wikidata"):
+            value = tags.get(key)
+            if value is not None and str(value).strip():
+                properties[key] = value
+
     return {
         "type": "Feature",
         "id": f"osm/{etype}/{osm_id}",
         "geometry": geom,
-        "properties": {
-            "name": name,
-            "layer_id": layer_id,
-            "osm_type": etype,
-            "osm_id": osm_id,
-            "substance": tags.get("substance"),
-            "operator": tags.get("operator"),
-            "industrial": tags.get("industrial"),
-            "man_made": tags.get("man_made"),
-            "source": "openstreetmap",
-            "attribution": "© OpenStreetMap contributors (ODbL)",
-        },
+        "properties": properties,
     }
 
 

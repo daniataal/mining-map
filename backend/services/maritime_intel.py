@@ -17,6 +17,23 @@ from urllib.request import Request, urlopen
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 AISSTREAM_PERSIAN_GULF_ISSUE_URL = "https://github.com/aisstream/aisstream/issues/17"
+
+# --- Maritime AIS provider notes (ADR) ---
+# Live AIS ingest: oil-live-intel-worker (Go) → oil_ais_positions + maritime_source_health.
+# Legacy /api/maritime/* HTTP routes proxy to Go; vessel map reads use /api/oil-live/vessels/live.
+# the UI vessel layer uses /api/oil-live/vessels/live (Go).
+#
+# Alternatives (not wired unless MARITIME_AIS_PROVIDER changes from default):
+#   aisstream     — WebSocket, global satellite+terrestrial mix; free dev key; known Hormuz gap (#17).
+#   myshiptracking — REST, terrestrial-heavy; paid tiers (trial only); good for EU/US coast POC.
+#   marinesia     — REST, free key but ~1 req/hr; per-MMSI lookups only (poor global map feed).
+#   vessel_finder — REST credits; commercial; similar to MyShipTracking.
+#   aishub        — REST/WebSocket; free if you share an AIS antenna feed (ops burden).
+#   noaa_cadastre — US historic bulk GeoJSON; not live AIS (enrichment layer only).
+#
+# Env stubs for future adapters (see .env.example): MYSHIPTRACKING_API_KEY, MARINESIA_API_KEY,
+# MARITIME_AIS_PROVIDER=aisstream|myshiptracking|marinesia (default aisstream).
+MARITIME_AIS_PROVIDER = os.getenv("MARITIME_AIS_PROVIDER", "aisstream").strip().lower() or "aisstream"
 GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 UNLOCODE_CSV_URL = "https://raw.githubusercontent.com/datasets/un-locode/main/data/code-list.csv"
 WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -40,6 +57,7 @@ MARITIME_AIS_MAX_REGIONS = max(0, int(os.getenv("MARITIME_AIS_MAX_REGIONS", "0")
 MARITIME_SNAPSHOT_TTL_SECONDS = int(os.getenv("MARITIME_SNAPSHOT_TTL_SECONDS", "300"))
 MARITIME_SNAPSHOT_RETENTION_SECONDS = int(os.getenv("MARITIME_SNAPSHOT_RETENTION_SECONDS", str(60 * 60 * 24)))
 MARITIME_WORKER_STATUS_ID = "aisstream"
+AIS_POSITIONS_FRESH_SECONDS = int(os.getenv("AIS_POSITIONS_FRESH_SECONDS", "1800"))
 MARITIME_MEMORY_CACHE_TTL_SECONDS = int(os.getenv("MARITIME_MEMORY_CACHE_TTL_SECONDS", "10"))
 MARITIME_MEMORY_CACHE_MAX_VESSELS = int(os.getenv("MARITIME_MEMORY_CACHE_MAX_VESSELS", "10000"))
 MARITIME_GULF_SUPPLEMENT_MAX_VESSELS = max(
@@ -49,6 +67,14 @@ MARITIME_GULF_SUPPLEMENT_MAX_VESSELS = max(
 MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS = max(
     AIS_MIN_CAPTURE_WINDOW_SECONDS,
     int(os.getenv("MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS", "18")),
+)
+MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS = max(
+    250,
+    int(os.getenv("MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS", "2500")),
+)
+MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS = max(
+    AIS_MIN_CAPTURE_WINDOW_SECONDS,
+    int(os.getenv("MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS", "18")),
 )
 MARITIME_ALWAYS_ON_REGION_IDS = tuple(
     item.strip()
@@ -151,6 +177,7 @@ AISSTREAM_WATCH_REGIONS = [
     },
     {"id": "red_sea_suez", "label": "Red Sea and Suez", "bbox": (12.0, 29.0, 32.5, 44.0)},
     {"id": "east_mediterranean", "label": "Mediterranean", "bbox": (30.0, -7.0, 46.0, 37.0)},
+    {"id": "gulf_of_guinea", "label": "Gulf of Guinea", "bbox": GULF_OF_GUINEA_DEMO_BBOX},
     {"id": "west_africa", "label": "West Africa offshore", "bbox": (-30.0, -20.0, 14.0, 20.0)},
     {"id": "south_africa_indian", "label": "South and East Africa coast", "bbox": (-40.0, 15.0, -5.0, 55.0)},
     {"id": "gulf_of_mexico", "label": "Gulf of Mexico and Caribbean", "bbox": (18.0, -98.0, 31.0, -79.0)},
@@ -280,6 +307,62 @@ def count_maritime_rows_in_bbox(
     return len(filter_maritime_rows_by_bbox(rows, bbox))
 
 
+def viewport_ais_coverage_gap(
+    rows: list[dict[str, Any]],
+    bbox: Optional[tuple[float, float, float, float]],
+    *,
+    worker_ok: bool,
+    min_global_rows: int = 100,
+) -> bool:
+    """True when the global feed is healthy but the requested viewport has no live AIS rows."""
+    normalized_bbox = _normalize_requested_bbox(bbox)
+    if normalized_bbox is None or not worker_ok:
+        return False
+    if count_maritime_rows_in_bbox(rows, normalized_bbox) > 0:
+        return False
+    return len(rows) >= max(1, int(min_global_rows))
+
+
+# Dedicated worker supplemental watches so sparse regions are not crowded out by the global cap.
+MARITIME_WORKER_SUPPLEMENT_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "persian_gulf",
+        "label": "Persian Gulf and Strait of Hormuz (supplemental)",
+        "bbox": PERSIAN_GULF_CORE_BBOX,
+        "max_vessels": MARITIME_GULF_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "gulf_of_guinea",
+        "label": "Gulf of Guinea (supplemental)",
+        "bbox": GULF_OF_GUINEA_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "horn_of_africa",
+        "label": "Horn of Africa / Gulf of Aden (supplemental)",
+        "bbox": HORN_OF_AFRICA_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "red_sea_south",
+        "label": "Red Sea south (supplemental)",
+        "bbox": RED_SEA_SOUTH_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+    {
+        "id": "east_africa_indian",
+        "label": "East Africa / Indian Ocean approaches (supplemental)",
+        "bbox": EAST_AFRICA_INDIAN_DEMO_BBOX,
+        "max_vessels": MARITIME_COASTAL_SUPPLEMENT_MAX_VESSELS,
+        "window_seconds": MARITIME_COASTAL_SUPPLEMENT_WINDOW_SECONDS,
+    },
+)
+
+
 def _north_sea_reference_bbox() -> tuple[float, float, float, float]:
     region = _region_by_id("north_sea")
     if region is not None:
@@ -303,6 +386,79 @@ def _sort_maritime_rows(rows: list[dict[str, Any]], vessel_scope: str) -> list[d
         key=lambda row: str(row.get("last_seen_at") or row.get("observed_at") or ""),
         reverse=True,
     )
+
+
+def _ais_worker_status_from_source_health(row: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if not row:
+        return {
+            "status": "unknown",
+            "source": "AISStream",
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "last_error": None,
+            "last_cycle_upserted": 0,
+            "geography_mode": None,
+            "region_labels": [],
+            "effective_bbox_count": None,
+        }
+    limitations = row.get("limitations") or []
+    last_error = None
+    if (row.get("status") or "") == "error" and limitations:
+        first = limitations[0]
+        last_error = str(first) if first is not None else None
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return {
+        "status": row.get("status") or "unknown",
+        "source": row.get("display_name") or row.get("source") or "AISStream",
+        "last_attempt_at": _iso_datetime(row.get("updated_at")),
+        "last_success_at": _iso_datetime(row.get("last_observation_at")),
+        "last_error": last_error,
+        "last_cycle_upserted": int(row.get("observation_count") or 0),
+        "geography_mode": metadata.get("geography_mode"),
+        "region_labels": metadata.get("region_labels") or [],
+        "effective_bbox_count": metadata.get("effective_bbox_count"),
+    }
+
+
+def _fetch_aisstream_source_health(cur) -> dict[str, Any]:
+    cur.execute(
+        """
+        SELECT source, status, display_name, source_type,
+               last_observation_at, observation_count, limitations, metadata, updated_at
+        FROM maritime_source_health
+        WHERE source = %s
+        """,
+        (MARITIME_WORKER_STATUS_ID,),
+    )
+    row = cur.fetchone()
+    return _ais_worker_status_from_source_health(dict(row) if row else None)
+
+
+def _count_distinct_oil_ais(
+    cur,
+    *,
+    hours: int = 24,
+    bbox: Optional[tuple[float, float, float, float]] = None,
+) -> int:
+    sql = """
+        SELECT COUNT(DISTINCT mmsi) AS count
+        FROM oil_ais_positions
+        WHERE ts >= NOW() - (%s * INTERVAL '1 hour')
+    """
+    args: list[Any] = [hours]
+    if bbox is not None:
+        south, west, north, east = bbox
+        sql += " AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s"
+        args.extend([south, north, west, east])
+    cur.execute(sql, args)
+    return int((cur.fetchone() or {}).get("count") or 0)
+
+
+def _oil_ais_latest_age_seconds(cur) -> Optional[float]:
+    cur.execute("SELECT MAX(ts) AS latest FROM oil_ais_positions")
+    row = cur.fetchone()
+    latest = _parse_datetime((row or {}).get("latest"))
+    return _seconds_since(latest)
 
 
 def fetch_persisted_maritime_rows(conn) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
@@ -334,18 +490,53 @@ def fetch_persisted_maritime_rows(conn) -> tuple[list[dict[str, Any]], Optional[
             (MARITIME_SNAPSHOT_RETENTION_SECONDS, max_rows),
         )
         rows = [dict(row) for row in cur.fetchall()]
-        cur.execute(
-            """
-            SELECT status, source, last_attempt_at, last_success_at, last_error, snapshot_count, metadata
-            FROM maritime_ingest_status
-            WHERE id = %s
-            """,
-            (MARITIME_WORKER_STATUS_ID,),
-        )
-        status_row = cur.fetchone()
+        worker = _fetch_aisstream_source_health(cur)
     conn.commit()
-    status = dict(status_row) if status_row else None
-    return rows, status
+    return rows, worker
+
+
+def fetch_persisted_maritime_rows_in_bbox(
+    conn,
+    bbox: tuple[float, float, float, float],
+    *,
+    max_rows: int,
+    vessel_scope: str = "all_vessels",
+) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Load vessels in viewport from Postgres (preferred path for map bbox queries)."""
+    from psycopg2.extras import RealDictCursor
+
+    ensure_maritime_tables(conn)
+    south, west, north, east = bbox
+    limit = max(1, min(int(max_rows), AIS_MAX_VESSELS * 2))
+    order_sql = _vessel_scope_order_sql(vessel_scope)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            SELECT
+                mmsi,
+                vessel_name,
+                lat,
+                lng,
+                observed_at,
+                source_label,
+                source_url,
+                ship_type_code,
+                ship_type_label,
+                payload,
+                last_seen_at
+            FROM maritime_vessel_snapshots
+            WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
+              AND lat BETWEEN %s AND %s
+              AND lng BETWEEN %s AND %s
+            ORDER BY {order_sql}
+            LIMIT %s
+            """,
+            (MARITIME_SNAPSHOT_RETENTION_SECONDS, south, north, west, east, limit),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        worker = _fetch_aisstream_source_health(cur)
+    conn.commit()
+    return rows, worker
 
 
 def _refresh_maritime_memory_cache(conn) -> None:
@@ -594,8 +785,15 @@ def _build_stored_feed_response(
                 "observed_at": _iso_datetime(row.get("observed_at") or payload.get("observed_at")),
                 "source_label": row.get("source_label") or payload.get("source_label") or "AISStream",
                 "source_url": row.get("source_url") or payload.get("source_url"),
-                "ship_type_code": row.get("ship_type_code"),
-                "ship_type_label": row.get("ship_type_label") or payload.get("ship_type_label"),
+                "ship_type_code": (
+                    row.get("ship_type_code")
+                    if row.get("ship_type_code") is not None
+                    else payload.get("ship_type_code")
+                ),
+                "ship_type_label": (
+                    row.get("ship_type_label")
+                    or payload.get("ship_type_label")
+                ),
                 "last_seen_at": _iso_datetime(row.get("last_seen_at")),
             }
         )
@@ -622,7 +820,7 @@ def _build_stored_feed_response(
         )
     if is_stale:
         limitations.append(
-            "Persisted AIS snapshots are stale or unavailable; check the maritime-worker container and AISSTREAM_API_KEY."
+            "Persisted AIS snapshots are stale or unavailable; check oil-live-intel-worker and AISSTREAM_API_KEY."
         )
     limitations.append(
         "AIS ownership/operator enrichment depends on whether the MMSI or IMO can be matched in open sources such as Wikidata."
@@ -645,6 +843,7 @@ def _build_stored_feed_response(
         "source": "AISStream persisted snapshot",
         "data_as_of": (freshness_anchor.isoformat() if freshness_anchor else _now_iso()),
         "live_positions_enabled": not is_stale,
+        "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
         "limitations": limitations,
         "scope": normalized_scope,
         "capture_window_seconds": capture_window_seconds,
@@ -826,6 +1025,7 @@ def _build_empty_ais_response(
         "source": source,
         "data_as_of": _now_iso(),
         "live_positions_enabled": live_positions_enabled,
+        "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
         "limitations": limitations,
         "scope": _normalize_vessel_scope(vessel_scope),
         "capture_window_seconds": capture_window_seconds,
@@ -1330,6 +1530,70 @@ def _parse_ais_message(raw_message: dict[str, Any]) -> tuple[Optional[str], dict
     return mmsi, accumulator
 
 
+async def _receive_aisstream_vessels(
+    *,
+    subscription: dict[str, Any],
+    normalized_window: float,
+    normalized_max_vessels: int,
+    normalized_scope: str,
+    merge_ais_stream_message: Any,
+    new_vessel_accumulator: Any,
+    ssl: Any,
+) -> dict[str, dict[str, Any]]:
+    """Open AISStream WebSocket, collect raw vessel accumulators for one capture window."""
+    import websockets  # type: ignore
+
+    vessels: dict[str, dict[str, Any]] = {}
+    async with websockets.connect(
+        AISSTREAM_URL,
+        ping_interval=None,
+        close_timeout=1,
+        ssl=ssl,
+    ) as websocket:
+        await websocket.send(json.dumps(subscription))
+        started = time.monotonic()
+        raw_target_count = min(
+            max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 80),
+            max(AIS_MAX_VESSELS * 2, 12000),
+        )
+        while time.monotonic() - started < normalized_window:
+            remaining = normalized_window - (time.monotonic() - started)
+            if remaining <= 0:
+                break
+            try:
+                message_json = await asyncio.wait_for(
+                    websocket.recv(), timeout=min(1.0, remaining)
+                )
+            except asyncio.TimeoutError:
+                continue
+
+            raw_message = json.loads(message_json)
+            metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
+            body_holder = raw_message.get("Message") or {}
+            body: dict[str, Any] = {}
+            if isinstance(body_holder, dict):
+                message_type = _clean_text(raw_message.get("MessageType"))
+                body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
+                if not isinstance(body, dict):
+                    body = {}
+            mmsi = str(
+                (metadata.get("MMSI") if isinstance(metadata, dict) else None)
+                or body.get("UserID")
+                or body.get("MMSI")
+                or ""
+            ).strip()
+            if not mmsi:
+                continue
+            current = vessels.get(mmsi)
+            if current is None:
+                current = new_vessel_accumulator(mmsi)
+                vessels[mmsi] = current
+            merge_ais_stream_message(current, raw_message)
+            if len(vessels) >= raw_target_count:
+                break
+    return vessels
+
+
 async def _collect_ais_snapshot(
     *,
     timeout_seconds: float = AIS_DEFAULT_CAPTURE_WINDOW_SECONDS,
@@ -1376,7 +1640,21 @@ async def _collect_ais_snapshot(
             plan=plan,
         )
 
-    vessels: dict[str, dict[str, Any]] = {}
+    try:
+        from backend.services.maritime_ssl import (
+            format_maritime_connection_error,
+            maritime_ssl_verify_enabled,
+            should_retry_aisstream_without_tls_verify,
+            websockets_ssl_argument,
+        )
+    except ImportError:
+        from services.maritime_ssl import (
+            format_maritime_connection_error,
+            maritime_ssl_verify_enabled,
+            should_retry_aisstream_without_tls_verify,
+            websockets_ssl_argument,
+        )
+
     subscription = {
         "APIKey": api_key,
         "BoundingBoxes": plan["boxes"],
@@ -1389,51 +1667,44 @@ async def _collect_ais_snapshot(
         ],
     }
 
-    try:
-        async with websockets.connect(AISSTREAM_URL, ping_interval=None, close_timeout=1) as websocket:
-            await websocket.send(json.dumps(subscription))
-            started = time.monotonic()
-            raw_target_count = min(
-                max(normalized_max_vessels * (4 if normalized_scope == "oil_tankers" else 2), 80),
-                max(AIS_MAX_VESSELS * 2, 12000),
+    vessels: dict[str, dict[str, Any]] = {}
+    connection_error: Exception | None = None
+    tls_fallback_used = False
+    verify_attempts: list[bool] = [True, False] if maritime_ssl_verify_enabled() else [False]
+    for attempt_idx, verify_tls in enumerate(verify_attempts):
+        if attempt_idx > 0 and not (
+            connection_error and should_retry_aisstream_without_tls_verify(connection_error)
+        ):
+            break
+        if verify_tls is False:
+            tls_fallback_used = True
+            print(
+                "[maritime] AISStream TLS certificate expired upstream; "
+                "retrying with MARITIME_SSL_VERIFY=0 (auto-fallback until AISStream renews)."
             )
-            while time.monotonic() - started < normalized_window:
-                remaining = normalized_window - (time.monotonic() - started)
-                if remaining <= 0:
-                    break
-                try:
-                    message_json = await asyncio.wait_for(websocket.recv(), timeout=min(1.0, remaining))
-                except asyncio.TimeoutError:
-                    continue
+        try:
+            vessels = await _receive_aisstream_vessels(
+                subscription=subscription,
+                normalized_window=normalized_window,
+                normalized_max_vessels=normalized_max_vessels,
+                normalized_scope=normalized_scope,
+                merge_ais_stream_message=merge_ais_stream_message,
+                new_vessel_accumulator=new_vessel_accumulator,
+                ssl=websockets_ssl_argument(AISSTREAM_URL, verify=verify_tls),
+            )
+            connection_error = None
+            break
+        except Exception as exc:
+            connection_error = exc
+            vessels = {}
 
-                raw_message = json.loads(message_json)
-                metadata = raw_message.get("MetaData") or raw_message.get("Metadata") or {}
-                body_holder = raw_message.get("Message") or {}
-                body: dict[str, Any] = {}
-                if isinstance(body_holder, dict):
-                    message_type = _clean_text(raw_message.get("MessageType"))
-                    body = body_holder.get(message_type) or next(iter(body_holder.values()), {})
-                    if not isinstance(body, dict):
-                        body = {}
-                mmsi = str(
-                    (metadata.get("MMSI") if isinstance(metadata, dict) else None)
-                    or body.get("UserID")
-                    or body.get("MMSI")
-                    or ""
-                ).strip()
-                if not mmsi:
-                    continue
-                current = vessels.get(mmsi)
-                if current is None:
-                    current = new_vessel_accumulator(mmsi)
-                    vessels[mmsi] = current
-                merge_ais_stream_message(current, raw_message)
-                if len(vessels) >= raw_target_count:
-                    break
-    except Exception as exc:
+    if connection_error is not None:
+        limitation = format_maritime_connection_error(AISSTREAM_URL, connection_error)
+        if tls_fallback_used:
+            limitation = f"{limitation} Auto-fallback to insecure TLS also failed."
         return _build_empty_ais_response(
             source="AISStream",
-            limitations=[f"AIS watch failed: {exc}"],
+            limitations=[limitation],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
             max_vessels=normalized_max_vessels,
@@ -1509,12 +1780,26 @@ async def _collect_ais_snapshot(
     }
 
 
+def _maritime_demo_seeding_allowed() -> bool:
+    """
+    Dev-only master switch for synthetic coastal/Gulf demo positions.
+
+    Production and customer-facing API paths keep this off (unset / 0). Local demos require
+    MARITIME_ALLOW_DEMO_SEED=1 plus MARITIME_*_DEMO_SEED — never exposed via Caddy/prod compose.
+    """
+    return os.getenv("MARITIME_ALLOW_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
+
+
 def _maritime_gulf_demo_env() -> bool:
+    if not _maritime_demo_seeding_allowed():
+        return False
     return os.getenv("MARITIME_GULF_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
 
 
 def _maritime_coastal_demo_env() -> bool:
-    """Unified Gulf + Africa sparse-region demo seed (server-side)."""
+    """Unified Gulf + Africa sparse-region demo seed (server-side, dev-only)."""
+    if not _maritime_demo_seeding_allowed():
+        return False
     return os.getenv("MARITIME_COASTAL_DEMO_SEED", "").strip().lower() in ("1", "true", "yes")
 
 
@@ -1563,6 +1848,13 @@ def maritime_coastal_demo_merge_decision(
     merge_gulf = False
     merge_africa = False
 
+    if not _maritime_demo_seeding_allowed():
+        return {
+            "merge_gulf": False,
+            "merge_africa_region_ids": [],
+            "reference_ingest_ok": ref_ok,
+        }
+
     if include_coastal_demo:
         merge_gulf = True
         merge_africa = True
@@ -1610,7 +1902,9 @@ def _load_africa_coastal_demo_seed_rows() -> list[dict[str, Any]]:
 
 
 def _should_merge_persian_gulf_demo_rows(*, include_gulf_demo: bool, demo_env: bool, coverage_gap: bool) -> bool:
-    """Explicit API opt-in always wins; otherwise env-gated merge only when AISStream gap heuristic fires."""
+    """Dev-only: explicit opt-in or env-gated merge when AISStream gap heuristic fires."""
+    if not _maritime_demo_seeding_allowed():
+        return False
     if include_gulf_demo:
         return True
     return bool(demo_env and coverage_gap)
@@ -1618,25 +1912,10 @@ def _should_merge_persian_gulf_demo_rows(*, include_gulf_demo: bool, demo_env: b
 
 def _load_maritime_rows_for_feed(conn=None) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]], str, Optional[float]]:
     """
-    Resolve vessel rows for API feed: Redis snapshot first, then in-process memory cache, then Postgres.
+    Resolve vessel rows for API feed: in-process memory cache, then Postgres legacy snapshots.
+    Redis snapshot writer retired — live AIS is served from /api/oil-live/vessels/live.
     Returns (rows, status, data_source, cache_age_seconds).
     """
-    try:
-        from backend.services.maritime_snapshot import get_global_maritime_snapshot
-    except ImportError:
-        from services.maritime_snapshot import get_global_maritime_snapshot
-
-    redis_payload = get_global_maritime_snapshot()
-    if redis_payload and isinstance(redis_payload.get("rows"), list) and redis_payload["rows"]:
-        updated_at = redis_payload.get("updated_at")
-        age_seconds = None
-        if updated_at:
-            parsed = _parse_datetime(updated_at)
-            if parsed is not None:
-                age_seconds = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
-        status = redis_payload.get("status") if isinstance(redis_payload.get("status"), dict) else None
-        return list(redis_payload["rows"]), status, "redis", age_seconds
-
     cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
     if (
         _maritime_memory_cache.get("rows")
@@ -1677,11 +1956,12 @@ def _build_maritime_vessel_feed_from_rows(
     normalized_window: int,
     normalized_offset: int,
     normalized_bbox: Optional[tuple[float, float, float, float]],
-    include_gulf_demo: bool,
-    include_coastal_demo: bool,
     data_source: str = "postgres",
     cache_age_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
+    include_gulf_demo = False
+    include_coastal_demo = False
+
     worker_ok = (status or {}).get("status") == "ok"
     gulf_c = count_maritime_rows_in_bbox(all_rows, PERSIAN_GULF_CORE_BBOX)
     north_c = count_maritime_rows_in_bbox(all_rows, _north_sea_reference_bbox())
@@ -1781,13 +2061,19 @@ def _build_maritime_vessel_feed_from_rows(
         response["memory_cache_age_seconds"] = round(float(cache_age_seconds), 2)
     response["snapshot_vessel_count"] = len(all_rows)
     response["aisstream_persian_gulf_coverage_gap"] = coverage_gap
+    response["viewport_live_vessel_count"] = (
+        count_maritime_rows_in_bbox(all_rows, normalized_bbox) if normalized_bbox else None
+    )
+    response["viewport_ais_coverage_gap"] = viewport_ais_coverage_gap(
+        all_rows,
+        normalized_bbox,
+        worker_ok=worker_ok,
+    )
     response["persian_gulf_demo_synthetic"] = bool(gulf_demo_rows)
     response["coastal_demo_regions"] = coastal_demo_regions
     response["coastal_demo_synthetic"] = bool(coastal_demo_synthetic)
     if gulf_demo_rows:
-        if include_coastal_demo or include_gulf_demo:
-            pg_mode = "api_opt_in"
-        elif env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
+        if env_coastal and ref_ok and gulf_c < MARITIME_COASTAL_DEMO_SPARSE_THRESHOLD:
             pg_mode = "env_coastal_sparse"
         elif env_gulf and coverage_gap:
             pg_mode = "env_coverage_gap"
@@ -1798,19 +2084,7 @@ def _build_maritime_vessel_feed_from_rows(
     response["persian_gulf_demo_mode"] = pg_mode
     response["maritime_aisstream_issue_url"] = AISSTREAM_PERSIAN_GULF_ISSUE_URL
     if demo_rows:
-        if include_coastal_demo:
-            demo_note = (
-                "Coastal sparse-feed demo: synthetic Gulf and Africa-adjacent positions merged because "
-                "include_coastal_demo=1 was requested; these are not live AIS for those boxes. Other rows may "
-                "still be real persisted AIS snapshot positions."
-            )
-        elif include_gulf_demo:
-            demo_note = (
-                "Persian Gulf Hormuz demo: synthetic positions merged because include_gulf_demo was requested; "
-                "these are not live AIS positions for the Gulf. Other vessels in this response may still be "
-                "real persisted AIS snapshot positions."
-            )
-        elif env_coastal:
+        if env_coastal:
             demo_note = (
                 "Coastal sparse-feed demo: synthetic positions merged while MARITIME_COASTAL_DEMO_SEED is enabled "
                 "for low-coverage Hormuz and/or Africa-adjacent reference boxes; this does not represent restored "
@@ -1835,8 +2109,6 @@ def get_maritime_vessel_feed(
     vessel_scope: str = "oil_tankers",
     bbox: Optional[tuple[float, float, float, float]] = None,
     offset: int = 0,
-    include_gulf_demo: bool = False,
-    include_coastal_demo: bool = False,
 ) -> dict[str, Any]:
     normalized_scope = _normalize_vessel_scope(vessel_scope)
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
@@ -1849,13 +2121,37 @@ def get_maritime_vessel_feed(
     plan = _build_ais_subscription_plan(normalized_bbox)
 
     try:
+        if normalized_bbox is not None:
+            conn = _db_connect()
+            try:
+                bbox_rows, bbox_status = fetch_persisted_maritime_rows_in_bbox(
+                    conn,
+                    normalized_bbox,
+                    max_rows=normalized_max_vessels * 2,
+                    vessel_scope=normalized_scope,
+                )
+            finally:
+                conn.close()
+            if bbox_rows:
+                return _build_maritime_vessel_feed_from_rows(
+                    all_rows=bbox_rows,
+                    status=bbox_status if isinstance(bbox_status, dict) else None,
+                    normalized_scope=normalized_scope,
+                    normalized_max_vessels=normalized_max_vessels,
+                    normalized_window=normalized_window,
+                    normalized_offset=normalized_offset,
+                    normalized_bbox=normalized_bbox,
+                    data_source="postgres_bbox",
+                    cache_age_seconds=None,
+                )
+
         all_rows, status, data_source, cache_age = _load_maritime_rows_for_feed()
     except Exception as exc:
         return _build_empty_ais_response(
             source="AISStream persisted snapshot (database unavailable)",
             limitations=[
                 f"Maritime snapshots could not be read: {exc}",
-                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+                "The backend does not open live AIS websockets in the request path; start oil-live-intel-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
@@ -1873,8 +2169,6 @@ def get_maritime_vessel_feed(
             normalized_window=normalized_window,
             normalized_offset=normalized_offset,
             normalized_bbox=normalized_bbox,
-            include_gulf_demo=include_gulf_demo,
-            include_coastal_demo=include_coastal_demo,
             data_source=data_source,
             cache_age_seconds=cache_age,
         )
@@ -1883,7 +2177,7 @@ def get_maritime_vessel_feed(
             source="AISStream persisted snapshot (read error)",
             limitations=[
                 f"Maritime snapshots could not be assembled: {exc}",
-                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+                "The backend does not open live AIS websockets in the request path; start oil-live-intel-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
@@ -1972,48 +2266,52 @@ def collect_worker_maritime_vessel_feed(
     vessel_scope: str = "all_vessels",
 ) -> dict[str, Any]:
     """
-    Worker ingest: multi-region watch plus a dedicated Persian Gulf / Hormuz capture so
-    high-traffic chokepoints are not crowded out by the global vessel cap.
+    Worker ingest: multi-region watch plus dedicated supplemental captures for sparse
+    chokepoints (Persian Gulf, Gulf of Guinea, Horn/Red Sea, East Africa) so high-traffic
+    European boxes do not crowd them out of the global vessel cap.
     """
     normalized_max_vessels = max(1, min(int(max_vessels), AIS_MAX_VESSELS))
     normalized_window = max(
         AIS_MIN_CAPTURE_WINDOW_SECONDS,
         min(int(capture_window_seconds), AIS_MAX_CAPTURE_WINDOW_SECONDS),
     )
-    gulf_max = min(MARITIME_GULF_SUPPLEMENT_MAX_VESSELS, normalized_max_vessels)
-    gulf_feed = collect_live_maritime_vessel_feed(
-        max_vessels=gulf_max,
-        capture_window_seconds=min(
-            normalized_window,
-            MARITIME_GULF_SUPPLEMENT_WINDOW_SECONDS,
-        ),
-        vessel_scope=vessel_scope,
-        bbox=PERSIAN_GULF_CORE_BBOX,
-    )
+    supplemental_feeds: list[dict[str, Any]] = []
+    supplemental_labels: list[str] = []
+    for spec in MARITIME_WORKER_SUPPLEMENT_SPECS:
+        supplement_max = min(int(spec["max_vessels"]), normalized_max_vessels)
+        supplement_window = min(int(spec["window_seconds"]), normalized_window)
+        supplemental_feeds.append(
+            collect_live_maritime_vessel_feed(
+                max_vessels=supplement_max,
+                capture_window_seconds=supplement_window,
+                vessel_scope=vessel_scope,
+                bbox=spec["bbox"],
+            )
+        )
+        supplemental_labels.append(str(spec["label"]))
     main_feed = collect_live_maritime_vessel_feed(
         max_vessels=normalized_max_vessels,
         capture_window_seconds=normalized_window,
         vessel_scope=vessel_scope,
     )
     merged = merge_maritime_vessel_feeds(
-        [gulf_feed, main_feed],
+        supplemental_feeds + [main_feed],
         max_vessels=normalized_max_vessels,
         vessel_scope=vessel_scope,
     )
     merged["geography_mode"] = main_feed.get("geography_mode")
     merged["geography_note"] = main_feed.get("geography_note")
     merged["region_labels"] = list(
-        dict.fromkeys(
-            (gulf_feed.get("region_labels") or [])
-            + (main_feed.get("region_labels") or [])
-            + ["Persian Gulf and Strait of Hormuz (supplemental)"]
-        )
+        dict.fromkeys((main_feed.get("region_labels") or []) + supplemental_labels)
     )
-    merged["effective_bbox_count"] = int(main_feed.get("effective_bbox_count") or 0) + 1
+    merged["effective_bbox_count"] = int(main_feed.get("effective_bbox_count") or 0) + len(
+        MARITIME_WORKER_SUPPLEMENT_SPECS
+    )
     merged["source"] = main_feed.get("source") or "AISStream multi-region watch"
     merged_limitations = list(merged.get("limitations") or [])
     supplement_note = (
-        "Persian Gulf / Strait of Hormuz supplemental watch runs every worker cycle."
+        "Supplemental watches run every worker cycle for Persian Gulf, Gulf of Guinea, "
+        "Horn of Africa / Gulf of Aden, Red Sea south, and East Africa approaches."
     )
     if supplement_note not in merged_limitations:
         merged_limitations.append(supplement_note)
@@ -2237,10 +2535,6 @@ def get_maritime_stats(
     try:
         conn = _db_connect()
     except Exception as exc:
-        try:
-            from backend.services.maritime_snapshot import get_snapshot_meta
-        except ImportError:
-            from services.maritime_snapshot import get_snapshot_meta
         return {
             "stored_vessel_count": 0,
             "snapshot_vessel_count": 0,
@@ -2252,7 +2546,7 @@ def get_maritime_stats(
             "memory_cache_loaded": False,
             "memory_cache_age_seconds": None,
             "aisstream_configured": bool(os.getenv("AISSTREAM_API_KEY", "").strip()),
-            "redis_snapshot": get_snapshot_meta(),
+            "redis_snapshot": {"available": False, "writer": "retired"},
             "worker": {"status": "database_unavailable", "last_error": str(exc)},
             "limits": {
                 "ais_max_vessels": AIS_MAX_VESSELS,
@@ -2266,80 +2560,24 @@ def get_maritime_stats(
 
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM maritime_vessel_snapshots
-                WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
-                """,
-                (MARITIME_SNAPSHOT_RETENTION_SECONDS,),
-            )
-            stored_count = int((cur.fetchone() or {}).get("count") or 0)
+            stored_count = _count_distinct_oil_ais(cur, hours=24)
             gulf_south, gulf_west, gulf_north, gulf_east = PERSIAN_GULF_CORE_BBOX
-            cur.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM maritime_vessel_snapshots
-                WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
-                  AND lat BETWEEN %s AND %s
-                  AND lng BETWEEN %s AND %s
-                """,
-                (
-                    MARITIME_SNAPSHOT_RETENTION_SECONDS,
-                    gulf_south,
-                    gulf_north,
-                    gulf_west,
-                    gulf_east,
-                ),
+            persian_gulf_count = _count_distinct_oil_ais(
+                cur,
+                hours=24,
+                bbox=(gulf_south, gulf_west, gulf_north, gulf_east),
             )
-            persian_gulf_count = int((cur.fetchone() or {}).get("count") or 0)
             north_south, north_west, north_north, north_east = _north_sea_reference_bbox()
-            cur.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM maritime_vessel_snapshots
-                WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
-                  AND lat BETWEEN %s AND %s
-                  AND lng BETWEEN %s AND %s
-                """,
-                (
-                    MARITIME_SNAPSHOT_RETENTION_SECONDS,
-                    north_south,
-                    north_north,
-                    north_west,
-                    north_east,
-                ),
+            north_sea_count = _count_distinct_oil_ais(
+                cur,
+                hours=24,
+                bbox=(north_south, north_west, north_north, north_east),
             )
-            north_sea_count = int((cur.fetchone() or {}).get("count") or 0)
             bbox_count = 0
             if normalized_bbox is not None:
-                south, west, north, east = normalized_bbox
-                cur.execute(
-                    """
-                    SELECT COUNT(*) AS count
-                    FROM maritime_vessel_snapshots
-                    WHERE last_seen_at >= NOW() - (%s * INTERVAL '1 second')
-                      AND lat BETWEEN %s AND %s
-                      AND lng BETWEEN %s AND %s
-                    """,
-                    (
-                        MARITIME_SNAPSHOT_RETENTION_SECONDS,
-                        south,
-                        north,
-                        west,
-                        east,
-                    ),
-                )
-                bbox_count = int((cur.fetchone() or {}).get("count") or 0)
-            cur.execute(
-                """
-                SELECT status, source, last_attempt_at, last_success_at, last_error, snapshot_count, metadata
-                FROM maritime_ingest_status
-                WHERE id = %s
-                """,
-                (MARITIME_WORKER_STATUS_ID,),
-            )
-            status_row = cur.fetchone()
+                bbox_count = _count_distinct_oil_ais(cur, hours=24, bbox=normalized_bbox)
+            worker = _fetch_aisstream_source_health(cur)
+            ais_latest_age_seconds = _oil_ais_latest_age_seconds(cur)
 
         cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
         cached_rows = _maritime_memory_cache.get("rows") or []
@@ -2348,15 +2586,24 @@ def get_maritime_stats(
             cache_age = time.time() - float(_maritime_memory_cache.get("loaded_at") or 0.0)
             cached_rows = _maritime_memory_cache.get("rows") or []
 
-        status = dict(status_row) if status_row else {}
-        metadata = status.get("metadata") if isinstance(status.get("metadata"), dict) else {}
-        last_success = _parse_datetime(status.get("last_success_at"))
-        snapshot_age_seconds = _seconds_since(last_success)
-        try:
-            from backend.services.maritime_snapshot import get_snapshot_meta
-        except ImportError:
-            from services.maritime_snapshot import get_snapshot_meta
-        redis_snapshot = get_snapshot_meta()
+        last_success = _parse_datetime(worker.get("last_success_at"))
+        snapshot_age_seconds = ais_latest_age_seconds
+        if snapshot_age_seconds is None and last_success is not None:
+            snapshot_age_seconds = _seconds_since(last_success)
+        redis_snapshot = {
+            "available": False,
+            "stale": True,
+            "writer": "retired",
+            "note": (
+                "Legacy Redis snapshot from Python maritime-worker is retired; "
+                "live AIS is ingested by oil-live-intel-worker into oil_ais_positions."
+            ),
+        }
+        worker_status = worker.get("status") or "unknown"
+        ais_positions_fresh = (
+            ais_latest_age_seconds is not None
+            and ais_latest_age_seconds <= AIS_POSITIONS_FRESH_SECONDS
+        )
         return {
             "stored_vessel_count": stored_count,
             "snapshot_vessel_count": len(cached_rows),
@@ -2365,8 +2612,10 @@ def get_maritime_stats(
             "aisstream_persian_gulf_coverage_gap": bool(
                 persian_gulf_count == 0
                 and north_sea_count >= 25
-                and (status.get("status") or "") == "ok"
+                and worker_status in {"ok", "connecting"}
             ),
+            "ais_positions_fresh": ais_positions_fresh,
+            "ais_latest_age_seconds": snapshot_age_seconds,
             "bbox_vessel_count": bbox_count,
             "requested_bbox": list(normalized_bbox) if normalized_bbox else None,
             "memory_cache_loaded": bool(cached_rows),
@@ -2375,17 +2624,7 @@ def get_maritime_stats(
             "stale": snapshot_age_seconds is None or snapshot_age_seconds > MARITIME_SNAPSHOT_TTL_SECONDS,
             "snapshot_age_seconds": snapshot_age_seconds,
             "redis_snapshot": redis_snapshot,
-            "worker": {
-                "status": status.get("status") or "unknown",
-                "source": status.get("source") or "AISStream",
-                "last_attempt_at": _iso_datetime(status.get("last_attempt_at")),
-                "last_success_at": _iso_datetime(status.get("last_success_at")),
-                "last_error": status.get("last_error"),
-                "last_cycle_upserted": status.get("snapshot_count") or 0,
-                "geography_mode": metadata.get("geography_mode"),
-                "region_labels": metadata.get("region_labels") or [],
-                "effective_bbox_count": metadata.get("effective_bbox_count"),
-            },
+            "worker": worker,
             "limits": {
                 "ais_max_vessels": AIS_MAX_VESSELS,
                 "memory_cache_max_vessels": MARITIME_MEMORY_CACHE_MAX_VESSELS,

@@ -235,6 +235,7 @@ def get_layer_geojson_from_db(
     layer_id: str,
     *,
     bbox: Optional[tuple[float, float, float, float]] = None,
+    zoom: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build a GeoJSON FeatureCollection from persisted OSM rows."""
     if layer_id not in OSM_LAYERS:
@@ -253,10 +254,22 @@ def get_layer_geojson_from_db(
         """
         params.extend([west, south, east, north])
 
+    try:
+        from backend.services.license_map_perf import simplify_tolerance_for_zoom
+    except ImportError:
+        from services.license_map_perf import simplify_tolerance_for_zoom
+
+    tolerance = simplify_tolerance_for_zoom(zoom)
+    if tolerance > 0:
+        geom_sql = "ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom::geometry, %s))::json"
+        params.append(tolerance)
+    else:
+        geom_sql = "ST_AsGeoJSON(geom)::json"
+
     with conn.cursor() as cur:
         cur.execute(
             f"""
-            SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json
+            SELECT osm_type, osm_id, tags, {geom_sql}
             FROM petroleum_osm_features
             WHERE layer_id = %s
             {bbox_clause}
@@ -322,6 +335,7 @@ def get_osm_layer_geojson_with_fallback(
     layer_id: str,
     *,
     bbox: Optional[tuple[float, float, float, float]] = None,
+    zoom: Optional[float] = None,
 ) -> dict[str, Any]:
     """Read persisted features when available; otherwise live Overpass."""
     try:
@@ -330,7 +344,7 @@ def get_osm_layer_geojson_with_fallback(
         from services.petroleum_osm_overpass import get_osm_layer_geojson
 
     if layer_has_cached_features(conn, layer_id):
-        payload = get_layer_geojson_from_db(conn, layer_id, bbox=bbox)
+        payload = get_layer_geojson_from_db(conn, layer_id, bbox=bbox, zoom=zoom)
         if payload.get("feature_count", 0) > 0 or bbox is None:
             return payload
 

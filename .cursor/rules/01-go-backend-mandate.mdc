@@ -1,0 +1,5 @@
+---
+description: Permanent Go backend migration mandate.
+alwaysApply: true
+---
+The permanent backend target is Go. Python/FastAPI is transitional. Prefer new permanent APIs, workers, adapters and performance-critical services in Go. Reject new permanent Python production subsystems unless explicitly approved as a temporary bridge with a Go replacement and removal plan. Use staged cutover, parity tests and rollback.

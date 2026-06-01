@@ -1,4 +1,5 @@
 import type { MaritimeVessel } from './types';
+import { parseAisShipTypeCode } from './filters';
 
 /** AIS ship/cargo type buckets (ITU-R M.1371-style 0–99); label fallback refines API-specific codes. */
 export type VesselCategoryKey =
@@ -48,9 +49,10 @@ export const VESSEL_LEGEND_T: Record<VesselCategoryKey, [string, string]> = {
   other: ['אחר/לא ידוע', 'Other'],
 };
 
-function vesselCategoryFromTypeCode(code: number | null | undefined): VesselCategoryKey | null {
-  if (code == null || !Number.isFinite(code)) return null;
-  const c = Math.floor(code);
+function vesselCategoryFromTypeCode(code: unknown): VesselCategoryKey | null {
+  const parsed = parseAisShipTypeCode(code);
+  if (parsed == null) return null;
+  const c = parsed;
   if (c === 0) return 'other';
   if (c >= 80 && c <= 89) return 'tanker';
   if (c >= 70 && c <= 79) return 'cargo';
@@ -91,7 +93,7 @@ function vesselCategoryFromLabel(label: string | null | undefined): VesselCatego
 }
 
 export function getVesselMarkerColor(vessel: MaritimeVessel): string {
-  const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
+  const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code);
   if (fromCode) return VESSEL_CATEGORY_COLORS[fromCode];
   const fromLabel = vesselCategoryFromLabel(vessel.ship_type_label);
   if (fromLabel) return VESSEL_CATEGORY_COLORS[fromLabel];
@@ -100,7 +102,7 @@ export function getVesselMarkerColor(vessel: MaritimeVessel): string {
 
 /** Lower = drawn first under LOD cell competition (tankers win over fishing, etc.). */
 export function getVesselLodPriority(vessel: MaritimeVessel): number {
-  const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code ?? null);
+  const fromCode = vesselCategoryFromTypeCode(vessel.ship_type_code);
   const fromLabel = fromCode ? null : vesselCategoryFromLabel(vessel.ship_type_label);
   const key = fromCode ?? fromLabel ?? 'other';
   const order: VesselCategoryKey[] = [

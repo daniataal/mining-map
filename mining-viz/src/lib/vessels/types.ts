@@ -1,6 +1,17 @@
 /** Vessel / AIS types — separate from mining license data. */
 
 export type MaritimeVesselScope = 'oil_tankers' | 'all_vessels';
+export type MaritimeTankerView =
+  | 'worldwide'
+  | 'middle_east'
+  | 'persian_gulf'
+  | 'strait_of_hormuz'
+  | 'gulf_of_oman'
+  | 'fujairah'
+  | 'dubai_jebel_ali'
+  | 'ras_tanura'
+  | 'qatar_ras_laffan'
+  | 'kuwait_iraq_terminals';
 
 export interface MaritimeViewportBounds {
   south: number;
@@ -99,6 +110,24 @@ export interface MaritimeVessel {
   ais_metadata?: Record<string, unknown>;
   ais_messages?: Record<string, AisMessageEnvelope>;
   last_seen_at?: string | null;
+  is_tanker?: boolean | null;
+  region_tags?: string[];
+  provider?: string | null;
+  coverage_confidence?: 'open_ais_recent' | 'limited_terrestrial_ais' | string | null;
+}
+
+export interface AisCoverageStatus {
+  provider?: string;
+  region?: string;
+  stream_status?: string;
+  last_received_regional_position_at?: string | null;
+  vessels_observed_last_hour?: number;
+  tankers_observed_last_hour?: number;
+  heartbeat_status?: string;
+  coverage_warning?: boolean;
+  warning_text?: string | null;
+  recent_region_position_frames?: number;
+  metrics?: Record<string, unknown>[];
 }
 
 export interface MaritimeVesselFeedResponse {
@@ -106,6 +135,8 @@ export interface MaritimeVesselFeedResponse {
   source: string;
   data_as_of: string;
   live_positions_enabled: boolean;
+  /** Backend has AISSTREAM_API_KEY (does not prove worker is ingesting). */
+  aisstream_configured?: boolean;
   limitations: string[];
   scope: MaritimeVesselScope;
   capture_window_seconds: number;
@@ -129,16 +160,21 @@ export interface MaritimeVesselFeedResponse {
   worker?: Record<string, unknown>;
   /** True when DB shows vessels in North Sea but none in Persian Gulf while worker is healthy (AISStream upstream gap). */
   aisstream_persian_gulf_coverage_gap?: boolean;
+  /** Live AIS rows in the requested viewport before demo merge (when bbox supplied). */
+  viewport_live_vessel_count?: number | null;
+  /** True when the global snapshot is healthy but the current viewport has no live AIS rows. */
+  viewport_ais_coverage_gap?: boolean;
   /** True when Hormuz-area demo rows were merged (synthetic or seed file). */
   persian_gulf_demo_synthetic?: boolean;
   /** Labels of regions that received demo/seed positions in this response (Gulf + Africa-adjacent when enabled). */
   coastal_demo_regions?: string[];
   /** True when any merged coastal demo used built-in synthetic generators (not only static seed files). */
   coastal_demo_synthetic?: boolean;
-  /** How Gulf demo rows were merged: UI/API opt-in vs env heuristics. */
-  persian_gulf_demo_mode?: 'api_opt_in' | 'env_coverage_gap' | 'env_coastal_sparse' | null;
+  /** How Gulf demo rows were merged (dev-only env heuristics; absent in production). */
+  persian_gulf_demo_mode?: 'env_coverage_gap' | 'env_coastal_sparse' | null;
   /** Public tracker for AISStream Persian Gulf coverage (for UI banner link). */
   maritime_aisstream_issue_url?: string | null;
+  coverage?: AisCoverageStatus;
 }
 
 export interface VesselFilters {

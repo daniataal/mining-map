@@ -21,8 +21,7 @@ class PlatformHealthTests(unittest.TestCase):
         body = build_platform_health(
             redis_enabled=True,
             redis_ping=lambda: mock.Mock(ping=mock.Mock(return_value=True)),
-            get_snapshot_meta=lambda: {"available": True, "stale": False},
-            get_maritime_stats=lambda: {"worker": {"status": "ok"}, "redis_snapshot": {}},
+            get_maritime_stats=lambda: {"worker": {"status": "ok"}, "ais_positions_fresh": True},
         )
         self.assertEqual(body["api"], "ok")
         self.assertEqual(body["status"], "ok")
@@ -40,11 +39,53 @@ class PlatformHealthTests(unittest.TestCase):
             "env": {},
         },
     )
+    def test_build_platform_health_ok_with_fresh_ais_positions(self, _mock_ai):
+        body = build_platform_health(
+            redis_enabled=True,
+            redis_ping=lambda: mock.Mock(ping=mock.Mock(return_value=True)),
+            get_maritime_stats=lambda: {
+                "worker": {"status": "ok"},
+                "redis_snapshot": {"writer": "retired"},
+                "ais_positions_fresh": True,
+            },
+        )
+        self.assertEqual(body["status"], "ok")
+        self.assertTrue(body["ais_positions_fresh"])
+
+    @mock.patch(
+        "backend.services.platform_health.get_ai_provider_status",
+        return_value={
+            "groq": "configured",
+            "openrouter": "missing",
+            "pollinations_enabled": False,
+            "ready": True,
+            "env": {},
+        },
+    )
+    def test_build_platform_health_degraded_when_oil_live_down(self, _mock_ai):
+        body = build_platform_health(
+            redis_enabled=True,
+            redis_ping=lambda: mock.Mock(ping=mock.Mock(return_value=True)),
+            get_maritime_stats=lambda: {"worker": {"status": "ok"}, "ais_positions_fresh": True},
+            get_oil_live_health=lambda: {"ok": False, "error": "connection refused", "url": "http://oil-live-intel:8095/api/oil-live/health"},
+        )
+        self.assertEqual(body["status"], "degraded")
+        self.assertFalse(body["oil_live_intel"]["ok"])
+
+    @mock.patch(
+        "backend.services.platform_health.get_ai_provider_status",
+        return_value={
+            "groq": "configured",
+            "openrouter": "missing",
+            "pollinations_enabled": False,
+            "ready": True,
+            "env": {},
+        },
+    )
     def test_build_platform_health_degraded_when_redis_down(self, _mock_ai):
         body = build_platform_health(
             redis_enabled=True,
             redis_ping=lambda: None,
-            get_snapshot_meta=lambda: {"available": False, "stale": True},
             get_maritime_stats=lambda: {"worker": {"status": "error"}},
         )
         self.assertEqual(body["status"], "degraded")
@@ -68,8 +109,7 @@ class PlatformHealthTests(unittest.TestCase):
             body = build_platform_health(
                 redis_enabled=True,
                 redis_ping=lambda: mock.Mock(ping=mock.Mock(return_value=True)),
-                get_snapshot_meta=lambda: {"available": True, "stale": False},
-                get_maritime_stats=lambda: {"worker": {"status": "ok"}, "redis_snapshot": {}},
+                get_maritime_stats=lambda: {"worker": {"status": "ok"}, "ais_positions_fresh": True},
             )
         self.assertEqual(body["status"], "degraded")
         self.assertFalse(body["ai_providers"]["ready"])

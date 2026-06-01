@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 ARG BASE_IMAGE=dannyatalla/mining-map-base:latest
 FROM ${BASE_IMAGE}
 
@@ -8,7 +10,8 @@ WORKDIR /app
 COPY data/ ./data/
 
 COPY requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install -r requirements.txt
 
 # Copy only the code directories and files, avoiding copying data/ again to prevent layer bloating and cache invalidation
 COPY api/ ./api/

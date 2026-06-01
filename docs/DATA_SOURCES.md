@@ -2,7 +2,9 @@
 
 This document is the operational source-of-truth for **what** Meridian ingests, **why** gaps exist (e.g. Kazakhstan), and **how** to verify rows in production. Paid APIs (Mapbox tilesets, commercial company registries) are called out explicitly so we do not mistake them for official cadastre data.
 
-**Last reviewed:** 2026-05-19
+**MAD-45 planning matrix** (vessels, parties, tank farms, pipelines — match keys & cross-match): [OPEN_DATA_MATRIX_MAD-45.md](./OPEN_DATA_MATRIX_MAD-45.md).
+
+**Last reviewed:** 2026-05-23
 
 ---
 
@@ -39,10 +41,37 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Norway | oil_and_gas | `norway_npd_production_licences_current` | NPD Factmaps |
 | Finland | mining | `finland_tukes_active_mining_areas` | Tukes via GTK |
 | Colombia | mining | `colombia_anm_titulo_vigente` | ANM ServiciosANM layer 4, capped 2000 |
+| Mexico | mining | `mexico_inecc_concesiones_mineras` | INECC Atlas Minero MapServer/22; national concessions; capped 2000/run |
 | Peru | mining | `peru_ingemmet_derechos_mineros` | INGEMMET Derechos Mineros; ~2k cap (no offset pagination) |
 | Australia (QLD) | mining | `australia_queensland_mineral_tenement` | State only, capped |
 | Global | mining | `usgs_mrds_global` | **Fallback** — sites/deposits, not licences; updates ceased ~2011 |
 | Global | oil_and_gas | `megagiant_oil_gas_fields_world` | **Fallback** — giant fields only |
+
+#### Mexico — `mexico_inecc_concesiones_mineras` (MAD-77)
+
+| | |
+|--|--|
+| **URL** | https://mapas.inecc.gob.mx/ArcGIS/rest/services/Atlas_Minero_Mercurio/MapServer/22 |
+| **License** | Mexican government open GIS (INECC Atlas Minero; concession attributes from national mining cadastre) |
+| **Refresh cadence** | On-demand via `POST /api/admin/open-data/sync?source_id=mexico_inecc_concesiones_mineras`; optional daily worker with other `OPEN_DATA_SOURCES` |
+| **Ingest** | `open_data_sync` ArcGIS query → idempotent upsert (`record_origin=open_data`) |
+| **Match keys** | Primary: `TITULO` (concession title no.); fallback: `OBJECTID`; holder: `TITULAR` |
+| **Mapped fields** | `TITULAR` → company; `NOMBRELOTE` → license type label; `SUST1`–`SUST3` → commodity codes; `MUNICIPIO` + `NOM_ENT` → region |
+| **Tier honesty** | National polygon layer (~25k features); sync capped at **2000 records/run** for MVP performance — not a live SGM portal scrape |
+| **Verify** | `curl` layer `returnCountOnly`; after sync: `SELECT COUNT(*) FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras'`; sample `id` like `mexico_inecc_concesiones_mineras:232215` |
+
+#### GEM — `gem_global_extraction_tracker_march_2026` (MAD-99)
+
+| | |
+|--|--|
+| **File** | `Global-Oil-and-Gas-Extraction-Tracker-March-2026.xlsx` (repo root or `GEM_TRACKER_XLSX_PATH`) |
+| **License** | [Global Energy Monitor](https://globalenergymonitor.org/projects/global-oil-gas-extraction-tracker/) open tracker (March 2026) |
+| **Refresh cadence** | On-demand `POST /api/admin/gem-extraction-tracker/ingest`; optional auto step on `POST /api/admin/oil-live/graph-sync` when `GEM_TRACKER_AUTO_INGEST=true` |
+| **Ingest** | `gem_extraction_tracker_import.py` — Field-level main data (~7.6k rows); reserves/production merged into `raw_payload` when present |
+| **Match keys** | Primary: `Unit ID` → `id` prefix `gem_global_extraction_tracker_march_2026:` |
+| **Mapped fields** | `Operator`/`Owner(s)` → company; `Country/Area` → country; `Subnational unit`/`Basin`/`Block(s)` → region; `Fuel type` → commodity; `Status` → status; `Latitude`/`Longitude` → map coords when present |
+| **Tier honesty** | Global NGO field-level extraction reference — **not** an official licence/block registry (`record_origin=global_open_fallback`) |
+| **Verify** | After ingest: `SELECT COUNT(*) FROM licenses WHERE source_id='gem_global_extraction_tracker_march_2026'`; sample `id` like `gem_global_extraction_tracker_march_2026:L100000321006`; Oil & Gas map with `prefer_open_data=true` |
 
 ### 2.2 Other backend ingest (not ArcGIS list)
 
@@ -51,10 +80,13 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `opec_gulf_sync.py` | Gulf/OPEC NOCs, major fields, terminals | Static + optional EIA API key | `record_origin` → `opec_gulf_reference` / open_data; compare to national NOC sites |
 | `gov_procurement_sync.py` | USAspending contract awards | Yes (US federal) | Award ID on USAspending.gov |
 | `csv_fallback_import.py` | User/admin CSV (e.g. SA/Ghana mining) | User-provided | `user_import_csv`; source file + row hash |
+| `gem_extraction_tracker_import.py` | GEM Global Oil & Gas Extraction Tracker (March 2026 xlsx) | Yes (GEM open data) | `source_id=gem_global_extraction_tracker_march_2026`; `record_origin=global_open_fallback`; admin `POST /api/admin/gem-extraction-tracker/ingest`; auto on graph-sync when xlsx present |
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
 | `comtrade_scheduled_sync.py` | Scheduled HS27 refresh | UN Comtrade keyed API | `comtrade_sync_runs`; worker + admin sync |
+| `census_trade.py` | U.S. bilateral HS 2709/2710/2711 (Census timeseries API) | Free API key ([signup](https://api.census.gov/data/key_signup.html)) | `oil_trade_flows.data_source=census_api`; macro tier; runs on graph sync |
+| `usitc_dataweb.py` | U.S. HS flows / tariff context (DataWeb) | Free account + API token | `USITC_DATAWEB_API_KEY`; `data_source=usitc_dataweb` on graph sync |
 | Bundled `licenses.json` | Legacy snapshot | Deprecated for prod UX | `bundled_json`; excluded when `prefer_open_data=true` |
 
 ### 2.3 Company / deal signals (in app today)
@@ -67,6 +99,50 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | Company intel | `GET /company-intel` | Heuristic aggregation | No OpenCorporates API (paid) wired |
 | SEC EDGAR | `GET /api/companies/{name}/sec-filings` | Free (US issuers) | CIK + browse-edgar link (US listed cos only) |
 | EU beneficial ownership | Not wired | Varies by MS | **Thin** open API coverage |
+
+### 2.4 Oil Live / Live Data (unified commercial graph)
+
+Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin/oil-live/graph-sync` (`backend/services/oil_live_graph_sync.py`) and the Go **synthetic BOL** rebuild. Operational onboarding: **[LIVE_DATA.md](./LIVE_DATA.md)**.
+
+| Source | Module / worker | Env / tier | In `oil_trade_flows` / graph |
+|--------|-----------------|------------|------------------------------|
+| **UN Comtrade** | `comtrade_scheduled_sync.py`, graph-sync trade mirror | `COMTRADE_API_KEY` (free tier) | `data_source=comtrade`; macro HS 2709/2710/2711 |
+| **EIA** | `opec_gulf_sync.py` + graph-sync enrichment | `EIA_API_KEY` (optional) | Production / reference context; not row-level BOL |
+| **U.S. Census** | `census_trade.py` | `CENSUS_API_KEY` | `data_source=census_api`; macro bilateral HS27 |
+| **USITC DataWeb** | `usitc_dataweb.py` | `USITC_DATAWEB_API_KEY` | `data_source=usitc_dataweb`; U.S. import/export HS flows |
+| **EIA crude imports** | `eia_imports.sync_eia_crude_imports` (graph-sync step) | `EIA_API_KEY` | `oil_trade_flows.data_source='eia'`, HS 2709, partner=origin country; aggregated last-12-months macro tier |
+| **EIA refinery throughput (PADD)** | `eia_imports.sync_eia_refinery_throughput` | `EIA_API_KEY` | `oil_refinery_throughput` (PADD, week_ending, utilization_pct, crude_input_mbbl_d); feeds **Recipe G** in `engine.go` |
+| **EIA historic company imports (files)** | `eia_historic_imports.ingest_eia_downloads_folder` | `EIA_DOWNLOADS_DIR` (local folder of `impa*.xls/xlsx`; **no** web scrape); graph-sync step `eia_historic_imports` | `eia_historic_imports` — company-level U.S. imports by origin/product/port; Live Data + Oil/Gas map arcs |
+| **Eurostat COMEXT (macro)** | `eurostat_trade.sync_eurostat_hs27` | `EUROSTAT_SYNC_ENABLED`; dataset `EUROSTAT_DATASET` | `oil_trade_flows.data_source=eurostat`; macro tier; dedupe `UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)` via migration `018` + `ingest_oil_trades.upsert_rows` |
+| **JODI oil snapshots** | `jodi_oil.sync_jodi_snapshots` | `JODI_CSV_URL` or `JODI_CSV_PATH` (public export) | `jodi_oil_snapshots`; validates corridors / benchmarks |
+| **Mining HS Comtrade** | `commodity_trade_flows.sync_mining_hs_comtrade` | `COMTRADE_API_KEY`; `COMMODITY_COMTRADE_SYNC_ENABLED` | `commodity_trade_flows` (HS 26xx/71xx/74xx); license dossier trade panel |
+| **UK / user trade manifests** | `trade_manifest_ingest.sync_uk_open_trade_rows` | `UK_MANIFEST_CSV_DIR`, `USER_MANIFEST_CSV_DIR`; admin `POST /api/admin/trade-manifests/upload`; sample CSV in `data/uk_trade_manifests/`; `uk-trade-manifest-sync-worker` | `trade_manifest_rows` (`customs_open`, `user_upload`, `macro`) |
+| **AIS (live)** | `oil-live-intel-worker` (Go) | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_vessels`, `oil_port_calls`, `maritime_source_health`; `/api/oil-live/vessels/live`. Partial open/community coverage, not global truth |
+| **Vessel positions (multi-source merge)** | `oil-live-intel` map API | `OIL_LIVE_MERGED_VESSEL_POSITIONS` optional | `oil_vessel_position_observations` — per-source rows; **`GET /api/oil-live/vessels/live`** is primary map path |
+| **Maritime Redis snapshot (retired)** | — | — | **Removed** — was Python `maritime-worker` → Redis; graph-sync mirror retired. Historical `data_source=maritime_redis` rows may remain in DB |
+| **Open AIS coverage + gaps** | `oil-live-intel` `/coverage`, `/source-health`, `/sync-status` AIS fields; migration `017_open_ais_coverage.sql` | No paid source; AISHub requires contributed receivers | `coverage_cells`, `maritime_watch_zones`, `maritime_source_health`, `port_event_observations`; `/coverage` is bbox-only (no global dump); sync-status exposes `live_vessel_count`, `live_ais_port_call_count`, watch-zone gap counts for Live Data panels |
+| **AISHub contributor path** | Future adapter after station contribution | AISHub free API requires sharing receiver data | Planned source in `maritime_source_health`; priority for Fujairah/UAE, Oman, Suez/Red Sea, Durban/Richards Bay, Lagos/Tema, Mombasa/Dar, Tangier |
+| **Government AIS (BarentsWatch)** | `barentswatch_ais_sync.sync_barentswatch_ais` (graph-sync step) | `BARENTSWATCH_CLIENT_ID`, `BARENTSWATCH_CLIENT_SECRET` from [barentswatch.no](https://developer.barentswatch.no/docs/AIS/live-ais-api/); `BARENTSWATCH_AIS_SYNC_ENABLED` | `oil_vessel_position_observations` with `data_source=barentswatch`, `source_type=government_ais`; regional Norway EEZ only — **not** Gulf/Africa. Live Data dev toggle filters `/coverage?sources=barentswatch`. Verify bbox `4,58,31,71`. |
+| **Government AIS / SAR validation (other)** | Denmark AIS, Sentinel-1 monitor (planned) | Public/regional; SAR is unidentified vessel detection only | Planned source health rows; Sentinel-1 must be `source_type=satellite_detected_unidentified` |
+| **OSM storage** | Overpass + `petroleum_osm_features` + bulk seed | ODbL | `oil_terminals` (~12k after dedup); map bbox API |
+| **EU TED** | `ted_procurement_sync.py` | EU open | `eu_procurement_notices`; Recipe C tender signals |
+| **USAspending** | `gov_procurement_sync.py` | US open | Awards → Recipe E government offtake hints |
+| **OpenSanctions** | `opensanctions_screening.py` (graph-sync step) | Public API; `OPENSANCTIONS_API_KEY` optional for higher quota | `oil_companies.sanctions_status` + `sanctions_matches`; non-blocking UI chip only |
+| **Elasticsearch (search index)** | `oil-live-intel/cmd/oil-live-search-indexer` (Go) | `ELASTICSEARCH_URL` (`http://elasticsearch:9200` in compose); single-node 8.13.4 image; volume `meridian_elasticsearch_data` | **Not a data source** — indexes Postgres (`meridian_cargo_records`, `oil_companies`, `oil_terminals`, `oil_vessels`) for full-text search via `/api/oil-live/search`. Full sync on boot, incremental on `updated_at`. UI degrades to "Search unavailable" when ES is down. |
+| **GLEIF LEI batch** | `gleif_batch.enrich_companies_with_lei` (graph-sync step) | Public API, no key | `oil_companies.lei` + `lei_record_id`; denormalised onto `meridian_cargo_records.shipper_lei` / `consignee_lei` |
+| **Wikidata company facts** | `wikidata_company_enrichment.py` (graph-sync step) | Public MediaWiki API; polite `User-Agent` | `oil_companies.wikidata_qid` + `wikidata_facts` JSONB (industries, hq, country, website, freebase id) |
+| **Licenses / suppliers** | App licenses + [LICENSE_BULK_IMPORT.md](../LICENSE_BULK_IMPORT.md) | User / admin CSV | `oil_companies` index on graph-sync step 2 |
+
+**Synthetic Meridian Cargo Records (MCR)** — not paid Bill of Lading data. Triangulation recipes **A–F** in `oil-live-intel/internal/services/syntheticbol/engine.go`.
+
+| `bol_tier` / UI label | Meaning |
+|-----------------------|---------|
+| `synthetic` (default DB) | MCR built from public signals; amber **Synthetic cargo** badge |
+| `inferred` | Shown when tier omitted in API/UI; same honesty — no confirmed private deal |
+| Provenance `seed_port_calls` | Demo AIS-style port calls when live AIS sparse; **Include seed data** toggle |
+| Provenance `live_ais` | Geofenced port calls from AISStream worker |
+
+Paid BOL vendors (e.g. ImportYeti) are **explicitly excluded** — see roadmap in [LIVE_DATA.md](./LIVE_DATA.md) and `.cursor/plans/live_data_unification_1ae1516a.plan.md`.
 
 ---
 
@@ -87,7 +163,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **EU** | Finland Tukes mining areas | In repo | Open gov | `arcgis` | `ALUETUNNUS` on Tukes register |
 | **Africa** | Zambia/Kenya/SA petroleum & mining | In repo | Official cadastre | `arcgis` | Source layer URL + external id |
 | **Middle East** | OPEC Gulf reference + Megagiant | In repo + `opec_gulf_sync` | Reference / open layer | `static` + `arcgis` | Flag as fallback; NOC website |
-| **Latin America** | ANM Colombia, ANM-style portals | National URLs vary | Open gov (varies) | **Gap** | Per-country licence ID |
+| **Latin America** | ANM Colombia, INGEMMET Peru, INECC Mexico concessions | In repo (see §2.1) | Open gov (varies) | `arcgis` | `TITULO` / `CG_CODIGO` / `CODIGO_EXPEDIENTE` |
 | **Petroleum infra** | OSM pipelines (`man_made=pipeline`) | Overpass API | ODbL | **`overpass`** (opt-in map layers) | OSM way ID + tag inspection |
 | **Petroleum infra** | oilmap / Mapbox tilesets | Mapbox | Third-party | **Paid** — `petroleum_infrastructure` | Document token; not official |
 | **Trade** | UN Comtrade HS 2709/2710 | https://comtrade.un.org/ | UN terms (free tier) | `api` (partial in repo) | Reporter/partner/year in response |
@@ -157,7 +233,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 |------------|--------|-------|
 | **Central Asia hydrocarbons** | Done | KZ ArcGIS hub unverified (timeout); TM/UZ `WORLD_COVERAGE_OVERRIDES`. |
 | **EU mining** | Done | Sweden SGU OGC + Poland PGI portal refs in `WORLD_COVERAGE_OVERRIDES` (no ArcGIS sync). |
-| **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `peru_ingemmet_derechos_mineros` (Peru capped ~2k, no offset pagination). |
+| **LatAm mining** | Done | `colombia_anm_titulo_vigente`, `mexico_inecc_concesiones_mineras`, `peru_ingemmet_derechos_mineros` (Mexico/Peru capped ~2k/run). |
 | **Comtrade HS27** | Done | Daily worker + admin endpoints; 429/503 backoff in `ingest_oil_trades._fetch_comtrade_bulk`. |
 | **GLEIF LEI** | Done | Free public API lookup endpoint. |
 | **OSM petroleum DB** | Done | `petroleum-osm-worker` + `POST /api/admin/petroleum-osm/sync`; API reads DB first. |
@@ -241,7 +317,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **OSM petroleum** | Done (starter) | `GET /api/petroleum/osm-layers/{pipelines\|refineries}`; Overpass tile cache; opt-in map layers labeled “OpenStreetMap (community)”. |
 | **SEC EDGAR linker** | Done (starter) | `GET /api/companies/{name}/sec-filings`; dossier SEC link; `SEC_EDGAR_USER_AGENT`; mocked ticker JSON tests. |
 | **Central Asia hydrocarbons** | Done (honest gaps) | KZ oil: `official_portal_only` + arcgis.gis-center.kz timeout note; TM/UZ portal refs in `WORLD_COVERAGE_OVERRIDES`. |
-| **EU mining / LatAm** | Done (partial) | Sweden SGU OGC documented (not ArcGIS sync); Colombia ANM + Peru INGEMMET in `OPEN_DATA_SOURCES` (verified 2026-05). |
+| **EU mining / LatAm** | Done (partial) | Sweden SGU OGC documented (not ArcGIS sync); Colombia ANM + Mexico INECC + Peru INGEMMET in `OPEN_DATA_SOURCES` (verified 2026-05). |
 | **Comtrade refresh** | Done | `comtrade_scheduled_sync.py`, `comtrade_sync_runs`, admin sync + sync-runs, `comtrade-sync-worker` in docker-compose. |
 | **GLEIF LEI** | Done (starter) | `GET /api/companies/{name}/lei` via GLEIF public API. |
 | **OSM petroleum persist** | Stub | `petroleum_osm_features` table on init; nightly worker deferred. |
@@ -318,6 +394,13 @@ curl -s "http://localhost:8000/api/admin/data-health?refresh_probes=true" -H "X-
 curl -X POST "http://localhost:8000/api/admin/open-data/sync?source_id=kenya_mining_cadastre" \
   -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
 
+# Mexico INECC mining concessions (MAD-77)
+curl -X POST "http://localhost:8000/api/admin/open-data/sync?source_id=mexico_inecc_concesiones_mineras" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{}'
+# Sample row count + licence id
+psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras';"
+psql "$DATABASE_URL" -c "SELECT id, company, region FROM licenses WHERE source_id='mexico_inecc_concesiones_mineras' LIMIT 3;"
+
 # Coverage single country (server-side filter)
 curl -s "http://localhost:8000/api/open-data/coverage/world?country=Ghana" | jq '.countries'
 
@@ -372,11 +455,11 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/services/eu_company_registers.py` | EU member-state register URL mapping (legacy import) |
 | `backend/services/deal_room_export_pdf.py` | Reportlab PDF deal export (+ HTML fallback) |
 | `mining-viz/src/components/dossier/TradeFlowsChart.tsx` | Comtrade year bar chart in dossier |
-| `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27 linkage |
+| `backend/services/entity_trade_flows.py` | License → `oil_trade_flows` HS27; reporter fuzzy + Eurostat `partner` match |
 | `backend/services/deal_room_export_html.py` | Printable HTML deal export |
 | `backend/arcgis_probe_sync_worker.py` | Weekly KZ + PH ArcGIS probes |
 | `mining-viz/src/components/dossier/CompanyRegistryLinks.tsx` | Dossier OC + national register chips |
-| `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored Comtrade rows in dossier |
+| `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored macro trade rows (Comtrade + Eurostat) in dossier |
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |
@@ -390,3 +473,15 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/comtrade_sync_worker.py` | Daily Comtrade refresh worker |
 | `backend/services/license_sync_store.py` | License sync run helpers |
 | `mining-viz/src/lib/licenseVisibility.ts` | Hide junk fallbacks in UI |
+| `backend/services/oil_live_graph_sync.py` | Live Data graph-sync orchestrator |
+| `backend/services/vessel_position_observations.py` | Multi-source vessel position upsert + Redis maritime mirror |
+| `backend/services/ingest/barentswatch_ais_sync.py` | BarentsWatch government AIS graph-sync step (`barentswatch_ais`) |
+| `oil-live-intel/internal/services/vesselmerge/` | Map API merge reader (precedence: live_ais > aisstream/aishub > government AIS > maritime_redis > inferred > SAR) |
+| `oil-live-intel/migrations/014_vessel_position_sources.sql` | Base `oil_vessel_position_observations` table |
+| `oil-live-intel/migrations/017_open_ais_coverage.sql` | Source/freshness columns, `coverage_cells`, `port_event_observations`, watch zones, source health |
+| `backend/services/census_trade.py` | U.S. Census HS27 macro flows |
+| `backend/services/usitc_dataweb.py` | USITC DataWeb macro flows |
+| `oil-live-intel/internal/services/syntheticbol/` | MCR recipes A–F + rebuild |
+| `oil-live-intel/internal/services/search/` | Elasticsearch indexer + query builder for MCRs, companies, terminals, vessels |
+| `oil-live-intel/cmd/oil-live-search-indexer/` | Worker syncing Postgres → ES on a ticker (default 300s) |
+| `docs/LIVE_DATA.md` | Live Data onboarding, env keys, trader workflows |

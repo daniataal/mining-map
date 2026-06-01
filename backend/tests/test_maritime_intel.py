@@ -7,6 +7,7 @@ from unittest import mock
 
 from backend.services.maritime_intel import (
     _build_ais_subscription_plan,
+    _build_maritime_vessel_feed_from_rows,
     _regions_for_worker_watch_mode,
     AISSTREAM_WATCH_REGIONS,
     PERSIAN_GULF_CORE_BBOX,
@@ -30,8 +31,10 @@ from backend.services.maritime_intel import (
     match_destination_to_port,
     merge_maritime_vessel_feeds,
     maritime_coastal_demo_merge_decision,
+    MARITIME_WORKER_SUPPLEMENT_SPECS,
     parse_unlocode_coordinates,
     petroleum_vessel_priority,
+    viewport_ais_coverage_gap,
 )
 
 
@@ -88,8 +91,29 @@ class MaritimeIntelTests(unittest.TestCase):
         regions = _regions_for_worker_watch_mode("all_regions")
         region_ids = {region["id"] for region in regions}
         self.assertIn("west_africa", region_ids)
+        self.assertIn("gulf_of_guinea", region_ids)
         self.assertIn("south_africa_indian", region_ids)
         self.assertIn("east_africa_arabian_sea", region_ids)
+
+    def test_worker_supplement_specs_cover_gulf_and_africa(self):
+        supplement_ids = {spec["id"] for spec in MARITIME_WORKER_SUPPLEMENT_SPECS}
+        self.assertIn("persian_gulf", supplement_ids)
+        self.assertIn("gulf_of_guinea", supplement_ids)
+        self.assertIn("horn_of_africa", supplement_ids)
+        self.assertIn("red_sea_south", supplement_ids)
+        self.assertIn("east_africa_indian", supplement_ids)
+
+    def test_viewport_ais_coverage_gap_when_feed_healthy_but_view_empty(self):
+        rows = [{"mmsi": str(i), "lat": 55.0, "lng": 3.0} for i in range(150)]
+        self.assertTrue(
+            viewport_ais_coverage_gap(rows, PERSIAN_GULF_CORE_BBOX, worker_ok=True),
+        )
+        self.assertFalse(
+            viewport_ais_coverage_gap(rows, (50.0, -5.0, 62.0, 12.0), worker_ok=True),
+        )
+        self.assertFalse(
+            viewport_ais_coverage_gap(rows, PERSIAN_GULF_CORE_BBOX, worker_ok=False),
+        )
 
     def test_regions_for_worker_watch_mode_always_includes_persian_gulf(self):
         regions = _regions_for_worker_watch_mode("rotating")
@@ -208,7 +232,8 @@ class MaritimeIntelTests(unittest.TestCase):
             self.assertLessEqual(lng, east)
             self.assertTrue(str(row.get("mmsi", "")).startswith("998010"))
 
-    def test_maritime_coastal_demo_merge_decision_api_coastal(self):
+    @mock.patch.dict(os.environ, {"MARITIME_ALLOW_DEMO_SEED": "1"}, clear=False)
+    def test_maritime_coastal_demo_merge_decision_dev_coastal_opt_in(self):
         live = {"persian_gulf_hormuz": 50, "gulf_of_guinea": 50}
         d = maritime_coastal_demo_merge_decision(
             live_counts=live,
@@ -223,6 +248,7 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertTrue(d["merge_gulf"])
         self.assertEqual(len(d["merge_africa_region_ids"]), len(MARITIME_COASTAL_DEMO_AFRICA_SPECS))
 
+    @mock.patch.dict(os.environ, {"MARITIME_ALLOW_DEMO_SEED": "1"}, clear=False)
     def test_maritime_coastal_demo_merge_decision_env_coastal_sparse(self):
         live = {
             "persian_gulf_hormuz": 2,
@@ -247,6 +273,7 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertIn("red_sea_south", d["merge_africa_region_ids"])
         self.assertNotIn("mozambique_channel", d["merge_africa_region_ids"])
 
+    @mock.patch.dict(os.environ, {"MARITIME_ALLOW_DEMO_SEED": "1"}, clear=False)
     def test_maritime_coastal_demo_merge_decision_gulf_only_env(self):
         live = {"persian_gulf_hormuz": 0, "gulf_of_guinea": 0}
         d = maritime_coastal_demo_merge_decision(
@@ -319,6 +346,27 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(filtered[0]["mmsi"], "1")
         self.assertEqual(len(filter_maritime_rows_by_bbox(rows, None)), 2)
 
+    def test_maritime_coastal_demo_merge_decision_blocked_without_allow_flag(self):
+        live = {"persian_gulf_hormuz": 0, "gulf_of_guinea": 0}
+        with mock.patch.dict(
+            os.environ,
+            {"MARITIME_ALLOW_DEMO_SEED": "0", "MARITIME_COASTAL_DEMO_SEED": "1", "MARITIME_GULF_DEMO_SEED": "1"},
+            clear=False,
+        ):
+            d = maritime_coastal_demo_merge_decision(
+                live_counts=live,
+                reference_ingest_ok=True,
+                coverage_gap_persian_gulf=True,
+                include_coastal_demo=True,
+                include_gulf_demo=True,
+                env_coastal=True,
+                env_gulf_only=True,
+                sparse_threshold=12,
+            )
+        self.assertFalse(d["merge_gulf"])
+        self.assertEqual(d["merge_africa_region_ids"], [])
+
+    @mock.patch.dict(os.environ, {"MARITIME_ALLOW_DEMO_SEED": "1"}, clear=False)
     def test_should_merge_persian_gulf_demo_rows(self):
         self.assertTrue(
             _should_merge_persian_gulf_demo_rows(include_gulf_demo=True, demo_env=False, coverage_gap=False)
@@ -332,6 +380,52 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertFalse(
             _should_merge_persian_gulf_demo_rows(include_gulf_demo=False, demo_env=True, coverage_gap=False)
         )
+
+    def test_should_merge_persian_gulf_demo_rows_blocked_without_allow_flag(self):
+        with mock.patch.dict(
+            os.environ,
+            {"MARITIME_ALLOW_DEMO_SEED": "0", "MARITIME_GULF_DEMO_SEED": "1"},
+            clear=False,
+        ):
+            self.assertFalse(
+                _should_merge_persian_gulf_demo_rows(
+                    include_gulf_demo=True, demo_env=True, coverage_gap=True
+                )
+            )
+
+    def test_build_maritime_vessel_feed_from_rows_no_demo_in_prod_defaults(self):
+        with mock.patch.dict(
+            os.environ,
+            {"MARITIME_ALLOW_DEMO_SEED": "0", "MARITIME_COASTAL_DEMO_SEED": "1", "MARITIME_GULF_DEMO_SEED": "1"},
+            clear=False,
+        ):
+            response = _build_maritime_vessel_feed_from_rows(
+                all_rows=[],
+                status={
+                    "status": "ok",
+                    "source": "AISStream regional watch",
+                    "last_attempt_at": datetime.now(timezone.utc),
+                    "last_success_at": datetime.now(timezone.utc),
+                    "last_error": None,
+                    "snapshot_count": 0,
+                    "metadata": {},
+                },
+                normalized_scope="all_vessels",
+                normalized_max_vessels=60,
+                normalized_window=10,
+                normalized_offset=0,
+                normalized_bbox=PERSIAN_GULF_CORE_BBOX,
+            )
+        self.assertFalse(response.get("persian_gulf_demo_synthetic"))
+        self.assertFalse(response.get("coastal_demo_synthetic"))
+        self.assertEqual(response.get("coastal_demo_regions"), [])
+        self.assertIsNone(response.get("persian_gulf_demo_mode"))
+        demo_mmsi = [
+            str(v.get("mmsi") or "")
+            for v in response.get("vessels") or []
+            if str(v.get("mmsi") or "").startswith("999") or str(v.get("mmsi") or "").startswith("998")
+        ]
+        self.assertEqual(demo_mmsi, [])
 
     def test_stored_feed_response_marks_fresh_worker_snapshots_live(self):
         now = datetime.now(timezone.utc)
@@ -377,6 +471,40 @@ class MaritimeIntelTests(unittest.TestCase):
         self.assertEqual(response["worker"]["status"], "ok")
         self.assertEqual(response["vessels"][0]["last_seen_at"], now.isoformat())
 
+    def test_stored_feed_response_keeps_ship_type_from_payload_when_row_column_null(self):
+        now = datetime.now(timezone.utc)
+        response = _build_stored_feed_response(
+            rows=[
+                {
+                    "mmsi": "987654321",
+                    "vessel_name": "Payload Tanker",
+                    "lat": 25.0,
+                    "lng": 52.0,
+                    "observed_at": now,
+                    "source_label": "AISStream",
+                    "source_url": "https://aisstream.io/documentation",
+                    "ship_type_code": None,
+                    "ship_type_label": None,
+                    "payload": {
+                        "id": "ais:987654321",
+                        "ship_type_code": 82,
+                        "ship_type_label": "Tanker",
+                    },
+                    "last_seen_at": now,
+                }
+            ],
+            status={"status": "ok", "last_success_at": now, "metadata": {}},
+            max_vessels=10,
+            offset=0,
+            total_available=1,
+            capture_window_seconds=10,
+            vessel_scope="all_vessels",
+            bbox=None,
+        )
+        vessel = response["vessels"][0]
+        self.assertEqual(vessel["ship_type_code"], 82)
+        self.assertEqual(vessel["ship_type_label"], "Tanker")
+
     def test_stored_feed_response_exposes_stale_worker_snapshots(self):
         old_seen = datetime.now(timezone.utc) - timedelta(hours=2)
         response = _build_stored_feed_response(
@@ -399,6 +527,7 @@ class MaritimeIntelTests(unittest.TestCase):
         )
 
         self.assertFalse(response["live_positions_enabled"])
+        self.assertIn("aisstream_configured", response)
         self.assertTrue(response["stale"])
         self.assertEqual(response["total_available"], 0)
         self.assertEqual(response["returned_count"], 0)

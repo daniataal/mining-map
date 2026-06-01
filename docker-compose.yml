@@ -1,6 +1,5 @@
-# Local stack: MARITIME_COASTAL_DEMO_SEED defaults to 1 so Hormuz + Africa-adjacent reference
-# boxes merge synthetic demo traffic when live AIS counts are low (see backend maritime_intel).
-# Legacy MARITIME_GULF_DEMO_SEED still supported; set both to 0 in .env for production-like behavior.
+# Local stack: maritime demo seeds default to 0 (honest AIS). Synthetic demos require
+# MARITIME_ALLOW_DEMO_SEED=1 plus MARITIME_*_DEMO_SEED in .env (dev-only; not used in prod compose).
 
 services:
   backend:
@@ -8,6 +7,13 @@ services:
       context: ./backend
     container_name: mining-backend
     restart: always
+    # Secrets: prefer backend.env (production) or repo-root .env (local). Do not pass empty
+    # AISSTREAM_API_KEY=${AISSTREAM_API_KEY} here — that overrides env_file with a blank value.
+    env_file:
+      - path: .env
+        required: false
+      - path: backend.env
+        required: false
     ports:
       - "8000:8000"
     environment:
@@ -18,8 +24,8 @@ services:
       - DB_PASSWORD=password
       # AI provider runtime config from .env. Keep secrets out of this file.
       # Safe check: docker compose exec backend python -c "import os; print({k: bool(os.getenv(k)) for k in ('GROQ_API_KEY','OPENROUTER_API_KEY','DISABLE_POLLINATIONS_FALLBACK')})"
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-${GROQ_AI_API_KEY:-}}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-${OPENROUTER_AI_API_KEY:-}}
       - AI_HTTP_TIMEOUT_SECONDS=${AI_HTTP_TIMEOUT_SECONDS:-18}
       - AI_HTTP_MAX_RETRIES=${AI_HTTP_MAX_RETRIES:-1}
       - AI_ANALYSIS_DEADLINE_SECONDS=${AI_ANALYSIS_DEADLINE_SECONDS:-45}
@@ -28,20 +34,19 @@ services:
       - POLLINATIONS_HTTP_MAX_RETRIES=${POLLINATIONS_HTTP_MAX_RETRIES:-0}
       - DISABLE_POLLINATIONS_FALLBACK=${DISABLE_POLLINATIONS_FALLBACK:-}
       - SECRET_KEY=${SECRET_KEY}
-      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
       # Petroleum Mapbox tiles (oil/gas pipelines). GitHub Actions secret: MAPBOX_ACCESS_TOKEN
       - MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN:-}
       - OILMAP_MAPBOX_TOKEN=${OILMAP_MAPBOX_TOKEN:-}
       # Optional geocoding; same Mapbox token usually works if unset
       - MAPBOX_GEOCODING_TOKEN=${MAPBOX_GEOCODING_TOKEN:-}
-      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-1}
+      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-0}
       - MARITIME_MEMORY_CACHE_TTL_SECONDS=${MARITIME_MEMORY_CACHE_TTL_SECONDS:-10}
       - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
       - AIS_MAX_VESSELS=${AIS_MAX_VESSELS:-15000}
       - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-600}
       - MARITIME_SNAPSHOT_TTL_SEC=${MARITIME_SNAPSHOT_TTL_SEC:-600}
       - MARITIME_SNAPSHOT_REDIS_KEY=${MARITIME_SNAPSHOT_REDIS_KEY:-maritime:snapshot:global}
-      - MARITIME_COASTAL_DEMO_SEED=${MARITIME_COASTAL_DEMO_SEED:-1}
+      - MARITIME_COASTAL_DEMO_SEED=${MARITIME_COASTAL_DEMO_SEED:-0}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
@@ -50,6 +55,21 @@ services:
       - COMTRADE_API_KEY_SECONDARY=${COMTRADE_API_KEY_SECONDARY:-}
       - COMTRADE_SYNC_ENABLED=${COMTRADE_SYNC_ENABLED:-true}
       - PETROLEUM_DISABLE_MAPBOX=${PETROLEUM_DISABLE_MAPBOX:-}
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_TIMEOUT_SECONDS=${STORAGE_OVERPASS_TIMEOUT_SECONDS:-120}
+      - STORAGE_OVERPASS_RETRY_ATTEMPTS=${STORAGE_OVERPASS_RETRY_ATTEMPTS:-3}
+      - STORAGE_OVERPASS_TILE_WORKERS=${STORAGE_OVERPASS_TILE_WORKERS:-3}
+      - STORAGE_SKIP_LIVE_OVERPASS=${STORAGE_SKIP_LIVE_OVERPASS:-true}
+      - OIL_INTEL_API_URL=${OIL_INTEL_API_URL:-http://oil-live-intel:8095}
+      - OIL_INTEL_INTERNAL_KEY=${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
+      - OIL_GRAPH_SYNC_ENABLED=${OIL_GRAPH_SYNC_ENABLED:-true}
+      - OIL_GRAPH_SYNC_ON_STARTUP=${OIL_GRAPH_SYNC_ON_STARTUP:-false}
+      - OIL_GRAPH_STORAGE_IMPORT_CAP=${OIL_GRAPH_STORAGE_IMPORT_CAP:-5000}
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
     healthcheck:
       test:
         [
@@ -100,46 +120,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # maritime-worker: continuous AIS ingest (start with: docker compose up -d maritime-worker)
-  maritime-worker:
-    build:
-      context: ./backend
-    container_name: mining-maritime-worker
-    restart: always
-    command: ["python", "maritime_worker.py"]
-    mem_limit: ${MARITIME_WORKER_MEM_LIMIT:-1g}
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=mining_db
-      - DB_USER=postgres
-      - DB_PASSWORD=password
-      - AISSTREAM_API_KEY=${AISSTREAM_API_KEY}
-      - MARITIME_WORKER_INTERVAL_SECONDS=${MARITIME_WORKER_INTERVAL_SECONDS:-30}
-      - MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=${MARITIME_WORKER_CAPTURE_WINDOW_SECONDS:-25}
-      - MARITIME_WORKER_MAX_VESSELS=${MARITIME_WORKER_MAX_VESSELS:-15000}
-      - MARITIME_WORKER_SCOPE=${MARITIME_WORKER_SCOPE:-all_vessels}
-      - MARITIME_WORKER_WATCH_MODE=${MARITIME_WORKER_WATCH_MODE:-all_regions}
-      - MARITIME_ALWAYS_ON_REGION_IDS=${MARITIME_ALWAYS_ON_REGION_IDS:-persian_gulf,arabian_gulf,malacca,east_mediterranean}
-      - MARITIME_GULF_SUPPLEMENT_MAX_VESSELS=${MARITIME_GULF_SUPPLEMENT_MAX_VESSELS:-4000}
-      - MARITIME_GULF_DEMO_SEED=${MARITIME_GULF_DEMO_SEED:-1}
-      - MARITIME_AIS_SEED_FILE=${MARITIME_AIS_SEED_FILE:-}
-      - AIS_MAX_VESSELS=${AIS_MAX_VESSELS:-15000}
-      - AIS_MAX_CAPTURE_WINDOW_SECONDS=${AIS_MAX_CAPTURE_WINDOW_SECONDS:-30}
-      - MARITIME_SNAPSHOT_TTL_SECONDS=${MARITIME_SNAPSHOT_TTL_SECONDS:-600}
-      - MARITIME_SNAPSHOT_TTL_SEC=${MARITIME_SNAPSHOT_TTL_SEC:-600}
-      - MARITIME_SNAPSHOT_REDIS_KEY=${MARITIME_SNAPSHOT_REDIS_KEY:-maritime:snapshot:global}
-      - MARITIME_SNAPSHOT_RETENTION_SECONDS=${MARITIME_SNAPSHOT_RETENTION_SECONDS:-86400}
-      - MARITIME_MEMORY_CACHE_MAX_VESSELS=${MARITIME_MEMORY_CACHE_MAX_VESSELS:-20000}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-mining_redis_dev}
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
+  # Live AIS ingest: oil-live-intel-worker (Go) — start with: docker compose up -d oil-live-intel-worker
   license-sync-worker:
     build:
       context: ./backend
@@ -186,25 +167,6 @@ services:
       db:
         condition: service_healthy
 
-  petroleum-osm-worker:
-    build:
-      context: ./backend
-    container_name: mining-petroleum-osm-worker
-    restart: always
-    command: ["python", "petroleum_osm_sync_worker.py"]
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=mining_db
-      - DB_USER=postgres
-      - DB_PASSWORD=password
-      - PETROLEUM_OSM_SYNC_ENABLED=${PETROLEUM_OSM_SYNC_ENABLED:-true}
-      - PETROLEUM_OSM_SYNC_INTERVAL_SECONDS=${PETROLEUM_OSM_SYNC_INTERVAL_SECONDS:-86400}
-      - PETROLEUM_OSM_SYNC_BACKOFF_SECONDS=${PETROLEUM_OSM_SYNC_BACKOFF_SECONDS:-3600}
-      - PETROLEUM_OSM_TILE_SLEEP_SECONDS=${PETROLEUM_OSM_TILE_SLEEP_SECONDS:-2.0}
-    depends_on:
-      db:
-        condition: service_healthy
 
   ted-procurement-worker:
     build:
@@ -248,66 +210,81 @@ services:
       db:
         condition: service_healthy
 
-  sweden-mining-worker:
+  oil-live-graph-sync-worker:
     build:
       context: ./backend
-    container_name: mining-sweden-mining-worker
+    container_name: mining-oil-live-graph-sync-worker
     restart: always
-    command: ["python", "sweden_mining_sync_worker.py"]
+    command: ["python", "oil_live_graph_sync_worker.py"]
     environment:
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=mining_db
       - DB_USER=postgres
       - DB_PASSWORD=password
-      - SGU_MINING_SYNC_ENABLED=${SGU_MINING_SYNC_ENABLED:-true}
-      - SGU_SYNC_INTERVAL_SECONDS=${SGU_SYNC_INTERVAL_SECONDS:-604800}
-      - SGU_SYNC_BACKOFF_SECONDS=${SGU_SYNC_BACKOFF_SECONDS:-3600}
-      - SGU_USER_AGENT=${SGU_USER_AGENT:-MeridianMiningMap/1.0 (SGU open data)}
+      - OIL_GRAPH_SYNC_ENABLED=${OIL_GRAPH_SYNC_ENABLED:-true}
+      - OIL_GRAPH_SYNC_INTERVAL_SECONDS=${OIL_GRAPH_SYNC_INTERVAL_SECONDS:-43200}
+      - OIL_GRAPH_SYNC_BACKOFF_SECONDS=${OIL_GRAPH_SYNC_BACKOFF_SECONDS:-3600}
+      - OIL_GRAPH_STORAGE_IMPORT_CAP=${OIL_GRAPH_STORAGE_IMPORT_CAP:-5000}
+      - OIL_INTEL_API_URL=${OIL_INTEL_API_URL:-http://oil-live-intel:8095}
+      - OIL_INTEL_INTERNAL_KEY=${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+      - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
+      - UK_TRADE_MANIFEST_SYNC_ENABLED=true
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/uk_trade_manifests:/data/uk_trade_manifests:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      oil-live-intel:
+        condition: service_healthy
+
+  eia-historic-sync-worker:
+    build:
+      context: ./backend
+    container_name: mining-eia-historic-sync-worker
+    restart: always
+    command: ["python", "eia_historic_sync_worker.py"]
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=mining_db
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - EIA_DOWNLOADS_DIR=/data/eia_downloads
+      - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+      - EIA_HISTORIC_SYNC_ENABLED=${EIA_HISTORIC_SYNC_ENABLED:-true}
+      - EIA_HISTORIC_SYNC_INTERVAL_SECONDS=${EIA_HISTORIC_SYNC_INTERVAL_SECONDS:-21600}
+      - EIA_HISTORIC_SYNC_BACKOFF_SECONDS=${EIA_HISTORIC_SYNC_BACKOFF_SECONDS:-1800}
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
     depends_on:
       db:
         condition: service_healthy
 
-  arcgis-probe-worker:
+  uk-trade-manifest-sync-worker:
     build:
       context: ./backend
-    container_name: mining-arcgis-probe-worker
+    container_name: mining-uk-trade-manifest-sync-worker
     restart: always
-    command: ["python", "arcgis_probe_sync_worker.py"]
+    command: ["python", "uk_trade_manifest_sync_worker.py"]
     environment:
       - DB_HOST=db
       - DB_PORT=5432
       - DB_NAME=mining_db
       - DB_USER=postgres
       - DB_PASSWORD=password
-      - PROBE_SYNC_ENABLED=${PROBE_SYNC_ENABLED:-true}
-      - PROBE_SYNC_INTERVAL_SECONDS=${PROBE_SYNC_INTERVAL_SECONDS:-604800}
-      - PROBE_SYNC_BACKOFF_SECONDS=${PROBE_SYNC_BACKOFF_SECONDS:-3600}
-      - KZ_ARCGIS_PROBE_URL=${KZ_ARCGIS_PROBE_URL:-}
-      - PH_MGB_ARCGIS_TOKEN=${PH_MGB_ARCGIS_TOKEN:-}
+      - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
+      - UK_TRADE_MANIFEST_SYNC_ENABLED=true
+      - UK_MANIFEST_SYNC_INTERVAL_SECONDS=${UK_MANIFEST_SYNC_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./data/uk_trade_manifests:/data/uk_trade_manifests:ro
     depends_on:
       db:
         condition: service_healthy
 
-  kazakhstan-mining-worker:
-    build:
-      context: ./backend
-    container_name: mining-kazakhstan-mining-worker
-    restart: always
-    command: ["python", "kazakhstan_mining_sync_worker.py"]
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=mining_db
-      - DB_USER=postgres
-      - DB_PASSWORD=password
-      - KZ_EGOV_API_KEY=${KZ_EGOV_API_KEY:-}
-      - KZ_EGOV_API_BASE=${KZ_EGOV_API_BASE:-https://data.egov.kz/api/v4}
-      - KZ_EGOV_SYNC_INTERVAL_SECONDS=${KZ_EGOV_SYNC_INTERVAL_SECONDS:-86400}
-      - KZ_EGOV_SYNC_BACKOFF_SECONDS=${KZ_EGOV_SYNC_BACKOFF_SECONDS:-3600}
-    depends_on:
-      db:
-        condition: service_healthy
 
   redis:
     image: redis:alpine
@@ -342,11 +319,152 @@ services:
     environment:
       VITE_API_BASE: ${VITE_API_BASE:-}
       VITE_ROUTE_SERVICE_URL: ${VITE_ROUTE_SERVICE_URL:-}
+      OIL_INTEL_PROXY_TARGET: http://oil-live-intel:8095
+      BACKEND_PROXY_TARGET: http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
       route-service:
         condition: service_healthy
+
+  oil-live-intel:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-intel
+    restart: unless-stopped
+    # Docker embedded DNS (127.0.0.11) can fail external lookups ("server misbehaving");
+    # keep it first for compose service names (db), fall back to public resolvers.
+    dns:
+      - 127.0.0.11
+      - 8.8.8.8
+      - 1.1.1.1
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8095:8095"
+    environment:
+      OIL_INTEL_PORT: "8095"
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
+      ENABLE_AIS: ${OIL_INTEL_ENABLE_AIS:-true}
+      ENABLE_EIA: ${OIL_INTEL_ENABLE_EIA:-true}
+      ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
+      ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
+      EXISTING_BACKEND_URL: "http://backend:8000"
+      SUPPLIER_CREATE_ENDPOINT: "/licenses"
+      OIL_INTEL_SEED_ON_STARTUP: "true"
+      OIL_INTEL_INTERNAL_KEY: ${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
+      OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-true}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      # ShipVault registry enrichment — secrets (EMAIL/PASSWORD/FIREBASE_API_KEY/BEARER_TOKEN) via env_file only.
+      SHIPVAULT_BASE_URL: ${SHIPVAULT_BASE_URL:-https://shipvaultapi-gjb8c.ondigitalocean.app}
+      SHIPVAULT_CACHE_TTL_DAYS: ${SHIPVAULT_CACHE_TTL_DAYS:-7}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:8095/api/oil-live/health",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  oil-live-intel-worker:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-intel-worker
+    restart: unless-stopped
+    entrypoint: ["/app/worker"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      OIL_INTEL_API_URL: "http://oil-live-intel:8095"
+      OIL_INTEL_INTERNAL_KEY: ${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
+      OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-false}
+      MARITIME_SSL_AUTO_FALLBACK: ${MARITIME_SSL_AUTO_FALLBACK:-1}
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
+      ENABLE_AIS: ${OIL_INTEL_ENABLE_AIS:-true}
+      ENABLE_EIA: ${OIL_INTEL_ENABLE_EIA:-true}
+      ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
+      ENABLE_OSM_IMPORT: ${OIL_INTEL_ENABLE_OSM_IMPORT:-false}
+      OIL_INTEL_SEED_ON_STARTUP: "false"
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      # Go graph-sync cold steps (Python oil-live-graph-sync-worker remains orchestrator):
+      OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS: ${OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS:-false}
+      OIL_GRAPH_SYNC_GO_LICENSES: ${OIL_GRAPH_SYNC_GO_LICENSES:-false}
+      OIL_GRAPH_SYNC_GO_TRADE_FLOWS: ${OIL_GRAPH_SYNC_GO_TRADE_FLOWS:-false}
+      OIL_GRAPH_SYNC_GO_PORT_CALLS: ${OIL_GRAPH_SYNC_GO_PORT_CALLS:-false}
+      OIL_GRAPH_SYNC_GO_TED: ${OIL_GRAPH_SYNC_GO_TED:-false}
+      OIL_GRAPH_SYNC_GO_GOV_AWARDS: ${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-false}
+      OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE: ${OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE:-false}
+      OIL_GRAPH_SYNC_INTERVAL_SECONDS: ${OIL_GRAPH_SYNC_INTERVAL_SECONDS:-86400}
+      OIL_GRAPH_SYNC_BACKOFF_SECONDS: ${OIL_GRAPH_SYNC_BACKOFF_SECONDS:-3600}
+    depends_on:
+      db:
+        condition: service_healthy
+      oil-live-intel:
+        condition: service_healthy
+
+  # oil-live-search-indexer: maintains the Elasticsearch indices used by
+  # /api/oil-live/search. Full sync on startup; incremental sync every
+  # SEARCH_INDEXER_INTERVAL_SECONDS (default 300s).
+  oil-live-search-indexer:
+    build:
+      context: ./oil-live-intel
+    container_name: oil-live-search-indexer
+    restart: unless-stopped
+    entrypoint: ["/app/search-indexer"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@db:5432/mining_db?sslmode=disable"
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      SEARCH_INDEXER_INTERVAL_SECONDS: ${SEARCH_INDEXER_INTERVAL_SECONDS:-300}
+      OIL_INTEL_SEED_ON_STARTUP: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  # elasticsearch: search index layer for MCRs, companies, terminals, vessels.
+  # Single-node, security disabled — local dev only. Use a managed cluster or
+  # full xpack security in production.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: mining-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - meridian_elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9200/_cluster/health | grep -E '\"status\":\"(green|yellow)\"' >/dev/null"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   db:
     build:
@@ -388,3 +506,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  meridian_elasticsearch_data:
