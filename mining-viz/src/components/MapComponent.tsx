@@ -10,8 +10,10 @@ import {
     useState,
     type ReactNode,
 } from 'react';
-import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useQuery } from '@tanstack/react-query';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
+import { useOilLiveMapSyncStatus } from '../hooks/useOilLiveMapSyncStatus';
+import { useMapLayerViewports } from '../hooks/useMapLayerViewports';
 import { useTheme } from 'next-themes';
 import {
     MapContainer,
@@ -75,7 +77,6 @@ import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
 import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
 import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
-import { getOilLiveSyncStatus } from '../api/oilLiveApi';
 import {
   LIVE_DATA_HUB_BOUNDS,
   LIVE_DATA_DEFAULT_LAYERS,
@@ -118,9 +119,10 @@ import { applyCollocationJitter } from '../lib/geo';
 import { isLiveDealClientClusterData } from '../lib/liveDealMap/liveDealMapLod';
 import type { LiveDealFeatureKind, LiveDealMapFeature } from '../lib/liveDealMap/liveDealMapTypes';
 import {
-  countriesWithVisibleLicenses,
-  countryLicenseCounts,
+  countryLicenseCountsForBorders,
+  countriesForMapBorders,
 } from '../lib/countriesWithVisibleLicenses';
+import { isCountryLicenseSummary, LICENSE_MAP_BORDER_COUNTRY_CAP } from '../lib/licenseCountrySummary';
 import {
   createLicenseMarkerIconCache,
   markerIconSignature,
@@ -292,8 +294,10 @@ interface MapComponentProps {
   onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds | null) => void;
   /** Map zoom for license clustering and overlay LOD. */
   onLicenseMapZoomChange?: (zoom: number) => void;
-  /** After server-cluster drill fly completes — refetch viewport licenses. */
-  onLicenseClusterDrillComplete?: () => void;
+  /** Current map zoom for license clustering (from App). */
+  licenseMapZoom?: number;
+  /** After cluster drill fly completes — refetch with expanded grid-cell bbox. */
+  onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -423,17 +427,21 @@ function ClusterGroupRefBridge({
     clusterGroupRef,
     onSingleMarkerClusterClick,
     onLicenseMapZoomChange,
+    onLicenseClusterDrillComplete,
 }: {
     clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
     onSingleMarkerClusterClick?: (marker: L.Marker) => void;
     onLicenseMapZoomChange?: (zoom: number) => void;
+    onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
 }) {
     const map = useMap();
     const { layerContainer } = useLeafletContext();
     const onSingleMarkerClusterClickRef = useRef(onSingleMarkerClusterClick);
     const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
+    const onLicenseClusterDrillCompleteRef = useRef(onLicenseClusterDrillComplete);
     onSingleMarkerClusterClickRef.current = onSingleMarkerClusterClick;
     onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
+    onLicenseClusterDrillCompleteRef.current = onLicenseClusterDrillComplete;
     useEffect(() => {
         const group = asLicenseMarkerClusterGroup(layerContainer);
         clusterGroupRef.current = group;
@@ -451,6 +459,7 @@ function ClusterGroupRefBridge({
             if (children.length > 1) {
                 L.DomEvent.stopPropagation(event);
                 const bounds = L.latLngBounds(children.map((m) => m.getLatLng()));
+                const padded = bounds.pad(0.15);
                 const fitMaxZoom = Math.max(
                     clusterTargetZoom(map.getZoom()),
                     Math.min(
@@ -459,12 +468,20 @@ function ClusterGroupRefBridge({
                     ),
                 );
                 map.stop();
-                map.flyToBounds(bounds.pad(0.15), {
+                map.flyToBounds(padded, {
                     maxZoom: fitMaxZoom,
                     duration: 0.55,
                     padding: [32, 32],
                 });
-                const syncZoom = () => onLicenseMapZoomChangeRef.current?.(map.getZoom());
+                const syncZoom = () => {
+                    onLicenseMapZoomChangeRef.current?.(map.getZoom());
+                    onLicenseClusterDrillCompleteRef.current?.({
+                        south: padded.getSouth(),
+                        west: padded.getWest(),
+                        north: padded.getNorth(),
+                        east: padded.getEast(),
+                    });
+                };
                 map.once('moveend', syncZoom);
             }
         };
@@ -519,7 +536,7 @@ const LicenseClusterFlyEffect = ({
     cluster: PendingLicenseClusterFly | null;
     onLicenseMapZoomChange?: (zoom: number) => void;
     onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
-    onLicenseClusterDrillComplete?: () => void;
+    onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
     onComplete: () => void;
 }) => {
     const map = useMap();
@@ -583,7 +600,7 @@ const LicenseClusterFlyEffect = ({
                 });
             }
             onLicenseMapZoomChangeRef.current?.(zoom);
-            onLicenseClusterDrillCompleteRef.current?.();
+            onLicenseClusterDrillCompleteRef.current?.(flyBox);
             onCompleteRef.current();
         };
         map.stop();
@@ -898,6 +915,7 @@ export default function MapComponent({
   countryFocusBoundsTrigger = 0,
   onLicenseMapViewportChange,
   onLicenseMapZoomChange,
+  licenseMapZoom,
   onLicenseClusterDrillComplete,
   storageEntities = [],
   onStorageInViewCountChange,
@@ -956,12 +974,7 @@ export default function MapComponent({
         data: oilLiveSyncStatus,
         isError: oilLiveSyncStatusError,
         isPending: oilLiveSyncStatusPending,
-    } = useQuery({
-        queryKey: ['oil-live-sync-status-map'],
-        queryFn: getOilLiveSyncStatus,
-        enabled: isLiveDataView && oilLiveOverlaysEnabled,
-        staleTime: 60_000,
-    });
+    } = useOilLiveMapSyncStatus(isLiveDataView && oilLiveOverlaysEnabled);
     const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
@@ -970,9 +983,18 @@ export default function MapComponent({
     const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
     const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
     const prevSelectedIdRef = useRef<string | null>(null);
-    const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
-    const [oilGasMapViewport, setOilGasMapViewport] = useState<MaritimeViewportBounds | null>(null);
-    const [liveDataMapViewport, setLiveDataMapViewport] = useState<MaritimeViewportBounds | null>(null);
+    const {
+        currentVisibleViewport,
+        oilGasMapViewport,
+        liveDataMapViewport,
+        maritimeViewport,
+        licenseViewport,
+        setCurrentVisibleViewport,
+        setOilGasMapViewport,
+        setLiveDataMapViewport,
+        setMaritimeViewport,
+        setLicenseViewport,
+    } = useMapLayerViewports();
     const [governmentAisCoverageEnabled, setGovernmentAisCoverageEnabled] = useState(false);
 
     const isMobileDevice = useMemo(() => {
@@ -1001,12 +1023,10 @@ export default function MapComponent({
         [onVesselFiltersChange, vesselFilters],
     );
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
-    const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
-    const [licenseViewport, setLicenseViewport] = useState<MaritimeViewportBounds | null>(null);
     const [maritimeTankerView, setMaritimeTankerView] = useState<MaritimeTankerView>('worldwide');
     const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<PendingLicenseClusterFly | null>(
         null,
@@ -1024,7 +1044,7 @@ export default function MapComponent({
             setLicenseViewport(bbox);
             onLicenseMapViewportChange?.(bbox);
         },
-        [onLicenseMapViewportChange],
+        [onLicenseMapViewportChange, setLicenseViewport],
     );
     const handleLicenseZoomChange = useCallback(
         (zoom: number) => {
@@ -1036,7 +1056,22 @@ export default function MapComponent({
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
-    const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+    /** Re-jitter only when ids/positions change — avoids marker flash on refetch-with-same-rows. */
+    const licenseDisplaySignature = useMemo(
+        () =>
+            processedData
+                .map(
+                    (r) =>
+                        `${r.id}|${r.lat ?? ''}|${r.lng ?? ''}|${r.mapClusterCount ?? ''}|${r._displayLat ?? ''}|${r._displayLng ?? ''}`,
+                )
+                .join('\n'),
+        [processedData],
+    );
+    const displayData = useMemo(
+        () => applyCollocationJitter(processedData),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- signature captures map-relevant row changes
+        [licenseDisplaySignature],
+    );
 
     const {
         data: maritimeFeed,
@@ -1340,30 +1375,42 @@ export default function MapComponent({
         prevSelectedIdRef.current = selectedItem.id;
     }, [selectedItem?.id, setMarkerSelectedVisual]);
 
-    const borderCountries = useMemo(() => {
+    /** Same rows as markers (post-jitter) — borders must not use a separate ranked list. */
+    const { borderCountries, borderCountriesCapped } = useMemo(() => {
         if (isRoutePlannerView) {
-            return [];
+            return { borderCountries: [] as string[], borderCountriesCapped: false };
         }
         const focus = countryFocusCountry?.trim();
         if (focus) {
-            return [focus].sort((a, b) => a.localeCompare(b));
+            return { borderCountries: [focus], borderCountriesCapped: false };
         }
-        // Outlines follow the same filtered license set as map markers (search + facet filters).
-        const MAX_BORDER_COUNTRIES = 30;
-        const all = countriesWithVisibleLicenses(processedData);
-        if (all.length <= MAX_BORDER_COUNTRIES) return all;
-        return countryLicenseCounts(processedData)
-            .slice(0, MAX_BORDER_COUNTRIES)
-            .map((row) => row.country);
-    }, [processedData, countryFocusCountry, isRoutePlannerView]);
+        const borderList = countriesForMapBorders(displayData, LICENSE_MAP_BORDER_COUNTRY_CAP);
+        const ranked = countryLicenseCountsForBorders(displayData);
+        const capped = ranked.length > LICENSE_MAP_BORDER_COUNTRY_CAP;
+        return {
+            borderCountries: borderList,
+            borderCountriesCapped: capped,
+        };
+    }, [countryFocusCountry, displayData, isRoutePlannerView]);
 
-    const { data: filteredGeoJson } = useQuery({
-        queryKey: ['country-borders', borderCountries],
+    const borderCountriesKey = useMemo(
+        () => borderCountries.slice().sort((a, b) => a.localeCompare(b)).join('|'),
+        [borderCountries],
+    );
+
+    const {
+        data: filteredGeoJson,
+        isPlaceholderData: borderGeoJsonPlaceholder,
+    } = useQuery({
+        queryKey: ['country-borders', borderCountriesKey],
         queryFn: () => getCountryBorders(borderCountries),
         enabled: borderCountries.length > 0,
         staleTime: 1000 * 60 * 60 * 24,
         gcTime: 1000 * 60 * 60 * 24 * 7,
+        refetchOnWindowFocus: false,
     });
+    const borderGeoJsonMatchesMarkers =
+        Boolean(filteredGeoJson) && !borderGeoJsonPlaceholder;
 
     /** High-contrast strokes on dark Carto tiles; cyan at 50% opacity + weight 1 was nearly invisible. */
     const countryBorderPathStyle = useMemo(
@@ -1542,7 +1589,10 @@ export default function MapComponent({
             const markerIcon = licenseMarkerIcons.get(item.id);
             if (!markerIcon) continue;
             const isServerCluster = isServerLicenseCluster(item);
-            if (!isServerCluster && serverClusterMode) continue;
+            const hidePointsForServerClusters =
+                serverClusterMode &&
+                (licenseMapZoom == null || licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM);
+            if (!isServerCluster && hidePointsForServerClusters) continue;
             const marker = (
                 <Marker
                     key={item.id}
@@ -1571,7 +1621,9 @@ export default function MapComponent({
                     {isServerCluster ? (
                         <Tooltip direction="top" offset={[0, -20]} opacity={1}>
                             <span className="text-[10px] font-black uppercase text-white tracking-widest">
-                                Zoom in — {item.mapClusterCount ?? ''} licenses
+                                {isCountryLicenseSummary(item)
+                                    ? `${item.country} — ${item.mapClusterCount ?? ''} licenses`
+                                    : `Zoom in — ${item.mapClusterCount ?? ''} licenses`}
                             </span>
                         </Tooltip>
                     ) : (
@@ -1604,6 +1656,7 @@ export default function MapComponent({
         };
     }, [
         licenseMarkerIcons,
+        licenseMapZoom,
         licenseServerClusterMode,
         mapDisplayData,
         onSelectMaritimeVessel,
@@ -1762,20 +1815,24 @@ export default function MapComponent({
                 </div>
             )}
 
-            {isOilAndGasView &&
-                isMaritimeLayerEnabled &&
-                maritimeFeed?.aisstream_persian_gulf_coverage_gap && (
+            {isMaritimeLayerEnabled &&
+                ((isMaritimeMapView &&
+                    (maritimeTankerView === 'persian_gulf' || maritimeTankerView === 'strait_of_hormuz')) ||
+                    (isOilAndGasView && maritimeFeed?.aisstream_persian_gulf_coverage_gap) ||
+                    (isLiveDataView &&
+                        oilLiveOverlaysEnabled &&
+                        viewportOverlapsPersianGulfHub(liveDataMapViewport))) && (
                 <div
                     className="pointer-events-auto absolute left-3 right-3 top-3 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:max-w-xl"
                     role="status"
                 >
                     <p className="font-black uppercase tracking-widest text-[9px] text-amber-700 dark:text-amber-200">
-                        {t('פער AIS במפרץ הפרסי', 'Persian Gulf AIS upstream gap')}
+                        {t('כיסוי AIS מוגבל — מפרץ / הורמוז', 'Limited AIS coverage — Gulf / Hormuz')}
                     </p>
                     <p className="mt-1">
                         {t(
-                            'AISStream מדלג על המפרץ — הריצו oil-live-intel-worker והרחיבו watches; בדקו סטטוס סנכרון ב־Maritime Watch.',
-                            'AISStream skips the Gulf — run oil-live-intel-worker and expand watches; check sync status in Maritime Watch.',
+                            'מקור AISStream דליל במפרץ הפרסי ובמפרץ עומאן — היעדר מכליות על המפה אינו הוכחה ליעדר תנועה. הריצו oil-live-intel-worker, הרחיבו maritime_watch_zones, ובדקו /api/oil-live/coverage.',
+                            'AISStream is sparse in the Persian Gulf and Gulf of Oman — an empty map is not proof of no traffic. Run oil-live-intel-worker, expand maritime_watch_zones, and check /api/oil-live/coverage.',
                         )}
                     </p>
                 </div>
@@ -1843,6 +1900,7 @@ export default function MapComponent({
                         eiaHistoricRowCount={oilLiveSyncStatus?.eia_historic_import_count ?? null}
                         governmentAisCoverageEnabled={governmentAisCoverageEnabled}
                         onGovernmentAisCoverageChange={setGovernmentAisCoverageEnabled}
+                        mapZoom={overlayMapZoom}
                     />
                 </div>
             )}
@@ -2376,6 +2434,32 @@ export default function MapComponent({
                         </p>
                     </div>
                 )}
+                {licenseServerClusterMode &&
+                    licenseMapZoom != null &&
+                    licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
+                    displayData.some(isCountryLicenseSummary) && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] max-w-md bg-slate-950/90 text-slate-100 border border-cyan-500/25 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
+                            {t('תצוגת עולם — סיכום לפי מדינה', 'World view — one marker per country')}
+                        </p>
+                        <p className="text-[10px] text-slate-300 text-center leading-relaxed mt-1">
+                            {t(
+                                'סימן אחד לכל מדינה עם רישיונות בתצוגה; קווי מתאר תואמים לאותן מדינות. התקרבו לזום 8+ לפרטי רישיון.',
+                                'One marker per country with licenses in view; outlines match those countries. Zoom to level 8+ for individual licenses.',
+                            )}
+                        </p>
+                    </div>
+                )}
+                {borderCountriesCapped && borderGeoJsonMatchesMarkers && (
+                    <div className="absolute top-36 left-1/2 -translate-x-1/2 z-[1000] max-w-md bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-xl px-3 py-1.5 shadow-lg backdrop-blur-xl">
+                        <p className="text-[9px] text-slate-400 text-center">
+                            {t(
+                                `קווי מתאר: עד ${LICENSE_MAP_BORDER_COUNTRY_CAP} מדינות עם הכי הרבה רישיונות בתצוגה.`,
+                                `Outlines: up to ${LICENSE_MAP_BORDER_COUNTRY_CAP} countries with the most licenses in view.`,
+                            )}
+                        </p>
+                    </div>
+                )}
                 {isOilAndGasView && onGroundVisible && (
                     <MapZoomTracker
                         onZoomChange={(z) => {
@@ -2415,13 +2499,9 @@ export default function MapComponent({
                     mapFlyTrigger={mapFlyTrigger}
                     markerRefs={markerRefs}
                     clusterGroupRef={clusterGroupRef}
-                    preferCoordinatePopup={
-                        Boolean(
-                            selectedItem &&
-                            useCanvasLicenseMarkers &&
-                            licenseCanvasFeatures.some((feature) => feature.id === selectedItem.id),
-                        )
-                    }
+                    preferCoordinatePopup={Boolean(
+                        selectedItem && !isServerLicenseCluster(selectedItem),
+                    )}
                     userAnnotations={userAnnotations}
                     updateAnnotation={updateAnnotation}
                     deleteLicense={deleteLicense}
@@ -2510,11 +2590,11 @@ export default function MapComponent({
                         </FeatureGroup>
                     </LayersControl.Overlay>
 
-                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
+                    {borderGeoJsonMatchesMarkers && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
                         <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
-                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
-                                data={filteredGeoJson}
+                                key={`country-borders:${isDark ? 'd' : 'l'}:${countryFocusCountry?.trim() ?? 'viewport'}`}
+                                data={filteredGeoJson!}
                                 interactive={false}
                                 style={countryBorderLayerStyle}
                             />
@@ -2658,6 +2738,7 @@ export default function MapComponent({
                                 clusterGroupRef={clusterGroupRef}
                                 onSingleMarkerClusterClick={handleSingleClusterMarkerClick}
                                 onLicenseMapZoomChange={onLicenseMapZoomChange}
+                                onLicenseClusterDrillComplete={onLicenseClusterDrillComplete}
                             />
                             {licensePointMarkers}
                         </MarkerClusterGroup>

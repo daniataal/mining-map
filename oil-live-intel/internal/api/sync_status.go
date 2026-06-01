@@ -62,8 +62,9 @@ type syncStatusSummary struct {
 	DemoPortCallCount             int            `json:"demo_port_call_count"`
 	DemoCargoRecordCount          int            `json:"demo_cargo_record_count"`
 	ProductionCargoRecordCount    int            `json:"production_cargo_record_count"`
-	LastVesselObservationAt       any            `json:"last_vessel_observation_at"`
-	Disclaimer                    string         `json:"disclaimer"`
+	LastVesselObservationAt       any                    `json:"last_vessel_observation_at"`
+	GraphSyncSteps                []GraphSyncStepOutcome `json:"graph_sync_steps,omitempty"`
+	Disclaimer                    string                 `json:"disclaimer"`
 }
 
 func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary {
@@ -186,6 +187,8 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		FROM oil_vessel_position_observations
 	`).Scan(&lastVesselObs)
 
+	graphSteps := queryGraphSyncSteps(ctx, pool)
+
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
 		CompanyCount:                  companyCount,
@@ -222,6 +225,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		DemoCargoRecordCount:          demoCargo,
 		ProductionCargoRecordCount:    productionCargo,
 		LastVesselObservationAt:       formatTimePtr(lastVesselObs),
+		GraphSyncSteps:                graphSteps,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted; demo/seed rows reported separately.",
 	}
 }

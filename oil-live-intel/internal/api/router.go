@@ -36,6 +36,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/licenses/{id}/files", s.GetLicenseFiles)
 		api.Post("/licenses/{id}/files", s.UploadLicenseFile)
 		api.Get("/licenses/map", s.LicenseMapClusters)
+		api.Get("/licenses/country-summary", s.LicenseCountrySummary)
 
 		api.Get("/coverage", s.VesselCoverage)
 		api.Get("/coverage/status", s.CoverageStatus)

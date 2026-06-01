@@ -468,8 +468,17 @@ export type McrTierCount = { bol_tier: string; count: number };
 
 export type TradeFlowSourceCount = { data_source: string; count: number };
 
+export type GraphSyncStepOutcome = {
+  key: string;
+  status: string;
+  implementation?: string;
+  updated_at?: string;
+  detail?: Record<string, unknown>;
+};
+
 export type OilLiveSyncStatus = {
   last_graph_sync_at?: string | null;
+  graph_sync_steps?: GraphSyncStepOutcome[];
   terminal_count: number;
   company_count?: number;
   cargo_record_count: number;
@@ -1460,9 +1469,11 @@ export type TradeManifestRow = {
 export async function getTradeManifests(opts: {
   q?: string;
   limit?: number;
+  bol_tier?: string;
 } = {}): Promise<{ manifests: TradeManifestRow[]; count: number; disclaimer?: string }> {
   const params = new URLSearchParams();
   if (opts.q) params.set('q', opts.q);
+  if (opts.bol_tier) params.set('bol_tier', opts.bol_tier);
   params.set('limit', String(opts.limit ?? 100));
   const res = await fetch(oilUrl(`/api/oil-live/trade-manifests?${params}`));
   if (!res.ok) throw new Error(`oil-live trade-manifests ${res.status}`);

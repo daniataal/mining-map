@@ -32,12 +32,8 @@ func (s *Server) LicenseMapClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	grid := licensemap.GridDegrees(zoomPtr)
 	if grid == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]any{
-			"mode":     "points",
-			"fallback": "python",
-			"endpoint": "/licenses",
-			"hint":     "Go scaffold covers low-zoom clusters (zoom < 8); point mode remains on Python until cutover.",
-		})
+		// High zoom: same handler as GET /api/oil-live/licenses (point mode).
+		s.ListLicenses(w, r)
 		return
 	}
 

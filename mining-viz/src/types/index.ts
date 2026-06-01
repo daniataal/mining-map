@@ -71,6 +71,9 @@ export interface MiningLicense {
   mapClusterCount?: number;
   /** Grid cell size (degrees) when `mapClusterCount` is set. */
   mapClusterGridDeg?: number;
+  /** Map render position (cluster land-snap / colocation jitter). */
+  _displayLat?: number | null;
+  _displayLng?: number | null;
 }
 
 export interface MarketTickerRow {

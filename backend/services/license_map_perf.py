@@ -39,14 +39,82 @@ def license_cluster_min_count(grid_deg: float) -> int:
     return 2
 
 
-def _cluster_cell_key(lat: float, lng: float, grid_deg: float) -> tuple[int, int]:
-    # Match SQL GROUP BY FLOOR(coord / grid_deg); centers are at k*g + g/2.
+def _cluster_cell_key(
+    lat: float, lng: float, grid_deg: float, origin_lat: float = 0.0, origin_lng: float = 0.0
+) -> tuple[int, int]:
     half = grid_deg / 2.0
-    return (math.floor((lat - half) / grid_deg), math.floor((lng - half) / grid_deg))
+    return (
+        math.floor((lat - origin_lat - half) / grid_deg),
+        math.floor((lng - origin_lng - half) / grid_deg),
+    )
+
+
+def _dominant_cluster_center(clusters: list[dict[str, Any]]) -> tuple[float, float] | None:
+    best = -1
+    lat = lng = 0.0
+    for row in clusters:
+        cnt = int(row.get("mapClusterCount") or 0)
+        if cnt > best:
+            best = cnt
+            lat = float(row["lat"])
+            lng = float(row["lng"])
+    if best < 0:
+        return None
+    return lat, lng
+
+
+_COUNTRY_LAND_BBOXES: dict[str, tuple[float, float, float, float]] = {
+    "ghana": (4.5, 11.5, -3.5, 1.5),
+    "cote d'ivoire": (4.2, 10.7, -8.6, -2.5),
+    "côte d'ivoire": (4.2, 10.7, -8.6, -2.5),
+    "ivory coast": (4.2, 10.7, -8.6, -2.5),
+    "nigeria": (4.0, 14.0, 2.7, 14.5),
+    "senegal": (12.0, 16.8, -17.8, -11.2),
+    "mali": (10.0, 25.0, -12.5, 4.5),
+    "guinea": (7.0, 12.8, -15.5, -7.5),
+    "liberia": (4.2, 8.6, -11.6, -7.2),
+    "sierra leone": (6.8, 10.1, -13.5, -10.0),
+}
+
+
+def _normalize_country_land_key(country: str) -> str:
+    return (country or "").strip().lower().replace("\u2019", "'")
+
+
+def _refine_cluster_land_position(lat: float, lng: float, country: str) -> tuple[float, float]:
+    bbox = _COUNTRY_LAND_BBOXES.get(_normalize_country_land_key(country))
+    if not bbox:
+        return lat, lng
+    min_lat, max_lat, min_lng, max_lng = bbox
+    if min_lat <= lat <= max_lat and min_lng <= lng <= max_lng:
+        return lat, lng
+    return (min_lat + max_lat) / 2.0, (min_lng + max_lng) / 2.0
+
+
+def _snap_cluster_to_viewport(
+    lat: float,
+    lng: float,
+    *,
+    min_lat: float,
+    max_lat: float,
+    min_lng: float,
+    max_lng: float,
+    grid_deg: float,
+) -> tuple[float, float]:
+    if min_lat <= lat <= max_lat and min_lng <= lng <= max_lng:
+        edge = max(grid_deg * 0.25, 0.5)
+        if (
+            lat - min_lat >= edge
+            and max_lat - lat >= edge
+            and lng - min_lng >= edge
+            and max_lng - lng >= edge
+        ):
+            return lat, lng
+    return (min_lat + max_lat) / 2.0, (min_lng + max_lng) / 2.0
 
 
 def merge_license_clusters(
-    clusters: list[dict[str, Any]], *, grid_deg: float
+    clusters: list[dict[str, Any]], *, grid_deg: float, origin_lat: float = 0.0, origin_lng: float = 0.0
 ) -> list[dict[str, Any]]:
     """Merge neighboring grid bubbles so continental zoom shows fewer overlapping markers."""
     if len(clusters) < 2 or grid_deg <= 0:
@@ -67,7 +135,7 @@ def merge_license_clusters(
 
     cells: dict[tuple[int, int], list[int]] = {}
     for idx, cluster in enumerate(clusters):
-        key = _cluster_cell_key(float(cluster["lat"]), float(cluster["lng"]), grid_deg)
+        key = _cluster_cell_key(float(cluster["lat"]), float(cluster["lng"]), grid_deg, origin_lat, origin_lng)
         cells.setdefault(key, []).append(idx)
 
     for (iy, ix), members in list(cells.items()):
@@ -93,16 +161,14 @@ def merge_license_clusters(
             merged.append(clusters[members[0]])
             continue
         total = 0
-        wlat = 0.0
-        wlng = 0.0
         country = ""
         sector = "mining"
+        group: list[dict[str, Any]] = []
         for idx in members:
             row = clusters[idx]
             cnt = int(row.get("mapClusterCount") or 0)
             total += cnt
-            wlat += float(row["lat"]) * cnt
-            wlng += float(row["lng"]) * cnt
+            group.append(row)
             if not country and row.get("country"):
                 country = str(row["country"])
             if row.get("sector"):
@@ -110,8 +176,12 @@ def merge_license_clusters(
         if total <= 0:
             merged.append(clusters[members[0]])
             continue
-        lat = wlat / total
-        lng = wlng / total
+        center = _dominant_cluster_center(group)
+        if center is None:
+            merged.append(clusters[members[0]])
+            continue
+        lat, lng = center
+        lat, lng = _refine_cluster_land_position(lat, lng, country)
         merged.append(
             {
                 "id": f"cluster:{country}:{round(lat, 4)}:{round(lng, 4)}",
@@ -156,33 +226,40 @@ def query_license_clusters(
     min_cnt = license_cluster_min_count(grid_deg)
     sql = f"""
         SELECT
-            (FLOOR(lat / %s) * %s + %s / 2.0)::float AS lat,
-            (FLOOR(lng / %s) * %s + %s / 2.0)::float AS lng,
+            (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lat))::float AS lat,
+            (PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lng))::float AS lng,
             COUNT(*)::int AS cnt,
             country,
             MAX(COALESCE(sector, 'mining')) AS sector
-        FROM licenses
-        WHERE {sector_sql}
-          AND ({country_sql})
-          AND lat IS NOT NULL AND lng IS NOT NULL
-          AND lat BETWEEN -90 AND 90
-          AND lng BETWEEN -180 AND 180
-          AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
-          AND lat BETWEEN %s AND %s
-          AND lng BETWEEN %s AND %s
-          {open_clause}
-        GROUP BY FLOOR(lat / %s), FLOOR(lng / %s), country
+        FROM (
+            SELECT
+                lat,
+                lng,
+                FLOOR((lat - %s) / %s)::bigint AS lat_bucket,
+                FLOOR((lng - %s) / %s)::bigint AS lng_bucket,
+                country,
+                COALESCE(sector, 'mining') AS sector
+            FROM licenses
+            WHERE {sector_sql}
+              AND ({country_sql})
+              AND lat IS NOT NULL AND lng IS NOT NULL
+              AND lat BETWEEN -90 AND 90
+              AND lng BETWEEN -180 AND 180
+              AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
+              AND lat BETWEEN %s AND %s
+              AND lng BETWEEN %s AND %s
+              {open_clause}
+        ) bucketed
+        GROUP BY lat_bucket, lng_bucket, country
         HAVING COUNT(*) >= %s
         ORDER BY cnt DESC
         LIMIT %s
     """
     g = grid_deg
     params = [
+        min_lat,
         g,
-        g,
-        g,
-        g,
-        g,
+        min_lng,
         g,
         *sector_params,
         *country_params,
@@ -190,8 +267,6 @@ def query_license_clusters(
         max_lat,
         min_lng,
         max_lng,
-        g,
-        g,
         min_cnt,
         safe_limit,
     ]
@@ -207,6 +282,7 @@ def query_license_clusters(
         sector = (row["sector"] if "sector" in keys else row[4]) or "mining"
         if lat is None or lng is None or not cnt or int(cnt) < min_cnt:
             continue
+        lat, lng = _refine_cluster_land_position(float(lat), float(lng), str(country))
         out.append(
             {
                 "id": f"cluster:{country}:{round(float(lat), 4)}:{round(float(lng), 4)}",
@@ -225,9 +301,25 @@ def query_license_clusters(
                 "entityKind": "license",
             }
         )
-    merged = merge_license_clusters(out, grid_deg=g)
+    merged = merge_license_clusters(out, grid_deg=g, origin_lat=min_lat, origin_lng=min_lng)
+    snapped = []
+    for row in merged:
+        lat, lng = _snap_cluster_to_viewport(
+            float(row["lat"]),
+            float(row["lng"]),
+            min_lat=min_lat,
+            max_lat=max_lat,
+            min_lng=min_lng,
+            max_lng=max_lng,
+            grid_deg=g,
+        )
+        row = dict(row)
+        lat, lng = _refine_cluster_land_position(lat, lng, str(row.get("country") or ""))
+        row["lat"] = lat
+        row["lng"] = lng
+        snapped.append(row)
     return collapse_clusters_tight_viewport(
-        merged,
+        snapped,
         min_lat=min_lat,
         max_lat=max_lat,
         min_lng=min_lng,
@@ -262,30 +354,40 @@ def collapse_clusters_tight_viewport(
 
     out = []
     for cc in by_country.values():
-        out.append(_merge_cluster_rows(cc))
+        out.append(_merge_cluster_rows(cc, min_lat=min_lat, max_lat=max_lat, min_lng=min_lng, max_lng=max_lng))
     return out
 
 
-def _merge_cluster_rows(clusters: list[dict[str, Any]]) -> dict[str, Any]:
+def _merge_cluster_rows(
+    clusters: list[dict[str, Any]],
+    *,
+    min_lat: float = -90.0,
+    max_lat: float = 90.0,
+    min_lng: float = -180.0,
+    max_lng: float = 180.0,
+) -> dict[str, Any]:
     total = 0
-    wlat = 0.0
-    wlng = 0.0
     country = ""
     sector = "mining"
     grid = float(clusters[0].get("mapClusterGridDeg") or 0)
     for row in clusters:
         cnt = int(row.get("mapClusterCount") or 0)
         total += cnt
-        wlat += float(row["lat"]) * cnt
-        wlng += float(row["lng"]) * cnt
         if not country and row.get("country"):
             country = str(row["country"])
         if row.get("sector"):
             sector = str(row["sector"])
     if total <= 0:
         return clusters[0]
-    lat = wlat / total
-    lng = wlng / total
+    center = _dominant_cluster_center(clusters)
+    if center is None:
+        return clusters[0]
+    lat, lng = center
+    if grid > 0:
+        lat, lng = _snap_cluster_to_viewport(
+            lat, lng, min_lat=min_lat, max_lat=max_lat, min_lng=min_lng, max_lng=max_lng, grid_deg=grid
+        )
+    lat, lng = _refine_cluster_land_position(lat, lng, country)
     return {
         "id": f"cluster:{country}:{round(lat, 4)}:{round(lng, 4)}",
         "company": f"{total} licenses",

@@ -10,6 +10,7 @@
 // zooms in instead of spiderfying hundreds of legs.
 
 import type { MiningLicense } from '../types';
+import { isServerLicenseCluster } from './licenseMapCluster';
 
 const COLLISION_KEY_PRECISION = 5; // ~1.1 m bucket — anything closer counts as collocated
 
@@ -86,6 +87,19 @@ export function applyCollocationJitter(rows: MiningLicense[]): JitteredLicense[]
   }
 
   return rows.map((r) => {
+    if (
+      isServerLicenseCluster(r) &&
+      r._displayLat != null &&
+      r._displayLng != null
+    ) {
+      return {
+        ...r,
+        _displayLat: r._displayLat,
+        _displayLng: r._displayLng,
+        _wasJittered: false,
+        _collocatedCount: 1,
+      } as JitteredLicense;
+    }
     if (r.lat == null || r.lng == null) {
       return {
         ...r,

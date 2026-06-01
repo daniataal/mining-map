@@ -19,6 +19,7 @@ import (
 
 func (s *Server) ListTradeManifests(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tier := strings.TrimSpace(r.URL.Query().Get("bol_tier"))
 	limit := queryInt(r, "limit", 50)
 	if limit > 500 {
 		limit = 500
@@ -31,6 +32,11 @@ func (s *Server) ListTradeManifests(w http.ResponseWriter, r *http.Request) {
 	`
 	args := []any{}
 	n := 1
+	if tier != "" {
+		sql += fmt.Sprintf(` AND bol_tier = $%d`, n)
+		args = append(args, tier)
+		n++
+	}
 	if q != "" {
 		sql += fmt.Sprintf(` AND (
 			importer_name ILIKE $%d OR exporter_name ILIKE $%d
