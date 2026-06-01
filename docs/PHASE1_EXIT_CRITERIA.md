@@ -50,4 +50,6 @@ Optional before removing Python license fallback:
 
 **Crisis desk dev corridors (optional):** `./scripts/seed_hormuz_crisis_demo.sh` then re-check digest `top_corridors` length ≥ 1.
 
+**Browser checklist:** [PHASE1_BROWSER_CHECKLIST.md](./PHASE1_BROWSER_CHECKLIST.md)
+
 **License strict cutover:** staging `VITE_LICENSE_MAP_SHADOW_METRICS=1` → [LICENSE_MAP_CUTOVER_GATE.md](./LICENSE_MAP_CUTOVER_GATE.md). Do not set `VITE_LICENSE_MAP_GO_STRICT=1` in prod until shadow shows zero `usedFallback`.
