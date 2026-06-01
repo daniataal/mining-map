@@ -23,7 +23,8 @@ type License struct {
 	SourceName        *string    `json:"source_name"`
 	SourceURL         *string    `json:"source_url"`
 	SourceRecordURL   *string    `json:"source_record_url"`
-	SourceUpdatedAt   *time.Time `json:"source_updated_at"`
+	// source_updated_at is TEXT in production schema (Python ingest stores ISO strings).
+	SourceUpdatedAt   *string    `json:"source_updated_at"`
 	LastSyncedAt      *time.Time `json:"last_synced_at"`
 	SourceKind        *string    `json:"source_kind"`
 	EntityKind        *string    `json:"entityKind"`

@@ -109,7 +109,7 @@ def _ingest_single_csv(conn: Any, path: Path, *, data_source: str, tier: str) ->
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
                     )
-                    ON CONFLICT DO NOTHING;
+                    ON CONFLICT DO NOTHING
                     """,
                     (
                         data_source,

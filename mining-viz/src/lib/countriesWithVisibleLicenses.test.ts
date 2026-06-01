@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countriesForMapBorders,
   countriesWithVisibleLicenses,
   countryLicenseCounts,
+  countryLicenseCountsForBorders,
   licenseHasMapCoordinates,
 } from './countriesWithVisibleLicenses';
 import type { MiningLicense } from '../types';
@@ -63,5 +65,29 @@ describe('countryLicenseCounts', () => {
       { country: 'Ghana', count: 2 },
       { country: 'Peru', count: 1 },
     ]);
+  });
+});
+
+describe('countryLicenseCountsForBorders', () => {
+  it('weights server clusters by mapClusterCount', () => {
+    const rows = [
+      license({ id: '1', country: 'Australia', lat: -25, lng: 133, mapClusterCount: 4925 }),
+      license({ id: '2', country: 'Russia', lat: 55, lng: 37, mapClusterCount: 22 }),
+      license({ id: '3', country: 'Russia', lat: 56, lng: 38, mapClusterCount: 15 }),
+    ];
+    expect(countryLicenseCountsForBorders(rows)).toEqual([
+      { country: 'Australia', count: 4925 },
+      { country: 'Russia', count: 37 },
+    ]);
+  });
+});
+
+describe('countriesForMapBorders', () => {
+  it('returns every country present on the map when under cap', () => {
+    const rows = [
+      license({ id: '1', country: 'Ghana', lat: 5, lng: -1, mapClusterCount: 10 }),
+      license({ id: '2', country: 'Peru', lat: -12, lng: -77, mapClusterCount: 3 }),
+    ];
+    expect(countriesForMapBorders(rows, 50)).toEqual(['Ghana', 'Peru']);
   });
 });

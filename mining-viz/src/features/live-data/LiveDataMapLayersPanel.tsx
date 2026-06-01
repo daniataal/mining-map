@@ -1,4 +1,16 @@
-import { Anchor, Archive, ArrowRightLeft, Globe2, Layers, Radar, Route, Ship, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import {
+  Anchor,
+  Archive,
+  ArrowRightLeft,
+  Building2,
+  Globe2,
+  Layers,
+  Radar,
+  Route,
+  Ship,
+  Sparkles,
+} from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
@@ -40,6 +52,23 @@ export type LiveDataMapLayersPanelProps = {
   eiaHistoricEnabled?: boolean;
   onEiaHistoricChange?: (on: boolean) => void;
   eiaHistoricRowCount?: number | null;
+  /** Map zoom for infrastructure gate (pipelines z≥9 per UX_SPEC_MAD-46). */
+  mapZoom?: number | null;
+};
+
+/** MAD-4x-e — unified Historic / Live / Macro / Infrastructure groups. */
+export type LayerDataFamily = 'live' | 'historic' | 'macro' | 'infra';
+
+const LAYER_FAMILY_ORDER: LayerDataFamily[] = ['live', 'historic', 'macro', 'infra'];
+
+const LAYER_FAMILY_META: Record<
+  LayerDataFamily,
+  { labelEn: string; labelHe: string; icon: typeof Radar }
+> = {
+  live: { labelEn: 'Live', labelHe: 'חי', icon: Radar },
+  historic: { labelEn: 'Historic', labelHe: 'היסטורי', icon: Archive },
+  macro: { labelEn: 'Macro', labelHe: 'מאקרו', icon: Globe2 },
+  infra: { labelEn: 'Infrastructure', labelHe: 'תשתית', icon: Building2 },
 };
 
 const LAYER_META = [
@@ -104,8 +133,11 @@ export default function LiveDataMapLayersPanel({
   eiaHistoricEnabled = false,
   onEiaHistoricChange,
   eiaHistoricRowCount,
+  mapZoom,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
+  const [layerFamily, setLayerFamily] = useState<LayerDataFamily>('live');
+  const infraZoomOk = mapZoom == null || mapZoom >= 9;
 
   const fmtCount = (n: number | undefined) =>
     n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -177,6 +209,49 @@ export default function LiveDataMapLayersPanel({
           })}
         </div>
 
+        <div
+          className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+          role="tablist"
+          aria-label={t('קבוצות שכבות', 'Layer groups')}
+        >
+          {LAYER_FAMILY_ORDER.map((family) => {
+            const meta = LAYER_FAMILY_META[family];
+            const Icon = meta.icon;
+            const active = layerFamily === family;
+            const infraDisabled = family === 'infra' && !infraZoomOk;
+            return (
+              <button
+                key={family}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                disabled={infraDisabled}
+                onClick={() => !infraDisabled && setLayerFamily(family)}
+                className={`rounded-xl px-2 py-2 text-left transition-colors ${
+                  infraDisabled
+                    ? 'cursor-not-allowed border border-black/5 bg-slate-200/50 text-slate-400 opacity-60 dark:border-white/5 dark:bg-slate-900/40'
+                    : active
+                      ? 'border border-amber-500/50 bg-amber-500/20 text-slate-950 dark:text-white'
+                      : 'border border-black/10 bg-white/70 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide">
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {t(meta.labelHe, meta.labelEn)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {layerFamily === 'infra' && !infraZoomOk && (
+          <p className="text-xs leading-relaxed text-sky-800 dark:text-sky-200">
+            {t(
+              'התקרבו לרמת זום 9+ להפעלת צינורות OSM. מסופים ומכליות נשארים בקבוצת Live.',
+              'Zoom to level 9+ for OSM pipelines. Terminals and tankers stay under Live.',
+            )}
+          </p>
+        )}
+
         {lensMode === 'deal' && (
           <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-950 dark:text-emerald-100">
             {t(
@@ -225,7 +300,7 @@ export default function LiveDataMapLayersPanel({
           </p>
         )}
 
-        {showRawControls && layers.vessels && (
+        {showRawControls && layerFamily === 'live' && layers.vessels && (
           <div
             className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
             role="status"
@@ -250,7 +325,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {showRawControls && syncStatus && (
+        {showRawControls && layerFamily === 'live' && syncStatus && (
           <div
             className={`rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
               layers.coverage
@@ -291,7 +366,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {showLayerGrid && <div className="grid grid-cols-2 gap-2">
+        {showLayerGrid && layerFamily === 'live' && <div className="grid grid-cols-2 gap-2">
           {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {
             const on = layers[key];
             const coverageHighlight = key === 'coverage' && coverageNeedsAttention && !on;
@@ -318,7 +393,7 @@ export default function LiveDataMapLayersPanel({
           })}
         </div>}
 
-        {showRawControls && onEiaHistoricChange && (
+        {showRawControls && layerFamily === 'historic' && onEiaHistoricChange && (
           <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
             <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300 mb-2">
               {t('היסטורי', 'Historic')}
@@ -351,7 +426,7 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {showRawControls && onMacroTradeChange && (
+        {showRawControls && layerFamily === 'macro' && onMacroTradeChange && (
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-500/30 bg-slate-500/5 px-3 py-2">
             <input
               type="checkbox"
@@ -366,7 +441,7 @@ export default function LiveDataMapLayersPanel({
           </label>
         )}
 
-        {showRawControls && <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+        {showRawControls && layerFamily === 'macro' && <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="checkbox"
@@ -420,7 +495,7 @@ export default function LiveDataMapLayersPanel({
           </label>
         </div>}
 
-        {showRawControls && canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
+        {showRawControls && layerFamily === 'live' && canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
             <label className="flex cursor-pointer items-start gap-2.5">
               <input
@@ -444,7 +519,21 @@ export default function LiveDataMapLayersPanel({
           </div>
         )}
 
-        {showRawControls && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
+        {showRawControls && layerFamily === 'infra' && infraZoomOk && (
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100">
+            <p className="text-[10px] font-black uppercase tracking-wide text-sky-800 dark:text-sky-200">
+              {t('תשתית ביצוע', 'Execution infrastructure')}
+            </p>
+            <p className="mt-1">
+              {t(
+                'צינורות OSM, מסופי אחסון ונמלים מפורטים בלשונית Oil & Gas → Infrastructure. כאן: השתמשו במסופים/מכליות בקבוצת Live.',
+                'OSM pipelines, storage, and ports are on the Oil & Gas → Infrastructure tab. Use terminals/vessels under Live for corridor context.',
+              )}
+            </p>
+          </div>
+        )}
+
+        {showRawControls && layerFamily === 'live' && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="checkbox"

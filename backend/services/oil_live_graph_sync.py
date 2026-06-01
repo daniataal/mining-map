@@ -186,6 +186,27 @@ def _record_graph_sync_at(conn: Any, finished_at: str) -> None:
         )
 
 
+def _record_graph_sync_steps(conn: Any, steps: dict[str, Any]) -> None:
+    """Persist per-step outcomes for GET /api/oil-live/sync-status graph_sync_steps."""
+    if not steps:
+        return
+    with conn.cursor() as cur:
+        for step_name, payload in steps.items():
+            if not isinstance(payload, dict):
+                payload = {"status": "ok", "detail": payload}
+            cur.execute(
+                """
+                INSERT INTO oil_live_sync_state (key, value, metadata, updated_at)
+                VALUES (%s, now(), %s::jsonb, now())
+                ON CONFLICT (key) DO UPDATE SET
+                  value = now(),
+                  metadata = EXCLUDED.metadata,
+                  updated_at = now()
+                """,
+                (f"graph_sync_step_{step_name}", json.dumps(payload)),
+            )
+
+
 def _ensure_demo_opportunities(cur: Any) -> dict[str, Any]:
     """
     Link open opportunities to real terminals; seed one demo row when empty.
@@ -1353,7 +1374,12 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
             }
         else:
             summary["steps"]["storage_terminals"] = _import_storage_terminals(cur)
-        summary["steps"]["petroleum_osm_storage"] = _ensure_petroleum_osm_storage_layer(conn)
+        if _graph_sync_go_step_enabled("petroleum_osm_storage"):
+            summary["steps"]["petroleum_osm_storage"] = _graph_sync_go_skip_payload(
+                "petroleum_osm_storage"
+            )
+        else:
+            summary["steps"]["petroleum_osm_storage"] = _ensure_petroleum_osm_storage_layer(conn)
         if _graph_sync_go_step_enabled("licenses"):
             summary["steps"]["licenses"] = _graph_sync_go_skip_payload("licenses")
         else:
@@ -1431,6 +1457,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         )
     summary["finished_at"] = _now_iso()
     _record_graph_sync_at(conn, summary["finished_at"])
+    _record_graph_sync_steps(conn, summary.get("steps") or {})
     conn.commit()
     summary["status"] = "ok"
     return summary

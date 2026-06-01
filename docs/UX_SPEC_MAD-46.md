@@ -146,7 +146,7 @@ Layers are grouped in **two panels** today; spec consolidates mental model into 
 |-------|----------|--------------|---------|----------|---------|--------------|
 | **Live movement** | `vessels` | Oil/tanker AIS near terminals | **Off** (Live Data entry) | z≥5 | `live` | `GET /api/oil-live/map` bbox |
 | | `coverage` | AIS coverage gaps | Off | z≥4 | `inferred` | coverage cells |
-| | `all_maritime` | Global maritime canvas | Off | z≥3 | `live` | maritime-worker / Redis |
+| | `all_maritime` | Global maritime canvas | Off | z≥3 | `live` | `oil-live-intel-worker` → Postgres (`oil_ais_positions`) |
 | **Live trade** | `terminals` | Terminals & storage hubs | **On** (Live Data) | z≥5 | `inferred`/`live` | oil terminals bbox |
 | | `corridors` | Shipment routes (MCR) | Off | z≥6 | `synthetic` | cargo records in view |
 | | `opportunities` | Deal hypotheses | Off | z≥6 | `synthetic` | opportunities bbox |

@@ -50,20 +50,18 @@ If you see **"Database error"** or permissions issues:
 
 If you want the live maritime vessel layer, set `AISSTREAM_API_KEY` in the repo-root `.env` before running `docker compose up` or starting the backend locally. GitHub Actions deployments expect the same value in the repository secret named `AISSTREAM_API_KEY` and write it to the server as `/opt/mining-map/backend.env` during deploy.
 
-Start the AIS ingest worker (required for dense vessel maps):
+Start the Go AIS ingest worker (required for dense vessel maps):
 
 ```bash
-docker compose up -d maritime-worker
+docker compose up -d oil-live-intel-worker
 curl -s http://localhost:8080/api/oil-live/maritime/stats | python3 -m json.tool
 ```
 
-Useful `.env` overrides for denser maps:
+Useful `.env` overrides:
 
-- `MARITIME_WORKER_WATCH_MODE=all_regions` (default) — subscribes to every curated box including West/South/East Africa
-- `MARITIME_WORKER_WATCH_MODE=global` — single world bounding box (heaviest)
-- `MARITIME_WORKER_MAX_VESSELS=15000` and `MARITIME_WORKER_CAPTURE_WINDOW_SECONDS=25`
-- `MARITIME_ALWAYS_ON_REGION_IDS=persian_gulf,arabian_gulf,malacca,east_mediterranean` — high-traffic boxes stay subscribed in rotating mode
-- `MARITIME_AIS_SEED_FILE=/path/to/vessels.json` — optional cold-start JSON (`{"vessels": [...]}`)
+- `AISSTREAM_API_KEY` — required for live AIS (same key for `oil-live-intel-worker`)
+- `OIL_INTEL_ENABLE_AIS=true` — enable AIS ingest in the Go worker (default on in compose)
+- `MARITIME_SSL_AUTO_FALLBACK=1` — retry once if AISStream TLS fails (default on)
 
 Persian Gulf empty map check:
 
@@ -71,9 +69,9 @@ Persian Gulf empty map check:
 curl -s 'http://localhost:8080/api/oil-live/maritime/stats?south=24&west=48&north=30&east=58' | python3 -m json.tool
 ```
 
-If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild `maritime-worker` after code changes: `docker compose build maritime-worker && docker compose up -d --no-deps maritime-worker`.
+If `aisstream_persian_gulf_coverage_gap` is `true` while `north_sea_vessel_count` is high, AISStream is not relaying Gulf traffic (upstream issue; see [aisstream#17](https://github.com/aisstream/aisstream/issues/17)). Rebuild after worker code changes: `docker compose build oil-live-intel-worker && docker compose up -d --no-deps oil-live-intel-worker`.
 
-If worker logs mention `stream.aisstream.io` and `certificate has expired`, check whether upstream renewed the cert (May 2026+). Workers auto-retry once with `MARITIME_SSL_AUTO_FALLBACK=1` (default). After renewal, force-recreate `maritime-worker` and `oil-live-intel-worker` to clear stale ingest status. Dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`.
+If worker logs mention `stream.aisstream.io` and `certificate has expired`, check whether upstream renewed the cert (May 2026+). The worker auto-retries once with `MARITIME_SSL_AUTO_FALLBACK=1` (default). After renewal, force-recreate `oil-live-intel-worker` to clear stale ingest status. Dev-only bypass: `MARITIME_SSL_VERIFY=0` in `.env` / `backend.env`.
 
 ### Remote PostGIS Recovery
 

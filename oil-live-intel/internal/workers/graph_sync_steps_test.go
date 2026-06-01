@@ -54,6 +54,13 @@ func TestGraphSyncGoGovAwardsEnabled(t *testing.T) {
 	}
 }
 
+func TestGraphSyncGoPetroleumOsmStorageEnabled(t *testing.T) {
+	t.Setenv("OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE", "true")
+	if !graphSyncGoPetroleumOsmStorageEnabled() {
+		t.Fatal("expected petroleum_osm_storage enabled for true")
+	}
+}
+
 func TestAnyGraphSyncGoStepEnabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_LICENSES", "false")
@@ -61,6 +68,7 @@ func TestAnyGraphSyncGoStepEnabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_PORT_CALLS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_TED", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_GOV_AWARDS", "false")
+	t.Setenv("OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE", "false")
 	if anyGraphSyncGoStepEnabled() {
 		t.Fatal("expected all disabled")
 	}
@@ -77,6 +85,7 @@ func TestGraphSyncGoStepsRunOnceDisabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_PORT_CALLS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_TED", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_GOV_AWARDS", "false")
+	t.Setenv("OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE", "false")
 	worker := &GraphSyncGoSteps{}
 	if err := worker.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce disabled: %v", err)

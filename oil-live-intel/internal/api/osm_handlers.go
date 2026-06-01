@@ -6,12 +6,26 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mining-map/oil-live-intel/internal/overpass"
 )
+
+func petroleumMapboxDisabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("PETROLEUM_DISABLE_MAPBOX")))
+	if v == "1" || v == "true" || v == "yes" || v == "on" {
+		return true
+	}
+	if strings.TrimSpace(os.Getenv("MAPBOX_ACCESS_TOKEN")) == "" &&
+		strings.TrimSpace(os.Getenv("OILMAP_MAPBOX_TOKEN")) == "" {
+		return true
+	}
+	return false
+}
 
 var OSMLayers = map[string]map[string]string{
 	"pipelines": {
@@ -54,18 +68,30 @@ func (s *Server) OSMLayersCatalog(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	mapboxOff := petroleumMapboxDisabled()
+	limitations := []string{
+		"Community-mapped OSM data; coverage and accuracy vary by region.",
+		"Respect Overpass rate limits — large views are tile-chunked and cached.",
+	}
+	if mapboxOff {
+		limitations = append(limitations,
+			"Mapbox oilmap layers are disabled — use OSM petroleum layers as the default infrastructure source.",
+		)
+	} else {
+		limitations = append(limitations,
+			"Does not replace Mapbox oilmap layers; opt-in only when Mapbox token is configured.",
+		)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"layers":     layers,
-		"data_as_of": time.Now().UTC().Format(time.RFC3339),
+		"layers":          layers,
+		"data_as_of":      time.Now().UTC().Format(time.RFC3339),
+		"mapbox_disabled": mapboxOff,
 		"source_labels": []string{
 			"OpenStreetMap",
 			"Overpass API",
 		},
-		"limitations": []string{
-			"Community-mapped OSM data; coverage and accuracy vary by region.",
-			"Respect Overpass rate limits — large views are tile-chunked and cached.",
-			"Does not replace Mapbox oilmap layers; opt-in only.",
-		},
+		"limitations": limitations,
 	})
 }
 

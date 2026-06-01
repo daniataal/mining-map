@@ -33,6 +33,18 @@ export function normalizeLicenseViewportBounds(
     east = 180;
   }
 
+  const minSpan = 1e-4;
+  if (east - west < minSpan) {
+    const mid = (west + east) / 2;
+    west = mid - minSpan / 2;
+    east = mid + minSpan / 2;
+  }
+  if (north - south < minSpan) {
+    const mid = (south + north) / 2;
+    south = mid - minSpan / 2;
+    north = mid + minSpan / 2;
+  }
+
   return { south, west, north, east };
 }
 
@@ -54,4 +66,30 @@ export function quantizeLicenseViewportBounds(
     north: q(normalized.north),
     east: q(normalized.east),
   };
+}
+
+/** Intersection of two axis-aligned boxes; null when disjoint. */
+export function intersectLicenseViewportBounds(
+  a: LicenseViewportBounds,
+  b: LicenseViewportBounds,
+): LicenseViewportBounds | null {
+  const south = Math.max(a.south, b.south);
+  const north = Math.min(a.north, b.north);
+  const west = Math.max(a.west, b.west);
+  const east = Math.min(a.east, b.east);
+  if (south >= north || west >= east) return null;
+  return { south, west, north, east };
+}
+
+/** Smallest box containing both inputs (normalized). Used after cluster drill so fetch spans the grid cell. */
+export function unionLicenseViewportBounds(
+  a: LicenseViewportBounds,
+  b: LicenseViewportBounds,
+): LicenseViewportBounds {
+  return normalizeLicenseViewportBounds({
+    south: Math.min(a.south, b.south),
+    west: Math.min(a.west, b.west),
+    north: Math.max(a.north, b.north),
+    east: Math.max(a.east, b.east),
+  });
 }
