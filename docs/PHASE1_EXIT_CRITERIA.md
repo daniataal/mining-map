@@ -42,6 +42,12 @@ Optional before removing Python license fallback:
 
 ## Sign-off
 
-- [ ] Product: trader journey table above
-- [ ] Engineering: automated gates green on target environment
-- [ ] Ops: `oil-live-intel-worker` + graph-sync healthy; demo seed off in prod
+- [ ] Product: trader journey table above (manual browser pass on :8080)
+- [x] Engineering: automated gates (`go test`, `npm run build`, `platform_map_smoke.sh`, license parity) — re-run on PR branch before merge
+- [ ] Ops: `oil-live-intel-worker` + graph-sync healthy; demo seed off in prod — see [STAGING_OPS.md](./STAGING_OPS.md)
+
+**Automated engineering sign-off:** `./scripts/phase1_signoff.sh`
+
+**Crisis desk dev corridors (optional):** `./scripts/seed_hormuz_crisis_demo.sh` then re-check digest `top_corridors` length ≥ 1.
+
+**License strict cutover:** staging `VITE_LICENSE_MAP_SHADOW_METRICS=1` → [LICENSE_MAP_CUTOVER_GATE.md](./LICENSE_MAP_CUTOVER_GATE.md). Do not set `VITE_LICENSE_MAP_GO_STRICT=1` in prod until shadow shows zero `usedFallback`.

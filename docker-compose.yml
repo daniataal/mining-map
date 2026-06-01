@@ -231,10 +231,12 @@ services:
       - EIA_DOWNLOADS_DIR=/data/eia_downloads
       - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
       - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
+      - BRAZIL_MANIFEST_CSV_DIR=/data/brazil_trade_manifests
       - UK_TRADE_MANIFEST_SYNC_ENABLED=true
     volumes:
       - ./data/eia_downloads:/data/eia_downloads:ro
       - ./data/uk_trade_manifests:/data/uk_trade_manifests:ro
+      - ./data/brazil_trade_manifests:/data/brazil_trade_manifests:ro
     depends_on:
       db:
         condition: service_healthy

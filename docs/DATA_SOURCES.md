@@ -117,6 +117,10 @@ Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin
 | **JODI oil snapshots** | `jodi_oil.sync_jodi_snapshots` | `JODI_CSV_URL` or `JODI_CSV_PATH` (public export) | `jodi_oil_snapshots`; validates corridors / benchmarks |
 | **Mining HS Comtrade** | `commodity_trade_flows.sync_mining_hs_comtrade` | `COMTRADE_API_KEY`; `COMMODITY_COMTRADE_SYNC_ENABLED` | `commodity_trade_flows` (HS 26xx/71xx/74xx); license dossier trade panel |
 | **UK / user trade manifests** | `trade_manifest_ingest.sync_uk_open_trade_rows` | `UK_MANIFEST_CSV_DIR`, `USER_MANIFEST_CSV_DIR`; admin `POST /api/admin/trade-manifests/upload`; sample CSV in `data/uk_trade_manifests/`; `uk-trade-manifest-sync-worker` | `trade_manifest_rows` (`customs_open`, `user_upload`, `macro`) |
+
+**Dev verify (Phase 1):** drop HMRC-style `*.csv` under `data/uk_trade_manifests/`, then run `./scripts/ingest_uk_manifests_dev.sh` (or graph-sync step `trade_manifest_uk`). Confirm `GET /api/oil-live/trade-manifests?bol_tier=customs_open` and `sync-status.manifest_by_tier` show `customs_open` counts. Live Data intel panel surfaces the tier badge — not paid BOL.
+
+**Brazil (MAD-4x-c2):** `BRAZIL_MANIFEST_CSV_DIR` → graph-sync `trade_manifest_brazil` → same table with `data_source=brazil_comex_open`. Sample: `data/brazil_trade_manifests/sample_open_trade.csv`.
 | **AIS (live)** | `oil-live-intel-worker` (Go) | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_vessels`, `oil_port_calls`, `maritime_source_health`; `/api/oil-live/vessels/live`. Partial open/community coverage, not global truth |
 | **Vessel positions (multi-source merge)** | `oil-live-intel` map API | `OIL_LIVE_MERGED_VESSEL_POSITIONS` optional | `oil_vessel_position_observations` — per-source rows; **`GET /api/oil-live/vessels/live`** is primary map path |
 | **Maritime Redis snapshot (retired)** | — | — | **Removed** — was Python `maritime-worker` → Redis; graph-sync mirror retired. Historical `data_source=maritime_redis` rows may remain in DB |

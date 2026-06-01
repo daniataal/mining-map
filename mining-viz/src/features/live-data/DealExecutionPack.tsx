@@ -8,6 +8,7 @@ import {
   Calculator,
   Route,
   CheckCircle2,
+  Download,
 } from 'lucide-react';
 import {
   getOpportunityDealPack,
@@ -20,6 +21,7 @@ import {
   buildRoutePlannerHintsFromCargo,
   type LiveDataRouteHints,
 } from './liveDataRoutePrefill';
+import { downloadDealPackMarkdown, printDealPack } from './dealPackExport';
 
 export type DealExecutionPackProps = {
   opportunityId: string;
@@ -309,6 +311,21 @@ export default function DealExecutionPack({
       )}
 
       <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="text-[10px] font-bold uppercase text-violet-600 flex items-center gap-1"
+          onClick={() => downloadDealPackMarkdown(pack, opportunityId)}
+        >
+          <Download className="w-3 h-3" />
+          {t('ייצוא MD', 'Export MD')}
+        </button>
+        <button
+          type="button"
+          className="text-[10px] font-bold uppercase text-slate-600 flex items-center gap-1"
+          onClick={() => printDealPack(pack, opportunityId)}
+        >
+          {t('הדפס / PDF', 'Print / PDF')}
+        </button>
         {onOpenRoutePlanner && (
           <button
             type="button"

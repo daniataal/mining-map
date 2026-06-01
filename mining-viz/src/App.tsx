@@ -93,6 +93,7 @@ import {
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
 import type { HistoricArcSelection } from './features/live-data/HistoricArcDetailDrawer';
 import {
+  CRISIS_HORMUZ_BBOX,
   LIVE_DATA_HUB_CENTER,
   LIVE_DATA_EIA_HISTORIC_DEFAULT_YEAR,
   LIVE_DATA_VESSEL_FILTERS,
@@ -1023,10 +1024,20 @@ export default function App() {
   const handleOilLiveLensChange = useCallback((lens: LiveDataLensMode) => {
     setOilLiveLens(lens);
     setOilLiveLayers(layersForLiveDataLens(lens));
-    setOilLiveTradeFlowGroup(lens === 'raw' ? 'country_pair' : 'company_pair');
+    setOilLiveTradeFlowGroup(
+      lens === 'raw' || lens === 'crisis' ? 'country_pair' : 'company_pair',
+    );
     setLiveDataMacroTradeOn(lens !== 'infrastructure');
     setLiveDataEiaHistoricOn(false);
-    setIsMaritimeLayerEnabled(lens === 'raw');
+    setIsMaritimeLayerEnabled(lens === 'raw' || lens === 'crisis');
+    if (lens === 'crisis') {
+      const b = CRISIS_HORMUZ_BBOX;
+      setLiveDataFlyTarget({
+        lat: (b.south + b.north) / 2,
+        lng: (b.west + b.east) / 2,
+      });
+      setLiveDataFlyTrigger((n) => n + 1);
+    }
   }, []);
 
   useEffect(() => {

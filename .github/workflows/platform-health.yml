@@ -23,7 +23,7 @@ jobs:
 
       - name: Go tests (oil-live-intel)
         working-directory: oil-live-intel
-        run: go test ./internal/api/... ./internal/workers/... ./internal/services/graphsync/...
+        run: go test ./internal/api/... ./internal/workers/... ./internal/services/graphsync/... ./internal/services/opportunity/... ./internal/services/ais/...
 
       - name: Set up Node
         uses: actions/setup-node@v4

@@ -486,6 +486,7 @@ export type OilLiveSyncStatus = {
   oil_trade_flow_count?: number;
   eia_historic_import_count?: number;
   trade_manifest_row_count?: number;
+  manifest_by_tier?: McrTierCount[];
   mcr_by_tier?: McrTierCount[];
   oil_trade_flows_by_source?: TradeFlowSourceCount[];
   last_comtrade_sync_at?: string | null;
@@ -516,7 +517,102 @@ export type OilLiveSyncStatus = {
   corridor_partial_count?: number;
   last_cargo_at?: string | null;
   disclaimer?: string;
+  watch_zone_observations_24h?: WatchZoneObservation24h[];
 };
+
+export type WatchZoneObservation24h = {
+  zone_id: string;
+  name: string;
+  observation_count: number;
+  has_gap: boolean;
+  expected_gap_reason?: string;
+};
+
+export type CrisisScenario = {
+  id: string;
+  slug: string;
+  title: string;
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
+  watch_zone_ids: string[];
+  product_filter?: string;
+  assumptions_json?: Record<string, unknown>;
+};
+
+export type ScenarioTopCorridor = {
+  load_country: string;
+  discharge_country: string;
+  commodity_family: string;
+  cargo_count: number;
+  avg_confidence?: number;
+};
+
+export type ScenarioDigest = {
+  scenario: CrisisScenario;
+  sync_status?: OilLiveSyncStatus;
+  watch_zone_observations_24h?: WatchZoneObservation24h[];
+  top_corridors?: ScenarioTopCorridor[];
+  manifest_by_tier?: McrTierCount[];
+  mcr_by_tier?: McrTierCount[];
+  open_opportunity_count?: number;
+  top_opportunities?: Array<{
+    id: string;
+    title: string;
+    deal_score?: number;
+    signal_kind?: string;
+    status?: string;
+  }>;
+  disclaimer?: string;
+};
+
+export type CorridorDeltaRow = {
+  load_country: string;
+  discharge_country: string;
+  commodity_family: string;
+  recent_count: number;
+  baseline_count: number;
+  delta_count: number;
+  delta_pct?: number;
+  avg_confidence?: number;
+};
+
+export async function getCrisisScenarios(): Promise<{ scenarios: CrisisScenario[]; count: number }> {
+  const res = await fetch(oilUrl('/api/oil-live/scenarios'));
+  if (!res.ok) throw new Error(`oil-live scenarios ${res.status}`);
+  return res.json();
+}
+
+export async function getScenarioDigest(slug: string): Promise<ScenarioDigest> {
+  const res = await fetch(oilUrl(`/api/oil-live/scenarios/${encodeURIComponent(slug)}/digest`));
+  if (!res.ok) throw new Error(`oil-live scenario digest ${res.status}`);
+  return res.json();
+}
+
+export async function getCorridorDelta(opts: {
+  window_days?: number;
+  baseline_days?: number;
+  limit?: number;
+  commodity?: string;
+  min_lat?: number;
+  max_lat?: number;
+  min_lng?: number;
+  max_lng?: number;
+} = {}): Promise<{ corridors: CorridorDeltaRow[]; count: number; disclaimer?: string }> {
+  const params = new URLSearchParams();
+  if (opts.window_days != null) params.set('window_days', String(opts.window_days));
+  if (opts.baseline_days != null) params.set('baseline_days', String(opts.baseline_days));
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.commodity) params.set('commodity', opts.commodity);
+  if (opts.min_lat != null) params.set('min_lat', String(opts.min_lat));
+  if (opts.max_lat != null) params.set('max_lat', String(opts.max_lat));
+  if (opts.min_lng != null) params.set('min_lng', String(opts.min_lng));
+  if (opts.max_lng != null) params.set('max_lng', String(opts.max_lng));
+  const res = await fetch(oilUrl(`/api/oil-live/corridors/delta?${params}`));
+  if (!res.ok) throw new Error(`oil-live corridors/delta ${res.status}`);
+  return res.json();
+}
 
 export async function getOilLiveSyncStatus(): Promise<OilLiveSyncStatus> {
   const res = await fetch(oilUrl('/api/oil-live/sync-status'));

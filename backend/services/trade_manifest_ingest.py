@@ -17,6 +17,7 @@ UK_SYNC_ENABLED = (os.getenv("UK_TRADE_MANIFEST_SYNC_ENABLED") or "true").strip(
 }
 
 UK_MANIFEST_CSV_DIR = (os.getenv("UK_MANIFEST_CSV_DIR") or "").strip()
+BRAZIL_MANIFEST_CSV_DIR = (os.getenv("BRAZIL_MANIFEST_CSV_DIR") or "").strip()
 USER_MANIFEST_CSV_DIR = (os.getenv("USER_MANIFEST_CSV_DIR") or "").strip()
 
 # ONS bilateral trade sample (macro; labeled honestly when not company-level)
@@ -65,6 +66,23 @@ def sync_uk_open_trade_rows(conn: Any) -> dict[str, Any]:
     total += _ingest_manifest_csv_dir(conn, UK_MANIFEST_CSV_DIR, data_source="uk_hmrc_open", tier="customs_open")
     total += _ingest_manifest_csv_dir(conn, USER_MANIFEST_CSV_DIR, data_source="user_upload", tier="user_upload")
     total += _ingest_ons_macro(conn)
+    return {"status": "ok", "rows_upserted": total}
+
+
+def sync_brazil_open_trade_rows(conn: Any) -> dict[str, Any]:
+    """Brazil Comex-style open CSV dir → trade_manifest_rows (customs_open)."""
+    enabled = (os.getenv("BRAZIL_TRADE_MANIFEST_SYNC_ENABLED") or "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if not enabled:
+        return {"status": "skipped", "reason": "BRAZIL_TRADE_MANIFEST_SYNC_ENABLED is off"}
+    ensure_trade_manifest_table(conn)
+    total = _ingest_manifest_csv_dir(
+        conn, BRAZIL_MANIFEST_CSV_DIR, data_source="brazil_comex_open", tier="customs_open"
+    )
     return {"status": "ok", "rows_upserted": total}
 
 
