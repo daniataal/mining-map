@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,15 +26,21 @@ func queryTopCorridorsInBbox(
 		limit = 20
 	}
 	out := []scenarioCorridorRow{}
-	rows, err := pool.Query(ctx, `
+	sql := `
 		SELECT load_country, discharge_country, commodity_family, cargo_count, avg_confidence
 		FROM mcr_corridor_aggregates_country
 		WHERE origin_lat BETWEEN $1 AND $2
-		  AND origin_lng BETWEEN $3 AND $4
-		  AND ($5 = '' OR commodity_family = $5)
-		ORDER BY cargo_count DESC NULLS LAST
-		LIMIT $6
-	`, minLat, maxLat, minLng, maxLng, commodity, limit)
+		  AND origin_lng BETWEEN $3 AND $4`
+	args := []any{minLat, maxLat, minLng, maxLng}
+	argN := 5
+	if vals := commodityFilterValues(commodity); len(vals) > 0 {
+		sql += fmt.Sprintf(" AND commodity_family = ANY($%d)", argN)
+		args = append(args, vals)
+		argN++
+	}
+	sql += fmt.Sprintf(" ORDER BY cargo_count DESC NULLS LAST LIMIT $%d", argN)
+	args = append(args, limit)
+	rows, err := pool.Query(ctx, sql, args...)
 	if err != nil {
 		return out
 	}
