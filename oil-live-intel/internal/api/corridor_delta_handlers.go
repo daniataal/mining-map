@@ -63,11 +63,7 @@ func (s *Server) CorridorDelta(w http.ResponseWriter, r *http.Request) {
 	`, windowDays, baselineDays, windowDays)
 	args := []any{}
 	n := 1
-	if commodity != "" {
-		sql += fmt.Sprintf(` AND commodity_family = $%d`, n)
-		args = append(args, commodity)
-		n++
-	}
+	n = appendCommodityFamilyFilter(&sql, commodity, n, &args)
 	if hasBbox {
 		sql += fmt.Sprintf(`
 		  AND corridor_load_lat BETWEEN $%d AND $%d

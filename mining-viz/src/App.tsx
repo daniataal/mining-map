@@ -1030,6 +1030,13 @@ export default function App() {
     setLiveDataMacroTradeOn(lens !== 'infrastructure');
     setLiveDataEiaHistoricOn(false);
     setIsMaritimeLayerEnabled(lens === 'raw' || lens === 'crisis');
+    if (lens === 'infrastructure') {
+      setInfrastructureLayerVisibility({
+        pipelines: true,
+        refineries: true,
+        storage_terminals: true,
+      });
+    }
     if (lens === 'crisis') {
       const b = CRISIS_HORMUZ_BBOX;
       setLiveDataFlyTarget({

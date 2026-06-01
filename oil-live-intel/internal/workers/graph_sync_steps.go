@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mining-map/oil-live-intel/internal/services/graphsync"
+	"github.com/mining-map/oil-live-intel/internal/services/syntheticbol"
+	"github.com/mining-map/oil-live-intel/internal/utils"
 	"github.com/rs/zerolog/log"
 )
 
@@ -50,6 +52,10 @@ func graphSyncGoPetroleumOsmStorageEnabled() bool {
 	return graphSyncGoFlagEnabled("PETROLEUM_OSM_STORAGE")
 }
 
+func graphSyncGoPortCallMCREnabled() bool {
+	return graphSyncGoFlagEnabled("PORT_CALL_MCR")
+}
+
 func anyGraphSyncGoStepEnabled() bool {
 	return graphSyncGoTerminalOperatorsEnabled() ||
 		graphSyncGoLicensesEnabled() ||
@@ -57,7 +63,8 @@ func anyGraphSyncGoStepEnabled() bool {
 		graphSyncGoPortCallsEnabled() ||
 		graphSyncGoTEDEnabled() ||
 		graphSyncGoGovAwardsEnabled() ||
-		graphSyncGoPetroleumOsmStorageEnabled()
+		graphSyncGoPetroleumOsmStorageEnabled() ||
+		graphSyncGoPortCallMCREnabled()
 }
 
 func (g *GraphSyncGoSteps) runStep(
@@ -178,6 +185,25 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 			}
 			log.Info().Int("events", result.Events).Msg("[graph-sync-go] gov_awards done")
 			return map[string]any{"events": result.Events}, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if graphSyncGoPortCallMCREnabled() {
+		log.Info().Msg("[graph-sync-go] running port_call_mcr step…")
+		err := g.runStep(ctx, "graphsync_port_call_mcr", func(ctx context.Context) (map[string]any, error) {
+			res, err := syntheticbol.RunPortCallMCR(ctx, g.Pool, utils.NewLogger())
+			if err != nil {
+				return nil, err
+			}
+			log.Info().Int("upserted", res.Upserted).Interface("recipes", res.Recipes).Msg("[graph-sync-go] port_call_mcr done")
+			return map[string]any{
+				"upserted": res.Upserted,
+				"recipes":  res.Recipes,
+				"errors":   res.Errors,
+			}, nil
 		})
 		if err != nil && firstErr == nil {
 			firstErr = err

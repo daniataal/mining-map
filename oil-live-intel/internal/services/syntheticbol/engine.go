@@ -76,10 +76,21 @@ type recipeFn struct {
 	run  func(context.Context, *pgxpool.Pool) ([]mcrDraft, error)
 }
 
-// RunRebuild executes triangulation recipes A–F and upserts MCR rows.
+// RunRebuild executes triangulation recipes A–G and upserts MCR rows.
 func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (BuildResult, error) {
-	res := BuildResult{Recipes: map[string]int{}}
-	recipes := []recipeFn{
+	return runRecipeBatch(ctx, pool, log, allSyntheticRecipes())
+}
+
+// RunPortCallMCR runs recipes derived from oil_port_calls (A likely load, B corridor pairs).
+func RunPortCallMCR(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (BuildResult, error) {
+	return runRecipeBatch(ctx, pool, log, []recipeFn{
+		{RecipeLikelyLoad, recipeLikelyLoad},
+		{RecipeCorridor, recipeCorridorTrade},
+	})
+}
+
+func allSyntheticRecipes() []recipeFn {
+	return []recipeFn{
 		{RecipeLikelyLoad, recipeLikelyLoad},
 		{RecipeCorridor, recipeCorridorTrade},
 		{RecipeTenderBuyer, recipeTenderBuyer},
@@ -88,6 +99,10 @@ func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (Bu
 		{RecipeRepeatDealer, recipeRepeatDealer},
 		{RecipeRefineryDriven, recipeRefineryDriven},
 	}
+}
+
+func runRecipeBatch(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger, recipes []recipeFn) (BuildResult, error) {
+	res := BuildResult{Recipes: map[string]int{}}
 	for _, rf := range recipes {
 		drafts, err := rf.run(ctx, pool)
 		if err != nil {
