@@ -41,9 +41,6 @@ import {
   AlertTriangle as LucideAlertTriangle,
   CheckCircle2 as LucideCheckCircle2,
   Ship as LucideShip,
-  Radio as LucideRadio,
-  Compass as LucideCompass,
-  Clock as LucideClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -51,6 +48,24 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import {
+  LIFECYCLE_STEPS,
+  normalizeDealStage,
+  dealStageIndex,
+  dealStageAtIndex,
+  DD_CHECKLIST_IDS,
+  checklistStageWarning,
+} from '../lib/dealWorkflow';
+import {
+  resolveChecklistItems,
+  checklistProgress,
+} from '../lib/checklistDefaults';
+import {
+  sourceQualityLabel,
+  sourceQualityTier,
+  sourceQualityWarning,
+} from '../lib/sourceQuality';
+import { toast } from 'sonner';
 import { getEsgZoneIntersection } from '../lib/esgConservationZones';
 import MaritimeContextPanel from './MaritimeContextPanel';
 import PortLogisticsPanel from './PortLogisticsPanel';
@@ -63,6 +78,10 @@ import EntityTradeFlowsPanel from './dossier/EntityTradeFlowsPanel';
 import { CountryCoveragePanel } from './dossier/CountryCoveragePanel';
 import DealRoomPanel from './DealRoomPanel';
 import LicenseeProcurementSection from './LicenseeProcurementSection';
+import SupplyChainPanel from './dossier/SupplyChainPanel';
+import FreeTradeEvidencePanel from './dossier/FreeTradeEvidencePanel';
+import SatelliteSitePanel from './dossier/SatelliteSitePanel';
+import GoldBodLicensePanel from './dossier/GoldBodLicensePanel';
 import {
   API_BASE,
   getEntityContacts,
@@ -76,12 +95,28 @@ import {
   useStorageTerminalDetails,
 } from '../lib/api';
 import { getLicenseCommodityLabels } from '../lib/commodities';
+import {
+  formatStorageOperatorLabel,
+  formatStorageOwnerLabel,
+  formatStorageSubstanceLabel,
+  storageTerminalOsmTagSummary,
+  STORAGE_OPERATOR_UNTAGGED,
+} from '../lib/storageTankFarmsLayer';
 import { getCommodityMarketSnapshot } from '../lib/commodityMarket';
 import {
   getLicenseHeroImageUrl,
   getLicenseVolumeUnit,
   isOilAndGasLicense,
 } from '../lib/licenseHeroImage';
+import {
+  buildMaritimeStatusMessages,
+  buildVesselAlerts,
+  findNearbyVessels,
+  licenseViewportBounds,
+  resolveMaritimeFeedIssue,
+  useMaritimeVessels,
+  type VesselAlert,
+} from '../lib/vessels';
 
 /** Client-side cap — slightly above server AI_ANALYSIS_DEADLINE_SECONDS + enrichment budget. */
 const AI_ANALYZE_CLIENT_TIMEOUT_MS = 70_000;
@@ -103,16 +138,17 @@ function formatAiAnalyzeFailureMessage(status: number, payload: unknown): string
   return 'Intelligence request failed.';
 }
 
-function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+function fmtAlertTimestamp(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
+
+function vesselAlertSeverityClass(severity: VesselAlert['severity']): string {
+  if (severity === 'critical') return 'bg-red-500/10 text-red-400 border-red-500/20';
+  if (severity === 'warning') return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+  return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20';
 }
 
 interface DossierViewProps {
@@ -133,35 +169,6 @@ interface DossierViewProps {
   onOpenInvestigations?: () => void;
   onDealRoomLinked?: (room: DealRoom) => void;
 }
-
-const KANBAN_STAGES = ['New', 'Needs Review', 'Investigating', 'Escalated', 'Approved', 'Rejected'] as const;
-
-const LIFECYCLE_STEPS = [
-  { id: 'New', label: 'New' },
-  { id: 'Needs Review', label: 'Needs Review' },
-  { id: 'Investigating', label: 'Investigating' },
-  { id: 'Escalated', label: 'Escalated' },
-  { id: 'Approved', label: 'Approved' },
-  { id: 'Rejected', label: 'Rejected' },
-] as const;
-
-const STAGE_TO_LIFECYCLE: Record<string, number> = {
-  'New': 0,
-  'Needs Review': 1,
-  'Investigating': 2,
-  'Escalated': 3,
-  'Approved': 4,
-  'Rejected': 5,
-};
-
-const LIFECYCLE_TO_STAGE: Record<number, string> = {
-  0: 'New',
-  1: 'Needs Review',
-  2: 'Investigating',
-  3: 'Escalated',
-  4: 'Approved',
-  5: 'Rejected',
-};
 
 function inferOilCategory(commodity?: string | null): OilHsCategory {
   const normalized = (commodity || '').toLowerCase();
@@ -218,10 +225,6 @@ export default function DossierView({
   const [contactsError, setContactsError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const [selectedCommodity, setSelectedCommodity] = useState('');
-  const [supplySearchQuery, setSupplySearchQuery] = useState('');
-  const [supplyFilterType, setSupplyFilterType] = useState('all');
-  const [verifiedSuppliers, setVerifiedSuppliers] = useState<string[]>([]);
-
   const [documentText, setDocumentText] = useState('');
   const [scannedContract, setScannedContract] = useState<any>(null);
   const [isScanningContract, setIsScanningContract] = useState(false);
@@ -240,30 +243,95 @@ export default function DossierView({
   }, [item]);
   const isEsgRisk = esgZone !== null;
 
-  const [radarSweeping, setRadarSweeping] = useState(true);
-  const [dispatchedVessels, setDispatchedVessels] = useState<string[]>([]);
+  const vesselAlertsViewport = useMemo(() => {
+    if (item?.lat == null || item?.lng == null) return null;
+    return licenseViewportBounds(item.lat, item.lng);
+  }, [item?.lat, item?.lng]);
 
-  const mockAISVessels = useMemo(() => {
-    if (!item) return [];
-    const fleet = [
-      { name: 'Golden Horizon', type: 'Bulk Carrier', flag: 'Panama', speed: '12.4 kn', baseOffsetLat: 0.15, baseOffsetLng: -0.12 },
-      { name: 'Sea Sovereign', type: 'Crude Oil Tanker', flag: 'Marshall Islands', speed: '14.1 kn', baseOffsetLat: -0.08, baseOffsetLng: 0.22 },
-      { name: 'Star Orion', type: 'LNG Carrier', flag: 'Singapore', speed: '16.8 kn', baseOffsetLat: 0.28, baseOffsetLng: 0.05 },
-      { name: 'Atlantic Pioneer', type: 'General Cargo', flag: 'Liberia', speed: '10.2 kn', baseOffsetLat: -0.32, baseOffsetLng: -0.25 }
-    ];
+  const vesselAlertsTabActive = activeTab === 'vessel-alerts';
 
-    return fleet.map(v => {
-      const vLat = (item.lat || 0) + v.baseOffsetLat;
-      const vLng = (item.lng || 0) + v.baseOffsetLng;
-      const distance = calculateDistanceKm(item.lat || 0, item.lng || 0, vLat, vLng);
-      return {
-        ...v,
-        lat: vLat,
-        lng: vLng,
-        distance
-      };
-    }).sort((a, b) => a.distance - b.distance);
-  }, [item]);
+  const {
+    data: maritimeFeedForAlerts,
+    isLoading: maritimeAlertsLoading,
+    error: maritimeAlertsError,
+  } = useMaritimeVessels({
+    enabled: vesselAlertsTabActive && item?.lat != null && item?.lng != null,
+    viewport: vesselAlertsViewport,
+    scope: 'all_vessels',
+    maxVessels: 5000,
+    captureWindowSeconds: 25,
+  });
+
+  const nearbyVesselSignals = useMemo(() => {
+    if (item?.lat == null || item?.lng == null) return [];
+    return findNearbyVessels(maritimeFeedForAlerts?.vessels ?? [], item.lat, item.lng);
+  }, [item?.lat, item?.lng, maritimeFeedForAlerts?.vessels]);
+
+  const maritimeSnapshotTotal =
+    maritimeFeedForAlerts?.snapshot_vessel_count ??
+    maritimeFeedForAlerts?.total_available ??
+    maritimeFeedForAlerts?.vessels?.length ??
+    0;
+
+  const maritimeFeedIssue = useMemo(
+    () =>
+      resolveMaritimeFeedIssue(maritimeFeedForAlerts, {
+        layerEnabled: true,
+        vesselsInView: nearbyVesselSignals.length,
+        snapshotTotal: maritimeSnapshotTotal,
+      }),
+    [maritimeFeedForAlerts, nearbyVesselSignals.length, maritimeSnapshotTotal],
+  );
+
+  const vesselAlerts = useMemo(
+    () =>
+      buildVesselAlerts({
+        feed: maritimeFeedForAlerts,
+        feedIssue: maritimeFeedIssue,
+        licenseLat: item?.lat,
+        licenseLng: item?.lng,
+        nearbySignals: nearbyVesselSignals,
+        esgZone,
+        legalEvents,
+      }),
+    [
+      maritimeFeedForAlerts,
+      maritimeFeedIssue,
+      item?.lat,
+      item?.lng,
+      nearbyVesselSignals,
+      esgZone,
+      legalEvents,
+    ],
+  );
+
+  const proximityAlerts = useMemo(
+    () => vesselAlerts.filter((alert) => alert.kind === 'vessel_proximity'),
+    [vesselAlerts],
+  );
+
+  const systemAlerts = useMemo(
+    () => vesselAlerts.filter((alert) => alert.kind !== 'vessel_proximity'),
+    [vesselAlerts],
+  );
+
+  const maritimeStatusForAlerts = useMemo(
+    () =>
+      buildMaritimeStatusMessages(maritimeFeedForAlerts, {
+        layerEnabled: true,
+        vesselsInView: nearbyVesselSignals.length,
+        snapshotTotal: maritimeSnapshotTotal,
+        isLoading: maritimeAlertsLoading,
+        hasError: Boolean(maritimeAlertsError),
+      }),
+    [
+      maritimeFeedForAlerts,
+      nearbyVesselSignals.length,
+      maritimeSnapshotTotal,
+      maritimeAlertsLoading,
+      maritimeAlertsError,
+    ],
+  );
 
   const defaultLogs = useMemo(() => {
     if (!item) return [];
@@ -280,12 +348,6 @@ export default function DossierView({
         username: 'Sentinel Sat GIS',
         timestamp: new Date(Date.now() - 24 * 3600 * 1000).toISOString()
       }] : []),
-      {
-        action: 'LOGISTICS_DESK_LOAD',
-        details: `Vessel proximity alerts initialized for concession locator bounds (${item.lat?.toFixed(4)}, ${item.lng?.toFixed(4)}).`,
-        username: 'System Router',
-        timestamp: new Date(Date.now() - 12 * 3600 * 1000).toISOString()
-      }
     ];
   }, [item, isEsgRisk, esgZone]);
 
@@ -313,155 +375,6 @@ export default function DossierView({
   const activeCommodityLabel = selectedCommodity || primaryCommodityLabel;
   const commodityListLabel = effectiveCommodityRaw || activeCommodityLabel || 'Unknown';
 
-  const mockSupplyChain = useMemo(() => {
-    if (!item) return [];
-    const baseCommodity = commodityListLabel;
-    
-    const suppliers = [
-      {
-        id: 'SUP-SANDVIK-01',
-        name: 'Sandvik Mining & Rock Solutions',
-        role: 'supplier',
-        product: 'Heavy Extraction Drills & Underground Loaders',
-        country: 'Sweden',
-        volume: '42 Units / year',
-        agreement: 'Valid through Dec 2028',
-        compliance: 'ESG-9 Compliant',
-        duns: '55-667-8899'
-      },
-      {
-        id: 'SUP-CATERPILLAR-02',
-        name: 'Caterpillar Global Mining',
-        role: 'supplier',
-        product: 'Ultra-class Haul Trucks & Excavation Rigs',
-        country: 'United States',
-        volume: '18 Heavy Excavators',
-        agreement: 'Valid through Jun 2029',
-        compliance: 'Verified Ethical Sourcing',
-        duns: '00-112-2233'
-      },
-      {
-        id: 'SUP-ORICA-03',
-        name: 'Orica Mining Services',
-        role: 'supplier',
-        product: 'Commercial Explosives & Precision Blasting Systems',
-        country: 'Australia',
-        volume: '4,200 Tons / annum',
-        agreement: 'Valid through Apr 2027',
-        compliance: 'EPA Certified',
-        duns: '99-887-7766'
-      },
-      {
-        id: 'SUP-SCHLUMBERGER-04',
-        name: 'SLB (Schlumberger Ltd)',
-        role: 'supplier',
-        product: 'Reservoir Telemetry & Drilling Fluid Systems',
-        country: 'France',
-        volume: '8 Active Wells',
-        agreement: 'Valid through Feb 2030',
-        compliance: 'High-Tech Environmentally Audited',
-        duns: '22-334-4455'
-      },
-      {
-        id: 'SUP-BAKER-05',
-        name: 'Baker Hughes Logistics',
-        role: 'supplier',
-        product: 'Turbomachinery & Gas Processing Infrastructure',
-        country: 'United States',
-        volume: '4 Compression Stations',
-        agreement: 'Valid through Oct 2029',
-        compliance: 'Verified Carbon Reduction Program',
-        duns: '11-223-3344'
-      }
-    ];
-
-    const consumers = [
-      {
-        id: 'CON-VALCAMBI-01',
-        name: 'Valcambi SA Precious Metals Smelter',
-        role: 'consumer',
-        product: 'High-Purity Bullion Smelting & Refining',
-        country: 'Switzerland',
-        volume: '450,000 Oz / year',
-        agreement: 'Valid through Jan 2031',
-        compliance: 'LBMA Certified Sourcing',
-        duns: '44-556-6677'
-      },
-      {
-        id: 'CON-RAND-02',
-        name: 'Rand Refinery Ltd',
-        role: 'consumer',
-        product: 'Precious Metals Refining & Coinage Minting',
-        country: 'South Africa',
-        volume: '280,000 Oz / year',
-        agreement: 'Valid through Aug 2029',
-        compliance: 'LBMA & Responsible Gold Certified',
-        duns: '33-445-5566'
-      },
-      {
-        id: 'CON-TESLA-03',
-        name: 'Tesla Gigafactory Batteries',
-        role: 'consumer',
-        product: 'EV Cathode Sourcing & Manganese Raw Inputs',
-        country: 'United States',
-        volume: '15,000 Tons Manganese / yr',
-        agreement: 'Valid through May 2030',
-        compliance: 'Direct Responsible Mineral Sourcing',
-        duns: '09-876-5432'
-      },
-      {
-        id: 'CON-BP-TRADING-04',
-        name: 'BP Oil Trading & Logistics',
-        role: 'consumer',
-        product: 'Wholesale Fossil Fuel Distribution & Marine Fueling',
-        country: 'United Kingdom',
-        volume: '18.5M Barrels / year',
-        agreement: 'Valid through Mar 2031',
-        compliance: 'Maritime Environmental Registry Verified',
-        duns: '77-889-9900'
-      },
-      {
-        id: 'CON-MITSUBISHI-05',
-        name: 'Mitsubishi Heavy Industries',
-        role: 'consumer',
-        product: 'Industrial Turbines & Silver/Manganese Components',
-        country: 'Japan',
-        volume: '1,200 Tons / year',
-        agreement: 'Valid through Nov 2028',
-        compliance: 'Ethical Sourcing Gold Standard',
-        duns: '88-990-0011'
-      }
-    ];
-
-    const isOilSector = baseCommodity.toLowerCase().includes('oil') || baseCommodity.toLowerCase().includes('gas') || baseCommodity.toLowerCase().includes('diesel');
-    
-    const activeSuppliers = isOilSector
-      ? suppliers.filter(s => s.id !== 'SUP-ORICA-03' && s.id !== 'SUP-SANDVIK-01')
-      : suppliers.filter(s => s.id !== 'SUP-SCHLUMBERGER-04' && s.id !== 'SUP-BAKER-05');
-      
-    const activeConsumers = isOilSector
-      ? consumers.filter(c => c.id === 'CON-BP-TRADING-04' || c.id === 'CON-MITSUBISHI-05')
-      : consumers.filter(c => c.id !== 'CON-BP-TRADING-04');
-
-    return [...activeSuppliers, ...activeConsumers];
-  }, [item, commodityListLabel]);
-
-  const filteredSupplyChain = useMemo(() => {
-    return mockSupplyChain.filter(node => {
-      const matchesSearch = 
-        node.name.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
-        node.product.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
-        node.country.toLowerCase().includes(supplySearchQuery.toLowerCase()) ||
-        node.id.toLowerCase().includes(supplySearchQuery.toLowerCase());
-      
-      const matchesType = 
-        supplyFilterType === 'all' || 
-        node.role === supplyFilterType;
-
-      return matchesSearch && matchesType;
-    });
-  }, [mockSupplyChain, supplySearchQuery, supplyFilterType]);
-
   const commoditySummaryLabel =
     commodityLabels.length === 0
       ? 'Unknown'
@@ -474,9 +387,46 @@ export default function DossierView({
     [activeCommodityLabel, marketPrices]
   );
 
-  // Current pipeline stage
-  const currentStage = annotation.stage || 'New';
-  const lifecycleStep = STAGE_TO_LIFECYCLE[currentStage] ?? 0;
+  const currentStage = normalizeDealStage(annotation.stage);
+  const lifecycleStep = dealStageIndex(currentStage);
+
+  const checklistItems = useMemo(
+    () => (item ? resolveChecklistItems(item.id, annotation.checklist) : []),
+    [item?.id, annotation.checklist],
+  );
+  const checklistStats = useMemo(() => checklistProgress(checklistItems), [checklistItems]);
+  const sourceTier = useMemo(() => sourceQualityTier(item || {}), [item]);
+  const sourceQualityWarn = useMemo(() => sourceQualityWarning(sourceTier), [sourceTier]);
+  const stageChecklistWarn = useMemo(
+    () => checklistStageWarning(annotation.stage, checklistStats.pct),
+    [annotation.stage, checklistStats.pct],
+  );
+
+  const ddChecklistComplete = useMemo(
+    () =>
+      DD_CHECKLIST_IDS.every((id) => checklistItems.find((it) => it.id === id)?.checked),
+    [checklistItems],
+  );
+
+  const handleChecklistChange = (items: typeof checklistItems) => {
+    if (!item) return;
+    updateAnnotation(item.id, {
+      checklist: items,
+      checklistUpdatedAt: new Date().toISOString(),
+    });
+  };
+
+  const suggestInvestigatingStage = () => {
+    if (!item || currentStage === 'Investigating' || !ddChecklistComplete) return;
+    toast.message(t('השלמת בדיקת נאותות', 'Due diligence items complete'), {
+      description: t('לסמן כעסקה בחקירה?', 'Mark deal as Investigating?'),
+      action: {
+        label: t('חקירה', 'Investigating'),
+        onClick: () => updateAnnotation(item.id, { stage: 'Investigating' }),
+      },
+      duration: 8000,
+    });
+  };
   const isOilAndGas = isOilAndGasLicense(item?.sector, commodityListLabel);
   const volumeUnit = getLicenseVolumeUnit(item?.sector, commodityListLabel);
   const heroImageUrl = item ? getLicenseHeroImageUrl(item) : '/assets/commodities/mining.png';
@@ -744,7 +694,7 @@ Output requirements:
     }
     setIsLoadingDealRoom(true);
     setDealRoomError(null);
-    listDealRooms({ entityId: item.id, entityKind: item.entityKind || 'license' })
+    listDealRooms({ entityId: item.id, entityKind: item.entityKind || 'license', includeArchived: true })
       .then((rooms) => {
         if (!isCancelled) setDealRoom(rooms[0] ?? null);
       })
@@ -963,7 +913,6 @@ Output requirements:
       phoneNumber: annotation.phoneNumber || item?.phoneNumber || '',
       quantity: annotation.quantity ?? item?.capacity ?? 0,
       price: annotation.price ?? item?.pricePerKg ?? 0,
-      stage: annotation.stage || 'New',
     });
     setIsEditing(true);
   };
@@ -981,11 +930,14 @@ Output requirements:
   const publicBusinessContacts = entityContacts.filter(
     (contact) => (contact.contactScope || 'public_business') === 'public_business'
   );
+  const isAiOrWebDiscoveredPhone = (discoveredBy?: string | null) =>
+    discoveredBy === 'ai' || discoveredBy === 'web';
   const sourceBackedPhoneContact = publicBusinessContacts.find(
-    (contact) => contact.contactType === 'phone' && (contact.discoveredBy || 'open_data') !== 'ai'
+    (contact) =>
+      contact.contactType === 'phone' && !isAiOrWebDiscoveredPhone(contact.discoveredBy || 'open_data')
   );
   const aiDiscoveredPhoneContacts = publicBusinessContacts.filter(
-    (contact) => contact.contactType === 'phone' && contact.discoveredBy === 'ai'
+    (contact) => contact.contactType === 'phone' && isAiOrWebDiscoveredPhone(contact.discoveredBy)
   );
   const publicPhoneContact = sourceBackedPhoneContact || aiDiscoveredPhoneContacts[0];
   const publicWebsiteContact = publicBusinessContacts.find((contact) => contact.contactType === 'website');
@@ -1170,30 +1122,40 @@ Output requirements:
                 />
               </div>
             )}
-            {/* Deal Lifecycle Strip — driven by annotation.stage */}
+            {/* Deal stage strip — single source: annotation.stage (6 canonical stages) */}
             <div className="mb-6 md:mb-10 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                    {t('סטטוס עסקה', 'Deal Lifecycle')}
+                    {t('שלב עסקה', 'Deal stage')}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">
-                      {LIFECYCLE_STEPS[lifecycleStep]?.label}
-                    </span>
-                    <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-none text-[9px] font-black ml-1">
                       {currentStage}
-                    </Badge>
+                    </span>
+                    {checklistStats.total > 0 && (
+                      <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-none text-[9px] font-black">
+                        {t('רשימת ביצוע', 'Checklist')}: {checklistStats.done}/{checklistStats.total}
+                      </Badge>
+                    )}
                   </div>
+                  {ddChecklistComplete && currentStage !== 'Investigating' && (
+                    <button
+                      type="button"
+                      onClick={() => updateAnnotation(item.id, { stage: 'Investigating' })}
+                      className="mt-2 text-left text-[9px] font-black uppercase tracking-widest text-amber-500 hover:text-amber-400"
+                    >
+                      {t('DD הושלם — סמן כחקירה', 'DD complete — mark as Investigating')}
+                    </button>
+                  )}
                 </div>
-                {/* Steps: horizontal scroll on mobile */}
                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                   {LIFECYCLE_STEPS.map((step, i) => (
                     <div key={step.id} className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={() =>
-                          updateAnnotation(item.id, { stage: LIFECYCLE_TO_STAGE[i] })
+                          updateAnnotation(item.id, { stage: dealStageAtIndex(i) })
                         }
                         className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer min-h-[44px] whitespace-nowrap
                           ${i === lifecycleStep
@@ -1214,9 +1176,27 @@ Output requirements:
               </div>
             </div>
 
+            {(sourceQualityWarn || stageChecklistWarn) && (
+              <div className="mb-6 space-y-2">
+                {sourceQualityWarn && (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[11px] font-semibold text-amber-900 dark:text-amber-100">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-300 block mb-1">
+                      {t('איכות מקור', 'Source quality')}: {sourceQualityLabel(sourceTier)}
+                    </span>
+                    {sourceQualityWarn}
+                  </div>
+                )}
+                {stageChecklistWarn && (
+                  <div className="rounded-2xl border border-slate-400/30 bg-slate-500/10 px-4 py-3 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                    {stageChecklistWarn}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'trade-evidence', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
                   'deal-room': 'Deal Room',
@@ -1224,6 +1204,7 @@ Output requirements:
                   'exports-imports': 'Exports and Imports',
                   'gov-tenders': 'Gov Spending & Tenders',
                   'supply-chain': 'Global Supply Chain',
+                  'trade-evidence': 'Trade Evidence',
                   'news': 'News',
                   'satellite': 'Satellite',
                   'owners': 'Ownership',
@@ -1287,7 +1268,23 @@ Output requirements:
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                       <LucideShieldCheck className="w-4 h-4 text-emerald-500" /> Execution Checklist
                     </h4>
-                    <ExecutionChecklist dealId={item.id} dealLabel={item.company} />
+                    <ExecutionChecklist
+                      dealId={item.id}
+                      dealLabel={item.company}
+                      items={checklistItems}
+                      onItemsChange={(next) => {
+                        handleChecklistChange(next);
+                        const ddDone = DD_CHECKLIST_IDS.every((id) =>
+                          next.find((it) => it.id === id)?.checked,
+                        );
+                        if (
+                          ddDone &&
+                          normalizeDealStage(annotation.stage) !== 'Investigating'
+                        ) {
+                          suggestInvestigatingStage();
+                        }
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -1296,10 +1293,13 @@ Output requirements:
                   {/* Lead Value Score */}
                   <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 md:p-8">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-5 flex items-center gap-3">
-                      <LucideZap className="w-4 h-4 text-amber-500" /> Lead Value
+                      <LucideZap className="w-4 h-4 text-amber-500" /> {t('עדיפות ליד', 'Lead priority')}
                     </h4>
                     <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
-                      Internal priority tag for pipeline ranking. Not shared externally.
+                      {t(
+                        'תג עדיפות פנימי לדירוג בתור — לא קשור לשלב העסקה.',
+                        'Internal priority for queue ranking — separate from deal stage.',
+                      )}
                     </p>
                     <div className="grid grid-cols-3 gap-2 mb-4">
                       {(['high', 'medium', 'low'] as LeadValue[]).map(v => {
@@ -1367,7 +1367,7 @@ Output requirements:
                 terminalDetails={terminalDetails}
                 commodityListLabel={commodityListLabel}
                 volumeUnit={volumeUnit}
-                pipelineStageLabel={LIFECYCLE_STEPS[lifecycleStep]?.label || currentStage}
+                pipelineStageLabel={currentStage}
                 isOilAndGas={isOilAndGas}
                 isPortLogistics={isPortLogistics}
                 isStorageTerminal={isStorageTerminal}
@@ -1462,176 +1462,216 @@ Output requirements:
 
             {/* VESSEL ALERTS TAB (PILLAR C) */}
             {activeTab === 'vessel-alerts' && item && (
-              <div className="space-y-8 max-w-4xl mx-auto">
-                {/* Radar Sweep & Congestion Index HUD */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Radar sweep indicator */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] shadow-lg">
-                    {radarSweeping && (
-                      <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none animate-pulse" />
-                    )}
-                    <div className="relative w-24 h-24 rounded-full border border-cyan-500/20 flex items-center justify-center overflow-hidden">
-                      {/* Sweep sweep line */}
-                      {radarSweeping && (
-                        <div className="absolute inset-0 origin-center bg-gradient-to-tr from-cyan-500/10 to-transparent rounded-full animate-[spin_4s_linear_infinite]" />
-                      )}
-                      <div className="w-16 h-16 rounded-full border border-cyan-500/30 flex items-center justify-center">
-                        <div className="w-8 h-8 rounded-full border border-cyan-500/40 flex items-center justify-center">
-                          <LucideRadio className="w-4 h-4 text-cyan-400 animate-pulse" />
-                        </div>
-                      </div>
-                      <div className="absolute bottom-2 w-2 h-2 bg-red-500 rounded-full animate-ping" style={{ left: '30%', top: '25%' }} />
-                      <div className="absolute bottom-2 w-2 h-2 bg-yellow-500 rounded-full animate-ping" style={{ right: '25%', bottom: '30%' }} />
-                    </div>
-                    
-                    <div className="text-center mt-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        {t('מכ״ם הגנה פעיל', 'Active Radar Sweep')}
-                      </h4>
-                      <Button
-                        onClick={() => setRadarSweeping(!radarSweeping)}
-                        variant="ghost"
-                        className="h-6 mt-1 px-3 text-[9px] text-cyan-400 hover:text-cyan-300 font-bold uppercase tracking-wider bg-cyan-500/10 hover:bg-cyan-500/20 rounded-full"
-                      >
-                        {radarSweeping ? t('כבה סריקה', 'PAUSE RADAR') : t('הפעל סריקה', 'START RADAR')}
-                      </Button>
-                    </div>
-                  </Card>
-
-                  {/* Congestion Index HUD */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 flex flex-col justify-between md:col-span-2 shadow-lg relative overflow-hidden">
-                    <div className="absolute -top-12 -right-12 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+              <div className="space-y-6 max-w-4xl mx-auto">
+                <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <Badge className="bg-amber-500 text-slate-950 border-none font-black text-[9px] px-2.5 h-5 mb-3">
-                        {t('מדד צפיפות ימית', 'AIS LOGISTICS TRAFFIC SATURATION')}
+                      <Badge className="bg-cyan-500/10 text-cyan-400 border-none font-black text-[9px] px-2.5 h-5 mb-3">
+                        {t('מקור AIS', 'AIS source')}
                       </Badge>
-                      <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight">
-                        {t('עומס בנמל: בינוני-גבוה', 'Port Congestion: MEDIUM-HIGH')}
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                        {maritimeStatusForAlerts
+                          ? t(maritimeStatusForAlerts.headlineHe, maritimeStatusForAlerts.headlineEn)
+                          : t('מעקב כלי שיט', 'Vessel watch')}
                       </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-md">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed max-w-2xl">
+                        {maritimeStatusForAlerts
+                          ? t(maritimeStatusForAlerts.detailHe, maritimeStatusForAlerts.detailEn)
+                          : t(
+                              'טוען מצב מאגר AIS סביב הרישיון…',
+                              'Loading AIS feed status around this license…',
+                            )}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">
+                        {t('עודכן', 'Updated')}
+                      </p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        {fmtAlertTimestamp(
+                          maritimeFeedForAlerts?.data_as_of,
+                          t('לא זמין', 'Unavailable'),
+                        )}
+                      </p>
+                      <p className="text-[9px] text-slate-500 mt-1">
+                        {maritimeFeedForAlerts?.source || 'maritime_intel'}
+                      </p>
+                    </div>
+                  </div>
+                  {maritimeAlertsError && (
+                    <p className="mt-4 text-[10px] text-red-500 font-bold">
+                      {String((maritimeAlertsError as Error)?.message || maritimeAlertsError)}
+                    </p>
+                  )}
+                  {maritimeStatusForAlerts?.sparseWarningHe && maritimeStatusForAlerts.sparseWarningEn && (
+                    <p className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-[10px] text-amber-700 dark:text-amber-300">
+                      {t(maritimeStatusForAlerts.sparseWarningHe, maritimeStatusForAlerts.sparseWarningEn)}
+                    </p>
+                  )}
+                </Card>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                        {t('התרעות מבוססות נתונים', 'Data-driven alerts')}
+                      </h4>
+                      <p className="text-[9px] text-slate-400">
                         {t(
-                          'זמן ההמתנה הממוצע לפריקה במעגני הקונססיה עומד כעת על 3.4 ימים עקב תנאי מזג אוויר ופעילות מוגברת.',
-                          'The average unloading delay at the nearest marine concession locator terminals is currently 3.4 days due to localized bulk carrier queues.'
+                          'רק אותות מ-AIS, כיסוי, ESG ו-OpenSanctions — ללא אירועי הדגמה',
+                          'Only AIS coverage, proximity, ESG, and OpenSanctions signals — no demo events',
                         )}
                       </p>
                     </div>
+                    <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
+                      {vesselAlerts.length} {t('התרעות', 'Alerts')}
+                    </Badge>
+                  </div>
 
-                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-6">
-                      <div className="flex-1">
-                        <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1">
-                          <span>{t('עומס', 'Saturation')}</span>
-                          <span className="text-amber-500 font-black">74%</span>
-                        </div>
-                        <div className="w-full h-2.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 rounded-full" style={{ width: '74%' }} />
+                  {maritimeAlertsLoading && !maritimeFeedForAlerts ? (
+                    <Card className="p-8 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">
+                          {t('טוען התרעות ימיות…', 'Loading maritime alerts…')}
+                        </p>
+                      </div>
+                    </Card>
+                  ) : vesselAlerts.length === 0 ? (
+                    <Card className="p-8 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <div className="flex items-start gap-3">
+                        <LucideShip className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">
+                            {t('אין התרעות פעילות', 'No active alerts')}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                            {t(
+                              'לא נמצאו כלי שיט AIS בטווח 150 ק"מ, דגלים מסנקציות, או בעיות כיסוי מעבר לסטטוס המאגר למעלה.',
+                              'No AIS vessels within 150 km, sanctions flags, or coverage issues beyond the feed status above.',
+                            )}
+                          </p>
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">{t('זמן פריקה', 'Avg Queue Time')}</p>
-                        <p className="text-xl font-black text-slate-900 dark:text-white">~78 hrs</p>
-                      </div>
+                    </Card>
+                  ) : (
+                    <div className="space-y-3">
+                      {systemAlerts.map((alert) => (
+                        <Card
+                          key={alert.id}
+                          className={`p-5 rounded-3xl border ${vesselAlertSeverityClass(alert.severity)}`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <LucideAlertTriangle className="w-4 h-4 shrink-0" />
+                                <h4 className="text-sm font-black uppercase tracking-wide">
+                                  {t(alert.titleHe, alert.titleEn)}
+                                </h4>
+                              </div>
+                              <p className="text-[10px] leading-relaxed opacity-90">
+                                {t(alert.messageHe, alert.messageEn)}
+                              </p>
+                            </div>
+                            <Badge className="font-black text-[8px] px-2 h-5 border-none shrink-0 uppercase">
+                              {alert.severity}
+                            </Badge>
+                          </div>
+                          <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/5 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-500">
+                            <span>
+                              {t('מקור', 'Source')}: {alert.sourceLabel}
+                            </span>
+                            <span>
+                              {t('נצפה', 'Observed')}:{' '}
+                              {fmtAlertTimestamp(alert.observedAt, t('לא זמין', 'Unavailable'))}
+                            </span>
+                          </div>
+                        </Card>
+                      ))}
                     </div>
-                  </Card>
+                  )}
                 </div>
 
-                {/* Spatial Proximity Signals */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500">
-                        {t('אותות קרבה ימיים פעילים', 'Active AIS Proximity Signals')}
+                        {t('קרבת AIS לרישיון', 'AIS proximity to license')}
                       </h4>
                       <p className="text-[9px] text-slate-400">
-                        {t('חישוב מרחק גיאוגרפי ישיר (האברסין) ממיקום הרישיון', 'Direct Haversine geographical distance from concession bounds')}
+                        {t(
+                          'כלי שיט אמיתיים בטווח 150 ק"מ (Haversine) — ללא מיקומי הדגמה',
+                          'Real AIS vessels within 150 km (Haversine) — demo positions excluded',
+                        )}
                       </p>
                     </div>
                     <Badge variant="outline" className="border-cyan-500/20 text-cyan-400 text-[9px] font-bold">
-                      {mockAISVessels.length} {t('כלי שיט בטווח', 'Active Vessels')}
+                      {proximityAlerts.length} {t('קרובים', 'Nearby')}
                     </Badge>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {mockAISVessels.map((vessel) => {
-                      const isDispatched = dispatchedVessels.includes(vessel.name);
-                      const isHighRisk = vessel.distance < 120;
-                      
-                      return (
-                        <Card
-                          key={vessel.name}
-                          className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[220px] shadow-sm hover:shadow-md
-                            ${isHighRisk 
-                              ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/30' 
-                              : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 hover:border-black/10 dark:hover:border-white/10'}`}
-                        >
-                          {isHighRisk && (
-                            <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-lg pointer-events-none" />
-                          )}
-                          
-                          <div>
+                  {proximityAlerts.length === 0 ? (
+                    <Card className="p-6 rounded-3xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5">
+                      <p className="text-[10px] text-slate-500">
+                        {t(
+                          'אין כלי שיט AIS שמורים בטווח. נסו להרחיב את oil-live-intel-worker או לבדוק כיסוי המפרץ.',
+                          'No persisted AIS vessels in range. Expand oil-live-intel-worker watches or check Gulf coverage.',
+                        )}
+                      </p>
+                    </Card>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {proximityAlerts.map((alert) => {
+                        const signal = nearbyVesselSignals.find((entry) => entry.vessel.id === alert.vesselId);
+                        const vessel = signal?.vessel;
+                        const isCritical = alert.severity === 'critical';
+                        return (
+                          <Card
+                            key={alert.id}
+                            className={`p-5 rounded-3xl border transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[180px] shadow-sm
+                              ${isCritical
+                                ? 'bg-red-500/5 border-red-500/20'
+                                : 'bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5'}`}
+                          >
                             <div className="flex items-start justify-between gap-3 mb-3">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0
-                                  ${isHighRisk ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                  ${isCritical ? 'bg-red-500/20 text-red-500' : 'bg-cyan-500/10 text-cyan-400'}`}>
                                   <LucideShip className="w-4 h-4" />
                                 </div>
-                                <div>
-                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate max-w-[140px] uppercase">
-                                    {vessel.name}
+                                <div className="min-w-0">
+                                  <h4 className="text-sm font-black text-slate-900 dark:text-white truncate uppercase">
+                                    {alert.vesselName || vessel?.mmsi || t('לא ידוע', 'Unknown')}
                                   </h4>
-                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
-                                    {vessel.type} • {vessel.flag}
+                                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider truncate">
+                                    {[vessel?.ship_type_label, vessel?.mmsi ? `MMSI ${vessel.mmsi}` : null]
+                                      .filter(Boolean)
+                                      .join(' · ')}
                                   </p>
                                 </div>
                               </div>
                               <Badge className={`font-black text-[9px] px-2 h-5 border-none shrink-0
-                                ${isHighRisk ? 'bg-red-500 text-white animate-pulse' : 'bg-cyan-500/10 text-cyan-400'}`}>
-                                {vessel.distance.toFixed(1)} km
+                                ${isCritical ? 'bg-red-500 text-white' : 'bg-cyan-500/10 text-cyan-400'}`}>
+                                {alert.distanceKm?.toFixed(1)} km
                               </Badge>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-black/5 dark:border-white/5">
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                <LucideCompass className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{t('מהירות: ', 'Speed: ') + vessel.speed}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                <LucideClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span>{t('זמן הגעה: ', 'ETA: ') + (isHighRisk ? 'Immediate' : '1.2 days')}</span>
-                              </div>
+                            <p className="text-[10px] text-slate-500 leading-relaxed">
+                              {t(alert.messageHe, alert.messageEn)}
+                            </p>
+                            <div className="mt-4 pt-3 border-t border-black/5 dark:border-white/5 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-500">
+                              <span>
+                                {t('מקור', 'Source')}: {alert.sourceLabel}
+                              </span>
+                              <span>
+                                {t('נצפה', 'Observed')}:{' '}
+                                {fmtAlertTimestamp(alert.observedAt, t('לא זמין', 'Unavailable'))}
+                              </span>
                             </div>
-                          </div>
-
-                          <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
-                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">
-                              {isHighRisk ? t('חריגת גבול אקטיבית', 'CRITICAL BOUNDARY INTRUSION') : t('גישה שגרתית', 'ROUTINE TRANSIT')}
-                            </span>
-                            <Button
-                              onClick={() => {
-                                if (isDispatched) return;
-                                const newLog = {
-                                  action: 'VESSEL_PROXIMITY_ALARM',
-                                  details: `Logistics alert dispatched: Vessel '${vessel.name}' (${vessel.type}, Flag: ${vessel.flag}) flagged idling near concession buffer range at ${vessel.distance.toFixed(1)}km distance. Speed: ${vessel.speed}.`,
-                                  username: 'AIS Watcher',
-                                  timestamp: new Date().toISOString()
-                                };
-                                setActivityLogs(prev => [newLog, ...prev]);
-                                setDispatchedVessels(prev => [...prev, vessel.name]);
-                              }}
-                              disabled={isDispatched}
-                              className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
-                                ${isDispatched 
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                                  : isHighRisk
-                                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-md shadow-red-500/20'
-                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
-                            >
-                              {isDispatched ? t('שוגר בהצלחה', 'ALERTED ✔') : t('שגר התרעה', 'DISPATCH WARNING')}
-                            </Button>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1648,223 +1688,26 @@ Output requirements:
 
             {/* GLOBAL SUPPLY CHAIN & VALUE FLOW TAB */}
             {activeTab === 'supply-chain' && item && (
-              <div className="space-y-8 max-w-4xl mx-auto">
-                {/* Supply Chain Telemetry HUD */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Upstream & Downstream Flow Overview */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between min-h-[200px] relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-xl pointer-events-none" />
-                    <div>
-                      <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
-                        {t('סקירת שרשרת ערך', 'GLOBAL LOGISTICS OVERVIEW')}
-                      </span>
-                      <h4 className="text-md font-black text-slate-900 dark:text-white uppercase truncate">
-                        {item.company}
-                      </h4>
-                      <div className="space-y-1 mt-3">
-                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
-                          <span>{t('ספקים מאושרים', 'Verified Suppliers')}:</span>
-                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">3 Upstream</span>
-                        </div>
-                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase">
-                          <span>{t('צרכני קצה', 'Downstream Buyers')}:</span>
-                          <span className="text-slate-700 dark:text-slate-300 font-mono font-bold">2 Global Outlets</span>
-                        </div>
-                      </div>
-                    </div>
+              <SupplyChainPanel
+                item={item}
+                entityRelationships={entityRelationships}
+                isLoadingRelationships={isLoadingRelationships}
+                onOpenExportsTab={() => setActiveTab('exports-imports')}
+                onOpenGovTab={() => setActiveTab('gov-tenders')}
+              />
+            )}
 
-                    <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
-                      <span className="text-[9px] font-black text-purple-500 dark:text-purple-400 uppercase tracking-wider bg-purple-500/10 px-2 py-0.5 rounded-full">
-                        {t('שרשרת אספקה מאובטחת', 'SECURED PIPELINE')}
-                      </span>
-                      <span className="text-[9px] text-slate-400 font-bold uppercase">ESG-9 VERIFIED</span>
-                    </div>
-                  </Card>
+            {activeTab === 'trade-evidence' && item && (
+              <FreeTradeEvidencePanel
+                item={item}
+                commodityLabel={commodityListLabel}
+                onOpenExportsTab={() => setActiveTab('exports-imports')}
+              />
+            )}
 
-                  {/* Supply Telemetry Metrics */}
-                  <Card className="bg-slate-900/50 dark:bg-slate-950/50 border-black/10 dark:border-white/10 rounded-3xl p-6 shadow-lg flex flex-col justify-between md:col-span-2 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
-                          {t('זמן אספקה ממוצע', 'AVG LEAD TIME')}
-                        </span>
-                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                          12.4 Days
-                        </p>
-                        <span className="text-[9px] text-slate-400 font-bold uppercase">SUPPLIER DISPATCH</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
-                          {t('נפח שינוע שנתי', 'ANNUAL TRANSIT')}
-                        </span>
-                        <p className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                          450k Oz
-                        </p>
-                        <span className="text-[9px] text-slate-400 font-bold uppercase">COMMODITY VALUE</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
-                          {t('ציון תאימות ESG', 'COMPLIANCE RATING')}
-                        </span>
-                        <p className="text-sm font-black text-slate-900 dark:text-white truncate uppercase text-emerald-500">
-                          98.4% PASSED
-                        </p>
-                        <span className="text-[9px] text-slate-400 font-bold uppercase">SOCIALLY RESPONSIBLE</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5">
-                      <div className="flex justify-between text-[9px] text-slate-400 font-bold uppercase mb-1.5">
-                        <span>{t('פריסת ספקי שרשרת ערך לפי מדינות', 'Supply Chain Geographical Share')}</span>
-                        <span className="text-purple-500 font-black">Sweden & USA: 72%</span>
-                      </div>
-                      <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full flex overflow-hidden">
-                        <div className="h-full bg-blue-500" style={{ width: '40%' }} title="Sweden" />
-                        <div className="h-full bg-amber-500" style={{ width: '32%' }} title="United States" />
-                        <div className="h-full bg-emerald-500" style={{ width: '15%' }} title="Switzerland" />
-                        <div className="h-full bg-purple-500" style={{ width: '13%' }} title="Others" />
-                      </div>
-                      <div className="flex gap-3 mt-2 text-[8px] text-slate-400 font-bold uppercase">
-                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> Sweden</span>
-                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> United States</span>
-                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Switzerland</span>
-                        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full" /> Others</span>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-
-                {/* Filter and Search Controls */}
-                <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                  <div className="flex flex-wrap gap-1">
-                    {[
-                      { id: 'all', label: 'All Channels' },
-                      { id: 'supplier', label: 'Upstream Suppliers' },
-                      { id: 'consumer', label: 'Downstream Consumers' }
-                    ].map(cat => (
-                      <button
-                        key={cat.id}
-                        onClick={() => setSupplyFilterType(cat.id)}
-                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all
-                          ${supplyFilterType === cat.id 
-                            ? 'bg-purple-500 text-white border border-purple-500 shadow-md shadow-purple-500/10' 
-                            : 'bg-black/5 dark:bg-white/5 text-slate-500 border border-black/5 dark:border-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="w-full md:w-64 relative">
-                    <Input
-                      type="text"
-                      placeholder="Search Suppliers, Smelters..."
-                      value={supplySearchQuery}
-                      onChange={(e) => setSupplySearchQuery(e.target.value)}
-                      className="h-9 pl-4 pr-8 text-xs font-semibold bg-black/5 dark:bg-white/5 border-black/10 dark:border-white/10 rounded-xl"
-                    />
-                  </div>
-                </div>
-
-                {/* Counterparties List */}
-                <div className="space-y-4">
-                  {filteredSupplyChain.length === 0 ? (
-                    <div className="text-center py-20 text-slate-500 text-sm font-bold bg-black/5 dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5">
-                      {t('לא נמצאו ספקים או צרכנים מאושרים', 'No verified supply chain counterparties found.')}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                      {filteredSupplyChain.map((node) => {
-                        const isVerified = verifiedSuppliers.includes(node.id);
-                        
-                        let roleColor = 'bg-blue-500/10 text-blue-500 border border-blue-500/20';
-                        if (node.role === 'consumer') {
-                          roleColor = 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20';
-                        }
-
-                        return (
-                          <Card
-                            key={node.id}
-                            className="p-6 bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl shadow-sm hover:shadow-md transition-all duration-300 relative overflow-hidden"
-                          >
-                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                              <div className="space-y-2 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge className="bg-slate-200 dark:bg-slate-800 text-slate-500 border-none font-bold text-[8px] font-mono tracking-wide px-2 h-5">
-                                    {node.id}
-                                  </Badge>
-                                  <Badge className={`font-black text-[8px] px-2 h-5 ${roleColor}`}>
-                                    {node.role.toUpperCase()}
-                                  </Badge>
-                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
-                                    {node.country}
-                                  </span>
-                                </div>
-                                
-                                <h4 className="text-md font-black text-slate-900 dark:text-white uppercase leading-snug">
-                                  {node.name}
-                                </h4>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
-                                  Material Category: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{node.product}</span>
-                                </p>
-                              </div>
-
-                              <div className="text-left md:text-right shrink-0 flex flex-col justify-between min-h-[80px]">
-                                <div>
-                                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest block mb-0.5">
-                                    {t('נפח הספקה / צריכה שנתי', 'ANNUAL TRANSIT VOLUME')}
-                                  </span>
-                                  <p className="text-lg font-black text-slate-950 dark:text-white tracking-tight">
-                                    {node.volume}
-                                  </p>
-                                </div>
-
-                                <div className="flex items-center gap-2 mt-2 md:justify-end">
-                                  <span className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                                    Compliance:
-                                  </span>
-                                  <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500">
-                                    {node.compliance}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 pt-4 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex items-center gap-4 text-[9px] text-slate-400 font-semibold uppercase">
-                                <span>DUNS: <span className="text-slate-600 dark:text-slate-300 font-mono">{node.duns}</span></span>
-                                <span>Agreement: <span className="text-slate-600 dark:text-slate-300">{node.agreement}</span></span>
-                              </div>
-                              
-                              <Button
-                                onClick={() => {
-                                  if (isVerified) return;
-                                  const newLog = {
-                                    action: 'SUPPLY_CHAIN_VERIFIED',
-                                    details: `Supply chain trace verified for counterparties company '${node.name}' (Role: ${node.role.toUpperCase()}, Country: ${node.country}). ESG sourcing validated. DUNS Reference: ${node.duns}.`,
-                                    username: 'Compliance Watcher',
-                                    timestamp: new Date().toISOString()
-                                  };
-                                  setActivityLogs(prev => [newLog, ...prev]);
-                                  setVerifiedSuppliers(prev => [...prev, node.id]);
-                                }}
-                                disabled={isVerified}
-                                className={`h-8 px-4 text-[9px] font-black uppercase tracking-widest shrink-0 rounded-xl
-                                  ${isVerified 
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                                    : 'bg-white/10 dark:bg-slate-900/50 hover:bg-white/20 border border-black/10 dark:border-white/10 text-slate-700 dark:text-white'}`}
-                              >
-                                {isVerified ? t('אימות שרשרת ערך', 'VERIFIED ✔') : t('בצע אימות תאימות', 'VERIFY SOURCING')}
-                              </Button>
-                            </div>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
+            {/* SATELLITE SITE TAB */}
+            {activeTab === 'satellite' && item && (
+              <SatelliteSitePanel item={item} esgZone={esgZone} isEsgRisk={isEsgRisk} />
             )}
 
             {/* TECH SPECS TAB */}
@@ -2334,6 +2177,7 @@ Output requirements:
                   <p className="text-[10px] text-slate-500 leading-relaxed">
                     Public lawsuits, regulatory actions, and arbitration matters tied to this entity.
                     Configure <code className="font-mono">COURTLISTENER_API_KEY</code>,{' '}
+                    <code className="font-mono">OPENSANCTIONS_API_KEY</code>,{' '}
                     <code className="font-mono">PACER_API_TOKEN</code>, or a KYB provider key to replace the stub
                     feed with live data. AI-extracted events appear alongside adapter-sourced rows and are
                     re-fingerprinted so re-running DD does not duplicate cases.
@@ -2384,7 +2228,7 @@ Output requirements:
                 <div className="bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 rounded-3xl p-6 space-y-4">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                      <LucidePhone className="w-4 h-4 text-emerald-500" /> Phones discovered by AI
+                      <LucidePhone className="w-4 h-4 text-emerald-500" /> Phones from AI / web fetch
                     </h4>
                     {(ddDiscoveredPhones.length > 0 || aiDiscoveredPhoneContacts.length > 0) && (
                       <Badge className="bg-emerald-500/10 text-emerald-500 border-none text-[9px] font-black uppercase">
@@ -2393,11 +2237,12 @@ Output requirements:
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 leading-relaxed">
-                    These numbers were located by the AI during a DD run and persisted to{' '}
-                    <code className="font-mono">entity_contacts</code> with{' '}
-                    <code className="font-mono">discovered_by='ai'</code> and confidence capped at 0.7.
+                    These numbers were located by the AI during a DD run, or by the contact agent’s optional web fetch,
+                    and persisted to <code className="font-mono">entity_contacts</code> with{' '}
+                    <code className="font-mono">discovered_by='ai'</code> or{' '}
+                    <code className="font-mono">discovered_by='web'</code>.
                     They show up everywhere a public business phone is rendered — including the dossier card
-                    and the map popup — but stay clearly distinguishable from source-backed numbers so an
+                    and the map popup — but stay clearly distinguishable from cadastre-backed numbers so an
                     analyst can verify them before promoting.
                   </p>
 
@@ -2731,6 +2576,29 @@ Output requirements:
                     </div>
                   </Card>
 
+                  {(item.phoneNumber || publicPhoneContact || privateLeadPhone !== '—') && (
+                    <Card className="bg-emerald-500/10 border border-emerald-500/25 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/20">
+                        <LucidePhone className="h-6 w-6 text-emerald-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-300">
+                          {t('טלפון מפעיל / חברה', 'Operator / company phone')}
+                        </p>
+                        <p className="text-lg font-bold text-slate-900 dark:text-white break-all">
+                          {publicPhoneContact?.value || item.phoneNumber || privateLeadPhone}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {publicPhoneContact
+                            ? t('מאגר entity_contacts או רישום פתוח', 'From entity_contacts or open registry')
+                            : item.phoneNumber
+                              ? t('משדה הרישיון ב-Postgres', 'From license record in Postgres')
+                              : t('הערת ליד פנימית', 'Internal lead note')}
+                        </p>
+                      </div>
+                    </Card>
+                  )}
+
                   {isEsgRisk && esgZone && (
                     <Card className="bg-red-500/10 border-red-500/20 rounded-3xl p-6 mb-6 overflow-hidden relative shadow-[0_12px_40px_rgba(239,68,68,0.15)] flex flex-col md:flex-row gap-6 items-center">
                       <div className="absolute inset-0 bg-gradient-to-r from-red-500/5 to-transparent pointer-events-none" />
@@ -2755,6 +2623,8 @@ Output requirements:
                       </div>
                     </Card>
                   )}
+
+                  <GoldBodLicensePanel item={item} commodityLabel={commodityListLabel} />
 
                   {/* General Specs */}
                   <Card className="bg-black/5 dark:bg-white/5 border-black/5 dark:border-white/5 rounded-3xl p-4 sm:p-8">
@@ -2788,7 +2658,28 @@ Output requirements:
                           value={terminalDetails.entitySubtype.replace(/_/g, ' ')}
                         />
                       )}
-                      {terminalDetails.operatorName && (
+                      {isStorageTerminal && (
+                        <SpecItem
+                          label={t('מפעיל', 'Operator')}
+                          value={formatStorageOperatorLabel(
+                            terminalDetails.operatorName,
+                            t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                          )}
+                        />
+                      )}
+                      {isStorageTerminal && formatStorageOwnerLabel(terminalDetails.ownerName) && (
+                        <SpecItem
+                          label={t('בעלים', 'Owner')}
+                          value={terminalDetails.ownerName || '—'}
+                        />
+                      )}
+                      {isStorageTerminal && formatStorageSubstanceLabel(terminalDetails) && (
+                        <SpecItem
+                          label={t('חומר', 'Substance')}
+                          value={formatStorageSubstanceLabel(terminalDetails) || '—'}
+                        />
+                      )}
+                      {!isStorageTerminal && terminalDetails.operatorName && (
                         <SpecItem
                           label={t('מפעיל', 'Operator')}
                           value={terminalDetails.operatorName}
@@ -2829,8 +2720,8 @@ Output requirements:
                       {publicPhoneContact && (
                         <SpecItem
                           label={
-                            publicPhoneContact.discoveredBy === 'ai'
-                              ? t('טלפון (גילוי AI)', 'Public Phone (AI-found)')
+                            isAiOrWebDiscoveredPhone(publicPhoneContact.discoveredBy)
+                              ? t('טלפון (גילוי AI / רשת)', 'Public Phone (AI / web)')
                               : t('טלפון ציבורי', 'Public Phone')
                           }
                           value={publicPhoneContact.value}
@@ -3155,7 +3046,11 @@ Output requirements:
                               Company Contact Agent
                             </p>
                             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                              Searches only known source fields and saved source URLs. Missing phones/emails/sites stay “not found.”
+                              Reads structured fields from the cadastre row first. When phone, email, or website is still
+                              missing and <code className="font-mono text-[9px]">GOOGLE_CSE_API_KEY</code> +{' '}
+                              <code className="font-mono text-[9px]">GOOGLE_CSE_CX</code> (or{' '}
+                              <code className="font-mono text-[9px]">SERPAPI_API_KEY</code>) is set, the backend runs a
+                              bounded search + HTML fetch (mailto/tel/text only — no guessing).
                             </p>
                           </div>
                           <Button
@@ -3179,6 +3074,12 @@ Output requirements:
                                 {kind} not found
                               </Badge>
                             ))}
+                            {contactAgentJob.output.web_discovery?.engine &&
+                              contactAgentJob.output.web_discovery.engine !== 'none' && (
+                                <Badge className="border-none bg-violet-500/10 text-violet-600 dark:text-violet-300 text-[9px] font-black uppercase">
+                                  Web: {contactAgentJob.output.web_discovery.engine}
+                                </Badge>
+                              )}
                             {contactAgentJob.cached && (
                               <Badge className="border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 text-[9px] font-black uppercase">
                                 Cached
@@ -3193,12 +3094,42 @@ Output requirements:
                         <div className="rounded-2xl border border-black/5 dark:border-white/5 bg-black/5 dark:bg-white/5 p-4">
                           <div className="space-y-2">
                             <ReadRow label={t('תת-סוג', 'Subtype')} value={terminalDetails.entitySubtype?.replace(/_/g, ' ') || '—'} />
-                            <ReadRow label={t('מפעיל', 'Operator')} value={terminalDetails.operatorName || '—'} />
+                            <ReadRow
+                              label={t('מפעיל', 'Operator')}
+                              value={formatStorageOperatorLabel(
+                                terminalDetails.operatorName,
+                                t('לא מתויג', STORAGE_OPERATOR_UNTAGGED),
+                              )}
+                            />
+                            <ReadRow
+                              label={t('בעלים', 'Owner')}
+                              value={formatStorageOwnerLabel(terminalDetails.ownerName) || '—'}
+                            />
+                            <ReadRow
+                              label={t('חומר', 'Substance')}
+                              value={formatStorageSubstanceLabel(terminalDetails) || '—'}
+                            />
                             <ReadRow label={t('נמל קרוב', 'Nearby Port')} value={terminalDetails.nearbyPort?.name || '—'} />
                             <ReadRow label={t('מרחק לנמל', 'Port Distance')} value={terminalDetails.nearbyPort?.distance_km != null ? `${terminalDetails.nearbyPort.distance_km} km` : '—'} />
                             <ReadRow label={t('קיבולת מסומנת', 'Tagged Capacity')} value={terminalDetails.capacityText || '—'} />
                             <ReadRow label={t('הסבר ביטחון', 'Confidence Note')} value={terminalDetails.confidenceNote || '—'} wide />
                           </div>
+                          {storageTerminalOsmTagSummary(storageTerminalDetails?.rawPayload).length > 0 && (
+                            <div className="mt-4 border-t border-black/5 dark:border-white/5 pt-4">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                                {t('תגי OSM', 'OSM tags')}
+                              </p>
+                              <div className="space-y-1">
+                                {storageTerminalOsmTagSummary(storageTerminalDetails?.rawPayload).map((tag) => (
+                                  <p key={tag.key} className="text-[10px] text-slate-500 break-words">
+                                    <span className="font-semibold text-slate-700 dark:text-slate-300">{tag.key}</span>
+                                    {': '}
+                                    {tag.value}
+                                  </p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {isLoadingStorageTerminal && (
                             <p className="mt-3 text-[10px] text-slate-500">
                               {t('טוען פרטי ראיות מלאים...', 'Loading full evidence details...')}
@@ -3318,13 +3249,19 @@ Output requirements:
                     </div>
                   </Card>
 
-                  {/* Tactical Pipeline Status */}
+                  {/* Deal signal (qualification heat — not workflow stage) */}
                   <Card className="bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-3xl p-8">
-                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
+                    <h4 className="text-[12px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-3">
                       <LucideZap className="w-4 h-4 text-emerald-500" />{' '}
-                      {t('מצב צנרת', 'Pipeline State')}
+                      {t('אות עסקה', 'Deal signal')}
                     </h4>
-                    <div className="grid grid-cols-3 gap-3">
+                    <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">
+                      {t(
+                        'חום ההזדמנות (עסקה / בדיקה / ליד) — נפרד משלב העסקה למעלה.',
+                        'Opportunity heat (Deal / Assay / Lead) — separate from deal stage above.',
+                      )}
+                    </p>
+                    <div className="grid grid-cols-3 gap-3 mb-4">
                       {[
                         { id: 'good', label: t('עסקה', 'Deal'), color: 'bg-emerald-500' },
                         { id: 'maybe', label: t('בדיקה', 'Assay'), color: 'bg-amber-500' },
@@ -3354,6 +3291,33 @@ Output requirements:
                           </button>
                         );
                       })}
+                    </div>
+                    <div className="pt-4 border-t border-black/5 dark:border-white/5">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2">
+                        {t('עדיפות ליד', 'Lead priority')}
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['high', 'medium', 'low'] as LeadValue[]).map((v) => {
+                          const isActive = (annotation.leadValue || 'medium') === v;
+                          return (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateAnnotation(item.id, { leadValue: v });
+                              }}
+                              className={`py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all ${
+                                isActive
+                                  ? 'bg-amber-500 text-slate-950 border-amber-500'
+                                  : 'bg-black/5 dark:bg-white/5 text-slate-500 border-black/10 dark:border-white/10'
+                              }`}
+                            >
+                              {v}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </Card>
 
@@ -3387,8 +3351,8 @@ Output requirements:
                     {!isEditing ? (
                       <div className="space-y-3">
                         <ReadRow
-                          label={t('שלב', 'Stage')}
-                          value={annotation.stage || 'New'}
+                          label={t('שלב עסקה', 'Deal stage')}
+                          value={currentStage}
                         />
                         <ReadRow
                           label={t('איש קשר', 'Contact')}
@@ -3414,26 +3378,13 @@ Output requirements:
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        <div>
-                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">
-                            {t('שלב בצנרת', 'Pipeline Stage')}
-                          </label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {(['New', 'Contacted', 'Diligence', 'Verified', 'Closed'] as const).map(s => (
-                              <button
-                                key={s}
-                                type="button"
-                                onClick={() => setEditDraft(d => ({ ...d, stage: s }))}
-                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all
-                                  ${editDraft.stage === s
-                                    ? 'bg-amber-500 text-slate-950 border-amber-500'
-                                    : 'bg-black/5 dark:bg-white/5 text-slate-500 dark:text-slate-400 border-black/10 dark:border-white/10 hover:bg-black/10 dark:hover:bg-white/10'}`}
-                              >
-                                {s}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          {t(
+                            'שלב העסקה נערך בשורת השלבים למעלה.',
+                            'Deal stage is edited in the strip at the top of the dossier.',
+                          )}{' '}
+                          <span className="font-bold text-slate-600 dark:text-slate-300">{currentStage}</span>
+                        </p>
                         <EditField
                           label={t('איש קשר', 'Contact Person')}
                           value={editDraft.contactPerson || ''}
@@ -3510,6 +3461,8 @@ function formatSourceKindLabel(sourceKind?: string | null): string | null {
       return 'User CSV';
     case 'bundled_json':
       return 'Bundled fallback';
+    case 'curated_reference':
+      return 'Curated reference';
     default:
       return null;
   }

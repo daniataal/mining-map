@@ -48,6 +48,24 @@ class EntityContactExtractionTests(unittest.TestCase):
 
         self.assertEqual(build_license_contact_candidates(row), [])
 
+    def test_syncs_license_phone_number_column(self):
+        row = {
+            "id": "lic-phone-only",
+            "record_origin": "open_data",
+            "source_name": "National Mining Registry",
+            "source_url": "https://registry.example.gov/license/lic-phone-only",
+            "phone_number": "+1 202 555 0199",
+            "raw_payload": {},
+        }
+
+        contacts = build_license_contact_candidates(row)
+
+        self.assertEqual(len(contacts), 1)
+        self.assertEqual(contacts[0]["contact_type"], "phone")
+        self.assertEqual(contacts[0]["value"], "+1 202 555 0199")
+        self.assertEqual(contacts[0]["extracted_from"], "licenses.phone_number")
+        self.assertEqual(contacts[0]["source_type"], "official_open_data")
+
     def test_splits_multivalue_fields(self):
         row = {
             "id": "port-node-1",

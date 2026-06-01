@@ -643,6 +643,7 @@ def _build_license_api_results(
                 "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
                 "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
                 "confidenceNote": row["confidence_note"] if "confidence_note" in keys else None,
+                "enrichmentNote": _extract_enrichment_note(row),
                 "geoSource": display_geo_source if "geo_source" in keys else None,
                 "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
                 "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
@@ -651,6 +652,54 @@ def _build_license_api_results(
             }
         )
     return results
+
+
+def _build_license_map_results(
+    rows: list,
+    cached_geo: dict[str, dict],
+) -> list[dict[str, Any]]:
+    """Slim map-marker payload (smaller JSON than dossier/list views)."""
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        keys = row.keys()
+        display_lat, display_lng, display_geo_source, display_geo_approximated, display_geo_confidence = _license_display_coords(
+            row, cached_geo
+        )
+        date_val = row["date_issued"]
+        results.append(
+            {
+                "id": row["id"],
+                "company": row["company"],
+                "licenseType": row["license_type"],
+                "commodity": row["commodity"],
+                "status": row["status"],
+                "date": date_val.isoformat() if hasattr(date_val, "isoformat") else date_val,
+                "country": row["country"],
+                "region": row["region"],
+                "sector": row["sector"] if "sector" in keys and row["sector"] else "mining",
+                "lat": display_lat,
+                "lng": display_lng,
+                "entityKind": row["entity_kind"] if "entity_kind" in keys and row["entity_kind"] else "license",
+                "entitySubtype": row["entity_subtype"] if "entity_subtype" in keys else None,
+                "confidenceScore": row["confidence_score"] if "confidence_score" in keys else None,
+                "recordOrigin": row["record_origin"] if "record_origin" in keys else None,
+                "sourceName": row["source_name"] if "source_name" in keys else None,
+                "geoSource": display_geo_source if "geo_source" in keys else None,
+                "geoApproximated": display_geo_approximated if "geo_approximated" in keys else None,
+                "geoConfidence": display_geo_confidence if "geo_confidence" in keys else None,
+            }
+        )
+    return results
+
+
+def _licenses_json_response(payload: Any, *, max_age: int = 120):
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        content=jsonable_encoder(payload),
+        headers={"Cache-Control": f"public, max-age={max_age}"},
+    )
 
 
 # Allow CORS for local development (so React/Vite can fetch from us)
@@ -1351,14 +1400,22 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 CREATE INDEX IF NOT EXISTS idx_licenses_sector_lat_lng
                 ON licenses (sector, lat, lng)
                 WHERE lat IS NOT NULL AND lng IS NOT NULL;
-                
+
                 CREATE INDEX IF NOT EXISTS idx_licenses_country ON licenses (country);
                 CREATE INDEX IF NOT EXISTS idx_licenses_country_lower ON licenses (LOWER(country));
                 CREATE INDEX IF NOT EXISTS idx_licenses_id ON licenses (id);
                 CREATE INDEX IF NOT EXISTS idx_licenses_origin ON licenses (record_origin);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);
                 """
             )
+            try:
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_licenses_external_id_unique ON licenses (external_id);"
+                )
+            except Exception as ext_id_idx_exc:
+                conn.rollback()
+                print(
+                    f"idx_licenses_external_id_unique skipped (duplicate external_id?): {ext_id_idx_exc}"
+                )
             # Normalized relationship layer for cross-sector role transparency.
             # We preserve the old rel_type/source_entity_id columns for backward
             # compatibility and add richer source-backed provenance fields here.
@@ -1385,19 +1442,29 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             # Older deployments created a partial unique index on fingerprint.
             # ON CONFLICT (fingerprint) cannot infer partial indexes reliably,
             # so we normalize to a plain unique index after de-duping rows.
-            cur.execute(
-                """
-                DELETE FROM entity_relationships er
-                USING entity_relationships newer
-                WHERE er.fingerprint = newer.fingerprint
-                  AND er.fingerprint IS NOT NULL
-                  AND er.ctid < newer.ctid;
-                """
-            )
-            cur.execute("DROP INDEX IF EXISTS idx_entity_relationships_fingerprint;")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);")
+            try:
+                cur.execute(
+                    """
+                    DELETE FROM entity_relationships er
+                    USING entity_relationships newer
+                    WHERE er.fingerprint = newer.fingerprint
+                      AND er.fingerprint IS NOT NULL
+                      AND er.ctid < newer.ctid;
+                    """
+                )
+                cur.execute("DROP INDEX IF EXISTS idx_entity_relationships_fingerprint;")
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_fingerprint ON entity_relationships(fingerprint);"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_relationships_source_ref ON entity_relationships(source_entity_kind, source_entity_ref);"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);"
+                )
+            except Exception as er_idx_exc:
+                conn.rollback()
+                print(f"entity_relationships fingerprint index migration skipped: {er_idx_exc}")
             # AI-DD enhancement: contact provenance (open_data / ai / manual) and
             # the timestamp a human verified an AI-discovered phone number. These
             # are additive — existing rows fall back to 'open_data' which matches
@@ -1440,6 +1507,11 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 ON license_annotations (user_id, updated_at DESC);
                 """
             )
+        except Exception as e:
+            conn.rollback()
+            print(f"Schema migration skipped or failed (might already exist): {e}")
+
+        try:
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS license_sync_runs (
@@ -1451,7 +1523,8 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                     records_fetched INTEGER DEFAULT 0,
                     records_written INTEGER DEFAULT 0,
                     records_skipped_manual INTEGER DEFAULT 0,
-                    error TEXT
+                    error TEXT,
+                    drift_warning JSONB
                 );
                 """
             )
@@ -1466,9 +1539,9 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             )
             conn.commit()
             print("Schema migration successful (added new columns if missing).")
-        except Exception as e:
-            conn.rollback() 
-            print(f"Schema migration skipped or failed (might already exist): {e}")
+        except Exception as sync_runs_exc:
+            conn.rollback()
+            print(f"license_sync_runs migration skipped or failed: {sync_runs_exc}")
 
         # Geo Cache Table (used for fallback coordinate lookups)
         cur.execute("""
@@ -1596,7 +1669,7 @@ def init_db(*, raise_on_error: bool = False) -> bool:
                 net_weight_kg   BIGINT,
                 data_source     VARCHAR(80)   NOT NULL DEFAULT 'seed/static',
                 ingested_at     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year)
+                UNIQUE (reporter_m49, partner_m49, hs_code, flow_type, year, data_source)
             );
         """)
         cur.execute("""
@@ -1762,6 +1835,19 @@ def _gov_procurement_sync_on_startup_enabled() -> bool:
     return flag in {"1", "true", "yes", "on"}
 
 
+def _oil_graph_sync_on_startup_enabled() -> bool:
+    flag = (os.getenv("OIL_GRAPH_SYNC_ON_STARTUP") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
+def _eia_historic_auto_ingest_on_startup_enabled() -> bool:
+    try:
+        from backend.services.eia_historic_imports import eia_historic_auto_ingest_enabled
+    except ImportError:
+        from services.eia_historic_imports import eia_historic_auto_ingest_enabled
+    return eia_historic_auto_ingest_enabled()
+
+
 def _sync_gov_procurement_reference() -> None:
     if not _gov_procurement_sync_on_startup_enabled():
         return
@@ -1781,6 +1867,70 @@ def _sync_gov_procurement_reference() -> None:
             conn.close()
     except Exception as exc:
         print(f"[GovProcurement] Sync skipped or failed: {exc}")
+
+
+def _sync_eia_historic_reference() -> None:
+    """Upsert impa*.xls from EIA_DOWNLOADS_DIR when files are present (skips unchanged files)."""
+    startup_off = (os.getenv("EIA_HISTORIC_STARTUP_INGEST") or "false").strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if startup_off or not _eia_historic_auto_ingest_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[EiaHistoric] Skipping ingest until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.eia_historic_imports import try_auto_ingest_eia_downloads
+        except ImportError:
+            from services.eia_historic_imports import try_auto_ingest_eia_downloads
+
+        conn = get_db_connection()
+        try:
+            summary = try_auto_ingest_eia_downloads(conn)
+            if summary.get("status") == "error":
+                conn.rollback()
+            print(
+                f"[EiaHistoric] Auto-ingest — status={summary.get('status')}, "
+                f"rows_inserted={summary.get('rows_inserted', 0)}, "
+                f"reason={summary.get('reason', '')}"
+            )
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[EiaHistoric] Auto-ingest skipped or failed: {exc}")
+
+
+def _sync_oil_live_graph_reference() -> None:
+    """Merge OSM terminals, licenses, trade, port calls, TED, USAspending into oil_commercial_events."""
+    if not _oil_graph_sync_on_startup_enabled():
+        return
+    if not ensure_schema_initialized():
+        print("[OilGraph] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import run_full_graph_sync
+        except ImportError:
+            from services.oil_live_graph_sync import run_full_graph_sync
+
+        conn = get_db_connection()
+        try:
+            summary = run_full_graph_sync(conn, rebuild_synthetic_bol=False)
+            print(
+                f"[OilGraph] Commercial graph sync complete — status={summary.get('status')}, "
+                f"steps={list((summary.get('steps') or {}).keys())}"
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        print(f"[OilGraph] Sync skipped or failed: {exc}")
 
 
 def _sync_opec_gulf_reference() -> None:
@@ -1811,6 +1961,36 @@ def _sync_opec_gulf_reference() -> None:
             opec_conn.close()
     except Exception as exc:
         print(f"[OPEC] Persian Gulf sync skipped or failed: {exc}")
+
+
+def _sync_oil_products_licenses_reference() -> None:
+    """Upsert curated downstream fuel / petroleum products marketing licensees."""
+    if not ensure_schema_initialized():
+        print("[OilProductsLic] Skipping sync until schema is ready.")
+        return
+    try:
+        try:
+            from backend.services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+        except ImportError:
+            from services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+
+        lic_conn = get_db_connection()
+        try:
+            summary = sync_oil_products_licenses(lic_conn)
+            print(
+                f"[OilProductsLic] Sync complete — "
+                f"{summary.get('entities_written', 0)} fuel/products marketers upserted "
+                f"(seed {summary.get('seed_count', 0)})."
+            )
+            if summary.get("entities_written", 0) > 0:
+                try:
+                    cache.delete_pattern("licenses:*")
+                except Exception:
+                    pass
+        finally:
+            lic_conn.close()
+    except Exception as exc:
+        print(f"[OilProductsLic] Sync skipped or failed: {exc}")
 
 
 def _bootstrap_open_data():
@@ -1925,7 +2105,10 @@ def startup_schema_bootstrap():
             print("[startup] schema bootstrap failed; service will retry on next DB-backed request")
             return
         _sync_opec_gulf_reference()
+        _sync_oil_products_licenses_reference()
+        _sync_eia_historic_reference()
         _sync_gov_procurement_reference()
+        _sync_oil_live_graph_reference()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
@@ -2140,14 +2323,38 @@ def get_user_logs(user_id: str, limit: int = 100):
 
 
 
+def _extract_enrichment_note(row: dict) -> Optional[str]:
+    """Parse short curated notes from a compact raw_payload JSON blob (OPEC Gulf, etc.)."""
+    keys = row.keys()
+    raw = None
+    for key in ("raw_payload_lite", "raw_payload"):
+        if key in keys and row[key]:
+            raw = row[key]
+            break
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    for field in ("notes", "enrichment_note", "description"):
+        value = data.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
 def _license_api_columns_sql() -> str:
-    # We explicitly omit 'raw_payload' because it can be multiple megabytes per row and crashes the API response time
+    # Omit full raw_payload (can be huge). Include a capped slice for curated enrichment notes only.
     return (
         "id, company, license_type, commodity, status, date_issued, country, region, "
         "sector, lat, lng, phone_number, contact_person, record_origin, source_id, "
         "source_name, source_url, source_record_url, source_updated_at, last_synced_at, "
         "source_kind, entity_kind, entity_subtype, confidence_score, confidence_note, "
-        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng"
+        "geo_source, geo_approximated, geo_confidence, original_lat, original_lng, "
+        "CASE WHEN char_length(COALESCE(raw_payload, '')) <= 2048 THEN raw_payload END AS raw_payload_lite"
     )
 
 
@@ -2211,6 +2418,8 @@ def read_licenses(
     max_lng: Optional[float] = None,
     limit: int = 5000,
     countries: Optional[str] = None,
+    zoom: Optional[float] = None,
+    map: bool = False,
 ):
     """Return licenses for the map and admin views.
 
@@ -2229,7 +2438,11 @@ def read_licenses(
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing license schema")
 
-    cache_key = f"licenses:sector:{sector}:prefer_open_data:{prefer_open_data}:bbox:{min_lat}_{max_lat}_{min_lng}_{max_lng}:limit:{limit}:countries:{countries}"
+    map_mode = map or str(zoom or "").strip() != ""
+    cache_key = (
+        f"licenses:sector:{sector}:prefer_open_data:{prefer_open_data}:bbox:{min_lat}_{max_lat}_{min_lng}_{max_lng}"
+        f":limit:{limit}:countries:{countries}:zoom:{zoom}:map:{int(map_mode)}"
+    )
     cached_val = cache.get(cache_key)
     if cached_val:
         try:
@@ -2240,7 +2453,16 @@ def read_licenses(
     def _cache_and_return(res):
         if isinstance(res, list) or (isinstance(res, dict) and "error" not in res):
             try:
-                cache.set(cache_key, json.dumps(res), ex_seconds=1800)
+                cache.set(
+                    cache_key,
+                    json.dumps(
+                        res,
+                        default=lambda o: o.isoformat()
+                        if isinstance(o, datetime)
+                        else str(o),
+                    ),
+                    ex_seconds=1800,
+                )
             except Exception as exc:
                 print(f"[Redis] Failed to cache response: {exc}")
         return res
@@ -2281,20 +2503,18 @@ def read_licenses(
         safe_limit = max(1, min(int(limit or 10000), 15000))
         sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
         country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
-        exists_sql = f"""
-            SELECT EXISTS (
-                SELECT 1 FROM licenses
-                WHERE {sector_sql}
-                  AND ({country_sql})
-                  AND LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
-            )
-        """
-        c.execute(exists_sql, tuple(sector_params + country_params))
-        has_row = c.fetchone() or {}
-        has_preferred_live_rows = bool(has_row.get("exists"))
         open_clause = ""
-        if prefer_open_data and has_preferred_live_rows:
-            open_clause = " AND LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json' "
+        if prefer_open_data:
+            open_clause = f""" AND (
+                LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                OR country IS NULL
+                OR country NOT IN (
+                    SELECT country FROM licenses 
+                    WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                    AND country IS NOT NULL
+                    AND {sector_sql}
+                )
+            ) """
         columns = _license_api_columns_sql()
         per_country_cap = len(requested_countries) > 1
         if per_country_cap:
@@ -2332,6 +2552,59 @@ def read_licenses(
     if bbox is not None:
         c = conn.cursor(cursor_factory=RealDictCursor)
         try:
+            try:
+                from backend.services.license_map_perf import (
+                    license_cluster_limit_for_zoom,
+                    license_grid_degrees,
+                    query_license_clusters,
+                )
+            except ImportError:
+                from services.license_map_perf import (
+                    license_cluster_limit_for_zoom,
+                    license_grid_degrees,
+                    query_license_clusters,
+                )
+
+            grid_deg = license_grid_degrees(zoom) if map_mode else None
+            min_la, max_la, min_lo, max_lo = bbox  # type: ignore[misc]
+            sector_sql, sector_params = _licenses_sector_sql_fragment(normalized_sector_key)
+            country_sql, country_params = _licenses_countries_sql_fragment(requested_countries)
+            open_clause = ""
+            if prefer_open_data:
+                open_clause = f""" AND (
+                    LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+                    OR country IS NULL
+                    OR country NOT IN (
+                        SELECT country FROM licenses 
+                        WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback') 
+                        AND country IS NOT NULL
+                        AND {sector_sql}
+                    )
+                ) """
+            
+            # Keep a dummy variable so later references don't break
+            has_preferred_live_rows = False
+
+            if grid_deg is not None:
+                clusters = query_license_clusters(
+                    c,
+                    sector_sql=sector_sql,
+                    sector_params=sector_params,
+                    country_sql=country_sql,
+                    country_params=country_params,
+                    min_lat=min_la,
+                    max_lat=max_la,
+                    min_lng=min_lo,
+                    max_lng=max_lo,
+                    grid_deg=grid_deg,
+                    open_clause=open_clause,
+                    limit=license_cluster_limit_for_zoom(zoom, int(limit or 800)),
+                    zoom=zoom,
+                )
+                conn.close()
+                payload = {"mode": "clusters", "clusters": clusters, "zoom": zoom, "grid_degrees": grid_deg}
+                return _licenses_json_response(_cache_and_return(payload), max_age=180)
+
             rows, cached_geo, has_preferred_live_rows = _bbox_query(c)
         except Exception as e:
             conn.close()
@@ -2357,14 +2630,17 @@ def read_licenses(
             print(f"[licenses] bbox query failed: {e}")
             return _schema_unavailable_response("reading licenses")
         conn.close()
-        results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
+        if map_mode:
+            results = _build_license_map_results(rows, cached_geo)
+        else:
+            results = _build_license_api_results(rows, cached_geo, describe_license_source_record, source_registry)
         if not results:
             print(
                 "[licenses] empty feed (bbox) "
                 f"sector={normalized_sector_key or 'all'} prefer_open_data={prefer_open_data} "
                 f"has_live_origin_signal={has_preferred_live_rows}"
             )
-        return _cache_and_return(results)
+        return _licenses_json_response(_cache_and_return(results), max_age=120)
 
     start_time = time.time()
     c = conn.cursor(cursor_factory=RealDictCursor)
@@ -2957,6 +3233,11 @@ class DealRoomCreateRequest(BaseModel):
     status: str = "open"
     route_snapshot: Optional[dict[str, Any]] = None
     notes: Optional[str] = None
+    # RFQ-lite (stored in evidence_json.rfq)
+    rfq_quantity: Optional[str] = None
+    rfq_hs_code: Optional[str] = None
+    rfq_incoterm: Optional[str] = None
+    rfq_product: Optional[str] = None
 
 
 class DealRoomPatchRequest(BaseModel):
@@ -3111,6 +3392,14 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
     services = _load_deal_room_services()
     conn = get_db_connection()
     try:
+        rfq = {}
+        if payload.rfq_product or payload.rfq_quantity or payload.rfq_hs_code or payload.rfq_incoterm:
+            rfq = {
+                "product": payload.rfq_product,
+                "quantity": payload.rfq_quantity,
+                "hs_code": payload.rfq_hs_code,
+                "incoterm": payload.rfq_incoterm,
+            }
         room = services.create_deal_room(
             conn,
             entity_id=payload.entity_id,
@@ -3119,6 +3408,7 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
             status=payload.status,
             route_snapshot=payload.route_snapshot,
             notes=payload.notes,
+            rfq=rfq or None,
         )
         return _decorate_deal_room(conn, room)
     finally:
@@ -3126,11 +3416,20 @@ def create_deal_room_endpoint(payload: DealRoomCreateRequest):
 
 
 @app.get("/api/deal-rooms")
-def list_deal_rooms_endpoint(entity_id: Optional[str] = None, entity_kind: Optional[str] = None):
+def list_deal_rooms_endpoint(
+    entity_id: Optional[str] = None,
+    entity_kind: Optional[str] = None,
+    include_archived: bool = False,
+):
     services = _load_deal_room_services()
     conn = get_db_connection()
     try:
-        rooms = services.list_deal_rooms(conn, entity_id=entity_id, entity_kind=entity_kind)
+        rooms = services.list_deal_rooms(
+            conn,
+            entity_id=entity_id,
+            entity_kind=entity_kind,
+            include_archived=include_archived,
+        )
         return [_decorate_deal_room(conn, room) for room in rooms]
     finally:
         conn.close()
@@ -3398,9 +3697,20 @@ def create_license(item: LicenseCreate):
 import requests
 
 MARKETPLACE_API_URL = os.getenv("MARKETPLACE_API_URL", "http://host.docker.internal:3001/api/v1/ingest")
-MARKETPLACE_API_KEY = os.getenv("MARKETPLACE_API_KEY", "demo-key")
+
+try:
+    from backend.services.marketplace_export import marketplace_export_configured
+except ImportError:
+    from services.marketplace_export import marketplace_export_configured
+
 
 def export_license_to_marketplace(license_data: dict):
+    if not marketplace_export_configured():
+        print(
+            "EXPORT SKIPPED: MARKETPLACE_API_KEY is unset or demo-key "
+            "(configure a real key for production marketplace export)."
+        )
+        return False
     print(f"Attempting export for license {license_data['id']}...")
     try:
         # Map fields to Marketplace Seller Object
@@ -4422,33 +4732,27 @@ def analyze_document_with_ai(request: AIDocumentRequest):
 
     result = _run_provider_cascade(system_prompt, user_prompt)
     if result is None or not result.get("content"):
-        return {
-            "status": "success",
-            "extracted": True,
-            "license_id_reference": f"REF-{request.license_id}-MOCK",
-            "royalty_rate": "5.5% Gross Revenue Royalty",
-            "environmental_rating": "Risk-Alert",
-            "environmental_rationale": "High water-usage noted in concession zone, requiring secondary EPA audit.",
-            "annual_work_commitment": "$2,500,000 USD Exploration Target",
-            "local_content_requirement": "Min. 60% of local sub-contractors sourced in region",
-            "provider": "Mock (API key fallback)",
-            "model": "stub-v1"
-        }
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "error_code": "AI_UPSTREAM_UNAVAILABLE",
+                "message": "Document intelligence providers are offline or timed out.",
+                "extracted": False,
+            },
+        )
 
     parsed = _extract_json_object(result["content"])
     if not parsed or not parsed.get("extracted"):
-        return {
-            "status": "success",
-            "extracted": True,
-            "license_id_reference": f"REF-{request.license_id}-MOCK",
-            "royalty_rate": "5.5% Gross Revenue Royalty",
-            "environmental_rating": "Risk-Alert",
-            "environmental_rationale": "High water-usage noted in concession zone, requiring secondary EPA audit.",
-            "annual_work_commitment": "$2,500,000 USD Exploration Target",
-            "local_content_requirement": "Min. 60% of local sub-contractors sourced in region",
-            "provider": result.get("provider") if result else "Mock",
-            "model": result.get("model") if result else "stub-v1"
-        }
+        return JSONResponse(
+            status_code=422,
+            content={
+                "status": "error",
+                "error_code": "NO_EXTRACTABLE_SIGNAL",
+                "message": "No contract parameters could be extracted from the document.",
+                "extracted": False,
+            },
+        )
 
     return {
         "status": "success",
@@ -5366,43 +5670,58 @@ def get_company_registry_links(company_name: str, country: str = ""):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _probe_oil_live_health() -> dict:
+    """Reachability check for oil-live-intel (Live Data terminals / sync-status)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    base = (os.getenv("OIL_INTEL_API_URL") or "http://oil-live-intel:8095").rstrip("/")
+    url = f"{base}/api/oil-live/health"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        sync = payload.get("sync") if isinstance(payload.get("sync"), dict) else {}
+        return {
+            "ok": True,
+            "url": url,
+            "terminal_count": sync.get("terminal_count"),
+            "cargo_record_count": sync.get("cargo_record_count"),
+        }
+    except urllib.error.HTTPError as exc:
+        return {"ok": False, "url": url, "error": f"HTTP {exc.code}"}
+    except Exception as exc:
+        return {"ok": False, "url": url, "error": str(exc)}
+
+
 @app.get("/api/health")
 def platform_health():
     """Lightweight platform status for UI banners (API, Redis, maritime worker)."""
     try:
         from backend.services.platform_health import build_platform_health
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
         from services.platform_health import build_platform_health
-    try:
-        from backend.services.maritime_snapshot import get_snapshot_meta
-        from backend.services.maritime_intel import get_maritime_stats
-    except ImportError:
-        from services.maritime_snapshot import get_snapshot_meta
-        from services.maritime_intel import get_maritime_stats
+        from services.maritime_go_proxy import proxy_oil_live_get
 
     return build_platform_health(
         redis_enabled=REDIS_ENABLED,
         redis_ping=cache.get_client,
-        get_snapshot_meta=get_snapshot_meta,
-        get_maritime_stats=get_maritime_stats,
+        get_maritime_stats=lambda: proxy_oil_live_get("/api/oil-live/maritime/stats"),
+        get_oil_live_health=_probe_oil_live_health,
     )
 
 
 @app.get("/api/maritime/snapshot")
 def get_maritime_snapshot_meta():
-    """Redis snapshot health (age, count, regions) without returning full vessel payloads."""
-    try:
-        try:
-            from backend.services.maritime_snapshot import get_snapshot_meta
-        except ImportError:
-            from services.maritime_snapshot import get_snapshot_meta
-        return get_snapshot_meta()
-    except Exception as exc:
-        return {
-            "available": False,
-            "source": None,
-            "error": str(exc),
-        }
+    """Deprecated — use /api/oil-live/maritime/stats and /api/oil-live/vessels/live (Caddy rewrites legacy paths)."""
+    return {
+        "available": False,
+        "stale": True,
+        "writer": "retired",
+        "redirect": "/api/oil-live/maritime/stats",
+        "note": "Use /api/oil-live/vessels/live for the vessel map layer.",
+    }
 
 
 @app.get("/api/maritime/stats")
@@ -5412,23 +5731,15 @@ def get_maritime_stats_endpoint(
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Debug counts for persisted AIS snapshots and worker ingest health."""
+    """Deprecated — canonical: GET /api/oil-live/maritime/stats. Thin proxy for backend:8000 direct access."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_stats
-        except ImportError:
-            from services.maritime_intel import get_maritime_stats
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_stats(bbox=bbox)
-    except Exception as exc:
-        return {
-            "stored_vessel_count": 0,
-            "snapshot_vessel_count": 0,
-            "aisstream_configured": False,
-            "worker": {"status": "error", "last_error": str(exc)},
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    return proxy_oil_live_get("/api/oil-live/maritime/stats", params)
 
 
 @app.get("/api/maritime/vessels")
@@ -5437,59 +5748,39 @@ def get_maritime_vessels(
     capture_window_seconds: int = 10,
     scope: str = "all_vessels",
     offset: int = 0,
-    include_gulf_demo: bool = False,
-    include_coastal_demo: bool = Query(
-        False,
-        description=(
-            "When true, merges Hormuz + Africa-adjacent synthetic demo positions (server must allow demo seeding). "
-            "See MARITIME_COASTAL_DEMO_SEED / MARITIME_GULF_DEMO_SEED. Overrides sparse-only merge for all coastal demo regions."
-        ),
-    ),
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Optional AIS maritime layer for oil and gas mode, served from worker snapshots."""
+    """Deprecated — canonical: GET /api/oil-live/vessels/live (param limit, not max_vessels)."""
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_vessel_feed
-        except ImportError:
-            from services.maritime_intel import get_maritime_vessel_feed
-        bbox = None
-        if all(value is not None for value in (south, west, north, east)):
-            bbox = (float(south), float(west), float(north), float(east))
-        return get_maritime_vessel_feed(
-            max_vessels=max_vessels,
-            capture_window_seconds=capture_window_seconds,
-            vessel_scope=scope,
-            bbox=bbox,
-            offset=offset,
-            include_gulf_demo=include_gulf_demo,
-            include_coastal_demo=include_coastal_demo,
-        )
-    except Exception as exc:
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    params: dict[str, Any] = {"limit": max(1, min(int(max_vessels), 2000))}
+    if all(value is not None for value in (south, west, north, east)):
+        params["bbox"] = f"{west},{south},{east},{north}"
+    payload = proxy_oil_live_get("/api/oil-live/vessels/live", params)
+    if payload.get("proxy_error"):
         return {
             "vessels": [],
-            "source": "maritime_intel_error",
-            "data_as_of": datetime.utcnow().isoformat(),
-            "live_positions_enabled": False,
-            "limitations": [f"Maritime vessel feed failed: {exc}"],
-            "scope": "oil_tankers" if scope != "all_vessels" else "all_vessels",
-            "capture_window_seconds": capture_window_seconds,
+            "source": "oil_live_proxy_error",
+            "limitations": [str(payload.get("error") or "Go vessel feed unavailable")],
+            "scope": scope,
             "max_vessels": max_vessels,
-            "offset": offset,
-            "total_available": 0,
-            "returned_count": 0,
-            "cap_applied": False,
-            "geography_mode": "viewport_bbox" if all(value is not None for value in (south, west, north, east)) else "default_regions",
-            "geography_note": None,
-            "requested_bbox": [south, west, north, east] if all(value is not None for value in (south, west, north, east)) else None,
-            "effective_bbox_count": 0,
-            "region_labels": [],
-            "coastal_demo_regions": [],
-            "coastal_demo_synthetic": False,
         }
+    vessels = payload.get("vessels") if isinstance(payload.get("vessels"), list) else []
+    return {
+        **payload,
+        "vessels": vessels,
+        "source": "oil-live-intel",
+        "deprecated_route": "/api/maritime/vessels",
+        "canonical_route": "/api/oil-live/vessels/live",
+        "scope": scope,
+        "offset": offset,
+        "returned_count": len(vessels),
+    }
 
 
 @app.get("/api/maritime/context")
@@ -5505,44 +5796,31 @@ def get_maritime_context(
     destination: str = "",
 ):
     """
-    Open/free maritime context for oil & gas screening.
+    Deprecated — canonical: GET /api/oil-live/maritime/context.
 
-    This endpoint is explicit about scope: it returns vessel/company/port/news
-    evidence and counterparty proxies, not true bill-of-lading coverage.
+    Open/free maritime context for oil & gas screening (vessel/company/port/news;
+    not bill-of-lading coverage).
     """
     try:
-        try:
-            from backend.services.maritime_intel import get_maritime_context as build_maritime_context
-        except ImportError:
-            from services.maritime_intel import get_maritime_context as build_maritime_context
-        codes = _resolve_codes(country) if country else {}
-        return build_maritime_context(
-            company=company,
-            country=country,
-            country_iso2=codes.get("iso2", ""),
-            commodity=commodity,
-            lat=lat,
-            lng=lng,
-            vessel_name=vessel_name,
-            mmsi=mmsi,
-            imo=imo,
-            destination=destination,
-        )
-    except Exception as exc:
-        return {
-            "source_labels": [],
-            "data_as_of": datetime.utcnow().isoformat(),
-            "company_links": [],
-            "nearest_ports": [],
-            "evidence": [],
-            "identity": None,
-            "relationships": [],
-            "counterparty_proxies": [],
-            "bol_coverage_note": (
-                "Bill-of-lading buyer/seller coverage is not reliably available from free/open sources."
-            ),
-            "limitations": [f"Maritime context failed: {exc}"],
-        }
+        from backend.services.maritime_go_proxy import proxy_oil_live_get
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get
+    codes = _resolve_codes(country) if country else {}
+    return proxy_oil_live_get(
+        "/api/oil-live/maritime/context",
+        {
+            "company": company,
+            "country": country,
+            "country_iso2": codes.get("iso2", ""),
+            "commodity": commodity,
+            "lat": lat,
+            "lng": lng,
+            "vessel_name": vessel_name,
+            "mmsi": mmsi,
+            "imo": imo,
+            "destination": destination,
+        },
+    )
 
 
 @app.get("/api/storage/terminals")
@@ -5565,6 +5843,7 @@ def get_storage_terminals(force_refresh: bool = False):
                 "total": 0,
                 "countries": 0,
                 "with_operator": 0,
+                "with_owner": 0,
                 "with_capacity": 0,
                 "with_nearby_port": 0,
                 "high_confidence": 0,
@@ -5669,6 +5948,7 @@ def get_petroleum_osm_layer(
     west: Optional[float] = None,
     north: Optional[float] = None,
     east: Optional[float] = None,
+    zoom: Optional[float] = None,
 ):
     """GeoJSON for OSM petroleum pipelines or refineries (DB snapshot first, Overpass fallback)."""
     try:
@@ -5682,7 +5962,7 @@ def get_petroleum_osm_layer(
             bbox = (south, west, north, east)
         conn = get_db_connection()
         try:
-            return get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox)
+            payload = get_osm_layer_geojson_with_fallback(conn, layer_id, bbox=bbox, zoom=zoom)
         finally:
             conn.close()
     except KeyError:
@@ -5696,6 +5976,7 @@ def get_petroleum_osm_layer(
             "data_as_of": datetime.utcnow().isoformat(),
             "limitations": [f"OSM petroleum layer fetch failed: {exc}"],
         }
+    return _licenses_json_response(payload, max_age=600)
 
 
 @app.get("/api/companies/{company_name}/sec-filings")
@@ -5831,6 +6112,7 @@ def get_oil_flows(
     hs: Optional[str] = None,
     year: Optional[int] = None,
     flow: Optional[str] = None,
+    data_source: Optional[str] = None,
     limit: int = 200,
 ):
     """
@@ -5842,6 +6124,7 @@ def get_oil_flows(
     hs       : HS code, e.g. "2709" | "2710" | "2711"
     year     : e.g. 2022
     flow     : "X" (exports) | "M" (imports)
+    data_source : macro ingest source, e.g. "eurostat", "census_api", "usitc_dataweb", "UN Comtrade"
     limit    : max rows returned (default 200)
 
     Returns
@@ -5866,13 +6149,24 @@ def get_oil_flows(
         if flow:
             filters.append("flow_type = %s")
             params.append(flow.upper())
+        if data_source:
+            filters.append("data_source = %s")
+            params.append(data_source.strip())
 
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
 
+        try:
+            from backend.services.entity_trade_flows import _column_exists, _enrich_flow_item
+        except ImportError:
+            from services.entity_trade_flows import _column_exists, _enrich_flow_item
+
+        include_raw = _column_exists(c, "oil_trade_flows", "raw")
+        raw_col = ", raw" if include_raw else ""
+
         c.execute(
             f"""SELECT id, reporter, reporter_iso2, partner, hs_code, hs_description,
-                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at
+                       flow_type, year, trade_value_usd, net_weight_kg, data_source, ingested_at{raw_col}
                 FROM oil_trade_flows
                 {where}
                 ORDER BY year DESC, trade_value_usd DESC NULLS LAST
@@ -5880,15 +6174,16 @@ def get_oil_flows(
             params,
         )
         rows = c.fetchall()
+        data = [_enrich_flow_item(dict(row)) for row in rows]
 
         return {
-            "data": rows,
-            "count": len(rows),
+            "data": data,
+            "count": len(data),
+            "bol_tier": "macro",
             "hs_codes_covered": _OIL_HS_META,
             "provenance": (
-                "Seed: UN Comtrade aggregate tables (comtradeplus.un.org, 2024-Q4), "
-                "cross-checked with BP Statistical Review 2023. "
-                "Live rows sourced via UN Comtrade API v1."
+                "Macro tier in oil_trade_flows from graph-sync: UN Comtrade, Eurostat, "
+                "U.S. Census, USITC DataWeb, EIA, and static seed — not company BOLs."
             ),
             "limitations": _OIL_LIMITATIONS,
         }
@@ -6254,6 +6549,155 @@ def admin_data_health(
         conn.close()
 
 
+class EiaHistoricIngestRequest(BaseModel):
+    path: Optional[str] = None
+
+
+class GemExtractionTrackerIngestRequest(BaseModel):
+    path: Optional[str] = None
+
+
+@app.get("/api/eia-historic-imports/summary")
+def eia_historic_imports_summary(
+    importer: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    limit: int = 50,
+):
+    """Aggregate EIA file-import volumes by year and top origin countries."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_summary
+        except ImportError:
+            from services.eia_historic_imports import query_summary
+        return query_summary(
+            conn,
+            importer=importer,
+            year_from=year_from,
+            year_to=year_to,
+            limit=limit,
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/eia-historic-imports/series")
+def eia_historic_imports_series(
+    importer: str,
+    origin_country: Optional[str] = None,
+    commodity_family: Optional[str] = None,
+):
+    """Monthly/annual import time series for one U.S. importer (company-level EIA files)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_series
+        except ImportError:
+            from services.eia_historic_imports import query_series
+        return query_series(
+            conn,
+            importer=importer,
+            origin_country=origin_country,
+            commodity_family=commodity_family,
+        )
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/eia-historic-imports/map")
+def eia_historic_imports_map(
+    year: int,
+    importer: Optional[str] = None,
+    limit: int = 80,
+):
+    """Origin→U.S. corridor aggregates for map arcs (geocode client-side)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import query_map_arcs
+        except ImportError:
+            from services.eia_historic_imports import query_map_arcs
+        return query_map_arcs(conn, year=year, importer=importer, limit=limit)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-extraction-tracker/ingest")
+def admin_gem_extraction_tracker_ingest(
+    request: GemExtractionTrackerIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+    path: Optional[str] = None,
+):
+    """
+    Ingest GEM Global Oil and Gas Extraction Tracker xlsx into ``licenses``
+    (``sector=oil_and_gas``). Defaults to repo-root workbook or ``GEM_TRACKER_XLSX_PATH``.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    target = (request.path or path or "").strip() or None
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_extraction_tracker_import import ingest_gem_extraction_tracker
+        except ImportError:
+            from services.ingest.gem_extraction_tracker_import import ingest_gem_extraction_tracker
+        summary = ingest_gem_extraction_tracker(conn, workbook_path=target)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/eia-historic-imports/ingest")
+def admin_eia_historic_imports_ingest(
+    request: EiaHistoricIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+    folder: Optional[str] = None,
+):
+    """
+    Ingest EIA ``impa*.xls(x)`` from ``EIA_DOWNLOADS_DIR`` or ``folder`` query/body path.
+    User-provided files only — does not scrape eia.gov.
+    """
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    target = (request.path or folder or "").strip()
+    if not target:
+        try:
+            from backend.services.eia_historic_imports import default_downloads_dir
+        except ImportError:
+            from services.eia_historic_imports import default_downloads_dir
+        target = default_downloads_dir()
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.eia_historic_imports import ingest_eia_downloads_folder
+        except ImportError:
+            from services.eia_historic_imports import ingest_eia_downloads_folder
+        summary = ingest_eia_downloads_folder(conn, target)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
 @app.post("/api/admin/petroleum-osm/sync")
 def admin_petroleum_osm_sync(x_admin_token: Optional[str] = Header(None)):
     """Refresh petroleum_osm_features from Overpass world tiles."""
@@ -6354,6 +6798,208 @@ def read_eu_procurement_cpv_buckets():
     return {"status": "success", "buckets": buckets}
 
 
+@app.post("/api/admin/oil-live/enrich-contacts")
+def admin_oil_live_enrich_contacts(
+    x_admin_token: Optional[str] = Header(None),
+    limit: int = 50,
+):
+    """Batch-run contact enrichment for top oil companies missing contacts (requires supplier_id)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_contact_enrichment import run_oil_live_contact_enrichment_batch
+        except ImportError:
+            from services.oil_live_contact_enrichment import run_oil_live_contact_enrichment_batch
+        conn = get_db_connection()
+        try:
+            return run_oil_live_contact_enrichment_batch(conn, limit=limit)
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.exception("oil-live enrich-contacts failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/oil-live/purge-demo-seed")
+def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
+    """Delete demo opportunities and seed/demo port calls (MT DEMO STAR, seed_port_calls)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import purge_demo_seed
+        except ImportError:
+            from services.oil_live_graph_sync import purge_demo_seed
+        conn = get_db_connection()
+        try:
+            result = purge_demo_seed(conn)
+        finally:
+            conn.close()
+        return {"status": "ok", **result}
+    except Exception as exc:
+        logger.exception("oil-live purge-demo-seed failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/trade-manifests/upload")
+async def trade_manifest_upload(
+    file: UploadFile = File(...),
+    consent: bool = True,
+):
+    """User CSV manifest upload (tier=user_upload). Requires explicit consent flag."""
+    if not consent:
+        return {"status": "error", "message": "consent required"}
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        return {"status": "error", "message": "CSV file required"}
+    import tempfile
+
+    ensure_schema_initialized()
+    tmp_path = None
+    try:
+        try:
+            from backend.services.trade_manifest_ingest import ingest_user_manifest_csv
+        except ImportError:
+            from services.trade_manifest_ingest import ingest_user_manifest_csv
+        suffix = os.path.splitext(file.filename)[1] or ".csv"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        conn = get_db_connection()
+        try:
+            result = ingest_user_manifest_csv(conn, tmp_path, consent=consent)
+            conn.commit()
+        finally:
+            conn.close()
+        return result
+    except Exception as exc:
+        logger.exception("trade manifest upload failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+    finally:
+        if tmp_path and os.path.isfile(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+@app.post("/api/admin/trade-manifests/upload")
+def admin_trade_manifest_upload(
+    x_admin_token: Optional[str] = Header(None),
+    file_path: str = "",
+    consent: bool = True,
+):
+    """Ingest user-provided manifest CSV into trade_manifest_rows (tier=user_upload)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    if not file_path.strip():
+        return {"status": "error", "message": "file_path required"}
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.trade_manifest_ingest import ingest_user_manifest_csv
+        except ImportError:
+            from services.trade_manifest_ingest import ingest_user_manifest_csv
+        conn = get_db_connection()
+        try:
+            result = ingest_user_manifest_csv(conn, file_path.strip(), consent=consent)
+            conn.commit()
+        finally:
+            conn.close()
+        return result
+    except Exception as exc:
+        logger.exception("trade manifest upload failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/api/commodity/benchmarks")
+def commodity_benchmarks_panel(
+    products: str = "crude,diesel,jet,gold",
+):
+    """Free/public benchmark snapshot for deal pack and dossier (benchmark_only tier)."""
+    ensure_schema_initialized()
+    out: list[dict[str, Any]] = []
+    requested = [p.strip().lower() for p in products.split(",") if p.strip()]
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT country, product, flow_indicator, period, value, unit
+                FROM jodi_oil_snapshots
+                ORDER BY ingested_at DESC NULLS LAST
+                LIMIT 20;
+                """
+            )
+            for row in cur.fetchall() or []:
+                out.append(
+                    {
+                        "source": "jodi",
+                        "tier": "benchmark_only",
+                        "product": row[1] or row[3],
+                        "country": row[0],
+                        "period": row[3],
+                        "value": float(row[4]) if row[4] is not None else None,
+                        "unit": row[5],
+                        "disclaimer": "JODI macro supply/demand — not a transaction price.",
+                    }
+                )
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    for prod in requested:
+        if prod in ("gold", "silver"):
+            try:
+                ticker = "GC=F" if prod == "gold" else "SI=F"
+                snap = _yahoo_futures_spot(ticker)
+                if snap:
+                    out.append(
+                        {
+                            "source": "yahoo_delayed",
+                            "tier": "benchmark_only",
+                            "product": prod,
+                            "value": snap.get("price"),
+                            "unit": "USD",
+                            "disclaimer": "Delayed exchange quote — not for execution pricing.",
+                        }
+                    )
+            except Exception:
+                pass
+    return {"benchmarks": out, "disclaimer": "Public benchmarks only — verify at source before pricing deals."}
+
+
+@app.post("/api/admin/oil-live/graph-sync")
+def admin_oil_live_graph_sync(
+    x_admin_token: Optional[str] = Header(None),
+    rebuild_synthetic_bol: bool = True,
+):
+    """Merge free sources into oil commercial graph + trigger synthetic BOL rebuild."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.oil_live_graph_sync import run_full_graph_sync
+        except ImportError:
+            from services.oil_live_graph_sync import run_full_graph_sync
+        conn = get_db_connection()
+        try:
+            result = run_full_graph_sync(conn, rebuild_synthetic_bol=rebuild_synthetic_bol)
+        finally:
+            conn.close()
+        return {"status": result.get("status", "ok"), **result}
+    except Exception as exc:
+        logger.exception("oil-live graph-sync failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
 @app.post("/api/admin/eu-procurement/sync")
 def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
     """Refresh eu_procurement_notices from TED Search API (free, no API key)."""
@@ -6409,6 +7055,123 @@ def read_entity_trade_flows(
         return Response(str(exc), status_code=500)
     finally:
         conn.close()
+
+
+@app.get("/entities/{entity_id:path}/satellite-site")
+def read_entity_satellite_site(
+    entity_id: str,
+    entity_kind: str = "license",
+):
+    """Site coordinates and external satellite imagery links (no mock scene ingest)."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing satellite site schema")
+    conn = get_db_connection()
+    try:
+        lat = None
+        lng = None
+        company = ""
+        country = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country, lat, lng FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+                lat = row.get("lat")
+                lng = row.get("lng")
+        try:
+            from backend.services.satellite_site import build_satellite_site_payload
+        except ImportError:
+            from services.satellite_site import build_satellite_site_payload
+        return build_satellite_site_payload(
+            entity_id=entity_id,
+            company=company,
+            country=country,
+            lat=float(lat) if lat is not None else None,
+            lng=float(lng) if lng is not None else None,
+            esg_zone=None,
+        )
+    except Exception as exc:
+        logger.exception("satellite-site failed for %s: %s", entity_id, exc)
+        return {"entity_id": entity_id, "has_coordinates": False, "limitations": [str(exc)], "links": []}
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/goldbod-license")
+def read_entity_goldbod_license(
+    entity_id: str,
+    entity_kind: str = "license",
+    license_number: Optional[str] = None,
+):
+    """Ghana Gold Board (GoldBod) license verification for gold-sector entities."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing goldbod schema")
+    conn = get_db_connection()
+    try:
+        company = ""
+        country = ""
+        commodity = ""
+        if (entity_kind or "").strip().lower() == "license":
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT company, country, commodity FROM licenses WHERE id = %s",
+                    (entity_id,),
+                )
+                row = cur.fetchone()
+            if row:
+                company = (row.get("company") or "").strip()
+                country = (row.get("country") or "").strip()
+                commodity = (row.get("commodity") or "").strip()
+        try:
+            from backend.services.goldbod import build_entity_goldbod_payload
+        except ImportError:
+            from services.goldbod import build_entity_goldbod_payload
+        return build_entity_goldbod_payload(
+            entity_id=entity_id,
+            company=company,
+            country=country,
+            commodity=commodity,
+            license_number=(license_number or "").strip(),
+        )
+    except Exception as exc:
+        logger.exception("goldbod-license failed for %s: %s", entity_id, exc)
+        return {
+            "entity_id": entity_id,
+            "status": "api_unavailable",
+            "eligible": False,
+            "limitations": [str(exc)],
+            "links": [],
+            "matches": [],
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/ghana/goldbod/search")
+def search_goldbod_license(
+    q: str = "",
+    license_number: Optional[str] = None,
+    business_id: Optional[str] = None,
+    country: str = "Ghana",
+    commodity: str = "Gold",
+):
+    """Search GoldBod public registry / optional partner API by company or certificate."""
+    try:
+        from backend.services.goldbod import verify_goldbod_license
+    except ImportError:
+        from services.goldbod import verify_goldbod_license
+    return verify_goldbod_license(
+        company_name=(q or "").strip(),
+        license_number=(license_number or "").strip(),
+        business_id=(business_id or "").strip(),
+        country=country,
+        commodity=commodity,
+    )
 
 
 @app.get("/entities/{entity_id:path}/eu-procurement")
@@ -6568,6 +7331,37 @@ def admin_kazakhstan_mining_sync(
         return {"status": "success", **result}
     except RuntimeError as exc:
         return {"status": "skipped", "message": str(exc)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+@app.post("/api/admin/oil-products-licenses/sync")
+def admin_oil_products_licenses_sync(
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Upsert curated downstream fuel / petroleum products marketing licensees from seed JSON."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    ensure_schema_initialized()
+    try:
+        try:
+            from backend.services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+        except ImportError:
+            from services.ingest.oil_products_licenses_sync import sync_oil_products_licenses
+
+        conn = get_db_connection()
+        try:
+            result = sync_oil_products_licenses(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        if result.get("entities_written", 0):
+            cache.delete_pattern("licenses:*")
+        return {"status": "success", **result}
+    except FileNotFoundError as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -6787,16 +7581,20 @@ def get_world_open_data_coverage(
 
 
 @app.get("/api/admin/licenses/export")
-def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
-    """CSV export with provenance columns for admin backup and re-import."""
+def admin_export_licenses(
+    format: str = Query("csv", description="csv or json"),
+    sector: Optional[str] = None,
+    country: Optional[str] = None,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Export licenses from Postgres for backup and re-import (source of truth)."""
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
         return forbidden
 
     conn = get_db_connection()
     c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute(
-        """
+    query = """
         SELECT
             id, company, country, region, commodity, license_type, status,
             lat, lng, phone_number, contact_person, date_issued,
@@ -6804,14 +7602,20 @@ def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
             source_record_url, source_updated_at, last_synced_at,
             manually_edited, manually_edited_at, manually_edited_by
         FROM licenses
-        ORDER BY country, sector, company
-        """
-    )
+        WHERE 1=1
+    """
+    params: list[Any] = []
+    if sector:
+        query += " AND lower(coalesce(sector, 'mining')) = lower(%s)"
+        params.append(sector.strip())
+    if country:
+        query += " AND lower(country) = lower(%s)"
+        params.append(country.strip())
+    query += " ORDER BY country, sector, company"
+    c.execute(query, tuple(params))
     rows = c.fetchall()
     conn.close()
 
-    output = io.StringIO()
-    writer = csv.writer(output)
     headers = [
         "id",
         "company",
@@ -6837,6 +7641,16 @@ def admin_export_licenses(x_admin_token: Optional[str] = Header(None)):
         "manually_edited_at",
         "manually_edited_by",
     ]
+    normalized_format = (format or "csv").strip().lower()
+    if normalized_format == "json":
+        payload = [{col: row.get(col) for col in headers} for row in rows]
+        return JSONResponse(
+            content={"count": len(payload), "licenses": payload},
+            headers={"Content-Disposition": "attachment; filename=licenses_admin_export.json"},
+        )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
     writer.writerow(headers)
     for row in rows:
         writer.writerow([row.get(col) for col in headers])

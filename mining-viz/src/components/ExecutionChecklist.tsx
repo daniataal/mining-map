@@ -1,69 +1,80 @@
-import { useState, useCallback } from 'react';
-import { ChecklistItem, DealChecklist } from '../types';
+import { useState, useCallback, useEffect } from 'react';
+import { ChecklistItem } from '../types';
 import { Check, Copy, Download, Plus, X, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-
-const DEFAULT_TEMPLATE: Omit<ChecklistItem, 'checked'>[] = [
-  { id: 'dd-license',   label: 'Due Diligence — verify license validity with mining authority' },
-  { id: 'dd-site',      label: 'Due Diligence — confirm site visit / physical inspection' },
-  { id: 'kyc-seller',   label: 'KYC — identity & beneficial ownership of seller/company' },
-  { id: 'kyc-docs',     label: 'KYC — collect ID, TIN, registration docs' },
-  { id: 'sanctions',    label: 'Sanctions screen — OFAC / EU / UN lists [PLACEHOLDER — consult compliance counsel]' },
-  { id: 'aml',          label: 'AML check — source-of-funds declaration signed' },
-  { id: 'contract',     label: 'Contract milestone — draft SPA or LOI issued and signed' },
-  { id: 'payment',      label: 'Payment terms confirmed — escrow / LC / wire details locked' },
-  { id: 'assay',        label: 'Assay / quality certificate obtained from accredited lab' },
-  { id: 'insurance',    label: 'Cargo & credit insurance arranged' },
-  { id: 'logistics',    label: 'Logistics confirmed — shipment legs, incoterm, ETA' },
-  { id: 'export-permit',label: 'Export permit / mineral certificate issued by authority' },
-];
+import {
+  defaultChecklistItems,
+  loadChecklistFromLocalStorage,
+  saveChecklistToLocalStorage,
+} from '../lib/checklistDefaults';
 
 const DISCLAIMER =
   '⚠ This checklist is a workflow aid only — not legal, compliance, or financial advice. ' +
   'Always engage licensed compliance, legal, and financial professionals before executing any transaction.';
 
-function loadChecklist(dealId: string): ChecklistItem[] {
-  try {
-    const raw = localStorage.getItem(`mining_checklist_${dealId}`);
-    if (raw) return JSON.parse(raw);
-  } catch (_) {}
-  return DEFAULT_TEMPLATE.map(t => ({ ...t, checked: false }));
-}
-
-function saveChecklist(dealId: string, items: ChecklistItem[]) {
-  const record: DealChecklist = { dealId, items, updatedAt: new Date().toISOString() };
-  localStorage.setItem(`mining_checklist_${dealId}`, JSON.stringify(record.items));
-}
-
 interface ExecutionChecklistProps {
   dealId: string;
   dealLabel?: string;
   compact?: boolean;
+  /** When provided, checklist syncs to license annotations (server when logged in). */
+  items?: ChecklistItem[];
+  onItemsChange?: (items: ChecklistItem[]) => void;
 }
 
-export default function ExecutionChecklist({ dealId, dealLabel, compact = false }: ExecutionChecklistProps) {
-  const [items, setItems] = useState<ChecklistItem[]>(() => loadChecklist(dealId));
+export default function ExecutionChecklist({
+  dealId,
+  dealLabel,
+  compact = false,
+  items: controlledItems,
+  onItemsChange,
+}: ExecutionChecklistProps) {
+  const isControlled = controlledItems != null && onItemsChange != null;
+
+  const [internalItems, setInternalItems] = useState<ChecklistItem[]>(() =>
+    isControlled ? controlledItems! : loadChecklistFromLocalStorage(dealId),
+  );
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
   const [newLabel, setNewLabel] = useState('');
   const [showAddRow, setShowAddRow] = useState(false);
 
-  const persist = useCallback((next: ChecklistItem[]) => {
-    setItems(next);
-    saveChecklist(dealId, next);
-  }, [dealId]);
+  const items = isControlled ? controlledItems! : internalItems;
+
+  useEffect(() => {
+    if (!isControlled) {
+      setInternalItems(loadChecklistFromLocalStorage(dealId));
+    }
+  }, [dealId, isControlled]);
+
+  useEffect(() => {
+    if (isControlled && controlledItems) {
+      setInternalItems(controlledItems);
+    }
+  }, [isControlled, controlledItems]);
+
+  const persist = useCallback(
+    (next: ChecklistItem[]) => {
+      if (isControlled) {
+        onItemsChange!(next);
+      } else {
+        setInternalItems(next);
+        saveChecklistToLocalStorage(dealId, next);
+      }
+    },
+    [dealId, isControlled, onItemsChange],
+  );
 
   const toggle = (id: string) => {
-    persist(items.map(it => it.id === id ? { ...it, checked: !it.checked } : it));
+    persist(items.map((it) => (it.id === id ? { ...it, checked: !it.checked } : it)));
   };
 
   const updateNote = (id: string, notes: string) => {
-    persist(items.map(it => it.id === id ? { ...it, notes } : it));
+    persist(items.map((it) => (it.id === id ? { ...it, notes } : it)));
   };
 
   const removeItem = (id: string) => {
-    persist(items.filter(it => it.id !== id));
+    persist(items.filter((it) => it.id !== id));
   };
 
   const addItem = () => {
@@ -79,7 +90,7 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
   };
 
   const toggleNotes = (id: string) => {
-    setExpandedNotes(prev => {
+    setExpandedNotes((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -89,7 +100,9 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
   const buildText = () => {
     const header = `EXECUTION CHECKLIST — ${dealLabel || dealId}\nGenerated: ${new Date().toLocaleString()}\n${DISCLAIMER}\n\n`;
     const body = items
-      .map(it => `[${it.checked ? 'X' : ' '}] ${it.label}${it.notes ? `\n    Notes: ${it.notes}` : ''}`)
+      .map(
+        (it) => `[${it.checked ? 'X' : ' '}] ${it.label}${it.notes ? `\n    Notes: ${it.notes}` : ''}`,
+      )
       .join('\n');
     return header + body;
   };
@@ -98,7 +111,7 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
     try {
       await navigator.clipboard.writeText(buildText());
       toast.success('Checklist copied to clipboard');
-    } catch (_) {
+    } catch {
       toast.error('Copy failed — try the download button');
     }
   };
@@ -114,19 +127,19 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
     toast.success('Checklist downloaded');
   };
 
-  const done = items.filter(it => it.checked).length;
-  const total = items.length;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const { done, total, pct } = (() => {
+    const t = items.length;
+    const d = items.filter((it) => it.checked).length;
+    return { done: d, total: t, pct: t > 0 ? Math.round((d / t) * 100) : 0 };
+  })();
 
   return (
     <div className="space-y-4">
-      {/* Disclaimer */}
       <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
         <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
         <p className="text-[10px] text-amber-600 dark:text-amber-400 leading-relaxed">{DISCLAIMER}</p>
       </div>
 
-      {/* Progress bar */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -142,9 +155,8 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
         </div>
       </div>
 
-      {/* Items */}
       <div className="space-y-1">
-        {items.map(item => {
+        {items.map((item) => {
           const notesOpen = expandedNotes.has(item.id);
           const isSanctions = item.id === 'sanctions' || item.id === 'aml';
           return (
@@ -154,8 +166,8 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
                 item.checked
                   ? 'bg-emerald-500/5 border-emerald-500/20'
                   : isSanctions
-                  ? 'bg-red-500/5 border-red-500/20'
-                  : 'bg-black/2 dark:bg-white/2 border-black/5 dark:border-white/5'
+                    ? 'bg-red-500/5 border-red-500/20'
+                    : 'bg-black/2 dark:bg-white/2 border-black/5 dark:border-white/5'
               }`}
             >
               <div className="flex items-start gap-2 p-2.5">
@@ -174,8 +186,8 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
                     item.checked
                       ? 'line-through text-slate-400 dark:text-slate-600'
                       : isSanctions
-                      ? 'text-red-600 dark:text-red-400'
-                      : 'text-slate-700 dark:text-slate-300'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-slate-700 dark:text-slate-300'
                   }`}
                   onClick={() => toggle(item.id)}
                 >
@@ -206,7 +218,7 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
                     className="w-full text-[11px] bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-lg px-3 py-1.5 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 outline-none focus:border-amber-400 transition-colors"
                     placeholder="Add a note..."
                     value={item.notes || ''}
-                    onChange={e => updateNote(item.id, e.target.value)}
+                    onChange={(e) => updateNote(item.id, e.target.value)}
                   />
                 </div>
               )}
@@ -215,7 +227,6 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
         })}
       </div>
 
-      {/* Add custom item */}
       {!compact && (
         <div>
           {showAddRow ? (
@@ -224,12 +235,22 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
                 className="flex-1 text-xs bg-white dark:bg-slate-900 border border-black/10 dark:border-white/10 rounded-lg px-3 py-2 text-slate-700 dark:text-slate-300 placeholder:text-slate-400 outline-none focus:border-amber-400 transition-colors"
                 placeholder="Custom checklist item..."
                 value={newLabel}
-                onChange={e => setNewLabel(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addItem()}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addItem()}
                 autoFocus
               />
-              <Button size="sm" onClick={addItem} className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold">Add</Button>
-              <Button size="sm" variant="ghost" onClick={() => { setShowAddRow(false); setNewLabel(''); }} className="text-slate-400">
+              <Button size="sm" onClick={addItem} className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold">
+                Add
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setShowAddRow(false);
+                  setNewLabel('');
+                }}
+                className="text-slate-400"
+              >
                 <X className="w-4 h-4" />
               </Button>
             </div>
@@ -244,7 +265,6 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
         </div>
       )}
 
-      {/* Export actions */}
       <div className="flex items-center gap-2 pt-2 border-t border-black/5 dark:border-white/5">
         <Badge variant="secondary" className="text-[9px] font-black">
           {done}/{total} done
@@ -270,3 +290,5 @@ export default function ExecutionChecklist({ dealId, dealLabel, compact = false 
     </div>
   );
 }
+
+export { defaultChecklistItems, loadChecklistFromLocalStorage };

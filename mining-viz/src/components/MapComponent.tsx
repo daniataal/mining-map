@@ -1,6 +1,19 @@
-import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useDebouncedValue } from '../hooks/use-debounced-value';
+import {
+    lazy,
+    startTransition,
+    Suspense,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+    type ReactNode,
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
+import { useOilLiveMapSyncStatus } from '../hooks/useOilLiveMapSyncStatus';
+import { useMapLayerViewports } from '../hooks/useMapLayerViewports';
 import { useTheme } from 'next-themes';
 import {
     MapContainer,
@@ -25,33 +38,72 @@ import L from 'leaflet';
 import 'leaflet.markercluster';
 import 'leaflet/dist/leaflet.css';
 import { ChevronDown, ChevronUp, Loader2, Radar, RefreshCw, Ship } from 'lucide-react';
-import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
+import { MiningLicense, UserAnnotation, MaritimeVessel, MaritimeTankerView, MaritimeViewportBounds, MaritimeVesselScope, OilAndGasDisplayMode } from '../types';
 import { getCountryBorders, useMaritimeVessels } from '../lib/api';
 import {
   applyVesselFilters,
   CanvasVesselLayer,
-  clearMaritimeSnapshotCache,
   filterVesselsByViewport,
-  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
-  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
   sortVesselsForDisplay,
   toVesselDrawRecords,
-  VESSEL_SHIP_TYPE_OPTIONS,
+  planVesselLodDraw,
+  LOD_FULL_DETAIL_ZOOM,
   MARITIME_LEGEND_KEYS,
   VESSEL_CATEGORY_COLORS,
   VESSEL_LEGEND_T,
   type VesselFilters,
 } from '../lib/vessels';
+import { buildMaritimeStatusMessages } from '../lib/vessels/maritimeFeedStatus';
 import MaritimeLayerSync from './vessels/MaritimeLayerSync';
+import MaritimeVesselFocusLayers from './vessels/MaritimeVesselFocusLayers';
+import MaritimeFocusLegend from './vessels/MaritimeFocusLegend';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
+import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
+import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
+import OilLiveMapOverlays, {
+  type OilLiveEntityClickPayload,
+  type OilLiveLayerVisibility,
+} from './petroleum/OilLiveMapOverlays';
+import LiveDataMapLayersPanel from '../features/live-data/LiveDataMapLayersPanel';
+import EiaHistoricMapLayer from '../features/live-data/EiaHistoricMapLayer';
+import MacroTradeFlowsMapLayer from '../features/live-data/MacroTradeFlowsMapLayer';
+import type { EiaHistoricMapArc, EiaHistoricMapOrigin } from '../api/eiaHistoricApi';
+import type { MacroTradeFlow } from '../api/oilLiveApi';
+import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
+import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
+import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
+import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
+import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
+import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
+import {
+  LIVE_DATA_HUB_BOUNDS,
+  LIVE_DATA_DEFAULT_LAYERS,
+  GOVERNMENT_AIS_COVERAGE_SOURCES,
+  viewportOverlapsPersianGulfHub,
+  type LiveDataLensMode,
+} from '../features/live-data/liveDataMapDefaults';
+import { resolveLiveDataVesselStatus } from '../features/live-data/liveDataVesselStatus';
 import { createOilFieldMapIcon, createRefineryMapIcon } from './petroleum/refineryMapIcon';
-import { WORLD_PETROLEUM_PRELOAD_BBOX } from '../lib/petroleumLayers';
 import { isOilFieldEntity, isRefineryEntity } from '../lib/oilEntityKinds';
+import { countEntitiesInViewport } from '../lib/viewportBounds';
 import MapZoomTracker from './petroleum/MapZoomTracker';
 import MapBasemapLayers from './map/MapBasemapLayers';
-import { createLicenseClusterIconFactory } from '../lib/mapClusterIcons';
+import {
+    clusterTargetZoom,
+    isServerLicenseCluster,
+    LICENSE_MAP_DEFAULT_ZOOM,
+    planClusterDrillFly,
+    serverClusterFlyBounds,
+    SERVER_CLUSTER_MIN_DRILL_ZOOM,
+} from '../lib/licenseMapCluster';
+import { capMarkersInViewport } from '../lib/mapDomMarkerCap';
+import { LICENSE_MAP_DOM_MARKER_CAP, MAP_VIEWPORT_DEBOUNCE_MS } from '../lib/mapViewportDebounce';
+import {
+  createLicenseClusterIconFactory,
+  createServerLicenseClusterIcon,
+} from '../lib/mapClusterIcons';
 import { useI18n } from '../lib/i18n';
 import type { RouteMapOverlay } from '../features/route-planner/types';
 import RoutePlannerMapLayers from '../features/route-planner/RoutePlannerMapLayers';
@@ -64,10 +116,13 @@ import RoutePlannerMapResizeEffect from '../features/route-planner/RoutePlannerM
 import type { RoutePlannerHubMarker } from '../features/route-planner/locationPresets';
 import RouteLegend from '../features/route-planner/RouteLegend';
 import { applyCollocationJitter } from '../lib/geo';
+import { isLiveDealClientClusterData } from '../lib/liveDealMap/liveDealMapLod';
+import type { LiveDealFeatureKind, LiveDealMapFeature } from '../lib/liveDealMap/liveDealMapTypes';
 import {
-  countriesWithVisibleLicenses,
-  countryLicenseCounts,
+  countryLicenseCountsForBorders,
+  countriesForMapBorders,
 } from '../lib/countriesWithVisibleLicenses';
+import { isCountryLicenseSummary, LICENSE_MAP_BORDER_COUNTRY_CAP } from '../lib/licenseCountrySummary';
 import {
   createLicenseMarkerIconCache,
   markerIconSignature,
@@ -85,7 +140,6 @@ import {
 
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 
@@ -158,6 +212,29 @@ const PORTS_MAP_RENDER_LIMIT = 3000;
 const MARITIME_MAX_VESSEL_OPTIONS = ['1000', '2000', '5000', '10000', '15000'];
 
 const MARITIME_CAPTURE_WINDOW_OPTIONS = ['10', '15', '25', '30'];
+const MARITIME_TANKER_VIEW_OPTIONS: { value: MaritimeTankerView; labelHe: string; labelEn: string }[] = [
+    { value: 'worldwide', labelHe: 'מכליות בעולם', labelEn: 'Worldwide Tankers' },
+    { value: 'middle_east', labelHe: 'מזרח תיכון', labelEn: 'Middle East' },
+    { value: 'persian_gulf', labelHe: 'המפרץ הפרסי', labelEn: 'Persian Gulf' },
+    { value: 'strait_of_hormuz', labelHe: 'הורמוז', labelEn: 'Hormuz' },
+    { value: 'gulf_of_oman', labelHe: 'מפרץ עומאן', labelEn: 'Gulf of Oman' },
+    { value: 'fujairah', labelHe: "פוג'יירה", labelEn: 'Fujairah' },
+    { value: 'dubai_jebel_ali', labelHe: 'דובאי / ג׳בל עלי', labelEn: 'Dubai / Jebel Ali' },
+    { value: 'ras_tanura', labelHe: 'ראס תנורה', labelEn: 'Ras Tanura' },
+    { value: 'qatar_ras_laffan', labelHe: 'קטאר / ראס לפאן', labelEn: 'Qatar / Ras Laffan' },
+    { value: 'kuwait_iraq_terminals', labelHe: 'כווית / עיראק', labelEn: 'Kuwait / Iraq terminals' },
+];
+const MARITIME_TANKER_VIEW_BOUNDS: Partial<Record<MaritimeTankerView, [[number, number], [number, number]]>> = {
+    middle_east: [[16.0, 46.0], [31.5, 62.0]],
+    persian_gulf: [[23.5, 47.5], [30.8, 56.8]],
+    strait_of_hormuz: [[25.3, 55.9], [27.0, 57.3]],
+    gulf_of_oman: [[22.0, 56.0], [26.8, 61.5]],
+    fujairah: [[24.85, 56.20], [25.45, 56.75]],
+    dubai_jebel_ali: [[24.80, 54.70], [25.45, 55.45]],
+    ras_tanura: [[26.30, 49.70], [27.20, 50.40]],
+    qatar_ras_laffan: [[24.5, 50.5], [27.0, 52.4]],
+    kuwait_iraq_terminals: [[28.5, 47.5], [30.8, 49.9]],
+};
 
 const getMarkerColor = (
   commodity?: string,
@@ -213,7 +290,14 @@ interface MapComponentProps {
   licensesRefetching?: boolean;
   /** Optional status line while some country feeds are still loading or failed (non-blocking). */
   licensesSecondaryStatus?: string | null;
-  /** When set, reports map bounds for GET /licenses viewport filtering (mining / oil_and_gas). */
+  /** Debounced map bounds → GET /licenses?min_lat&… (sparse wire). */
+  onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds | null) => void;
+  /** Map zoom for license clustering and overlay LOD. */
+  onLicenseMapZoomChange?: (zoom: number) => void;
+  /** Current map zoom for license clustering (from App). */
+  licenseMapZoom?: number;
+  /** After cluster drill fly completes — refetch with expanded grid-cell bbox. */
+  onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
   selectedMaritimeVessel: MaritimeVessel | null;
   onSelectMaritimeVessel: (vessel: MaritimeVessel | null) => void;
   maritimeMapViewActive?: boolean;
@@ -252,24 +336,167 @@ interface MapComponentProps {
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
   countryFocusBoundsTrigger?: number;
+  /** Open-data storage terminals / tank farms (Oil & Gas view). */
+  storageEntities?: MiningLicense[];
+  onStorageInViewCountChange?: (count: number) => void;
+  /** Live Data mode — oil-live-intel map overlays. */
+  oilLiveOverlaysEnabled?: boolean;
+  oilLiveProductFilter?: string;
+  oilLiveTerminalSearch?: string;
+  oilLiveLens?: LiveDataLensMode;
+  onOilLiveLensChange?: (lens: LiveDataLensMode) => void;
+  oilLiveLayers?: OilLiveLayerVisibility;
+  onOilLiveLayersChange?: (layers: OilLiveLayerVisibility) => void;
+  oilLiveTradeFlowGroup?: 'company_pair' | 'country_pair';
+  onOilLiveTradeFlowGroupChange?: (group: 'company_pair' | 'country_pair') => void;
+  oilLiveCoverageStats?: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+    vesselMeta?: import('../api/oilLiveApi').OilLiveVesselMeta | null;
+  } | null;
+  onOilLiveStatsChange?: (stats: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+    vesselMeta?: import('../api/oilLiveApi').OilLiveVesselMeta | null;
+  }) => void;
+  liveDataMacroTradeOn?: boolean;
+  onLiveDataMacroTradeChange?: (on: boolean) => void;
+  liveDataEiaHistoricOn?: boolean;
+  onLiveDataEiaHistoricChange?: (on: boolean) => void;
+  oilLiveSidebarActive?: boolean;
+  onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
+  onOilLiveDismiss?: () => void;
+  /** Fly map when a Live Data search hit has coordinates. */
+  onLiveDataMapFlyTo?: (lat: number, lng: number) => void;
+  /** Increment when entering Live Data to fly map to Gulf hub bbox. */
+  liveDataFlyTrigger?: number;
+  /** When set, fly to this point instead of the default hub (search hit). */
+  liveDataFlyTarget?: { lat: number; lng: number } | null;
+  /** EIA historic file-import corridor arcs (purple dashed). */
+  eiaHistoricMapEnabled?: boolean;
+  eiaHistoricMapArcs?: EiaHistoricMapArc[];
+  eiaHistoricMapOrigins?: EiaHistoricMapOrigin[];
+  eiaHistoricMapYear?: number;
+  eiaHistoricShowCorridors?: boolean;
+  onEiaHistoricSelectImporter?: (importerName: string) => void;
+  onEiaHistoricViewArcDetails?: (
+    selection: import('../features/live-data/HistoricArcDetailDrawer').HistoricArcSelection,
+  ) => void;
+  /** Hide mining license clusters so historic EIA points are clickable */
+  suppressLicenseClusters?: boolean;
+  /** Do not paint license markers (Historic / Live Data tabs). */
+  hideLicenseMarkers?: boolean;
+  /** Show OSM petroleum infrastructure on mining/global/oil views. */
+  showInfrastructureLayers?: boolean;
+  infrastructureLayerVisibility?: Record<OsmPetroleumLayerId, boolean>;
+  infrastructureForcedLayers?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  infrastructureMapZoom?: number;
+  infrastructureMapBbox?: import('../lib/petroleumLayers').PetroleumViewportBounds | null;
+  infrastructurePanelHint?: 'zoom' | 'off' | null;
+  onInfrastructureLayerChange?: (layerId: OsmPetroleumLayerId, visible: boolean) => void;
+  onInfrastructureFeatureClick?: (
+    selection: import('../features/infrastructure/InfrastructureFeatureDrawer').InfrastructureFeatureSelection,
+  ) => void;
+  /** Comtrade/Census macro country-pair arcs (gray). */
+  macroTradeFlowsEnabled?: boolean;
+  macroTradeFlows?: MacroTradeFlow[];
 }
 
-/** Capture the Leaflet MarkerClusterGroup instance for popup spiderfy timing. */
+/** Max markers before we always zoom instead of spiderfy (spiderfy disabled anyway). */
+const LICENSE_CLUSTER_FIT_MAX_ZOOM = 14;
+const LICENSE_CANVAS_CLUSTER_MAX_ZOOM = 13;
+const LICENSE_CANVAS_CLUSTER_MIN_COUNT = 10;
+const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = 16;
+const LICENSE_CANVAS_CLUSTER_KINDS: readonly LiveDealFeatureKind[] = [
+    'license',
+    'refinery',
+    'oil_field',
+];
+
+type PendingLicenseClusterFly = MiningLicense & {
+    _clientCluster?: boolean;
+    _clientClusterBounds?: MaritimeViewportBounds;
+};
+
+/** Capture the Leaflet MarkerClusterGroup instance for popup timing. */
 function ClusterGroupRefBridge({
     clusterGroupRef,
+    onSingleMarkerClusterClick,
+    onLicenseMapZoomChange,
+    onLicenseClusterDrillComplete,
 }: {
     clusterGroupRef: React.MutableRefObject<LicenseMarkerClusterGroup | null>;
+    onSingleMarkerClusterClick?: (marker: L.Marker) => void;
+    onLicenseMapZoomChange?: (zoom: number) => void;
+    onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
 }) {
+    const map = useMap();
     const { layerContainer } = useLeafletContext();
+    const onSingleMarkerClusterClickRef = useRef(onSingleMarkerClusterClick);
+    const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
+    const onLicenseClusterDrillCompleteRef = useRef(onLicenseClusterDrillComplete);
+    onSingleMarkerClusterClickRef.current = onSingleMarkerClusterClick;
+    onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
+    onLicenseClusterDrillCompleteRef.current = onLicenseClusterDrillComplete;
     useEffect(() => {
         const group = asLicenseMarkerClusterGroup(layerContainer);
         clusterGroupRef.current = group;
+        const onClusterClick = (event: L.LeafletEvent) => {
+            const layer = event.layer as L.Layer & {
+                getAllChildMarkers?: () => L.Marker[];
+                getLatLng?: () => L.LatLng;
+            };
+            const children = layer.getAllChildMarkers?.() ?? [];
+            if (children.length === 1 && onSingleMarkerClusterClickRef.current) {
+                L.DomEvent.stopPropagation(event);
+                onSingleMarkerClusterClickRef.current(children[0]);
+                return;
+            }
+            if (children.length > 1) {
+                L.DomEvent.stopPropagation(event);
+                const bounds = L.latLngBounds(children.map((m) => m.getLatLng()));
+                const padded = bounds.pad(0.15);
+                const fitMaxZoom = Math.max(
+                    clusterTargetZoom(map.getZoom()),
+                    Math.min(
+                        LICENSE_CLUSTER_FIT_MAX_ZOOM,
+                        map.getBoundsZoom(bounds.pad(0.12)) ?? clusterTargetZoom(map.getZoom()),
+                    ),
+                );
+                map.stop();
+                map.flyToBounds(padded, {
+                    maxZoom: fitMaxZoom,
+                    duration: 0.55,
+                    padding: [32, 32],
+                });
+                const syncZoom = () => {
+                    onLicenseMapZoomChangeRef.current?.(map.getZoom());
+                    onLicenseClusterDrillCompleteRef.current?.({
+                        south: padded.getSouth(),
+                        west: padded.getWest(),
+                        north: padded.getNorth(),
+                        east: padded.getEast(),
+                    });
+                };
+                map.once('moveend', syncZoom);
+            }
+        };
+        if (group) {
+            group.on('clusterclick', onClusterClick);
+        }
         return () => {
+            if (group) {
+                group.off('clusterclick', onClusterClick);
+            }
             if (clusterGroupRef.current === group) {
                 clusterGroupRef.current = null;
             }
         };
-    }, [layerContainer, clusterGroupRef]);
+    }, [map, layerContainer, clusterGroupRef]);
     return null;
 }
 
@@ -298,6 +525,108 @@ const MapEffect = ({
     return null;
 };
 
+/** Fly into a server-side license cluster; sync zoom/bbox from map on moveend (zoom ≥ 7 → points). */
+const LicenseClusterFlyEffect = ({
+    cluster,
+    onLicenseMapZoomChange,
+    onLicenseMapViewportChange,
+    onLicenseClusterDrillComplete,
+    onComplete,
+}: {
+    cluster: PendingLicenseClusterFly | null;
+    onLicenseMapZoomChange?: (zoom: number) => void;
+    onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
+    onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds) => void;
+    onComplete: () => void;
+}) => {
+    const map = useMap();
+    const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
+    const onLicenseMapViewportChangeRef = useRef(onLicenseMapViewportChange);
+    const onLicenseClusterDrillCompleteRef = useRef(onLicenseClusterDrillComplete);
+    const onCompleteRef = useRef(onComplete);
+    const clusterRef = useRef(cluster);
+    onLicenseMapZoomChangeRef.current = onLicenseMapZoomChange;
+    onLicenseMapViewportChangeRef.current = onLicenseMapViewportChange;
+    onLicenseClusterDrillCompleteRef.current = onLicenseClusterDrillComplete;
+    onCompleteRef.current = onComplete;
+    clusterRef.current = cluster;
+    const clusterFlyId = cluster?.id ?? null;
+    useEffect(() => {
+        const clusterItem = clusterRef.current;
+        if (!clusterFlyId || !clusterItem) return;
+        const lat = clusterItem._displayLat ?? clusterItem.lat;
+        const lng = clusterItem._displayLng ?? clusterItem.lng;
+        if (lat == null || lng == null) {
+            onCompleteRef.current();
+            return;
+        }
+        const isClientCluster =
+            clusterItem._clientCluster === true || clusterItem.id.startsWith('client-cluster:');
+        const flyBox = isClientCluster && clusterItem._clientClusterBounds
+            ? clusterItem._clientClusterBounds
+            : serverClusterFlyBounds(lat, lng, clusterItem);
+        const bounds = L.latLngBounds(
+            [flyBox.south, flyBox.west],
+            [flyBox.north, flyBox.east],
+        );
+        const boundsSpanDeg = Math.max(
+            Math.abs(flyBox.north - flyBox.south),
+            Math.abs(flyBox.east - flyBox.west),
+        );
+        const boundsFitZoom = map.getBoundsZoom(bounds, false, [36, 36]);
+        const flyPlan = planClusterDrillFly(map.getZoom(), boundsSpanDeg, boundsFitZoom);
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            let zoom = map.getZoom();
+            const minDrillZoom = isClientCluster
+                ? LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM
+                : SERVER_CLUSTER_MIN_DRILL_ZOOM;
+            if (zoom < minDrillZoom) {
+                const targetZoom = isClientCluster
+                    ? LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM
+                    : clusterTargetZoom(zoom);
+                map.setView([lat, lng], targetZoom, { animate: false });
+                zoom = map.getZoom();
+            }
+            const mapBounds = map.getBounds();
+            if (mapBounds.isValid()) {
+                onLicenseMapViewportChangeRef.current?.({
+                    south: Number(mapBounds.getSouth().toFixed(4)),
+                    west: Number(mapBounds.getWest().toFixed(4)),
+                    north: Number(mapBounds.getNorth().toFixed(4)),
+                    east: Number(mapBounds.getEast().toFixed(4)),
+                });
+            }
+            onLicenseMapZoomChangeRef.current?.(zoom);
+            onLicenseClusterDrillCompleteRef.current?.(flyBox);
+            onCompleteRef.current();
+        };
+        map.stop();
+        if (isClientCluster) {
+            map.flyTo([lat, lng], LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM, { duration: 0.5 });
+        } else if (flyPlan.mode === 'center') {
+            map.flyTo([lat, lng], flyPlan.zoom, { duration: 0.75 });
+        } else {
+            map.flyToBounds(bounds, {
+                maxZoom: flyPlan.maxZoom,
+                duration: 0.75,
+                padding: [36, 36],
+            });
+        }
+        map.once('moveend', finish);
+        return () => {
+            map.off('moveend', finish);
+            map.stop();
+            if (!finished) {
+                finish();
+            }
+        };
+    }, [clusterFlyId, map]);
+    return null;
+};
+
 const MapClickHandler = ({
     onMapClick,
     routePlannerPickRole,
@@ -315,6 +644,9 @@ const MapClickHandler = ({
 }) => {
     useMapEvents({
         click(e) {
+            if ((e.originalEvent as MouseEvent & { __liveDealCanvasHandled?: boolean }).__liveDealCanvasHandled) {
+                return;
+            }
             if (routePlannerPickRole && onRoutePlannerMapPick) {
                 onRoutePlannerMapPick(e.latlng.lat, e.latlng.lng, routePlannerPickRole);
                 return;
@@ -378,22 +710,101 @@ const CountryFocusBoundsFly = ({
     const map = useMap();
     useEffect(() => {
         if (!active || !geojson || trigger <= 0) return;
-        try {
-            const gjLayer = L.geoJSON(geojson as never);
-            const bounds = gjLayer.getBounds();
-            if (!bounds.isValid()) return;
-            map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
-        } catch {
-            /* ignore malformed GeoJSON during development */
-        }
+        const timer = window.setTimeout(() => {
+            try {
+                map.invalidateSize({ animate: false, pan: false });
+                const gjLayer = L.geoJSON(geojson as never);
+                const bounds = gjLayer.getBounds();
+                if (!bounds.isValid()) return;
+                map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
+            } catch {
+                /* ignore malformed GeoJSON during development */
+            }
+        }, 80);
+        return () => window.clearTimeout(timer);
     }, [active, geojson, trigger, map]);
+    return null;
+};
+
+const MaritimeFleetSelectionFly = ({
+    vessel,
+}: {
+    vessel: MaritimeVessel | null;
+}) => {
+    const map = useMap();
+    const lastFlownIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!vessel) {
+            lastFlownIdRef.current = null;
+            return;
+        }
+        const src = (vessel.source_label ?? '').toLowerCase();
+        if (!src.includes('shipvault')) return;
+        const lat = vessel.lat;
+        const lng = vessel.lng;
+        if (lat == null || lng == null || (lat === 0 && lng === 0)) return;
+        if (lastFlownIdRef.current === vessel.id) return;
+        lastFlownIdRef.current = vessel.id;
+        const timer = window.setTimeout(() => {
+            map.flyTo([lat, lng], Math.max(map.getZoom(), 8), { duration: 0.85 });
+        }, 120);
+        return () => window.clearTimeout(timer);
+    }, [vessel, map]);
+    return null;
+};
+
+const LiveDataMapFly = ({
+    trigger,
+    target,
+}: {
+    trigger: number;
+    target: { lat: number; lng: number } | null;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (trigger <= 0) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            if (target) {
+                map.flyTo([target.lat, target.lng], Math.max(map.getZoom(), 8), { duration: 1.0 });
+                return;
+            }
+            const bounds = L.latLngBounds(LIVE_DATA_HUB_BOUNDS);
+            if (!bounds.isValid()) return;
+            map.flyToBounds(bounds, { padding: [48, 48], maxZoom: 6, duration: 1.2 });
+        }, 120);
+        return () => window.clearTimeout(timer);
+    }, [trigger, target, map]);
+    return null;
+};
+
+const TankerViewFlyEffect = ({
+    active,
+    view,
+}: {
+    active: boolean;
+    view: MaritimeTankerView;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!active || view === 'worldwide') return;
+        const boundsSpec = MARITIME_TANKER_VIEW_BOUNDS[view];
+        if (!boundsSpec) return;
+        const bounds = L.latLngBounds(boundsSpec);
+        if (!bounds.isValid()) return;
+        const timer = window.setTimeout(() => {
+            map.invalidateSize({ animate: false, pan: false });
+            map.flyToBounds(bounds, { padding: [48, 48], maxZoom: 8, duration: 0.9 });
+        }, 80);
+        return () => window.clearTimeout(timer);
+    }, [active, map, view]);
     return null;
 };
 
 const ViewportBoundsTracker = ({
     active,
     onBoundsChange,
-    debounceMs = 0,
+    debounceMs = MAP_VIEWPORT_DEBOUNCE_MS,
 }: {
     active: boolean;
     onBoundsChange: (bbox: MaritimeViewportBounds | null) => void;
@@ -416,7 +827,7 @@ const ViewportBoundsTracker = ({
         const signature = `${nextBounds.south}:${nextBounds.west}:${nextBounds.north}:${nextBounds.east}`;
         if (signature === lastSignatureRef.current) return;
         lastSignatureRef.current = signature;
-        onBoundsChange(nextBounds);
+        startTransition(() => onBoundsChange(nextBounds));
     }, [active, map, onBoundsChange]);
 
     const scheduleEmitBounds = useCallback(() => {
@@ -502,11 +913,68 @@ export default function MapComponent({
   getDealRoomForLicense,
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
+  onLicenseMapViewportChange,
+  onLicenseMapZoomChange,
+  licenseMapZoom,
+  onLicenseClusterDrillComplete,
+  storageEntities = [],
+  onStorageInViewCountChange,
+  oilLiveOverlaysEnabled = false,
+  oilLiveProductFilter = 'all',
+  oilLiveTerminalSearch = '',
+  oilLiveLens = 'deal',
+  onOilLiveLensChange,
+  oilLiveLayers = LIVE_DATA_DEFAULT_LAYERS,
+  onOilLiveLayersChange,
+  oilLiveTradeFlowGroup = 'company_pair',
+  onOilLiveTradeFlowGroupChange,
+  oilLiveCoverageStats = null,
+  onOilLiveStatsChange,
+  onOilLiveEntityClick,
+  onOilLiveDismiss,
+  onLiveDataMapFlyTo,
+  liveDataFlyTrigger = 0,
+  liveDataFlyTarget = null,
+  eiaHistoricMapEnabled = false,
+  eiaHistoricMapArcs = [],
+  eiaHistoricMapOrigins = [],
+  eiaHistoricMapYear,
+  eiaHistoricShowCorridors = false,
+  onEiaHistoricSelectImporter,
+  onEiaHistoricViewArcDetails,
+  suppressLicenseClusters = false,
+  hideLicenseMarkers = false,
+  showInfrastructureLayers = false,
+  infrastructureLayerVisibility,
+  infrastructureForcedLayers,
+  infrastructureMapZoom,
+  infrastructureMapBbox,
+  infrastructurePanelHint,
+  onInfrastructureLayerChange,
+  onInfrastructureFeatureClick,
+  macroTradeFlowsEnabled = false,
+  macroTradeFlows = [],
+  liveDataMacroTradeOn = true,
+  onLiveDataMacroTradeChange,
+  liveDataEiaHistoricOn = false,
+  onLiveDataEiaHistoricChange,
+  oilLiveSidebarActive = false,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
     const isDark = resolvedTheme !== 'light';
     const isOilAndGasView = viewModeKey === 'oil_and_gas';
+    const isLicenseMapView =
+        viewModeKey === 'mining' ||
+        viewModeKey === 'oil_and_gas' ||
+        viewModeKey === 'global' ||
+        viewModeKey === 'suppliers';
+    const isLiveDataView = oilLiveSidebarActive;
+    const {
+        data: oilLiveSyncStatus,
+        isError: oilLiveSyncStatusError,
+        isPending: oilLiveSyncStatusPending,
+    } = useOilLiveMapSyncStatus(isLiveDataView && oilLiveOverlaysEnabled);
     const isMaritimeMapView = maritimeMapViewActive;
     const isRoutePlannerView = viewModeKey === 'route_planner';
     const mapRef = useRef<L.Map | null>(null);
@@ -515,7 +983,19 @@ export default function MapComponent({
     const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
     const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
     const prevSelectedIdRef = useRef<string | null>(null);
-    const [currentVisibleViewport, setCurrentVisibleViewport] = useState<MaritimeViewportBounds | null>(null);
+    const {
+        currentVisibleViewport,
+        oilGasMapViewport,
+        liveDataMapViewport,
+        maritimeViewport,
+        licenseViewport,
+        setCurrentVisibleViewport,
+        setOilGasMapViewport,
+        setLiveDataMapViewport,
+        setMaritimeViewport,
+        setLicenseViewport,
+    } = useMapLayerViewports();
+    const [governmentAisCoverageEnabled, setGovernmentAisCoverageEnabled] = useState(false);
 
     const isMobileDevice = useMemo(() => {
         if (typeof window === 'undefined') return false;
@@ -534,79 +1014,65 @@ export default function MapComponent({
         () => ({ ...vesselFilters, search: debouncedVesselSearch }),
         [vesselFilters, debouncedVesselSearch],
     );
-    const setVesselFilters = onVesselFiltersChange ?? (() => {});
+    const setVesselFilters = useCallback(
+        (update: VesselFilters | ((prev: VesselFilters) => VesselFilters)) => {
+            if (!onVesselFiltersChange) return;
+            const next = typeof update === 'function' ? update(vesselFilters) : update;
+            onVesselFiltersChange(next);
+        },
+        [onVesselFiltersChange, vesselFilters],
+    );
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
-    const [maritimeViewport, setMaritimeViewport] = useState<MaritimeViewportBounds | null>(null);
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
     const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
+    const [overlayMapZoom, setOverlayMapZoom] = useState(5);
+    const [maritimeTankerView, setMaritimeTankerView] = useState<MaritimeTankerView>('worldwide');
+    const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<PendingLicenseClusterFly | null>(
+        null,
+    );
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
-    const [includeCoastalDemoVessels, setIncludeCoastalDemoVessels] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        if (window.localStorage.getItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY) === '1') {
-            return true;
-        }
-        return window.localStorage.getItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY) === '1';
-    });
-    const vesselLayerLabel = t('כלי שיט (AIS)', 'Vessels (AIS)');
+    const vesselLayerLabel = t('מכליות (AIS)', 'Tankers (AIS)');
     const handleMaritimeLayerActiveChange = useCallback(
         (active: boolean) => {
             setIsMaritimeLayerEnabled(active);
         },
         [setIsMaritimeLayerEnabled],
     );
-    const vesselApiScope =
-        prioritizePetroleumVessels && isOilAndGasView ? ('oil_tankers' as const) : ('all_vessels' as const);
+    const handleLicenseViewportChange = useCallback(
+        (bbox: MaritimeViewportBounds | null) => {
+            setLicenseViewport(bbox);
+            onLicenseMapViewportChange?.(bbox);
+        },
+        [onLicenseMapViewportChange, setLicenseViewport],
+    );
+    const handleLicenseZoomChange = useCallback(
+        (zoom: number) => {
+            onLicenseMapZoomChange?.(zoom);
+        },
+        [onLicenseMapZoomChange],
+    );
+    const vesselApiScope: MaritimeVesselScope = 'oil_tankers';
 
     // Jitter rows that share exact coordinates so each marker has a unique
     // anchor for spiderfy + popup. See lib/geo.ts for the rationale.
-    const displayData = useMemo(() => applyCollocationJitter(processedData), [processedData]);
+    /** Re-jitter only when ids/positions change — avoids marker flash on refetch-with-same-rows. */
+    const licenseDisplaySignature = useMemo(
+        () =>
+            processedData
+                .map(
+                    (r) =>
+                        `${r.id}|${r.lat ?? ''}|${r.lng ?? ''}|${r.mapClusterCount ?? ''}|${r._displayLat ?? ''}|${r._displayLng ?? ''}`,
+                )
+                .join('\n'),
+        [processedData],
+    );
+    const displayData = useMemo(
+        () => applyCollocationJitter(processedData),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- signature captures map-relevant row changes
+        [licenseDisplaySignature],
+    );
 
-    const mobileFilteredData = useMemo(() => {
-        if (!isMobileDevice || !currentVisibleViewport) {
-            return { data: displayData, capped: false };
-        }
-        const filtered = displayData.filter((item) => {
-            if (item.lat == null || item.lng == null) return false;
-            if (selectedItem && item.id === selectedItem.id) return true;
-            return (
-                item.lat >= currentVisibleViewport.south &&
-                item.lat <= currentVisibleViewport.north &&
-                item.lng >= currentVisibleViewport.west &&
-                item.lng <= currentVisibleViewport.east
-            );
-        });
-
-        const MOBILE_RENDER_LIMIT = 800;
-        if (filtered.length > MOBILE_RENDER_LIMIT) {
-            const capped = filtered.slice(0, MOBILE_RENDER_LIMIT);
-            if (selectedItem) {
-                const selected = filtered.find((item) => item.id === selectedItem.id);
-                if (selected && !capped.some((item) => item.id === selected.id)) {
-                    capped[capped.length - 1] = selected;
-                }
-            }
-            return { data: capped, capped: true };
-        }
-        return { data: filtered, capped: false };
-    }, [displayData, selectedItem, isMobileDevice, currentVisibleViewport]);
-
-    const mapDisplayData = useMemo(() => {
-        if (isMobileDevice) {
-            return mobileFilteredData.data;
-        }
-
-        if (viewModeKey !== 'ports' || displayData.length <= PORTS_MAP_RENDER_LIMIT) {
-            return displayData;
-        }
-        const capped = displayData.slice(0, PORTS_MAP_RENDER_LIMIT);
-        if (!selectedItem) return capped;
-        const selected = displayData.find((item) => item.id === selectedItem.id);
-        if (!selected || capped.some((item) => item.id === selected.id)) {
-            return capped;
-        }
-        return [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
-    }, [displayData, selectedItem, viewModeKey, isMobileDevice, mobileFilteredData]);
     const {
         data: maritimeFeed,
         isLoading: isMaritimeLoading,
@@ -614,67 +1080,166 @@ export default function MapComponent({
         error: maritimeError,
         refetch: refetchMaritime,
     } = useMaritimeVessels({
-        enabled: isMaritimeMapView,
+        enabled: isMaritimeMapView && isMaritimeLayerEnabled,
         maxVessels: Number(maritimeMaxVessels),
         captureWindowSeconds: Number(maritimeCaptureWindow),
         scope: vesselApiScope,
-        includeCoastalDemo: includeCoastalDemoVessels,
+        view: maritimeTankerView,
+        viewport: null,
     });
     const maritimeSnapshotVessels = maritimeFeed?.vessels ?? [];
+    const maritimeBboxTotal =
+        maritimeFeed?.total_available ?? maritimeFeed?.effective_bbox_count ?? null;
     const maritimeSnapshotTotal =
-        maritimeFeed?.snapshot_vessel_count ?? maritimeFeed?.total_available ?? maritimeSnapshotVessels.length;
-    const maritimeSparseSnapshot = isMaritimeLayerEnabled && maritimeSnapshotTotal < 100;
+        (maritimeViewport && maritimeBboxTotal != null
+            ? maritimeBboxTotal
+            : maritimeFeed?.snapshot_vessel_count) ??
+        maritimeFeed?.total_available ??
+        maritimeSnapshotVessels.length;
     const maritimeVesselsInViewport = useMemo(
-        () => filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
-        [maritimeSnapshotVessels, maritimeViewport],
+        () =>
+            vesselApiScope === 'oil_tankers'
+                ? maritimeSnapshotVessels
+                : filterVesselsByViewport(maritimeSnapshotVessels, maritimeViewport),
+        [maritimeSnapshotVessels, maritimeViewport, vesselApiScope],
     );
     const maritimeVessels = useMemo(() => {
         const filtered = applyVesselFilters(maritimeVesselsInViewport, vesselFiltersApplied);
         return sortVesselsForDisplay(filtered, prioritizePetroleumVessels && isOilAndGasView);
     }, [maritimeVesselsInViewport, vesselFiltersApplied, prioritizePetroleumVessels, isOilAndGasView]);
+    const maritimeFocusMode = Boolean(selectedMaritimeVessel);
+    const maritimeVesselsForCanvas = useMemo(() => {
+        if (!maritimeFocusMode || !selectedMaritimeVessel) return maritimeVessels;
+        const byId = maritimeVessels.find((v) => v.id === selectedMaritimeVessel.id);
+        if (byId) return [byId];
+        const mmsi = String(selectedMaritimeVessel.mmsi ?? '').trim();
+        const byMmsi = mmsi ? maritimeVessels.find((v) => String(v.mmsi) === mmsi) : undefined;
+        return [byMmsi ?? selectedMaritimeVessel];
+    }, [maritimeVessels, maritimeFocusMode, selectedMaritimeVessel]);
+    const maritimeStatusMessages = useMemo(
+        () =>
+            buildMaritimeStatusMessages(maritimeFeed, {
+                layerEnabled: isMaritimeLayerEnabled,
+                vesselsInView: maritimeVessels.length,
+                snapshotTotal: maritimeSnapshotTotal,
+                isLoading: isMaritimeLoading,
+                hasError: Boolean(maritimeError),
+            }),
+        [
+            maritimeFeed,
+            isMaritimeLayerEnabled,
+            maritimeVessels.length,
+            maritimeSnapshotTotal,
+            isMaritimeLoading,
+            maritimeError,
+        ],
+    );
     const maritimeServedFromCache = Boolean(
         maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
     );
+    const countryFocusActive = Boolean(countryFocusCountry?.trim());
     const onGroundVisible =
-      (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') && !isRoutePlannerView;
-    const vesselsVisible = isMaritimeMapView && (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only');
+      (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') &&
+      !isRoutePlannerView &&
+      (!isLiveDataView || countryFocusActive);
+    const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers;
+    const useCanvasLicenseMarkers = isLicenseMapView && !suppressLicenseClusters;
+
+    const { mapDisplayData, licenseMarkersCapped } = useMemo(() => {
+        let data = displayData;
+
+        if (viewModeKey === 'ports' && data.length > PORTS_MAP_RENDER_LIMIT) {
+            const capped = data.slice(0, PORTS_MAP_RENDER_LIMIT);
+            if (selectedItem) {
+                const selected = displayData.find((item) => item.id === selectedItem.id);
+                if (selected && !capped.some((item) => item.id === selected.id)) {
+                    data = [selected, ...capped.slice(0, PORTS_MAP_RENDER_LIMIT - 1)];
+                } else {
+                    data = capped;
+                }
+            } else {
+                data = capped;
+            }
+        }
+
+        const serverClusterMode = data.some(isServerLicenseCluster);
+        if (
+            showLicenseMarkers &&
+            !useCanvasLicenseMarkers &&
+            !serverClusterMode &&
+            data.length > LICENSE_MAP_DOM_MARKER_CAP
+        ) {
+            const markerViewport = isMobileDevice ? currentVisibleViewport : licenseViewport;
+            const capped = capMarkersInViewport(
+                data,
+                markerViewport,
+                LICENSE_MAP_DOM_MARKER_CAP,
+                selectedItem?.id,
+            );
+            return { mapDisplayData: capped.data, licenseMarkersCapped: capped.capped };
+        }
+
+        return { mapDisplayData: data, licenseMarkersCapped: false };
+    }, [
+        displayData,
+        selectedItem,
+        viewModeKey,
+        isMobileDevice,
+        currentVisibleViewport,
+        licenseViewport,
+        showLicenseMarkers,
+        useCanvasLicenseMarkers,
+    ]);
+
+    useEffect(() => {
+        if (!isOilAndGasView || !onStorageInViewCountChange) return;
+        onStorageInViewCountChange(countEntitiesInViewport(storageEntities, oilGasMapViewport));
+    }, [isOilAndGasView, storageEntities, oilGasMapViewport, onStorageInViewCountChange]);
+    const vesselsVisible =
+      isMaritimeMapView &&
+      (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only') &&
+      (!isLiveDataView || isMaritimeLayerEnabled);
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
 
-    useLayoutEffect(() => {
+    const maritimeDrawRecords = useMemo(
+        () =>
+            toVesselDrawRecords(
+                maritimeVesselsForCanvas,
+                maritimeMapZoom,
+                selectedMaritimeVessel?.id ?? maritimeVesselsForCanvas[0]?.id ?? null,
+            ),
+        [maritimeVesselsForCanvas, maritimeMapZoom, selectedMaritimeVessel?.id],
+    );
+
+    const maritimeLodEstimate = useMemo(() => {
+        if (!maritimeViewport || maritimeDrawRecords.length === 0) {
+            return { drawn: maritimeDrawRecords.length, subsampling: false };
+        }
+        const plan = planVesselLodDraw(maritimeDrawRecords, maritimeViewport, maritimeMapZoom);
+        return { drawn: plan.drawIndices.length, subsampling: plan.lodSubsampling };
+    }, [maritimeDrawRecords, maritimeViewport, maritimeMapZoom]);
+
+    const pushVesselsToCanvas = useCallback(() => {
         if (!vesselsVisible || !isMaritimeLayerEnabled) return;
         const layer = canvasVesselLayerRef.current;
         if (!layer) return;
-        layer.setVessels(
-            maritimeVessels,
-            toVesselDrawRecords(maritimeVessels, maritimeMapZoom, selectedMaritimeVessel?.id ?? null),
-        );
+        layer.setFocusMode(maritimeFocusMode);
+        layer.setVessels(maritimeVesselsForCanvas, maritimeDrawRecords);
     }, [
         vesselsVisible,
         isMaritimeLayerEnabled,
-        maritimeVessels,
-        maritimeMapZoom,
-        selectedMaritimeVessel?.id,
+        maritimeFocusMode,
+        maritimeVesselsForCanvas,
+        maritimeDrawRecords,
     ]);
 
-    const prevCoastalDemoToggleMount = useRef(true);
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        if (includeCoastalDemoVessels) {
-            window.localStorage.setItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY, '1');
-            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
-        } else {
-            window.localStorage.removeItem(MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY);
-            window.localStorage.removeItem(MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY);
-        }
-    }, [includeCoastalDemoVessels]);
+    useLayoutEffect(() => {
+        pushVesselsToCanvas();
+    }, [pushVesselsToCanvas]);
 
-    useEffect(() => {
-        if (prevCoastalDemoToggleMount.current) {
-            prevCoastalDemoToggleMount.current = false;
-            return;
-        }
-        clearMaritimeSnapshotCache();
-    }, [includeCoastalDemoVessels]);
+    const handleCanvasVesselLayerReady = useCallback(() => {
+        pushVesselsToCanvas();
+    }, [pushVesselsToCanvas]);
 
     useEffect(() => {
         if (isMaritimeMapView) return;
@@ -700,6 +1265,21 @@ export default function MapComponent({
     useEffect(() => {
         if (!selectedMaritimeVessel) return;
         if (maritimeVessels.some((vessel) => vessel.id === selectedMaritimeVessel.id)) return;
+
+        const mmsi = String(selectedMaritimeVessel.mmsi ?? '').trim();
+        if (mmsi && mmsi !== '0') {
+            const feedByMmsi = maritimeVessels.find((vessel) => String(vessel.mmsi) === mmsi);
+            if (feedByMmsi) {
+                if (feedByMmsi.id !== selectedMaritimeVessel.id) {
+                    onSelectMaritimeVessel(feedByMmsi);
+                }
+                return;
+            }
+        }
+
+        const src = (selectedMaritimeVessel.source_label ?? '').toLowerCase();
+        if (src.includes('shipvault') || src === 'registry') return;
+
         onSelectMaritimeVessel(null);
     }, [maritimeVessels, onSelectMaritimeVessel, selectedMaritimeVessel]);
 
@@ -707,57 +1287,62 @@ export default function MapComponent({
         'הפעל את שכבת «כלי שיט (AIS)» במסננים (אייקון שכבות) או בבקרת השכבות למטה מימין.',
         'Enable «Vessels (AIS)» in the filter panel (layers icon) or the layer control (bottom-right).'
     );
-    const maritimeHeadlineStatus = !isMaritimeLayerEnabled
-        ? ''
-        : isMaritimeLoading && !maritimeFeed
-            ? t('טוען מעקב כלי שיט…', 'Loading vessel watch…')
-            : maritimeError
-                ? t('טעינה נכשלה', 'Load failed')
-                : !maritimeFeed?.live_positions_enabled
-                    ? t(
-                          `${maritimeSnapshotTotal.toLocaleString()} כלי שיט (AIS לא חי)`,
-                          `${maritimeSnapshotTotal.toLocaleString()} vessels (live AIS unavailable)`
-                      )
-                    : maritimeVessels.length === 0
-                        ? t(
-                              `0 בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
-                              `0 in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
-                          )
-                        : t(
-                              `${maritimeVessels.length.toLocaleString()} בתצוגה · ${maritimeSnapshotTotal.toLocaleString()} במאגר`,
-                              `${maritimeVessels.length.toLocaleString()} in view · ${maritimeSnapshotTotal.toLocaleString()} in feed`
-                          );
-    const maritimeDetailNote = !isMaritimeLayerEnabled
-        ? t(
-              'כלי השיט כבויים כברירת מחדל. הפעל כדי להציג מיקומי AIS — הנתונים נטענים ברקע מראש.',
-              'Vessels stay off until you enable the layer. AIS data is prefetched in the background for instant display.'
-          )
-        : isMaritimeLoading && !maritimeFeed
-            ? t('טוען מעקב כלי שיט עבור התצוגה הנוכחית...', 'Loading vessel watch for the current view...')
-            : maritimeError
-                ? t('טעינת כלי השיט נכשלה. נסה רענון או שנה היקף/תצוגה.', 'Vessel loading failed. Try refresh or adjust the view/scope.')
-                : !maritimeFeed?.live_positions_enabled
-                    ? t(
-                          'AIS חי אינו זמין כרגע. ההקשר הימי בתיק עדיין פעיל גם בלי שכבת כלי שיט.',
-                          'Live AIS is not available right now. Maritime dossier context still works without the vessel layer.'
-                      )
-                    : maritimeVessels.length === 0
-                        ? t(
-                              'לא נמצאו כלי שיט בתצוגה ובחלון הלכידה הנוכחיים. נסה להזיז מפה, להגדיל חלון או לעבור לכל כלי השיט.',
-                              'No vessels were observed in the current view and capture window. Pan/zoom, widen the window, or switch to all vessels.'
-                          )
-                        : t(
-                              `נצפו ${maritimeFeed?.returned_count ?? maritimeVessels.length} כלי שיט בתצוגה הנוכחית.`,
-                              `${maritimeFeed?.returned_count ?? maritimeVessels.length} vessels observed in the current watch.`
-                          );
+    const maritimeHeadlineStatus = maritimeStatusMessages
+        ? t(maritimeStatusMessages.headlineHe, maritimeStatusMessages.headlineEn)
+        : '';
+    const maritimeDetailNote = maritimeStatusMessages
+        ? t(maritimeStatusMessages.detailHe, maritimeStatusMessages.detailEn)
+        : '';
     const maritimeLimitationText =
         maritimeFeed?.limitations?.find((item) => item && item !== maritimeFeed?.geography_note) ?? null;
-    const maritimeSparseWarning = maritimeSparseSnapshot
-        ? t(
-              'מעט כלי שיט במאגר. הפעל docker compose up -d maritime-worker והגדר AISSTREAM_API_KEY בקובץ .env.',
-              'Sparse vessel feed. Run docker compose up -d maritime-worker and set AISSTREAM_API_KEY in .env.'
-          )
-        : null;
+    const maritimeSparseWarning =
+        maritimeStatusMessages?.sparseWarningHe && maritimeStatusMessages.sparseWarningEn
+            ? t(maritimeStatusMessages.sparseWarningHe, maritimeStatusMessages.sparseWarningEn)
+            : null;
+    const liveDataVesselStatus = useMemo(
+        () =>
+            isLiveDataView && oilLiveLayers.vessels
+                ? resolveLiveDataVesselStatus({
+                      vesselsInView: oilLiveCoverageStats?.vessels ?? 0,
+                      syncStatus: oilLiveSyncStatus,
+                      allMaritimeEnabled: isMaritimeLayerEnabled,
+                      maritimeMessages: maritimeStatusMessages,
+                      inPersianGulfViewport: viewportOverlapsPersianGulfHub(liveDataMapViewport),
+                      vesselMeta: oilLiveCoverageStats?.vesselMeta ?? null,
+                  })
+                : null,
+        [
+            isLiveDataView,
+            oilLiveLayers.vessels,
+            oilLiveCoverageStats?.vessels,
+            oilLiveCoverageStats?.vesselMeta,
+            oilLiveSyncStatus,
+            isMaritimeLayerEnabled,
+            maritimeStatusMessages,
+            liveDataMapViewport,
+        ],
+    );
+    const maritimeViewportAisGap =
+        isMaritimeLayerEnabled &&
+        maritimeVessels.length === 0 &&
+        Boolean(maritimeFeed?.viewport_ais_coverage_gap);
+    const maritimeLodUiNote =
+        isMaritimeLayerEnabled &&
+        maritimeVessels.length > 0 &&
+        maritimeLodEstimate.subsampling &&
+        maritimeLodEstimate.drawn < maritimeVessels.length
+            ? t(
+                  `בזום עולמי מוצגים ~${maritimeLodEstimate.drawn.toLocaleString()} סימני כלי שיט מתוך ${maritimeVessels.length.toLocaleString()} בתצוגה (דגימת LOD, לא קיבוץ). התקרבו לזום ≥${LOD_FULL_DETAIL_ZOOM} לכל הסימנים.`,
+                  `At this zoom only ~${maritimeLodEstimate.drawn.toLocaleString()} ship icons are drawn from ${maritimeVessels.length.toLocaleString()} in view (display LOD, not clustering). Zoom to ≥${LOD_FULL_DETAIL_ZOOM} to show every vessel.`
+              )
+            : null;
+    const maritimeClusterClarification =
+        isMaritimeLayerEnabled && onGroundVisible && mapDisplayData.length > 0
+            ? t(
+                  'מספרים גדולים על המפה (למשל 1943) הם קיבוץ רישיונות/נכסים — לא כלי שיט. כלי שיט מוצגים כסימני משולש צבעוניים.',
+                  'Large numbered map bubbles (e.g. 1943) are license/asset clusters—not vessels. Ships appear as small colored chevrons.'
+              )
+            : null;
 
     const flyTarget = useMemo(() => {
         if (!selectedItem) return null;
@@ -790,30 +1375,42 @@ export default function MapComponent({
         prevSelectedIdRef.current = selectedItem.id;
     }, [selectedItem?.id, setMarkerSelectedVisual]);
 
-    const borderCountries = useMemo(() => {
+    /** Same rows as markers (post-jitter) — borders must not use a separate ranked list. */
+    const { borderCountries, borderCountriesCapped } = useMemo(() => {
         if (isRoutePlannerView) {
-            return [];
+            return { borderCountries: [] as string[], borderCountriesCapped: false };
         }
         const focus = countryFocusCountry?.trim();
         if (focus) {
-            return [focus].sort((a, b) => a.localeCompare(b));
+            return { borderCountries: [focus], borderCountriesCapped: false };
         }
-        // Outlines follow the same filtered license set as map markers (search + facet filters).
-        const MAX_BORDER_COUNTRIES = 30;
-        const all = countriesWithVisibleLicenses(processedData);
-        if (all.length <= MAX_BORDER_COUNTRIES) return all;
-        return countryLicenseCounts(processedData)
-            .slice(0, MAX_BORDER_COUNTRIES)
-            .map((row) => row.country);
-    }, [processedData, countryFocusCountry, isRoutePlannerView]);
+        const borderList = countriesForMapBorders(displayData, LICENSE_MAP_BORDER_COUNTRY_CAP);
+        const ranked = countryLicenseCountsForBorders(displayData);
+        const capped = ranked.length > LICENSE_MAP_BORDER_COUNTRY_CAP;
+        return {
+            borderCountries: borderList,
+            borderCountriesCapped: capped,
+        };
+    }, [countryFocusCountry, displayData, isRoutePlannerView]);
 
-    const { data: filteredGeoJson } = useQuery({
-        queryKey: ['country-borders', borderCountries],
+    const borderCountriesKey = useMemo(
+        () => borderCountries.slice().sort((a, b) => a.localeCompare(b)).join('|'),
+        [borderCountries],
+    );
+
+    const {
+        data: filteredGeoJson,
+        isPlaceholderData: borderGeoJsonPlaceholder,
+    } = useQuery({
+        queryKey: ['country-borders', borderCountriesKey],
         queryFn: () => getCountryBorders(borderCountries),
         enabled: borderCountries.length > 0,
         staleTime: 1000 * 60 * 60 * 24,
         gcTime: 1000 * 60 * 60 * 24 * 7,
+        refetchOnWindowFocus: false,
     });
+    const borderGeoJsonMatchesMarkers =
+        Boolean(filteredGeoJson) && !borderGeoJsonPlaceholder;
 
     /** High-contrast strokes on dark Carto tiles; cyan at 50% opacity + weight 1 was nearly invisible. */
     const countryBorderPathStyle = useMemo(
@@ -869,12 +1466,79 @@ export default function MapComponent({
         return countryBorderPathStyle;
     }, [countryFocusCountry, isDark, countryBorderPathStyle]);
 
+    const licenseServerClusterMode = useMemo(
+        () => mapDisplayData.some(isServerLicenseCluster),
+        [mapDisplayData],
+    );
+
+    const licenseCanvasFeatures = useMemo<LiveDealMapFeature[]>(() => {
+        if (!showLicenseMarkers || !useCanvasLicenseMarkers || licenseServerClusterMode) return [];
+        return mapDisplayData
+            .filter((item) => item._displayLat != null && item._displayLng != null)
+            .map((item) => {
+                const annotation = userAnnotations[item.id] || {};
+                const commodity = annotation.commodity || item.commodity || '';
+                const color = getMarkerColor(
+                    commodity,
+                    annotation.status,
+                    item.sector,
+                    item.entitySubtype,
+                );
+                const refineryPin = isRefineryEntity(item);
+                const oilFieldPin = !refineryPin && isOilFieldEntity(item);
+                const kind =
+                    item.entitySubtype === 'tank_farm'
+                        ? 'tank_farm'
+                        : item.entityKind === 'storage_terminal' ||
+                            item.entitySubtype === 'storage_terminal' ||
+                            item.entitySubtype === 'storage_tank'
+                          ? 'storage_terminal'
+                          : refineryPin
+                            ? 'refinery'
+                            : oilFieldPin
+                              ? 'oil_field'
+                              : 'license';
+                return {
+                    shape: 'point',
+                    uid: `license:${item.id}`,
+                    id: item.id,
+                    kind,
+                    lat: item._displayLat!,
+                    lng: item._displayLng!,
+                    title: item.company,
+                    subtitle: [item.commodity, item.country, item.licenseType].filter(Boolean).join(' · '),
+                    tier: item.recordOrigin ?? item.sourceKind ?? 'open_data',
+                    confidence: item.confidenceScore ?? item.geoConfidence ?? undefined,
+                    sourceCount: item.evidenceCount ?? item.sourceLabels?.length ?? 0,
+                    dealScore:
+                        item.confidenceScore ??
+                        (item.status?.toLowerCase?.().includes('operat') ? 0.75 : 0.5),
+                    styleKey:
+                        commodity.toLowerCase().includes('gold')
+                            ? 'gold'
+                            : refineryPin
+                              ? 'refinery'
+                              : oilFieldPin
+                                ? 'oil_field'
+                                : item.entitySubtype ?? color,
+                    data: item,
+                } satisfies LiveDealMapFeature;
+            });
+    }, [
+        licenseServerClusterMode,
+        mapDisplayData,
+        showLicenseMarkers,
+        useCanvasLicenseMarkers,
+        userAnnotations,
+    ]);
+
     const licenseMarkerIcons = useMemo(() => {
         const cache = markerIconCacheRef.current;
         const icons = new Map<string, L.DivIcon>();
         const validIds = new Set<string>();
         for (const item of mapDisplayData) {
             if (item._displayLat == null || item._displayLng == null) continue;
+            if (useCanvasLicenseMarkers && !isServerLicenseCluster(item)) continue;
             validIds.add(item.id);
             const annotation = userAnnotations[item.id] || {};
             const color = getMarkerColor(
@@ -887,11 +1551,16 @@ export default function MapComponent({
             const isEsgRisk = esgZone !== null;
             const refineryPin = isRefineryEntity(item);
             const oilFieldPin = !refineryPin && isOilFieldEntity(item);
-            const sig = markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
+            const clusterCount = item.mapClusterCount ?? 0;
+            const sig = clusterCount
+              ? `srv-cluster:${clusterCount}:${isDark ? 'd' : 'l'}`
+              : markerIconSignature(color, isEsgRisk, refineryPin, oilFieldPin, isDark);
             icons.set(
                 item.id,
                 cache.get(item.id, sig, () =>
-                    refineryPin
+                    clusterCount > 0
+                      ? createServerLicenseClusterIcon(clusterCount, isDark)
+                      : refineryPin
                         ? createRefineryMapIcon()
                         : oilFieldPin
                           ? createOilFieldMapIcon()
@@ -901,21 +1570,30 @@ export default function MapComponent({
         }
         cache.prune(validIds);
         return icons;
-    }, [mapDisplayData, userAnnotations, isDark]);
+    }, [mapDisplayData, userAnnotations, isDark, useCanvasLicenseMarkers]);
 
     const licenseClusterIconCreate = useMemo(
         () => createLicenseClusterIconFactory(isDark),
         [isDark],
     );
 
-    const renderedMarkers = useMemo(() => {
-        if (!onGroundVisible) return null;
-        return mapDisplayData.map((item) => {
-            if (item._displayLat == null || item._displayLng == null) return null;
+    const { serverClusterMarkers, licensePointMarkers } = useMemo(() => {
+        if (!showLicenseMarkers) {
+            return { serverClusterMarkers: null as ReactNode, licensePointMarkers: null as ReactNode };
+        }
+        const server: ReactNode[] = [];
+        const points: ReactNode[] = [];
+        const serverClusterMode = licenseServerClusterMode;
+        for (const item of mapDisplayData) {
+            if (item._displayLat == null || item._displayLng == null) continue;
             const markerIcon = licenseMarkerIcons.get(item.id);
-            if (!markerIcon) return null;
-
-            return (
+            if (!markerIcon) continue;
+            const isServerCluster = isServerLicenseCluster(item);
+            const hidePointsForServerClusters =
+                serverClusterMode &&
+                (licenseMapZoom == null || licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM);
+            if (!isServerCluster && hidePointsForServerClusters) continue;
+            const marker = (
                 <Marker
                     key={item.id}
                     position={[item._displayLat, item._displayLng]}
@@ -931,41 +1609,136 @@ export default function MapComponent({
                         click: (e) => {
                             L.DomEvent.stopPropagation(e);
                             onSelectMaritimeVessel(null);
+                            if (isServerCluster) {
+                                setSelectedItem(null);
+                                setPendingLicenseClusterFly(item);
+                                return;
+                            }
                             setSelectedItem(item);
                         },
                     }}
                 >
-                    <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-                        <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
-                            <span className="text-[10px] font-black uppercase text-white tracking-widest">{item.company}</span>
-                            {item.entitySubtype && (
-                              <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
-                                {item.entitySubtype.replaceAll('_', ' ')}
-                              </p>
-                            )}
-                            {item._wasJittered && (
-                              <span className="ml-1 text-[8px] font-bold text-amber-400">≈ approx ({item._collocatedCount})</span>
-                            )}
-                        </div>
-                    </Tooltip>
+                    {isServerCluster ? (
+                        <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                            <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                                {isCountryLicenseSummary(item)
+                                    ? `${item.country} — ${item.mapClusterCount ?? ''} licenses`
+                                    : `Zoom in — ${item.mapClusterCount ?? ''} licenses`}
+                            </span>
+                        </Tooltip>
+                    ) : (
+                        <Tooltip direction="top" offset={[0, -20]} opacity={1}>
+                            <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                                <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                                    {item.company}
+                                </span>
+                                {item.entitySubtype && (
+                                    <p className="text-[8px] text-cyan-300 uppercase tracking-widest">
+                                        {item.entitySubtype.replaceAll('_', ' ')}
+                                    </p>
+                                )}
+                                {item._wasJittered && (
+                                    <span className="ml-1 text-[8px] font-bold text-amber-400">
+                                        ≈ approx ({item._collocatedCount})
+                                    </span>
+                                )}
+                            </div>
+                        </Tooltip>
+                    )}
                 </Marker>
             );
-        });
+            if (isServerCluster) server.push(marker);
+            else points.push(marker);
+        }
+        return {
+            serverClusterMarkers: server.length ? server : null,
+            licensePointMarkers: points.length ? points : null,
+        };
     }, [
         licenseMarkerIcons,
+        licenseMapZoom,
+        licenseServerClusterMode,
         mapDisplayData,
-        userAnnotations,
         onSelectMaritimeVessel,
         setSelectedItem,
-        onGroundVisible,
+        showLicenseMarkers,
     ]);
+
+    const handleLicenseCanvasFeatureClick = useCallback(
+        (feature: LiveDealMapFeature) => {
+            if (feature.shape === 'point' && feature.kind === 'server_cluster' && isLiveDealClientClusterData(feature.data)) {
+                const { bounds, count } = feature.data;
+                const span = Math.max(
+                    Math.abs(bounds.north - bounds.south),
+                    Math.abs(bounds.east - bounds.west),
+                    0.05,
+                );
+                onSelectMaritimeVessel(null);
+                setSelectedItem(null);
+                setPendingLicenseClusterFly({
+                    id: feature.uid,
+                    company: `${count} licenses`,
+                    licenseType: 'Cluster',
+                    commodity: '',
+                    status: 'Active',
+                    date: null,
+                    country: '',
+                    region: '',
+                    sector: isOilAndGasView ? 'oil_and_gas' : 'mining',
+                    lat: feature.lat,
+                    lng: feature.lng,
+                    _displayLat: feature.lat,
+                    _displayLng: feature.lng,
+                    mapClusterCount: count,
+                    mapClusterGridDeg: span,
+                    entityKind: 'license',
+                    _clientCluster: true,
+                    _clientClusterBounds: bounds,
+                } as PendingLicenseClusterFly);
+                return;
+            }
+            const item = feature.data as MiningLicense | undefined;
+            if (!item) return;
+            onSelectMaritimeVessel(null);
+            setSelectedItem(item);
+        },
+        [isOilAndGasView, onSelectMaritimeVessel, setSelectedItem],
+    );
 
     const handleMaritimeVesselClick = useCallback(
         (vessel: MaritimeVessel) => {
             setSelectedItem(null);
-            onSelectMaritimeVessel(vessel);
+            const resolved =
+                maritimeVessels.find((entry) => entry.id === vessel.id) ??
+                maritimeVessels.find((entry) => String(entry.mmsi) === String(vessel.mmsi)) ??
+                vessel;
+            onSelectMaritimeVessel(resolved);
         },
-        [onSelectMaritimeVessel, setSelectedItem],
+        [maritimeVessels, onSelectMaritimeVessel, setSelectedItem],
+    );
+
+    const handleSingleClusterMarkerClick = useCallback(
+        (marker: L.Marker) => {
+            const ll = marker.getLatLng();
+            const byRef = Object.entries(markerRefs.current).find(([, m]) => m === marker)?.[0];
+            const item =
+                (byRef ? mapDisplayData.find((d) => d.id === byRef) : null) ??
+                mapDisplayData.find((d) => {
+                    const lat = d._displayLat ?? d.lat;
+                    const lng = d._displayLng ?? d.lng;
+                    if (lat == null || lng == null) return false;
+                    return Math.abs(lat - ll.lat) < 1e-4 && Math.abs(lng - ll.lng) < 1e-4;
+                });
+            if (!item) return;
+            onSelectMaritimeVessel(null);
+            if (isServerLicenseCluster(item)) {
+                setSelectedItem(null);
+                setPendingLicenseClusterFly(item);
+                return;
+            }
+            setSelectedItem(item);
+        },
+        [mapDisplayData, onSelectMaritimeVessel, setSelectedItem],
     );
 
     const formatMaritimeVesselTooltip = useCallback((vessel: MaritimeVessel) => {
@@ -1021,34 +1794,131 @@ export default function MapComponent({
                 </div>
             )}
 
-            {isOilAndGasView &&
-                isMaritimeLayerEnabled &&
-                maritimeFeed?.aisstream_persian_gulf_coverage_gap && (
+            {isLiveDataView && oilLiveOverlaysEnabled && oilLiveLayers.vessels && liveDataVesselStatus && (
+                <div
+                    className="pointer-events-none absolute left-3 right-3 top-3 z-[640] sm:left-6 sm:max-w-xl"
+                    role="status"
+                >
+                    <div className="rounded-2xl border border-sky-500/35 bg-sky-500/12 px-4 py-3 text-[10px] font-semibold leading-snug text-sky-950 shadow-lg dark:text-sky-50">
+                        <p className="font-black uppercase tracking-widest text-[9px] text-sky-700 dark:text-sky-200">
+                            {t('מעקב מכליות (נתונים חיים)', 'Live Data vessel watch')}
+                        </p>
+                        <p className="mt-1">
+                            {t(liveDataVesselStatus.headlineHe, liveDataVesselStatus.headlineEn)}
+                        </p>
+                        {liveDataVesselStatus.detailEn && liveDataVesselStatus.detailHe && (
+                            <p className="mt-1 opacity-90">
+                                {t(liveDataVesselStatus.detailHe, liveDataVesselStatus.detailEn)}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {isMaritimeLayerEnabled &&
+                ((isMaritimeMapView &&
+                    (maritimeTankerView === 'persian_gulf' || maritimeTankerView === 'strait_of_hormuz')) ||
+                    (isOilAndGasView && maritimeFeed?.aisstream_persian_gulf_coverage_gap) ||
+                    (isLiveDataView &&
+                        oilLiveOverlaysEnabled &&
+                        viewportOverlapsPersianGulfHub(liveDataMapViewport))) && (
                 <div
                     className="pointer-events-auto absolute left-3 right-3 top-3 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:max-w-xl"
                     role="status"
                 >
                     <p className="font-black uppercase tracking-widest text-[9px] text-amber-700 dark:text-amber-200">
-                        {t('פער AIS במפרץ הפרסי', 'Persian Gulf AIS upstream gap')}
+                        {t('כיסוי AIS מוגבל — מפרץ / הורמוז', 'Limited AIS coverage — Gulf / Hormuz')}
                     </p>
                     <p className="mt-1">
                         {t(
-                            'AISStream מדלג על המפרץ — הפעילו הצג מיקומי הדגמה בפאנל כלי השיט או הריצו maritime-worker.',
-                            'AISStream skips the Gulf — enable Show demo positions in the vessel panel or run maritime-worker.',
+                            'מקור AISStream דליל במפרץ הפרסי ובמפרץ עומאן — היעדר מכליות על המפה אינו הוכחה ליעדר תנועה. הריצו oil-live-intel-worker, הרחיבו maritime_watch_zones, ובדקו /api/oil-live/coverage.',
+                            'AISStream is sparse in the Persian Gulf and Gulf of Oman — an empty map is not proof of no traffic. Run oil-live-intel-worker, expand maritime_watch_zones, and check /api/oil-live/coverage.',
                         )}
                     </p>
                 </div>
             )}
             {!isRoutePlannerView &&
+              viewModeKey !== 'suppliers' &&
+              !licensesFetchPending &&
               ((onGroundVisible ? processedData.length : 0) === 0) &&
-              ((vesselsVisible ? maritimeVessels.length : 0) === 0) && (
+              (vesselsVisible && isMaritimeLayerEnabled
+                ? maritimeVessels.length === 0 && !(isMaritimeLoading && !maritimeFeed)
+                : true) && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-slate-100/60 dark:bg-slate-900/60 backdrop-blur-sm">
                     <div className="text-4xl mb-2">🔍</div>
                     <h3 className="text-lg font-bold">{t("לא נמצאו נכסים", "No assets found")}</h3>
                     <p className="text-sm text-slate-400">{t("נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון", "Try adjusting filters or reloading the storage layer")}</p>
                 </div>
             )}
-            {isMaritimeMapView && (
+            {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveEntityClick && (
+                <div className="absolute left-4 top-4 z-[960] pointer-events-auto sm:left-6">
+                    <LiveDataMapCompanySearch
+                        onEntityClick={onOilLiveEntityClick}
+                        onMapFlyTo={onLiveDataMapFlyTo}
+                    />
+                </div>
+            )}
+            {isLiveDataView && oilLiveOverlaysEnabled && (
+                <>
+                <div className="absolute right-4 top-24 z-[950] pointer-events-auto hidden sm:block">
+                    <LiveDataMapLegend
+                        layers={oilLiveLayers}
+                        eiaHistoricOn={eiaHistoricMapEnabled}
+                        macroTradeOn={liveDataMacroTradeOn && macroTradeFlowsEnabled}
+                    />
+                </div>
+                <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-auto px-2 w-full max-w-[520px] flex justify-center">
+                    <LiveDataSyncStatusBanner
+                        syncStatus={oilLiveSyncStatus}
+                        unreachable={oilLiveSyncStatusError}
+                        pending={oilLiveSyncStatusPending}
+                    />
+                </div>
+                <div className="absolute left-1/2 -translate-x-1/2 top-[7.5rem] z-[950] pointer-events-auto">
+                    <GraphSyncMapBanner cargoRecordCount={oilLiveSyncStatus?.cargo_record_count} />
+                </div>
+                </>
+            )}
+            {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveLayersChange && (
+                <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">
+                    <LiveDataMapLayersPanel
+                        layers={oilLiveLayers}
+                        onLayersChange={onOilLiveLayersChange}
+                        lensMode={oilLiveLens}
+                        onLensModeChange={onOilLiveLensChange}
+                        coverageStats={oilLiveCoverageStats}
+                        syncStatus={oilLiveSyncStatus}
+                        allMaritimeEnabled={isMaritimeLayerEnabled}
+                        onAllMaritimeChange={setIsMaritimeLayerEnabled}
+                        globalMaritimeCount={maritimeSnapshotTotal}
+                        tradeFlowGroup={oilLiveTradeFlowGroup}
+                        onTradeFlowGroupChange={onOilLiveTradeFlowGroupChange}
+                        macroTradeEnabled={liveDataMacroTradeOn}
+                        onMacroTradeChange={onLiveDataMacroTradeChange}
+                        eiaHistoricEnabled={liveDataEiaHistoricOn}
+                        onEiaHistoricChange={onLiveDataEiaHistoricChange}
+                        eiaHistoricRowCount={oilLiveSyncStatus?.eia_historic_import_count ?? null}
+                        governmentAisCoverageEnabled={governmentAisCoverageEnabled}
+                        onGovernmentAisCoverageChange={setGovernmentAisCoverageEnabled}
+                        mapZoom={overlayMapZoom}
+                    />
+                </div>
+            )}
+            {showInfrastructureLayers &&
+                !isLiveDataView &&
+                !isOilAndGasView &&
+                infrastructureLayerVisibility &&
+                onInfrastructureLayerChange && (
+                <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">
+                    <InfrastructureLayersPanel
+                        visibility={infrastructureLayerVisibility}
+                        onChange={onInfrastructureLayerChange}
+                        mapZoom={infrastructureMapZoom}
+                        panelHint={infrastructurePanelHint}
+                    />
+                </div>
+            )}
+            {isMaritimeMapView && !isLiveDataView && (
                 <div className="absolute left-4 bottom-4 z-[950] w-[min(100vw-2rem,480px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
                     <div className="border-b border-black/5 px-3.5 py-3 dark:border-white/5">
                         <div className="flex items-center gap-2.5">
@@ -1116,31 +1986,54 @@ export default function MapComponent({
                             )}
                         </div>
 
-                        <label
-                            htmlFor="mining-include-coastal-demo"
-                            className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-black/5 bg-black/[0.02] px-2.5 py-2.5 dark:border-white/10 dark:bg-white/[0.03]"
-                        >
-                            <Checkbox
-                                id="mining-include-coastal-demo"
-                                checked={includeCoastalDemoVessels}
-                                onCheckedChange={(value) => setIncludeCoastalDemoVessels(value === true)}
-                                className="mt-0.5"
-                            />
-                            <span className="min-w-0 text-[9px] leading-snug text-slate-600 dark:text-slate-300">
-                                <span className="font-semibold text-slate-800 dark:text-slate-100">
-                                    {t(
-                                        'הצג מיקומי הדגמה כשה־AIS דליל (מפרץ + חופי אפריקה)',
-                                        'Show demo positions where AIS feed is sparse (Gulf + Africa coasts)',
-                                    )}
-                                </span>
-                                <span className="mt-0.5 block text-slate-500 dark:text-slate-400">
-                                    {t(
-                                        'שולח include_coastal_demo=1 לשרת; נשמר בדפדפן. כבו לתצוגת מאגר בלבד.',
-                                        'Sends include_coastal_demo=1 to the API; saved in the browser. Turn off for snapshot-only.',
-                                    )}
-                                </span>
-                            </span>
-                        </label>
+                        <div>
+                            <p className="mb-1 text-[8px] font-black uppercase tracking-widest text-slate-500">
+                                {t('שכבת כלי שיט', 'Vessel Layer')}
+                            </p>
+                            <Select
+                                value={maritimeTankerView}
+                                onValueChange={(value) => {
+                                    setMaritimeTankerView(value as MaritimeTankerView);
+                                    setIsMaritimeLayerEnabled(true);
+                                }}
+                            >
+                                <SelectTrigger className="h-9 w-full rounded-xl border-black/10 bg-white/80 text-[10px] font-black uppercase tracking-widest dark:border-white/10 dark:bg-slate-950/80">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="border-black/10 bg-white dark:border-white/10 dark:bg-slate-950">
+                                    {MARITIME_TANKER_VIEW_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>
+                                            {t(option.labelHe, option.labelEn)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                <Badge className="border-none bg-cyan-500/10 text-[8px] font-black uppercase text-cyan-600 dark:text-cyan-300">
+                                    {t('מכליות בלבד', 'Tankers only')}
+                                </Badge>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setOilAndGasDisplayMode('on_ground_only')}
+                                    className="h-7 rounded-lg px-2 text-[8px] font-black uppercase tracking-widest text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+                                >
+                                    {t('מסופי נפט', 'Oil Terminals')}
+                                </Button>
+                            </div>
+                            <p className="mt-1.5 text-[9px] leading-snug text-slate-500 dark:text-slate-500">
+                                {maritimeTankerView === 'worldwide'
+                                    ? t(
+                                          'קורא מכליות שמורות מכל העולם; בחירת תצוגה לא משנה את ה-worker.',
+                                          'Reads stored worldwide tankers; changing view never changes the collector.'
+                                      )
+                                    : t(
+                                          'קורא מכליות שמורות באזור הנבחר ומקרב את המפה לשם.',
+                                          'Reads stored tankers in the selected region and flies the map there.'
+                                      )}
+                            </p>
+                        </div>
 
                         {isMaritimeLayerEnabled && (
                             <>
@@ -1172,49 +2065,47 @@ export default function MapComponent({
                                     </p>
                                 )}
 
-                                {(((maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0) ||
-                                    maritimeFeed?.persian_gulf_demo_synthetic) && (
-                                    <p className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-2 text-[9px] leading-snug text-cyan-900 dark:text-cyan-100">
-                                        {(maritimeFeed?.coastal_demo_regions?.length ?? 0) > 0 && (
-                                            <span className="block font-semibold text-cyan-950 dark:text-cyan-50">
-                                                {t(
-                                                    `אזורי הדגמה: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
-                                                    `Demo regions: ${(maritimeFeed?.coastal_demo_regions ?? []).join(' · ')}.`,
-                                                )}
-                                            </span>
+                                {maritimeFeed?.coverage?.warning_text && (
+                                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
+                                        {maritimeFeed.coverage.warning_text}
+                                    </p>
+                                )}
+
+                                {maritimeFeed?.coverage && (
+                                    <div className="grid grid-cols-2 gap-1.5 text-[8px] font-black uppercase tracking-widest">
+                                        <Badge className="justify-center border-none bg-slate-950/10 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                            {t('זרם', 'Stream')} {maritimeFeed.coverage.stream_status || 'unknown'}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-slate-950/10 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                                            {t('Heartbeat', 'Heartbeat')} {maritimeFeed.coverage.heartbeat_status || 'unknown'}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                                            {t('מכליות שעה', 'Tankers 1h')} {maritimeFeed.coverage.tankers_observed_last_hour ?? 0}
+                                        </Badge>
+                                        <Badge className="justify-center border-none bg-cyan-500/10 text-cyan-600 dark:text-cyan-300">
+                                            {t('כלי שיט שעה', 'Vessels 1h')} {maritimeFeed.coverage.vessels_observed_last_hour ?? 0}
+                                        </Badge>
+                                    </div>
+                                )}
+
+                                {maritimeViewportAisGap && (
+                                    <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-2 text-[9px] leading-snug text-amber-900 dark:text-amber-100">
+                                        {t(
+                                            'אין AIS חי באזור זה — המאגר מכיל כלי שיט באזורים אחרים (למשל אירופה). הרחב את oil-live-intel-worker watches או בדוק סטטוס סנכרון למטה.',
+                                            'No live AIS in this region — the feed has vessels elsewhere (e.g. Europe). Expand oil-live-intel-worker watches or check sync status below.',
                                         )}
-                                        <span className="mt-1 block">
-                                            {(() => {
-                                                const mode = maritimeFeed?.persian_gulf_demo_mode;
-                                                if (mode === 'api_opt_in') {
-                                                    return includeCoastalDemoVessels
-                                                        ? t(
-                                                              'נקודות סינתטיות/קובץ הדגמה (בקשת משתמש include_coastal_demo) לצד כלי שיט אמיתיים מהמאגר — לא AIS חי באותם תיבות.',
-                                                              'Synthetic / seed-file demo positions (your include_coastal_demo opt-in) appear alongside real snapshot vessels—not live AIS in those boxes.',
-                                                          )
-                                                        : t(
-                                                              'נקודות סינתטיות במפרץ (בקשת משתמש) לצד כלי שיט אמיתיים אחרים מהמאגר — לא AIS חי מהמפרץ.',
-                                                              'Synthetic Gulf demo markers (your opt-in) appear alongside other real snapshot vessels in this feed—not live Gulf AIS.',
-                                                          );
-                                                }
-                                                if (mode === 'env_coverage_gap') {
-                                                    return t(
-                                                        'נקודות הדגמה במפרץ (MARITIME_GULF_DEMO_SEED + פער AISStream) — לא AIS חי מהמפרץ.',
-                                                        'Gulf demo positions (MARITIME_GULF_DEMO_SEED + AISStream gap)—not live Gulf AIS.',
-                                                    );
-                                                }
-                                                if (mode === 'env_coastal_sparse') {
-                                                    return t(
-                                                        'נקודות הדגמה (MARITIME_COASTAL_DEMO_SEED) לתיבות יעד דלילות — לא AIS חי משוחזר.',
-                                                        'Demo positions (MARITIME_COASTAL_DEMO_SEED) for sparse target boxes—not restored live AIS.',
-                                                    );
-                                                }
-                                                return t(
-                                                    'נקודות הדגמה — לא AIS חי באותם אזורים; שאר הסימנים עלולים להיות AIS אמיתי מהמאגר.',
-                                                    'Demo positions—not live AIS in those areas; other markers may still be real snapshot AIS.',
-                                                );
-                                            })()}
-                                        </span>
+                                    </p>
+                                )}
+
+                                {maritimeLodUiNote && (
+                                    <p className="rounded-lg border border-slate-500/25 bg-slate-500/10 px-2.5 py-2 text-[9px] leading-snug text-slate-700 dark:text-slate-200">
+                                        {maritimeLodUiNote}
+                                    </p>
+                                )}
+
+                                {maritimeClusterClarification && (
+                                    <p className="text-[9px] leading-snug text-slate-500 dark:text-slate-400">
+                                        {maritimeClusterClarification}
                                     </p>
                                 )}
 
@@ -1302,7 +2193,7 @@ export default function MapComponent({
                                                 className="h-8 rounded-lg border-black/10 bg-white/80 text-[10px] dark:border-white/10 dark:bg-slate-950/80"
                                             />
                                             <div className="flex flex-wrap gap-1">
-                                                {VESSEL_SHIP_TYPE_OPTIONS.map((typeLabel) => {
+                                                {(['Tanker'] as const).map((typeLabel) => {
                                                     const active = vesselFilters.shipTypes.includes(typeLabel);
                                                     return (
                                                         <button
@@ -1382,7 +2273,7 @@ export default function MapComponent({
                                             <p className="mb-1 text-[9px] leading-snug text-slate-500">
                                                 {t(
                                                     'הסימון מצביע לכיוון השייט (צפון מעלה). צבע המילוי לפי קטגוריית סוג AIS. בזום עולמי מוצגת דגימת LOD (מכליות מועדפות) — לא קיבוץ; בזום אזורי מוצגים כל כלי השיט בתצוגה.',
-                                                    'Chevron points along heading (north up). Fill color follows AIS ship-type category. At world zoom the map uses display LOD (tankers preferred)—not clustering; at regional zoom every in-view vessel is drawn.'
+                                                    `Chevron points along heading (north up). Fill color follows AIS ship-type category. Below zoom ${LOD_FULL_DETAIL_ZOOM} the map may subsample icons for performance (tankers preferred)—not clustering; zoom in for every in-view vessel.`
                                                 )}
                                             </p>
                                             <div className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -1426,7 +2317,12 @@ export default function MapComponent({
                                                 {maritimeFeed?.source || t('ממתין לטעינה', 'Waiting to load')}
                                             </p>
                                             <p className="text-[9px] text-slate-500">
-                                                {maritimeFeed?.geography_mode === 'viewport_bbox'
+                                                {maritimeFeed?.geography_mode === 'stored_view_filter'
+                                                    ? t(
+                                                          'סינון תצוגה על בסיס הנתונים השמורים — לא משנה את גבולות ה-ingest.',
+                                                          'Stored-data view filter — does not change ingest boundaries.'
+                                                      )
+                                                    : maritimeFeed?.geography_mode === 'viewport_bbox'
                                                     ? t('מבוסס על גבולות המפה הנוכחיים', 'Using the current map bounds')
                                                     : maritimeFeed?.geography_mode === 'sampled_viewport_regions'
                                                         ? t(
@@ -1480,7 +2376,13 @@ export default function MapComponent({
             )}
             <MapContainer 
               center={mapCenter} 
-              zoom={viewModeKey === 'ports' ? 3 : viewModeKey === 'route_planner' ? 4 : 7} 
+              zoom={
+                viewModeKey === 'ports' || oilLiveSidebarActive
+                  ? 3
+                  : viewModeKey === 'route_planner'
+                    ? 4
+                    : LICENSE_MAP_DEFAULT_ZOOM
+              } 
               className="w-full h-full"
               zoomControl={false}
               preferCanvas
@@ -1494,35 +2396,112 @@ export default function MapComponent({
                     onMapClick={() => {
                       setSelectedItem(null);
                       onSelectMaritimeVessel(null);
+                      if (isLiveDataView) onOilLiveDismiss?.();
                     }}
                 />
-                <ViewportBoundsTracker active={isMaritimeMapView} debounceMs={50} onBoundsChange={setMaritimeViewport} />
+                <ViewportBoundsTracker
+                    active={isMaritimeMapView && isMaritimeLayerEnabled}
+                    onBoundsChange={setMaritimeViewport}
+                />
                 <ViewportBoundsTracker active={isMobileDevice} onBoundsChange={setCurrentVisibleViewport} />
-                {isMobileDevice && mobileFilteredData.capped && (
+                <ViewportBoundsTracker
+                    active={
+                        Boolean(onLicenseMapViewportChange) &&
+                        !hideLicenseMarkers &&
+                        isLicenseMapView &&
+                        (!isLiveDataView || countryFocusActive)
+                    }
+                    onBoundsChange={handleLicenseViewportChange}
+                />
+                <ViewportBoundsTracker
+                    active={isOilAndGasView}
+                    onBoundsChange={setOilGasMapViewport}
+                />
+                <ViewportBoundsTracker
+                    active={isLiveDataView && oilLiveOverlaysEnabled}
+                    onBoundsChange={setLiveDataMapViewport}
+                />
+                {licenseMarkersCapped && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
-                            {t('ביצועי מובייל אופטימליים', 'Mobile performance optimized')}
+                            {t('מגבלת סימנים לביצועים', 'Marker limit for performance')}
                         </p>
                         <p className="text-[10px] text-slate-400 text-center text-xs">
                             {t(
-                                'מוצגות רק 800 הקונססיות הקרובות ביותר. עשה זום-אין לצפייה בשאר.',
-                                'Showing nearest 800 concessions only. Zoom in to view others.'
+                                `מוצגות עד ${LICENSE_MAP_DOM_MARKER_CAP} קונססיות בתצוגה. התקרבו לזום-אין לפרטים נוספים.`,
+                                `Showing up to ${LICENSE_MAP_DOM_MARKER_CAP} concessions in view. Zoom in for more detail.`
+                            )}
+                        </p>
+                    </div>
+                )}
+                {licenseServerClusterMode &&
+                    licenseMapZoom != null &&
+                    licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
+                    displayData.some(isCountryLicenseSummary) && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] max-w-md bg-slate-950/90 text-slate-100 border border-cyan-500/25 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
+                            {t('תצוגת עולם — סיכום לפי מדינה', 'World view — one marker per country')}
+                        </p>
+                        <p className="text-[10px] text-slate-300 text-center leading-relaxed mt-1">
+                            {t(
+                                'סימן אחד לכל מדינה עם רישיונות בתצוגה; קווי מתאר תואמים לאותן מדינות. התקרבו לזום 8+ לפרטי רישיון.',
+                                'One marker per country with licenses in view; outlines match those countries. Zoom to level 8+ for individual licenses.',
+                            )}
+                        </p>
+                    </div>
+                )}
+                {borderCountriesCapped && borderGeoJsonMatchesMarkers && (
+                    <div className="absolute top-36 left-1/2 -translate-x-1/2 z-[1000] max-w-md bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-xl px-3 py-1.5 shadow-lg backdrop-blur-xl">
+                        <p className="text-[9px] text-slate-400 text-center">
+                            {t(
+                                `קווי מתאר: עד ${LICENSE_MAP_BORDER_COUNTRY_CAP} מדינות עם הכי הרבה רישיונות בתצוגה.`,
+                                `Outlines: up to ${LICENSE_MAP_BORDER_COUNTRY_CAP} countries with the most licenses in view.`,
                             )}
                         </p>
                     </div>
                 )}
                 {isOilAndGasView && onGroundVisible && (
-                    <MapZoomTracker onZoomChange={setPetroleumMapZoom} />
+                    <MapZoomTracker
+                        onZoomChange={(z) => {
+                            setPetroleumMapZoom(z);
+                            setOverlayMapZoom(z);
+                            handleLicenseZoomChange(z);
+                        }}
+                    />
                 )}
+                {isLiveDataView && oilLiveOverlaysEnabled && !isOilAndGasView && (
+                    <MapZoomTracker
+                        onZoomChange={(z) => {
+                            setOverlayMapZoom(z);
+                            handleLicenseZoomChange(z);
+                        }}
+                    />
+                )}
+                {onLicenseMapViewportChange &&
+                    isLicenseMapView &&
+                    (!isLiveDataView || countryFocusActive) &&
+                    !isOilAndGasView && (
+                        <MapZoomTracker onZoomChange={handleLicenseZoomChange} />
+                    )}
                 {isMaritimeMapView && isMaritimeLayerEnabled && (
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <LicenseClusterFlyEffect
+                    cluster={pendingLicenseClusterFly}
+                    onLicenseMapZoomChange={handleLicenseZoomChange}
+                    onLicenseMapViewportChange={handleLicenseViewportChange}
+                    onLicenseClusterDrillComplete={onLicenseClusterDrillComplete}
+                    onComplete={() => setPendingLicenseClusterFly(null)}
+                />
                 <LicenseMapPopupController
                     selectedItem={selectedItem}
                     mapFlyTrigger={mapFlyTrigger}
                     markerRefs={markerRefs}
                     clusterGroupRef={clusterGroupRef}
+                    preferCoordinatePopup={Boolean(
+                        selectedItem && !isServerLicenseCluster(selectedItem),
+                    )}
                     userAnnotations={userAnnotations}
                     updateAnnotation={updateAnnotation}
                     deleteLicense={deleteLicense}
@@ -1549,6 +2528,19 @@ export default function MapComponent({
                     active={Boolean(countryFocusCountry?.trim())}
                     geojson={filteredGeoJson ?? null}
                     trigger={countryFocusBoundsTrigger}
+                />
+                {isLiveDataView && (
+                    <LiveDataMapFly trigger={liveDataFlyTrigger} target={liveDataFlyTarget} />
+                )}
+                {isMaritimeMapView && (
+                    <MaritimeFleetSelectionFly vessel={selectedMaritimeVessel} />
+                )}
+                {isMaritimeMapView && selectedMaritimeVessel && isMaritimeLayerEnabled && (
+                    <MaritimeVesselFocusLayers vessel={selectedMaritimeVessel} />
+                )}
+                <TankerViewFlyEffect
+                    active={isMaritimeMapView && isMaritimeLayerEnabled}
+                    view={maritimeTankerView}
                 />
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
@@ -1598,26 +2590,86 @@ export default function MapComponent({
                         </FeatureGroup>
                     </LayersControl.Overlay>
 
-                    {filteredGeoJson && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
+                    {borderGeoJsonMatchesMarkers && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
                         <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
                             <GeoJSON
-                                key={`${borderCountries.join(',')}:${isDark ? 'd' : 'l'}:${countryFocusCountry ?? 'all'}`}
-                                data={filteredGeoJson}
+                                key={`country-borders:${isDark ? 'd' : 'l'}:${countryFocusCountry?.trim() ?? 'viewport'}`}
+                                data={filteredGeoJson!}
                                 interactive={false}
                                 style={countryBorderLayerStyle}
                             />
                         </LayersControl.Overlay>
                     )}
+                    {isLiveDataView && oilLiveOverlaysEnabled && (
+                        <OilLiveMapOverlays
+                            enabled
+                            mapZoom={overlayMapZoom}
+                            productFilter={oilLiveProductFilter}
+                            terminalSearch={oilLiveTerminalSearch}
+                            lensMode={oilLiveLens}
+                            layers={oilLiveLayers}
+                            tradeFlowGroup={oilLiveTradeFlowGroup}
+                            viewport={liveDataMapViewport}
+                            focusVesselMmsi={
+                                maritimeFocusMode && selectedMaritimeVessel?.mmsi != null
+                                    ? Number(selectedMaritimeVessel.mmsi)
+                                    : null
+                            }
+                            coverageSources={
+                                governmentAisCoverageEnabled ? GOVERNMENT_AIS_COVERAGE_SOURCES : undefined
+                            }
+                            onStatsChange={onOilLiveStatsChange}
+                            onEntityClick={onOilLiveEntityClick}
+                        />
+                    )}
+                    {eiaHistoricMapEnabled && (eiaHistoricMapArcs.length > 0 || (eiaHistoricMapOrigins?.length ?? 0) > 0) && (
+                        <EiaHistoricMapLayer
+                            enabled={eiaHistoricMapEnabled}
+                            arcs={eiaHistoricMapArcs}
+                            origins={eiaHistoricMapOrigins}
+                            year={eiaHistoricMapYear}
+                            showCorridors={eiaHistoricShowCorridors}
+                            onSelectImporter={onEiaHistoricSelectImporter}
+                            onViewArcDetails={onEiaHistoricViewArcDetails}
+                        />
+                    )}
+                    {macroTradeFlowsEnabled && macroTradeFlows.length > 0 && (
+                        <MacroTradeFlowsMapLayer
+                            enabled={macroTradeFlowsEnabled}
+                            flows={macroTradeFlows}
+                        />
+                    )}
+                    {showInfrastructureLayers && onGroundVisible && !isLiveDataView && (
+                        <OsmPetroleumMapLayers
+                            bbox={infrastructureMapBbox}
+                            enabled
+                            layerVisibility={infrastructureLayerVisibility}
+                            forcedLayers={infrastructureForcedLayers}
+                            mapZoom={infrastructureMapZoom}
+                            onFeatureClick={onInfrastructureFeatureClick}
+                        />
+                    )}
                     {isOilAndGasView && onGroundVisible && (
                         <>
                             <PetroleumMapLayers
-                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                bbox={oilGasMapViewport}
                                 mapZoom={petroleumDetailZoom}
                                 enabled={isOilAndGasView && onGroundVisible}
                             />
                             <OsmPetroleumMapLayers
-                                bbox={WORLD_PETROLEUM_PRELOAD_BBOX}
+                                bbox={oilGasMapViewport}
                                 enabled={isOilAndGasView && onGroundVisible}
+                                mapZoom={petroleumDetailZoom}
+                            />
+                            <StorageTankFarmsMapLayer
+                                entities={storageEntities}
+                                enabled={isOilAndGasView && onGroundVisible}
+                                mapZoom={petroleumDetailZoom}
+                                selectedId={selectedItem?.entityKind === 'storage_terminal' ? selectedItem.id : null}
+                                onSelect={(item) => {
+                                    onSelectMaritimeVessel(null);
+                                    setSelectedItem(item);
+                                }}
                             />
                         </>
                     )}
@@ -1628,14 +2680,16 @@ export default function MapComponent({
                                     layerApiRef={canvasVesselLayerRef}
                                     mapZoom={maritimeMapZoom}
                                     selectedId={selectedMaritimeVessel?.id ?? null}
+                                    focusMode={maritimeFocusMode}
                                     onVesselClick={handleMaritimeVesselClick}
                                     formatTooltip={formatMaritimeVesselTooltip}
+                                    onLayerReady={handleCanvasVesselLayerReady}
                                 />
                             </LayerGroup>
                         </LayersControl.Overlay>
                     )}
                 </MapBasemapLayers>
-                {isMaritimeMapView && (
+                {isMaritimeMapView && (!isLiveDataView || isMaritimeLayerEnabled) && (
                     <MaritimeLayerSync layerName={vesselLayerLabel} onLayerActiveChange={handleMaritimeLayerActiveChange} />
                 )}
 
@@ -1643,21 +2697,52 @@ export default function MapComponent({
                     eating clicks meant for the spiderfied markers beneath them.
                     showCoverageOnHover:false removes the coverage polygon overlay that can
                     also intercept pointer events in dense areas. */}
-                {onGroundVisible && (
-                <MarkerClusterGroup
-                    showCoverageOnHover={false}
-                    iconCreateFunction={licenseClusterIconCreate}
-                    spiderLegPolylineOptions={{
-                        weight: 1.5,
-                        color: isDark ? '#64748b' : '#334155',
-                        opacity: isDark ? 0.5 : 0.65,
-                        interactive: false,
-                    }}
-                >
-                    <ClusterGroupRefBridge clusterGroupRef={clusterGroupRef} />
-                    {renderedMarkers}
-                </MarkerClusterGroup>
+                {showLicenseMarkers && serverClusterMarkers && (
+                    <LayerGroup>{serverClusterMarkers}</LayerGroup>
                 )}
+                {licenseCanvasFeatures.length > 0 && (
+                    <CanvasLiveDealLayer
+                        features={licenseCanvasFeatures}
+                        mapZoom={overlayMapZoom}
+                        selectedUid={selectedItem ? `license:${selectedItem.id}` : null}
+                        onFeatureClick={handleLicenseCanvasFeatureClick}
+                        clusterPoints
+                        clusterKinds={LICENSE_CANVAS_CLUSTER_KINDS}
+                        clusterMaxZoom={LICENSE_CANVAS_CLUSTER_MAX_ZOOM}
+                        clusterMinCount={LICENSE_CANVAS_CLUSTER_MIN_COUNT}
+                        isDark={isDark}
+                    />
+                )}
+                {showLicenseMarkers &&
+                    !useCanvasLicenseMarkers &&
+                    licensePointMarkers &&
+                    (suppressLicenseClusters ? (
+                        <LayerGroup>{licensePointMarkers}</LayerGroup>
+                    ) : (
+                        <MarkerClusterGroup
+                            showCoverageOnHover={false}
+                            spiderfyOnMaxZoom={false}
+                            spiderfyOnEveryZoom={false}
+                            maxClusterRadius={52}
+                            disableClusteringAtZoom={14}
+                            zoomToBoundsOnClick={false}
+                            iconCreateFunction={licenseClusterIconCreate}
+                            spiderLegPolylineOptions={{
+                                weight: 1.5,
+                                color: isDark ? '#64748b' : '#334155',
+                                opacity: isDark ? 0.5 : 0.65,
+                                interactive: false,
+                            }}
+                        >
+                            <ClusterGroupRefBridge
+                                clusterGroupRef={clusterGroupRef}
+                                onSingleMarkerClusterClick={handleSingleClusterMarkerClick}
+                                onLicenseMapZoomChange={onLicenseMapZoomChange}
+                                onLicenseClusterDrillComplete={onLicenseClusterDrillComplete}
+                            />
+                            {licensePointMarkers}
+                        </MarkerClusterGroup>
+                    ))}
                 {isRoutePlannerView && routePlannerShowPorts && routePlannerPorts.length > 0 && onRoutePlannerPortPick && (
                   <Suspense fallback={null}>
                     <RoutePlannerPortMarkers
@@ -1682,6 +2767,11 @@ export default function MapComponent({
             </MapContainer>
             {isRoutePlannerView && routePlannerOverlay && routePlannerOverlay.legs.length > 0 && (
               <RouteLegend className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,240px)]" />
+            )}
+            {isMaritimeMapView && selectedMaritimeVessel && isMaritimeLayerEnabled && (
+              <div className="absolute bottom-6 right-4 z-[900] max-w-[min(100vw-2rem,280px)] pointer-events-none">
+                <MaritimeFocusLegend vessel={selectedMaritimeVessel} />
+              </div>
             )}
         </div>
     );

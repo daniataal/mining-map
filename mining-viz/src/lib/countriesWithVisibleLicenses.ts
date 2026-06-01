@@ -43,3 +43,41 @@ export function countryLicenseCounts(
     (a, b) => b.count - a.count || a.country.localeCompare(b.country),
   );
 }
+
+/** Weighted counts for country border selection (server clusters use mapClusterCount). */
+export function countryLicenseCountsForBorders(
+  licenses: readonly MiningLicense[],
+): Array<{ country: string; count: number }> {
+  const byKey = new Map<string, { country: string; count: number }>();
+  for (const item of licenses) {
+    if (!licenseHasMapCoordinates(item)) continue;
+    const raw = item.country?.trim();
+    if (!raw) continue;
+    const weight =
+      typeof item.mapClusterCount === 'number' && item.mapClusterCount > 0
+        ? item.mapClusterCount
+        : 1;
+    const key = raw.toLowerCase();
+    const row = byKey.get(key);
+    if (row) {
+      row.count += weight;
+    } else {
+      byKey.set(key, { country: raw, count: weight });
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => b.count - a.count || a.country.localeCompare(b.country),
+  );
+}
+
+/** Countries to request outlines for — mirrors markers on the map (no separate global ranking). */
+export function countriesForMapBorders(
+  licenses: readonly MiningLicense[],
+  maxCountries = 80,
+): string[] {
+  const ranked = countryLicenseCountsForBorders(licenses);
+  if (ranked.length <= maxCountries) {
+    return ranked.map((row) => row.country);
+  }
+  return ranked.slice(0, maxCountries).map((row) => row.country);
+}

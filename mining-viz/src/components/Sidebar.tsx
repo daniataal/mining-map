@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '../lib/i18n';
-import { MiningLicense, UserAnnotation } from '../types';
+import { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
+import type { LicenseCoverageSector } from '../lib/licenseCoverage';
+import { LicenseCoverageBreakdown } from '../features/licenses/LicenseCoverageBreakdown';
+import { LicenseSyncStatusBar } from '../features/licenses/LicenseSyncStatusBar';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
@@ -12,11 +15,16 @@ import {
   Settings as LucideSettings,
   Pin as LucidePin,
   PieChart as LucidePieChart,
-  Upload as LucideUpload
+  Upload as LucideUpload,
+  Radio as LucideRadio,
+  Archive as LucideArchive,
+  List as LucideList,
 } from 'lucide-react';
+import type { MapSidebarTab } from './WorkspaceSidebarLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { licenseCardSubtitle, licenseCardTitle } from '../lib/licenseSidebarCard';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -50,6 +58,12 @@ interface SidebarProps {
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
   getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
+  workspaceTab?: MapSidebarTab;
+  onSelectWorkspaceTab?: (tab: MapSidebarTab) => void;
+  worldCoverage?: WorldCoverageResponse | null;
+  licenseCoverageSector?: LicenseCoverageSector | null;
+  licenseCoverageAlsoShowSector?: LicenseCoverageSector | null;
+  showLicenseCoveragePanel?: boolean;
 }
 
 function sourceTrustLabel(item: MiningLicense): string {
@@ -91,6 +105,12 @@ export default function Sidebar({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   getDealRoomForLicense,
+  workspaceTab = 'licenses',
+  onSelectWorkspaceTab,
+  worldCoverage,
+  licenseCoverageSector,
+  licenseCoverageAlsoShowSector,
+  showLicenseCoveragePanel,
 }: SidebarProps) {
   const { t } = useI18n();
   const [displayCount, setDisplayCount] = useState(20);
@@ -119,14 +139,46 @@ export default function Sidebar({
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
         <button 
-          onClick={() => setViewMode('map')}
+          onClick={() => {
+            onSelectWorkspaceTab?.('licenses');
+            setViewMode('map');
+          }}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
-          ${viewMode === 'map' 
+          ${workspaceTab === 'licenses' && viewMode === 'map'
             ? 'bg-amber-500/20 text-amber-500 border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.1)]' 
             : 'text-slate-400 dark:text-slate-500 border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          title={t('רישיונות', 'Licenses')}
         >
-          <LucideMapPin className="w-5 h-5" />
+          <LucideList className="w-5 h-5" />
         </button>
+        {onSelectWorkspaceTab && (
+          <>
+            <button
+              type="button"
+              onClick={() => onSelectWorkspaceTab('live_data')}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+                workspaceTab === 'live_data'
+                  ? 'bg-sky-500/20 text-sky-600 border-sky-500/40'
+                  : 'text-slate-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+              title={t('נתונים חיים', 'Live Data')}
+            >
+              <LucideRadio className="w-5 h-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectWorkspaceTab('historic')}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+                workspaceTab === 'historic'
+                  ? 'bg-violet-500/20 text-violet-600 border-violet-500/40'
+                  : 'text-slate-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5'
+              }`}
+              title={t('היסטורי', 'Historic')}
+            >
+              <LucideArchive className="w-5 h-5" />
+            </button>
+          </>
+        )}
         <button 
           onClick={() => setViewMode('dashboard')}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
@@ -164,6 +216,31 @@ export default function Sidebar({
           exit={{ opacity: 0, x: -20 }}
           className="flex min-h-0 min-w-0 flex-1 flex-col"
         >
+          {onSelectWorkspaceTab && (
+            <div className="flex shrink-0 border-b border-black/5 dark:border-white/5">
+              {(
+                [
+                  ['licenses', 'רישיונות', 'Licenses', LucideList],
+                  ['live_data', 'חי', 'Live', LucideRadio],
+                  ['historic', 'היסטורי', 'Historic', LucideArchive],
+                ] as const
+              ).map(([key, he, en, Icon]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSelectWorkspaceTab(key)}
+                  className={`flex-1 px-2 py-2 text-[9px] font-black uppercase tracking-wide flex items-center justify-center gap-1 ${
+                    workspaceTab === key
+                      ? 'bg-amber-500/10 text-amber-800 dark:text-amber-200 border-b-2 border-amber-500'
+                      : 'text-slate-500 border-b-2 border-transparent hover:text-slate-700'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" />
+                  {t(he, en)}
+                </button>
+              ))}
+            </div>
+          )}
           <header className="p-5 border-b border-black/5 dark:border-white/5">
             <div className="flex items-center justify-between">
               <h1 className="text-sm font-black tracking-[0.2em] text-slate-400 dark:text-slate-500 uppercase">{t("תוצאות", "Live Results")}</h1>
@@ -201,6 +278,18 @@ export default function Sidebar({
                  </Button>
                </div>
             </div>
+            {showLicenseCoveragePanel && licenseCoverageSector && (
+              <div className="mt-4 space-y-3">
+                <LicenseCoverageBreakdown
+                  sector={licenseCoverageSector}
+                  worldCoverage={worldCoverage}
+                  alsoShowSector={licenseCoverageAlsoShowSector}
+                />
+                {licenseCoverageSector === 'mining' && (
+                  <LicenseSyncStatusBar worldCoverage={worldCoverage} />
+                )}
+              </div>
+            )}
             {infrastructureStats && infrastructureStats.total > 0 && (
               <div className="mt-4 rounded-2xl border border-cyan-500/10 bg-cyan-500/5 p-3 space-y-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -272,7 +361,7 @@ export default function Sidebar({
                   >
                     <div className="flex justify-between items-start mb-2">
                       <h3 className={`text-xs font-black uppercase tracking-tight truncate pr-4 transition-colors ${isSelected ? 'text-amber-500' : 'text-slate-700 dark:text-slate-200'}`}>
-                        {item.company}
+                        {licenseCardTitle(item)}
                       </h3>
                       <div className="flex gap-1 shrink-0">
                          {annotation.status === 'good' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
@@ -281,8 +370,10 @@ export default function Sidebar({
                       </div>
                     </div>
                     <div className="flex items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">
-                       <LucideMapPin className="w-3 h-3 mr-1 text-slate-600" />
-                       <span className="truncate">{item.region}</span>
+                       <LucideMapPin className="w-3 h-3 mr-1 shrink-0 text-slate-600" />
+                       <span className="truncate" title={licenseCardSubtitle(item)}>
+                         {licenseCardSubtitle(item)}
+                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <Badge className={`${sourceTrustClass(item)} border-none text-[8px] font-black uppercase`}>

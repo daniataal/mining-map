@@ -1,6 +1,7 @@
 import axios, { isCancel } from 'axios';
 import { useMemo } from 'react';
 import {
+  keepPreviousData,
   useQuery,
   useMutation,
   useQueryClient,
@@ -42,6 +43,31 @@ import {
   writeLicenseBundleCache,
   type LicenseBundleMode,
 } from './licenseBundleCache';
+import { normalizeMaritimeContextResponse } from './maritimeContextNormalize';
+import {
+  LICENSE_COUNTRY_FETCH_HUB,
+  licenseViewportBoundsFromGeoJson,
+} from './countryBounds';
+import {
+  collapseServerClustersInViewport,
+  applyServerClusterDisplayPositions,
+  filterLicenseMapRowsToBounds,
+  LICENSE_MAP_GO_ENABLED,
+  licenseCountrySummaryFetchPaths,
+  licenseFetchPaths,
+  MIN_SERVER_LICENSE_CLUSTER_COUNT,
+  SERVER_CLUSTER_MIN_DRILL_ZOOM,
+} from './licenseMapCluster';
+import {
+  countrySummaryRowsToLicenses,
+  parseLicenseCountrySummaryResponse,
+} from './licenseCountrySummary';
+import {
+  licenseMapPathKind,
+  recordLicenseMapShadowMetric,
+} from './licenseMapShadowMetrics';
+import { getStoredMiningToken } from './miningAuth';
+import { MAP_VIEWPORT_DEBOUNCE_MS } from './mapViewportDebounce';
 
 export {
   clearLicenseBundleCaches,
@@ -79,6 +105,12 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+export {
+  clearMiningAuthStorage,
+  getStoredMiningToken,
+  MINING_AUTH_STORAGE_KEYS,
+} from './miningAuth';
 
 let licensesFallbackDataPromise: Promise<MiningLicense[]> | null = null;
 
@@ -137,9 +169,9 @@ function normalizeCountryBordersParam(countries: string[]): string[] {
   ).sort((a, b) => a.localeCompare(b));
 }
 
-// Request interceptor for auth
+// Request interceptor for auth (mining_token from login UI; token alias for legacy scripts)
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('mining_token');
+  const token = getStoredMiningToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -192,11 +224,33 @@ export async function bulkImportLicensesFile(file: File): Promise<BulkImportFile
 }
 
 // --- Licenses ---
-/** Viewport for GET /licenses bbox params (south/west/north/east). Kept for API typing; map loads ignore bbox. */
+/** Viewport for GET /licenses bbox params (south/west/north/east). */
 export type LicenseViewportBounds = MaritimeViewportBounds;
 
 const LICENSE_GET_TIMEOUT_MS = 90_000;
-/** One GET /licenses per view mode; filters (country, commodity, etc.) run client-side only. */
+/** Map viewport fetch cap (backend clamps to 15000). */
+const LICENSE_VIEWPORT_LIMIT = 5000;
+const LICENSE_VIEWPORT_STALE_MS = 10 * 60_000;
+
+/** @deprecated Use MAP_VIEWPORT_DEBOUNCE_MS from mapViewportDebounce — kept for callers. */
+export const LICENSE_VIEWPORT_DEBOUNCE_MS = MAP_VIEWPORT_DEBOUNCE_MS;
+
+import {
+  intersectLicenseViewportBounds,
+  normalizeLicenseViewportBounds,
+  quantizeLicenseViewportBounds,
+  unionLicenseViewportBounds,
+  wrapLongitude,
+} from './licenseViewportBounds';
+
+export {
+  intersectLicenseViewportBounds,
+  normalizeLicenseViewportBounds,
+  quantizeLicenseViewportBounds,
+  unionLicenseViewportBounds,
+  wrapLongitude,
+};
+/** Legacy bulk load — prefer useLicensesForMap. */
 const LICENSE_BULK_LIMIT = 15_000;
 const LICENSE_BUNDLE_STALE_MS = 60 * 60_000;
 /** USGS global fallback — excluded from map country fetches (dominates shared SQL limits). */
@@ -362,26 +416,356 @@ export type UseLicensesResult = {
   bundleMode: LicenseBundleMode;
 };
 
+async function parseLicensesResponse(data: unknown): Promise<MiningLicense[]> {
+  if (Array.isArray(data)) return data as MiningLicense[];
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    if ('error' in obj) {
+      const msg = String(obj.error ?? 'Licenses request failed');
+      throw new Error(msg);
+    }
+    if (obj.mode === 'clusters' && Array.isArray(obj.clusters)) {
+      return (obj.clusters as MiningLicense[]).filter(
+        (row) => (row.mapClusterCount ?? 0) >= MIN_SERVER_LICENSE_CLUSTER_COUNT,
+      );
+    }
+  }
+  console.warn('[licenses] Expected array from /licenses, got:', data);
+  return [];
+}
+
+async function fetchLicensePathsWithShadow<T>(
+  kind: 'bundle' | 'viewport',
+  paths: string[],
+  sector: string | undefined,
+  fetchPath: (path: string) => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i]!;
+    const started = performance.now();
+    try {
+      const result = await fetchPath(path);
+      recordLicenseMapShadowMetric({
+        kind,
+        path,
+        pathKind: licenseMapPathKind(path),
+        latencyMs: Math.round(performance.now() - started),
+        usedFallback: i > 0,
+        ...(i > 0 && lastError != null
+          ? {
+              fallbackError:
+                lastError instanceof Error ? lastError.message : String(lastError),
+            }
+          : {}),
+        ...(sector ? { sector } : {}),
+      });
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (isCancel(err)) throw err;
+      if (i < paths.length - 1) {
+        recordLicenseMapShadowMetric({
+          kind,
+          path,
+          pathKind: licenseMapPathKind(path),
+          latencyMs: Math.round(performance.now() - started),
+          usedFallback: true,
+          fallbackError: err instanceof Error ? err.message : String(err),
+          ...(sector ? { sector } : {}),
+        });
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(String(lastError ?? 'Licenses request failed'));
+}
+
+/**
+ * Go-first license reads; Python `/licenses` is a temporary fallback when Go fails.
+ * Safe to drop the Python path after ~14d green `license_map_parity.sh` +
+ * `license_bundle_parity.sh` on staging/prod Caddy and zero `usedFallback` in the
+ * shadow ring (`VITE_LICENSE_MAP_SHADOW_METRICS=1` or dev → `getLicenseMapShadowMetrics()`).
+ */
 async function fetchLicenseBundleFromApi(
   sector: 'mining' | 'oil_and_gas' | undefined,
   signal?: AbortSignal,
 ): Promise<MiningLicense[]> {
-  const { data } = await apiClient.get<unknown>('/licenses', {
-    signal,
-    timeout: LICENSE_GET_TIMEOUT_MS,
-    params: {
-      prefer_open_data: true,
-      limit: LICENSE_BULK_LIMIT,
-      ...(sector ? { sector } : {}),
+  const params = {
+    prefer_open_data: true,
+    limit: LICENSE_BULK_LIMIT,
+    ...(sector ? { sector } : {}),
+  };
+  const paths = licenseFetchPaths(false);
+
+  return fetchLicensePathsWithShadow(
+    'bundle',
+    paths,
+    sector,
+    async (path) => {
+      const { data } = await apiClient.get<unknown>(path, {
+        signal,
+        timeout: LICENSE_GET_TIMEOUT_MS,
+        params,
+      });
+      return parseLicensesResponse(data);
     },
+  );
+}
+
+async function fetchLicensesViewportFromApi(
+  options: {
+    sector?: 'mining' | 'oil_and_gas';
+    bounds: LicenseViewportBounds;
+    /** Visible map extent for collapse + client trim (defaults to bounds). */
+    collapseBounds?: LicenseViewportBounds | null;
+    countries?: string[];
+    mapZoom?: number;
+    signal?: AbortSignal;
+  },
+): Promise<MiningLicense[]> {
+  const { sector, bounds, collapseBounds, countries, mapZoom, signal } = options;
+  const fetchBounds = quantizeLicenseViewportBounds(bounds);
+  const displayBounds = collapseBounds
+    ? quantizeLicenseViewportBounds(collapseBounds)
+    : fetchBounds;
+  const zoomRounded =
+    mapZoom != null && Number.isFinite(mapZoom) ? Math.round(mapZoom * 10) / 10 : null;
+  const params: Record<string, string | number | boolean> = {
+    prefer_open_data: true,
+    limit: LICENSE_VIEWPORT_LIMIT,
+    min_lat: fetchBounds.south,
+    max_lat: fetchBounds.north,
+    min_lng: fetchBounds.west,
+    max_lng: fetchBounds.east,
+    map: 1,
+  };
+  if (sector) params.sector = sector;
+  if (countries?.length) params.countries = countries.join(',');
+  if (zoomRounded != null) params.zoom = zoomRounded;
+
+  const useCountrySummaryPath =
+    LICENSE_MAP_GO_ENABLED &&
+    zoomRounded != null &&
+    zoomRounded < SERVER_CLUSTER_MIN_DRILL_ZOOM;
+  const summaryPaths = licenseCountrySummaryFetchPaths();
+  const clusterPaths = licenseFetchPaths(
+    LICENSE_MAP_GO_ENABLED &&
+      zoomRounded != null &&
+      zoomRounded < SERVER_CLUSTER_MIN_DRILL_ZOOM,
+  );
+  const paths =
+    useCountrySummaryPath && summaryPaths.length > 0
+      ? [...summaryPaths, ...clusterPaths.filter((p) => !summaryPaths.includes(p))]
+      : clusterPaths;
+
+  return fetchLicensePathsWithShadow(
+    'viewport',
+    paths,
+    sector,
+    async (path) => {
+      const requestParams = { ...params };
+      if (path.endsWith('/map')) delete requestParams.map;
+      if (path.includes('country-summary')) {
+        delete requestParams.map;
+        delete requestParams.zoom;
+        const { data } = await apiClient.get<unknown>(path, {
+          signal,
+          timeout: 60_000,
+          params: requestParams,
+        });
+        const summaryRows = parseLicenseCountrySummaryResponse(data);
+        return countrySummaryRowsToLicenses(summaryRows, sector ?? 'mining');
+      }
+      const { data } = await apiClient.get<unknown>(path, {
+        signal,
+        timeout: 60_000,
+        params: requestParams,
+      });
+      const parsed = await parseLicensesResponse(data);
+      const inView = filterLicenseMapRowsToBounds(parsed, displayBounds);
+      const collapsed = collapseServerClustersInViewport(
+        inView,
+        displayBounds,
+        zoomRounded ?? undefined,
+      );
+      const positioned = applyServerClusterDisplayPositions(
+        collapsed,
+        displayBounds,
+        zoomRounded ?? undefined,
+      );
+      if (import.meta.env.DEV) {
+        const ghanaCluster = collapsed.find(
+          (row) =>
+            (row.mapClusterCount ?? 0) >= 100 &&
+            row.country?.toLowerCase().includes('ghana'),
+        );
+        const ghanaDisplay = positioned.find((row) => row.id === ghanaCluster?.id);
+        if (ghanaCluster && ghanaDisplay) {
+          console.debug('[license-map] Ghana cluster raw vs display', {
+            path,
+            count: ghanaCluster.mapClusterCount,
+            raw: { lat: ghanaCluster.lat, lng: ghanaCluster.lng },
+            display: {
+              lat: ghanaDisplay._displayLat ?? ghanaDisplay.lat,
+              lng: ghanaDisplay._displayLng ?? ghanaDisplay.lng,
+            },
+            zoom: zoomRounded,
+          });
+        }
+      }
+      return positioned;
+    },
+  );
+}
+
+/** Per-country license hubs for low zoom (Go `/licenses/country-summary`). */
+export async function getLicenseCountrySummary(options: {
+  bounds: LicenseViewportBounds;
+  sector?: 'mining' | 'oil_and_gas';
+  countries?: string[];
+  preferOpenData?: boolean;
+  signal?: AbortSignal;
+}): Promise<MiningLicense[]> {
+  const { bounds, sector, countries, preferOpenData = true, signal } = options;
+  const params: Record<string, string | number | boolean> = {
+    prefer_open_data: preferOpenData,
+    limit: 120,
+    min_lat: bounds.south,
+    max_lat: bounds.north,
+    min_lng: bounds.west,
+    max_lng: bounds.east,
+  };
+  if (sector) params.sector = sector;
+  if (countries?.length) params.countries = countries.join(',');
+
+  const paths = licenseCountrySummaryFetchPaths();
+  if (!paths.length) return [];
+
+  return fetchLicensePathsWithShadow('viewport', paths, sector, async (path) => {
+    const { data } = await apiClient.get<unknown>(path, { signal, timeout: 60_000, params });
+    const rows = parseLicenseCountrySummaryResponse(data);
+    return countrySummaryRowsToLicenses(rows, sector ?? 'mining');
   });
-  if (Array.isArray(data)) return data as MiningLicense[];
-  if (data && typeof data === 'object' && 'error' in data) {
-    const msg = String((data as { error?: unknown }).error ?? 'Licenses request failed');
-    throw new Error(msg);
-  }
-  console.warn('[useLicenses] Expected array from /licenses, got:', data);
-  return [];
+}
+
+/** Background warm-up for Oil & Gas tab / Historic sidebar (avoids cold fetch on sector switch). */
+export function prefetchOilAndGasLicensesHub(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  const fetchBounds = quantizeLicenseViewportBounds(LICENSE_COUNTRY_FETCH_HUB);
+  return queryClient
+    .prefetchQuery({
+      queryKey: ['licenses', 'viewport', 'oil_and_gas', '', 'scoped', fetchBounds] as const,
+      queryFn: ({ signal }: QueryFunctionContext) =>
+        fetchLicensesViewportFromApi({ sector: 'oil_and_gas', bounds: fetchBounds, signal }),
+      staleTime: LICENSE_VIEWPORT_STALE_MS,
+    })
+    .then(() => undefined);
+}
+
+/** Viewport-scoped licenses for the map (debounced bbox). Country filters use `countries` param when set. */
+export function useLicensesForMap(options: {
+  sector?: 'mining' | 'oil_and_gas';
+  bounds: LicenseViewportBounds | null;
+  filterCountries?: string[];
+  /** Map zoom for server-side clustering (zoom &lt; 7 → grid aggregates). */
+  mapZoom?: number;
+  /** Expanded bbox after cluster drill — unioned with viewport for fetch/display until cleared. */
+  drillExpandBounds?: LicenseViewportBounds | null;
+  enabled: boolean;
+}): UseLicensesResult {
+  const { sector, bounds, filterCountries = [], mapZoom, drillExpandBounds, enabled } = options;
+  const viewportBounds = useMemo(
+    () => (bounds ? quantizeLicenseViewportBounds(bounds) : null),
+    [bounds],
+  );
+  const drillBounds = useMemo(
+    () => (drillExpandBounds ? quantizeLicenseViewportBounds(drillExpandBounds) : null),
+    [drillExpandBounds],
+  );
+  const effectiveViewportBounds = useMemo(() => {
+    if (!viewportBounds) return drillBounds;
+    if (!drillBounds) return viewportBounds;
+    return quantizeLicenseViewportBounds(unionLicenseViewportBounds(viewportBounds, drillBounds));
+  }, [viewportBounds, drillBounds]);
+  const countriesKey = filterCountries.length ? filterCountries.join('|') : '';
+  const countryScoped = filterCountries.length > 0;
+
+  const bordersQuery = useQuery({
+    queryKey: ['country-borders', 'license-fetch', countriesKey] as const,
+    queryFn: () => getCountryBorders(filterCountries),
+    enabled: enabled && countryScoped,
+    staleTime: 1000 * 60 * 60 * 24,
+    gcTime: 1000 * 60 * 60 * 24 * 7,
+  });
+
+  const countryFetchBounds = useMemo(() => {
+    if (!countryScoped) return null;
+    return (
+      licenseViewportBoundsFromGeoJson(bordersQuery.data) ?? LICENSE_COUNTRY_FETCH_HUB
+    );
+  }, [countryScoped, bordersQuery.data]);
+
+  const fetchBounds = useMemo(() => {
+    const view = effectiveViewportBounds;
+    if (countryScoped && countryFetchBounds && view) {
+      return intersectLicenseViewportBounds(countryFetchBounds, view) ?? view;
+    }
+    if (countryScoped) return countryFetchBounds;
+    return view;
+  }, [countryScoped, countryFetchBounds, effectiveViewportBounds]);
+
+  const query = useQuery({
+    queryKey: [
+      'licenses',
+      'viewport',
+      LICENSE_MAP_GO_ENABLED ? 'go' : 'py',
+      sector,
+      countriesKey,
+      'scoped',
+      fetchBounds,
+      effectiveViewportBounds,
+    ] as const,
+    staleTime: LICENSE_VIEWPORT_STALE_MS,
+    gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+    queryFn: async ({ signal }: QueryFunctionContext) => {
+      if (!fetchBounds) return [];
+      return fetchLicensesViewportFromApi({
+        sector,
+        bounds: fetchBounds,
+        collapseBounds: effectiveViewportBounds ?? fetchBounds,
+        countries: filterCountries.length ? filterCountries : undefined,
+        mapZoom,
+        signal,
+      });
+    },
+    enabled: enabled && fetchBounds != null,
+  });
+
+  const mapData = useMemo(() => {
+    const rows = query.data ?? [];
+    if (!effectiveViewportBounds) return rows;
+    return filterLicenseMapRowsToBounds(rows, effectiveViewportBounds);
+  }, [query.data, effectiveViewportBounds]);
+
+  const stillLoadingCountryCount =
+    query.isLoading && !query.data?.length ? 1 : 0;
+  const failedCountryQueryCount = query.isError && !query.data?.length ? 1 : 0;
+
+  return {
+    data: mapData,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    error: query.error instanceof Error ? query.error : query.error ? new Error(String(query.error)) : null,
+    stillLoadingCountryCount,
+    failedCountryQueryCount,
+    bundleMode: licenseBundleModeFromSector(sector),
+  };
 }
 
 export const useLicenses = (sector?: 'mining' | 'oil_and_gas'): UseLicensesResult => {
@@ -389,7 +773,7 @@ export const useLicenses = (sector?: 'mining' | 'oil_and_gas'): UseLicensesResul
   const syncCached = useMemo(() => readLicenseBundleCacheSync(bundleMode), [bundleMode]);
 
   const query = useQuery({
-    queryKey: ['licenses', 'bundle', bundleMode] as const,
+    queryKey: ['licenses', 'bundle', LICENSE_MAP_GO_ENABLED ? 'go' : 'py', bundleMode] as const,
     staleTime: LICENSE_BUNDLE_STALE_MS,
     gcTime: 2 * LICENSE_BUNDLE_STALE_MS,
     retry: 1,
@@ -496,11 +880,13 @@ export async function getAgentJob<TOutput = Record<string, unknown>>(
 export async function listDealRooms(options: {
   entityId?: string;
   entityKind?: string;
+  includeArchived?: boolean;
 } = {}): Promise<DealRoom[]> {
   const { data } = await apiClient.get<DealRoom[]>('/api/deal-rooms', {
     params: {
       ...(options.entityId ? { entity_id: options.entityId } : {}),
       ...(options.entityKind ? { entity_kind: options.entityKind } : {}),
+      ...(options.includeArchived ? { include_archived: true } : {}),
     },
   });
   return Array.isArray(data) ? data : [];
@@ -513,6 +899,10 @@ export async function createDealRoom(payload: {
   status?: string;
   routeSnapshot?: Record<string, unknown>;
   notes?: string;
+  rfq_quantity?: string;
+  rfq_hs_code?: string;
+  rfq_incoterm?: string;
+  rfq_product?: string;
 }): Promise<DealRoom> {
   const { data } = await apiClient.post<DealRoom>('/api/deal-rooms', {
     entity_id: payload.entityId,
@@ -521,6 +911,10 @@ export async function createDealRoom(payload: {
     status: payload.status,
     route_snapshot: payload.routeSnapshot,
     notes: payload.notes,
+    rfq_quantity: payload.rfq_quantity,
+    rfq_hs_code: payload.rfq_hs_code,
+    rfq_incoterm: payload.rfq_incoterm,
+    rfq_product: payload.rfq_product,
   });
   return data;
 }
@@ -991,52 +1385,75 @@ export interface MaritimeContextQuery {
   lat?: number;
   lng?: number;
   vessel_name?: string;
-  mmsi?: string;
-  imo?: string;
+  mmsi?: string | number;
+  imo?: string | number;
   destination?: string;
 }
 
-export {
-  useMaritimeVessels,
-  prefetchMaritimeVesselSnapshot,
-  fetchMaritimeVesselSnapshot,
-  MARITIME_INCLUDE_GULF_DEMO_LOCALSTORAGE_KEY,
-  MARITIME_INCLUDE_COASTAL_DEMO_LOCALSTORAGE_KEY,
-  readMaritimeIncludeGulfDemoPreference,
-  readMaritimeIncludeCoastalDemoPreference,
-} from './vessels/useVessels';
-export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
+function maritimeContextField(value: string | number | null | undefined): string {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+export { normalizeMaritimeContextResponse } from './maritimeContextNormalize';
 
 export const useMaritimeContext = (params: MaritimeContextQuery, enabled = true) => {
+  const normalized = useMemo(
+    () => ({
+      company: maritimeContextField(params.company),
+      country: maritimeContextField(params.country),
+      commodity: maritimeContextField(params.commodity),
+      vessel_name: maritimeContextField(params.vessel_name),
+      mmsi: maritimeContextField(params.mmsi),
+      imo: maritimeContextField(params.imo),
+      destination: maritimeContextField(params.destination),
+      lat: params.lat,
+      lng: params.lng,
+    }),
+    [params],
+  );
+
   const hasUsefulQuery =
-    Boolean(params.company?.trim()) ||
-    Boolean(params.country?.trim()) ||
-    Boolean(params.vessel_name?.trim()) ||
-    Boolean(params.mmsi?.trim()) ||
-    Boolean(params.imo?.trim());
+    Boolean(normalized.company) ||
+    Boolean(normalized.country) ||
+    Boolean(normalized.vessel_name) ||
+    Boolean(normalized.mmsi) ||
+    Boolean(normalized.imo);
 
   return useQuery<MaritimeContextResponse>({
-    queryKey: ['maritime-context', params],
+    queryKey: ['maritime-context', normalized],
     queryFn: async () => {
-      const { data } = await apiClient.get<MaritimeContextResponse>('/api/maritime/context', {
-        params,
+      const { data } = await apiClient.get<MaritimeContextResponse>('/api/oil-live/maritime/context', {
+        params: normalized,
       });
-      return data;
+      return normalizeMaritimeContextResponse(data);
     },
     enabled: enabled && hasUsefulQuery,
     staleTime: 2 * 60_000,
   });
 };
 
+export {
+  useMaritimeVessels,
+  prefetchMaritimeVesselSnapshot,
+  fetchMaritimeVesselSnapshot,
+} from './vessels/useVessels';
+export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
+
 export const useStorageTerminals = (enabled = true) => {
   return useQuery<StorageTerminalResponse>({
     queryKey: ['storage-terminals'],
     queryFn: async () => {
-      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals');
+      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
+        timeout: 12_000,
+      });
       return data;
     },
     enabled,
     staleTime: 30 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 };
 

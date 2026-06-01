@@ -1,0 +1,94 @@
+---
+description: Madsan Global Intelligence project rules
+alwaysApply: true
+---
+
+# Madsan Global Intelligence Cursor Rules
+
+You are working on Madsan Global Intelligence, an AI-powered commodity intelligence platform for mining, oil, logistics, companies, suppliers, buyers, importers, exporters, maps, dossiers, and opportunity scoring.
+
+## Main objective
+
+Build a profitable intelligence platform that helps identify, verify, score, and act on global commodity opportunities.
+
+Profit paths include:
+- deal sourcing and brokerage
+- paid intelligence reports
+- supplier/buyer verification reports
+- SaaS subscriptions
+- internal sourcing and trading advantage
+- custom due-diligence projects
+
+## Safety rules
+
+- Do not read, print, edit, or expose `.env`, `.env.local`, credentials, SSH keys, API keys, kube configs, cloud credentials, or secrets.
+- Do not commit, push, deploy, or run destructive commands unless explicitly instructed.
+- Do not use Docker socket access.
+- Do not modify production infrastructure without explaining the change first.
+- Keep all code changes small, reviewable, and easy to revert.
+- Always inspect existing code before creating new files.
+- Always summarize changed files.
+
+## Repo workflow
+
+Before coding:
+1. Read `AGENTS.md`.
+2. Inspect the repo structure.
+3. Identify backend, frontend, data, map, and agent-related areas.
+4. Write a short plan before editing.
+5. Prefer small incremental changes.
+
+After coding:
+1. Run available tests/typechecks where practical.
+2. Show the changed files.
+3. Explain the business value.
+4. Suggest the next task for Paperclip.
+
+## Paperclip workflow
+
+Paperclip is the company control plane.
+
+Use Paperclip tasks as the source of truth for:
+- roadmap
+- goals
+- agent delegation
+- business priorities
+- execution tracking
+
+When working from a Paperclip task:
+1. Restate the goal.
+2. Identify affected files.
+3. Make the smallest useful change.
+4. Summarize what changed.
+5. Suggest how to update the Paperclip task status.
+
+## Architecture priorities
+
+Prioritize:
+- company dossiers
+- opportunity scoring
+- map layers
+- data ingestion
+- open/free data sources
+- PostGIS/geospatial support
+- clean UI for human due diligence
+- Obsidian brain (`~/ai-agent-stack/obsidian-vault`, index `MADSAN_BRAIN.md`) — see `obsidian-brain.mdc`
+- Paperclip/OpenClaw/Cursor workflow
+
+Avoid:
+- paid APIs for MVP unless explicitly approved
+- illegal scraping
+- bypassing paywalls
+- uncontrolled agent actions
+- exposing private data
+
+## First engineering focus
+
+The first useful MVP should include:
+- repo structure summary
+- company dossier template
+- opportunity scoring model
+- map/live-data architecture
+- first public data ingestion plan
+- first 50 lead categories
+- exportable due-diligence report template

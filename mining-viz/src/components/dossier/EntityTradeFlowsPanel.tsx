@@ -13,6 +13,8 @@ interface StoredTradeFlow {
   year?: number;
   trade_value_usd?: number | null;
   data_source?: string;
+  bol_tier?: string;
+  sourceRecordUrl?: string;
 }
 
 interface EntityTradeFlowsResponse {
@@ -61,7 +63,7 @@ export default function EntityTradeFlowsPanel({
   if (isLoading) {
     return (
       <Card className="p-4 text-xs text-slate-500">
-        {t('טוען זרימות סחר מ-Comtrade…', 'Loading stored Comtrade trade flows…')}
+        {t('טוען זרימות סחר מאקרו…', 'Loading stored macro trade flows (Comtrade, Eurostat)…')}
       </Card>
     );
   }
@@ -69,14 +71,38 @@ export default function EntityTradeFlowsPanel({
   if (isError || !data) return null;
 
   const flows = data.flows || [];
-  if (!flows.length && !(data.warnings?.length)) return null;
+  const warnings = data.warnings || [];
+
+  if (!flows.length) {
+    return (
+      <Card className="p-4 space-y-2 border-amber-500/25 bg-amber-500/5">
+        <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+          {t('זרימות סחר (מאקרו)', 'Trade flows (macro)')}
+        </p>
+        <Badge variant="outline" className="text-[10px] uppercase">
+          {t('רמת מאקרו', 'bol_tier: macro')}
+        </Badge>
+        {warnings.map((w, i) => (
+          <p key={i} className="text-xs text-slate-600 dark:text-slate-400">
+            {w}
+          </p>
+        ))}
+        <p className="text-[11px] text-slate-500">
+          {t(
+            'הריצו graph-sync — Comtrade (מפתח API) + Eurostat (EU, ללא מפתח) ב-oil_trade_flows; כרייה ב-commodity_trade_flows.',
+            'Run graph-sync — Comtrade (API key) + Eurostat (EU, no key) in oil_trade_flows; mining rows in commodity_trade_flows.',
+          )}
+        </p>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 space-y-3 border-amber-500/20">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
-            {t('זרימות סחר (Comtrade DB)', 'Trade flows (Comtrade DB)')}
+            {t('זרימות סחר (מאקרו DB)', 'Trade flows (macro DB)')}
           </p>
           {data.country && (
             <p className="text-[10px] text-slate-500">
@@ -103,6 +129,8 @@ export default function EntityTradeFlowsPanel({
                 <th className="py-1 pr-2">Flow</th>
                 <th className="py-1 pr-2">HS</th>
                 <th className="py-1 pr-2">Partner</th>
+                <th className="py-1 pr-2">Source</th>
+                <th className="py-1 pr-2">Tier</th>
                 <th className="py-1">USD</th>
               </tr>
             </thead>
@@ -118,6 +146,23 @@ export default function EntityTradeFlowsPanel({
                   </td>
                   <td className="py-1 pr-2">{row.hs_code}</td>
                   <td className="py-1 pr-2">{row.partner || '—'}</td>
+                  <td className="py-1 pr-2 text-slate-500">
+                    {row.sourceRecordUrl ? (
+                      <a
+                        href={row.sourceRecordUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-cyan-700 dark:text-cyan-300"
+                      >
+                        {row.data_source || 'verify'}
+                      </a>
+                    ) : (
+                      row.data_source || '—'
+                    )}
+                  </td>
+                  <td className="py-1 pr-2 text-slate-500 uppercase text-[10px]">
+                    {row.bol_tier || 'macro'}
+                  </td>
                   <td className="py-1">{fmtUsd(row.trade_value_usd)}</td>
                 </tr>
               ))}

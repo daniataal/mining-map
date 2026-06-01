@@ -33,6 +33,59 @@ class PetroleumOsmOverpassTests(unittest.TestCase):
         self.assertEqual(payload["feature_count"], 1)
         self.assertEqual(payload["features"][0]["geometry"]["type"], "LineString")
 
+    def test_element_to_feature_preserves_pipeline_operational_tags(self):
+        feat = osm._element_to_feature(
+            "pipelines",
+            {
+                "type": "way",
+                "id": 98483828,
+                "tags": {
+                    "man_made": "pipeline",
+                    "name": "Example Pipe",
+                    "operator": "Acme Pipelines",
+                    "owner": "Acme Holdings",
+                    "substance": "oil",
+                    "diameter": "48 in",
+                    "ref": "LINE-1",
+                    "wikipedia": "en:Example",
+                },
+                "geometry": [
+                    {"lat": 1.0, "lon": 2.0},
+                    {"lat": 1.1, "lon": 2.1},
+                ],
+            },
+        )
+        self.assertIsNotNone(feat)
+        props = feat["properties"]
+        self.assertEqual(props["operator"], "Acme Pipelines")
+        self.assertEqual(props["owner"], "Acme Holdings")
+        self.assertEqual(props["substance"], "oil")
+        self.assertEqual(props["diameter"], "48 in")
+        self.assertEqual(props["ref"], "LINE-1")
+        self.assertEqual(props["wikipedia"], "en:Example")
+        self.assertEqual(props["osm_id"], 98483828)
+        self.assertEqual(props["pipeline_substance"], "oil")
+
+    def test_element_to_feature_classifies_water_by_name(self):
+        feat = osm._element_to_feature(
+            "pipelines",
+            {
+                "type": "way",
+                "id": 296661798,
+                "tags": {
+                    "man_made": "pipeline",
+                    "name": "مشروع المياه القطري",
+                    "name:ar": "مشروع المياه القطري",
+                },
+                "geometry": [
+                    {"lat": 32.788, "lon": 35.284},
+                    {"lat": 32.787, "lon": 35.283},
+                ],
+            },
+        )
+        self.assertIsNotNone(feat)
+        self.assertEqual(feat["properties"]["pipeline_substance"], "water")
+
     @patch("backend.services.petroleum_osm_overpass.urlopen")
     def test_fetch_overpass_parses_elements(self, mock_urlopen):
         body = {"elements": [{"type": "node", "id": 1, "lat": 1, "lon": 2, "tags": {}}]}

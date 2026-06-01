@@ -23,4 +23,12 @@ describe('dealRoomIndex', () => {
     expect(getDealRoomForLicense(map, 'lic-2')?.id).toBe('b');
     expect(getDealRoomForLicense(map, 'missing')).toBeUndefined();
   });
+
+  it('skips archived rooms for entity lookup', () => {
+    const map = buildDealRoomByEntityKey([
+      room('a', 'lic-1'),
+      { ...room('b', 'lic-1'), status: 'archived' },
+    ]);
+    expect(getDealRoomForLicense(map, 'lic-1')?.id).toBe('a');
+  });
 });

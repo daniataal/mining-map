@@ -783,6 +783,215 @@
   width: 100%;
 }
 
+/* EIA historic origin popups */
+.leaflet-popup.eia-historic-leaflet-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #0f1419;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.leaflet-popup.eia-historic-leaflet-popup .leaflet-popup-tip {
+  background: #0f1419;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+}
+
+.leaflet-popup.eia-historic-leaflet-popup .leaflet-popup-content {
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: 280px;
+  max-width: 340px;
+}
+
+.leaflet-popup.eia-historic-leaflet-popup a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #a78bfa;
+  font-size: 20px;
+}
+
+.leaflet-popup.eia-historic-leaflet-popup a.leaflet-popup-close-button:hover {
+  color: #ede9fe;
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.eia-historic-popup-card {
+  padding: 14px 16px 12px;
+  color: #e2e8f0;
+  font-family: inherit;
+}
+
+.eia-historic-popup-card--hub {
+  padding-bottom: 14px;
+}
+
+.eia-historic-route-pill {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  font-size: 11px;
+  font-weight: 700;
+  color: #ddd6fe;
+}
+
+.eia-historic-route-arrow {
+  color: #a78bfa;
+  font-size: 14px;
+}
+
+.eia-historic-route-to {
+  color: #c4b5fd;
+}
+
+.eia-historic-popup-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.eia-historic-popup-icon {
+  width: 18px;
+  height: 18px;
+  color: #a78bfa;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.eia-historic-popup-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+  line-height: 1.25;
+}
+
+.eia-historic-popup-sub {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.eia-historic-popup-tier {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.18);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.eia-historic-popup-section {
+  margin-bottom: 10px;
+}
+
+.eia-historic-popup-label {
+  margin: 0 0 6px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.eia-historic-popup-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eia-historic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: #cbd5e1;
+}
+
+.eia-historic-chip-val {
+  font-variant-numeric: tabular-nums;
+  color: #a78bfa;
+  font-weight: 700;
+}
+
+.eia-historic-importer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eia-historic-importer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.eia-historic-importer-btn:hover {
+  background: rgba(139, 92, 246, 0.22);
+  border-color: rgba(167, 139, 250, 0.5);
+}
+
+.eia-historic-importer-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e9d5ff;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.eia-historic-importer-meta {
+  display: block;
+  margin-top: 2px;
+  padding-left: 8px;
+  font-size: 10px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.eia-historic-popup-foot {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(51, 65, 85, 0.6);
+  font-size: 9px;
+  color: #64748b;
+  line-height: 1.35;
+}
+
 /* ESG protected-area popups (conservation buffer circles) */
 .leaflet-popup.esg-leaflet-popup .leaflet-popup-content-wrapper {
   padding: 0;
@@ -1026,6 +1235,73 @@
 .custom-cluster-icon--light:hover {
   background: rgba(37, 99, 235, 0.28);
   box-shadow: 0 4px 14px rgba(30, 64, 175, 0.35), inset 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+/* Server-side viewport clusters (world zoom) — no pulse, calmer at scale */
+.custom-cluster-icon--server {
+  animation: none;
+}
+
+.oil-terminal-cluster-icon {
+  background: rgba(37, 99, 235, 0.85);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.45);
+  font-size: 12px !important;
+}
+
+.leaflet-popup.oil-live-leaflet-popup .leaflet-popup-content {
+  margin: 0;
+  padding: 12px 14px;
+  min-width: 200px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.leaflet-popup.oil-live-leaflet-popup .leaflet-popup-content strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.oil-live-popup-body p {
+  margin: 4px 0 0;
+}
+
+.oil-live-popup-muted {
+  font-size: 11px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.oil-live-popup-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.oil-live-popup-btn:hover {
+  background: #1d4ed8;
+}
+
+.oil-live-popup-btn--outline {
+  margin-top: 6px;
+  background: transparent;
+  color: #2563eb;
+  border: 1px solid #2563eb;
+}
+
+.oil-live-popup-btn--outline:hover {
+  background: rgba(37, 99, 235, 0.08);
 }
 
 @keyframes pulse-glow {
@@ -1379,7 +1655,8 @@
 
 .leaflet-canvas-vessel-layer {
   pointer-events: auto;
-  z-index: 450;
+  /* Above license MarkerClusterGroup (~600) so AIS chevrons stay visible in dense map areas. */
+  z-index: 650;
 }
 
 .leaflet-tooltip.vessel-canvas-tooltip {
@@ -1389,24 +1666,34 @@
   padding: 0;
 }
 .refinery-marker,
-.oil-field-marker {
+.oil-field-marker,
+.storage-terminal-marker,
+.tank-farm-marker {
   background: transparent !important;
   border: none !important;
 }
 .refinery-marker-pin,
-.oil-field-marker-pin {
+.oil-field-marker-pin,
+.storage-terminal-marker-pin,
+.tank-farm-marker-pin {
   line-height: 0;
 }
 .refinery-marker-pin svg,
-.oil-field-marker-pin svg {
+.oil-field-marker-pin svg,
+.storage-terminal-marker-pin svg,
+.tank-farm-marker-pin svg {
   display: block;
   flex-shrink: 0;
   pointer-events: none;
 }
 .refinery-marker.is-selected .refinery-marker-pin,
 .oil-field-marker.is-selected .oil-field-marker-pin,
+.storage-terminal-marker.is-selected .storage-terminal-marker-pin,
+.tank-farm-marker.is-selected .tank-farm-marker-pin,
 .refinery-marker-pin.is-selected,
-.oil-field-marker-pin.is-selected {
+.oil-field-marker-pin.is-selected,
+.storage-terminal-marker-pin.is-selected,
+.tank-farm-marker-pin.is-selected {
   transform: scale(1.12);
   z-index: 1100;
 }
@@ -1433,4 +1720,80 @@
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   padding: 2px 6px;
+}
+
+/* ShipVault nested panels inside maritime drawer */
+.oil-maritime-panel .shipvault-slide-over {
+  backdrop-filter: blur(12px);
+}
+
+@media (max-width: 640px) {
+  .oil-maritime-panel {
+    width: min(96vw, 100%) !important;
+  }
+}
+
+/* Maritime vessel focus mode — track + indicative route legend */
+.maritime-focus-legend {
+  padding: 0.65rem 0.85rem;
+  border-radius: 1rem;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  color: #e2e8f0;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.maritime-focus-legend__title {
+  margin: 0 0 0.35rem;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #22d3ee;
+}
+
+.maritime-focus-legend__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.maritime-focus-legend__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.maritime-focus-legend__swatch {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 0.2rem;
+  margin-top: 0.35rem;
+  border-radius: 1px;
+}
+
+.maritime-focus-legend__swatch--track {
+  background: #22d3ee;
+}
+
+.maritime-focus-legend__swatch--projected {
+  background: repeating-linear-gradient(
+    90deg,
+    #c084fc 0,
+    #c084fc 5px,
+    transparent 5px,
+    transparent 8px
+  );
+}
+
+.maritime-focus-legend__hint {
+  margin: 0.45rem 0 0;
+  font-size: 9px;
+  color: #94a3b8;
 }

@@ -19,6 +19,8 @@ export interface MiningLicense {
     | 'rail_terminal'
     | 'logistics_hub'
     | 'depot'
+    | 'fuel_depot'
+    | 'storage_tank'
     | string
     | null;
   recordOrigin?: 'open_data' | 'global_open_fallback' | 'bundled_json' | 'manual' | 'csv_import' | 'user_import_csv' | string | null;
@@ -39,7 +41,7 @@ export interface MiningLicense {
   sourceRecordUrl?: string | null;
   sourceUpdatedAt?: string | null;
   lastSyncedAt?: string | null;
-  sourceKind?: 'official_registry' | 'global_open_fallback' | 'user_import_csv' | 'bundled_json' | 'unknown' | string | null;
+  sourceKind?: 'official_registry' | 'global_open_fallback' | 'user_import_csv' | 'bundled_json' | 'curated_reference' | 'unknown' | string | null;
   sourceAccess?: string | null;
   coverageState?: string | null;
   provenanceNote?: string | null;
@@ -51,16 +53,27 @@ export interface MiningLicense {
   originalLat?: number | null;
   originalLng?: number | null;
   operatorName?: string | null;
+  ownerName?: string | null;
+  substanceText?: string | null;
   sourceLabels?: string[];
   commodityHints?: string[];
   capacityText?: string | null;
   confidenceScore?: number | null;
   confidenceNote?: string | null;
+  /** Curated ingest notes (OPEC Gulf, etc.) — short text, not full raw_payload. */
+  enrichmentNote?: string | null;
   nearbyPort?: MaritimePortReference | null;
   evidenceCount?: number | null;
   locode?: string | null;
   countryIso2?: string | null;
   subdivision?: string | null;
+  /** Server-side viewport cluster count (low zoom); not a real license row. */
+  mapClusterCount?: number;
+  /** Grid cell size (degrees) when `mapClusterCount` is set. */
+  mapClusterGridDeg?: number;
+  /** Map render position (cluster land-snap / colocation jitter). */
+  _displayLat?: number | null;
+  _displayLng?: number | null;
 }
 
 export interface MarketTickerRow {
@@ -126,6 +139,13 @@ export interface ContactEnrichmentOutput {
   contacts: EntityContact[];
   not_found: string[];
   limitations: string[];
+  web_discovery?: {
+    configured?: boolean;
+    engine?: string | null;
+    query?: string | null;
+    urls_tried?: Array<{ url?: string; status?: number }>;
+    skipped_robots?: string[];
+  };
   ai?: {
     status?: string | null;
     reason?: string | null;
@@ -438,6 +458,8 @@ export interface UserAnnotation {
   phoneNumber?: string;
   leadValue?: LeadValue;
   feeNote?: string;
+  checklist?: ChecklistItem[];
+  checklistUpdatedAt?: string;
   [key: string]: any;
 }
 
@@ -597,6 +619,7 @@ export interface MaritimeContextResponse {
 export type {
   MaritimeVessel,
   MaritimeVesselScope,
+  MaritimeTankerView,
   MaritimeViewportBounds,
   MaritimeVesselFeedResponse,
   VesselFilters,
@@ -626,10 +649,12 @@ export interface StorageTerminalStats {
   total: number;
   countries: number;
   with_operator: number;
+  with_owner?: number;
   with_capacity: number;
   with_nearby_port: number;
   high_confidence: number;
   by_subtype: Record<string, number>;
+  by_source?: Record<string, number>;
   top_countries: Array<{ country: string; count: number }>;
 }
 
@@ -778,4 +803,3 @@ export interface WorldCoverageResponse {
   countries: WorldCoverageCountry[];
   sources: SourceCatalogEntry[];
 }
-

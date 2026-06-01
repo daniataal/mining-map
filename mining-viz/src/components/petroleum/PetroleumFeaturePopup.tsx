@@ -4,6 +4,7 @@ import {
   petroleumLayerTypeLabel,
 } from '../../lib/petroleumFeatureFields';
 import type { PetroleumLayerId } from '../../lib/petroleumLayers';
+import { pipelineSubstancePopupLayerId } from '../../lib/pipelineSubstance';
 import { useI18n } from '../../lib/i18n';
 import { ExternalLink, MapPin } from 'lucide-react';
 
@@ -41,6 +42,12 @@ const LAYER_ACCENT: Record<
     border: 'border-sky-500/25',
     dot: 'bg-sky-400',
   },
+};
+
+const WATER_PIPELINE_ACCENT = {
+  badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+  border: 'border-cyan-500/25',
+  dot: 'bg-cyan-400',
 };
 
 interface PetroleumFeaturePopupProps {
@@ -99,20 +106,38 @@ export default function PetroleumFeaturePopup({
 }: PetroleumFeaturePopupProps) {
   const { t } = useI18n();
   const model = buildPetroleumFeatureViewModel(properties, layerId);
-  const accent = LAYER_ACCENT[layerId];
-  const layerLabel = petroleumLayerTypeLabel(layerId);
+  const accent =
+    model.pipelineSubstance === 'water'
+      ? WATER_PIPELINE_ACCENT
+      : LAYER_ACCENT[
+          model.pipelineSubstance != null
+            ? pipelineSubstancePopupLayerId(model.pipelineSubstance)
+            : layerId
+        ] ?? LAYER_ACCENT[layerId];
+  const layerLabel = model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(layerId);
   const showExploringSection =
     layerId === 'exploration' || layerId === 'production' || layerId === 'bid_rounds';
+  const isOsmPipeline =
+    model.isOsmFeature &&
+    (layerId === 'oil_pipelines' || layerId === 'gas_pipelines');
+  const showOperatorSection = isOsmPipeline || (model.operator && !showExploringSection);
   const companiesUnknownHint = model.sourceUrl
     ? t('לא ידוע — ראה מקור', 'Unknown — see source')
     : t('לא ידוע', 'Unknown');
+  const operatorMissingHint = t(
+    'מפעיל לא מתויג ב-OSM',
+    'Operator not tagged in OSM'
+  );
 
   const detailRows: { label: string; value: string }[] = [];
   if (model.facilityType && model.facilityType !== layerLabel) {
     detailRows.push({ label: t('סוג', 'Type'), value: model.facilityType });
   }
-  if (model.operator && !showExploringSection) {
-    detailRows.push({ label: t('מפעיל', 'Operator'), value: model.operator });
+  if (model.owner && model.owner !== model.operator) {
+    detailRows.push({ label: t('בעלים', 'Owner'), value: model.owner });
+  }
+  for (const row of model.pipelineDetails) {
+    detailRows.push(row);
   }
   if (model.country) {
     detailRows.push({ label: t('מדינה', 'Country'), value: model.country });
@@ -176,6 +201,20 @@ export default function PetroleumFeaturePopup({
         />
       )}
 
+      {showOperatorSection && !showExploringSection && (
+        <ExploringCompaniesSection
+          label={t('מפעיל', 'Operator')}
+          companies={
+            model.operator
+              ? [model.operator]
+              : model.exploringCompanies.length > 0
+                ? model.exploringCompanies
+                : []
+          }
+          unknownHint={isOsmPipeline ? operatorMissingHint : companiesUnknownHint}
+        />
+      )}
+
       {detailRows.length > 0 && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
           {detailRows.map((row) => (
@@ -204,8 +243,32 @@ export default function PetroleumFeaturePopup({
             {sourceLinkLabel}
           </a>
         )}
+        {model.wikipediaUrl && (
+          <a
+            href={model.wikipediaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 break-all"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('ויקיפדיה', 'Wikipedia')}
+          </a>
+        )}
+        {model.wikidataUrl && (
+          <a
+            href={model.wikidataUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 break-all"
+          >
+            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Wikidata
+          </a>
+        )}
         <p className="text-[9px] uppercase tracking-wide text-slate-600">
-          {t('נתוני שכבה', 'Compiled layer')} · oilmap tileset
+          {model.isOsmFeature
+            ? t('נתוני קהילה', 'Community layer') + ' · OpenStreetMap'
+            : t('נתוני שכבה', 'Compiled layer') + ' · oilmap tileset'}
         </p>
       </footer>
     </article>

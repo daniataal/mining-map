@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Briefcase, Plus, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, Briefcase, Plus, Search } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
-import { createDealRoom } from '../lib/api';
+import { createDealRoom, updateDealRoom } from '../lib/api';
+import { DEAL_ROOM_ARCHIVED_STATUS, isDealRoomArchived } from '../lib/dealRoomIndex';
 import type { DealRoom, MiningLicense } from '../types';
 import DealRoomPanel from './DealRoomPanel';
 import { Badge } from './ui/badge';
@@ -31,18 +32,25 @@ export default function DealRoomsListPanel({
   const { t } = useI18n();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const licenseById = useMemo(
     () => Object.fromEntries(allLicenses.map((item) => [item.id, item])),
     [allLicenses],
   );
 
-  const filteredRooms = useMemo(() => {
+  const activeRooms = useMemo(() => rooms.filter((room) => !isDealRoomArchived(room)), [rooms]);
+  const archivedCount = rooms.length - activeRooms.length;
+
+  const visibleRooms = useMemo(() => {
+    const base = showArchived ? rooms : activeRooms;
     const q = search.trim().toLowerCase();
-    if (!q) return rooms;
-    return rooms.filter((room) => {
+    if (!q) return base;
+    return base.filter((room) => {
       const license = licenseById[room.entityId];
       const haystack = [
         room.title,
@@ -59,7 +67,31 @@ export default function DealRoomsListPanel({
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [licenseById, rooms, search]);
+  }, [activeRooms, licenseById, rooms, search, showArchived]);
+
+  async function handleArchiveRoom(room: DealRoom, reactivate = false) {
+    setIsArchiving(true);
+    setArchiveError(null);
+    try {
+      const updated = await updateDealRoom(room.id, {
+        status: reactivate ? 'open' : DEAL_ROOM_ARCHIVED_STATUS,
+      });
+      onRoomChange(updated);
+      if (!reactivate && selectedId === room.id) {
+        setSelectedId(null);
+      }
+      await onRefresh();
+    } catch {
+      setArchiveError(
+        t(
+          reactivate ? 'לא ניתן להפעיל מחדש את החדר' : 'לא ניתן לארכב את החדר',
+          reactivate ? 'Could not reactivate deal room.' : 'Could not archive deal room.',
+        ),
+      );
+    } finally {
+      setIsArchiving(false);
+    }
+  }
 
   useEffect(() => {
     if (!highlightedRoomId) return;
@@ -98,6 +130,7 @@ export default function DealRoomsListPanel({
   }
 
   if (selectedRoom) {
+    const archived = isDealRoomArchived(selectedRoom);
     return (
       <div className="max-w-5xl mx-auto w-full px-2 sm:px-4 pb-8 overflow-y-auto">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -110,18 +143,41 @@ export default function DealRoomsListPanel({
           >
             {t('← כל החדרים', '← All rooms')}
           </Button>
-          {selectedEntity && (
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedEntity && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenEntity(selectedEntity)}
+                className="rounded-xl text-[10px] font-black uppercase tracking-widest"
+              >
+                {t('פתח תיקייה', 'Open dossier')}
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onOpenEntity(selectedEntity)}
+              disabled={isArchiving}
+              onClick={() => void handleArchiveRoom(selectedRoom, archived)}
               className="rounded-xl text-[10px] font-black uppercase tracking-widest"
             >
-              {t('פתח תיקייה', 'Open dossier')}
+              {archived ? (
+                <>
+                  <ArchiveRestore className="w-3.5 h-3.5 mr-1.5" />
+                  {t('הפעל מחדש', 'Reactivate')}
+                </>
+              ) : (
+                <>
+                  <Archive className="w-3.5 h-3.5 mr-1.5" />
+                  {t('העבר לארכיון', 'Archive')}
+                </>
+              )}
             </Button>
-          )}
+          </div>
         </div>
+        {archiveError && <p className="mb-3 text-xs font-bold text-red-500">{archiveError}</p>}
         <DealRoomPanel
           dealRoom={selectedRoom}
           entity={selectedEntity}
@@ -143,8 +199,13 @@ export default function DealRoomsListPanel({
               {t('חדרי עסקאות', 'Deal Rooms')}
             </h2>
             <Badge className="bg-slate-500/15 text-slate-600 dark:text-slate-300 border-none text-[10px] font-black uppercase">
-              {rooms.length} {t('פעילים', 'active')}
+              {activeRooms.length} {t('פעילים', 'active')}
             </Badge>
+            {archivedCount > 0 && (
+              <Badge className="bg-slate-500/10 text-slate-500 border-none text-[10px] font-black uppercase">
+                {archivedCount} {t('בארכיון', 'archived')}
+              </Badge>
+            )}
           </div>
           <Button
             type="button"
@@ -156,6 +217,16 @@ export default function DealRoomsListPanel({
             {isCreating ? t('יוצר…', 'Creating…') : t('חדר חדש', 'New room')}
           </Button>
         </div>
+
+        <label className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(event) => setShowArchived(event.target.checked)}
+            className="rounded border-slate-300"
+          />
+          {t('הצג ארכיון', 'Show archived')}
+        </label>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -170,16 +241,19 @@ export default function DealRoomsListPanel({
         {createError && (
           <p className="text-xs font-bold text-red-500">{createError}</p>
         )}
+        {archiveError && (
+          <p className="text-xs font-bold text-red-500">{archiveError}</p>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading ? (
           <p className="text-sm font-semibold text-slate-500">{t('טוען חדרים…', 'Loading deal rooms…')}</p>
-        ) : filteredRooms.length === 0 ? (
+        ) : visibleRooms.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-black/10 dark:border-white/10 p-10 text-center">
             <Briefcase className="w-10 h-10 mx-auto text-slate-400 mb-3" />
             <p className="text-sm font-bold text-slate-500">
-              {rooms.length === 0
+              {activeRooms.length === 0 && !showArchived
                 ? t(
                     'אין עדיין חדרי עסקאות. הוסף רישיון מתיקייה או צור חדר חדש.',
                     'No deal rooms yet. Add a license from a dossier or create a new room.',
@@ -189,9 +263,10 @@ export default function DealRoomsListPanel({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
-            {filteredRooms.map((room) => {
+            {visibleRooms.map((room) => {
               const license = licenseById[room.entityId];
               const isHighlighted = room.id === highlightedRoomId;
+              const archived = isDealRoomArchived(room);
               return (
                 <button
                   key={room.id}
@@ -200,11 +275,13 @@ export default function DealRoomsListPanel({
                   className={`text-left rounded-2xl border p-4 transition-all hover:border-amber-500/40 hover:bg-amber-500/[0.04] ${
                     isHighlighted
                       ? 'border-amber-500 bg-amber-500/10 ring-2 ring-amber-500/30'
-                      : 'border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03]'
+                      : archived
+                        ? 'border-slate-300/50 dark:border-slate-600/50 bg-slate-500/[0.04] opacity-80'
+                        : 'border-black/10 dark:border-white/10 bg-black/[0.02] dark:bg-white/[0.03]'
                   }`}
                 >
-                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
-                    {room.status}
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${archived ? 'text-slate-500' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {archived ? t('בארכיון', 'archived') : room.status}
                   </p>
                   <p className="mt-1 text-sm font-black uppercase text-slate-900 dark:text-white line-clamp-2">
                     {room.title}

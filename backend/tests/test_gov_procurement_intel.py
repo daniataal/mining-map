@@ -153,6 +153,19 @@ class CollectTests(unittest.TestCase):
 
 
 class CommodityFeedTests(unittest.TestCase):
+    def test_all_commodity_profiles_use_usaspending_naics_lengths(self):
+        from backend.services.gov_procurement_intel import COMMODITY_FEED_PROFILES
+
+        for profile in COMMODITY_FEED_PROFILES:
+            payload = build_commodity_feed_search_payload(profile)
+            naics = (payload["filters"].get("naics_codes") or {}).get("require") or []
+            for code in naics:
+                self.assertIn(
+                    len(code),
+                    (2, 4, 6),
+                    f"profile {profile.get('id')!r} NAICS {code!r} must be length 2, 4, or 6",
+                )
+
     def test_feed_payload_uses_naics_and_keywords(self):
         profile = {
             "id": "gold",

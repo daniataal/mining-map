@@ -118,7 +118,7 @@ _SHIPPING_METHODS: list[ShippingMethodInfo] = [
         typical_cost_usd_per_tkm=0.005,
         requires_port=True,
         supports_hazardous=True,
-        notes="Vessel reference comes from the AIS feed at /api/maritime/vessels.",
+        notes="Vessel reference comes from the AIS feed at /api/oil-live/vessels/live.",
     ),
     ShippingMethodInfo(
         method=ShippingMethod.AIR,

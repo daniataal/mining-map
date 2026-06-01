@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyVesselFilters, canonicalShipTypeChipFromVessel } from './filters';
+import { applyVesselFilters, canonicalShipTypeChipFromVessel, parseAisShipTypeCode } from './filters';
 import type { MaritimeVessel, VesselFilters } from './types';
 
 const baseVessel = (over: Partial<MaritimeVessel>): MaritimeVessel => ({
@@ -30,6 +30,15 @@ describe('canonicalShipTypeChipFromVessel', () => {
   it('maps non-canonical labels to filter chips', () => {
     expect(canonicalShipTypeChipFromVessel(baseVessel({ ship_type_label: 'LNG Carrier' }))).toBe('Tanker');
     expect(canonicalShipTypeChipFromVessel(baseVessel({ ship_type_label: 'Bulk carrier' }))).toBe('Cargo');
+  });
+
+  it('parses numeric string AIS type codes from JSON snapshots', () => {
+    expect(parseAisShipTypeCode('82')).toBe(82);
+    expect(
+      canonicalShipTypeChipFromVessel(
+        baseVessel({ ship_type_code: '82' as unknown as number, ship_type_label: null }),
+      ),
+    ).toBe('Tanker');
   });
 });
 

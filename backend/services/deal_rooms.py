@@ -66,6 +66,9 @@ def _safe_json(value: Any, default: Any) -> Any:
     return default
 
 
+ARCHIVED_STATUS = "archived"
+
+
 def ensure_deal_rooms_table(conn: Any) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -164,6 +167,7 @@ def create_deal_room(
     status: str = "open",
     route_snapshot: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
+    rfq: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     ensure_deal_rooms_table(conn)
     entity = load_entity_basics(conn, entity_id, entity_kind)
@@ -188,7 +192,7 @@ def create_deal_room(
                 status,
                 _jsonb(route_snapshot) if route_snapshot is not None else None,
                 _jsonb([]),
-                _jsonb({"entity": entity, "agentOutputs": {}, "confidence": None}),
+                _jsonb({"entity": entity, "agentOutputs": {}, "confidence": None, "rfq": rfq or {}}),
                 notes,
             ),
         )
@@ -197,10 +201,19 @@ def create_deal_room(
     return serialize_deal_room(_row_to_dict(row))
 
 
-def list_deal_rooms(conn: Any, *, entity_id: Optional[str] = None, entity_kind: Optional[str] = None) -> list[dict[str, Any]]:
+def list_deal_rooms(
+    conn: Any,
+    *,
+    entity_id: Optional[str] = None,
+    entity_kind: Optional[str] = None,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     ensure_deal_rooms_table(conn)
     where = []
     params: list[Any] = []
+    if not include_archived:
+        where.append("status <> %s")
+        params.append(ARCHIVED_STATUS)
     if entity_id:
         where.append("entity_id = %s")
         params.append(entity_id)

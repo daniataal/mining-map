@@ -1,9 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../lib/api';
+import { isAnnotationsAuthError } from '../lib/annotationsAuth';
+import { fetchLicenseAnnotationsFromServer, resetSharedAnnotationsHydration } from '../lib/annotationsHydration';
+import {
+  blockAnnotationsServerHydration,
+  clearMiningAuthStorage,
+  isAnnotationsServerHydrationBlocked,
+  isJwtExpired,
+  resetAnnotationsHydrationSession,
+} from '../lib/miningAuth';
+import { normalizeAnnotationStage } from '../lib/dealWorkflow';
 import type { UserAnnotation } from '../types';
+
+export { isAnnotationsAuthError } from '../lib/annotationsAuth';
 
 const LOCAL_STORAGE_KEY = 'mining_user_data';
 const MIGRATION_FLAG_KEY = 'mining_annotations_migrated_v1';
+
+/** Client-only license IDs are not persisted in Postgres. */
+function isLocalOnlyLicenseId(licenseId: string): boolean {
+  return licenseId.startsWith('user_csv:') || licenseId.startsWith('local:');
+}
+
+export type UseLicenseAnnotationsOptions = {
+  /** Called when the server rejects the stored JWT (expired / invalid). */
+  onAuthInvalid?: () => void;
+};
 
 function readLocalAnnotations(): Record<string, UserAnnotation> {
   try {
@@ -14,13 +36,24 @@ function readLocalAnnotations(): Record<string, UserAnnotation> {
   }
 }
 
+function normalizeRecord(record: Record<string, UserAnnotation>): Record<string, UserAnnotation> {
+  const out: Record<string, UserAnnotation> = {};
+  for (const [id, ann] of Object.entries(record)) {
+    out[id] = normalizeAnnotationStage(ann);
+  }
+  return out;
+}
+
 function mergeAnnotations(
   local: Record<string, UserAnnotation>,
   server: Record<string, UserAnnotation>,
 ): Record<string, UserAnnotation> {
-  const merged: Record<string, UserAnnotation> = { ...local };
+  const merged: Record<string, UserAnnotation> = { ...normalizeRecord(local) };
   for (const [licenseId, serverAnn] of Object.entries(server)) {
-    merged[licenseId] = { ...(local[licenseId] || {}), ...serverAnn };
+    merged[licenseId] = normalizeAnnotationStage({
+      ...(merged[licenseId] || {}),
+      ...serverAnn,
+    });
   }
   return merged;
 }
@@ -29,15 +62,39 @@ function mergeAnnotations(
  * User license annotations: server is source of truth when logged in;
  * localStorage is offline cache / one-time migration source.
  */
-export function useLicenseAnnotations(token: string | null | undefined) {
+export function useLicenseAnnotations(
+  token: string | null | undefined,
+  options?: UseLicenseAnnotationsOptions,
+) {
   const [userAnnotations, setUserAnnotations] = useState<Record<string, UserAnnotation>>(() =>
-    readLocalAnnotations(),
+    normalizeRecord(readLocalAnnotations()),
   );
   const [hydrated, setHydrated] = useState(false);
   const pendingWrites = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const onAuthInvalidRef = useRef(options?.onAuthInvalid);
+  onAuthInvalidRef.current = options?.onAuthInvalid;
+
+  const invalidateSession = useCallback(() => {
+    if (isAnnotationsServerHydrationBlocked()) return;
+    blockAnnotationsServerHydration();
+    clearMiningAuthStorage();
+    onAuthInvalidRef.current?.();
+  }, []);
 
   useEffect(() => {
-    if (!token?.trim()) {
+    const sessionToken = token?.trim();
+    if (!sessionToken) {
+      resetAnnotationsHydrationSession();
+      resetSharedAnnotationsHydration();
+      setHydrated(true);
+      return;
+    }
+    if (isAnnotationsServerHydrationBlocked()) {
+      setHydrated(true);
+      return;
+    }
+    if (isJwtExpired(sessionToken)) {
+      invalidateSession();
       setHydrated(true);
       return;
     }
@@ -45,12 +102,8 @@ export function useLicenseAnnotations(token: string | null | undefined) {
     let cancelled = false;
     (async () => {
       try {
-        const { data } = await apiClient.get<{
-          annotations?: Record<string, UserAnnotation>;
-        }>('/api/licenses/annotations');
+        const { annotations: server } = await fetchLicenseAnnotationsFromServer(sessionToken);
         if (cancelled) return;
-
-        const server = data?.annotations || {};
         const local = readLocalAnnotations();
         const merged = mergeAnnotations(local, server);
         setUserAnnotations(merged);
@@ -59,6 +112,7 @@ export function useLicenseAnnotations(token: string | null | undefined) {
         const alreadyMigrated = localStorage.getItem(MIGRATION_FLAG_KEY) === '1';
         if (!alreadyMigrated && Object.keys(local).length > 0) {
           for (const [licenseId, annotation] of Object.entries(local)) {
+            if (isLocalOnlyLicenseId(licenseId)) continue;
             const serverAnn = server[licenseId] || {};
             const localOnly = { ...annotation };
             for (const key of Object.keys(serverAnn)) {
@@ -75,7 +129,11 @@ export function useLicenseAnnotations(token: string | null | undefined) {
           localStorage.setItem(MIGRATION_FLAG_KEY, '1');
         }
       } catch (err) {
-        console.warn('[annotations] server hydration failed, using local cache', err);
+        if (isAnnotationsAuthError(err)) {
+          invalidateSession();
+        } else {
+          console.warn('[annotations] server hydration failed, using local cache', err);
+        }
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -84,11 +142,11 @@ export function useLicenseAnnotations(token: string | null | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, invalidateSession]);
 
   const persistToServer = useCallback(
     (licenseId: string, annotation: UserAnnotation) => {
-      if (!token?.trim()) return;
+      if (!token?.trim() || isLocalOnlyLicenseId(licenseId)) return;
       const existing = pendingWrites.current.get(licenseId);
       if (existing) clearTimeout(existing);
       const timer = setTimeout(async () => {
@@ -98,18 +156,22 @@ export function useLicenseAnnotations(token: string | null | undefined) {
             annotation,
           });
         } catch (err) {
-          console.warn(`[annotations] failed to save ${licenseId}`, err);
+          if (isAnnotationsAuthError(err)) {
+            invalidateSession();
+          } else {
+            console.warn(`[annotations] failed to save ${licenseId}`, err);
+          }
         }
       }, 400);
       pendingWrites.current.set(licenseId, timer);
     },
-    [token],
+    [token, invalidateSession],
   );
 
   const updateAnnotation = useCallback(
     (id: string, updates: Partial<UserAnnotation>) => {
       setUserAnnotations((prev) => {
-        const nextAnn = { ...(prev[id] || {}), ...updates };
+        const nextAnn = normalizeAnnotationStage({ ...(prev[id] || {}), ...updates });
         const next = { ...prev, [id]: nextAnn };
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
         if (token?.trim()) {

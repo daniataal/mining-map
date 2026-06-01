@@ -1,0 +1,565 @@
+import { useState } from 'react';
+import {
+  Anchor,
+  Archive,
+  ArrowRightLeft,
+  Building2,
+  Globe2,
+  Layers,
+  Radar,
+  Route,
+  Ship,
+  Sparkles,
+} from 'lucide-react';
+import { useI18n } from '../../lib/i18n';
+import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
+import type { OilLiveLayerVisibility } from '../../components/petroleum/OilLiveMapOverlays';
+
+import {
+  LIVE_DATA_LENS_COPY,
+  LIVE_DATA_LENS_ORDER,
+  OIL_LIVE_MAP_VESSEL_FETCH_CAP,
+  type LiveDataLensMode,
+} from './liveDataMapDefaults';
+import { resolveLiveDataVesselStatus } from './liveDataVesselStatus';
+import { canToggleGovernmentAisCoverage } from './liveDataDevFeatures';
+
+export type LiveDataMapLayersPanelProps = {
+  layers: OilLiveLayerVisibility;
+  onLayersChange: (layers: OilLiveLayerVisibility) => void;
+  lensMode?: LiveDataLensMode;
+  onLensModeChange?: (mode: LiveDataLensMode) => void;
+  coverageStats?: {
+    terminals: number;
+    vessels: number;
+    opportunities: number;
+    corridors: number;
+  } | null;
+  macroTradeEnabled?: boolean;
+  onMacroTradeChange?: (on: boolean) => void;
+  allMaritimeEnabled: boolean;
+  onAllMaritimeChange: (enabled: boolean) => void;
+  globalMaritimeCount?: number | null;
+  /** Dev toggle: filter AIS coverage overlay to government sources (BarentsWatch). */
+  governmentAisCoverageEnabled?: boolean;
+  onGovernmentAisCoverageChange?: (enabled: boolean) => void;
+  /** Aggregated Trade Flow layer group selector (company_pair vs country_pair). */
+  tradeFlowGroup?: TradeFlowGroup;
+  onTradeFlowGroupChange?: (group: TradeFlowGroup) => void;
+  /** Global ledger counts from GET /api/oil-live/sync-status (AIS coverage health). */
+  syncStatus?: OilLiveSyncStatus | null;
+  /** EIA historic import arcs (Historic group — off by default). */
+  eiaHistoricEnabled?: boolean;
+  onEiaHistoricChange?: (on: boolean) => void;
+  eiaHistoricRowCount?: number | null;
+  /** Map zoom for infrastructure gate (pipelines z≥9 per UX_SPEC_MAD-46). */
+  mapZoom?: number | null;
+};
+
+/** MAD-4x-e — unified Historic / Live / Macro / Infrastructure groups. */
+export type LayerDataFamily = 'live' | 'historic' | 'macro' | 'infra';
+
+const LAYER_FAMILY_ORDER: LayerDataFamily[] = ['live', 'historic', 'macro', 'infra'];
+
+const LAYER_FAMILY_META: Record<
+  LayerDataFamily,
+  { labelEn: string; labelHe: string; icon: typeof Radar }
+> = {
+  live: { labelEn: 'Live', labelHe: 'חי', icon: Radar },
+  historic: { labelEn: 'Historic', labelHe: 'היסטורי', icon: Archive },
+  macro: { labelEn: 'Macro', labelHe: 'מאקרו', icon: Globe2 },
+  infra: { labelEn: 'Infrastructure', labelHe: 'תשתית', icon: Building2 },
+};
+
+const LAYER_META = [
+  {
+    key: 'terminals' as const,
+    icon: Anchor,
+    labelEn: 'Terminals',
+    labelHe: 'מסופים',
+    hintEn: 'Storage hubs and load/discharge points',
+    hintHe: 'מרכזי אחסון ונקודות טעינה/פריקה',
+  },
+  {
+    key: 'vessels' as const,
+    icon: Ship,
+    labelEn: 'Vessels',
+    labelHe: 'כלי שיט',
+    hintEn: 'Oil/tanker AIS near terminals (capped)',
+    hintHe: 'AIS מכליות ליד מסופים (מוגבל)',
+  },
+  {
+    key: 'coverage' as const,
+    icon: Radar,
+    labelEn: 'AIS coverage',
+    labelHe: 'כיסוי AIS',
+    hintEn: 'Sparse/gap overlay for open AIS sources',
+    hintHe: 'שכבת חוסרים ודלילות למקורות AIS פתוחים',
+  },
+  {
+    key: 'corridors' as const,
+    icon: Route,
+    labelEn: 'Shipment routes (MCR)',
+    labelHe: 'מסלולי מטען (MCR)',
+    hintEn: 'Per-shipment synthetic arcs in view',
+    hintHe: 'קשתות מטען סינתטי בתצוגה',
+  },
+  {
+    key: 'opportunities' as const,
+    icon: Sparkles,
+    labelEn: 'Opportunities',
+    labelHe: 'הזדמנויות',
+    hintEn: 'High-confidence deal hypotheses on map',
+    hintHe: 'השערות עסקה בביטחון גבוה על המפה',
+  },
+];
+
+export default function LiveDataMapLayersPanel({
+  layers,
+  onLayersChange,
+  lensMode = 'deal',
+  onLensModeChange,
+  coverageStats,
+  allMaritimeEnabled,
+  onAllMaritimeChange,
+  globalMaritimeCount,
+  governmentAisCoverageEnabled = false,
+  onGovernmentAisCoverageChange,
+  tradeFlowGroup = 'company_pair',
+  onTradeFlowGroupChange,
+  macroTradeEnabled = true,
+  onMacroTradeChange,
+  syncStatus,
+  eiaHistoricEnabled = false,
+  onEiaHistoricChange,
+  eiaHistoricRowCount,
+  mapZoom,
+}: LiveDataMapLayersPanelProps) {
+  const { t } = useI18n();
+  const [layerFamily, setLayerFamily] = useState<LayerDataFamily>('live');
+  const infraZoomOk = mapZoom == null || mapZoom >= 9;
+
+  const fmtCount = (n: number | undefined) =>
+    n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  function toggleLayer(key: keyof OilLiveLayerVisibility) {
+    onLayersChange({ ...layers, [key]: !layers[key] });
+  }
+
+  const tradeFlowsOn = Boolean(layers.tradeFlows);
+  const currentLens = LIVE_DATA_LENS_COPY[lensMode];
+  const showRawControls = lensMode === 'raw';
+  const showLayerGrid = lensMode !== 'deal';
+  const coverageNeedsAttention =
+    syncStatus != null &&
+    ((syncStatus.coverage_gap_watch_zone_count ?? 0) > 0 || syncStatus.live_vessel_count === 0);
+
+  const vesselWatchStatus =
+    layers.vessels
+      ? resolveLiveDataVesselStatus({
+          vesselsInView: coverageStats?.vessels ?? 0,
+          syncStatus,
+          allMaritimeEnabled: allMaritimeEnabled,
+        })
+      : null;
+
+  return (
+    <div className="w-[min(100vw-2rem,420px)] rounded-2xl border border-stone-200/90 dark:border-white/10 bg-stone-50/95 dark:bg-slate-950/90 backdrop-blur-xl shadow-2xl">
+      <div className="border-b border-black/5 px-4 py-3 dark:border-white/5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10">
+            <Layers className="h-4 w-4 text-amber-500" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-black uppercase tracking-widest text-amber-500">
+              {t('עדשת עסקאות חיות', 'Live Deal Lens')}
+            </p>
+            <p className="text-base leading-snug text-slate-700 dark:text-slate-200">
+              {t('ספקים · קונים · מסלולים · תשתית', 'Suppliers · buyers · routes · infrastructure')}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 pb-4 pt-3">
+        <p className="text-base leading-relaxed text-slate-600 dark:text-slate-300">
+          {t(currentLens.hintHe, currentLens.hintEn)}
+        </p>
+
+        <div className="grid grid-cols-3 gap-1.5" role="tablist" aria-label={t('עדשת מפה', 'Map lens')}>
+          {LIVE_DATA_LENS_ORDER.map((mode) => {
+            const meta = LIVE_DATA_LENS_COPY[mode];
+            const active = lensMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onLensModeChange?.(mode)}
+                className={`rounded-xl px-2 py-2 text-left transition-colors ${
+                  active
+                    ? 'border border-amber-500/50 bg-amber-500/20 text-slate-950 dark:text-white'
+                    : 'border border-black/10 bg-white/70 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-300'
+                }`}
+              >
+                <span className="block text-[10px] font-black uppercase tracking-wide">
+                  {t(meta.labelHe, meta.labelEn)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+          role="tablist"
+          aria-label={t('קבוצות שכבות', 'Layer groups')}
+        >
+          {LAYER_FAMILY_ORDER.map((family) => {
+            const meta = LAYER_FAMILY_META[family];
+            const Icon = meta.icon;
+            const active = layerFamily === family;
+            const infraDisabled = family === 'infra' && !infraZoomOk;
+            return (
+              <button
+                key={family}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                disabled={infraDisabled}
+                onClick={() => !infraDisabled && setLayerFamily(family)}
+                className={`rounded-xl px-2 py-2 text-left transition-colors ${
+                  infraDisabled
+                    ? 'cursor-not-allowed border border-black/5 bg-slate-200/50 text-slate-400 opacity-60 dark:border-white/5 dark:bg-slate-900/40'
+                    : active
+                      ? 'border border-amber-500/50 bg-amber-500/20 text-slate-950 dark:text-white'
+                      : 'border border-black/10 bg-white/70 text-slate-600 hover:bg-white dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-300'
+                }`}
+              >
+                <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide">
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {t(meta.labelHe, meta.labelEn)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {layerFamily === 'infra' && !infraZoomOk && (
+          <p className="text-xs leading-relaxed text-sky-800 dark:text-sky-200">
+            {t(
+              'התקרבו לרמת זום 9+ להפעלת צינורות OSM. מסופים ומכליות נשארים בקבוצת Live.',
+              'Zoom to level 9+ for OSM pipelines. Terminals and tankers stay under Live.',
+            )}
+          </p>
+        )}
+
+        {lensMode === 'deal' && (
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs leading-relaxed text-emerald-950 dark:text-emerald-100">
+            {t(
+              'מצב ברירת המחדל: מציג רק לידים, מסדרונות, ומסופים/כלי שיט שמחברים לעסקה. שכבות AIS ודיאגנוסטיקה גולמיות נשארות ב-Raw Data.',
+              'Default mode: shows leads, corridors, and only terminals/vessels that connect to execution. Raw AIS and diagnostics stay in Raw Data.',
+            )}
+          </div>
+        )}
+
+        {lensMode === 'infrastructure' && (
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-950 dark:text-sky-100">
+            {t(
+              'תשתית היא שכבת ביצוע: חוות מיכלים, מסופים, נמלים, צינורות וכלי שיט סמוכים שעוזרים להבין אם מסלול מסחרי אפשרי.',
+              'Infrastructure is execution context: storage, terminals, ports, pipelines, and nearby vessels that explain whether a commercial route is feasible.',
+            )}
+          </div>
+        )}
+
+        {coverageStats && (
+          <p className="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            {t('בתצוגה', 'In view')}:{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.terminals}</span>{' '}
+            {t('מסופים', 'terminals')} ·{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.vessels}</span>{' '}
+            {t('מכליות', 'tankers')} ·{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.opportunities}</span>{' '}
+            {t('הזדמנויות', 'opportunities')} ·{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{coverageStats.corridors}</span>{' '}
+            {t('מסדרונות', 'corridors')}
+          </p>
+        )}
+        {layers.corridors && coverageStats != null && coverageStats.corridors === 0 && (
+          <p className="text-xs leading-relaxed text-violet-800 dark:text-violet-200">
+            {t(
+              'מסדרונות = קשתות MCR (מטען סינתטי) בתצוגה. התקרבו למפרץ/ים פנימיים או הפעילו graph-sync אם אין רשומות.',
+              'Corridors = per-shipment MCR arcs in view. Zoom to a hub (e.g. Gulf) or run graph-sync if the ledger is empty.',
+            )}
+          </p>
+        )}
+        {coverageStats != null && coverageStats.vessels === 0 && (
+          <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+            {t(
+              'אין ספינות בתצוגה לא אומר שאין פעילות. בדקו את שכבת כיסוי AIS כדי לראות חורי דאטה.',
+              'No vessels in view does not mean no activity. Check the AIS coverage layer for data gaps.',
+            )}
+          </p>
+        )}
+
+        {showRawControls && layerFamily === 'live' && layers.vessels && (
+          <div
+            className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100"
+            role="status"
+          >
+            <p className="text-[10px] font-black uppercase tracking-wide text-sky-800 dark:text-sky-200">
+              {t('מעקב מכליות', 'Vessel watch')}
+            </p>
+            <p className="mt-1">
+              {t(vesselWatchStatus!.headlineHe, vesselWatchStatus!.headlineEn)}
+            </p>
+            {vesselWatchStatus!.detailEn && vesselWatchStatus!.detailHe && (
+              <p className="mt-1 opacity-85">
+                {t(vesselWatchStatus!.detailHe, vesselWatchStatus!.detailEn)}
+              </p>
+            )}
+            <p className="mt-1 opacity-85">
+              {t(
+                `מגבלת fetch ${OIL_LIVE_MAP_VESSEL_FETCH_CAP} · ברירת מחדל: מכליות oil-live (לא AIS גלובלי)`,
+                `Fetch cap ${OIL_LIVE_MAP_VESSEL_FETCH_CAP} · default: oil-live tankers (not global AIS)`,
+              )}
+            </p>
+          </div>
+        )}
+
+        {showRawControls && layerFamily === 'live' && syncStatus && (
+          <div
+            className={`rounded-xl border px-3 py-2.5 text-xs leading-relaxed ${
+              layers.coverage
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-950 dark:text-rose-100'
+                : 'border-slate-500/20 bg-slate-500/5 text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <p className="text-[10px] font-black uppercase tracking-wide text-rose-700 dark:text-rose-300">
+              {t('בריאות AIS (מסד נתונים)', 'AIS health (database)')}
+            </p>
+            <p className="mt-1">
+              {t('כלי שיט חיים', 'Live vessels')}:{' '}
+              <span className="font-semibold">{fmtCount(syncStatus.live_vessel_count)}</span>
+              {' · '}
+              {t('קריאות נמל AIS', 'AIS port calls')}:{' '}
+              <span className="font-semibold">
+                {fmtCount(syncStatus.live_ais_port_call_count ?? syncStatus.port_call_count)}
+              </span>
+              {' · '}
+              {t('אזורי חוסר', 'Gap zones')}:{' '}
+              <span className="font-semibold">{fmtCount(syncStatus.coverage_gap_watch_zone_count)}</span>
+              {syncStatus.coverage_watch_zone_count != null && (
+                <>
+                  {' · '}
+                  {t('אזורי מעקב', 'Watch zones')}:{' '}
+                  <span className="font-semibold">{fmtCount(syncStatus.coverage_watch_zone_count)}</span>
+                </>
+              )}
+            </p>
+            {!layers.coverage && (
+              <p className="mt-1 opacity-80">
+                {t(
+                  'הפעילו שכבת כיסוי AIS כדי לצייר חורים בתצוגה.',
+                  'Turn on the AIS coverage layer to draw gap cells in the viewport.',
+                )}
+              </p>
+            )}
+          </div>
+        )}
+
+        {showLayerGrid && layerFamily === 'live' && <div className="grid grid-cols-2 gap-2">
+          {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {
+            const on = layers[key];
+            const coverageHighlight = key === 'coverage' && coverageNeedsAttention && !on;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleLayer(key)}
+                className={`flex min-h-[52px] flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  on
+                    ? 'border-amber-500/40 bg-amber-500/15 text-slate-900 dark:text-slate-100'
+                    : coverageHighlight
+                      ? 'border-rose-500/40 bg-rose-500/10 text-rose-950 dark:text-rose-100'
+                      : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-400'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide">
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {t(labelHe, labelEn)}
+                </span>
+                <span className="mt-0.5 text-xs leading-snug opacity-80">{t(hintHe, hintEn)}</span>
+              </button>
+            );
+          })}
+        </div>}
+
+        {showRawControls && layerFamily === 'historic' && onEiaHistoricChange && (
+          <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+            <p className="text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300 mb-2">
+              {t('היסטורי', 'Historic')}
+            </p>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={eiaHistoricEnabled}
+                onChange={(e) => onEiaHistoricChange(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  <Archive className="h-4 w-4 shrink-0" />
+                  {t('קשתות יבוא EIA', 'EIA historic import arcs')}
+                </span>
+                <span className="mt-0.5 block text-xs leading-snug text-slate-600 dark:text-slate-400">
+                  {t(
+                    'bol_tier=historic — קבצי impa EIA, לא מכס ולא AIS חי.',
+                    'bol_tier=historic — EIA impa files, not customs BOL or live AIS.',
+                  )}
+                </span>
+                {eiaHistoricRowCount != null && eiaHistoricRowCount > 0 && (
+                  <span className="mt-1 block text-[10px] tabular-nums text-slate-500">
+                    {eiaHistoricRowCount.toLocaleString()} {t('שורות במסד', 'rows in DB')}
+                  </span>
+                )}
+              </span>
+            </label>
+          </div>
+        )}
+
+        {showRawControls && layerFamily === 'macro' && onMacroTradeChange && (
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-500/30 bg-slate-500/5 px-3 py-2">
+            <input
+              type="checkbox"
+              checked={macroTradeEnabled}
+              onChange={(e) => onMacroTradeChange(e.target.checked)}
+              className="h-4 w-4 rounded"
+            />
+            <span className="flex items-center gap-1.5 text-xs font-black uppercase text-slate-700 dark:text-slate-200">
+              <Globe2 className="h-3.5 w-3.5" />
+              {t('מסדרונות מאקרו (Comtrade)', 'Macro trade corridors')}
+            </span>
+          </label>
+        )}
+
+        {showRawControls && layerFamily === 'macro' && <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={tradeFlowsOn}
+              onChange={(e) => onLayersChange({ ...layers, tradeFlows: e.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-slate-300"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                <ArrowRightLeft className="h-4 w-4 shrink-0" />
+                {t('זוגות מסחר מצרפיים', 'Aggregated trade pairs')}
+              </span>
+              <span className="mt-0.5 block text-xs leading-snug text-slate-600 dark:text-slate-400">
+                {t(
+                  'קשתות מרוכזות לפי זוג חברות או מדינות (לא כל משלוח בנפרד).',
+                  'Rolled-up arcs by company or country pair — not every shipment.',
+                )}
+              </span>
+              <div
+                className={`mt-2 flex gap-1.5 transition-opacity ${
+                  tradeFlowsOn ? 'opacity-100' : 'opacity-40 pointer-events-none'
+                }`}
+                role="group"
+                aria-label={t('קיבוץ זרימות סחר', 'Trade Flow grouping')}
+              >
+                {(
+                  [
+                    { key: 'company_pair' as const, en: 'Company', he: 'חברה' },
+                    { key: 'country_pair' as const, en: 'Country', he: 'מדינה' },
+                  ]
+                ).map((opt) => {
+                  const active = tradeFlowGroup === opt.key;
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={!tradeFlowsOn || !onTradeFlowGroupChange}
+                      onClick={() => onTradeFlowGroupChange?.(opt.key)}
+                      className={`flex-1 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wide transition-colors ${
+                        active
+                          ? 'bg-violet-500 text-white'
+                          : 'border border-violet-500/30 text-violet-700 hover:bg-violet-500/10 dark:text-violet-200'
+                      }`}
+                    >
+                      {t(opt.he, opt.en)}
+                    </button>
+                  );
+                })}
+              </div>
+            </span>
+          </label>
+        </div>}
+
+        {showRawControls && layerFamily === 'live' && canToggleGovernmentAisCoverage() && onGovernmentAisCoverageChange && (
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={governmentAisCoverageEnabled}
+                onChange={(e) => onGovernmentAisCoverageChange(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-black uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  {t('כיסוי AIS ממשלתי (נורווגיה)', 'Government AIS coverage (Norway)')}
+                </span>
+                <span className="mt-0.5 block text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                  {t(
+                    'מסנן שכבת כיסוי ל-BarentsWatch בלבד. לא מכסה מפרץ/אפריקה — לבדיקת ingest אזורי.',
+                    'Filters the coverage overlay to BarentsWatch only. Does not cover Gulf/Africa — for regional ingest QA.',
+                  )}
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
+        {showRawControls && layerFamily === 'infra' && infraZoomOk && (
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2.5 text-xs leading-relaxed text-sky-950 dark:text-sky-100">
+            <p className="text-[10px] font-black uppercase tracking-wide text-sky-800 dark:text-sky-200">
+              {t('תשתית ביצוע', 'Execution infrastructure')}
+            </p>
+            <p className="mt-1">
+              {t(
+                'צינורות OSM, מסופי אחסון ונמלים מפורטים בלשונית Oil & Gas → Infrastructure. כאן: השתמשו במסופים/מכליות בקבוצת Live.',
+                'OSM pipelines, storage, and ports are on the Oil & Gas → Infrastructure tab. Use terminals/vessels under Live for corridor context.',
+              )}
+            </p>
+          </div>
+        )}
+
+        {showRawControls && layerFamily === 'live' && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={allMaritimeEnabled}
+              onChange={(e) => onAllMaritimeChange(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-slate-300"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-black uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                {t('כל AIS ימי (מתקדם)', 'All maritime AIS (advanced)')}
+              </span>
+              <span className="mt-0.5 block text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+                {globalMaritimeCount != null
+                  ? t(
+                      `מאגר גלובלי ~${globalMaritimeCount.toLocaleString()} כלי שיט — כבד; ברירת מחדל: מכליות oil-live בלבד.`,
+                      `Global feed ~${globalMaritimeCount.toLocaleString()} vessels — heavy; default is oil-live tankers only.`,
+                    )
+                  : t(
+                      'מאגר AIS גלובלי (אלפי כלי שיט) — כבד; ברירת מחדל: מכליות oil-live בלבד.',
+                      'Global AIS snapshot (thousands of vessels) — heavy; default is oil-live tankers only.',
+                    )}
+              </span>
+            </span>
+          </label>
+        </div>}
+      </div>
+    </div>
+  );
+}

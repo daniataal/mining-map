@@ -1,0 +1,45 @@
+{
+  "name": "Paperclip <Role> (Ollama)",
+  "role": "researcher",
+  "title": "<Role>",
+  "icon": "list",
+  "reportsTo": "73ef85a9-4943-44a0-93c6-e15906c29a8a",
+  "capabilities": "Ollama specialist — assignment/@mention only; see AGENTS.md. Mac fleet cap applies.",
+  "adapterType": "opencode_local",
+  "adapterConfig": {
+    "cwd": "/workspace/shared",
+    "command": "opencode",
+    "model": "ollama/llama3.2:3b",
+    "dangerouslySkipPermissions": true,
+    "disableSessionResume": true,
+    "compactWake": true,
+    "env": {
+      "HOME": { "type": "plain", "value": "/paperclip/instances/default/agents/pending/opencode-home" },
+      "XDG_CONFIG_HOME": { "type": "plain", "value": "/paperclip/.config" },
+      "XDG_DATA_HOME": { "type": "plain", "value": "/paperclip/.local/share" },
+      "OLLAMA_HOST": { "type": "plain", "value": "http://host.docker.internal:11434" },
+      "PAPERCLIP_GIT_BRANCH": { "type": "plain", "value": "paperclip2" }
+    },
+    "paperclipRuntimeSkills": [
+      {
+        "key": "paperclip-minimal",
+        "runtimeName": "paperclip",
+        "source": "/paperclip/skills-minimal",
+        "required": true
+      }
+    ]
+  },
+  "runtimeConfig": {
+    "heartbeat": {
+      "enabled": true,
+      "intervalSec": 0,
+      "wakeOnDemand": true,
+      "maxConcurrentRuns": 1
+    }
+  },
+  "instructionsBundle": {
+    "files": {
+      "AGENTS.md": "# Role\n\nOne short task per wake. Paperclip API only. No repo edits.\n"
+    }
+  }
+}

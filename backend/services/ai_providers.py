@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 ProviderState = Literal["configured", "missing", "invalid_template"]
 EnvPresence = Literal["SET", "MISSING"]
 
+# Runtime names (docker / backend.env). GitHub secrets often use *_AI_API_KEY aliases.
+AI_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    "GROQ_API_KEY": ("GROQ_API_KEY", "GROQ_AI_API_KEY"),
+    "OPENROUTER_API_KEY": ("OPENROUTER_API_KEY", "OPENROUTER_AI_API_KEY"),
+}
+
 AI_RUNTIME_ENV_KEYS = (
     "GROQ_API_KEY",
     "OPENROUTER_API_KEY",
@@ -24,8 +30,16 @@ AI_RUNTIME_ENV_KEYS = (
 )
 
 
+def _env_raw(name: str) -> str:
+    for key in AI_ENV_ALIASES.get(name, (name,)):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _env_secret(name: str) -> str:
-    value = (os.getenv(name) or "").strip()
+    value = _env_raw(name)
     if not value:
         return ""
     if value.startswith("{{") and value.endswith("}}"):
@@ -43,7 +57,7 @@ def _pollinations_fallback_enabled() -> bool:
 
 
 def _provider_config_state(name: str) -> ProviderState:
-    raw = (os.getenv(name) or "").strip()
+    raw = _env_raw(name)
     if not raw:
         return "missing"
     if raw.startswith("{{") and raw.endswith("}}"):
