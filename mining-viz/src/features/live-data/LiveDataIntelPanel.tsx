@@ -483,7 +483,7 @@ export default function LiveDataIntelPanel({
     },
     {
       key: 'manifests',
-      label: t('מניפסטים', 'Manifests'),
+      label: t('מניפסט פתוח (UK/מאקרו)', 'Open manifests (UK/macro)'),
       value: syncStatus?.trade_manifest_row_count ?? dbCountFallback,
     },
   ] as const;

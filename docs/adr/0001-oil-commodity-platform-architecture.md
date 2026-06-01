@@ -101,8 +101,8 @@ Production: `OIL_LIVE_DISABLE_DEMO_SEED=1`, `exclude_demo` on list APIs. MCR ≠
 | `mining-viz` | Thin client; React Query; map layers; virtualized lists | TypeScript |
 | `backend` | Auth, licenses, graph-sync orchestration, ingest jobs, admin | Python |
 | `oil-live-intel` | Map features, cargo search, MCR engine, corridor aggregates, ES indexer | Go (expand) |
-| `maritime-worker` / graph-sync workers | AIS ingest, batch upserts | Python / Go |
-| Redis | AIS snapshot, hot cache | — |
+| `oil-live-intel-worker` + graph-sync workers | AIS ingest (Go), batch graph-sync (Python orchestrator + optional Go steps) | Go / Python |
+| Redis | Hot cache (live AIS durable in Postgres via `oil-live-intel-worker`) | — |
 | Elasticsearch | Search index only; Postgres is truth | — |
 
 **Go migration candidates** (profile before moving):

@@ -52,7 +52,7 @@ func TestClusterMinCount(t *testing.T) {
 }
 
 func TestClusterLimitTighterAtWorldZoom(t *testing.T) {
-	if ClusterLimitForZoom(floatPtr(2), 800) != 60 {
+	if ClusterLimitForZoom(floatPtr(2), 800) != 100 {
 		t.Fatal("z2")
 	}
 	if ClusterLimitForZoom(floatPtr(4), 800) != 120 {

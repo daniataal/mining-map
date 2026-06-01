@@ -820,7 +820,7 @@ def _build_stored_feed_response(
         )
     if is_stale:
         limitations.append(
-            "Persisted AIS snapshots are stale or unavailable; check the maritime-worker container and AISSTREAM_API_KEY."
+            "Persisted AIS snapshots are stale or unavailable; check oil-live-intel-worker and AISSTREAM_API_KEY."
         )
     limitations.append(
         "AIS ownership/operator enrichment depends on whether the MMSI or IMO can be matched in open sources such as Wikidata."
@@ -2151,7 +2151,7 @@ def get_maritime_vessel_feed(
             source="AISStream persisted snapshot (database unavailable)",
             limitations=[
                 f"Maritime snapshots could not be read: {exc}",
-                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+                "The backend does not open live AIS websockets in the request path; start oil-live-intel-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,
@@ -2177,7 +2177,7 @@ def get_maritime_vessel_feed(
             source="AISStream persisted snapshot (read error)",
             limitations=[
                 f"Maritime snapshots could not be assembled: {exc}",
-                "The backend does not open live AIS websockets in the request path; start maritime-worker to populate snapshots.",
+                "The backend does not open live AIS websockets in the request path; start oil-live-intel-worker to populate snapshots.",
             ],
             vessel_scope=normalized_scope,
             capture_window_seconds=normalized_window,

@@ -2,15 +2,7 @@
 :80 {
 	encode gzip zstd
 
-	rewrite /api/map/country-borders* /api/oil-live/map/country-borders{path}
-	rewrite /api/petroleum/osm-layers* /api/oil-live/map/petroleum-osm/layers{path}
-	rewrite /api/licenses* /api/oil-live/licenses{path}
-	rewrite /licenses* /api/oil-live/licenses{path}
-	rewrite /api/maritime/stats* /api/oil-live/maritime/stats{path}
-	rewrite /api/maritime/context* /api/oil-live/maritime/context{path}
-	rewrite /api/maritime/vessels* /api/oil-live/vessels/live{path}
-
-	# Go Backend for Live Intel and Licenses
+	# Go oil-live-intel (canonical /api/oil-live/*)
 	handle /api/oil-live/* {
 		reverse_proxy oil-live-intel:8095 {
 			transport http {
@@ -19,6 +11,8 @@
 			}
 		}
 	}
+
+	# Python-only license annotations (must precede /api/licenses* → Go)
 	handle /api/licenses/annotations {
 		reverse_proxy backend:8000
 	}
@@ -47,6 +41,53 @@
 
 	handle_path /entities* {
 		rewrite * /entities{path}
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+
+	# Frontend-friendly paths → oil-live-intel (uri replace avoids duplicating {path})
+	handle /api/map/country-borders* {
+		uri replace /api/map/country-borders /api/oil-live/map/country-borders
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+	handle /api/petroleum/osm-layers* {
+		uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+	handle /api/maritime/stats* {
+		uri replace /api/maritime/stats /api/oil-live/maritime/stats
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+	handle /api/maritime/context* {
+		uri replace /api/maritime/context /api/oil-live/maritime/context
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+	handle /api/maritime/vessels* {
+		uri replace /api/maritime/vessels /api/oil-live/vessels/live
 		reverse_proxy oil-live-intel:8095 {
 			transport http {
 				read_timeout 0

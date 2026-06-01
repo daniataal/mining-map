@@ -19,3 +19,5 @@ data/eia_downloads/*.xlsx
 .DS_Store
 .idea/
 .vscode/
+# Local graphify knowledge graph (regenerate: graphify update .)
+graphify-out/

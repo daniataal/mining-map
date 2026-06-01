@@ -54,10 +54,10 @@ func ClusterLimitForZoom(zoom *float64, requested int) int {
 	}
 	z := *zoom
 	if z < 3 {
-		if requested < 60 {
+		if requested < 100 {
 			return requested
 		}
-		return 60
+		return 100
 	}
 	if z < 5 {
 		if requested < 120 {

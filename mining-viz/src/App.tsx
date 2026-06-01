@@ -210,6 +210,9 @@ export default function App() {
   const [licenseMapZoom, setLicenseMapZoom] = useState(
     () => LICENSE_MAP_DEFAULT_ZOOM,
   );
+  /** Grid-cell bbox for the cluster being drilled — keeps fetch/display spanning the full cell. */
+  const [licenseDrillExpandBounds, setLicenseDrillExpandBounds] =
+    useState<LicenseViewportBounds | null>(null);
   const [countryFocusCountry, setCountryFocusCountry] = useState<string | null>(null);
   const [countryFocusBoundsTrigger, setCountryFocusBoundsTrigger] = useState(0);
   const [licenseFetchCountries, setLicenseFetchCountries] = useState<string[]>([]);
@@ -231,14 +234,24 @@ export default function App() {
     sector: licenseSector,
     bounds: licenseMapViewport,
     filterCountries: licenseFetchCountries,
-    countryFocusBboxOnly: Boolean(countryFocusCountry?.trim()),
     mapZoom: licenseMapZoom,
+    drillExpandBounds: licenseDrillExpandBounds,
     enabled: licenseMapFetchEnabled,
   });
   const licenseServerClustered = useMemo(
     () => rawData.some((row) => (row.mapClusterCount ?? 0) > 0),
     [rawData],
   );
+  useEffect(() => {
+    if (!licenseDrillExpandBounds) return;
+    if (
+      licenseMapZoom >= 8 &&
+      rawData.length > 0 &&
+      !rawData.some((row) => (row.mapClusterCount ?? 0) > 0)
+    ) {
+      setLicenseDrillExpandBounds(null);
+    }
+  }, [licenseDrillExpandBounds, licenseMapZoom, rawData]);
   const licensesMapSecondaryStatus = null;
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
@@ -642,9 +655,13 @@ export default function App() {
     [],
   );
 
-  const handleLicenseClusterDrillComplete = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['licenses', 'viewport'] });
-  }, [queryClient]);
+  const handleLicenseClusterDrillComplete = useCallback(
+    (expandBounds: LicenseViewportBounds) => {
+      setLicenseDrillExpandBounds(normalizeLicenseViewportBounds(expandBounds));
+      queryClient.invalidateQueries({ queryKey: ['licenses', 'viewport'] });
+    },
+    [queryClient],
+  );
 
   const infrastructurePanelHint = useMemo(
     () =>
@@ -1592,6 +1609,7 @@ export default function App() {
                       : undefined
                   }
                   onLicenseMapZoomChange={licenseMapFetchEnabled ? setLicenseMapZoom : undefined}
+                  licenseMapZoom={licenseMapFetchEnabled ? licenseMapZoom : undefined}
                   onLicenseClusterDrillComplete={
                     licenseMapFetchEnabled ? handleLicenseClusterDrillComplete : undefined
                   }

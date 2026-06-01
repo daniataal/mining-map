@@ -1,6 +1,10 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { apiClient } from './api';
-import { catalogMapboxDisabled, isPetroleumMapboxDisabledEnv } from './petroleumMapMode';
+import {
+  catalogMapboxDisabled,
+  isPetroleumMapboxDisabledEnv,
+} from './petroleumMapMode';
+import type { OsmPetroleumLayerId } from './osmPetroleumLayers';
 
 export type PetroleumLayerId =
   | 'exploration'
@@ -81,10 +85,47 @@ export const DEFAULT_PETROLEUM_LAYER_VISIBILITY: Record<PetroleumLayerId, boolea
   gas_pipelines: false,
 };
 
+type OsmPetroleumCatalogResponse = {
+  layers: Array<{
+    id: OsmPetroleumLayerId;
+    label: string;
+    geometry?: string;
+    default_visible?: boolean;
+    attribution?: string;
+    license_note?: string;
+  }>;
+  data_as_of?: string;
+  source_labels?: string[];
+  limitations?: string[];
+  mapbox_disabled?: boolean;
+};
+
+function osmCatalogToPetroleumCatalog(data: OsmPetroleumCatalogResponse): PetroleumLayerCatalog {
+  return {
+    layers: data.layers.map((layer) => ({
+      id: layer.id as PetroleumLayerId,
+      label: layer.label,
+      geometry: (layer.geometry === 'line' ? 'line' : layer.geometry === 'polygon' ? 'polygon' : 'point') as PetroleumLayerMeta['geometry'],
+      default_visible: layer.default_visible ?? false,
+      attribution: layer.attribution,
+      license_note: layer.license_note,
+    })),
+    data_as_of: data.data_as_of ?? '',
+    source_labels: data.source_labels ?? ['OpenStreetMap'],
+    limitations: data.limitations ?? [],
+    mapbox_disabled: data.mapbox_disabled ?? true,
+  };
+}
+
 export function usePetroleumLayerCatalog(enabled = true) {
+  const mapboxOff = isPetroleumMapboxDisabledEnv();
   return useQuery<PetroleumLayerCatalog>({
-    queryKey: ['petroleum-layer-catalog'],
+    queryKey: ['petroleum-layer-catalog', mapboxOff ? 'osm' : 'mapbox'],
     queryFn: async () => {
+      if (mapboxOff) {
+        const { data } = await apiClient.get<OsmPetroleumCatalogResponse>('/api/petroleum/osm-layers');
+        return osmCatalogToPetroleumCatalog(data);
+      }
       const { data } = await apiClient.get<PetroleumLayerCatalog>('/api/petroleum/layers');
       return data;
     },
