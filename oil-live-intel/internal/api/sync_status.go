@@ -120,8 +120,13 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	vesselObservations = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_vessel_position_observations`)
 	liveVessels = countTable(ctx, pool, `
 		SELECT COUNT(DISTINCT mmsi)::int
-		FROM oil_vessel_position_observations
-		WHERE COALESCE(position_time, observed_at) > now() - interval '24 hours'
+		FROM (
+			SELECT mmsi, COALESCE(position_time, observed_at) AS ts
+			FROM oil_vessel_position_observations
+			UNION ALL
+			SELECT mmsi, ts FROM oil_ais_positions
+		) v
+		WHERE v.ts > now() - interval '24 hours'
 	`)
 	liveAisPortCalls = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM oil_port_calls
@@ -137,10 +142,16 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT COUNT(*)::int
 		FROM maritime_watch_zones z
 		WHERE NOT EXISTS (
-		  SELECT 1 FROM oil_vessel_position_observations o
+		  SELECT 1 FROM (
+		    SELECT lat, lng, COALESCE(position_time, observed_at) AS ts
+		    FROM oil_vessel_position_observations
+		    UNION ALL
+		    SELECT lat, lon AS lng, ts
+		    FROM oil_ais_positions
+		  ) o
 		  WHERE o.lat >= z.min_lat AND o.lat <= z.max_lat
 		    AND o.lng >= z.min_lng AND o.lng <= z.max_lng
-		    AND COALESCE(o.position_time, o.observed_at) > now() - interval '3 hours'
+		    AND o.ts > now() - interval '3 hours'
 		)
 	`)
 	demoPortCalls = countTable(ctx, pool, `
@@ -151,14 +162,14 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	`)
 	demoCargo = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM meridian_cargo_records
-		WHERE COALESCE(evidence::text, '') ILIKE '%seed_port_calls%'
-		   OR COALESCE(evidence::text, '') ILIKE '%demo seed%'
+		WHERE COALESCE(evidence_chain::text, '') ILIKE '%seed_port_calls%'
+		   OR COALESCE(evidence_chain::text, '') ILIKE '%demo seed%'
 		   OR LOWER(COALESCE(bol_tier, '')) IN ('demo', 'seed', 'seed_port_calls')
 	`)
 	productionCargo = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM meridian_cargo_records
-		WHERE COALESCE(evidence::text, '') NOT ILIKE '%seed_port_calls%'
-		  AND COALESCE(evidence::text, '') NOT ILIKE '%demo seed%'
+		WHERE COALESCE(evidence_chain::text, '') NOT ILIKE '%seed_port_calls%'
+		  AND COALESCE(evidence_chain::text, '') NOT ILIKE '%demo seed%'
 		  AND LOWER(COALESCE(bol_tier, '')) NOT IN ('demo', 'seed', 'seed_port_calls')
 	`)
 
@@ -187,8 +198,13 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		WHERE key = 'last_jodi_sync'
 	`).Scan(&lastJodi, &lastJodiStatus) //nolint:errcheck — row may be absent
 	_ = pool.QueryRow(ctx, `
-		SELECT MAX(COALESCE(position_time, observed_at))
-		FROM oil_vessel_position_observations
+		SELECT MAX(ts) FROM (
+			SELECT COALESCE(position_time, observed_at) AS ts
+			FROM oil_vessel_position_observations
+			UNION ALL
+			SELECT ts
+			FROM oil_ais_positions
+		) v
 	`).Scan(&lastVesselObs)
 
 	graphSteps := queryGraphSyncSteps(ctx, pool)
