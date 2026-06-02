@@ -13,9 +13,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 try:
-    from backend.country_borders import COUNTRY_BORDERS_PATH
+    from backend.country_borders import get_country_borders_geojson
 except ImportError:
-    from country_borders import COUNTRY_BORDERS_PATH
+    from country_borders import get_country_borders_geojson
 
 try:
     from backend.services.maritime_intel import haversine_km, find_nearest_ports, parse_unlocode_coordinates
@@ -107,7 +107,7 @@ def _country_names() -> dict[str, str]:
     if _country_name_cache is not None:
         return _country_name_cache
 
-    payload = json.loads(Path(COUNTRY_BORDERS_PATH).read_text(encoding="utf-8"))
+    payload, _ = get_country_borders_geojson()
     mapping: dict[str, str] = {}
     for feature in payload.get("features", []):
         properties = feature.get("properties") or {}

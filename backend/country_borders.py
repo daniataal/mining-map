@@ -80,6 +80,17 @@ _CACHE: CachedCountryBorders | None = None
 def _load_country_borders() -> CachedCountryBorders:
     global _CACHE
 
+    if not COUNTRY_BORDERS_PATH.exists():
+        # Keep graph-sync alive in slim containers that omit the large borders file.
+        # Downstream callers get an empty FeatureCollection instead of a hard crash.
+        payload = {"type": "FeatureCollection", "features": []}
+        _CACHE = CachedCountryBorders(
+            mtime_ns=0,
+            payload=payload,
+            base_etag="missing-country-borders",
+        )
+        return _CACHE
+
     stat = COUNTRY_BORDERS_PATH.stat()
     if _CACHE and _CACHE.mtime_ns == stat.st_mtime_ns:
         return _CACHE

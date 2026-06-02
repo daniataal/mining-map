@@ -1,8 +1,12 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Popup, Rectangle, LayerGroup } from 'react-leaflet';
 import L from 'leaflet';
 import CanvasLiveDealLayer from './CanvasLiveDealLayer';
+import OilLiveMapPopupController, {
+  liveDealFeatureToPopupSnapshot,
+  type OilLivePopupSnapshot,
+} from './OilLiveMapPopupController';
 import OilLiveProvenanceBadge from '../../features/live-data/OilLiveProvenanceBadge';
 import {
   connectOilLiveWebSocket,
@@ -20,10 +24,6 @@ import {
   type TradeFlowArc,
 } from '../../api/oilLiveApi';
 import type { MaritimeViewportBounds } from '../../types';
-import type {
-  OilLiveDrawerTab,
-  OilLiveEntityKind,
-} from '../../features/live-data/OilLiveEntityDrawer';
 import { dedupeOpportunities } from '../../features/live-data/dedupeOpportunities';
 import { LIVE_DATA_DEFAULT_LAYERS } from '../../features/live-data/liveDataMapDefaults';
 import type { LiveDataLensMode } from '../../features/live-data/liveDataMapDefaults';
@@ -42,15 +42,8 @@ import {
 } from '../../lib/corridorGeometry';
 import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
 
-export type OilLiveEntityClickPayload = {
-  entityKind: OilLiveEntityKind;
-  entityId: string;
-  opportunityId?: string;
-  title?: string;
-  subtitle?: string;
-  /** Opens entity drawer on Trading workflow tab (MAD-46 §8). */
-  initialDrawerTab?: OilLiveDrawerTab;
-};
+export type { OilLiveEntityClickPayload } from './oilLiveEntityPayload';
+import type { OilLiveEntityClickPayload } from './oilLiveEntityPayload';
 
 export type OilLiveLayerVisibility = {
   terminals: boolean;
@@ -129,90 +122,6 @@ type Props = {
   onEntityClick?: (payload: OilLiveEntityClickPayload) => void;
 };
 
-type SanctionsTone = 'clear' | 'flagged' | 'review' | 'unknown';
-
-function sanctionsTone(value?: string | null): SanctionsTone {
-  if (!value) return 'unknown';
-  const v = value.toLowerCase();
-  if (v === 'clear') return 'clear';
-  if (v === 'flagged' || v === 'sanctioned' || v === 'match') return 'flagged';
-  if (v === 'review' || v === 'pep') return 'review';
-  return 'unknown';
-}
-
-const SANCTIONS_STYLE: Record<SanctionsTone, { bg: string; color: string; label: string }> = {
-  clear: { bg: '#dcfce7', color: '#166534', label: 'Sanctions: clear' },
-  flagged: { bg: '#fee2e2', color: '#991b1b', label: 'Sanctions: flagged' },
-  review: { bg: '#fef3c7', color: '#92400e', label: 'Sanctions: review' },
-  unknown: { bg: '#e2e8f0', color: '#475569', label: 'Sanctions: unknown' },
-};
-
-function chipStyle(bg: string, color: string): React.CSSProperties {
-  return {
-    display: 'inline-block',
-    padding: '1px 6px',
-    borderRadius: 999,
-    background: bg,
-    color,
-    fontSize: 9,
-    fontWeight: 800,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginRight: 4,
-    marginBottom: 2,
-  };
-}
-
-function LeiChip({ lei }: { lei?: string | null }) {
-  if (!lei) return null;
-  return (
-    <span style={chipStyle('#dbeafe', '#1e3a8a')} title={`LEI ${lei}`}>
-      LEI {lei.slice(0, 8)}…
-    </span>
-  );
-}
-
-function SanctionsChip({ status }: { status?: string | null }) {
-  const tone = sanctionsTone(status);
-  const style = SANCTIONS_STYLE[tone];
-  return (
-    <span style={chipStyle(style.bg, style.color)} title={style.label}>
-      {tone === 'unknown' ? 'unscreened' : tone}
-    </span>
-  );
-}
-
-const RECIPE_TITLES: Record<string, string> = {
-  A: 'Sanctions-pivot corridor (commodity x recent port-call switch)',
-  B: 'Storage-build inferred lift (terminal level changes)',
-  C: 'Tender-driven (USAspending / TED contract win + lift)',
-  D: 'Refiner stock draw → import pull',
-  E: 'Pipeline outage / disruption substitution',
-  F: 'Export-quota window (Comtrade / Census signal)',
-  G: 'Refinery-driven (EIA throughput + Comtrade feedstock)',
-};
-
-function recipeLabel(recipe?: string | null): { code: string; title: string } | null {
-  if (!recipe) return null;
-  const match = /[A-G]/i.exec(recipe);
-  const code = match ? match[0].toUpperCase() : recipe;
-  const title = RECIPE_TITLES[code] ?? recipe;
-  return { code, title };
-}
-
-function formatVolumeBand(record: MeridianCargoRecord): string | null {
-  const unit = record.volume_unit ?? 'bbl';
-  const low = record.volume_low;
-  const mid = record.volume_best_estimate;
-  const high = record.volume_high;
-  const parts: string[] = [];
-  if (low != null) parts.push(Math.round(low).toLocaleString());
-  if (mid != null) parts.push(mid != null ? `≈${Math.round(mid).toLocaleString()}` : '—');
-  if (high != null) parts.push(Math.round(high).toLocaleString());
-  if (parts.length === 0) return null;
-  return `${parts.join(' – ')} ${unit}`;
-}
-
 function OilLiveMapOverlays({
   enabled,
   mapZoom = 5,
@@ -229,7 +138,11 @@ function OilLiveMapOverlays({
 }: Props) {
   const queryClient = useQueryClient();
   const [liveVessels, setLiveVessels] = useState<Record<number, OilLiveVessel>>({});
-  const [selectedFeature, setSelectedFeature] = useState<LiveDealMapFeature | null>(null);
+  const [popupSnapshot, setPopupSnapshot] = useState<OilLivePopupSnapshot | null>(null);
+
+  const handleCanvasFeatureClick = useCallback((feature: LiveDealMapFeature) => {
+    setPopupSnapshot(liveDealFeatureToPopupSnapshot(feature));
+  }, []);
   const bbox = viewport
     ? `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`
     : undefined;
@@ -723,354 +636,6 @@ function OilLiveMapOverlays({
   ]);
 
   useEffect(() => {
-    if (!selectedFeature) return;
-    if (!canvasFeatures.some((feature) => feature.uid === selectedFeature.uid)) {
-      setSelectedFeature(null);
-    }
-  }, [canvasFeatures, selectedFeature]);
-
-  const selectedPopupPosition: LatLngTuple | null = selectedFeature
-    ? selectedFeature.shape === 'point'
-      ? [selectedFeature.lat, selectedFeature.lng]
-      : [selectedFeature.popupLat, selectedFeature.popupLng]
-    : null;
-
-  const openFeatureDetails = (
-    payload: unknown,
-    initialDrawerTab?: OilLiveDrawerTab,
-  ): void => {
-    if (!onEntityClick || !payload || typeof payload !== 'object') return;
-    onEntityClick({
-      ...(payload as OilLiveEntityClickPayload),
-      ...(initialDrawerTab ? { initialDrawerTab } : {}),
-    });
-  };
-
-  const renderSelectedPopup = () => {
-    if (!selectedFeature) return null;
-
-    if (selectedFeature.kind === 'terminal') {
-      const term = selectedFeature.data as OilTerminal;
-      return (
-        <div className="oil-live-popup-body">
-          <OilLiveProvenanceBadge kind="inferred" className="mb-1" />
-          <strong>{term.name}</strong>
-          <p>{term.operator_name}</p>
-          <p>{(term.products ?? []).slice(0, 4).join(', ')}</p>
-          {term.country && <p className="oil-live-popup-muted">{term.country}</p>}
-          {onEntityClick && (
-            <>
-              <button
-                type="button"
-                className="oil-live-popup-btn"
-                onClick={() => openFeatureDetails(selectedFeature.payload)}
-              >
-                View details
-              </button>
-              <button
-                type="button"
-                className="oil-live-popup-btn oil-live-popup-btn--outline"
-                onClick={() => openFeatureDetails(selectedFeature.payload, 'workflow')}
-              >
-                Trading workflow
-              </button>
-            </>
-          )}
-        </div>
-      );
-    }
-
-    if (selectedFeature.kind === 'vessel') {
-      const vessel = selectedFeature.data as OilLiveVessel;
-      return (
-        <div className="oil-live-popup-body">
-          <OilLiveProvenanceBadge
-            kind={vessel.source ?? vessel.data_source ?? 'live_ais'}
-            className="mb-1"
-          />
-          <strong>{vessel.name ?? vessel.vessel_name ?? `MMSI ${vessel.mmsi}`}</strong>
-          <br />
-          {vessel.tanker_class}
-          {vessel.source_type && (
-            <>
-              <br />
-              <span className="oil-live-popup-muted">{vessel.source_type.replaceAll('_', ' ')}</span>
-            </>
-          )}
-          {vessel.freshness_seconds != null && (
-            <>
-              <br />
-              <span className="oil-live-popup-muted">
-                Freshness: {Math.round(vessel.freshness_seconds / 60)} min
-              </span>
-            </>
-          )}
-          <br />
-          <span className="oil-live-popup-muted">AIS does not confirm supplier or receiver.</span>
-          {onEntityClick && (
-            <button
-              type="button"
-              className="oil-live-popup-btn"
-              onClick={() => openFeatureDetails(selectedFeature.payload)}
-            >
-              View details
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    if (selectedFeature.kind === 'opportunity') {
-      const selected = selectedFeature.data as {
-        opportunity?: OilOpportunity;
-      };
-      const opportunity = selected.opportunity;
-      return (
-        <div className="oil-live-popup-body">
-          <OilLiveProvenanceBadge kind={opportunity?.source_tiers?.[0] ?? 'synthetic'} className="mb-1" />
-          <strong>{selectedFeature.title}</strong>
-          {opportunity?.deal_score != null && (
-            <p>Deal score {(opportunity.deal_score * 100).toFixed(0)}%</p>
-          )}
-          {opportunity?.confidence != null && (
-            <p>Confidence {(opportunity.confidence * 100).toFixed(0)}%</p>
-          )}
-          {opportunity?.hypothesis && <p>{opportunity.hypothesis}</p>}
-          {(opportunity?.evidence ?? []).slice(0, 2).map((line, index) => (
-            <p key={index} className="oil-live-popup-muted">
-              {line}
-            </p>
-          ))}
-          {onEntityClick && (
-            <>
-              <button
-                type="button"
-                className="oil-live-popup-btn"
-                onClick={() => openFeatureDetails(selectedFeature.payload)}
-              >
-                View details
-              </button>
-              <button
-                type="button"
-                className="oil-live-popup-btn oil-live-popup-btn--outline"
-                onClick={() => openFeatureDetails(selectedFeature.payload, 'workflow')}
-              >
-                Trading workflow
-              </button>
-            </>
-          )}
-        </div>
-      );
-    }
-
-    if (selectedFeature.kind === 'trade_flow') {
-      const arc = selectedFeature.data as TradeFlowArc;
-      return (
-        <div style={{ minWidth: 220, maxWidth: 280 }}>
-          <div style={{ marginBottom: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            <span style={chipStyle('#fef3c7', '#92400e')}>Trade flow</span>
-            <span style={chipStyle('#e0f2fe', '#075985')}>
-              {arc.group === 'company_pair' ? 'Company pair' : 'Country pair'}
-            </span>
-            <span style={chipStyle('#ede9fe', '#5b21b6')}>{arc.commodity_family}</span>
-          </div>
-          <strong>
-            {arc.shipper} → {arc.consignee}
-          </strong>
-          <br />
-          <span style={{ fontSize: 11 }}>
-            {arc.cargo_count.toLocaleString()} cargo{arc.cargo_count === 1 ? '' : 'es'} ·{' '}
-            {Math.round(arc.volume_total).toLocaleString()} {arc.volume_unit || ''}
-          </span>
-          <br />
-          <span style={{ fontSize: 11 }}>
-            Confidence avg {(arc.avg_confidence * 100).toFixed(0)}%
-          </span>
-          {arc.sample_mcr_ids.length > 0 && onEntityClick && (
-            <div style={{ marginTop: 6 }}>
-              <p
-                style={{
-                  fontSize: 9,
-                  fontWeight: 800,
-                  color: '#475569',
-                  textTransform: 'uppercase',
-                  margin: '0 0 2px',
-                }}
-              >
-                Contributing cargoes
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {arc.sample_mcr_ids.slice(0, 5).map((mcrId) => (
-                  <button
-                    key={mcrId}
-                    type="button"
-                    onClick={() =>
-                      onEntityClick({
-                        entityKind: 'cargo',
-                        entityId: mcrId,
-                        title: `MCR ${mcrId.slice(0, 8)}`,
-                        subtitle: `${arc.shipper} → ${arc.consignee}`,
-                      })
-                    }
-                    style={{
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 4,
-                      background: '#f8fafc',
-                      padding: '2px 6px',
-                      fontSize: 9,
-                      fontFamily: 'monospace',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {mcrId.slice(0, 8)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const record = selectedFeature.data as MeridianCargoRecord;
-    const volumeBand = formatVolumeBand(record);
-    const recipe = recipeLabel(record.recipe);
-    const evidenceTop = (record.evidence_chain ?? []).slice(0, 2);
-    const sources = record.sources ?? [];
-    return (
-      <div style={{ minWidth: 220, maxWidth: 280 }}>
-        <div style={{ marginBottom: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          <OilLiveProvenanceBadge kind={record.data_provenance ?? 'synthetic'} />
-          {record.bol_tier && <span style={chipStyle('#f1f5f9', '#0f172a')}>{record.bol_tier}</span>}
-          {recipe && (
-            <span style={chipStyle('#ede9fe', '#5b21b6')} title={recipe.title}>
-              Recipe {recipe.code}
-            </span>
-          )}
-          {isPartialCorridor(record) && (
-            <span style={chipStyle('#fef3c7', '#92400e')}>partial corridor</span>
-          )}
-        </div>
-        <strong>{record.commodity_family ?? 'Cargo corridor'}</strong>
-        <br />
-        {record.shipper_name && (
-          <>
-            Shipper: {record.shipper_name}
-            <br />
-          </>
-        )}
-        {record.consignee_name && (
-          <>
-            Consignee: {record.consignee_name}
-            <br />
-          </>
-        )}
-        {record.load_port_name && (
-          <>
-            Load: {record.load_port_name}
-            <br />
-          </>
-        )}
-        {(record.discharge_hint || record.discharge_country) && (
-          <>
-            Discharge: {record.discharge_hint ?? record.discharge_country}
-            <br />
-          </>
-        )}
-        {volumeBand && (
-          <>
-            Volume: {volumeBand}
-            {record.volume_method && (
-              <span style={{ ...chipStyle('#e0f2fe', '#075985'), marginLeft: 4 }}>
-                {record.volume_method}
-              </span>
-            )}
-            <br />
-          </>
-        )}
-        {record.confidence != null && (
-          <>
-            Confidence: {(record.confidence * 100).toFixed(0)}%
-            <br />
-          </>
-        )}
-
-        {(record.shipper_lei ||
-          record.consignee_lei ||
-          record.shipper_sanctions_status ||
-          record.consignee_sanctions_status) && (
-          <div style={{ marginTop: 6 }}>
-            {(record.shipper_lei || record.shipper_sanctions_status) && (
-              <div style={{ fontSize: 9, color: '#475569', marginBottom: 2 }}>
-                <span style={{ fontWeight: 800 }}>Shipper: </span>
-                <LeiChip lei={record.shipper_lei} />
-                <SanctionsChip status={record.shipper_sanctions_status} />
-              </div>
-            )}
-            {(record.consignee_lei || record.consignee_sanctions_status) && (
-              <div style={{ fontSize: 9, color: '#475569' }}>
-                <span style={{ fontWeight: 800 }}>Consignee: </span>
-                <LeiChip lei={record.consignee_lei} />
-                <SanctionsChip status={record.consignee_sanctions_status} />
-              </div>
-            )}
-          </div>
-        )}
-
-        {evidenceTop.length > 0 && (
-          <div style={{ marginTop: 6 }}>
-            <p
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                color: '#475569',
-                textTransform: 'uppercase',
-                margin: '0 0 2px',
-              }}
-            >
-              Evidence
-            </p>
-            <ul style={{ margin: 0, paddingLeft: 14, fontSize: 10, color: '#334155' }}>
-              {evidenceTop.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {sources.length > 0 && (
-          <div style={{ marginTop: 6, fontSize: 10 }}>
-            <span style={{ fontWeight: 800, color: '#475569' }}>Verify source: </span>
-            {sources
-              .filter((s) => s?.url)
-              .slice(0, 3)
-              .map((s, i) => (
-                <a
-                  key={i}
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#0369a1', marginRight: 6, textDecoration: 'underline' }}
-                >
-                  {s.name ?? `#${i + 1}`}
-                </a>
-              ))}
-          </div>
-        )}
-        {onEntityClick && (
-          <button
-            type="button"
-            className="oil-live-popup-btn"
-            onClick={() => openFeatureDetails(selectedFeature.payload)}
-          >
-            View details
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  useEffect(() => {
     if (!onStatsChange) return;
     onStatsChange({
       terminals: visibleTerminalCount,
@@ -1106,7 +671,7 @@ function OilLiveMapOverlays({
             <Popup>
               <div className="oil-live-popup-body">
                 <OilLiveProvenanceBadge kind="macro" className="mb-1" />
-                <strong>AIS coverage: {cell.coverage_quality.replaceAll('_', ' ')}</strong>
+                <strong>AIS coverage: {cell.coverage_quality.replace(/_/g, ' ')}</strong>
                 <p>{cell.vessel_count} vessels observed in this open-data cell</p>
                 <p className="oil-live-popup-muted">
                   {cell.sources?.length ? `Sources: ${cell.sources.join(', ')}` : 'Open AIS observations'}
@@ -1135,7 +700,7 @@ function OilLiveMapOverlays({
                 <strong>{zone.name}</strong>
                 <p>
                   {zone.recent_vessel_count ?? 0} recent open AIS vessels ·{' '}
-                  {zone.coverage_quality.replaceAll('_', ' ')}
+                  {zone.coverage_quality.replace(/_/g, ' ')}
                 </p>
                 {zone.expected_gap_reason && (
                   <p className="oil-live-popup-muted">{zone.expected_gap_reason}</p>
@@ -1150,21 +715,14 @@ function OilLiveMapOverlays({
       <CanvasLiveDealLayer
         features={canvasFeatures}
         mapZoom={mapZoom}
-        selectedUid={selectedFeature?.uid ?? null}
-        onFeatureClick={setSelectedFeature}
+        selectedUid={popupSnapshot?.uid ?? null}
+        onFeatureClick={handleCanvasFeatureClick}
       />
-      {selectedFeature && selectedPopupPosition && (
-        <Popup
-          key={selectedFeature.uid}
-          className="oil-live-leaflet-popup"
-          position={selectedPopupPosition}
-          eventHandlers={{
-            remove: () => setSelectedFeature(null),
-          }}
-        >
-          {renderSelectedPopup()}
-        </Popup>
-      )}
+      <OilLiveMapPopupController
+        snapshot={popupSnapshot}
+        onClose={() => setPopupSnapshot(null)}
+        onEntityClick={onEntityClick}
+      />
     </LayerGroup>
   );
 }
