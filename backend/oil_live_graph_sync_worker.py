@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 import time
 from typing import Any
 
@@ -60,6 +61,7 @@ def main() -> None:
             time.sleep(interval_seconds)
         except Exception as exc:
             print(f"[oil-live-graph-sync-worker] sync failed: {exc}")
+            traceback.print_exc()
             time.sleep(backoff_seconds)
 
 

@@ -60,6 +60,7 @@ import {
 } from './licenseMapCluster';
 import {
   countrySummaryRowsToLicenses,
+  isCountryLicenseSummary,
   parseLicenseCountrySummaryResponse,
 } from './licenseCountrySummary';
 import {
@@ -570,6 +571,13 @@ async function fetchLicensesViewportFromApi(
       if (path.includes('country-summary')) {
         delete requestParams.map;
         delete requestParams.zoom;
+        // Low-zoom country summary should represent the full available country set
+        // for the current sector/filter, not only centroids inside the current bbox.
+        // Bbox-clipped summaries can hide countries that reappear when zooming in.
+        delete requestParams.min_lat;
+        delete requestParams.max_lat;
+        delete requestParams.min_lng;
+        delete requestParams.max_lng;
         const { data } = await apiClient.get<unknown>(path, {
           signal,
           timeout: 60_000,
@@ -750,8 +758,15 @@ export function useLicensesForMap(options: {
   const mapData = useMemo(() => {
     const rows = query.data ?? [];
     if (!effectiveViewportBounds) return rows;
+    const lowZoomCountrySummary =
+      mapZoom != null &&
+      mapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
+      rows.some(isCountryLicenseSummary);
+    // Keep low-zoom country-summary rows intact so border/bubble presence stays stable
+    // while panning near country-edge centroids; strict point-in-bbox trim can hide both.
+    if (lowZoomCountrySummary) return rows;
     return filterLicenseMapRowsToBounds(rows, effectiveViewportBounds);
-  }, [query.data, effectiveViewportBounds]);
+  }, [query.data, effectiveViewportBounds, mapZoom]);
 
   const stillLoadingCountryCount =
     query.isLoading && !query.data?.length ? 1 : 0;

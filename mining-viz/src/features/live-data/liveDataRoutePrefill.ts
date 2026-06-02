@@ -89,6 +89,23 @@ function coordsToParty(
   return { lat, lng, label, country };
 }
 
+function countryHubFallbackParty(country?: string): RoutePartyLocation | null {
+  const canonCountry = country ? canonicalRouteHubCountry(country) : null;
+  if (!canonCountry) return null;
+  const fallback = PORT_PRESETS.find((preset) => {
+    if (!preset.country) return false;
+    const presetCountry = canonicalRouteHubCountry(preset.country);
+    return presetCountry === canonCountry;
+  });
+  if (!fallback) return null;
+  return {
+    lat: fallback.lat,
+    lng: fallback.lng,
+    label: fallback.name,
+    country: fallback.country ?? canonCountry,
+  };
+}
+
 export function resolveRoutePartyFromPort(
   portName: string | undefined,
   country?: string,
@@ -96,7 +113,9 @@ export function resolveRoutePartyFromPort(
 ): RoutePartyLocation | null {
   const preset = matchPortPreset(portName, country);
   if (preset) return presetToParty(preset, portName?.trim() || preset.name);
-  return coordsToParty(coords?.lat, coords?.lng, portName?.trim() || 'Port', country);
+  const withCoords = coordsToParty(coords?.lat, coords?.lng, portName?.trim() || 'Port', country);
+  if (withCoords) return withCoords;
+  return countryHubFallbackParty(country);
 }
 
 export function buildRoutePlannerHintsFromCargo(record: MeridianCargoRecord): LiveDataRouteHints {
