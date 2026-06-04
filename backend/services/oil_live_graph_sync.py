@@ -1236,6 +1236,17 @@ def _sync_gem_extraction_tracker(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_gem_goit_pipelines(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_goit_pipelines_import import try_auto_ingest_gem_goit_pipelines
+    except ImportError:
+        from services.ingest.gem_goit_pipelines_import import try_auto_ingest_gem_goit_pipelines
+    try:
+        return try_auto_ingest_gem_goit_pipelines(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _sync_eurostat_trade_flows(conn: Any) -> dict[str, Any]:
     try:
         from backend.services.eurostat_trade import sync_eurostat_hs27
@@ -1430,6 +1441,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["eia_padd_storage"] = _sync_eia_padd_storage(conn)
         summary["steps"]["eia_historic_imports"] = _sync_eia_historic_downloads(conn)
         summary["steps"]["gem_extraction_tracker"] = _sync_gem_extraction_tracker(conn)
+        summary["steps"]["gem_goit_pipelines"] = _sync_gem_goit_pipelines(conn)
         summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)

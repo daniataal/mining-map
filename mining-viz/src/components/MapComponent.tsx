@@ -60,6 +60,7 @@ import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
+import GemGoitPipelineMapLayer from './petroleum/GemGoitPipelineMapLayer';
 import OilLiveMapOverlays, {
   type OilLiveEntityClickPayload,
   type OilLiveLayerVisibility,
@@ -1979,6 +1980,12 @@ export default function MapComponent({
                                 mapZoom={petroleumMapZoom}
                                 layerIds={['pipelines', 'refineries']}
                                 splitOilGasPipelineLayers
+                                isDark={isDark}
+                            />
+                            <GemGoitPipelineMapLayer
+                                bbox={oilGasBbox}
+                                enabled={oilGasLayersEnabled}
+                                mapZoom={petroleumMapZoom}
                                 isDark={isDark}
                             />
                             <StorageTankFarmsMapLayer
