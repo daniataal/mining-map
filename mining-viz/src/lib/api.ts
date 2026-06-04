@@ -1,4 +1,5 @@
 import axios, { isCancel } from 'axios';
+import { isLocalDevConsoleDebugEnabled, postAgentDebugIngest } from './agentDebugIngest';
 import { useMemo } from 'react';
 import {
   keepPreviousData,
@@ -599,7 +600,7 @@ async function fetchLicensesViewportFromApi(
         displayBounds,
         zoomRounded ?? undefined,
       );
-      if (import.meta.env.DEV) {
+      if (isLocalDevConsoleDebugEnabled()) {
         const ghanaCluster = collapsed.find(
           (row) =>
             (row.mapClusterCount ?? 0) >= 100 &&
@@ -1530,26 +1531,19 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
       const requestTimeoutMs = 90_000;
       const startedAt = Date.now();
       const baseURL = apiClient.defaults.baseURL ?? '';
-      // #region agent log
-      fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
-        body: JSON.stringify({
-          sessionId: '7419a2',
-          hypothesisId: 'A',
-          location: 'api.ts:useStorageTerminals',
-          message: 'storage_fetch_start',
-          data: {
-            requestTimeoutMs,
-            forceRefresh,
-            baseURL,
-            bboxKey,
-            hasViewport: viewport != null,
-          },
-          timestamp: startedAt,
-        }),
-      }).catch(() => {});
-      // #endregion
+      postAgentDebugIngest({
+        hypothesisId: 'A',
+        location: 'api.ts:useStorageTerminals',
+        message: 'storage_fetch_start',
+        data: {
+          requestTimeoutMs,
+          forceRefresh,
+          baseURL,
+          bboxKey,
+          hasViewport: viewport != null,
+        },
+        timestamp: startedAt,
+      });
       try {
         const params: Record<string, string | number | boolean> = { limit };
         if (forceRefresh) params.force_refresh = true;
@@ -1564,44 +1558,28 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
           params,
           signal,
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
-          body: JSON.stringify({
-            sessionId: '7419a2',
-            hypothesisId: 'A',
-            location: 'api.ts:useStorageTerminals',
-            message: 'storage_fetch_ok',
-            data: {
-              elapsedMs: Date.now() - startedAt,
-              entityCount: data?.entities?.length ?? 0,
-              cached: (data as StorageTerminalResponse & { cached?: boolean })?.cached,
-              dataSource: (data as StorageTerminalResponse & { data_source?: string })?.data_source,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          hypothesisId: 'A',
+          location: 'api.ts:useStorageTerminals',
+          message: 'storage_fetch_ok',
+          data: {
+            elapsedMs: Date.now() - startedAt,
+            entityCount: data?.entities?.length ?? 0,
+            cached: (data as StorageTerminalResponse & { cached?: boolean })?.cached,
+            dataSource: (data as StorageTerminalResponse & { data_source?: string })?.data_source,
+          },
+        });
         return data;
       } catch (err) {
-        // #region agent log
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
-          body: JSON.stringify({
-            sessionId: '7419a2',
-            hypothesisId: 'A',
-            location: 'api.ts:useStorageTerminals',
-            message: 'storage_fetch_error',
-            data: {
-              elapsedMs: Date.now() - startedAt,
-              error: err instanceof Error ? err.message : String(err),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          hypothesisId: 'A',
+          location: 'api.ts:useStorageTerminals',
+          message: 'storage_fetch_error',
+          data: {
+            elapsedMs: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
         throw err;
       }
     },

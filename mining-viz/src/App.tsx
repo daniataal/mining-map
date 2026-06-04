@@ -15,6 +15,7 @@ import {
   type LicenseViewportBounds,
   normalizeLicenseViewportBounds,
 } from './lib/api';
+import { postAgentDebugIngest } from './lib/agentDebugIngest';
 import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
 import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
 import { DEFAULT_OSM_LAYER_VISIBILITY } from './lib/osmPetroleumLayers';
@@ -430,27 +431,21 @@ export default function App() {
     const curated = ents.filter(
       (e) => e.sourceKind === 'curated_reference' || String(e.id || '').startsWith('curated_storage_'),
     );
-    // #region agent log
-    fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
-      body: JSON.stringify({
-        sessionId: '7419a2',
-        hypothesisId: 'C',
-        location: 'App.tsx:storageEntities',
-        message: 'storage_entities_region_counts',
-        data: {
-          total: ents.length,
-          curated: curated.length,
-          uae: uae.length,
-          fujairah: fuj.length,
-          israel: isr.length,
-          statsBySource: storageTerminalResponse.stats?.by_source,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
+    postAgentDebugIngest({
+      sessionId: '7419a2',
+      hypothesisId: 'C',
+      location: 'App.tsx:storageEntities',
+      message: 'storage_entities_region_counts',
+      data: {
+        total: ents.length,
+        curated: curated.length,
+        uae: uae.length,
+        fujairah: fuj.length,
+        israel: isr.length,
+        statsBySource: storageTerminalResponse.stats?.by_source,
+      },
+      timestamp: Date.now(),
+    });
   }, [viewMode, storageTerminalResponse]);
   const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
