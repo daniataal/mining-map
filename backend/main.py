@@ -2104,6 +2104,24 @@ def _bootstrap_open_data():
         print(f"[OpenData] Bootstrap failed: {exc}")
 
 
+def _warm_storage_terminal_cache() -> None:
+    """Preload storage terminal in-memory cache so the first map pan does not block the API worker."""
+    if not ensure_schema_initialized():
+        return
+    try:
+        try:
+            from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
+        except ImportError:
+            from services.storage_terminals import get_storage_terminals as warm_storage_terminals  # type: ignore
+        storage_summary = warm_storage_terminals(force_refresh=False)
+        print(
+            f"[startup] Storage terminal cache ready with "
+            f"{storage_summary.get('stats', {}).get('total', 0)} entities."
+        )
+    except Exception as exc:
+        print(f"[startup] Storage terminal warmup skipped: {exc}")
+
+
 @app.on_event("startup")
 def startup_schema_bootstrap():
     """Bind the HTTP port before heavy DB work: init runs in a background thread."""
@@ -2122,6 +2140,7 @@ def startup_schema_bootstrap():
         _sync_eia_historic_reference()
         _sync_gov_procurement_reference()
         _sync_oil_live_graph_reference()
+        _warm_storage_terminal_cache()
         _bootstrap_open_data()
 
     threading.Thread(target=_warm, daemon=True).start()
