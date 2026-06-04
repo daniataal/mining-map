@@ -86,6 +86,18 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Tier honesty** | NGO-researched routes (`RouteAccuracy` in xlsx); **not** official cadastre; Excel has no geometry (routes only in GeoJSON) |
 | **Verify** | After ingest: `SELECT COUNT(*) FROM gem_pipeline_segments`; `curl` Gulf bbox → `feature_count` > 0; map layer **Pipelines — GEM GOIT (CC BY)** |
 
+#### GEM — `gem_gogpt_plants_january_2026` (GOGPT plants)
+
+| | |
+|--|--|
+| **File** | `Global-Oil-and-Gas-Plant-Tracker-GOGPT-January-2026.xlsx` (sheet `Gas & Oil Units`; optional `sub-threshold units` via `GEM_GOGPT_INCLUDE_SUB_THRESHOLD=true`) |
+| **License** | [Global Energy Monitor GOGPT](https://globalenergymonitor.org/projects/global-oil-gas-plant-tracker/) (January 2026) |
+| **Refresh** | `POST /api/admin/gem-gogpt-plants/ingest`; graph-sync when `GEM_GOGPT_AUTO_INGEST=true` |
+| **Storage** | Postgres `gem_plant_units` (Point, tags JSONB) |
+| **Commercial fields** | `Operator(s)`, `Owner(s)`, `Parent(s)`, GEM entity IDs, captive industry use/type, equipment vendor — **not** tank lessors |
+| **Map API** | `GET /api/petroleum/gem-plants?south&west&north&east` |
+| **Verify** | `SELECT COUNT(*) FROM gem_plant_units`; map layer **Plants — GEM GOGPT (power/CHP)**; popup shows owner/operator/captive rows |
+
 ### 2.2 Other backend ingest (not ArcGIS list)
 
 | Module | Data | Free? | Verification |
@@ -95,6 +107,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `csv_fallback_import.py` | User/admin CSV (e.g. SA/Ghana mining) | User-provided | `user_import_csv`; source file + row hash |
 | `gem_extraction_tracker_import.py` | GEM Global Oil & Gas Extraction Tracker (March 2026 xlsx) | Yes (GEM open data) | `source_id=gem_global_extraction_tracker_march_2026`; `record_origin=global_open_fallback`; admin `POST /api/admin/gem-extraction-tracker/ingest`; auto on graph-sync when xlsx present |
 | `gem_goit_pipelines_import.py` | GEM GOIT Oil/NGL pipelines (xlsx + GitHub route GeoJSON) | Yes (CC BY 4.0) | `gem_pipeline_segments`; admin `POST /api/admin/gem-goit-pipelines/ingest`; map `GET /api/petroleum/gem-pipelines` |
+| `gem_gogpt_plants_import.py` | GEM GOGPT oil/gas power plants (January 2026 xlsx) | Yes (GEM open data) | `gem_plant_units`; admin `POST /api/admin/gem-gogpt-plants/ingest`; map `GET /api/petroleum/gem-plants` |
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |

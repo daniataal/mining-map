@@ -87,9 +87,13 @@ const COMPANY_PROPERTY_KEYS = [
   'OPERATOR',
   'Operator',
   'operator',
+  'Operator(s)',
   'owner',
   'Owner',
   'OWNER',
+  'Owner(s)',
+  'Parent(s)',
+  'primary_counterparty',
   'licensee',
   'Licensee',
   'LICENSEE',
@@ -267,6 +271,48 @@ export function collectOsmPipelineDetails(
   return rows;
 }
 
+/** GEM GOGPT / GOIT / extraction — counterparties useful for outreach (not tank lessors). */
+export function collectGemCommercialDetails(
+  props: Record<string, unknown>,
+): { label: string; value: string }[] {
+  const isGem =
+    String(props.source || '').startsWith('gem_') ||
+    props.layer_id === 'gem_plants' ||
+    props.layer_id === 'gem_pipelines' ||
+    props.counterparties != null;
+  if (!isGem) return [];
+
+  const rows: { label: string; value: string }[] = [];
+  const add = (label: string, value: string | null | undefined) => {
+    const text = value?.trim();
+    if (text) rows.push({ label, value: text });
+  };
+
+  add('Operator', firstString(props, ['operator', 'Operator(s)', 'Operator']));
+  add('Owner', firstString(props, ['owner', 'Owner(s)', 'Owner']));
+  add('Parent', firstString(props, ['Parent(s)', 'parent']));
+  add('Primary contact (GEM)', firstString(props, ['primary_counterparty']));
+  add('Captive industry', firstString(props, ['captive_industry_use', 'captive_industry_type']));
+  add('Equipment', firstString(props, ['equipment', 'Equipment Manufacturer/Model']));
+  add('Location accuracy', firstString(props, ['location_accuracy', 'Location accuracy']));
+  add('GEM entity (owner)', firstString(props, ['owner_gem_entity_id']));
+  add('Note', firstString(props, ['commercial_note']));
+
+  const parties = props.counterparties;
+  if (Array.isArray(parties)) {
+    for (const block of parties) {
+      if (!block || typeof block !== 'object') continue;
+      const role = String((block as Record<string, unknown>).role || '').trim();
+      const names = (block as Record<string, unknown>).names;
+      if (!role || !Array.isArray(names) || names.length === 0) continue;
+      const label = role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      add(label, names.map(String).join('; '));
+    }
+  }
+
+  return rows;
+}
+
 export function petroleumLayerTypeLabel(layerId: PetroleumLayerId): string {
   return LAYER_TYPE_LABEL[layerId] ?? 'Infrastructure';
 }
@@ -417,14 +463,22 @@ export function buildPetroleumFeatureViewModel(
     : isPipelineLayer
       ? petroleumLayerTypeLabel(layerId)
       : null;
-  const name = firstString(props, ['Name', 'NAME', 'name', 'title', 'Title']);
-  const owner = firstString(props, ['owner', 'Owner', 'OWNER']);
+  const name = firstString(props, [
+    'Name',
+    'NAME',
+    'name',
+    'title',
+    'Title',
+    'plant_name',
+    'unit_name',
+  ]);
+  const owner = firstString(props, ['owner', 'Owner', 'OWNER', 'Owner(s)']);
   const exploringCompanies = collectExploringCompanies(props);
   const operatorFromTags =
     firstString(props, ['operator', 'Operator', 'OPERATOR']) ??
     (exploringCompanies.length === 1 ? exploringCompanies[0] : null);
   const operator = operatorFromTags ?? owner ?? null;
-  const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation']);
+  const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation', 'country']);
   const country = resolvePetroleumCountry(countryRaw);
   const facilityType =
     (isOsmPipeline && pipelineSubstance
@@ -449,7 +503,17 @@ export function buildPetroleumFeatureViewModel(
     'throughput',
   ]);
   const description = firstString(props, ['description', 'Description', 'notes', 'Notes']);
-  const sourceRaw = firstString(props, ['Source', 'SOURCE', 'source', 'link', 'Link', 'URL', 'url']);
+  const sourceRaw = firstString(props, [
+    'Source',
+    'SOURCE',
+    'source',
+    'link',
+    'Link',
+    'URL',
+    'url',
+    'wiki_url',
+    'Wiki URL',
+  ]);
   let { sourceUrl, sourceLabel, sourceText } = parsePetroleumSource(sourceRaw);
 
   const osmUrl = buildOsmObjectUrl(
@@ -466,15 +530,40 @@ export function buildPetroleumFeatureViewModel(
   }
 
   const pipelineDetails = isOsmPipeline ? collectOsmPipelineDetails(props) : [];
+  const gemCommercial = collectGemCommercialDetails(props);
 
   const operatorMissing =
     isOsmPipeline && !operator && !owner && exploringCompanies.length === 0;
 
-  const extraRows: { label: string; value: string }[] = [];
+  const extraRows: { label: string; value: string }[] = [...gemCommercial];
+  const gemConsumed = new Set(
+    gemCommercial.map((r) => r.label.toLowerCase()).concat([
+      'counterparties',
+      'operators',
+      'owners',
+      'parents',
+      'commercial_note',
+      'source_id',
+      'source_name',
+      'source_url',
+      'data_tier',
+      'attribution',
+      'unit_key',
+      'gem_unit_id',
+      'gem_location_id',
+      'layer_id',
+      'project_id',
+      'segment_key',
+    ]),
+  );
   for (const [key, raw] of Object.entries(props)) {
     if (CONSUMED_PROPERTY_KEYS.has(key) || raw == null) continue;
+    if (gemConsumed.has(key.toLowerCase()) || gemConsumed.has(humanizeKey(key).toLowerCase())) {
+      continue;
+    }
     const value = String(raw).trim();
     if (!value) continue;
+    if (key === 'counterparties' || typeof raw === 'object') continue;
     if (isOsmPipeline) {
       const lower = key.toLowerCase();
       if (
@@ -531,7 +620,7 @@ export function buildPetroleumFeatureViewModel(
     wikidataUrl,
     isOsmFeature,
     pipelineDetails,
-    extraRows: extraRows.slice(0, isOsmPipeline ? 2 : 4),
+    extraRows: extraRows.slice(0, gemCommercial.length > 0 ? 10 : isOsmPipeline ? 2 : 4),
   };
 }
 

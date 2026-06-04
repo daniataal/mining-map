@@ -1,0 +1,20 @@
+{
+  "Wiki URL": "https://www.gem.wiki/example",
+  "Country/Area": "United States",
+  "Plant name": "Example Gas Plant",
+  "Unit name": "Unit 1",
+  "Fuel": "gas",
+  "Capacity (MW)": 500,
+  "Status": "operating",
+  "Operator(s)": "Example Operator LLC",
+  "Owner(s)": "Example Owner Inc; Subsidiary Gas Co",
+  "Owner(s) GEM Entity ID": "E-100",
+  "Parent(s)": "Global Energy Parent",
+  "Latitude": 29.76,
+  "Longitude": -95.37,
+  "Location accuracy": "exact",
+  "Captive industry use": "yes",
+  "Captive industry type": "chemicals",
+  "GEM unit ID": "G9999TEST",
+  "GEM location ID": "L9999TEST"
+}
