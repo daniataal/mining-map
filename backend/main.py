@@ -1747,6 +1747,19 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             print(f"Petroleum OSM sync runs init skipped: {osm_run_exc}")
 
         try:
+            cur.execute("SAVEPOINT storage_terminal_display_schema")
+            try:
+                from backend.services.storage_terminal_display import ensure_storage_terminal_display_tables
+            except ImportError:
+                from services.storage_terminal_display import ensure_storage_terminal_display_tables
+            ensure_storage_terminal_display_tables(conn)
+            cur.execute("RELEASE SAVEPOINT storage_terminal_display_schema")
+        except Exception as storage_display_exc:
+            cur.execute("ROLLBACK TO SAVEPOINT storage_terminal_display_schema")
+            cur.execute("RELEASE SAVEPOINT storage_terminal_display_schema")
+            print(f"Storage terminal display table init skipped: {storage_display_exc}")
+
+        try:
             cur.execute("SAVEPOINT eu_procurement_schema")
             try:
                 from backend.services.eu_procurement_store import ensure_eu_procurement_tables
@@ -5279,48 +5292,10 @@ def get_market_prices():
 #   COMTRADE_API_KEY  — UN Comtrade subscription key (optional; endpoint
 #                       degrades gracefully to deep-links only if absent)
 
-_COMMODITY_HS: dict[str, str] = {
-    "gold": "7108", "silver": "7106",
-    "diamond": "7102", "diamonds": "7102",
-    "platinum": "7110", "palladium": "7110",
-    "copper": "7403",
-    "iron ore": "2601", "iron": "2601",
-    "coal": "2701",
-    "bauxite": "2606",
-    "aluminium": "7601", "aluminum": "7601",
-    "manganese": "2602",
-    "chromite": "2610", "chrome": "2610",
-    "cobalt": "2605",
-    "lithium": "2825",
-    "nickel": "7502",
-    "zinc": "7901",
-    "lead": "7801",
-    "tin": "8001",
-    "tungsten": "2611",
-    "titanium": "2614",
-    "tantalum": "2615",
-    "coltan": "2615",
-    "uranium": "2612",
-    # ── Petroleum chapter 27 (chapter HS 2709–2711) ──────────────────────
-    # The OilTradeContext panel posts commodity strings like
-    # "crude oil" / "petroleum products" / "natural gas" — map them so
-    # the public preview Comtrade endpoint resolves correctly.
-    "crude oil":           "2709",
-    "crude petroleum":     "2709",
-    "petroleum":           "2709",
-    "oil":                 "2709",
-    "petroleum products":  "2710",
-    "refined petroleum":   "2710",
-    "refined products":    "2710",
-    "gasoline":            "2710",
-    "diesel":              "2710",
-    "fuel oil":            "2710",
-    "natural gas":         "2711",
-    "lng":                 "2711",
-    "lpg":                 "2711",
-    "petroleum gas":       "2711",
-    "petroleum gases":     "2711",
-}
+try:
+    from backend.services.commodity_hs import resolve_hs as _resolve_hs
+except ImportError:
+    from services.commodity_hs import resolve_hs as _resolve_hs  # type: ignore
 
 # Country display name (lower) → {iso2, m49}
 # m49 = UN Comtrade reporter code; iso2 = World Bank country code
@@ -5432,17 +5407,6 @@ def _resolve_codes(country: str) -> dict:
     return {}
 
 
-def _resolve_hs(commodity: str) -> Optional[str]:
-    """Map commodity string to HS-4 code."""
-    key = commodity.lower().strip()
-    if key in _COMMODITY_HS:
-        return _COMMODITY_HS[key]
-    for k, v in _COMMODITY_HS.items():
-        if k in key or key in k:
-            return v
-    return None
-
-
 def _fetch_comtrade(m49: str, hs_code: str, year: int = 2023, iso2: str = "") -> dict:
     """
     Resolve trade flows through the free / fallback chain implemented in
@@ -5493,8 +5457,27 @@ def _fetch_world_bank(iso2: str) -> dict:
     return result
 
 
+@app.get("/api/companies/resolve")
+def get_company_resolve(name: str = "", country: str = ""):
+    """Resolve a display name to oil_companies (exact or fuzzy)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.company_name_resolve import resolve_company_name
+        except ImportError:
+            from services.company_name_resolve import resolve_company_name  # type: ignore
+        return resolve_company_name(conn, name=name, country=country)
+    finally:
+        conn.close()
+
+
 @app.get("/api/company-intel")
-def get_company_intel(company: str = "", country: str = "", commodity: str = ""):
+def get_company_intel(
+    company: str = "",
+    country: str = "",
+    commodity: str = "",
+    company_id: Optional[str] = None,
+):
     """
     Aggregate open-data trade & economic context for a mining license dossier.
 
@@ -5502,8 +5485,25 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     trade_manifest_rows, eia_historic_imports). Live Comtrade / World Bank calls
     run only when COMPANY_INTEL_LIVE_FALLBACK=1.
     """
+    resolved_company = company
+    resolved_country = country
+    if company_id and not resolved_company.strip():
+        conn_lookup = get_db_connection()
+        try:
+            try:
+                from backend.services.company_name_resolve import lookup_company_by_id
+            except ImportError:
+                from services.company_name_resolve import lookup_company_by_id  # type: ignore
+            row = lookup_company_by_id(conn_lookup, company_id)
+            if row and row.get("found"):
+                resolved_company = str(row.get("name") or "")
+                if not resolved_country.strip():
+                    resolved_country = str(row.get("country") or "")
+        finally:
+            conn_lookup.close()
+
     hs_code = _resolve_hs(commodity)
-    codes = _resolve_codes(country)
+    codes = _resolve_codes(resolved_country)
 
     read_path = "postgres"
     sync_state: dict = {}
@@ -5516,8 +5516,8 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
             from services.company_intel_store import fetch_company_intel_from_postgres
         bundle = fetch_company_intel_from_postgres(
             conn,
-            country=country,
-            company=company,
+            country=resolved_country,
+            company=resolved_company,
             commodity=commodity,
             hs_code=hs_code,
             codes=codes,
@@ -5544,9 +5544,9 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
         econ_data = _fetch_world_bank(codes["iso2"])
 
     # Pre-built deep links — no API calls, always available
-    company_q = _requests.utils.quote(company)
+    company_q = _requests.utils.quote(resolved_company)
     commodity_q = _requests.utils.quote(commodity)
-    country_q = _requests.utils.quote(country)
+    country_q = _requests.utils.quote(resolved_country)
     try:
         try:
             from backend.services.company_registry_links import (
@@ -5558,7 +5558,7 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
                 OPENCORPORATES_DISCLAIMER,
                 collect_registry_links,
             )
-        registry_bundle = collect_registry_links(company, country)
+        registry_bundle = collect_registry_links(resolved_company, resolved_country)
         registry_links = registry_bundle.get("links") or []
     except Exception:
         registry_bundle = {}
@@ -5668,8 +5668,9 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     )
 
     return {
-        "company": company,
-        "country": country,
+        "company": resolved_company,
+        "country": resolved_country,
+        "company_id": company_id,
         "commodity": commodity,
         "hs_code": hs_code,
         "country_codes": codes,
@@ -6866,6 +6867,51 @@ def admin_gem_goit_pipelines_ingest(
         conn.close()
 
 
+@app.get("/api/petroleum/infrastructure-coverage")
+def get_petroleum_infrastructure_coverage(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
+    """Viewport counts for OSM vs GEM vs storage — complementary layers, not duplicates."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.infrastructure_coverage import build_infrastructure_coverage
+            from backend.services.gem_pipeline_coverage import _parse_bbox
+        except ImportError:
+            from services.infrastructure_coverage import build_infrastructure_coverage  # type: ignore
+            from services.gem_pipeline_coverage import _parse_bbox  # type: ignore
+        bbox = _parse_bbox(south, west, north, east) if south is not None else None
+        return build_infrastructure_coverage(conn, bbox=bbox)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/petroleum/gem-pipelines/nearest")
+def get_nearest_gem_pipeline(
+    lat: float,
+    lng: float,
+    max_distance_m: float = 2000.0,
+):
+    """Nearest GEM pipeline segment to a point (OSM popup enrichment)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.infrastructure_coverage import nearest_gem_pipeline_segment
+        except ImportError:
+            from services.infrastructure_coverage import nearest_gem_pipeline_segment  # type: ignore
+        hit = nearest_gem_pipeline_segment(conn, lat=lat, lng=lng, max_distance_m=max_distance_m)
+        if hit is None:
+            return {"found": False, "limitations": ["No GEM GOIT segment within match distance."]}
+        return {"found": True, **hit}
+    finally:
+        conn.close()
+
+
 @app.get("/api/petroleum/gem-pipelines/coverage")
 def get_gem_pipelines_coverage(
     south: Optional[float] = None,
@@ -6956,6 +7002,68 @@ def admin_gem_gogpt_plants_ingest(
     except Exception as exc:
         conn.rollback()
         return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-ggit-lng/ingest")
+def admin_gem_ggit_lng_ingest(
+    request: GemGogptPlantsIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Ingest GEM GGIT LNG terminals (xlsx) into gem_lng_terminals."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_ggit_lng_terminals_import import ingest_gem_ggit_lng_terminals
+        except ImportError:
+            from services.ingest.gem_ggit_lng_terminals_import import ingest_gem_ggit_lng_terminals
+        summary = ingest_gem_ggit_lng_terminals(conn, workbook_path=request.path)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/petroleum/gem-lng-terminals")
+def get_gem_lng_terminals_layer(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    zoom: Optional[float] = None,
+    limit: int = 4000,
+):
+    """GeoJSON for GEM GGIT LNG terminals in viewport."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.gem_lng_terminals import get_gem_lng_terminals_geojson
+            from backend.services.storage_terminals import _parse_storage_bbox
+        except ImportError:
+            from services.gem_lng_terminals import get_gem_lng_terminals_geojson  # type: ignore
+            from services.storage_terminals import _parse_storage_bbox  # type: ignore
+
+        bbox = None
+        if south is not None or west is not None or north is not None or east is not None:
+            bbox = _parse_storage_bbox(south, west, north, east)
+        return get_gem_lng_terminals_geojson(conn, bbox=bbox, zoom=zoom, limit=limit)
+    except ValueError as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": "gem_lng_terminals",
+            "feature_count": 0,
+            "limitations": [str(exc)],
+            "coverage_gap": True,
+        }
     finally:
         conn.close()
 
@@ -7405,6 +7513,38 @@ def read_entity_trade_flows(
         return serialize_entity_trade_flows_response(payload)
     except Exception as exc:
         logger.exception("trade-flows failed for %s: %s", entity_id, exc)
+        return Response(str(exc), status_code=500)
+    finally:
+        conn.close()
+
+
+@app.get("/entities/{entity_id:path}/country-commodity-snapshot")
+def read_country_commodity_snapshot(
+    entity_id: str,
+    entity_kind: str = "license",
+    limit: int = 80,
+):
+    """Country-level extraction (where available) and trade export/import for license commodity."""
+    if not ensure_schema_initialized():
+        return _schema_unavailable_response("initializing country commodity snapshot schema")
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.country_commodity_snapshot import (
+                collect_country_commodity_snapshot,
+                serialize_country_commodity_snapshot,
+            )
+        except ImportError:
+            from services.country_commodity_snapshot import (
+                collect_country_commodity_snapshot,
+                serialize_country_commodity_snapshot,
+            )
+        payload = collect_country_commodity_snapshot(
+            conn, entity_id, entity_kind=entity_kind, limit=limit
+        )
+        return serialize_country_commodity_snapshot(payload)
+    except Exception as exc:
+        logger.exception("country-commodity-snapshot failed for %s: %s", entity_id, exc)
         return Response(str(exc), status_code=500)
     finally:
         conn.close()

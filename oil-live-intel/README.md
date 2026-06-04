@@ -46,6 +46,22 @@ docker compose up -d --build oil-live-intel
 curl -s http://localhost:8095/api/oil-live/health
 ```
 
+### CI / faster Docker builds
+
+Production images use a pre-built module cache image (`dannyatalla/oil-live-intel-base:latest`), same pattern as `mining-map-base` for Python. Rebuild the base when `go.mod` / `go.sum` change:
+
+- GitHub Actions: workflow **Build Base Images** (`.github/workflows/build-base.yml`) — also runs on `main` when those files change.
+- One-time after merge: run that workflow (or `workflow_dispatch`) so `docker-image.yml` can `FROM` the base.
+
+Local builds work without the base image (the Dockerfile re-runs `go mod download`). To match CI:
+
+```bash
+docker build -f oil-live-intel/Dockerfile.base -t dannyatalla/oil-live-intel-base:latest oil-live-intel
+docker build -t oil-live-intel:local --build-arg BASE_IMAGE=dannyatalla/oil-live-intel-base:latest oil-live-intel
+```
+
+Production (`docker-compose.prod.yml`) pins **`linux/arm64`**. CI builds **arm64 only** on `ubuntu-24.04-arm` (native, no QEMU). The base image skips repeated module/toolchain layers; the remaining cost is compiling four Go binaries once per push.
+
 ## Environment
 
 | Variable | Required | Default |

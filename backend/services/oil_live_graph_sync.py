@@ -525,8 +525,16 @@ def _ensure_petroleum_osm_storage_layer(conn: Any) -> dict[str, Any]:
             )
         ensure_petroleum_osm_tables(conn)
         if layer_has_cached_features(conn, "storage_terminals"):
-            return {"status": "skipped", "reason": "storage_terminals already cached"}
-        return sync_layer_tiles(conn, "storage_terminals")
+            result: dict[str, Any] = {"status": "skipped", "reason": "storage_terminals already cached"}
+        else:
+            result = sync_layer_tiles(conn, "storage_terminals")
+        try:
+            from backend.services.storage_terminal_display import maybe_materialize_after_osm_sync
+        except ImportError:
+            from services.storage_terminal_display import maybe_materialize_after_osm_sync  # type: ignore
+
+        result["storage_terminal_display"] = maybe_materialize_after_osm_sync(conn)
+        return result
     except Exception as exc:
         return {"status": "error", "message": str(exc)[:500]}
 
@@ -1258,6 +1266,17 @@ def _sync_gem_gogpt_plants(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_gem_ggit_lng(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_ggit_lng_terminals_import import try_auto_ingest_gem_ggit_lng
+    except ImportError:
+        from services.ingest.gem_ggit_lng_terminals_import import try_auto_ingest_gem_ggit_lng
+    try:
+        return try_auto_ingest_gem_ggit_lng(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _sync_eurostat_trade_flows(conn: Any) -> dict[str, Any]:
     try:
         from backend.services.eurostat_trade import sync_eurostat_hs27
@@ -1454,6 +1473,7 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["gem_extraction_tracker"] = _sync_gem_extraction_tracker(conn)
         summary["steps"]["gem_goit_pipelines"] = _sync_gem_goit_pipelines(conn)
         summary["steps"]["gem_gogpt_plants"] = _sync_gem_gogpt_plants(conn)
+        summary["steps"]["gem_ggit_lng"] = _sync_gem_ggit_lng(conn)
         summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)

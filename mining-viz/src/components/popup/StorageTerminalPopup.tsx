@@ -4,16 +4,20 @@ import { useStorageTerminalDetails } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
 import {
   buildStorageTerminalPopupModel,
+  formatGemNearbyLine,
   formatStorageOperatorDisplay,
 } from '../../lib/storageTerminalPopup';
 import type { MiningLicense } from '../../types';
 import AddToDueDiligenceButton from '../AddToDueDiligenceButton';
+import CompanyLeadButton from './CompanyLeadButton';
+import type { MiningLicense } from '../../types';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 
 interface StorageTerminalPopupProps {
   item: MiningLicense;
   onOpenDossier?: () => void;
+  onOpenCompanyLead?: (item: MiningLicense) => void;
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
@@ -38,6 +42,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 function StorageTerminalPopup({
   item,
   onOpenDossier,
+  onOpenCompanyLead,
   isInDdQueue = false,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
@@ -46,12 +51,25 @@ function StorageTerminalPopup({
   dealRoomTitle,
 }: StorageTerminalPopupProps) {
   const { t } = useI18n();
-  const { data: storageDetail } = useStorageTerminalDetails(item.id, Boolean(item.id));
+  const { data: storageDetail } = useStorageTerminalDetails(item.id, Boolean(item.id), item);
   const displayItem = useMemo(
     () => ({ ...item, ...(storageDetail || {}) }),
     [item, storageDetail],
   );
   const model = useMemo(() => buildStorageTerminalPopupModel(displayItem), [displayItem]);
+  const intel = model.commercialIntel;
+  const portTenants = intel?.portTenants ?? [];
+  const gemPlants = intel?.nearbyGemPlants ?? [];
+  const gemLng = intel?.nearbyGemLngTerminals ?? [];
+  const gemPipelines = intel?.nearbyGemPipelines ?? [];
+  const extractionFields = intel?.nearbyExtractionFields ?? [];
+  const leadCountry = model.country || item.country || '';
+  const hasCommercialSection =
+    portTenants.length > 0 ||
+    gemPlants.length > 0 ||
+    gemLng.length > 0 ||
+    gemPipelines.length > 0 ||
+    extractionFields.length > 0;
 
   const operatorMissingHint = t('מפעיל לא מתויג ב-OSM', 'Operator not tagged in OSM');
   const enrichedFromReference = Boolean(model.curatedEnrichmentSourceName);
@@ -160,6 +178,163 @@ function StorageTerminalPopup({
               <DetailRow key={`${row.label}-${row.value}`} label={row.label} value={row.value} />
             ))}
           </div>
+        )}
+
+        {hasCommercialSection && (
+          <section className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5 space-y-2.5">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              {t('לידים מסחריים (פתוח)', 'Commercial leads (open data)')}
+            </p>
+            {intel?.portDirectory && (
+              <p className="text-[10px] text-slate-500 leading-snug">
+                {intel.portDirectory.portName || intel.portDirectory.locode}
+                {intel.portMatchDistanceKm != null && intel.portMatchDistanceKm > 0
+                  ? ` · ~${intel.portMatchDistanceKm} km`
+                  : ''}
+                {intel.portDirectory.sourceUrl ? (
+                  <>
+                    {' · '}
+                    <a
+                      href={intel.portDirectory.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-600 dark:text-sky-400 underline"
+                    >
+                      {t('רשימת נמל', 'Port list')}
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            )}
+            {portTenants.length > 0 && (
+              <div>
+                <p className="text-[9px] font-semibold uppercase text-slate-500 mb-1">
+                  {t('דיירי נמל / אחסון', 'Port tenants & storage')}
+                </p>
+                <ul className="text-[11px] text-slate-700 dark:text-slate-200 space-y-0.5 max-h-28 overflow-y-auto">
+                  {portTenants.slice(0, 10).map((lead) => (
+                    <li key={`${lead.name}-${lead.role}`} className="break-words">
+                      <CompanyLeadButton
+                        name={lead.name || ''}
+                        country={leadCountry}
+                        source={lead.source}
+                        sourceLabel={lead.source_label}
+                        onOpenDossier={onOpenCompanyLead}
+                      />
+                      {lead.category_label ? (
+                        <span className="text-slate-500"> — {lead.category_label}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {gemLng.length > 0 && (
+              <div>
+                <p className="text-[9px] font-semibold uppercase text-slate-500 mb-1">
+                  {t('טרמינלים GEM GGIT בקרבה', 'Nearby GEM LNG terminals')}
+                </p>
+                <ul className="text-[11px] space-y-0.5">
+                  {gemLng.map((p) => (
+                    <li key={p.id || p.name} className="break-words">
+                      {p.name}
+                      {p.operator ? (
+                        <>
+                          {' · '}
+                          <CompanyLeadButton
+                            name={String(p.operator)}
+                            country={leadCountry}
+                            source={p.source_id}
+                            sourceLabel={p.source_label}
+                            onOpenDossier={onOpenCompanyLead}
+                            className="inline"
+                          />
+                        </>
+                      ) : (
+                        formatGemNearbyLine(p)
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {gemPlants.length > 0 && (
+              <div>
+                <p className="text-[9px] font-semibold uppercase text-slate-500 mb-1">
+                  {t('מתקני GEM GOGPT בקרבה', 'Nearby GEM plants')}
+                </p>
+                <ul className="text-[11px] space-y-0.5">
+                  {gemPlants.map((p) => (
+                    <li key={p.id || p.name} className="break-words">
+                      {p.operator ? (
+                        <>
+                          {p.name}
+                          {' · '}
+                          <CompanyLeadButton
+                            name={String(p.operator)}
+                            country={leadCountry}
+                            source={p.source_id}
+                            sourceLabel={p.source_label}
+                            onOpenDossier={onOpenCompanyLead}
+                            className="inline"
+                          />
+                        </>
+                      ) : (
+                        formatGemNearbyLine(p)
+                      )}
+                      {p.wiki_url ? (
+                        <>
+                          {' '}
+                          <a
+                            href={p.wiki_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sky-600 dark:text-sky-400"
+                          >
+                            GEM
+                          </a>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {gemPipelines.length > 0 && (
+              <div>
+                <p className="text-[9px] font-semibold uppercase text-slate-500 mb-1">
+                  {t('צינורות GEM GOIT בקרבה', 'Nearby GEM pipelines')}
+                </p>
+                <ul className="text-[11px] space-y-0.5">
+                  {gemPipelines.map((p) => (
+                    <li key={p.id || p.name} className="break-words">
+                      {formatGemNearbyLine(p)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {extractionFields.length > 0 && (
+              <div>
+                <p className="text-[9px] font-semibold uppercase text-slate-500 mb-1">
+                  {t('שדות נפט/גז בקרבה', 'Nearby oil & gas fields')}
+                </p>
+                <ul className="text-[11px] space-y-0.5">
+                  {extractionFields.map((f) => (
+                    <li key={f.id || f.name} className="break-words">
+                      {formatGemNearbyLine(f)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-[9px] text-slate-500 italic leading-snug">
+              {t(
+                'GEM ורשימות נמל אינם מפרסמים משכירי מיכלים — אמתו חוזים בשטח.',
+                'GEM and port lists do not publish tank lessors — verify contracts on the ground.',
+              )}
+            </p>
+          </section>
         )}
 
         <div className="space-y-2">

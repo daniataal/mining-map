@@ -297,6 +297,10 @@ export default function LicenseMapPopupController({
     if (item) propsRef.current.handleOpenDossier(item);
   }, []);
 
+  const onOpenCompanyLeadStable = useCallback((lead: MiningLicense) => {
+    propsRef.current.handleOpenDossier(lead);
+  }, []);
+
   const onAddDdStable = useCallback(() => {
     const id = selectedItemRef.current?.id;
     if (id) propsRef.current.onAddToDueDiligence?.(id);
@@ -324,6 +328,7 @@ export default function LicenseMapPopupController({
         updateAnnotation={updateAnnotationStable}
         onDelete={onDeleteStable}
         onOpenDossier={onOpenDossierStable}
+        onOpenCompanyLead={onOpenCompanyLeadStable}
         isInDdQueue={isInQueue}
         onAddToDueDiligence={
           onAddToDueDiligence ? onAddDdStable : undefined

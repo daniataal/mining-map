@@ -62,6 +62,8 @@ export interface MiningLicense {
   confidenceNote?: string | null;
   /** Curated ingest notes (OPEC Gulf, etc.) — short text, not full raw_payload. */
   enrichmentNote?: string | null;
+  /** Backend served full popup payload from storage_terminal_display (skip detail fetch). */
+  displayReady?: boolean | null;
   /** When sparse OSM was enriched from a nearby curated hub reference row. */
   curatedEnrichmentSourceId?: string | null;
   curatedEnrichmentSourceName?: string | null;
@@ -661,9 +663,57 @@ export interface StorageEvidenceItem {
   summary?: string | null;
 }
 
+export interface StorageCounterpartyLead {
+  name: string;
+  role?: string;
+  category?: string;
+  category_label?: string;
+  source?: string;
+  source_label?: string;
+  distance_km?: number | null;
+  storage_operator?: string | null;
+  capacity_text?: string | null;
+}
+
+export interface StorageGemNearbySummary {
+  kind?: string;
+  id?: string;
+  name?: string;
+  status?: string;
+  fuel?: string;
+  capacity_text?: string;
+  operator?: string;
+  owner?: string;
+  parent?: string;
+  primary_counterparty?: string;
+  captive_industry_type?: string;
+  wiki_url?: string;
+  distance_km?: number;
+  source_label?: string;
+}
+
+export interface StorageTerminalCommercialIntel {
+  portDirectory?: {
+    locode?: string;
+    portName?: string;
+    portAuthorityName?: string;
+    country?: string;
+    sourceUrl?: string;
+    tenantCount?: number;
+  } | null;
+  portMatchDistanceKm?: number | null;
+  portTenants?: StorageCounterpartyLead[];
+  nearbyGemPlants?: StorageGemNearbySummary[];
+  nearbyGemLngTerminals?: StorageGemNearbySummary[];
+  nearbyGemPipelines?: StorageGemNearbySummary[];
+  nearbyExtractionFields?: StorageGemNearbySummary[];
+  limitations?: string[];
+}
+
 export interface StorageTerminalDetails extends MiningLicense {
   evidence: StorageEvidenceItem[];
   rawPayload?: Record<string, unknown> | null;
+  commercialIntel?: StorageTerminalCommercialIntel;
 }
 
 export interface StorageTerminalStats {

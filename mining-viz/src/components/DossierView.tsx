@@ -80,6 +80,7 @@ import DealRoomPanel from './DealRoomPanel';
 import LicenseeProcurementSection from './LicenseeProcurementSection';
 import SupplyChainPanel from './dossier/SupplyChainPanel';
 import FreeTradeEvidencePanel from './dossier/FreeTradeEvidencePanel';
+import CountryCommoditySnapshotCard from './CountryCommoditySnapshotCard';
 import SatelliteSitePanel from './dossier/SatelliteSitePanel';
 import GoldBodLicensePanel from './dossier/GoldBodLicensePanel';
 import {
@@ -436,7 +437,8 @@ export default function DossierView({
   const { data: storageTerminalDetails, isLoading: isLoadingStorageTerminal } =
     useStorageTerminalDetails(
       isStorageTerminal ? item?.id : undefined,
-      Boolean(isOpen && isStorageTerminal && item?.id)
+      Boolean(isOpen && isStorageTerminal && item?.id),
+      isStorageTerminal ? item : undefined,
     );
 
   // Document AI state
@@ -1350,6 +1352,14 @@ Output requirements:
             {/* EXPORTS / IMPORTS TAB */}
             {activeTab === 'exports-imports' && (
               <div className="space-y-4">
+                {item.id && (
+                  <CountryCommoditySnapshotCard
+                    entityId={item.id}
+                    entityKind={item.entityKind || 'license'}
+                    variant="full"
+                    onViewPartners={() => setActiveTab('trade-evidence')}
+                  />
+                )}
                 {(isOilAndGas || item.commodity) && item.id && (
                   <EntityTradeFlowsPanel entityId={item.id} entityKind="license" />
                 )}
@@ -2575,6 +2585,15 @@ Output requirements:
                       </div>
                     </div>
                   </Card>
+
+                  {item.id && (
+                    <CountryCommoditySnapshotCard
+                      entityId={item.id}
+                      entityKind={item.entityKind || 'license'}
+                      variant="full"
+                      onViewPartners={() => setActiveTab('trade-evidence')}
+                    />
+                  )}
 
                   {(item.phoneNumber || publicPhoneContact || privateLeadPhone !== '—') && (
                     <Card className="bg-emerald-500/10 border border-emerald-500/25 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">

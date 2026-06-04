@@ -490,7 +490,11 @@ class StorageTerminalTests(unittest.TestCase):
         module._storage_cache["loaded_at"] = 0.0
         module._storage_cache["response"] = None
 
-        result = get_storage_terminal_details("osm:node:777")
+        with (
+            patch("backend.services.storage_terminal_display.storage_display_read_enabled", return_value=False),
+            patch("backend.services.storage_terminal_display.STORAGE_DISPLAY_WRITE_THROUGH", False),
+        ):
+            result = get_storage_terminal_details("osm:node:777")
         self.assertIsNotNone(result)
         self.assertEqual(result["operatorName"], "Shell Enriched")
         self.assertIn("evidence", result)

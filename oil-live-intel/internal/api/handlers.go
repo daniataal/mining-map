@@ -38,6 +38,15 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// HealthLive is a fast liveness probe for Docker/Caddy (no heavy sync-status queries).
+func (s *Server) HealthLive(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"service": "oil-live-intel",
+		"probe":   "live",
+	})
+}
+
 func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
 	if s.Pool != nil {
 		sync := querySyncStatus(r.Context(), s.Pool)

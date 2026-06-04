@@ -996,6 +996,63 @@ export async function getEntityRelationships(entityId: string, entityKind = 'lic
   return Array.isArray(data) ? data : [];
 }
 
+export interface CountryCommodityTradePartner {
+  partner: string;
+  totalUsd: number;
+}
+
+export interface CountryCommoditySnapshotTrade {
+  latestYear?: number | null;
+  exportUsd?: number | null;
+  importUsd?: number | null;
+  exportKg?: number | null;
+  importKg?: number | null;
+  topExportPartners?: CountryCommodityTradePartner[];
+  topImportPartners?: CountryCommodityTradePartner[];
+  dataSources?: string[];
+}
+
+export interface CountryCommoditySnapshotExtraction {
+  available?: boolean;
+  tier?: string | null;
+  summary?: string | null;
+  fieldCount?: number;
+  productionValueAggregate?: number | null;
+  limitations?: string[];
+  jodi?: {
+    tier?: string;
+    summary?: string;
+    limitations?: string[];
+  };
+}
+
+export interface CountryCommoditySnapshot {
+  entityId?: string;
+  entityKind?: string;
+  company?: string;
+  country?: string;
+  commodity?: string;
+  hsCodes?: string[];
+  bolTier?: string;
+  trade?: CountryCommoditySnapshotTrade;
+  extraction?: CountryCommoditySnapshotExtraction;
+  limitations?: string[];
+  warnings?: string[];
+  syncCta?: string;
+  provenance?: string;
+}
+
+export async function getCountryCommoditySnapshot(
+  entityId: string,
+  entityKind = 'license',
+): Promise<CountryCommoditySnapshot> {
+  const { data } = await apiClient.get<CountryCommoditySnapshot>(
+    `/entities/${encodeURIComponent(entityId)}/country-commodity-snapshot`,
+    { params: { entity_kind: entityKind, limit: 80 } },
+  );
+  return data;
+}
+
 export async function getLatestDdReport(entityId: string, entityKind = 'license'): Promise<DdReport | null> {
   const { data } = await apiClient.get<DdReport | null>(
     `/entities/${encodeURIComponent(entityId)}/dd/latest`,
@@ -1556,7 +1613,30 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
   });
 };
 
-export const useStorageTerminalDetails = (terminalId?: string, enabled = true) => {
+/** Skip detail round-trip when list row already has materialized / enriched display fields. */
+export function storageTerminalDetailFetchEnabled(
+  item?: Pick<
+    StorageTerminalDetails,
+    'id' | 'displayReady' | 'curatedEnrichmentSourceId' | 'operatorName'
+  > | null,
+): boolean {
+  if (!item?.id) return false;
+  if (item.displayReady) return false;
+  if (item.curatedEnrichmentSourceId) return false;
+  if (item.operatorName) return false;
+  return true;
+}
+
+export const useStorageTerminalDetails = (
+  terminalId?: string,
+  enabled = true,
+  item?: Pick<
+    StorageTerminalDetails,
+    'id' | 'displayReady' | 'curatedEnrichmentSourceId' | 'operatorName'
+  > | null,
+) => {
+  const shouldFetch =
+    enabled && storageTerminalDetailFetchEnabled(item ?? (terminalId ? { id: terminalId } : null));
   return useQuery<StorageTerminalDetails>({
     queryKey: ['storage-terminal-detail', terminalId],
     queryFn: async () => {
@@ -1565,7 +1645,7 @@ export const useStorageTerminalDetails = (terminalId?: string, enabled = true) =
       );
       return data;
     },
-    enabled: enabled && Boolean(terminalId),
+    enabled: shouldFetch,
     staleTime: 30 * 60_000,
   });
 };

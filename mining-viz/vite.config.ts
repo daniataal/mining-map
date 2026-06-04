@@ -31,6 +31,8 @@ export default defineConfig({
     },
   },
   server: {
+    // Caddy serves the UI on :8080 with Host localhost:8080 — allow proxy API calls from that host.
+    allowedHosts: ['localhost', '127.0.0.1', 'frontend', 'mining-frontend'],
     proxy: {
       '/api/oil-live/ws': {
         target: oilIntelProxyTarget,

@@ -1,21 +1,43 @@
-name: Build Base Image
+name: Build Base Images
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/requirements.txt"
+      - "mining-viz/package.json"
+      - "mining-viz/package-lock.json"
+      - "oil-live-intel/go.mod"
+      - "oil-live-intel/go.sum"
+      - "Dockerfile.base"
+      - "oil-live-intel/Dockerfile.base"
+      - ".github/workflows/build-base.yml"
 
 jobs:
   build-base:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mining-map-base
+            context: .
+            file: ./Dockerfile.base
+            image: dannyatalla/mining-map-base
+            cache_scope: mining-map-base
+          - name: oil-live-intel-base
+            context: ./oil-live-intel
+            file: ./oil-live-intel/Dockerfile.base
+            image: dannyatalla/oil-live-intel-base
+            cache_scope: oil-live-intel-base
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -26,13 +48,15 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push base image
+      - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile.base
-          platforms: linux/amd64,linux/arm64
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/arm64
           push: true
-          tags: dannyatalla/mining-map-base:latest
-          cache-from: type=gha,scope=mining-map-base
-          cache-to: type=gha,mode=max,scope=mining-map-base
+          tags: ${{ matrix.image }}:latest
+          cache-from: |
+            type=gha,scope=${{ matrix.cache_scope }}
+            type=registry,ref=${{ matrix.image }}:latest
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
