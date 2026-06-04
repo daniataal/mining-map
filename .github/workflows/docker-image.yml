@@ -263,7 +263,9 @@ jobs:
 
           # Pull and restart full production stack (docker-compose.prod.yml from repo).
           export VERSION_TAG="${VERSION_TAG}"
-          export VITE_API_BASE="http://${REMOTE_HOST}:8000"
+          # Empty base → browser uses :5173 same-origin; Vite proxies /api/oil-live → Go (see vite.config.ts).
+          # Backend :8000 also proxies /api/oil-live/* to oil-live-intel when clients still target :8000.
+          export VITE_API_BASE="${VITE_API_BASE:-}"
           export GROQ_API_KEY="${GROQ_EFFECTIVE}"
           export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
           export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"

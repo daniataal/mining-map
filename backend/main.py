@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Response, Header, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -5763,6 +5763,46 @@ def get_maritime_snapshot_meta():
         "redirect": "/api/oil-live/maritime/stats",
         "note": "Use /api/oil-live/vessels/live for the vessel map layer.",
     }
+
+
+def _proxy_oil_live_get_forward():
+    try:
+        from backend.services.maritime_go_proxy import proxy_oil_live_get_forward
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get_forward
+    return proxy_oil_live_get_forward
+
+
+def _oil_live_proxy_http_response(path: str, request: Request) -> Response:
+    """Forward GET query string to oil-live-intel; preserve upstream status for map clients."""
+    forward = _proxy_oil_live_get_forward()
+    params = dict(request.query_params)
+    body, status, content_type = forward(path, params)
+    if content_type.startswith("application/json"):
+        return JSONResponse(content=body, status_code=status)
+    text = body if isinstance(body, str) else json.dumps(body)
+    return Response(content=text, status_code=status, media_type=content_type)
+
+
+@app.get("/api/licenses/country-summary")
+def proxy_api_licenses_country_summary(request: Request):
+    """Go license hubs when UI hits backend:8000 (no Caddy / Vite proxy)."""
+    return _oil_live_proxy_http_response("/api/oil-live/licenses/country-summary", request)
+
+
+@app.get("/api/licenses/map")
+def proxy_api_licenses_map(request: Request):
+    """Go license clusters when UI hits backend:8000 directly."""
+    return _oil_live_proxy_http_response("/api/oil-live/licenses/map", request)
+
+
+@app.get("/api/oil-live/{full_path:path}")
+def proxy_api_oil_live_get(full_path: str, request: Request):
+    """
+    Thin GET proxy to oil-live-intel for deployments that set VITE_API_BASE to backend:8000.
+    Canonical edge routing is Caddy :8080 → oil-live-intel:8095; this keeps direct :8000 usable.
+    """
+    return _oil_live_proxy_http_response(f"/api/oil-live/{full_path}", request)
 
 
 @app.get("/api/maritime/stats")
