@@ -366,6 +366,8 @@ services:
     environment:
       - VITE_API_BASE=${VITE_API_BASE:-}
       - OIL_INTEL_PROXY_TARGET=http://oil-live-intel:8095
+      # Vite dev proxy must reach Docker service names, not 127.0.0.1 inside the container.
+      - BACKEND_PROXY_TARGET=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
