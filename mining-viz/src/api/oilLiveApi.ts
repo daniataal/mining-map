@@ -905,6 +905,8 @@ export type MeridianCargoRecord = {
   consignee_company_id?: string;
   vessel_name?: string;
   mmsi?: number;
+  vessel_type?: string;
+  tanker_class?: string;
   load_port_name?: string;
   load_country?: string;
   discharge_hint?: string;
@@ -967,6 +969,7 @@ export type TradeFlowsFilters = {
   group?: 'company_pair' | 'country_pair';
   commodity?: string;
   min_confidence?: number;
+  exclude_seed?: boolean;
   limit?: number;
   zoom?: number;
 };
@@ -989,6 +992,7 @@ export async function getTradeFlows(
   if (filters.zoom != null && Number.isFinite(filters.zoom)) {
     params.set('zoom', String(filters.zoom));
   }
+  if (filters.exclude_seed !== false) params.set('exclude_seed', 'true');
   const qs = params.toString();
   let res: Response;
   try {
@@ -1153,8 +1157,16 @@ export async function getCargoRecords(
   return res.json();
 }
 
-export async function getCargoRecord(id: string): Promise<MeridianCargoRecord> {
-  const res = await fetch(oilUrl(`/api/oil-live/cargo-records/${encodeURIComponent(id)}`));
+export async function getCargoRecord(
+  id: string,
+  opts: { exclude_seed?: boolean } = {},
+): Promise<MeridianCargoRecord> {
+  const params = new URLSearchParams();
+  if (opts.exclude_seed !== false) params.set('exclude_seed', 'true');
+  const qs = params.toString();
+  const res = await fetch(
+    oilUrl(`/api/oil-live/cargo-records/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`),
+  );
   if (!res.ok) throw new Error(`oil-live cargo-record ${res.status}`);
   return res.json();
 }

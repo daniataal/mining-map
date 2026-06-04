@@ -89,6 +89,13 @@ function formatVolumeBand(record: {
   return '—';
 }
 
+const PETROLEUM_TANKER_CLASSES = new Set(['crude', 'product', 'chemical', 'lng', 'lpg']);
+
+function isPetroleumTanker(tankerClass?: string | null): boolean {
+  if (!tankerClass) return true;
+  return PETROLEUM_TANKER_CLASSES.has(tankerClass.trim().toLowerCase());
+}
+
 export default function OilLiveEntityDrawer({
   entityKind,
   entityId,
@@ -344,10 +351,23 @@ export default function OilLiveEntityDrawer({
             <div className="space-y-4 text-[11px]">
               <div className="flex flex-wrap items-center gap-2">
                 <OilLiveProvenanceBadge kind={cargoRecord.data_provenance ?? 'synthetic'} />
+                {cargoRecord.data_provenance === 'live_ais' && (
+                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                    {t('AIS חי', 'Live AIS')}
+                  </span>
+                )}
                 <span className="text-[9px] font-mono text-amber-700 dark:text-amber-300">
                   {cargoRecord.synthetic_bol_id ?? cargoRecord.id.slice(0, 8)}
                 </span>
               </div>
+              {!isPetroleumTanker(cargoRecord.tanker_class) && cargoRecord.tanker_class && (
+                <p className="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-lg px-2 py-1.5">
+                  {t(
+                    'כלי שייט שאינו מכלית נפט — מסדרון זה עלול להיות לא אמין.',
+                    'Non-petroleum tanker vessel — this corridor may be unreliable.',
+                  )}
+                </p>
+              )}
 
               <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[10px]">
                 <div>
@@ -418,6 +438,8 @@ export default function OilLiveEntityDrawer({
                     <dd>
                       {cargoRecord.vessel_name}
                       {cargoRecord.mmsi != null && ` · MMSI ${cargoRecord.mmsi}`}
+                      {cargoRecord.tanker_class && ` · ${cargoRecord.tanker_class}`}
+                      {cargoRecord.vessel_type && ` (${cargoRecord.vessel_type})`}
                     </dd>
                   </div>
                 )}

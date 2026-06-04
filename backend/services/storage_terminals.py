@@ -5,6 +5,7 @@ import math
 import os
 import re
 import time
+from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,7 +37,10 @@ STORAGE_SKIP_LIVE_OVERPASS = (os.getenv("STORAGE_SKIP_LIVE_OVERPASS") or "").str
     "on",
 }
 STORAGE_CACHE_TTL_SECONDS = 60 * 60 * 12
+STORAGE_REFERENCE_ENRICH_MAX = int(os.getenv("STORAGE_REFERENCE_ENRICH_MAX", "2500"))
 MAX_NEARBY_PORT_DISTANCE_KM = 250.0
+SITE_CONTEXT_MAX_DISTANCE_KM = 2.0
+SITE_POLYGON_BUFFER_DEG = 0.0015
 MAX_TILE_WORKERS = int(os.getenv("STORAGE_OVERPASS_TILE_WORKERS", "3"))
 BULK_SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "oil_terminals_seed_bulk.json"
 DEFAULT_OVERPASS_URLS: tuple[str, ...] = (
@@ -63,8 +67,19 @@ PETROLEUM_SUBSTANCE_RE = re.compile(
     r"(oil|petroleum|diesel|gasoline|petrol|fuel|crude|lng|lpg|jet|kerosene|naphtha|refined)",
     re.I,
 )
+NON_PETROLEUM_TANK_RE = re.compile(
+    r"(cooling|chiller|hvac|generator|sewage|wastewater|potable|fire\s*suppression|"
+    r"data\s*center|server\s*room|air\s*conditioning|district\s*heating|solar|"
+    r"rainwater|stormwater|water\s*tank|heat\s*pump)",
+    re.I,
+)
+WEAK_SUBSTANCE_ONLY_VALUES = frozenset({"fuel", "gas", "oil", "water"})
 MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT = 4
 MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT = 10
+# Normalized map entities below this with a large persisted DB → offline bulk seed.
+MIN_NORMALIZED_ENTITIES_FOR_GLOBAL_LAYER = int(
+    os.getenv("STORAGE_MIN_NORMALIZED_ENTITIES", "500")
+)
 
 
 def _now_iso() -> str:
@@ -166,6 +181,52 @@ def _has_petroleum_substance(tags: dict[str, Any]) -> bool:
     return bool(PETROLEUM_SUBSTANCE_RE.search(_petroleum_tag_haystack(tags)))
 
 
+def _is_excluded_non_petroleum_tank(tags: dict[str, Any]) -> bool:
+    haystack = f"{_petroleum_tag_haystack(tags)} | {_identity_tag_haystack(tags)}"
+    return bool(NON_PETROLEUM_TANK_RE.search(haystack))
+
+
+def _has_storage_tank_identity(tags: dict[str, Any]) -> bool:
+    if _clean_text(tags.get("name")) or _clean_text(tags.get("name:en")):
+        return True
+    if _clean_text(tags.get("operator")) or _clean_text(tags.get("owner")):
+        return True
+    industrial = _normalize_token(tags.get("industrial"))
+    return industrial in {"oil", "gas", "petroleum terminal", "tank farm", "fuel", "refinery"}
+
+
+def _is_weak_substance_only_storage_tank(tags: dict[str, Any]) -> bool:
+    """Reject lone man_made=storage_tank rows tagged only with generic fuel/oil/gas substance."""
+    if _has_storage_tank_identity(tags):
+        return False
+    for key in ("substance", "content", "product", "products"):
+        value = _clean_text(tags.get(key)).lower()
+        if not value:
+            continue
+        if value in WEAK_SUBSTANCE_ONLY_VALUES:
+            return True
+        if PETROLEUM_SUBSTANCE_RE.search(value) and len(value.split()) <= 2:
+            return True
+    return False
+
+
+def _identity_tag_haystack(tags: dict[str, Any]) -> str:
+    return " ".join(
+        _clean_text(tags.get(key))
+        for key in ("name", "name:en", "operator", "owner", "brand", "description")
+    ).lower()
+
+
+def _has_petroleum_identity(tags: dict[str, Any]) -> bool:
+    haystack = _identity_tag_haystack(tags)
+    if PETROLEUM_SUBSTANCE_RE.search(haystack):
+        return True
+    if KEYWORD_RE.search(haystack):
+        return True
+    industrial = _normalize_token(tags.get("industrial"))
+    return industrial in {"oil", "gas", "refinery", "petroleum terminal", "tank farm", "fuel"}
+
+
 def _extract_operator_owner(tags: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     operator = _clean_text(tags.get("operator")) or None
     owner = _clean_text(tags.get("owner")) or None
@@ -208,6 +269,10 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
             "Explicit OSM fuel depot (industrial=fuel).",
         )
     if man_made == "storage tank":
+        if _is_excluded_non_petroleum_tank(tags):
+            return ("", 0.0, "")
+        if _is_weak_substance_only_storage_tank(tags):
+            return ("", 0.0, "")
         if _has_petroleum_substance(tags):
             if operator or owner or name:
                 return (
@@ -215,12 +280,8 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
                     0.72,
                     "Mapped petroleum storage tank with operator, owner, or site name context.",
                 )
-            return (
-                "storage_tank",
-                0.58,
-                "Mapped petroleum storage tank; may be one tank within a larger site.",
-            )
-        if KEYWORD_RE.search(haystack):
+            return ("", 0.0, "")
+        if KEYWORD_RE.search(haystack) and (operator or owner or name):
             return (
                 "storage_tank",
                 0.62,
@@ -244,11 +305,42 @@ def infer_terminal_subtype(tags: dict[str, Any]) -> tuple[str, float, str]:
             0.7,
             "Facility name/description suggests a fuel depot, but industrial=fuel is not explicit.",
         )
+    if industrial == "refinery":
+        return (
+            "storage_terminal",
+            0.88,
+            "Explicit OSM refinery industrial site (industrial=refinery).",
+        )
+    if industrial == "oil" and (name or operator or owner or _has_petroleum_substance(tags)):
+        return (
+            "storage_terminal",
+            0.76,
+            "OSM industrial=oil site with petroleum identity or substance tags.",
+        )
     if industrial in {"oil", "gas"} and KEYWORD_RE.search(haystack):
         return (
             "storage_terminal",
             0.68,
             "Oil/gas industrial site with storage-terminal keywords in the mapped name/description.",
+        )
+    landuse = _normalize_token(tags.get("landuse"))
+    if landuse == "industrial" and _has_petroleum_identity(tags):
+        if industrial in {"oil", "gas", "refinery", "petroleum terminal", "tank farm", "fuel"}:
+            return (
+                "storage_terminal",
+                0.82,
+                "Industrial landuse polygon with explicit petroleum industrial tagging.",
+            )
+        if _has_petroleum_substance(tags):
+            return (
+                "storage_terminal",
+                0.74,
+                "Industrial landuse polygon with petroleum substance/product tags.",
+            )
+        return (
+            "storage_terminal",
+            0.7,
+            "Named industrial landuse polygon with petroleum identity in OSM tags.",
         )
     return (
         "",
@@ -268,7 +360,7 @@ def _format_license_type(subtype: str) -> str:
 
 
 def _display_name(tags: dict[str, Any], subtype: str) -> Optional[str]:
-    name = _clean_text(tags.get("name"))
+    name = _clean_text(tags.get("name:en")) or _clean_text(tags.get("name"))
     if name:
         return name
     operator = _clean_text(tags.get("operator"))
@@ -442,6 +534,12 @@ def _load_country_features() -> list[CountryFeature]:
 
 
 def resolve_country(lat: float, lng: float) -> tuple[str, str]:
+    """Country lookup cached on ~1.1 km grid — list builds call this tens of thousands of times."""
+    return _resolve_country_cached(round(lat, 2), round(lng, 2))
+
+
+@lru_cache(maxsize=65536)
+def _resolve_country_cached(lat: float, lng: float) -> tuple[str, str]:
     for feature in _load_country_features():
         min_x, min_y, max_x, max_y = feature.bbox
         if lng < min_x or lng > max_x or lat < min_y or lat > max_y:
@@ -495,6 +593,19 @@ def build_overpass_query(bbox: tuple[float, float, float, float]) -> str:
   nwr["man_made"="storage_tank"]["content"~"{petroleum_substance}",i]({bbox_text});
   nwr["man_made"="silo"]["substance"~"{petroleum_substance}",i]({bbox_text});
   nwr["man_made"="silo"]["product"~"{petroleum_substance}",i]({bbox_text});
+  nwr["industrial"="oil"]({bbox_text});
+  nwr["industrial"="refinery"]({bbox_text});
+  nwr["landuse"="industrial"]["industrial"~"^(oil|gas|refinery)$"]({bbox_text});
+  nwr["landuse"="industrial"]["substance"~"{petroleum_substance}",i]({bbox_text});
+  nwr["landuse"="industrial"]["content"~"{petroleum_substance}",i]({bbox_text});
+  nwr["landuse"="industrial"]["name"~"(oil|petroleum|refinery|terminal|tank\\s*farm|tankfarm|depot|storage|adnoc|aramco|petrochemical)",i]({bbox_text});
+  nwr["landuse"="industrial"]["owner"~"(oil|petroleum|refinery|terminal|tank\\s*farm|tankfarm|depot|storage|adnoc|aramco|petrochemical|shell|bp|exxon|chevron|total)",i]({bbox_text});
+  nwr["landuse"="industrial"]["brand"~"(oil|petroleum|shell|bp|adnoc|aramco|total)",i]({bbox_text});
+  nwr["man_made"="works"]["industrial"~"^(oil|refinery|petrochemical|gas)$"]({bbox_text});
+  nwr["industrial"="petrochemical"]({bbox_text});
+  nwr["industrial"="petroleum"]({bbox_text});
+  nwr["man_made"="storage_tank"]["operator"~"(oil|petroleum|terminal|adnoc|aramco|shell|bp|vopak|storage)",i]({bbox_text});
+  nwr["man_made"="storage_tank"]["owner"~"(oil|petroleum|terminal|adnoc|aramco|shell|bp|vopak|storage)",i]({bbox_text});
 );
 out center tags qt;
 """.strip()
@@ -523,26 +634,81 @@ def fetch_overpass_elements(bbox: tuple[float, float, float, float]) -> list[dic
     return []
 
 
+def _element_geometry_bounds(element: dict[str, Any]) -> Optional[dict[str, float]]:
+    geometry = element.get("geometry") or []
+    if not isinstance(geometry, list) or len(geometry) < 3:
+        return None
+    lats = [float(pt["lat"]) for pt in geometry if isinstance(pt, dict) and pt.get("lat") is not None]
+    lngs = [float(pt["lon"]) for pt in geometry if isinstance(pt, dict) and pt.get("lon") is not None]
+    if not lats or not lngs:
+        return None
+    return {
+        "south": min(lats),
+        "north": max(lats),
+        "west": min(lngs),
+        "east": max(lngs),
+    }
+
+
+def _geojson_centroid_and_bounds(
+    geom_json: dict[str, Any],
+) -> tuple[Optional[float], Optional[float], Optional[dict[str, float]]]:
+    gtype = geom_json.get("type")
+    coords = geom_json.get("coordinates")
+    if not gtype or coords is None:
+        return None, None, None
+
+    points: list[tuple[float, float]] = []
+
+    def collect_ring(ring: Any) -> None:
+        if not isinstance(ring, list):
+            return
+        for coord in ring:
+            if isinstance(coord, list) and len(coord) >= 2:
+                points.append((float(coord[0]), float(coord[1])))
+
+    if gtype == "Point" and isinstance(coords, list) and len(coords) >= 2:
+        lng, lat = float(coords[0]), float(coords[1])
+        return lat, lng, {"south": lat, "north": lat, "west": lng, "east": lng}
+    if gtype == "Polygon":
+        collect_ring((coords or [None])[0])
+    elif gtype == "MultiPolygon":
+        for polygon in coords or []:
+            if isinstance(polygon, list) and polygon:
+                collect_ring(polygon[0])
+    if not points:
+        return None, None, None
+    lngs = [pt[0] for pt in points]
+    lats = [pt[1] for pt in points]
+    bounds = {"south": min(lats), "north": max(lats), "west": min(lngs), "east": max(lngs)}
+    return sum(lats) / len(lats), sum(lngs) / len(lngs), bounds
+
+
 def _element_from_db_row(
     osm_type: str,
     osm_id: int,
     tags: dict[str, Any],
     geom_json: dict[str, Any],
+    *,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    bounds: Optional[dict[str, float]] = None,
 ) -> Optional[dict[str, Any]]:
-    geom_type = geom_json.get("type")
-    coords = geom_json.get("coordinates")
-    lat = lng = None
-    if geom_type == "Point" and isinstance(coords, list) and len(coords) >= 2:
-        lng, lat = float(coords[0]), float(coords[1])
+    if lat is None or lng is None:
+        lat, lng, bounds = _geojson_centroid_and_bounds(geom_json)
     if lat is None or lng is None:
         return None
-    return {
+    element: dict[str, Any] = {
         "type": osm_type,
         "id": osm_id,
         "tags": tags,
         "lat": lat,
         "lon": lng,
+        "fromPetroleumOsmLayer": True,
     }
+    if bounds and (bounds["north"] - bounds["south"] > 0.0005 or bounds["east"] - bounds["west"] > 0.0005):
+        element["siteBounds"] = bounds
+    return element
 
 
 def _load_bulk_osm_seed_elements() -> list[dict[str, Any]]:
@@ -593,7 +759,13 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json
+                SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json AS geom_json,
+                       ST_Y(ST_Centroid(geom)) AS lat,
+                       ST_X(ST_Centroid(geom)) AS lon,
+                       ST_YMin(geom) AS south,
+                       ST_XMin(geom) AS west,
+                       ST_YMax(geom) AS north,
+                       ST_XMax(geom) AS east
                 FROM petroleum_osm_features
                 WHERE layer_id = %s
                 ORDER BY osm_id;
@@ -602,7 +774,7 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
             )
             rows = cur.fetchall()
         elements: list[dict[str, Any]] = []
-        for osm_type, osm_id, tags_raw, geom_json in rows:
+        for osm_type, osm_id, tags_raw, geom_json, lat, lon, south, west, north, east in rows:
             tags = tags_raw if isinstance(tags_raw, dict) else {}
             if isinstance(tags_raw, str):
                 try:
@@ -610,7 +782,23 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
                 except json.JSONDecodeError:
                     tags = {}
             geom = geom_json if isinstance(geom_json, dict) else json.loads(geom_json or "{}")
-            element = _element_from_db_row(str(osm_type), int(osm_id), tags, geom)
+            bounds = None
+            if all(value is not None for value in (south, west, north, east)):
+                bounds = {
+                    "south": float(south),
+                    "west": float(west),
+                    "north": float(north),
+                    "east": float(east),
+                }
+            element = _element_from_db_row(
+                str(osm_type),
+                int(osm_id),
+                tags,
+                geom,
+                lat=float(lat) if lat is not None else None,
+                lng=float(lon) if lon is not None else None,
+                bounds=bounds,
+            )
             if element:
                 elements.append(element)
         return elements, fetched_at if isinstance(fetched_at, str) else None
@@ -619,6 +807,9 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
 
 
 def _should_load_bulk_seed(db_elements: list[dict[str, Any]], osm_entity_count: int) -> bool:
+    if db_elements and osm_entity_count < MIN_NORMALIZED_ENTITIES_FOR_GLOBAL_LAYER:
+        if len(db_elements) >= MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT:
+            return True
     if osm_entity_count >= MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT and db_elements:
         return not _db_snapshot_is_globally_complete(db_elements)
     return osm_entity_count < MIN_DB_FEATURES_FOR_GLOBAL_SNAPSHOT
@@ -660,17 +851,197 @@ def _load_db_snapshot_entities(
 ) -> list[dict[str, Any]]:
     entities: list[dict[str, Any]] = []
     for element in db_elements:
-        normalized = normalize_storage_terminal(element, fetched_at)
+        normalized = normalize_storage_terminal(element, fetched_at, trust_petroleum_layer=True)
         if normalized:
             normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
             normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
             entities.append(normalized)
     return entities
-    if entities:
-        return True
-    if warnings and len(warnings) >= len(WORLD_TILES):
+
+
+def _entity_site_label(entity: dict[str, Any]) -> Optional[str]:
+    company = _clean_text(entity.get("company"))
+    if company and company != "Unnamed Storage Terminal":
+        return company
+    operator = _clean_text(entity.get("operatorName"))
+    if operator:
+        return operator
+    owner = _clean_text(entity.get("ownerName"))
+    return owner or None
+
+
+def _is_named_site_entity(entity: dict[str, Any]) -> bool:
+    subtype = entity.get("entitySubtype") or ""
+    if subtype not in {"storage_terminal", "tank_farm", "fuel_depot"}:
         return False
-    return True
+    return bool(_entity_site_label(entity))
+
+
+def _is_orphan_storage_tank(entity: dict[str, Any]) -> bool:
+    if entity.get("entitySubtype") != "storage_tank":
+        return False
+    if entity.get("operatorName") or entity.get("ownerName"):
+        return False
+    company = _clean_text(entity.get("company"))
+    return not company or company == "Unnamed Storage Terminal"
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    radius_km = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lng2 - lng1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    return 2 * radius_km * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _point_in_site_bounds(lat: float, lng: float, bounds: dict[str, float]) -> bool:
+    buffer_deg = SITE_POLYGON_BUFFER_DEG
+    return (
+        float(bounds["south"]) - buffer_deg <= lat <= float(bounds["north"]) + buffer_deg
+        and float(bounds["west"]) - buffer_deg <= lng <= float(bounds["east"]) + buffer_deg
+    )
+
+
+def _find_containing_named_site(
+    lat: float,
+    lng: float,
+    sites: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    for site in sites:
+        bounds = site.get("siteBounds")
+        if isinstance(bounds, dict) and _point_in_site_bounds(lat, lng, bounds):
+            return site
+    return None
+
+
+def _find_nearest_named_site(
+    lat: float,
+    lng: float,
+    country: str,
+    sites: list[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], float]:
+    best_site: Optional[dict[str, Any]] = None
+    best_dist = SITE_CONTEXT_MAX_DISTANCE_KM + 1.0
+
+    def consider(candidates: list[dict[str, Any]]) -> None:
+        nonlocal best_site, best_dist
+        for site in candidates:
+            site_lat = _safe_float(site.get("lat"))
+            site_lng = _safe_float(site.get("lng"))
+            if site_lat is None or site_lng is None:
+                continue
+            dist = _haversine_km(lat, lng, site_lat, site_lng)
+            if dist <= SITE_CONTEXT_MAX_DISTANCE_KM and dist < best_dist:
+                best_dist = dist
+                best_site = site
+
+    if country and country != "Unknown":
+        same_country = [site for site in sites if site.get("country") == country]
+        consider(same_country)
+        if best_site is not None:
+            return best_site, best_dist
+    consider(sites)
+    if best_site is None:
+        return None, best_dist
+    return best_site, best_dist
+
+
+def _enrich_orphan_tanks_with_site_context(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sites = [entity for entity in entities if _is_named_site_entity(entity)]
+    if not sites:
+        return entities
+
+    enriched: list[dict[str, Any]] = []
+    for entity in entities:
+        if not _is_orphan_storage_tank(entity):
+            enriched.append(entity)
+            continue
+
+        lat = _safe_float(entity.get("lat"))
+        lng = _safe_float(entity.get("lng"))
+        if lat is None or lng is None:
+            enriched.append(entity)
+            continue
+
+        containing_site = _find_containing_named_site(lat, lng, sites)
+        if containing_site is not None:
+            site_name = _entity_site_label(containing_site)
+            if site_name:
+                updated = dict(entity)
+                updated["siteContextName"] = site_name
+                updated["siteContextSource"] = containing_site.get("id")
+                updated["siteContextInferred"] = False
+                if not str(updated.get("operatorName") or "").strip() and containing_site.get("operatorName"):
+                    updated["operatorName"] = containing_site["operatorName"]
+                if not str(updated.get("ownerName") or "").strip() and containing_site.get("ownerName"):
+                    updated["ownerName"] = containing_site["ownerName"]
+                context_note = (
+                    f"Tank node lies within mapped industrial site polygon: {site_name}. "
+                    "Operator/owner copied from parent OSM site when tank node lacks tags."
+                )
+                prior_note = _clean_text(updated.get("confidenceNote"))
+                updated["confidenceNote"] = f"{prior_note} {context_note}".strip() if prior_note else context_note
+                evidence = list(updated.get("evidence") or [])
+                evidence.append(
+                    {
+                        "id": f"{updated.get('id')}:site_polygon",
+                        "title": f"Industrial site polygon: {site_name}",
+                        "url": containing_site.get("sourceRecordUrl"),
+                        "source_label": "OpenStreetMap (site polygon)",
+                        "evidence_type": "osm_site_polygon",
+                        "confidence": 0.72,
+                        "summary": context_note,
+                    }
+                )
+                updated["evidence"] = evidence
+                updated["evidenceCount"] = len(evidence)
+                enriched.append(updated)
+                continue
+
+        nearest_site, distance_km = _find_nearest_named_site(
+            lat,
+            lng,
+            _clean_text(entity.get("country")),
+            sites,
+        )
+        if nearest_site is None:
+            enriched.append(entity)
+            continue
+
+        site_name = _entity_site_label(nearest_site)
+        if not site_name:
+            enriched.append(entity)
+            continue
+
+        updated = dict(entity)
+        updated["siteContextName"] = site_name
+        updated["siteContextSource"] = nearest_site.get("id")
+        updated["siteContextInferred"] = True
+        context_note = (
+            f"Inferred nearby site context: {site_name} (~{distance_km:.1f} km). "
+            "Individual tank name not tagged in OSM."
+        )
+        prior_note = _clean_text(updated.get("confidenceNote"))
+        updated["confidenceNote"] = f"{prior_note} {context_note}".strip() if prior_note else context_note
+
+        evidence = list(updated.get("evidence") or [])
+        evidence.append(
+            {
+                "id": f"{updated.get('id')}:site_context",
+                "title": f"Nearby site context: {site_name}",
+                "url": nearest_site.get("sourceRecordUrl"),
+                "source_label": "OpenStreetMap (inferred proximity)",
+                "evidence_type": "inferred_site_context",
+                "confidence": 0.45,
+                "summary": context_note,
+            }
+        )
+        updated["evidence"] = evidence
+        updated["evidenceCount"] = len(evidence)
+        enriched.append(updated)
+
+    return enriched
 
 
 def _db_snapshot_is_globally_complete(elements: list[dict[str, Any]]) -> bool:
@@ -689,9 +1060,36 @@ def _db_snapshot_is_globally_complete(elements: list[dict[str, Any]]) -> bool:
     return len(countries) >= MIN_DB_COUNTRIES_FOR_GLOBAL_SNAPSHOT
 
 
-def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Optional[dict[str, Any]]:
+def normalize_storage_terminal(
+    element: dict[str, Any],
+    fetched_at: str,
+    *,
+    include_nearby_port: bool = False,
+    trust_petroleum_layer: bool = False,
+) -> Optional[dict[str, Any]]:
     tags = element.get("tags") or {}
+    trust_layer = trust_petroleum_layer or bool(element.get("fromPetroleumOsmLayer"))
     subtype, confidence, confidence_note = infer_terminal_subtype(tags)
+    if not subtype and trust_layer:
+        has_storage_tag_keys = any(
+            tags.get(key)
+            for key in (
+                "man_made",
+                "industrial",
+                "landuse",
+                "product",
+                "substance",
+                "operator",
+                "owner",
+            )
+        )
+        if not has_storage_tag_keys:
+            subtype = "storage_tank"
+            confidence = 0.55
+            confidence_note = (
+                "Mapped in petroleum_osm storage layer; OSM tags were reduced in the DB snapshot. "
+                "Use satellite/OSM for exact tank identity — operator may come from port/curated enrichment."
+            )
     if not subtype:
         return None
 
@@ -703,6 +1101,10 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
         lng = _safe_float(center.get("lon"))
     if lat is None or lng is None:
         return None
+
+    site_bounds = element.get("siteBounds") if isinstance(element.get("siteBounds"), dict) else None
+    if site_bounds is None:
+        site_bounds = _element_geometry_bounds(element)
 
     display_name = _display_name(tags, subtype)
     capacity_text = _parse_capacity_text(tags)
@@ -718,11 +1120,9 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
     region = _region_from_tags(tags)
 
     nearest_port = None
-    nearest_ports = (
-        find_nearest_ports(country_iso2=country_iso2, lat=lat, lng=lng, limit=1)
-        if country_iso2
-        else []
-    )
+    nearest_ports: list[dict[str, Any]] = []
+    if include_nearby_port and country_iso2:
+        nearest_ports = find_nearest_ports(country_iso2=country_iso2, lat=lat, lng=lng, limit=1)
     if nearest_ports:
         port = dict(nearest_ports[0])
         if port.get("distance_km") is not None and float(port["distance_km"]) <= MAX_NEARBY_PORT_DISTANCE_KM:
@@ -766,12 +1166,16 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
             }
         )
 
-    return {
+    result: dict[str, Any] = {
         "id": f"osm:{element.get('type')}:{element.get('id')}",
         "company": facility_name,
         "licenseType": _format_license_type(subtype),
         "commodity": ", ".join(commodity_hints) if commodity_hints else (substance_text or "petroleum"),
-        "status": "Mapped open infrastructure",
+        "status": (
+            "Unverified OSM tank node"
+            if subtype == "storage_tank" and confidence < 0.7
+            else "Mapped open infrastructure"
+        ),
         "date": None,
         "country": country,
         "region": region or country,
@@ -804,6 +1208,14 @@ def normalize_storage_terminal(element: dict[str, Any], fetched_at: str) -> Opti
             "tags": tags,
         },
     }
+    if site_bounds:
+        result["siteBounds"] = site_bounds
+    if subtype == "storage_tank" and confidence < 0.7:
+        result["coverageState"] = "sparse_osm_node"
+        result["confidenceNote"] = (
+            f"{confidence_note} Not a verified petroleum terminal — confirm on satellite and OSM tags before use."
+        )
+    return result
 
 
 def _dedupe_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -840,6 +1252,7 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
     with_owner = 0
     with_capacity = 0
     with_nearby_port = 0
+    with_reference_enrichment = 0
     for entity in entities:
         subtype = entity.get("entitySubtype") or "unknown"
         by_subtype[subtype] = by_subtype.get(subtype, 0) + 1
@@ -857,6 +1270,8 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
             with_capacity += 1
         if entity.get("nearbyPort"):
             with_nearby_port += 1
+        if entity.get("curatedEnrichmentSourceId"):
+            with_reference_enrichment += 1
 
     top_countries = [
         {"country": country, "count": count}
@@ -869,6 +1284,7 @@ def _build_stats(entities: list[dict[str, Any]]) -> dict[str, Any]:
         "with_owner": with_owner,
         "with_capacity": with_capacity,
         "with_nearby_port": with_nearby_port,
+        "with_reference_enrichment": with_reference_enrichment,
         "high_confidence": high_confidence,
         "by_subtype": by_subtype,
         "by_source": by_source,
@@ -883,18 +1299,137 @@ def _fresh_cache() -> Optional[dict[str, Any]]:
     return None
 
 
-def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
+def _debug_log_storage(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        import json as _json
+
+        payload = {
+            "sessionId": "7419a2",
+            "hypothesisId": hypothesis_id,
+            "location": "storage_terminals.py:get_storage_terminals",
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        _log_path = os.getenv(
+            "DEBUG_LOG_PATH",
+            "/Users/daniatallah/Gold Project /mining-map/.cursor/debug-7419a2.log",
+        )
+        with open(_log_path, "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps(payload, default=str) + "\n")
+    except OSError:
+        pass
+    # #endregion
+
+
+STORAGE_VIEWPORT_DEFAULT_LIMIT = int(os.getenv("STORAGE_VIEWPORT_DEFAULT_LIMIT", "2000"))
+STORAGE_VIEWPORT_MAX_LIMIT = int(os.getenv("STORAGE_VIEWPORT_MAX_LIMIT", "5000"))
+
+
+def _parse_storage_bbox(
+    south: Optional[float],
+    west: Optional[float],
+    north: Optional[float],
+    east: Optional[float],
+) -> Optional[tuple[float, float, float, float]]:
+    if south is None and west is None and north is None and east is None:
+        return None
+    if south is None or west is None or north is None or east is None:
+        raise ValueError("bbox requires all of south, west, north, east")
+    bbox = (float(south), float(west), float(north), float(east))
+    if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+        raise ValueError("invalid bbox: south must be < north and west must be < east")
+    return bbox
+
+
+def _entity_in_bbox(entity: dict[str, Any], bbox: tuple[float, float, float, float]) -> bool:
+    lat = entity.get("lat")
+    lng = entity.get("lng")
+    if lat is None or lng is None:
+        return False
+    south, west, north, east = bbox
+    return south <= float(lat) <= north and west <= float(lng) <= east
+
+
+def _apply_viewport_filter(
+    entities: list[dict[str, Any]],
+    *,
+    bbox: Optional[tuple[float, float, float, float]],
+    limit: Optional[int],
+) -> tuple[list[dict[str, Any]], bool]:
+    if bbox is None:
+        return entities, False
+    filtered = [entity for entity in entities if _entity_in_bbox(entity, bbox)]
+    coverage_gap = len(filtered) == 0
+    cap = limit if limit is not None else STORAGE_VIEWPORT_DEFAULT_LIMIT
+    cap = min(max(1, cap), STORAGE_VIEWPORT_MAX_LIMIT)
+    if len(filtered) > cap:
+        filtered = filtered[:cap]
+    return filtered, coverage_gap
+
+
+def _package_storage_response(
+    response: dict[str, Any],
+    entities: list[dict[str, Any]],
+    *,
+    bbox: Optional[tuple[float, float, float, float]] = None,
+    limit: Optional[int] = None,
+    cached: bool = False,
+) -> dict[str, Any]:
+    viewport_entities, coverage_gap = _apply_viewport_filter(entities, bbox=bbox, limit=limit)
+    out = dict(response)
+    out["entities"] = [_summary_entity(entity) for entity in viewport_entities]
+    if cached:
+        out["cached"] = True
+    if bbox is not None:
+        out["viewport_bbox"] = list(bbox)
+        out["coverage_gap"] = coverage_gap
+        if coverage_gap:
+            limitations = list(out.get("limitations") or [])
+            limitations.append(
+                "No storage terminals in this map viewport — may be an OSM mapping gap or zoom outside "
+                "petroleum infrastructure. Pan to a known hub or see GET /api/storage/coverage/report."
+            )
+            out["limitations"] = limitations
+        out["stats"] = _build_stats(viewport_entities)
+    return out
+
+
+def get_storage_terminals(
+    force_refresh: bool = False,
+    *,
+    bbox: Optional[tuple[float, float, float, float]] = None,
+    limit: Optional[int] = None,
+) -> dict[str, Any]:
+    _t0 = time.perf_counter()
+    _debug_log_storage(
+        "C",
+        "storage_request_start",
+        {"force_refresh": force_refresh, "skip_live_overpass": STORAGE_SKIP_LIVE_OVERPASS},
+    )
     previous_cache = dict(_storage_cache["response"]) if _storage_cache.get("response") else None
     previous_loaded_at = float(_storage_cache.get("loaded_at") or 0.0)
 
     if not force_refresh:
         cached = _fresh_cache()
         if cached is not None:
-            return {
-                **cached,
-                "entities": [_summary_entity(entity) for entity in cached.get("entities", [])],
-                "cached": True,
-            }
+            entities = cached.get("entities", [])
+            _debug_log_storage(
+                "D",
+                "storage_memory_cache_hit",
+                {
+                    "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                    "entity_count": len(entities),
+                },
+            )
+            return _package_storage_response(
+                cached,
+                entities,
+                bbox=bbox,
+                limit=limit,
+                cached=True,
+            )
 
     fetched_at = _now_iso()
     warnings: list[str] = []
@@ -903,25 +1438,43 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
     db_elements: list[dict[str, Any]] = []
     db_fetched_at: Optional[str] = None
     osm_entity_count = 0
+    use_db_only = False
 
     db_elements, db_fetched_at = _load_storage_terminals_from_db()
+    _debug_log_storage(
+        "B",
+        "storage_db_loaded",
+        {
+            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+            "db_element_count": len(db_elements),
+        },
+    )
 
-    use_db_only = (
-        not force_refresh
-        and bool(db_elements)
-        and _db_snapshot_is_globally_complete(db_elements)
+    # force_refresh only busts the in-memory cache — never force live Overpass when skipped.
+    use_db_only = bool(db_elements) and (
+        _db_snapshot_is_globally_complete(db_elements)
+        or STORAGE_SKIP_LIVE_OVERPASS
     )
 
     if use_db_only:
         data_source = "database"
         fetched_at = db_fetched_at or fetched_at
         for element in db_elements:
-            normalized = normalize_storage_terminal(element, fetched_at)
+            normalized = normalize_storage_terminal(element, fetched_at, trust_petroleum_layer=True)
             if normalized:
                 normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
                 normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
                 all_entities.append(normalized)
         osm_entity_count = len(all_entities)
+        _debug_log_storage(
+            "B",
+            "storage_db_normalized",
+            {
+                "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                "osm_entity_count": osm_entity_count,
+                "use_db_only": use_db_only,
+            },
+        )
     elif STORAGE_SKIP_LIVE_OVERPASS:
         data_source = "bulk_seed"
         warnings.append(
@@ -967,7 +1520,7 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
             )
             osm_entity_count += bulk_added
 
-    if STORAGE_SKIP_LIVE_OVERPASS and _should_load_bulk_seed(db_elements, osm_entity_count):
+    if STORAGE_SKIP_LIVE_OVERPASS and not use_db_only and _should_load_bulk_seed(db_elements, osm_entity_count):
         if db_elements and osm_entity_count == 0:
             data_source = "database"
             fetched_at = db_fetched_at or fetched_at
@@ -980,19 +1533,69 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
                 all_entities, fetched_at, data_source, warnings
             )
             osm_entity_count += bulk_added
+    elif STORAGE_SKIP_LIVE_OVERPASS and use_db_only and _should_load_bulk_seed(
+        db_elements, osm_entity_count
+    ):
+        data_source, bulk_added = _append_bulk_seed_entities(
+            all_entities, fetched_at, data_source, warnings
+        )
+        osm_entity_count += bulk_added
+        _debug_log_storage(
+            "B",
+            "storage_bulk_seed_appended",
+            {
+                "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                "bulk_added": bulk_added,
+                "osm_entity_count": osm_entity_count,
+            },
+        )
 
     try:
         from backend.services.storage_terminals_seed import (
             drop_curated_near_osm_duplicates,
+            enrich_osm_from_curated_reference,
+            enrich_osm_from_oil_terminal_reference,
             load_curated_storage_terminals,
         )
+        from backend.services.storage_terminals_gov_seed import (
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from backend.services.storage_terminals_oil_db import load_oil_terminal_reference_hubs
     except ImportError:
         from services.storage_terminals_seed import (  # type: ignore
             drop_curated_near_osm_duplicates,
+            enrich_osm_from_curated_reference,
+            enrich_osm_from_oil_terminal_reference,
             load_curated_storage_terminals,
         )
+        from services.storage_terminals_gov_seed import (  # type: ignore
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from services.storage_terminals_oil_db import load_oil_terminal_reference_hubs  # type: ignore
 
     curated_entities = load_curated_storage_terminals(fetched_at)
+    _debug_log_storage(
+        "A",
+        "storage_curated_loaded",
+        {
+            "curated_count": len(curated_entities),
+            "curated_uae": sum(
+                1 for e in curated_entities if "United Arab Emirates" in str(e.get("country") or "")
+            ),
+            "curated_fujairah": sum(
+                1
+                for e in curated_entities
+                if e.get("lat") is not None
+                and 25.0 <= float(e["lat"]) <= 25.25
+                and e.get("lng") is not None
+                and 56.2 <= float(e["lng"]) <= 56.5
+            ),
+        },
+    )
+    gov_reference_hubs = load_government_storage_reference_hubs(fetched_at)
+    oil_terminal_hubs = load_oil_terminal_reference_hubs()
     if curated_entities:
         all_entities.extend(curated_entities)
         if data_source == "database":
@@ -1002,7 +1605,58 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
         elif data_source == "bulk_seed":
             data_source = "bulk_seed+curated"
 
-    entities = drop_curated_near_osm_duplicates(_dedupe_entities(all_entities))
+    merged = _dedupe_entities(all_entities)
+    _debug_log_storage(
+        "B",
+        "storage_pre_reference_enrich",
+        {
+            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+            "merged_count": len(merged),
+            "reference_enrich_max": STORAGE_REFERENCE_ENRICH_MAX,
+        },
+    )
+    if len(merged) <= STORAGE_REFERENCE_ENRICH_MAX:
+        merged = enrich_osm_from_curated_reference(merged)
+        if gov_reference_hubs:
+            merged = enrich_osm_from_government_reference(merged, gov_reference_hubs)
+        if oil_terminal_hubs:
+            merged = enrich_osm_from_oil_terminal_reference(merged, oil_terminal_hubs)
+    else:
+        warnings.append(
+            f"Skipped global reference-hub enrichment for {len(merged)} entities (cap {STORAGE_REFERENCE_ENRICH_MAX})."
+        )
+    try:
+        from backend.services.port_authority_directory import anchor_port_authority_hubs_to_osm
+    except ImportError:
+        from services.port_authority_directory import anchor_port_authority_hubs_to_osm  # type: ignore
+    merged = anchor_port_authority_hubs_to_osm(merged, fetched_at)
+    try:
+        from backend.services.storage_terminals_seed import drop_curated_when_osm_present_nearby
+    except ImportError:
+        from services.storage_terminals_seed import drop_curated_when_osm_present_nearby  # type: ignore
+    merged = drop_curated_when_osm_present_nearby(merged, distance_km=8.0)
+    merged = drop_curated_near_osm_duplicates(merged)
+    _site_enrich_max = int(os.getenv("STORAGE_SITE_CONTEXT_ENRICH_MAX", "2500"))
+    _t_enrich = time.perf_counter()
+    if len(merged) <= _site_enrich_max:
+        entities = _enrich_orphan_tanks_with_site_context(merged)
+        _enrich_skipped = False
+    else:
+        entities = merged
+        _enrich_skipped = True
+        warnings.append(
+            f"Skipped site-context enrichment for {len(merged)} entities (cap {_site_enrich_max})."
+        )
+    _debug_log_storage(
+        "B",
+        "storage_site_context_enrich",
+        {
+            "merged_count": len(merged),
+            "enrich_skipped": _enrich_skipped,
+            "enrich_cap": _site_enrich_max,
+            "enrich_ms": int((time.perf_counter() - _t_enrich) * 1000),
+        },
+    )
     entities.sort(
         key=lambda item: (
             -(float(item.get("confidenceScore") or 0.0)),
@@ -1013,19 +1667,22 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
 
     response = {
         "entities": entities,
-        "source_labels": ["OpenStreetMap", "Overpass", "Curated reference", "UN/LOCODE"],
+        "source_labels": ["OpenStreetMap", "Overpass", "Curated reference", "Government open data", "oil_terminals DB", "UN/LOCODE"],
         "data_source": data_source,
         "data_as_of": fetched_at,
         "coverage_note": (
-            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of major "
-            "petroleum storage hubs (FOIZ, Ras Tanura, Jurong, US Gulf, Cushing, etc.). Includes petroleum terminals, "
-            "tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
+            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of ~180 major "
+            "petroleum storage hubs worldwide, plus optional oil_terminals Postgres enrichment when graph-sync has populated the DB. "
+            "Includes petroleum terminals, tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
         ),
         "limitations": [
             "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
             "Curated reference rows (sourceKind=curated_reference) are approximate hub centroids from public operator pages — not audited tank counts or capacities.",
+            "Government open reference rows (EIA/DOE/HSE/public regulator pages) enrich sparse OSM nodes within ~4 km when curated data is absent (evidence_type=government_open_enrichment).",
             "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
-            "Operator and owner values on OSM rows come only from OSM tags — missing tags are shown as untagged, never inferred.",
+            "Operator and owner on OSM rows come from OSM tags when present; sparse OSM nodes within ~4 km of a curated major-hub reference may inherit operator, capacity, country, and hub context from public operator pages (evidence_type=curated_enrichment). A second pass may fill remaining gaps from oil_terminals Postgres rows when present (evidence_type=oil_terminal_enrichment).",
+            "Orphan storage_tank nodes may receive siteContextName/siteContextInferred when a named terminal polygon is within ~2 km — proximity inference only, not ownership proof.",
+            "When OSM industrial polygons are available, orphan tanks inside the site bounding box inherit operator/owner from the parent polygon (evidence_type=osm_site_polygon).",
             "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
             "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
             "If you still see only a small regional cluster (e.g. Rotterdam-only), the backend may be serving a stale in-memory cache or an old regional petroleum_osm DB snapshot — call GET /api/storage/terminals?force_refresh=true or redeploy after petroleum_osm_sync.",
@@ -1055,10 +1712,17 @@ def get_storage_terminals(force_refresh: bool = False) -> dict[str, Any]:
         _storage_cache["loaded_at"] = previous_loaded_at
         _storage_cache["response"] = previous_cache
 
-    return {
-        **response,
-        "entities": [_summary_entity(entity) for entity in entities],
-    }
+    _debug_log_storage(
+        "B",
+        "storage_request_done",
+        {
+            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+            "entity_count": len(entities),
+            "data_source": data_source,
+            "use_db_only": use_db_only,
+        },
+    )
+    return _package_storage_response(response, entities, bbox=bbox, limit=limit)
 
 
 def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: list[str]) -> bool:
@@ -1069,14 +1733,199 @@ def _should_cache_storage_response(entities: list[dict[str, Any]], warnings: lis
     return True
 
 
-def get_storage_terminal_details(terminal_id: str) -> Optional[dict[str, Any]]:
+def _parse_storage_terminal_osm_id(terminal_id: str) -> Optional[tuple[str, int]]:
+    parts = (terminal_id or "").strip().split(":")
+    if len(parts) != 3 or parts[0] != "osm":
+        return None
+    osm_type, osm_id_raw = parts[1], parts[2]
+    if osm_type not in {"node", "way", "relation"}:
+        return None
+    try:
+        return osm_type, int(osm_id_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_storage_terminal_element_from_db(terminal_id: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Load one petroleum_osm_features row for storage_terminals layer."""
+    parsed = _parse_storage_terminal_osm_id(terminal_id)
+    if not parsed:
+        return None, None
+    osm_type, osm_id = parsed
+    try:
+        from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+    except ImportError:
+        from services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
+
+    conn = _db_connect()
+    try:
+        ensure_petroleum_osm_tables(conn)
+        stats = layer_feature_stats(conn, STORAGE_TERMINALS_LAYER_ID)
+        fetched_at = stats.get("last_fetched_at")
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json AS geom_json,
+                       ST_Y(ST_Centroid(geom)) AS lat,
+                       ST_X(ST_Centroid(geom)) AS lon,
+                       ST_YMin(geom) AS south,
+                       ST_XMin(geom) AS west,
+                       ST_YMax(geom) AS north,
+                       ST_XMax(geom) AS east
+                FROM petroleum_osm_features
+                WHERE layer_id = %s AND osm_type = %s AND osm_id = %s
+                LIMIT 1;
+                """,
+                (STORAGE_TERMINALS_LAYER_ID, osm_type, osm_id),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None, fetched_at if isinstance(fetched_at, str) else None
+        osm_type_db, osm_id_db, tags_raw, geom_json, lat, lon, south, west, north, east = row
+        tags = tags_raw if isinstance(tags_raw, dict) else {}
+        if isinstance(tags_raw, str):
+            try:
+                tags = json.loads(tags_raw)
+            except json.JSONDecodeError:
+                tags = {}
+        geom = geom_json if isinstance(geom_json, dict) else json.loads(geom_json or "{}")
+        bounds = None
+        if all(value is not None for value in (south, west, north, east)):
+            bounds = {
+                "south": float(south),
+                "west": float(west),
+                "north": float(north),
+                "east": float(east),
+            }
+        element = _element_from_db_row(
+            str(osm_type_db),
+            int(osm_id_db),
+            tags,
+            geom,
+            lat=float(lat) if lat is not None else None,
+            lng=float(lon) if lon is not None else None,
+            bounds=bounds,
+        )
+        return element, fetched_at if isinstance(fetched_at, str) else None
+    finally:
+        conn.close()
+
+
+def _load_storage_terminal_from_curated_or_bulk(
+    terminal_id: str,
+    fetched_at: str,
+) -> Optional[dict[str, Any]]:
+    try:
+        from backend.services.storage_terminals_seed import load_curated_storage_terminals
+    except ImportError:
+        from services.storage_terminals_seed import load_curated_storage_terminals  # type: ignore
+
+    for entity in load_curated_storage_terminals(fetched_at):
+        if entity.get("id") == terminal_id:
+            return dict(entity)
+
+    for element in _load_bulk_osm_seed_elements():
+        if f"osm:{element.get('type')}:{element.get('id')}" != terminal_id:
+            continue
+        normalized = normalize_storage_terminal(element, fetched_at, include_nearby_port=True)
+        if normalized:
+            normalized["sourceId"] = "osm_bulk_seed_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (offline bulk seed)"
+            return normalized
+    return None
+
+
+def _enrich_storage_entity_for_detail(entity: dict[str, Any], fetched_at: str) -> dict[str, Any]:
+    """Per-terminal reference enrichment (not subject to global STORAGE_REFERENCE_ENRICH_MAX)."""
+    if entity.get("sourceKind") in {"curated_reference", "government_open", "oil_terminal_reference"}:
+        return entity
+    if not str(entity.get("id", "")).startswith("osm:"):
+        return entity
+
+    try:
+        from backend.services.storage_terminals_gov_seed import (
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from backend.services.storage_terminals_oil_db import load_oil_terminal_reference_hubs
+        from backend.services.storage_terminals_seed import (
+            enrich_osm_from_oil_terminal_reference,
+            enrich_osm_from_reference_hubs,
+            load_curated_storage_terminals,
+        )
+    except ImportError:
+        from services.storage_terminals_gov_seed import (  # type: ignore
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from services.storage_terminals_oil_db import load_oil_terminal_reference_hubs  # type: ignore
+        from services.storage_terminals_seed import (  # type: ignore
+            enrich_osm_from_oil_terminal_reference,
+            enrich_osm_from_reference_hubs,
+            load_curated_storage_terminals,
+        )
+
+    entities = [dict(entity)]
+    curated_hubs = [
+        hub
+        for hub in load_curated_storage_terminals(fetched_at)
+        if hub.get("sourceKind") == "curated_reference"
+        and hub.get("lat") is not None
+        and hub.get("lng") is not None
+    ]
+    entities = enrich_osm_from_reference_hubs(
+        entities,
+        curated_hubs,
+        distance_km=4.0,
+        enrichment_kind="curated_reference",
+        source_label="Curated reference",
+        evidence_type="curated_enrichment",
+        summary_prefix="Sparse OSM geometry enriched from curated reference hub",
+        confidence_boost=0.14,
+        skip_if_enriched=False,
+    )
+    gov_hubs = load_government_storage_reference_hubs(fetched_at)
+    if gov_hubs:
+        entities = enrich_osm_from_government_reference(entities, gov_hubs)
+    oil_hubs = load_oil_terminal_reference_hubs()
+    if oil_hubs:
+        entities = enrich_osm_from_oil_terminal_reference(entities, oil_hubs)
+    enriched = entities[0]
+    site_enriched = _enrich_orphan_tanks_with_site_context([enriched])
+    return site_enriched[0] if site_enriched else enriched
+
+
+def _resolve_storage_terminal_detail_entity(terminal_id: str) -> Optional[dict[str, Any]]:
+    terminal_id = (terminal_id or "").strip()
+    if not terminal_id:
+        return None
+
+    fetched_at = _now_iso()
+    entity: Optional[dict[str, Any]] = None
+
     cached = _fresh_cache()
     if cached is None:
         get_storage_terminals(force_refresh=False)
         cached = _fresh_cache()
-    if cached is None:
+    if cached:
+        for candidate in cached.get("entities", []):
+            if candidate.get("id") == terminal_id:
+                entity = dict(candidate)
+                break
+
+    if entity is None:
+        element, db_fetched_at = _load_storage_terminal_element_from_db(terminal_id)
+        if element is not None:
+            fetched_at = db_fetched_at or fetched_at
+            entity = normalize_storage_terminal(element, fetched_at, include_nearby_port=True)
+        if entity is None:
+            entity = _load_storage_terminal_from_curated_or_bulk(terminal_id, fetched_at)
+
+    if entity is None:
         return None
-    for entity in cached.get("entities", []):
-        if entity.get("id") == terminal_id:
-            return entity
-    return None
+
+    return _enrich_storage_entity_for_detail(entity, fetched_at)
+
+
+def get_storage_terminal_details(terminal_id: str) -> Optional[dict[str, Any]]:
+    return _resolve_storage_terminal_detail_entity(terminal_id)

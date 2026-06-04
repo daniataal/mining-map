@@ -96,7 +96,7 @@ func (s *Server) ListCargoRecordsMap(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"id": id.String(), "synthetic_bol_id": bolID, "recipe": recipe,
 			"commodity_family": family, "confidence": conf, "triangulation_score": tri,
-			"bol_tier": tier,
+			"bol_tier":     tier,
 			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
 			"mmsi": mmsiVal, "load_port_name": loadPort, "load_country": loadCountry,
 			"discharge_hint":         discharge,
@@ -235,14 +235,20 @@ func (s *Server) ListCargoRecords(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) GetCargoRecord(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	excludeSeed := queryBool(r, "exclude_seed", s.Config.DisableDemoSeed)
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT id, synthetic_bol_id, fingerprint, recipe, commodity_family, confidence, triangulation_score,
-			bol_tier, shipper_name, consignee_name, shipper_company_id, consignee_company_id,
-			vessel_name, mmsi, imo, load_terminal_id, load_port_name, load_country,
-			discharge_hint, discharge_country, commodity_description,
-			volume_low, volume_high, volume_best_estimate, volume_method, volume_unit,
-			event_date, port_call_id, evidence_chain, sources, contact_ids, metadata
-		FROM meridian_cargo_records WHERE id::text = $1 OR synthetic_bol_id = $1
+		SELECT m.id, m.synthetic_bol_id, m.fingerprint, m.recipe, m.commodity_family, m.confidence, m.triangulation_score,
+			m.bol_tier, m.shipper_name, m.consignee_name, m.shipper_company_id, m.consignee_company_id,
+			m.vessel_name, m.mmsi, m.imo, m.load_terminal_id, m.load_port_name, m.load_country,
+			m.discharge_hint, m.discharge_country, m.commodity_description,
+			m.volume_low, m.volume_high, m.volume_best_estimate, m.volume_method, m.volume_unit,
+			m.event_date, m.port_call_id, m.evidence_chain, m.sources, m.contact_ids, m.metadata,
+			pc.evidence, pc.metadata,
+			v.vessel_type, v.tanker_class
+		FROM meridian_cargo_records m
+		LEFT JOIN oil_port_calls pc ON pc.id = m.port_call_id
+		LEFT JOIN oil_vessels v ON v.mmsi = m.mmsi
+		WHERE m.id::text = $1 OR m.synthetic_bol_id = $1
 		LIMIT 1
 	`, id)
 	if err != nil {
@@ -259,6 +265,12 @@ func (s *Server) GetCargoRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if excludeSeed {
+		if prov, ok := item["data_provenance"].(string); ok && prov == "seed_port_calls" {
+			writeErr(w, http.StatusNotFound, "cargo record not found")
+			return
+		}
+	}
 	item["disclaimer"] = "Synthetic cargo record — inferred from public sources, not a legal Bill of Lading."
 	writeJSON(w, http.StatusOK, item)
 }
@@ -271,9 +283,11 @@ func (s *Server) GetCargoRecord(w http.ResponseWriter, r *http.Request) {
 //	group           = company_pair (default) | country_pair
 //	commodity       = filter on commodity_family (optional)
 //	min_confidence  = float (default 0)
+//	exclude_seed    = bool (default from OIL_LIVE_DISABLE_DEMO_SEED)
 //	limit           = int (default 100, capped at 500)
 func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
 	zoom := queryFloat(r, "zoom", 0)
+	excludeSeed := queryBool(r, "exclude_seed", s.Config.DisableDemoSeed)
 	group := r.URL.Query().Get("group")
 	if group == "" {
 		if zoom > 0 && zoom < 8 {
@@ -307,17 +321,53 @@ func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
 		consigneeCol = "consignee_name"
 	}
 
-	q := fmt.Sprintf(`
+	var q string
+	commodityFilter := ""
+	if commodity != "" {
+		commodityFilter = fmt.Sprintf(` AND commodity_family = $%d`, 2)
+	}
+	if excludeSeed {
+		q = fmt.Sprintf(`
 		SELECT %s AS shipper, %s AS consignee, commodity_family,
 			cargo_count, volume_total, volume_unit, avg_confidence,
 			origin_lat, origin_lng, dest_lat, dest_lng, sample_mcr_ids
 		FROM %s
-		WHERE avg_confidence >= $1
-	`, shipperCol, consigneeCol, view)
+		WHERE avg_confidence >= $1%s
+	`, shipperCol, consigneeCol, view, commodityFilter)
+	} else {
+		// Dev-only: include seed-linked MCRs (views always exclude seed).
+		q = fmt.Sprintf(`
+		SELECT %s AS shipper, %s AS consignee, commodity_family,
+			COUNT(*)::int AS cargo_count,
+			SUM(volume_best_estimate)::double precision AS volume_total,
+			COALESCE(
+				(array_agg(volume_unit ORDER BY event_date DESC NULLS LAST)
+				   FILTER (WHERE volume_unit IS NOT NULL))[1],
+				'bbl'
+			) AS volume_unit,
+			AVG(confidence)::double precision AS avg_confidence,
+			AVG(corridor_load_lat)::double precision AS origin_lat,
+			AVG(corridor_load_lng)::double precision AS origin_lng,
+			AVG(corridor_discharge_lat)::double precision AS dest_lat,
+			AVG(corridor_discharge_lng)::double precision AS dest_lng,
+			(array_agg(id ORDER BY confidence DESC NULLS LAST,
+			                   event_date DESC NULLS LAST))[1:5] AS sample_mcr_ids
+		FROM meridian_cargo_records
+		WHERE corridor_load_lat IS NOT NULL
+		  AND corridor_load_lng IS NOT NULL
+		  AND corridor_discharge_lat IS NOT NULL
+		  AND corridor_discharge_lng IS NOT NULL
+		  AND confidence >= 0.5
+		  AND %s IS NOT NULL
+		  AND %s IS NOT NULL
+		  AND commodity_family IS NOT NULL%s
+		GROUP BY %s, %s, commodity_family
+		HAVING AVG(confidence) >= $1
+	`, shipperCol, consigneeCol, shipperCol, consigneeCol, commodityFilter, shipperCol, consigneeCol)
+	}
 	args := []any{minConf}
 	n := 2
 	if commodity != "" {
-		q += fmt.Sprintf(` AND commodity_family = $%d`, n)
 		args = append(args, commodity)
 		n++
 	}
@@ -472,10 +522,13 @@ func scanCargoRecord(rows interface {
 	var eventDate *time.Time
 	var evidence, sources, meta []byte
 	var contactIDs []uuid.UUID
+	var pcEvidence, pcMetadata []byte
+	var vesselType, tankerClass *string
 	if err := rows.Scan(&id, &bolID, &fingerprint, &recipe, &family, &conf, &tri, &tier,
 		&shipper, &consignee, &shipperCID, &consigneeCID, &vessel, &mmsi, &imo, &loadTID,
 		&loadPort, &loadCountry, &discharge, &dischargeCountry, &desc,
-		&volLo, &volHi, &volBest, &volMethod, &volUnit, &eventDate, &pcID, &evidence, &sources, &contactIDs, &meta); err != nil {
+		&volLo, &volHi, &volBest, &volMethod, &volUnit, &eventDate, &pcID, &evidence, &sources, &contactIDs, &meta,
+		&pcEvidence, &pcMetadata, &vesselType, &tankerClass); err != nil {
 		return nil, err
 	}
 	var evChain, srcList, metaMap any
@@ -486,12 +539,19 @@ func scanCargoRecord(rows interface {
 	for i, cid := range contactIDs {
 		contacts[i] = cid.String()
 	}
+	provenance := inferCargoProvenance(tier)
+	if portProv := inferPortCallProvenance(pcEvidence, pcMetadata); portProv != "unknown" {
+		provenance = portProv
+	} else if cargoRecordIsSeed(evidence, pcEvidence, pcMetadata) {
+		provenance = "seed_port_calls"
+	}
 	out := map[string]any{
 		"id": id.String(), "synthetic_bol_id": bolID, "fingerprint": fingerprint,
 		"recipe": recipe, "commodity_family": family, "confidence": conf,
-		"triangulation_score": tri, "bol_tier": tier, "data_provenance": inferCargoProvenance(tier),
+		"triangulation_score": tri, "bol_tier": tier, "data_provenance": provenance,
 		"shipper_name": shipper, "consignee_name": consignee,
 		"vessel_name": vessel, "mmsi": mmsi, "imo": imo,
+		"vessel_type": vesselType, "tanker_class": tankerClass,
 		"load_port_name": loadPort, "load_country": loadCountry,
 		"discharge_hint": discharge, "discharge_country": dischargeCountry,
 		"commodity_description": desc,

@@ -17,6 +17,8 @@ Short **AGENTS.md** bundles for Ollama-backed Paperclip specialists. Not used by
 | `PRODUCT-MANAGEMENT.md` | PM playbook, rubric, Phase 1 epics |
 | `templates/epic-feature.md` | Epic issue template |
 
+Agent knowledge layering (Obsidian + graphify): [docs/AGENT_KNOWLEDGE_LAYERS.md](../docs/AGENT_KNOWLEDGE_LAYERS.md)
+
 Setup: [docs/PAPERCLIP_OLLAMA_AGENTS.md](../docs/PAPERCLIP_OLLAMA_AGENTS.md)
 
 ```bash

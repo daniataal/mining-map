@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyCountrySummaryRequestParams,
   countrySummaryRowsToLicenses,
   isCountryLicenseSummary,
+  LICENSE_COUNTRY_SUMMARY_LIMIT,
+  LICENSE_COUNTRY_SUMMARY_WORLD_BBOX,
   parseLicenseCountrySummaryResponse,
 } from './licenseCountrySummary';
 
@@ -21,6 +24,26 @@ describe('parseLicenseCountrySummaryResponse', () => {
     expect(() => parseLicenseCountrySummaryResponse({ error: 'query_failed' })).toThrow(
       'query_failed',
     );
+  });
+});
+
+describe('applyCountrySummaryRequestParams', () => {
+  it('sets world bbox and summary limit for Go country-summary validation', () => {
+    const params: Record<string, string | number | boolean> = {
+      prefer_open_data: true,
+      limit: 5000,
+      map: 1,
+      zoom: 5,
+      min_lat: 10,
+      max_lat: 20,
+      min_lng: 30,
+      max_lng: 40,
+    };
+    applyCountrySummaryRequestParams(params);
+    expect(params.limit).toBe(LICENSE_COUNTRY_SUMMARY_LIMIT);
+    expect(params).toMatchObject(LICENSE_COUNTRY_SUMMARY_WORLD_BBOX);
+    expect(params.map).toBeUndefined();
+    expect(params.zoom).toBeUndefined();
   });
 });
 

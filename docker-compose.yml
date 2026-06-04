@@ -68,8 +68,12 @@ services:
       - OIL_GRAPH_STORAGE_IMPORT_CAP=${OIL_GRAPH_STORAGE_IMPORT_CAP:-5000}
       - EIA_DOWNLOADS_DIR=/data/eia_downloads
       - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
+      - DEBUG_LOG_PATH=/workspace/.cursor/debug-7419a2.log
+      - MERIDIAN_DATA_DIR=/data/meridian
     volumes:
       - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data:/data/meridian:ro
+      - ./.cursor:/workspace/.cursor
     healthcheck:
       test:
         [

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mining-map/oil-live-intel/internal/overpass"
+	"github.com/mining-map/oil-live-intel/internal/services/osmtiles"
 )
 
 func petroleumMapboxDisabled() bool {
@@ -59,12 +61,16 @@ func (s *Server) OSMLayersCatalog(w http.ResponseWriter, r *http.Request) {
 	layers := []map[string]interface{}{}
 	for id, meta := range OSMLayers {
 		layers = append(layers, map[string]interface{}{
-			"id":              id,
-			"label":           meta["label"],
-			"geometry":        meta["geometry"],
-			"default_visible": false,
-			"attribution":     "© OpenStreetMap contributors",
-			"license_note":    "ODbL — community-mapped; not official cadastre.",
+			"id":                id,
+			"label":             meta["label"],
+			"geometry":          meta["geometry"],
+			"default_visible":   false,
+			"attribution":       "© OpenStreetMap contributors",
+			"license_note":      "ODbL — community-mapped; not official cadastre.",
+			"tile_url_template": osmtiles.TileURLTempl,
+			"render_mode":       "mvt",
+			"source_layer":      osmtiles.MVTLayerName,
+			"min_zoom":          osmtiles.MinZoomForLayer(id),
 		})
 	}
 
@@ -87,12 +93,60 @@ func (s *Server) OSMLayersCatalog(w http.ResponseWriter, r *http.Request) {
 		"layers":          layers,
 		"data_as_of":      time.Now().UTC().Format(time.RFC3339),
 		"mapbox_disabled": mapboxOff,
+		"render_mode":     "mvt",
 		"source_labels": []string{
 			"OpenStreetMap",
 			"Overpass API",
 		},
 		"limitations": limitations,
 	})
+}
+
+func (s *Server) OSMLayerMVT(w http.ResponseWriter, r *http.Request) {
+	layerID := chi.URLParam(r, "layer_id")
+	if _, ok := OSMLayers[layerID]; !ok {
+		http.Error(w, fmt.Sprintf("Unknown OSM petroleum layer: %s", layerID), http.StatusNotFound)
+		return
+	}
+
+	z, err := strconv.Atoi(chi.URLParam(r, "z"))
+	if err != nil {
+		http.Error(w, "invalid z", http.StatusBadRequest)
+		return
+	}
+	x, err := strconv.Atoi(chi.URLParam(r, "x"))
+	if err != nil {
+		http.Error(w, "invalid x", http.StatusBadRequest)
+		return
+	}
+	y, err := strconv.Atoi(chi.URLParam(r, "y"))
+	if err != nil {
+		http.Error(w, "invalid y", http.StatusBadRequest)
+		return
+	}
+	if s.Pool == nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	tile, err := osmtiles.FetchTile(r.Context(), s.Pool, layerID, z, x, y)
+	if err != nil {
+		if errors.Is(err, osmtiles.ErrUnknownLayer) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("tile fetch failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	if len(tile) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(tile)
 }
 
 func (s *Server) OSMLayerGeoJSON(w http.ResponseWriter, r *http.Request) {

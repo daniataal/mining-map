@@ -1,0 +1,239 @@
+{
+  "meta": {
+    "source_id": "port_authority_directories",
+    "source_name": "Curated port authority major-customer directories",
+    "source_kind": "port_authority_curated",
+    "record_origin": "port_authority_curated",
+    "evidence_type": "port_authority_page",
+    "disclaimer": "Public port authority customer lists — not verified tank capacity, berth contracts, or ownership. Confirm against operator filings and on-site intelligence before trading decisions.",
+    "source_accessed_at": "2026-06-04"
+  },
+  "ports": [
+    {
+      "locode": "AEFJR",
+      "port_name": "Fujairah",
+      "port_authority_name": "Port of Fujairah",
+      "country": "United Arab Emirates",
+      "country_iso2": "AE",
+      "lat": 25.116,
+      "lng": 56.35,
+      "source_url": "https://fujairahport.ae/port-overview/major-customers/",
+      "osm_partition_bbox": [25.05, 56.25, 25.22, 56.45],
+      "partition_min_tanks": 24,
+      "tenants": [
+        {"name": "VTTI", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_vtti_fujairah_united_arab_emirates"},
+        {"name": "JSW Infrastructure MENA Terminals", "category": "tank_storage_and_refineries"},
+        {"name": "GPS", "category": "tank_storage_and_refineries"},
+        {"name": "CHEMOIL", "category": "tank_storage_and_refineries"},
+        {"name": "VOPAK", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_vopak_fujairah_united_arab_emirates"},
+        {"name": "ECOMAR", "category": "tank_storage_and_refineries"},
+        {"name": "EMARAT FOT", "category": "tank_storage_and_refineries"},
+        {"name": "BPGIC", "category": "tank_storage_and_refineries"},
+        {"name": "HORIZON", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_horizon_terminals_fujairah_united_arab_emirates"},
+        {"name": "EMIRATES TERMINALS", "category": "tank_storage_and_refineries"},
+        {"name": "MOUNT ROW", "category": "tank_storage_and_refineries"},
+        {"name": "ADNOC", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_adnoc_fujairah_storage_united_arab_emirates"},
+        {"name": "ENOC", "category": "tank_storage_and_refineries"},
+        {"name": "VITOL", "category": "tank_storage_and_refineries"},
+        {"name": "JSW DOHA QUARRY", "category": "aggregate_exporters"},
+        {"name": "RSC CTS", "category": "aggregate_exporters"},
+        {"name": "SALBOOKH TRADING", "category": "aggregate_exporters"},
+        {"name": "JSW CEMENT", "category": "aggregate_exporters"},
+        {"name": "ORYX", "category": "aggregate_exporters"},
+        {"name": "AL FOLK", "category": "shipping_agents"},
+        {"name": "SHARAF SHIPPING AGENCY", "category": "shipping_agents"},
+        {"name": "UNITAC", "category": "shipping_agents"},
+        {"name": "WILHELMSEN KANOO SHIPPING", "category": "shipping_agents"},
+        {"name": "GAC MIDDLE EAST", "category": "shipping_agents"},
+        {"name": "FUJI INCHCAPE SHIPPING SERVICES", "category": "shipping_agents"},
+        {"name": "SAIFEE SHIP", "category": "shipping_agents"},
+        {"name": "FAIRDEAL", "category": "shipping_agents"},
+        {"name": "Albwardy Damen", "category": "shipping_agents"},
+        {"name": "Al Arabia Bunkering", "category": "bunker_suppliers"},
+        {"name": "Atlantis Seven Seas Yacht International", "category": "shipping_agents"},
+        {"name": "Sea Master Oil Marketing", "category": "bunker_suppliers"},
+        {"name": "Fujairah National Shipping", "category": "shipping_agents"},
+        {"name": "Ionian Shipping Agency", "category": "shipping_agents"},
+        {"name": "Credential Ships Services", "category": "shipping_agents"},
+        {"name": "Cyclades Marine Services", "category": "shipping_agents"},
+        {"name": "FOIZ", "category": "other", "role_note": "Fujairah Oil Industry Zone", "curated_storage_external_id": "curated_storage_fujairah_oil_industry_zone_foiz_united_arab_emirates"},
+        {"name": "FUJAIRAH FREE ZONE", "category": "other"},
+        {"name": "Fujairah Terminals", "category": "other"},
+        {"name": "FNRC", "category": "other"},
+        {"name": "ALDAHRA", "category": "other"}
+      ]
+    },
+    {
+      "locode": "NLRTM",
+      "port_name": "Rotterdam",
+      "port_authority_name": "Port of Rotterdam",
+      "country": "Netherlands",
+      "country_iso2": "NL",
+      "lat": 51.9,
+      "lng": 4.5,
+      "source_url": "https://www.portofrotterdam.com/en/port-and-our-region/port-area/companies",
+      "tenants": [
+        {"name": "Vopak", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_vopak_rotterdam_netherlands"},
+        {"name": "Oiltanking", "category": "tank_storage_and_refineries"},
+        {"name": "Shell", "category": "tank_storage_and_refineries"},
+        {"name": "BP", "category": "tank_storage_and_refineries"},
+        {"name": "ExxonMobil", "category": "tank_storage_and_refineries"},
+        {"name": "Gunvor", "category": "tank_storage_and_refineries"},
+        {"name": "Koole Terminals", "category": "tank_storage_and_refineries"},
+        {"name": "VTTI", "category": "tank_storage_and_refineries"},
+        {"name": "Bunker suppliers (port register)", "category": "bunker_suppliers", "role_note": "See Port of Rotterdam bunker directory"},
+        {"name": "Shipping agents (port register)", "category": "shipping_agents", "role_note": "See Port of Rotterdam agent listings"}
+      ]
+    },
+    {
+      "locode": "SGSIN",
+      "port_name": "Singapore",
+      "port_authority_name": "Maritime and Port Authority of Singapore",
+      "country": "Singapore",
+      "country_iso2": "SG",
+      "lat": 1.264,
+      "lng": 103.82,
+      "source_url": "https://www.jurongisland.com/companies",
+      "tenants": [
+        {"name": "Vopak", "category": "tank_storage_and_refineries"},
+        {"name": "Oiltanking", "category": "tank_storage_and_refineries"},
+        {"name": "Shell", "category": "tank_storage_and_refineries"},
+        {"name": "ExxonMobil", "category": "tank_storage_and_refineries"},
+        {"name": "BP", "category": "tank_storage_and_refineries"},
+        {"name": "Chevron", "category": "tank_storage_and_refineries"},
+        {"name": "PetroChina", "category": "tank_storage_and_refineries"},
+        {"name": "Jurong Island tank storage operators", "category": "tank_storage_and_refineries", "role_note": "Multiple operators on Jurong Island — see Jurong Island company directory"}
+      ]
+    },
+    {
+      "locode": "USHOU",
+      "port_name": "Houston",
+      "port_authority_name": "Port Houston",
+      "country": "United States",
+      "country_iso2": "US",
+      "lat": 29.73,
+      "lng": -95.27,
+      "source_url": "https://porthouston.com/terminals/",
+      "tenants": [
+        {"name": "Kinder Morgan", "category": "tank_storage_and_refineries"},
+        {"name": "Enterprise Products", "category": "tank_storage_and_refineries"},
+        {"name": "Magellan", "category": "tank_storage_and_refineries"},
+        {"name": "Shell", "category": "tank_storage_and_refineries"},
+        {"name": "ExxonMobil", "category": "tank_storage_and_refineries"},
+        {"name": "Valero", "category": "tank_storage_and_refineries"},
+        {"name": "Phillips 66", "category": "tank_storage_and_refineries"},
+        {"name": "Vopak", "category": "tank_storage_and_refineries"}
+      ]
+    },
+    {
+      "locode": "BEANR",
+      "port_name": "Antwerp",
+      "port_authority_name": "Port of Antwerp-Bruges",
+      "country": "Belgium",
+      "country_iso2": "BE",
+      "lat": 51.23,
+      "lng": 4.4,
+      "source_url": "https://www.portofantwerpbruges.com/en/our-port/port-companies",
+      "tenants": [
+        {"name": "Vopak", "category": "tank_storage_and_refineries"},
+        {"name": "Oiltanking", "category": "tank_storage_and_refineries"},
+        {"name": "ExxonMobil", "category": "tank_storage_and_refineries"},
+        {"name": "TotalEnergies", "category": "tank_storage_and_refineries"},
+        {"name": "Gunvor", "category": "tank_storage_and_refineries"},
+        {"name": "VTTI", "category": "tank_storage_and_refineries"},
+        {"name": "Bunkering companies (port listing)", "category": "bunker_suppliers", "role_note": "See Port of Antwerp-Bruges company finder"}
+      ]
+    },
+    {
+      "locode": "AEJEA",
+      "port_name": "Jebel Ali",
+      "port_authority_name": "DP World Jebel Ali",
+      "country": "United Arab Emirates",
+      "country_iso2": "AE",
+      "lat": 24.985,
+      "lng": 55.027,
+      "source_url": "https://www.dpworld.com/en/uae/jebel-ali",
+      "tenants": [
+        {"name": "ENOC", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_jebel_ali_tank_terminals_united_arab_emirates"},
+        {"name": "Vopak", "category": "tank_storage_and_refineries"},
+        {"name": "HORIZON", "category": "tank_storage_and_refineries"},
+        {"name": "BPGIC", "category": "tank_storage_and_refineries"},
+        {"name": "Shipping agents (Jebel Ali)", "category": "shipping_agents", "role_note": "DP World service directory"}
+      ]
+    },
+    {
+      "locode": "AEDXB",
+      "port_name": "Dubai",
+      "port_authority_name": "DP World / Dubai ports",
+      "country": "United Arab Emirates",
+      "country_iso2": "AE",
+      "lat": 25.27,
+      "lng": 55.3,
+      "source_url": "https://www.dpworld.com/en/uae",
+      "tenants": [
+        {"name": "ENOC", "category": "tank_storage_and_refineries"},
+        {"name": "EPPCO", "category": "tank_storage_and_refineries"},
+        {"name": "Vopak", "category": "tank_storage_and_refineries"},
+        {"name": "HORIZON", "category": "tank_storage_and_refineries"}
+      ]
+    },
+    {
+      "locode": "SARTA",
+      "port_name": "Ras Tanura",
+      "port_authority_name": "Saudi Aramco — Ras Tanura complex",
+      "country": "Saudi Arabia",
+      "country_iso2": "SA",
+      "lat": 26.707,
+      "lng": 50.061,
+      "source_url": "https://www.aramco.com/",
+      "osm_partition_bbox": [26.55, 49.85, 26.95, 50.15],
+      "partition_min_tanks": 12,
+      "tenants": [
+        {"name": "Saudi Aramco", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_ras_tanura_terminal_saudi_arabia"},
+        {"name": "Ju'aymah Terminal", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_ju_aymah_crude_oil_terminal_saudi_arabia"}
+      ]
+    },
+    {
+      "locode": "SAYNB",
+      "port_name": "Yanbu",
+      "port_authority_name": "Saudi Aramco — Yanbu industrial port",
+      "country": "Saudi Arabia",
+      "country_iso2": "SA",
+      "lat": 24.089,
+      "lng": 38.063,
+      "source_url": "https://www.aramco.com/",
+      "tenants": [
+        {"name": "Saudi Aramco", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_yanbu_export_refinery_tank_farm_saudi_arabia"}
+      ]
+    },
+    {
+      "locode": "BRSSZ",
+      "port_name": "Santos",
+      "port_authority_name": "Santos Port Authority",
+      "country": "Brazil",
+      "country_iso2": "BR",
+      "lat": -23.945,
+      "lng": -46.334,
+      "source_url": "https://www.portodesantos.com.br/",
+      "tenants": [
+        {"name": "Transpetro", "category": "tank_storage_and_refineries"},
+        {"name": "Raizen", "category": "tank_storage_and_refineries"},
+        {"name": "Ultracargo", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_santos_port_petroleum_storage_brazil"}
+      ]
+    },
+    {
+      "locode": "INSIK",
+      "port_name": "Sikka (Jamnagar)",
+      "port_authority_name": "Reliance / Indian Oil — Jamnagar corridor",
+      "country": "India",
+      "country_iso2": "IN",
+      "lat": 22.39,
+      "lng": 69.83,
+      "source_url": "https://www.ril.com/",
+      "tenants": [
+        {"name": "Reliance Industries", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_jamnagar_refinery_tank_farm_india"},
+        {"name": "Indian Oil", "category": "tank_storage_and_refineries", "curated_storage_external_id": "curated_storage_sikka_crude_oil_terminal_india"}
+      ]
+    }
+  ]
+}

@@ -4,6 +4,19 @@ import type { PetroleumViewportBounds } from './petroleumLayers';
 
 export type OsmPetroleumLayerId = 'pipelines' | 'refineries' | 'storage_terminals';
 
+export interface OsmPetroleumCatalogLayer {
+  id: OsmPetroleumLayerId;
+  tile_url_template?: string;
+  source_layer?: string;
+  min_zoom?: number;
+  render_mode?: string;
+}
+
+export interface OsmPetroleumCatalog {
+  layers: OsmPetroleumCatalogLayer[];
+  render_mode?: string;
+}
+
 export interface OsmPetroleumLayerGeoJson {
   type: 'FeatureCollection';
   features: GeoJSON.Feature[];
@@ -13,6 +26,21 @@ export interface OsmPetroleumLayerGeoJson {
   attribution?: string;
   license_note?: string;
   limitations?: string[];
+  source?: string;
+  read_path?: string;
+  coverage_gap?: boolean;
+  stale?: boolean;
+  hint?: string;
+  db_feature_total?: number;
+}
+
+/** User-facing note when the OSM snapshot is empty or stale in Postgres. */
+export function osmPetroleumCoverageGapMessage(payload?: OsmPetroleumLayerGeoJson | null): string | null {
+  if (!payload?.coverage_gap) return null;
+  return (
+    payload.hint ??
+    'OSM infrastructure snapshot empty — run petroleum-osm worker or graph-sync.'
+  );
 }
 
 export const OSM_PETROLEUM_LAYER_IDS: OsmPetroleumLayerId[] = [
@@ -31,6 +59,18 @@ export const DEFAULT_OSM_LAYER_VISIBILITY: Record<OsmPetroleumLayerId, boolean> 
 export function defaultOsmLayerVisibility(mapboxDisabled: boolean): Record<OsmPetroleumLayerId, boolean> {
   if (!mapboxDisabled) return { ...DEFAULT_OSM_LAYER_VISIBILITY };
   return { pipelines: true, refineries: false, storage_terminals: false };
+}
+
+export function useOsmPetroleumCatalog(enabled = true) {
+  return useQuery<OsmPetroleumCatalog>({
+    queryKey: ['osm-petroleum-catalog'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<OsmPetroleumCatalog>('/api/petroleum/osm-layers');
+      return data;
+    },
+    enabled,
+    staleTime: 60 * 60_000,
+  });
 }
 
 export function useOsmPetroleumLayerGeoJson(

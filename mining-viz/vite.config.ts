@@ -88,6 +88,22 @@ export default defineConfig({
         proxyTimeout: 120000,
         ws: true,
       },
+      '/api/petroleum/osm-tiles': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+        rewrite: (path) =>
+          path.replace(/^\/api\/petroleum\/osm-tiles/, '/api/oil-live/map/petroleum-osm/tiles'),
+      },
+      '/api/petroleum/osm-layers': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+        rewrite: (path) =>
+          path.replace(/^\/api\/petroleum\/osm-layers/, '/api/oil-live/map/petroleum-osm/layers'),
+      },
       '/licenses': {
         target: oilIntelProxyTarget,
         changeOrigin: true,
@@ -133,6 +149,7 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           map: ['leaflet', 'react-leaflet', 'react-leaflet-cluster'],
+          maplibre: ['maplibre-gl', '@maplibre/maplibre-gl-leaflet'],
           markdown: ['react-markdown', 'remark-gfm'],
           motion: ['framer-motion'],
           query: ['@tanstack/react-query', 'axios'],

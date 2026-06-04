@@ -145,5 +145,60 @@ class RefineryThroughputTests(unittest.TestCase):
         self.assertEqual(len(ddl_calls), 1)
 
 
+class PaddStorageTests(unittest.TestCase):
+    def setUp(self):
+        self._prev = os.environ.pop("EIA_API_KEY", None)
+
+    def tearDown(self):
+        if self._prev is not None:
+            os.environ["EIA_API_KEY"] = self._prev
+        else:
+            os.environ.pop("EIA_API_KEY", None)
+
+    def test_skip_without_key(self):
+        out = eia_mod.sync_eia_padd_storage(MagicMock())
+        self.assertEqual(out["status"], "skipped")
+
+    def test_parse_latest_padd_rows(self):
+        rows = [
+            {"series": "WCRSTP21", "period": "2026-05-16", "value": 120.5},
+            {"series": "WCRSTP21", "period": "2026-05-23", "value": 121.2},
+            {"series": "WCRSTP31", "period": "2026-05-23", "value": 260.4},
+        ]
+        parsed = eia_mod._parse_latest_padd_storage_rows(rows)
+        self.assertEqual(parsed["PADD2"]["stocks_million_bbl"], 121.2)
+        self.assertEqual(parsed["PADD3"]["stocks_million_bbl"], 260.4)
+
+    def test_sync_writes_cache_and_db(self):
+        os.environ["EIA_API_KEY"] = "test-key"
+        sample_response = {
+            "response": {
+                "data": [
+                    {"series": "WCRSTP21", "period": "2026-05-23", "value": 118.7},
+                    {"series": "WCRSTP31", "period": "2026-05-23", "value": 255.1},
+                ]
+            }
+        }
+        conn = MagicMock()
+        cur = MagicMock()
+        cur.__enter__.return_value = cur
+        cur.__exit__.return_value = False
+        conn.cursor.return_value = cur
+
+        with patch.object(eia_mod, "requests") as mock_requests, patch.object(
+            eia_mod, "EIA_PADD_STORAGE_CACHE_PATH",
+            eia_mod.REPO_ROOT / "data" / "cache" / "eia_padd_storage_test.json",
+        ) as cache_path:
+            mock_requests.get.return_value = _FakeResponse(sample_response)
+            out = eia_mod.sync_eia_padd_storage(conn)
+
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["padds"], 2)
+        self.assertTrue(cache_path.is_file())
+        cached = eia_mod.read_eia_padd_storage_cache(cache_path)
+        self.assertIn("PADD2", cached)
+        cache_path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,10 +3,33 @@ package syntheticbol
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestPortCallLiveOnlyClause(t *testing.T) {
+	clause := portCallLiveOnlyClause("pc")
+	for _, needle := range []string{
+		"seed_port_calls",
+		"live_ais",
+		"pc.metadata",
+		"pc.evidence",
+	} {
+		if !strings.Contains(clause, needle) {
+			t.Fatalf("expected %q in live-only clause: %s", needle, clause)
+		}
+	}
+}
+
+func TestTankerVesselJoinRestrictsClasses(t *testing.T) {
+	for _, cls := range []string{"crude", "product", "chemical", "lng", "lpg"} {
+		if !strings.Contains(tankerVesselJoin, "'"+cls+"'") {
+			t.Fatalf("missing tanker class %q in join", cls)
+		}
+	}
+}
 
 func TestInferCommodityFamily(t *testing.T) {
 	crude := true

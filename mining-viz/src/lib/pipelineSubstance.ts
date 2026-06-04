@@ -158,3 +158,24 @@ export function splitOsmPipelineFeatures(
   }
   return { oilGas, water };
 }
+
+/** Split OSM pipelines into Mapbox-style oil vs gas overlay buckets. */
+export function splitOsmPipelineFeaturesForOilGasLayers(
+  features: GeoJSON.Feature[],
+): { oil: GeoJSON.Feature[]; gas: GeoJSON.Feature[]; water: GeoJSON.Feature[] } {
+  const oil: GeoJSON.Feature[] = [];
+  const gas: GeoJSON.Feature[] = [];
+  const water: GeoJSON.Feature[] = [];
+  for (const feature of features) {
+    const props = (feature.properties || {}) as Record<string, unknown>;
+    const substance = classifyPipelineSubstance(props);
+    if (substance === 'water') {
+      water.push(feature);
+    } else if (substance === 'gas') {
+      gas.push(feature);
+    } else {
+      oil.push(feature);
+    }
+  }
+  return { oil, gas, water };
+}

@@ -44,6 +44,7 @@ import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
+import { storageViewportCoverageGapMessage } from './lib/storageCoverageBanner';
 import { LICENSE_MAP_DEFAULT_ZOOM } from './lib/licenseMapCluster';
 import OilMaritimePanel from './components/OilMaritimePanel';
 import { resolveFleetVesselSelection } from './lib/vessels/resolveFleetVessel';
@@ -254,12 +255,17 @@ export default function App() {
     }
   }, [licenseDrillExpandBounds, licenseMapZoom, rawData]);
   const licensesMapSecondaryStatus = null;
+  const [oilGasMapViewport, setOilGasMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const debouncedOilGasMapViewport = useDebouncedValue(oilGasMapViewport, 450);
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
     error: storageError,
-  } = useStorageTerminals(viewMode === 'oil_and_gas' && mapSidebarTab === 'licenses');
+  } = useStorageTerminals(viewMode === 'oil_and_gas', {
+    viewport: debouncedOilGasMapViewport,
+    limit: 2000,
+  });
   const {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
@@ -376,6 +382,45 @@ export default function App() {
     [licenseSector, localLicenses]
   );
   const storageEntities = storageTerminalResponse?.entities || [];
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas' || !storageTerminalResponse?.entities) return;
+    const ents = storageTerminalResponse.entities;
+    const uae = ents.filter((e) => (e.country || '').includes('United Arab Emirates'));
+    const fuj = ents.filter(
+      (e) =>
+        e.lat != null &&
+        e.lng != null &&
+        e.lat >= 25.0 &&
+        e.lat <= 25.25 &&
+        e.lng >= 56.2 &&
+        e.lng <= 56.5,
+    );
+    const isr = ents.filter((e) => (e.country || '').includes('Israel'));
+    const curated = ents.filter(
+      (e) => e.sourceKind === 'curated_reference' || String(e.id || '').startsWith('curated_storage_'),
+    );
+    // #region agent log
+    fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+      body: JSON.stringify({
+        sessionId: '7419a2',
+        hypothesisId: 'C',
+        location: 'App.tsx:storageEntities',
+        message: 'storage_entities_region_counts',
+        data: {
+          total: ents.length,
+          curated: curated.length,
+          uae: uae.length,
+          fujairah: fuj.length,
+          israel: isr.length,
+          statsBySource: storageTerminalResponse.stats?.by_source,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [viewMode, storageTerminalResponse]);
   const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
     () => {
@@ -657,8 +702,11 @@ export default function App() {
   );
 
   const handleLicenseClusterDrillComplete = useCallback(
-    (expandBounds: LicenseViewportBounds) => {
+    (expandBounds: LicenseViewportBounds, zoom?: number) => {
       setLicenseDrillExpandBounds(normalizeLicenseViewportBounds(expandBounds));
+      if (zoom != null && Number.isFinite(zoom)) {
+        setLicenseMapZoom(zoom);
+      }
       queryClient.invalidateQueries({ queryKey: ['licenses', 'viewport'] });
     },
     [queryClient],
@@ -1498,6 +1546,13 @@ export default function App() {
               <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
                 <OilGasOnboardingTip active />
               </div>
+              {storageViewportCoverageGapMessage(storageTerminalResponse) && (
+                <div className="absolute top-[7.5rem] left-3 right-3 z-[999] pointer-events-none max-w-xl">
+                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-[10px] font-semibold text-amber-950 shadow-xl backdrop-blur-xl dark:text-amber-100">
+                    {storageViewportCoverageGapMessage(storageTerminalResponse)}
+                  </div>
+                </div>
+              )}
               {(isStorageLoading || storageTerminalResponse?.stats) && (
                 <div className="absolute top-[4.5rem] right-3 z-[999] pointer-events-none hidden sm:block">
                   <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-900 shadow-xl backdrop-blur-xl dark:text-cyan-100">
@@ -1634,6 +1689,21 @@ export default function App() {
                   storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
+                  }
+                  onOilGasMapViewportChange={
+                    viewMode === 'oil_and_gas'
+                      ? (bbox) =>
+                          setOilGasMapViewport(
+                            bbox
+                              ? {
+                                  south: bbox.south,
+                                  west: bbox.west,
+                                  north: bbox.north,
+                                  east: bbox.east,
+                                }
+                              : null,
+                          )
+                      : undefined
                   }
                   oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}

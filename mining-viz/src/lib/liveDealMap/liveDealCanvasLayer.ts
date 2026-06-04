@@ -35,6 +35,7 @@ function colorForFeature(feature: LiveDealMapFeature): string {
   if (feature.kind === 'opportunity') return '#10b981';
   if (feature.kind === 'terminal') return '#38bdf8';
   if (feature.kind === 'storage_terminal') return '#06b6d4';
+  if (feature.kind === 'storage_tank') return '#94a3b8';
   if (feature.kind === 'tank_farm') return '#f97316';
   if (feature.kind === 'refinery') return '#fb923c';
   if (feature.kind === 'oil_field') return '#1e40af';
@@ -63,6 +64,8 @@ function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: b
         ? 6.5
         : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
           ? 6.5
+          : feature.kind === 'storage_tank'
+            ? 5
           : feature.kind === 'refinery' || feature.kind === 'oil_field'
             ? 6
         : feature.kind === 'cargo'

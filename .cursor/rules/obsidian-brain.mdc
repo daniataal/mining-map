@@ -24,9 +24,10 @@ Never store secrets, API keys, `.env` contents, SSH keys, or credentials in the 
    - `06_Company-Dossiers/`
    - `08_Data-Sources/`
    - `05_Research/`
-3. Read repo `AGENTS.md` and operational docs (`docs/DATA_SOURCES.md`, `docs/LIVE_DATA.md`) for implementation work.
-4. Run `git branch --show-current` and `git status --short`.
-5. **Paperclip agent wakes:** checkout branch **`paperclip2`** only (see `.paperclip/GIT-BRANCH.md`). Human Cursor IDE sessions: stay on your current branch unless the user asks to switch.
+3. For **where in code**, use graphify before wide grep (`graphify query` / `path` / `explain`); see `docs/AGENT_KNOWLEDGE_LAYERS.md` and vault `09_Technical-Architecture/Meridian code navigation (graphify).md`.
+4. Read repo `AGENTS.md` and operational docs (`docs/DATA_SOURCES.md`, `docs/LIVE_DATA.md`) for implementation work.
+5. Run `git branch --show-current` and `git status --short`.
+6. **Paperclip agent wakes:** checkout branch **`paperclip2`** only (see `.paperclip/GIT-BRANCH.md`). Human Cursor IDE sessions: stay on your current branch unless the user asks to switch.
 
 ## During work
 
@@ -41,6 +42,7 @@ Never store secrets, API keys, `.env` contents, SSH keys, or credentials in the 
    - `12_Decisions/` — what we decided and why
    - `10_Runbooks/` — how to repeat the operation
    - `08_Data-Sources/` — new or changed open-data sources (link + license tier)
+4. If code structure changed materially, run `graphify update .` in this repo (see `.cursor/rules/graphify.mdc`).
 
 ## What does not belong in Obsidian
 

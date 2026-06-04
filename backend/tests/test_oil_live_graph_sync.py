@@ -52,6 +52,24 @@ def test_demo_seed_disabled_skips_helpers(monkeypatch):
     }
 
 
+def test_seed_tanker_mmsis_are_demo_only():
+    try:
+        from backend.services.oil_live_graph_sync import (
+            _LEGACY_HIJACKED_MMSIS,
+            _SEED_TANKER_MMSIS,
+        )
+    except ImportError:
+        from services.oil_live_graph_sync import (  # type: ignore
+            _LEGACY_HIJACKED_MMSIS,
+            _SEED_TANKER_MMSIS,
+        )
+
+    assert _LEGACY_HIJACKED_MMSIS == (636023100, 636023101, 636023102, 636023103, 636023104)
+    for mmsi in _SEED_TANKER_MMSIS:
+        assert 636012300 <= mmsi <= 636012349
+        assert mmsi not in _LEGACY_HIJACKED_MMSIS
+
+
 def test_merge_company_metadata_roles_and_sources():
     merged = _merge_company_metadata(
         {"roles": ["terminal_operator"], "sources": [{"name": "osm_storage"}]},
@@ -111,6 +129,7 @@ def test_graph_sync_summary_includes_census_step(monkeypatch):
             "reason": "EIA_API_KEY unset",
         },
         "_sync_eia_refinery_throughput": {"status": "skipped"},
+        "_sync_eia_padd_storage": {"status": "skipped"},
         "_run_gleif_batch": {"status": "skipped", "skipped_missing_columns": True},
         "_run_wikidata_batch": {"status": "skipped", "skipped_missing_columns": True},
         "_run_opensanctions_batch": {
@@ -141,6 +160,7 @@ def test_graph_sync_summary_includes_census_step(monkeypatch):
     for key in (
         "eia_crude_imports",
         "eia_refinery_throughput",
+        "eia_padd_storage",
         "gleif_batch",
         "wikidata_enrich",
         "opensanctions_screening",

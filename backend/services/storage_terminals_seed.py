@@ -38,12 +38,23 @@ except ImportError:
     )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SEED_PATH = REPO_ROOT / "data" / "storage_terminals_seed.json"
+try:
+    from backend.services.repo_data_paths import repo_data_file
+except ImportError:
+    from services.repo_data_paths import repo_data_file  # type: ignore
+
+SEED_PATH = repo_data_file("storage_terminals_seed.json")
 
 SOURCE_ID = "storage_terminals_curated"
 SOURCE_NAME = "Curated major global petroleum storage terminals"
 EXTERNAL_ID_PREFIX = "curated_storage_"
+
+# Fujairah International Airport (OMF/FJR) — curated FOIZ hubs must not sit on the airfield.
+_FUJAIRAH_AIRPORT_LAT = 25.1122
+_FUJAIRAH_AIRPORT_LNG = 56.3240
+_FUJAIRAH_AIRPORT_EXCLUSION_KM = 2.5
+_FUJAIRAH_FOIZ_HUB_LAT = 25.131
+_FUJAIRAH_FOIZ_HUB_LNG = 56.345
 
 
 @dataclass
@@ -60,6 +71,8 @@ class CuratedStorageTerminal:
     capacity_text: Optional[str] = None
     source_record_url: Optional[str] = None
     notes: Optional[str] = None
+    eia_padd: Optional[str] = None
+    retain_near_osm: bool = False
 
 
 def _slug(text: str) -> str:
@@ -105,14 +118,65 @@ def load_seed_records(path: Optional[Path] = None) -> list[CuratedStorageTermina
                 capacity_text=(str(row.get("capacity_text")).strip() if row.get("capacity_text") else None),
                 source_record_url=(str(row.get("source_record_url")).strip() if row.get("source_record_url") else None),
                 notes=(str(row.get("notes")).strip() if row.get("notes") else None),
+                eia_padd=(str(row.get("eia_padd")).strip().upper() if row.get("eia_padd") else None),
+                retain_near_osm=bool(row.get("retain_near_osm")),
             )
         )
     return records
 
 
+def _nudge_fujairah_off_airport(
+    record: CuratedStorageTerminal,
+    lat: float,
+    lng: float,
+) -> tuple[float, float, bool, Optional[str]]:
+    region_lower = (record.region or "").lower()
+    if "fujairah" not in region_lower and record.country != "United Arab Emirates":
+        return lat, lng, False, None
+    dist_km = _haversine_km(lat, lng, _FUJAIRAH_AIRPORT_LAT, _FUJAIRAH_AIRPORT_LNG)
+    if dist_km >= _FUJAIRAH_AIRPORT_EXCLUSION_KM:
+        return lat, lng, False, None
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+
+        _log_path = "/workspace/.cursor/debug-7419a2.log"
+        if not __import__("os").path.isdir("/workspace/.cursor"):
+            _log_path = str(Path(__file__).resolve().parents[2] / ".cursor" / "debug-7419a2.log")
+        with open(_log_path, "a", encoding="utf-8") as _f:
+            _f.write(
+                _json.dumps(
+                    {
+                        "sessionId": "7419a2",
+                        "hypothesisId": "A",
+                        "location": "storage_terminals_seed.py:_nudge_fujairah_off_airport",
+                        "message": "fujairah_airport_vicinity_nudge",
+                        "data": {
+                            "name": record.name,
+                            "from_lat": lat,
+                            "from_lng": lng,
+                            "dist_airport_km": round(dist_km, 3),
+                            "to_lat": _FUJAIRAH_FOIZ_HUB_LAT,
+                            "to_lng": _FUJAIRAH_FOIZ_HUB_LNG,
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except OSError:
+        pass
+    # #endregion
+    return _FUJAIRAH_FOIZ_HUB_LAT, _FUJAIRAH_FOIZ_HUB_LNG, True, "fujairah_foiz_centroid_nudge"
+
+
 def normalize_curated_terminal(record: CuratedStorageTerminal, fetched_at: str) -> dict[str, Any]:
     subtype = record.entity_subtype or "storage_terminal"
-    country, country_iso2 = resolve_country(record.lat, record.lng)
+    lat, lng = record.lat, record.lng
+    lat, lng, geo_approximated, geo_source = _nudge_fujairah_off_airport(record, lat, lng)
+    country, country_iso2 = resolve_country(lat, lng)
     if country == "Unknown" and record.country:
         country = record.country
 
@@ -124,8 +188,8 @@ def normalize_curated_terminal(record: CuratedStorageTerminal, fetched_at: str) 
     if country_iso2:
         nearest_ports = find_nearest_ports(
             country_iso2=country_iso2,
-            lat=record.lat,
-            lng=record.lng,
+            lat=lat,
+            lng=lng,
             limit=1,
         )
         if nearest_ports:
@@ -151,6 +215,10 @@ def normalize_curated_terminal(record: CuratedStorageTerminal, fetched_at: str) 
     )
     if record.notes:
         confidence_note = f"{confidence_note} {record.notes}"
+    if geo_approximated:
+        confidence_note = (
+            f"{confidence_note} Coordinates adjusted off Fujairah airport vicinity to FOIZ tank-terminal cluster."
+        )
 
     evidence = [
         {
@@ -190,8 +258,10 @@ def normalize_curated_terminal(record: CuratedStorageTerminal, fetched_at: str) 
         "country": country,
         "region": record.region or country,
         "sector": "oil_and_gas",
-        "lat": record.lat,
-        "lng": record.lng,
+        "lat": lat,
+        "lng": lng,
+        "geoApproximated": geo_approximated,
+        "geoSource": geo_source,
         "recordOrigin": "curated_reference",
         "sourceId": SOURCE_ID,
         "sourceName": SOURCE_NAME,
@@ -214,15 +284,52 @@ def normalize_curated_terminal(record: CuratedStorageTerminal, fetched_at: str) 
         "evidenceCount": len(evidence),
         "evidence": evidence,
         "enrichmentNote": record.notes,
+        "retainNearOsm": record.retain_near_osm,
     }
 
 
 def load_curated_storage_terminals(fetched_at: Optional[str] = None) -> list[dict[str, Any]]:
     ts = fetched_at or _now_iso()
-    return [
-        normalize_curated_terminal(record, ts)
-        for record in load_seed_records()
-    ]
+    records = load_seed_records()
+    entities = [normalize_curated_terminal(record, ts) for record in records]
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+
+        _log_path = "/workspace/.cursor/debug-7419a2.log"
+        if not __import__("os").path.isdir("/workspace/.cursor"):
+            _log_path = str(Path(__file__).resolve().parents[2] / ".cursor" / "debug-7419a2.log")
+        _payload = {
+            "sessionId": "7419a2",
+            "hypothesisId": "A",
+            "location": "storage_terminals_seed.py:load_curated_storage_terminals",
+            "message": "curated_seed_load",
+            "data": {
+                "seed_path": str(SEED_PATH),
+                "seed_exists": SEED_PATH.is_file(),
+                "record_count": len(records),
+                "entity_count": len(entities),
+                "uae_count": sum(
+                    1 for e in entities if "United Arab Emirates" in str(e.get("country") or "")
+                ),
+                "fujairah_count": sum(
+                    1
+                    for e in entities
+                    if e.get("lat") is not None
+                    and 25.0 <= float(e["lat"]) <= 25.25
+                    and e.get("lng") is not None
+                    and 56.2 <= float(e["lng"]) <= 56.5
+                ),
+            },
+            "timestamp": int(_time.time() * 1000),
+        }
+        with open(_log_path, "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps(_payload, default=str) + "\n")
+    except OSError:
+        pass
+    # #endregion
+    return entities
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -255,6 +362,335 @@ def _names_overlap(a: str, b: str) -> bool:
     return False
 
 
+GENERIC_OSM_STORAGE_NAMES = {
+    "unnamed storage terminal",
+    "unnamed storage tank",
+    "storage tank",
+    "storage terminal",
+}
+
+
+def _is_generic_osm_storage_name(value: Any) -> bool:
+    normalized = (str(value or "").strip().lower())
+    if not normalized:
+        return True
+    if normalized in GENERIC_OSM_STORAGE_NAMES:
+        return True
+    return normalized.startswith("unnamed storage")
+
+
+def _is_sparse_osm_entity(entity: dict[str, Any]) -> bool:
+    if not str(entity.get("id", "")).startswith("osm:"):
+        return False
+    company = str(entity.get("company") or "")
+    missing_operator = not str(entity.get("operatorName") or "").strip()
+    missing_owner = not str(entity.get("ownerName") or "").strip()
+    missing_capacity = not str(entity.get("capacityText") or "").strip()
+    generic_name = _is_generic_osm_storage_name(company)
+    unknown_country = not str(entity.get("country") or "").strip() or str(entity.get("country")) == "Unknown"
+    return generic_name or missing_operator or missing_owner or missing_capacity or unknown_country
+
+
+def _apply_reference_hub_to_sparse_entity(
+    entity: dict[str, Any],
+    hub: dict[str, Any],
+    *,
+    distance_km: float,
+    enrichment_kind: str,
+    source_label: str,
+    evidence_type: str,
+    summary_prefix: str,
+    confidence_boost: float = 0.14,
+    max_confidence: float = 0.84,
+) -> dict[str, Any]:
+    updated = dict(entity)
+    hub_name = str(hub.get("company") or "").strip()
+
+    if not str(updated.get("operatorName") or "").strip() and hub.get("operatorName"):
+        updated["operatorName"] = hub["operatorName"]
+    if not str(updated.get("ownerName") or "").strip() and hub.get("ownerName"):
+        updated["ownerName"] = hub["ownerName"]
+    if not str(updated.get("capacityText") or "").strip() and hub.get("capacityText"):
+        updated["capacityText"] = hub["capacityText"]
+    if not str(updated.get("substanceText") or "").strip() and hub.get("substanceText"):
+        updated["substanceText"] = hub["substanceText"]
+    if hub.get("commodityHints") and not updated.get("commodityHints"):
+        updated["commodityHints"] = list(hub["commodityHints"])
+    if (not str(updated.get("country") or "").strip() or str(updated.get("country")) == "Unknown") and hub.get(
+        "country"
+    ):
+        updated["country"] = hub["country"]
+    if (
+        not str(updated.get("region") or "").strip()
+        or str(updated.get("region")) == "Unknown"
+        or str(updated.get("region")) == str(updated.get("country"))
+    ) and hub.get("region"):
+        updated["region"] = hub["region"]
+    if not updated.get("nearbyPort") and hub.get("nearbyPort"):
+        updated["nearbyPort"] = hub["nearbyPort"]
+    if hub_name and _is_generic_osm_storage_name(updated.get("company")):
+        updated["siteContextName"] = hub_name
+        updated["siteContextInferred"] = False
+        updated["siteContextSource"] = hub.get("id")
+    operator_label = str(hub.get("operatorName") or hub_name or "").strip()
+    if operator_label and _is_generic_osm_storage_name(updated.get("company")):
+        updated["company"] = operator_label
+    for port_field in (
+        "portAuthorityLocode",
+        "portAuthorityPortName",
+        "portTenantName",
+        "portTenantCategory",
+    ):
+        if hub.get(port_field) and not updated.get(port_field):
+            updated[port_field] = hub[port_field]
+    if hub.get("operatorAssignmentKind"):
+        updated["operatorAssignmentKind"] = hub["operatorAssignmentKind"]
+    if hub.get("operatorPartitionInferred"):
+        updated["operatorPartitionInferred"] = True
+    if hub.get("operatorAssignmentNote"):
+        updated["operatorAssignmentNote"] = hub["operatorAssignmentNote"]
+
+    if hub.get("operatorPartitionInferred") and distance_km > 1.5:
+        updated.pop("capacityText", None)
+
+    if not updated.get("curatedEnrichmentSourceId"):
+        updated["curatedEnrichmentSourceId"] = hub.get("id")
+        updated["curatedEnrichmentSourceName"] = hub_name or None
+        updated["curatedEnrichmentDistanceKm"] = round(distance_km, 2)
+        updated["referenceEnrichmentKind"] = enrichment_kind
+        if hub.get("sourceRecordUrl"):
+            updated["enrichmentSourceUrl"] = hub["sourceRecordUrl"]
+    if hub.get("enrichmentNote"):
+        prior_note = str(updated.get("enrichmentNote") or "").strip()
+        note = str(hub["enrichmentNote"]).strip()
+        updated["enrichmentNote"] = f"{prior_note} {note}".strip() if prior_note else note
+
+    if hub.get("operatorPartitionInferred"):
+        enrichment_note = str(hub.get("operatorAssignmentNote") or summary_prefix)
+        enrichment_note = f"{enrichment_note} (~{distance_km:.1f} km to zone centroid)."
+    else:
+        enrichment_note = (
+            f"{summary_prefix} ({hub_name or hub.get('id')}, ~{distance_km:.1f} km). "
+            "Verify operator/capacity before commercial use."
+        )
+    prior_confidence_note = str(updated.get("confidenceNote") or "").strip()
+    updated["confidenceNote"] = (
+        f"{prior_confidence_note} {enrichment_note}".strip() if prior_confidence_note else enrichment_note
+    )
+    updated["confidenceScore"] = min(
+        max_confidence,
+        float(updated.get("confidenceScore") or 0.5) + confidence_boost,
+    )
+
+    labels = list(updated.get("sourceLabels") or [])
+    if source_label not in labels:
+        labels.append(source_label)
+    updated["sourceLabels"] = labels
+
+    evidence = list(updated.get("evidence") or [])
+    evidence.append(
+        {
+            "id": f"{updated.get('id')}:{evidence_type}",
+            "title": f"{source_label} enrichment: {hub_name or 'storage reference'}",
+            "url": hub.get("sourceRecordUrl"),
+            "source_label": source_label,
+            "evidence_type": evidence_type,
+            "confidence": round(float(updated.get("confidenceScore") or 0.0), 2),
+            "summary": enrichment_note,
+        }
+    )
+    updated["evidence"] = evidence
+    updated["evidenceCount"] = len(evidence)
+    return updated
+
+
+def enrich_osm_from_reference_hubs(
+    entities: list[dict[str, Any]],
+    reference_hubs: list[dict[str, Any]],
+    *,
+    distance_km: float = 4.0,
+    enrichment_kind: str = "curated_reference",
+    source_label: str = "Curated reference",
+    evidence_type: str = "curated_enrichment",
+    summary_prefix: str = "Sparse OSM geometry enriched from curated reference hub",
+    confidence_boost: float = 0.14,
+    skip_if_enriched: bool = False,
+    require_sparse: bool = True,
+) -> list[dict[str, Any]]:
+    """Fill OSM tank nodes from nearby reference hub rows (sparse-only by default)."""
+    hubs = [
+        hub
+        for hub in reference_hubs
+        if hub.get("lat") is not None and hub.get("lng") is not None
+    ]
+    if not hubs:
+        return entities
+
+    skip_kinds = {"curated_reference", "oil_terminal_reference", "government_open"}
+    if not require_sparse:
+        by_id = {str(entity.get("id") or ""): entity for entity in entities}
+        for entity_id, entity in list(by_id.items()):
+            if entity.get("sourceKind") in skip_kinds:
+                continue
+            if not str(entity_id).startswith("osm:"):
+                continue
+            if skip_if_enriched and entity.get("curatedEnrichmentSourceId"):
+                continue
+            lat = float(entity["lat"])
+            lng = float(entity["lng"])
+            best_hub: Optional[dict[str, Any]] = None
+            best_dist = distance_km + 1.0
+            for hub in hubs:
+                dist = _haversine_km(lat, lng, float(hub["lat"]), float(hub["lng"]))
+                if dist <= distance_km and dist < best_dist:
+                    best_dist = dist
+                    best_hub = hub
+            if best_hub is None:
+                continue
+            by_id[entity_id] = _apply_reference_hub_to_sparse_entity(
+                entity,
+                best_hub,
+                distance_km=best_dist,
+                enrichment_kind=enrichment_kind,
+                source_label=source_label,
+                evidence_type=evidence_type,
+                summary_prefix=summary_prefix,
+                confidence_boost=confidence_boost,
+            )
+        return list(by_id.values())
+
+    enriched: list[dict[str, Any]] = []
+    for entity in entities:
+        if entity.get("sourceKind") in skip_kinds:
+            enriched.append(entity)
+            continue
+        if require_sparse and not _is_sparse_osm_entity(entity):
+            enriched.append(entity)
+            continue
+        if skip_if_enriched and entity.get("curatedEnrichmentSourceId"):
+            enriched.append(entity)
+            continue
+
+        lat = float(entity["lat"])
+        lng = float(entity["lng"])
+        best_hub: Optional[dict[str, Any]] = None
+        best_dist = distance_km + 1.0
+        for candidate in hubs:
+            dist = _haversine_km(lat, lng, float(candidate["lat"]), float(candidate["lng"]))
+            if dist <= distance_km and dist < best_dist:
+                best_dist = dist
+                best_hub = candidate
+
+        if best_hub is None:
+            enriched.append(entity)
+            continue
+
+        enriched.append(
+            _apply_reference_hub_to_sparse_entity(
+                entity,
+                best_hub,
+                distance_km=best_dist,
+                enrichment_kind=enrichment_kind,
+                source_label=source_label,
+                evidence_type=evidence_type,
+                summary_prefix=summary_prefix,
+                confidence_boost=confidence_boost,
+            )
+        )
+
+    return enriched
+
+
+def enrich_osm_from_curated_reference(
+    entities: list[dict[str, Any]],
+    *,
+    distance_km: float = 4.0,
+) -> list[dict[str, Any]]:
+    """Fill sparse OSM tank nodes from nearby curated major-hub reference rows."""
+    curated = [
+        entity
+        for entity in entities
+        if entity.get("sourceKind") == "curated_reference"
+        and entity.get("lat") is not None
+        and entity.get("lng") is not None
+    ]
+    return enrich_osm_from_reference_hubs(
+        entities,
+        curated,
+        distance_km=distance_km,
+        enrichment_kind="curated_reference",
+        source_label="Curated reference",
+        evidence_type="curated_enrichment",
+        summary_prefix="Sparse OSM geometry enriched from curated reference hub",
+        confidence_boost=0.14,
+        skip_if_enriched=False,
+    )
+
+
+def enrich_osm_from_oil_terminal_reference(
+    entities: list[dict[str, Any]],
+    oil_terminal_hubs: list[dict[str, Any]],
+    *,
+    distance_km: float = 4.0,
+) -> list[dict[str, Any]]:
+    """Second-pass enrichment from persisted oil_terminals Postgres rows."""
+    return enrich_osm_from_reference_hubs(
+        entities,
+        oil_terminal_hubs,
+        distance_km=distance_km,
+        enrichment_kind="oil_terminal_reference",
+        source_label="oil_terminals DB",
+        evidence_type="oil_terminal_enrichment",
+        summary_prefix="Sparse OSM geometry enriched from oil_terminals Postgres reference",
+        confidence_boost=0.1,
+        skip_if_enriched=False,
+    )
+
+
+def drop_curated_when_osm_present_nearby(
+    entities: list[dict[str, Any]],
+    *,
+    distance_km: float = 8.0,
+    drop_radius_km: float = 2.0,
+    dense_osm_count: int = 3,
+) -> list[dict[str, Any]]:
+    """Remove curated centroids when dense OSM tank geometry exists at the same site (OSM-first map).
+
+    A single distant OSM cluster (e.g. adjacent tank farm 3–8 km away) must not suppress a
+    separate curated gap-fill hub — use ``retain_near_osm`` or rely on the 2 km / ≥3 tanks rule.
+    """
+    _ = distance_km  # legacy kwarg; dense check uses drop_radius_km
+    osm_points = [
+        entity
+        for entity in entities
+        if str(entity.get("id", "")).startswith("osm:")
+        and entity.get("lat") is not None
+        and entity.get("lng") is not None
+    ]
+    if not osm_points:
+        return entities
+
+    kept: list[dict[str, Any]] = []
+    for entity in entities:
+        if entity.get("sourceKind") != "curated_reference":
+            kept.append(entity)
+            continue
+        if entity.get("retainNearOsm"):
+            kept.append(entity)
+            continue
+        lat = float(entity["lat"])
+        lng = float(entity["lng"])
+        nearby_dense = sum(
+            1
+            for osm in osm_points
+            if _haversine_km(lat, lng, float(osm["lat"]), float(osm["lng"])) <= drop_radius_km
+        )
+        if nearby_dense >= dense_osm_count:
+            continue
+        kept.append(entity)
+    return kept
+
+
 def drop_curated_near_osm_duplicates(
     entities: list[dict[str, Any]],
     *,
@@ -276,13 +712,20 @@ def drop_curated_near_osm_duplicates(
         if entity.get("sourceKind") != "curated_reference":
             kept.append(entity)
             continue
+        if entity.get("retainNearOsm"):
+            kept.append(entity)
+            continue
         lat = float(entity["lat"])
         lng = float(entity["lng"])
         name = str(entity.get("company") or "")
+        curated_id = str(entity.get("id") or "")
         duplicate = False
         for osm in osm_points:
             if _haversine_km(lat, lng, float(osm["lat"]), float(osm["lng"])) > distance_km:
                 continue
+            if osm.get("curatedEnrichmentSourceId") == curated_id:
+                duplicate = True
+                break
             if _names_overlap(name, str(osm.get("company") or "")):
                 duplicate = True
                 break

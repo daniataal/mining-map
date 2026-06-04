@@ -711,6 +711,12 @@ def get_port_logistics_details(entity_id: str) -> Optional[dict[str, Any]]:
     detail["evidence"] = evidence
     detail["evidenceCount"] = len(evidence)
 
+    try:
+        from backend.services.port_authority_directory import attach_port_directory_to_entity
+    except ImportError:
+        from services.port_authority_directory import attach_port_directory_to_entity  # type: ignore
+    detail = attach_port_directory_to_entity(detail)
+
     _detail_cache[entity_id] = {
         "loaded_at": time.time(),
         "detail": detail,
