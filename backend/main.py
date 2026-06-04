@@ -6723,6 +6723,11 @@ class GemExtractionTrackerIngestRequest(BaseModel):
     path: Optional[str] = None
 
 
+class GemGoitPipelinesIngestRequest(BaseModel):
+    path: Optional[str] = None
+    routes_dir: Optional[str] = None
+
+
 @app.get("/api/eia-historic-imports/summary")
 def eia_historic_imports_summary(
     importer: Optional[str] = None,
@@ -6822,6 +6827,100 @@ def admin_gem_extraction_tracker_ingest(
     except Exception as exc:
         conn.rollback()
         return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-goit-pipelines/ingest")
+def admin_gem_goit_pipelines_ingest(
+    request: GemGoitPipelinesIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Ingest GEM GOIT Oil/NGL pipelines (xlsx + per-ProjectID route GeoJSON) into gem_pipeline_segments."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_goit_pipelines_import import ingest_gem_goit_pipelines
+        except ImportError:
+            from services.ingest.gem_goit_pipelines_import import ingest_gem_goit_pipelines
+        summary = ingest_gem_goit_pipelines(
+            conn,
+            workbook_path=request.path,
+            routes_dir=request.routes_dir,
+        )
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/petroleum/gem-pipelines/coverage")
+def get_gem_pipelines_coverage(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+):
+    """Viewport comparison: GEM GOIT segments vs OSM pipelines (2 km match threshold)."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.gem_pipeline_coverage import (
+                _parse_bbox,
+                build_gem_osm_pipeline_coverage,
+            )
+        except ImportError:
+            from services.gem_pipeline_coverage import (  # type: ignore
+                _parse_bbox,
+                build_gem_osm_pipeline_coverage,
+            )
+        bbox = _parse_bbox(south, west, north, east) if south is not None else None
+        return build_gem_osm_pipeline_coverage(conn, bbox=bbox)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/petroleum/gem-pipelines")
+def get_gem_pipelines_layer(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    zoom: Optional[float] = None,
+    limit: int = 5000,
+):
+    """GeoJSON for GEM GOIT oil/NGL pipeline segments in viewport."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.gem_pipeline_segments import get_gem_pipelines_geojson
+            from backend.services.storage_terminals import _parse_storage_bbox
+        except ImportError:
+            from services.gem_pipeline_segments import get_gem_pipelines_geojson  # type: ignore
+            from services.storage_terminals import _parse_storage_bbox  # type: ignore
+
+        bbox = None
+        if south is not None or west is not None or north is not None or east is not None:
+            bbox = _parse_storage_bbox(south, west, north, east)
+        return get_gem_pipelines_geojson(conn, bbox=bbox, zoom=zoom, limit=limit)
+    except ValueError as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": "gem_pipelines",
+            "feature_count": 0,
+            "limitations": [str(exc)],
+            "coverage_gap": True,
+        }
     finally:
         conn.close()
 

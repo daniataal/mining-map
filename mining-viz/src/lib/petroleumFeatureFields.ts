@@ -182,7 +182,10 @@ const PIPELINE_LAYER_IDS = new Set<PetroleumLayerId>(['oil_pipelines', 'gas_pipe
 const OSM_PIPELINE_DETAIL_SPECS: { label: string; keys: string[] }[] = [
   { label: 'Substance', keys: ['substance', 'Substance'] },
   { label: 'Diameter', keys: ['diameter', 'Diameter'] },
-  { label: 'Capacity', keys: ['capacity', 'Capacity'] },
+  { label: 'Capacity', keys: ['capacity', 'Capacity', 'capacity_text'] },
+  { label: 'Status', keys: ['status', 'Status'] },
+  { label: 'Owner', keys: ['owner', 'Owner'] },
+  { label: 'Length (km)', keys: ['length_km', 'LengthMergedKm'] },
   { label: 'Voltage', keys: ['voltage', 'Voltage'] },
   { label: 'Reference', keys: ['ref', 'Ref', 'REF'] },
   { label: 'Network', keys: ['network', 'Network'] },
@@ -439,6 +442,7 @@ export function buildPetroleumFeatureViewModel(
   const capacity = firstString(props, [
     'Capacity',
     'capacity',
+    'capacity_text',
     'CAPACITY',
     'bpd',
     'BPD',

@@ -73,6 +73,19 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Tier honesty** | Global NGO field-level extraction reference — **not** an official licence/block registry (`record_origin=global_open_fallback`) |
 | **Verify** | After ingest: `SELECT COUNT(*) FROM licenses WHERE source_id='gem_global_extraction_tracker_march_2026'`; sample `id` like `gem_global_extraction_tracker_march_2026:L100000321006`; Oil & Gas map with `prefer_open_data=true` |
 
+#### GEM — `gem_goit_oil_ngl_pipelines_march_2025` (GOIT pipelines)
+
+| | |
+|--|--|
+| **Files** | `GEM-GOIT-Oil-NGL-Pipelines-2025-03.xlsx` (sheet `Pipelines`, attributes only) + route GeoJSON per `ProjectID` from [GOIT-GGIT-pipeline-routes](https://github.com/GlobalEnergyMonitor/GOIT-GGIT-pipeline-routes) (`data/gem/goit-pipeline-routes/data/individual-routes/liquid-pipelines/`) |
+| **License** | CC BY 4.0 — citation: *Global Energy Monitor, Global Oil Infrastructure Tracker - Oil/NGL Pipelines - March 2025 release* |
+| **Fetch routes** | `./scripts/fetch_gem_goit_pipeline_routes.sh` (sparse clone; directory gitignored) |
+| **Refresh** | `POST /api/admin/gem-goit-pipelines/ingest`; optional graph-sync when `GEM_GOIT_PIPELINES_AUTO_INGEST=true` |
+| **Storage** | Postgres `gem_pipeline_segments` (LineString/MultiLineString, tags JSONB) — separate from `petroleum_osm_features` |
+| **Map API** | `GET /api/petroleum/gem-pipelines?south&west&north&east`; coverage `GET /api/petroleum/gem-pipelines/coverage` |
+| **Tier honesty** | NGO-researched routes (`RouteAccuracy` in xlsx); **not** official cadastre; Excel has no geometry (routes only in GeoJSON) |
+| **Verify** | After ingest: `SELECT COUNT(*) FROM gem_pipeline_segments`; `curl` Gulf bbox → `feature_count` > 0; map layer **Pipelines — GEM GOIT (CC BY)** |
+
 ### 2.2 Other backend ingest (not ArcGIS list)
 
 | Module | Data | Free? | Verification |
@@ -81,6 +94,7 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `gov_procurement_sync.py` | USAspending contract awards | Yes (US federal) | Award ID on USAspending.gov |
 | `csv_fallback_import.py` | User/admin CSV (e.g. SA/Ghana mining) | User-provided | `user_import_csv`; source file + row hash |
 | `gem_extraction_tracker_import.py` | GEM Global Oil & Gas Extraction Tracker (March 2026 xlsx) | Yes (GEM open data) | `source_id=gem_global_extraction_tracker_march_2026`; `record_origin=global_open_fallback`; admin `POST /api/admin/gem-extraction-tracker/ingest`; auto on graph-sync when xlsx present |
+| `gem_goit_pipelines_import.py` | GEM GOIT Oil/NGL pipelines (xlsx + GitHub route GeoJSON) | Yes (CC BY 4.0) | `gem_pipeline_segments`; admin `POST /api/admin/gem-goit-pipelines/ingest`; map `GET /api/petroleum/gem-pipelines` |
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
