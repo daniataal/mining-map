@@ -1378,8 +1378,16 @@ def _package_storage_response(
     cached: bool = False,
 ) -> dict[str, Any]:
     viewport_entities, coverage_gap = _apply_viewport_filter(entities, bbox=bbox, limit=limit)
+    try:
+        from backend.services.storage_terminal_display import overlay_materialized_on_entities
+    except ImportError:
+        from services.storage_terminal_display import overlay_materialized_on_entities  # type: ignore
+
+    viewport_entities = overlay_materialized_on_entities(
+        viewport_entities, bbox=bbox, summary=True
+    )
     out = dict(response)
-    out["entities"] = [_summary_entity(entity) for entity in viewport_entities]
+    out["entities"] = [_summary_entity(entity) if not entity.get("displayReady") else entity for entity in viewport_entities]
     if cached:
         out["cached"] = True
     if bbox is not None:
@@ -1895,10 +1903,49 @@ def _enrich_storage_entity_for_detail(entity: dict[str, Any], fetched_at: str) -
     return site_enriched[0] if site_enriched else enriched
 
 
-def _resolve_storage_terminal_detail_entity(terminal_id: str) -> Optional[dict[str, Any]]:
+def _resolve_storage_terminal_detail_entity(
+    terminal_id: str,
+    *,
+    write_through: bool = True,
+) -> Optional[dict[str, Any]]:
     terminal_id = (terminal_id or "").strip()
     if not terminal_id:
         return None
+
+    try:
+        from backend.services.storage_terminal_display import (
+            STORAGE_DISPLAY_WRITE_THROUGH,
+            load_display_by_id,
+            storage_display_read_enabled,
+            upsert_storage_terminal_display,
+        )
+    except ImportError:
+        from services.storage_terminal_display import (  # type: ignore
+            STORAGE_DISPLAY_WRITE_THROUGH,
+            load_display_by_id,
+            storage_display_read_enabled,
+            upsert_storage_terminal_display,
+        )
+
+    if storage_display_read_enabled():
+        conn = _db_connect()
+        try:
+            materialized = load_display_by_id(conn, terminal_id)
+            if materialized is not None:
+                try:
+                    try:
+                        from backend.services.storage_terminal_intel import (
+                            attach_storage_terminal_commercial_intel,
+                        )
+                    except ImportError:
+                        from services.storage_terminal_intel import (  # type: ignore
+                            attach_storage_terminal_commercial_intel,
+                        )
+                    return attach_storage_terminal_commercial_intel(conn, materialized)
+                except Exception:
+                    return materialized
+        finally:
+            conn.close()
 
     fetched_at = _now_iso()
     entity: Optional[dict[str, Any]] = None
@@ -1924,7 +1971,39 @@ def _resolve_storage_terminal_detail_entity(terminal_id: str) -> Optional[dict[s
     if entity is None:
         return None
 
-    return _enrich_storage_entity_for_detail(entity, fetched_at)
+    enriched = _enrich_storage_entity_for_detail(entity, fetched_at)
+    if write_through and STORAGE_DISPLAY_WRITE_THROUGH and str(enriched.get("id", "")).startswith("osm:"):
+        conn = _db_connect()
+        try:
+            upsert_storage_terminal_display(
+                conn,
+                terminal_id=str(enriched["id"]),
+                display_json=enriched,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        finally:
+            conn.close()
+        enriched["displayReady"] = True
+
+    lat, lng = enriched.get("lat"), enriched.get("lng")
+    if lat is not None and lng is not None:
+        try:
+            try:
+                from backend.services.storage_terminal_intel import attach_storage_terminal_commercial_intel
+            except ImportError:
+                from services.storage_terminal_intel import attach_storage_terminal_commercial_intel  # type: ignore
+
+            conn = _db_connect()
+            try:
+                enriched = attach_storage_terminal_commercial_intel(conn, enriched)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    return enriched
 
 
 def get_storage_terminal_details(terminal_id: str) -> Optional[dict[str, Any]]:

@@ -7,17 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 try:
-    from backend.services.entity_trade_flows import (
-        _resolve_hs,
-        _table_exists,
-        query_stored_trade_flows,
-    )
+    from backend.services.commodity_hs import resolve_hs
+    from backend.services.entity_trade_flows import _table_exists, query_stored_trade_flows
 except ImportError:
-    from services.entity_trade_flows import (  # type: ignore
-        _resolve_hs,
-        _table_exists,
-        query_stored_trade_flows,
-    )
+    from services.commodity_hs import resolve_hs  # type: ignore
+    from services.entity_trade_flows import _table_exists, query_stored_trade_flows  # type: ignore
+
+_resolve_hs = resolve_hs
 
 COMPANY_INTEL_LIVE_FALLBACK = (os.getenv("COMPANY_INTEL_LIVE_FALLBACK") or "").strip().lower() in {
     "1",

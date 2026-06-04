@@ -22,6 +22,7 @@ import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import CountryCommoditySnapshotCard from './CountryCommoditySnapshotCard';
 import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2, AlertTriangle as LucideAlertTriangle } from 'lucide-react';
 
 interface PopupFormProps {
@@ -30,6 +31,7 @@ interface PopupFormProps {
   updateAnnotation: (id: string, updates: Partial<UserAnnotation>) => void;
   onDelete: () => void;
   onOpenDossier?: () => void;
+  onOpenCompanyLead?: (item: MiningLicense) => void;
   isInDdQueue?: boolean;
   onAddToDueDiligence?: () => void;
   onRemoveFromDueDiligence?: () => void;
@@ -45,6 +47,7 @@ function PopupForm({
   annotation,
   onDelete,
   onOpenDossier,
+  onOpenCompanyLead,
   isInDdQueue = false,
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
@@ -81,6 +84,7 @@ function PopupForm({
         <StorageTerminalPopup
           item={item}
           onOpenDossier={onOpenDossier}
+          onOpenCompanyLead={onOpenCompanyLead}
           isInDdQueue={isInDdQueue}
           onAddToDueDiligence={onAddToDueDiligence}
           onRemoveFromDueDiligence={onRemoveFromDueDiligence}
@@ -252,6 +256,14 @@ function PopupForm({
                     <LucideMapPin className="w-4 h-4" />
                   </div>
                 </div>
+
+                {!isManagedInfrastructureEntity && item.id && (
+                  <CountryCommoditySnapshotCard
+                    entityId={item.id}
+                    entityKind={item.entityKind || 'license'}
+                    variant="compact"
+                  />
+                )}
 
                 <div className="grid grid-cols-2 gap-2 mt-5">
                    <Button 

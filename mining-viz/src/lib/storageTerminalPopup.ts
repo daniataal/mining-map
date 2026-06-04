@@ -1,4 +1,9 @@
-import type { MiningLicense } from '../types';
+import type {
+  MiningLicense,
+  StorageGemNearbySummary,
+  StorageTerminalCommercialIntel,
+  StorageTerminalDetails,
+} from '../types';
 import { licenseCardTitle } from './licenseSidebarCard';
 import { isUnknownLicenseName } from './licenseVisibility';
 import {
@@ -39,6 +44,22 @@ export interface StorageTerminalPopupModel {
   lastSyncedAt: string | null;
   lat: number | null;
   lng: number | null;
+  commercialIntel: StorageTerminalCommercialIntel | null;
+}
+
+export function formatGemNearbyLine(item: StorageGemNearbySummary): string {
+  const parts: string[] = [];
+  const name = item.name?.trim();
+  if (name) parts.push(name);
+  const party =
+    item.primary_counterparty?.trim() ||
+    item.operator?.trim() ||
+    item.owner?.trim();
+  if (party && party !== name) parts.push(party);
+  if (item.capacity_text) parts.push(item.capacity_text);
+  if (item.status) parts.push(item.status);
+  if (typeof item.distance_km === 'number') parts.push(`${item.distance_km} km`);
+  return parts.join(' · ') || 'Nearby asset';
 }
 
 function pushRow(rows: StorageTerminalPopupRow[], label: string, value?: string | null) {
@@ -136,7 +157,9 @@ export function formatStorageOperatorDisplay(
   return { label: operator, inferred: false };
 }
 
-export function buildStorageTerminalPopupModel(item: MiningLicense): StorageTerminalPopupModel {
+export function buildStorageTerminalPopupModel(
+  item: MiningLicense | StorageTerminalDetails,
+): StorageTerminalPopupModel {
   const operatorDisplay = formatStorageOperatorDisplay(item);
   const operatorTrimmed = operatorDisplay.label || null;
   const operatorMissing = !operatorTrimmed;
@@ -190,5 +213,7 @@ export function buildStorageTerminalPopupModel(item: MiningLicense): StorageTerm
     lastSyncedAt: item.lastSyncedAt,
     lat: item._displayLat ?? item.lat ?? null,
     lng: item._displayLng ?? item.lng ?? null,
+    commercialIntel:
+      'commercialIntel' in item && item.commercialIntel ? item.commercialIntel : null,
   };
 }

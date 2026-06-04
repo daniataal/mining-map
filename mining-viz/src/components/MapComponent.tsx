@@ -62,6 +62,8 @@ import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import GemGoitPipelineMapLayer from './petroleum/GemGoitPipelineMapLayer';
 import GemGogptPlantMapLayer from './petroleum/GemGogptPlantMapLayer';
+import GemGgitLngMapLayer from './petroleum/GemGgitLngMapLayer';
+import InfrastructureCoverageBanner from './petroleum/InfrastructureCoverageBanner';
 import OilLiveMapOverlays, {
   type OilLiveEntityClickPayload,
   type OilLiveLayerVisibility,
@@ -1192,6 +1194,13 @@ export default function MapComponent({
         () => resolvePetroleumViewportBounds(oilGasMapViewport),
         [oilGasMapViewport],
     );
+    const storageInViewCount = useMemo(
+        () =>
+            isOilAndGasView
+                ? countEntitiesInViewport(storageEntities, oilGasMapViewport)
+                : 0,
+        [isOilAndGasView, storageEntities, oilGasMapViewport],
+    );
 
     const maritimeDrawRecords = useMemo(
         () =>
@@ -1498,6 +1507,15 @@ export default function MapComponent({
                                 viewportOverlapsPersianGulfHub(liveDataMapViewport))),
                 )}
             />
+            {isOilAndGasView && onGroundVisible && (
+                <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-none px-2 w-full max-w-[540px] flex justify-center">
+                    <InfrastructureCoverageBanner
+                        bbox={oilGasBbox}
+                        enabled={oilGasLayersEnabled}
+                        storageInView={storageInViewCount > 0 ? storageInViewCount : undefined}
+                    />
+                </div>
+            )}
             <MapEmptyStateOverlay
                 t={t}
                 show={
@@ -1990,6 +2008,12 @@ export default function MapComponent({
                                 isDark={isDark}
                             />
                             <GemGogptPlantMapLayer
+                                bbox={oilGasBbox}
+                                enabled={oilGasLayersEnabled}
+                                mapZoom={petroleumMapZoom}
+                                isDark={isDark}
+                            />
+                            <GemGgitLngMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}

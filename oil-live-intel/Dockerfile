@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.23-alpine AS build
+# CI uses dannyatalla/oil-live-intel-base:latest (pre-downloaded modules). Local default: stock Go image.
+ARG BASE_IMAGE=golang:1.23-alpine
+FROM ${BASE_IMAGE} AS build
 WORKDIR /src
 RUN apk add --no-cache git
 
-# Layer cache: module download only invalidates when go.mod/go.sum change.
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download

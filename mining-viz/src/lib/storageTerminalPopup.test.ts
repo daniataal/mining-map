@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { storageTerminalDetailFetchEnabled } from './api';
 import {
   buildStorageTerminalPopupModel,
   formatStoragePopupSubtitle,
@@ -117,5 +118,35 @@ describe('buildStorageTerminalPopupModel', () => {
     expect(model.curatedEnrichmentSourceName).toBe(
       'ADNOC Sas Al Nakhl / Umm Al Nar Storage Hub',
     );
+  });
+});
+
+describe('storageTerminalDetailFetchEnabled', () => {
+  it('skips detail fetch when displayReady', () => {
+    expect(
+      storageTerminalDetailFetchEnabled({
+        id: 'osm:node:1',
+        displayReady: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('skips detail fetch when operator or curated enrichment present', () => {
+    expect(
+      storageTerminalDetailFetchEnabled({
+        id: 'osm:node:1',
+        operatorName: 'ADNOC',
+      }),
+    ).toBe(false);
+    expect(
+      storageTerminalDetailFetchEnabled({
+        id: 'osm:node:1',
+        curatedEnrichmentSourceId: 'curated_storage_x',
+      }),
+    ).toBe(false);
+  });
+
+  it('allows detail fetch for sparse list rows', () => {
+    expect(storageTerminalDetailFetchEnabled({ id: 'osm:node:1' })).toBe(true);
   });
 });

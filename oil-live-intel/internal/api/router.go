@@ -16,6 +16,7 @@ func NewRouter(s *Server) http.Handler {
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	r.Route("/api/oil-live", func(api chi.Router) {
+		api.Get("/health/live", s.HealthLive)
 		api.Get("/health", s.Health)
 		api.Get("/sync-status", s.SyncStatus)
 		api.Get("/map", s.Map)
