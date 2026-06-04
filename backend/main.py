@@ -2090,14 +2090,11 @@ def _bootstrap_open_data():
 
         try:
             try:
-                from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
+                from backend.services.storage_terminals import _schedule_global_storage_cache_warm
             except ImportError:
-                from services.storage_terminals import get_storage_terminals as warm_storage_terminals
-            storage_summary = warm_storage_terminals(force_refresh=False)
-            print(
-                f"[OpenData] Storage terminal cache ready with "
-                f"{storage_summary.get('stats', {}).get('total', 0)} entities."
-            )
+                from services.storage_terminals import _schedule_global_storage_cache_warm  # type: ignore
+            _schedule_global_storage_cache_warm()
+            print("[OpenData] Storage terminal global cache warm scheduled in background.")
         except Exception as exc:
             print(f"[OpenData] Storage terminal warmup skipped: {exc}")
     except Exception as exc:
@@ -2105,19 +2102,16 @@ def _bootstrap_open_data():
 
 
 def _warm_storage_terminal_cache() -> None:
-    """Preload storage terminal in-memory cache so the first map pan does not block the API worker."""
+    """Defer global storage cache build — map requests use viewport-fast DB path first."""
     if not ensure_schema_initialized():
         return
     try:
         try:
-            from backend.services.storage_terminals import get_storage_terminals as warm_storage_terminals
+            from backend.services.storage_terminals import _schedule_global_storage_cache_warm
         except ImportError:
-            from services.storage_terminals import get_storage_terminals as warm_storage_terminals  # type: ignore
-        storage_summary = warm_storage_terminals(force_refresh=False)
-        print(
-            f"[startup] Storage terminal cache ready with "
-            f"{storage_summary.get('stats', {}).get('total', 0)} entities."
-        )
+            from services.storage_terminals import _schedule_global_storage_cache_warm  # type: ignore
+        _schedule_global_storage_cache_warm()
+        print("[startup] Storage terminal global cache warm scheduled in background (viewport-fast serves map pans).")
     except Exception as exc:
         print(f"[startup] Storage terminal warmup skipped: {exc}")
 

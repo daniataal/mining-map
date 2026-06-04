@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -38,6 +39,8 @@ STORAGE_SKIP_LIVE_OVERPASS = (os.getenv("STORAGE_SKIP_LIVE_OVERPASS") or "").str
 }
 STORAGE_CACHE_TTL_SECONDS = 60 * 60 * 12
 STORAGE_REFERENCE_ENRICH_MAX = int(os.getenv("STORAGE_REFERENCE_ENRICH_MAX", "2500"))
+STORAGE_VIEWPORT_DB_PAD_DEG = float(os.getenv("STORAGE_VIEWPORT_DB_PAD_DEG", "0.35"))
+STORAGE_VIEWPORT_FAST_MAX_ENTITIES = int(os.getenv("STORAGE_VIEWPORT_FAST_MAX_ENTITIES", "12000"))
 MAX_NEARBY_PORT_DISTANCE_KM = 250.0
 SITE_CONTEXT_MAX_DISTANCE_KM = 2.0
 SITE_POLYGON_BUFFER_DEG = 0.0015
@@ -393,6 +396,8 @@ class CountryFeature:
 
 _country_feature_cache: list[CountryFeature] | None = None
 _storage_cache: dict[str, Any] = {"loaded_at": 0.0, "response": None}
+_storage_global_build_lock = threading.Lock()
+_storage_warm_scheduled = False
 
 
 def _ring_bbox(ring: list[tuple[float, float]]) -> tuple[float, float, float, float]:
@@ -743,7 +748,20 @@ def _load_bulk_osm_seed_elements() -> list[dict[str, Any]]:
     return elements
 
 
-def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[str]]:
+def _expand_storage_bbox(
+    bbox: tuple[float, float, float, float],
+    *,
+    pad_deg: Optional[float] = None,
+) -> tuple[float, float, float, float]:
+    """Pad viewport bbox so edge tanks and enrichment context are included in SQL load."""
+    pad = STORAGE_VIEWPORT_DB_PAD_DEG if pad_deg is None else pad_deg
+    south, west, north, east = bbox
+    return (south - pad, west - pad, north + pad, east + pad)
+
+
+def _load_storage_terminals_from_db(
+    bbox: Optional[tuple[float, float, float, float]] = None,
+) -> tuple[list[dict[str, Any]], Optional[str]]:
     try:
         from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, layer_feature_stats
     except ImportError:
@@ -756,9 +774,15 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
         if int(stats.get("feature_count") or 0) <= 0:
             return [], None
         fetched_at = stats.get("last_fetched_at")
+        spatial_sql = ""
+        params: tuple[Any, ...] = (STORAGE_TERMINALS_LAYER_ID,)
+        if bbox is not None:
+            south, west, north, east = bbox
+            spatial_sql = " AND ST_Intersects(geom, ST_MakeEnvelope(%s, %s, %s, %s, 4326))"
+            params = (STORAGE_TERMINALS_LAYER_ID, west, south, east, north)
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT osm_type, osm_id, tags, ST_AsGeoJSON(geom)::json AS geom_json,
                        ST_Y(ST_Centroid(geom)) AS lat,
                        ST_X(ST_Centroid(geom)) AS lon,
@@ -767,10 +791,10 @@ def _load_storage_terminals_from_db() -> tuple[list[dict[str, Any]], Optional[st
                        ST_YMax(geom) AS north,
                        ST_XMax(geom) AS east
                 FROM petroleum_osm_features
-                WHERE layer_id = %s
+                WHERE layer_id = %s{spatial_sql}
                 ORDER BY osm_id;
                 """,
-                (STORAGE_TERMINALS_LAYER_ID,),
+                params,
             )
             rows = cur.fetchall()
         elements: list[dict[str, Any]] = []
@@ -1404,6 +1428,257 @@ def _package_storage_response(
     return out
 
 
+def _schedule_global_storage_cache_warm() -> None:
+    """Background full cache build so later pans hit memory cache without blocking the API worker."""
+    if (os.getenv("STORAGE_GLOBAL_CACHE_WARM") or "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+    global _storage_warm_scheduled
+    if _fresh_cache() is not None:
+        return
+    with _storage_global_build_lock:
+        if _fresh_cache() is not None or _storage_warm_scheduled:
+            return
+        _storage_warm_scheduled = True
+
+    def _run() -> None:
+        global _storage_warm_scheduled
+        try:
+            get_storage_terminals(force_refresh=False, bbox=None, limit=None)
+        except Exception:
+            pass
+        finally:
+            with _storage_global_build_lock:
+                _storage_warm_scheduled = False
+
+    threading.Thread(target=_run, name="storage-global-cache-warm", daemon=True).start()
+
+
+def _enrich_and_build_storage_response(
+    all_entities: list[dict[str, Any]],
+    *,
+    fetched_at: str,
+    data_source: str,
+    warnings: list[str],
+    t0: float,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        from backend.services.storage_terminals_seed import (
+            drop_curated_near_osm_duplicates,
+            drop_curated_when_osm_present_nearby,
+            enrich_osm_from_curated_reference,
+            enrich_osm_from_oil_terminal_reference,
+        )
+        from backend.services.storage_terminals_gov_seed import (
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from backend.services.storage_terminals_oil_db import load_oil_terminal_reference_hubs
+    except ImportError:
+        from services.storage_terminals_seed import (  # type: ignore
+            drop_curated_near_osm_duplicates,
+            drop_curated_when_osm_present_nearby,
+            enrich_osm_from_curated_reference,
+            enrich_osm_from_oil_terminal_reference,
+        )
+        from services.storage_terminals_gov_seed import (  # type: ignore
+            enrich_osm_from_government_reference,
+            load_government_storage_reference_hubs,
+        )
+        from services.storage_terminals_oil_db import load_oil_terminal_reference_hubs  # type: ignore
+
+    gov_reference_hubs = load_government_storage_reference_hubs(fetched_at)
+    oil_terminal_hubs = load_oil_terminal_reference_hubs()
+    merged = _dedupe_entities(all_entities)
+    _debug_log_storage(
+        "B",
+        "storage_pre_reference_enrich",
+        {
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            "merged_count": len(merged),
+            "reference_enrich_max": STORAGE_REFERENCE_ENRICH_MAX,
+        },
+    )
+    if len(merged) <= STORAGE_REFERENCE_ENRICH_MAX:
+        merged = enrich_osm_from_curated_reference(merged)
+        if gov_reference_hubs:
+            merged = enrich_osm_from_government_reference(merged, gov_reference_hubs)
+        if oil_terminal_hubs:
+            merged = enrich_osm_from_oil_terminal_reference(merged, oil_terminal_hubs)
+    else:
+        warnings.append(
+            f"Skipped global reference-hub enrichment for {len(merged)} entities (cap {STORAGE_REFERENCE_ENRICH_MAX})."
+        )
+    try:
+        from backend.services.port_authority_directory import anchor_port_authority_hubs_to_osm
+    except ImportError:
+        from services.port_authority_directory import anchor_port_authority_hubs_to_osm  # type: ignore
+    merged = anchor_port_authority_hubs_to_osm(merged, fetched_at)
+    merged = drop_curated_when_osm_present_nearby(merged, distance_km=8.0)
+    merged = drop_curated_near_osm_duplicates(merged)
+    _site_enrich_max = int(os.getenv("STORAGE_SITE_CONTEXT_ENRICH_MAX", "2500"))
+    _t_enrich = time.perf_counter()
+    if len(merged) <= _site_enrich_max:
+        entities = _enrich_orphan_tanks_with_site_context(merged)
+        enrich_skipped = False
+    else:
+        entities = merged
+        enrich_skipped = True
+        warnings.append(
+            f"Skipped site-context enrichment for {len(merged)} entities (cap {_site_enrich_max})."
+        )
+    _debug_log_storage(
+        "B",
+        "storage_site_context_enrich",
+        {
+            "merged_count": len(merged),
+            "enrich_skipped": enrich_skipped,
+            "enrich_cap": _site_enrich_max,
+            "enrich_ms": int((time.perf_counter() - _t_enrich) * 1000),
+        },
+    )
+    entities.sort(
+        key=lambda item: (
+            -(float(item.get("confidenceScore") or 0.0)),
+            _clean_text(item.get("country")),
+            _clean_text(item.get("company")),
+        )
+    )
+    response = {
+        "entities": entities,
+        "source_labels": [
+            "OpenStreetMap",
+            "Overpass",
+            "Curated reference",
+            "Government open data",
+            "oil_terminals DB",
+            "UN/LOCODE",
+        ],
+        "data_source": data_source,
+        "data_as_of": fetched_at,
+        "coverage_note": (
+            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of ~180 major "
+            "petroleum storage hubs worldwide, plus optional oil_terminals Postgres enrichment when graph-sync has populated the DB. "
+            "Includes petroleum terminals, tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
+        ),
+        "limitations": [
+            "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
+            "Curated reference rows (sourceKind=curated_reference) are approximate hub centroids from public operator pages — not audited tank counts or capacities.",
+            "Government open reference rows (EIA/DOE/HSE/public regulator pages) enrich sparse OSM nodes within ~4 km when curated data is absent (evidence_type=government_open_enrichment).",
+            "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
+            "Operator and owner on OSM rows come from OSM tags when present; sparse OSM nodes within ~4 km of a curated major-hub reference may inherit operator, capacity, country, and hub context from public operator pages (evidence_type=curated_enrichment). A second pass may fill remaining gaps from oil_terminals Postgres rows when present (evidence_type=oil_terminal_enrichment).",
+            "Orphan storage_tank nodes may receive siteContextName/siteContextInferred when a named terminal polygon is within ~2 km — proximity inference only, not ownership proof.",
+            "When OSM industrial polygons are available, orphan tanks inside the site bounding box inherit operator/owner from the parent polygon (evidence_type=osm_site_polygon).",
+            "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
+            "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
+            "If you still see only a small regional cluster (e.g. Rotterdam-only), the backend may be serving a stale in-memory cache or an old regional petroleum_osm DB snapshot — call GET /api/storage/terminals?force_refresh=true or redeploy after petroleum_osm_sync.",
+        ]
+        + warnings,
+        "stats": _build_stats(entities),
+    }
+    return response, entities
+
+
+def _try_viewport_fast_storage_response(
+    *,
+    bbox: tuple[float, float, float, float],
+    limit: Optional[int],
+    t0: float,
+) -> Optional[dict[str, Any]]:
+    """Serve map viewport from bbox-limited Postgres rows instead of rebuilding ~80k global entities."""
+    load_bbox = _expand_storage_bbox(bbox)
+    db_elements, db_fetched_at = _load_storage_terminals_from_db(bbox=load_bbox)
+    if not db_elements:
+        _debug_log_storage(
+            "E",
+            "storage_viewport_fast_empty",
+            {"load_bbox": list(load_bbox)},
+        )
+        empty = {
+            "entities": [],
+            "source_labels": ["OpenStreetMap", "Overpass", "Curated reference"],
+            "data_source": "database+curated+viewport",
+            "data_as_of": db_fetched_at or _now_iso(),
+            "coverage_note": "No persisted OSM storage features in this viewport (petroleum_osm snapshot may still be syncing).",
+            "limitations": [
+                "Viewport-fast path returned zero petroleum_osm_features rows for this bbox."
+            ],
+            "stats": _build_stats([]),
+        }
+        return _package_storage_response(empty, [], bbox=bbox, limit=limit, cached=False)
+    if len(db_elements) > STORAGE_VIEWPORT_FAST_MAX_ENTITIES:
+        _debug_log_storage(
+            "E",
+            "storage_viewport_fast_skipped",
+            {
+                "db_element_count": len(db_elements),
+                "max": STORAGE_VIEWPORT_FAST_MAX_ENTITIES,
+            },
+        )
+        return None
+
+    fetched_at = db_fetched_at or _now_iso()
+    warnings: list[str] = []
+    all_entities: list[dict[str, Any]] = []
+    for element in db_elements:
+        normalized = normalize_storage_terminal(element, fetched_at, trust_petroleum_layer=True)
+        if normalized:
+            normalized["sourceId"] = "osm_petroleum_db_storage_terminals"
+            normalized["sourceName"] = "OpenStreetMap (persisted snapshot)"
+            all_entities.append(normalized)
+
+    try:
+        from backend.services.storage_terminals_seed import load_curated_storage_terminals
+    except ImportError:
+        from services.storage_terminals_seed import load_curated_storage_terminals  # type: ignore
+
+    curated_entities = [
+        entity
+        for entity in load_curated_storage_terminals(fetched_at)
+        if _entity_in_bbox(entity, load_bbox)
+    ]
+    if curated_entities:
+        all_entities.extend(curated_entities)
+
+    _debug_log_storage(
+        "E",
+        "storage_viewport_fast",
+        {
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            "db_element_count": len(db_elements),
+            "osm_entity_count": len(all_entities) - len(curated_entities),
+            "curated_in_bbox": len(curated_entities),
+            "load_bbox": list(load_bbox),
+        },
+    )
+    response, entities = _enrich_and_build_storage_response(
+        all_entities,
+        fetched_at=fetched_at,
+        data_source="database+curated+viewport",
+        warnings=warnings,
+        t0=t0,
+    )
+    response["limitations"] = list(response.get("limitations") or []) + [
+        "Viewport-fast path: loaded OSM storage rows for the current map bbox only; global in-memory cache may still be warming in the background.",
+    ]
+    _debug_log_storage(
+        "B",
+        "storage_request_done",
+        {
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            "entity_count": len(entities),
+            "data_source": "database+curated+viewport",
+            "use_db_only": True,
+            "viewport_fast": True,
+        },
+    )
+    return _package_storage_response(response, entities, bbox=bbox, limit=limit, cached=False)
+
+
 def get_storage_terminals(
     force_refresh: bool = False,
     *,
@@ -1414,7 +1689,11 @@ def get_storage_terminals(
     _debug_log_storage(
         "C",
         "storage_request_start",
-        {"force_refresh": force_refresh, "skip_live_overpass": STORAGE_SKIP_LIVE_OVERPASS},
+        {
+            "force_refresh": force_refresh,
+            "skip_live_overpass": STORAGE_SKIP_LIVE_OVERPASS,
+            "has_bbox": bbox is not None,
+        },
     )
     previous_cache = dict(_storage_cache["response"]) if _storage_cache.get("response") else None
     previous_loaded_at = float(_storage_cache.get("loaded_at") or 0.0)
@@ -1439,6 +1718,50 @@ def get_storage_terminals(
                 cached=True,
             )
 
+    if bbox is not None and not force_refresh:
+        return _try_viewport_fast_storage_response(bbox=bbox, limit=limit, t0=_t0)
+
+    with _storage_global_build_lock:
+        if not force_refresh:
+            cached = _fresh_cache()
+            if cached is not None:
+                entities = cached.get("entities", [])
+                _debug_log_storage(
+                    "D",
+                    "storage_memory_cache_hit",
+                    {
+                        "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                        "entity_count": len(entities),
+                        "after_build_lock": True,
+                    },
+                )
+                return _package_storage_response(
+                    cached,
+                    entities,
+                    bbox=bbox,
+                    limit=limit,
+                    cached=True,
+                )
+
+        return _build_global_storage_terminals_response(
+            force_refresh=force_refresh,
+            bbox=bbox,
+            limit=limit,
+            t0=_t0,
+            previous_cache=previous_cache,
+            previous_loaded_at=previous_loaded_at,
+        )
+
+
+def _build_global_storage_terminals_response(
+    *,
+    force_refresh: bool,
+    bbox: Optional[tuple[float, float, float, float]],
+    limit: Optional[int],
+    t0: float,
+    previous_cache: Optional[dict[str, Any]],
+    previous_loaded_at: float,
+) -> dict[str, Any]:
     fetched_at = _now_iso()
     warnings: list[str] = []
     all_entities: list[dict[str, Any]] = []
@@ -1453,7 +1776,7 @@ def get_storage_terminals(
         "B",
         "storage_db_loaded",
         {
-            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
             "db_element_count": len(db_elements),
         },
     )
@@ -1478,7 +1801,7 @@ def get_storage_terminals(
             "B",
             "storage_db_normalized",
             {
-                "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                 "osm_entity_count": osm_entity_count,
                 "use_db_only": use_db_only,
             },
@@ -1552,42 +1875,23 @@ def get_storage_terminals(
             "B",
             "storage_bulk_seed_appended",
             {
-                "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                 "bulk_added": bulk_added,
                 "osm_entity_count": osm_entity_count,
             },
         )
 
     try:
-        from backend.services.storage_terminals_seed import (
-            drop_curated_near_osm_duplicates,
-            enrich_osm_from_curated_reference,
-            enrich_osm_from_oil_terminal_reference,
-            load_curated_storage_terminals,
-        )
-        from backend.services.storage_terminals_gov_seed import (
-            enrich_osm_from_government_reference,
-            load_government_storage_reference_hubs,
-        )
-        from backend.services.storage_terminals_oil_db import load_oil_terminal_reference_hubs
+        from backend.services.storage_terminals_seed import load_curated_storage_terminals
     except ImportError:
-        from services.storage_terminals_seed import (  # type: ignore
-            drop_curated_near_osm_duplicates,
-            enrich_osm_from_curated_reference,
-            enrich_osm_from_oil_terminal_reference,
-            load_curated_storage_terminals,
-        )
-        from services.storage_terminals_gov_seed import (  # type: ignore
-            enrich_osm_from_government_reference,
-            load_government_storage_reference_hubs,
-        )
-        from services.storage_terminals_oil_db import load_oil_terminal_reference_hubs  # type: ignore
+        from services.storage_terminals_seed import load_curated_storage_terminals  # type: ignore
 
     curated_entities = load_curated_storage_terminals(fetched_at)
     _debug_log_storage(
         "A",
         "storage_curated_loaded",
         {
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
             "curated_count": len(curated_entities),
             "curated_uae": sum(
                 1 for e in curated_entities if "United Arab Emirates" in str(e.get("country") or "")
@@ -1602,8 +1906,6 @@ def get_storage_terminals(
             ),
         },
     )
-    gov_reference_hubs = load_government_storage_reference_hubs(fetched_at)
-    oil_terminal_hubs = load_oil_terminal_reference_hubs()
     if curated_entities:
         all_entities.extend(curated_entities)
         if data_source == "database":
@@ -1613,91 +1915,13 @@ def get_storage_terminals(
         elif data_source == "bulk_seed":
             data_source = "bulk_seed+curated"
 
-    merged = _dedupe_entities(all_entities)
-    _debug_log_storage(
-        "B",
-        "storage_pre_reference_enrich",
-        {
-            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
-            "merged_count": len(merged),
-            "reference_enrich_max": STORAGE_REFERENCE_ENRICH_MAX,
-        },
+    response, entities = _enrich_and_build_storage_response(
+        all_entities,
+        fetched_at=fetched_at,
+        data_source=data_source,
+        warnings=warnings,
+        t0=t0,
     )
-    if len(merged) <= STORAGE_REFERENCE_ENRICH_MAX:
-        merged = enrich_osm_from_curated_reference(merged)
-        if gov_reference_hubs:
-            merged = enrich_osm_from_government_reference(merged, gov_reference_hubs)
-        if oil_terminal_hubs:
-            merged = enrich_osm_from_oil_terminal_reference(merged, oil_terminal_hubs)
-    else:
-        warnings.append(
-            f"Skipped global reference-hub enrichment for {len(merged)} entities (cap {STORAGE_REFERENCE_ENRICH_MAX})."
-        )
-    try:
-        from backend.services.port_authority_directory import anchor_port_authority_hubs_to_osm
-    except ImportError:
-        from services.port_authority_directory import anchor_port_authority_hubs_to_osm  # type: ignore
-    merged = anchor_port_authority_hubs_to_osm(merged, fetched_at)
-    try:
-        from backend.services.storage_terminals_seed import drop_curated_when_osm_present_nearby
-    except ImportError:
-        from services.storage_terminals_seed import drop_curated_when_osm_present_nearby  # type: ignore
-    merged = drop_curated_when_osm_present_nearby(merged, distance_km=8.0)
-    merged = drop_curated_near_osm_duplicates(merged)
-    _site_enrich_max = int(os.getenv("STORAGE_SITE_CONTEXT_ENRICH_MAX", "2500"))
-    _t_enrich = time.perf_counter()
-    if len(merged) <= _site_enrich_max:
-        entities = _enrich_orphan_tanks_with_site_context(merged)
-        _enrich_skipped = False
-    else:
-        entities = merged
-        _enrich_skipped = True
-        warnings.append(
-            f"Skipped site-context enrichment for {len(merged)} entities (cap {_site_enrich_max})."
-        )
-    _debug_log_storage(
-        "B",
-        "storage_site_context_enrich",
-        {
-            "merged_count": len(merged),
-            "enrich_skipped": _enrich_skipped,
-            "enrich_cap": _site_enrich_max,
-            "enrich_ms": int((time.perf_counter() - _t_enrich) * 1000),
-        },
-    )
-    entities.sort(
-        key=lambda item: (
-            -(float(item.get("confidenceScore") or 0.0)),
-            _clean_text(item.get("country")),
-            _clean_text(item.get("company")),
-        )
-    )
-
-    response = {
-        "entities": entities,
-        "source_labels": ["OpenStreetMap", "Overpass", "Curated reference", "Government open data", "oil_terminals DB", "UN/LOCODE"],
-        "data_source": data_source,
-        "data_as_of": fetched_at,
-        "coverage_note": (
-            "Global coverage merges live OpenStreetMap/Overpass (11 world tiles) with a curated reference seed of ~180 major "
-            "petroleum storage hubs worldwide, plus optional oil_terminals Postgres enrichment when graph-sync has populated the DB. "
-            "Includes petroleum terminals, tank farms, fuel depots, and tagged petroleum storage tanks/silos — not an official global storage registry."
-        ),
-        "limitations": [
-            "Primary global source is OpenStreetMap via Overpass; coverage varies by country and mapper activity.",
-            "Curated reference rows (sourceKind=curated_reference) are approximate hub centroids from public operator pages — not audited tank counts or capacities.",
-            "Government open reference rows (EIA/DOE/HSE/public regulator pages) enrich sparse OSM nodes within ~4 km when curated data is absent (evidence_type=government_open_enrichment).",
-            "Individual man_made=storage_tank nodes are included with lower confidence when petroleum substance/operator tags exist; they may represent single tanks rather than whole terminals.",
-            "Operator and owner on OSM rows come from OSM tags when present; sparse OSM nodes within ~4 km of a curated major-hub reference may inherit operator, capacity, country, and hub context from public operator pages (evidence_type=curated_enrichment). A second pass may fill remaining gaps from oil_terminals Postgres rows when present (evidence_type=oil_terminal_enrichment).",
-            "Orphan storage_tank nodes may receive siteContextName/siteContextInferred when a named terminal polygon is within ~2 km — proximity inference only, not ownership proof.",
-            "When OSM industrial polygons are available, orphan tanks inside the site bounding box inherit operator/owner from the parent polygon (evidence_type=osm_site_polygon).",
-            "Nearby port context comes from UN/LOCODE and is heuristic logistics context, not proof of ownership, throughput, or berth access.",
-            "Capacity appears only when the open tags publish a storage value; no global open source provides consistent audited tank capacity coverage here.",
-            "If you still see only a small regional cluster (e.g. Rotterdam-only), the backend may be serving a stale in-memory cache or an old regional petroleum_osm DB snapshot — call GET /api/storage/terminals?force_refresh=true or redeploy after petroleum_osm_sync.",
-        ]
-        + warnings,
-        "stats": _build_stats(entities),
-    }
 
     if _should_cache_storage_response(entities, warnings):
         _storage_cache["loaded_at"] = time.time()
@@ -1724,10 +1948,11 @@ def get_storage_terminals(
         "B",
         "storage_request_done",
         {
-            "elapsed_ms": int((time.perf_counter() - _t0) * 1000),
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
             "entity_count": len(entities),
             "data_source": data_source,
             "use_db_only": use_db_only,
+            "viewport_fast": False,
         },
     )
     return _package_storage_response(response, entities, bbox=bbox, limit=limit)
