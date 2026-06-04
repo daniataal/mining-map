@@ -59,8 +59,18 @@
 			}
 		}
 	}
-	handle /api/petroleum/osm-layers* {
+	# handle_path matches nested paths (plain handle /api/...* only hits the catalog root)
+	handle_path /api/petroleum/osm-layers* {
 		uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+		reverse_proxy oil-live-intel:8095 {
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
+		}
+	}
+	handle_path /api/petroleum/osm-tiles* {
+		uri replace /api/petroleum/osm-tiles /api/oil-live/map/petroleum-osm/tiles
 		reverse_proxy oil-live-intel:8095 {
 			transport http {
 				read_timeout 0

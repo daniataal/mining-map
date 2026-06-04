@@ -1,0 +1,248 @@
+{
+  "meta": {
+    "source_id": "storage_terminals_government_open",
+    "source_name": "Government open petroleum storage references",
+    "source_kind": "government_open",
+    "references": [
+      "https://www.eia.gov/petroleum/storage/",
+      "https://www.eia.gov/petroleum/supply/weekly/",
+      "https://www.energy.gov/ceser/petroleum-reserves",
+      "https://www.gov.uk/government/collections/coordination-of-major-hazards",
+      "https://data.europa.eu/"
+    ],
+    "notes": "Named storage hubs and SPR sites from U.S. EIA/DOE and other public regulator pages. Hub-centroid coordinates for enrichment only — not licensed facility boundaries."
+  },
+  "entities": [
+    {
+      "name": "Cushing OK Crude Oil Hub (EIA PADD 2)",
+      "operator": "Multiple pipeline operators",
+      "country": "United States",
+      "region": "Oklahoma | PADD 2",
+      "lat": 35.985,
+      "lng": -96.769,
+      "entity_subtype": "tank_farm",
+      "commodity": "crude oil",
+      "eia_padd": "PADD2",
+      "capacity_text": "~90 million bbl working capacity (EIA weekly storage survey)",
+      "source_record_url": "https://www.eia.gov/petroleum/storage/"
+    },
+    {
+      "name": "Mont Belvieu NGL & Products Hub (EIA PADD 3)",
+      "operator": "Enterprise / Targa / multiple",
+      "country": "United States",
+      "region": "Texas | PADD 3",
+      "lat": 29.847,
+      "lng": -94.898,
+      "entity_subtype": "storage_terminal",
+      "commodity": "NGL, LPG, refined products",
+      "eia_padd": "PADD3",
+      "capacity_text": "Major U.S. Gulf Coast underground NGL/products hub (EIA PADD 3)",
+      "source_record_url": "https://www.eia.gov/petroleum/storage/"
+    },
+    {
+      "name": "Houston Ship Channel Storage (EIA PADD 3)",
+      "operator": "Multiple Gulf Coast operators",
+      "country": "United States",
+      "region": "Texas | PADD 3",
+      "lat": 29.723,
+      "lng": -95.027,
+      "entity_subtype": "tank_farm",
+      "commodity": "crude oil, refined products",
+      "eia_padd": "PADD3",
+      "source_record_url": "https://www.eia.gov/petroleum/supply/weekly/"
+    },
+    {
+      "name": "LOOP Clovelly Deepwater Oil Port Storage",
+      "operator": "LOOP LLC",
+      "country": "United States",
+      "region": "Louisiana | PADD 3",
+      "lat": 29.118,
+      "lng": -90.989,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil",
+      "eia_padd": "PADD3",
+      "source_record_url": "https://www.loopllc.com/"
+    },
+    {
+      "name": "Bryan Mound SPR Site (DOE)",
+      "operator": "U.S. Department of Energy",
+      "country": "United States",
+      "region": "Texas",
+      "lat": 29.148,
+      "lng": -95.389,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil (SPR)",
+      "eia_padd": "PADD3",
+      "capacity_text": "Strategic Petroleum Reserve cavern storage (public DOE)",
+      "source_record_url": "https://www.energy.gov/ceser/petroleum-reserves"
+    },
+    {
+      "name": "Big Hill SPR Site (DOE)",
+      "operator": "U.S. Department of Energy",
+      "country": "United States",
+      "region": "Texas",
+      "lat": 29.978,
+      "lng": -94.208,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil (SPR)",
+      "eia_padd": "PADD3",
+      "source_record_url": "https://www.energy.gov/ceser/petroleum-reserves"
+    },
+    {
+      "name": "West Hackberry SPR Site (DOE)",
+      "operator": "U.S. Department of Energy",
+      "country": "United States",
+      "region": "Louisiana",
+      "lat": 29.978,
+      "lng": -93.389,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil (SPR)",
+      "source_record_url": "https://www.energy.gov/ceser/petroleum-reserves"
+    },
+    {
+      "name": "Bayou Choctaw SPR Site (DOE)",
+      "operator": "U.S. Department of Energy",
+      "country": "United States",
+      "region": "Louisiana",
+      "lat": 30.722,
+      "lng": -91.182,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil (SPR)",
+      "source_record_url": "https://www.energy.gov/ceser/petroleum-reserves"
+    },
+    {
+      "name": "Philadelphia PADD 1 Products Storage Hub",
+      "operator": "Multiple PADD 1 operators",
+      "country": "United States",
+      "region": "Pennsylvania | PADD 1",
+      "lat": 39.895,
+      "lng": -75.211,
+      "entity_subtype": "storage_terminal",
+      "commodity": "refined products, crude",
+      "eia_padd": "PADD1",
+      "source_record_url": "https://www.eia.gov/petroleum/storage/"
+    },
+    {
+      "name": "Amsterdam-Rotterdam-Antwerp (ARA) Storage Hub",
+      "operator": "Multiple ARA terminal operators",
+      "country": "Netherlands",
+      "region": "Rotterdam | ARA",
+      "lat": 51.905,
+      "lng": 4.325,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil, refined products, fuel oil",
+      "capacity_text": "Northwest Europe benchmark tankage hub (public port/Eurostat context)",
+      "source_record_url": "https://www.portofrotterdam.com/"
+    },
+    {
+      "name": "Sullom Voe Government-Regulated Terminal Area",
+      "operator": "Shetland Islands Council / terminal operators",
+      "country": "United Kingdom",
+      "region": "Shetland",
+      "lat": 60.458,
+      "lng": -1.295,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil",
+      "source_record_url": "https://www.sullomvoeterminal.co.uk/"
+    },
+    {
+      "name": "Grangemouth COMAH Petroleum Site",
+      "operator": "Petroineos",
+      "country": "United Kingdom",
+      "region": "Scotland",
+      "lat": 56.022,
+      "lng": -3.721,
+      "entity_subtype": "tank_farm",
+      "commodity": "crude oil, refined products",
+      "source_record_url": "https://www.hse.gov.uk/comah/"
+    },
+    {
+      "name": "Immingham Humber COMAH Storage",
+      "operator": "Phillips 66 / Uniper",
+      "country": "United Kingdom",
+      "region": "Humber",
+      "lat": 53.63,
+      "lng": -0.198,
+      "entity_subtype": "storage_terminal",
+      "commodity": "refined products, crude",
+      "source_record_url": "https://www.hse.gov.uk/comah/"
+    },
+    {
+      "name": "Le Havre Antifer Petroleum Zone",
+      "operator": "Rubis / TotalEnergies",
+      "country": "France",
+      "region": "Normandy",
+      "lat": 49.508,
+      "lng": 0.138,
+      "entity_subtype": "storage_terminal",
+      "commodity": "refined products, crude",
+      "source_record_url": "https://www.havre-port.fr/"
+    },
+    {
+      "name": "Singapore MPA Petroleum Storage Area",
+      "operator": "MPA / Jurong Island operators",
+      "country": "Singapore",
+      "region": "Jurong Island",
+      "lat": 1.265,
+      "lng": 103.699,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil, refined products, chemicals",
+      "source_record_url": "https://www.mpa.gov.sg/"
+    },
+    {
+      "name": "Fujairah FOIZ Government Zone",
+      "operator": "FOIZ / Fujairah Municipality",
+      "country": "United Arab Emirates",
+      "region": "Fujairah",
+      "lat": 25.128,
+      "lng": 56.337,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil, refined products, fuel oil",
+      "source_record_url": "https://www.foiz.ae/"
+    },
+    {
+      "name": "Ras Tanura Saudi Export Terminal (Ministry of Energy)",
+      "operator": "Saudi Aramco",
+      "country": "Saudi Arabia",
+      "region": "Eastern Province",
+      "lat": 26.707,
+      "lng": 50.061,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil",
+      "source_record_url": "https://www.aramco.com/"
+    },
+    {
+      "name": "Saldanha Bay Strategic Storage (South Africa)",
+      "operator": "SBIDZ / Transnet",
+      "country": "South Africa",
+      "region": "Western Cape",
+      "lat": -33.035,
+      "lng": 17.944,
+      "entity_subtype": "storage_terminal",
+      "commodity": "crude oil",
+      "source_record_url": "https://www.saldanhahbayidz.co.za/"
+    },
+    {
+      "name": "Kwinana Western Australia Refinery Storage",
+      "operator": "Viva Energy (regulated facility)",
+      "country": "Australia",
+      "region": "Western Australia",
+      "lat": -32.242,
+      "lng": 115.775,
+      "entity_subtype": "tank_farm",
+      "commodity": "refined products, crude",
+      "source_record_url": "https://www.vivaenergy.com.au/"
+    },
+    {
+      "name": "Gladstone Curtis Island LNG & Products",
+      "operator": "Queensland Government / GLNG",
+      "country": "Australia",
+      "region": "Queensland",
+      "lat": -23.849,
+      "lng": 151.256,
+      "entity_subtype": "storage_terminal",
+      "commodity": "LNG, crude, refined products",
+      "source_record_url": "https://www.statedevelopment.qld.gov.au/"
+    }
+  ]
+}

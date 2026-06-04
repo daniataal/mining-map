@@ -64,11 +64,13 @@ export function useLicenseMarkerNodes({
         >
           {isServerCluster ? (
             <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-              <span className="text-[10px] font-black uppercase text-white tracking-widest">
-                {isCountryLicenseSummary(item)
-                  ? `${item.country} — ${item.mapClusterCount ?? ''} licenses`
-                  : `Zoom in — ${item.mapClusterCount ?? ''} licenses`}
-              </span>
+              <div className="bg-slate-950 border border-white/20 px-2 py-1 rounded-md shadow-2xl backdrop-blur-md">
+                <span className="text-[10px] font-black uppercase text-white tracking-widest">
+                  {isCountryLicenseSummary(item)
+                    ? `${item.country} — ${item.mapClusterCount ?? ''} licenses`
+                    : `Zoom in — ${item.mapClusterCount ?? ''} licenses`}
+                </span>
+              </div>
             </Tooltip>
           ) : (
             <Tooltip direction="top" offset={[0, -20]} opacity={1}>

@@ -49,22 +49,14 @@ export interface PetroleumLayerGeoJson {
   attribution?: string;
   license_note?: string;
   limitations?: string[];
+  coverage_gap?: boolean;
+  stale?: boolean;
+  hint?: string;
+  read_path?: string;
 }
 
-export interface PetroleumViewportBounds {
-  south: number;
-  west: number;
-  north: number;
-  east: number;
-}
-
-/** One-time world bbox for oil & gas map — avoids refetching infrastructure on every pan. */
-export const WORLD_PETROLEUM_PRELOAD_BBOX: PetroleumViewportBounds = {
-  south: -55,
-  west: -180,
-  north: 84,
-  east: 180,
-};
+export type { PetroleumViewportBounds } from './petroleumViewportBounds';
+export { resolvePetroleumViewportBounds, WORLD_PETROLEUM_PRELOAD_BBOX } from './petroleumViewportBounds';
 
 export const PETROLEUM_LAYER_IDS: PetroleumLayerId[] = [
   'exploration',

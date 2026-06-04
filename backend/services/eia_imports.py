@@ -24,9 +24,11 @@ EIA free API key signup: https://www.eia.gov/opendata/register.php
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 try:
@@ -39,6 +41,21 @@ LOG = logging.getLogger("meridian.eia_imports")
 EIA_BASE_URL = "https://api.eia.gov/v2"
 CRUDE_IMPORTS_URL = f"{EIA_BASE_URL}/crude-oil-imports/data/"
 REFINERY_UTILIZATION_URL = f"{EIA_BASE_URL}/petroleum/pnp/wiup/data/"
+PADD_STOCK_URL = f"{EIA_BASE_URL}/petroleum/stoc/wstk/data/"
+
+# EIA Weekly Petroleum Status Report — ending stocks excluding SPR (million bbl).
+PADD_STOCK_SERIES: dict[str, str] = {
+    "US": "WCRSTUS1",
+    "PADD1": "WCRSTP11",
+    "PADD2": "WCRSTP21",
+    "PADD3": "WCRSTP31",
+    "PADD4": "WCRSTP41",
+    "PADD5": "WCRSTP51",
+}
+SERIES_TO_PADD = {series: padd for padd, series in PADD_STOCK_SERIES.items()}
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EIA_PADD_STORAGE_CACHE_PATH = REPO_ROOT / "data" / "cache" / "eia_padd_storage.json"
 
 REQUEST_TIMEOUT_SECONDS = 20
 PAGE_SIZE = 5000
@@ -399,10 +416,207 @@ def sync_eia_refinery_throughput(conn: Any) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# PADD weekly crude storage (WPSR) — macro tier for gov storage enrichment
+# ---------------------------------------------------------------------------
+
+_PADD_STORAGE_DDL = """
+CREATE TABLE IF NOT EXISTS eia_padd_storage_snapshot (
+  padd TEXT PRIMARY KEY,
+  series_id TEXT NOT NULL,
+  stocks_million_bbl NUMERIC NOT NULL,
+  period DATE NOT NULL,
+  ingested_at TIMESTAMPTZ DEFAULT now()
+);
+"""
+
+
+def _normalize_series_id(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _parse_latest_padd_storage_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        series = _normalize_series_id(row.get("series") or row.get("seriesId") or row.get("series-id"))
+        padd = SERIES_TO_PADD.get(series)
+        if not padd:
+            continue
+        period = _parse_week_ending(row.get("period") or row.get("week"))
+        if not period:
+            continue
+        try:
+            value = float(row.get("value"))
+        except (TypeError, ValueError):
+            continue
+        existing = latest.get(padd)
+        if existing is None or str(period) > str(existing["period"]):
+            latest[padd] = {
+                "padd": padd,
+                "series_id": series,
+                "stocks_million_bbl": round(value, 2),
+                "period": period,
+            }
+    return latest
+
+
+def format_eia_padd_capacity_text(snapshot: dict[str, Any]) -> str:
+    padd = str(snapshot.get("padd") or "US")
+    mbbl = float(snapshot.get("stocks_million_bbl") or 0.0)
+    period = snapshot.get("period") or "latest"
+    label = padd if padd == "US" else padd.replace("PADD", "PADD ")
+    return (
+        f"~{mbbl:.1f} million bbl {label} crude stocks ex SPR "
+        f"(EIA weekly WPSR, {period})"
+    )
+
+
+def fetch_eia_padd_storage_latest(api_key: Optional[str] = None) -> dict[str, dict[str, Any]]:
+    """Fetch latest weekly PADD crude stocks from EIA v2 (no DB write)."""
+    key = (api_key or _eia_enabled() or "").strip()
+    if not key:
+        return {}
+    if requests is None:
+        return {}
+
+    params: dict[str, Any] = {
+        "api_key": key,
+        "frequency": "weekly",
+        "data[0]": "value",
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc",
+        "offset": 0,
+        "length": PAGE_SIZE,
+    }
+    for idx, series in enumerate(PADD_STOCK_SERIES.values()):
+        params[f"facets[series][{idx}]"] = series
+
+    payload = _http_get_json(PADD_STOCK_URL, params)
+    if not payload:
+        return {}
+    rows = (payload.get("response") or {}).get("data") or []
+    return _parse_latest_padd_storage_rows(rows)
+
+
+def write_eia_padd_storage_cache(snapshot: dict[str, dict[str, Any]], *, fetched_at: Optional[str] = None) -> Path:
+    ts = fetched_at or datetime.now(timezone.utc).isoformat()
+    EIA_PADD_STORAGE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "fetched_at": ts,
+        "source": PADD_STOCK_URL,
+        "data_source": "eia",
+        "padds": snapshot,
+    }
+    EIA_PADD_STORAGE_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return EIA_PADD_STORAGE_CACHE_PATH
+
+
+def read_eia_padd_storage_cache(path: Optional[Path] = None) -> dict[str, dict[str, Any]]:
+    cache_path = path or EIA_PADD_STORAGE_CACHE_PATH
+    if not cache_path.is_file():
+        return {}
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    padds = payload.get("padds") if isinstance(payload, dict) else None
+    if not isinstance(padds, dict):
+        return {}
+    return {str(k): v for k, v in padds.items() if isinstance(v, dict)}
+
+
+def load_eia_padd_storage_overlay() -> dict[str, dict[str, Any]]:
+    """Read latest cached PADD storage snapshot for gov hub enrichment."""
+    return read_eia_padd_storage_cache()
+
+
+def sync_eia_padd_storage(conn: Any) -> dict[str, Any]:
+    """
+    Pull EIA weekly PADD crude stocks (WPSR), persist to Postgres + JSON cache.
+
+    Used by graph-sync on a schedule; storage-terminal gov enrichment reads the cache.
+    """
+    key = _eia_enabled()
+    if not key:
+        LOG.warning("sync_eia_padd_storage skipped: EIA_API_KEY unset")
+        return {"status": "skipped", "reason": "EIA_API_KEY unset"}
+    if requests is None:
+        return {"status": "skipped", "reason": "requests library unavailable"}
+
+    snapshot = fetch_eia_padd_storage_latest(key)
+    if not snapshot:
+        cached = read_eia_padd_storage_cache()
+        if cached:
+            return {
+                "status": "ok",
+                "rows_upserted": 0,
+                "padds": len(cached),
+                "message": "EIA fetch empty; kept existing cache",
+                "cache_path": str(EIA_PADD_STORAGE_CACHE_PATH),
+            }
+        return {"status": "ok", "rows_upserted": 0, "message": "no PADD storage data returned"}
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    cache_path = write_eia_padd_storage_cache(snapshot, fetched_at=fetched_at)
+    upserts = 0
+    if conn is not None:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(_PADD_STORAGE_DDL)
+                for padd, row in snapshot.items():
+                    cur.execute(
+                        """
+                        INSERT INTO eia_padd_storage_snapshot
+                          (padd, series_id, stocks_million_bbl, period, ingested_at)
+                        VALUES (%s, %s, %s, %s, now())
+                        ON CONFLICT (padd) DO UPDATE SET
+                          series_id = EXCLUDED.series_id,
+                          stocks_million_bbl = EXCLUDED.stocks_million_bbl,
+                          period = EXCLUDED.period,
+                          ingested_at = now()
+                        """,
+                        (
+                            padd,
+                            row.get("series_id"),
+                            row.get("stocks_million_bbl"),
+                            row.get("period"),
+                        ),
+                    )
+                    upserts += 1
+            conn.commit()
+        except Exception as exc:
+            LOG.exception("sync_eia_padd_storage: db upsert failed: %s", exc)
+            return {
+                "status": "partial",
+                "rows_upserted": upserts,
+                "padds": len(snapshot),
+                "cache_path": str(cache_path),
+                "message": f"cache written; db upsert failed: {exc}",
+            }
+
+    return {
+        "status": "ok",
+        "rows_upserted": upserts or len(snapshot),
+        "padds": len(snapshot),
+        "cache_path": str(cache_path),
+        "fetched_at": fetched_at,
+        "data_source": "eia",
+    }
+
+
 __all__ = [
     "sync_eia_crude_imports",
     "sync_eia_refinery_throughput",
+    "sync_eia_padd_storage",
+    "fetch_eia_padd_storage_latest",
+    "load_eia_padd_storage_overlay",
+    "format_eia_padd_capacity_text",
+    "read_eia_padd_storage_cache",
+    "write_eia_padd_storage_cache",
     "EIA_BASE_URL",
     "CRUDE_IMPORTS_URL",
     "REFINERY_UTILIZATION_URL",
+    "PADD_STOCK_URL",
 ]

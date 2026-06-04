@@ -21,6 +21,25 @@ func TestInferPortCallProvenance(t *testing.T) {
 	}
 }
 
+func TestCargoRecordIsSeed(t *testing.T) {
+	seedPC := []byte(`[{"source":"seed_port_calls"}]`)
+	if !cargoRecordIsSeed(nil, seedPC, nil) {
+		t.Fatal("expected seed from port call evidence")
+	}
+	meta := []byte(`{"source":"seed_port_calls"}`)
+	if !cargoRecordIsSeed(nil, nil, meta) {
+		t.Fatal("expected seed from port call metadata")
+	}
+	mcrEv := []byte(`["seed_port_calls corridor"]`)
+	if !cargoRecordIsSeed(mcrEv, nil, nil) {
+		t.Fatal("expected seed from mcr evidence")
+	}
+	live := []byte(`{"source":"live_ais"}`)
+	if cargoRecordIsSeed(nil, nil, live) {
+		t.Fatal("live_ais should not be seed")
+	}
+}
+
 func TestInferCargoProvenance(t *testing.T) {
 	if inferCargoProvenance("") != "synthetic" {
 		t.Fatal("empty tier")

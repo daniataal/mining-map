@@ -197,6 +197,7 @@ function OilLiveMapOverlays({
         group: effectiveTradeFlowGroup,
         commodity: productFilter === 'all' ? undefined : productFilter,
         min_confidence: 0.55,
+        exclude_seed: true,
         limit: mapZoom < 8 ? 80 : 200,
         zoom: mapZoom,
       }),

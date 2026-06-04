@@ -75,6 +75,11 @@ export function buildLiveDataSyncTierLines(sync: OilLiveSyncStatus): LiveDataSyn
     (sync.last_eurostat_sync_status != null && sync.last_eurostat_sync_status !== 'ok') ||
     (sync.last_jodi_sync_status != null && sync.last_jodi_sync_status !== 'ok');
 
+  const customsOpenManifests = mcrCountForTiers(sync.manifest_by_tier, (t) => {
+    const tier = t.trim().toLowerCase();
+    return tier === 'customs_open' || tier === 'user_upload';
+  });
+
   return [
     {
       key: 'live_ais',
@@ -93,9 +98,9 @@ export function buildLiveDataSyncTierLines(sync: OilLiveSyncStatus): LiveDataSyn
       stale: (sync.terminal_count ?? 0) === 0,
     },
     {
-      key: 'synthetic_mcr',
-      labelEn: 'Synthetic MCR',
-      labelHe: 'מטען סינתטי',
+      key: 'production_mcr',
+      labelEn: 'MCR (non-demo, incl. synthetic)',
+      labelHe: 'MCR (לא דמו)',
       count:
         sync.production_cargo_record_count != null
           ? sync.production_cargo_record_count
@@ -103,6 +108,19 @@ export function buildLiveDataSyncTierLines(sync: OilLiveSyncStatus): LiveDataSyn
       lastSyncLabel:
         formatRelativeSyncAge(sync.last_cargo_at) ?? formatRelativeSyncAge(sync.last_graph_sync_at),
       stale: (sync.production_cargo_record_count ?? sync.cargo_record_count ?? 0) === 0,
+    },
+    {
+      key: 'customs_open',
+      labelEn: 'Customs (open manifests)',
+      labelHe: 'מכס פתוח',
+      count:
+        customsOpenManifests > 0
+          ? customsOpenManifests
+          : sync.trade_manifest_row_count != null && sync.trade_manifest_row_count > 0
+            ? sync.trade_manifest_row_count
+            : null,
+      lastSyncLabel: formatRelativeSyncAge(sync.last_graph_sync_at),
+      stale: (customsOpenManifests || sync.trade_manifest_row_count || 0) === 0,
     },
     {
       key: 'macro',
@@ -146,6 +164,7 @@ export function resolveLiveDataSyncBannerKind(
   const productionSignals =
     (sync.live_vessel_count ?? 0) +
     (sync.production_cargo_record_count ?? sync.cargo_record_count ?? 0) +
+    (sync.trade_manifest_row_count ?? 0) +
     (sync.terminal_count ?? 0) +
     (sync.oil_trade_flow_count ?? 0) +
     (sync.eia_historic_import_count ?? 0) +

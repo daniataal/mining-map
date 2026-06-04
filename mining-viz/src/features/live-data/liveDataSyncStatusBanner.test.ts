@@ -57,6 +57,16 @@ describe('liveDataSyncStatusBanner', () => {
     expect(live?.count).toBe(7);
   });
 
+  it('buildLiveDataSyncTierLines surfaces customs_open manifest tier', () => {
+    const lines = buildLiveDataSyncTierLines({
+      trade_manifest_row_count: 4,
+      manifest_by_tier: [{ bol_tier: 'customs_open', count: 4 }],
+      last_graph_sync_at: '2026-05-22T08:00:00Z',
+    });
+    const customs = lines.find((l) => l.key === 'customs_open');
+    expect(customs?.count).toBe(4);
+  });
+
   it('liveDataSyncBannerMessage returns unreachable copy', () => {
     const msg = liveDataSyncBannerMessage('unreachable');
     expect(msg?.en).toMatch(/sync-status/i);

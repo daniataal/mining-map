@@ -6,11 +6,17 @@ import {
   shouldUseOilGasLicensePopup,
 } from '../lib/oilGasLicensePopup';
 import OilGasLicensePopupSections from './popup/OilGasLicensePopupSections';
+import StorageTerminalPopup from './popup/StorageTerminalPopup';
+import PortOilGasTankTenantsSection from './popup/PortOilGasTankTenantsSection';
 import {
+  formatStorageLocatorContext,
   formatStorageOperatorLabel,
   formatStorageOwnerLabel,
+  formatStorageSiteContextNearLine,
   formatStorageSubstanceLabel,
+  shouldShowStorageSiteContextNear,
   STORAGE_OPERATOR_UNTAGGED,
+  STORAGE_SITE_CONTEXT_INFERRED_BADGE,
 } from '../lib/storageTankFarmsLayer';
 import { MiningLicense, UserAnnotation } from '../types';
 import { Button } from './ui/button';
@@ -30,6 +36,8 @@ interface PopupFormProps {
   isEsgRisk?: boolean;
   esgZoneName?: string;
   dealRoomTitle?: string;
+  /** When true, UN/LOCODE port popups show port-authority tank operators on the Oil & Gas map. */
+  oilAndGasMap?: boolean;
 }
 
 function PopupForm({
@@ -41,7 +49,9 @@ function PopupForm({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   isEsgRisk = false,
+  esgZoneName,
   dealRoomTitle,
+  oilAndGasMap = false,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -60,7 +70,26 @@ function PopupForm({
       item.capacityText ||
       (typeof item.capacity === 'number' && item.capacity > 0 ? String(item.capacity) : null);
     const locationLine = [item.country, item.region].filter(Boolean).join(' · ');
+    const storageSiteNearLine =
+      isStorageTerminal && shouldShowStorageSiteContextNear(item)
+        ? formatStorageSiteContextNearLine(item.siteContextName)
+        : null;
     const heroImage = getLicenseHeroImageUrl(item);
+
+    if (isStorageTerminal) {
+      return (
+        <StorageTerminalPopup
+          item={item}
+          onOpenDossier={onOpenDossier}
+          isInDdQueue={isInDdQueue}
+          onAddToDueDiligence={onAddToDueDiligence}
+          onRemoveFromDueDiligence={onRemoveFromDueDiligence}
+          isEsgRisk={isEsgRisk}
+          esgZoneName={esgZoneName}
+          dealRoomTitle={dealRoomTitle}
+        />
+      );
+    }
 
     return (
         <div
@@ -165,6 +194,25 @@ function PopupForm({
                         {locationLine || item.region || '—'}
                       </p>
                     </div>
+                    {storageSiteNearLine && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <p className="text-[10px] font-medium text-orange-400/90 leading-snug break-words">
+                          {storageSiteNearLine}
+                        </p>
+                        {item.siteContextInferred && (
+                          <Badge
+                            title={
+                              item.siteContextSource
+                                ? `Site context via ${item.siteContextSource}`
+                                : STORAGE_SITE_CONTEXT_INFERRED_BADGE
+                            }
+                            className="text-[7px] font-bold uppercase border border-orange-500/25 bg-orange-500/10 text-orange-300 px-1.5 h-4"
+                          >
+                            {t('הקשר אתר משוער', STORAGE_SITE_CONTEXT_INFERRED_BADGE)}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     {isStorageTerminal ? (
                       <p className="mt-1 text-[10px] text-slate-400 break-words">
                         {t('מפעיל', 'Operator')}:{' '}
@@ -323,12 +371,23 @@ function PopupForm({
                           {t("מזהה והקשר", "Locator & Context")}
                         </span>
                         <span className="text-[10px] font-bold text-slate-900 dark:text-white leading-tight break-words">
-                          {item.locode || '—'}
-                          {item.nearbyPort?.name ? ` · ${item.nearbyPort.name}` : item.operatorName ? ` · ${item.operatorName}` : ''}
+                          {isStorageTerminal
+                            ? formatStorageLocatorContext(item)
+                            : `${item.locode || '—'}${
+                                item.nearbyPort?.name
+                                  ? ` · ${item.nearbyPort.name}`
+                                  : item.operatorName
+                                    ? ` · ${item.operatorName}`
+                                    : ''
+                              }`}
                         </span>
                       </div>
                     )}
                 </div>
+                )}
+
+                {oilAndGasMap && item.entityKind === 'port' && (
+                  <PortOilGasTankTenantsSection item={item} />
                 )}
 
                 <p className="mt-4 text-[9px] text-slate-400 dark:text-slate-600 font-bold text-center uppercase tracking-tighter">

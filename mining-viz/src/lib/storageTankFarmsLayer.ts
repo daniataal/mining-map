@@ -1,10 +1,12 @@
 import type { MiningLicense } from '../types';
+import { isUnknownLicenseName } from './licenseVisibility';
+import {
+  formatStoragePopupTitle,
+} from './storageTerminalPopup';
 
 /** Leaflet LayersControl only registers overlays present on first mount — never gate on entity count. */
-export function storageTankFarmsLayerShouldMount(enabled: boolean, mapZoom?: number): boolean {
-  if (!enabled) return false;
-  if (mapZoom != null && mapZoom < 9) return false;
-  return true;
+export function storageTankFarmsLayerShouldMount(enabled: boolean, _mapZoom?: number): boolean {
+  return enabled;
 }
 
 export const STORAGE_OPERATOR_UNTAGGED = 'Operator not tagged';
@@ -34,11 +36,135 @@ export function formatStorageOwnerLabel(ownerName?: string | null): string | nul
   return trimmed || null;
 }
 
+/** Canvas / hover label: operator first, then capacity when known. */
+export function formatStorageMapFeatureLabels(
+  item: Pick<
+    MiningLicense,
+    | 'company'
+    | 'operatorName'
+    | 'ownerName'
+    | 'capacityText'
+    | 'capacity'
+    | 'country'
+    | 'entitySubtype'
+    | 'locode'
+    | 'nearbyPort'
+    | 'region'
+    | 'siteContextName'
+    | 'sourceId'
+  >,
+): { title: string; subtitle: string | null } {
+  const title = formatStoragePopupTitle(item);
+  const parts: string[] = [];
+  const operator = item.operatorName?.trim();
+  if (operator && operator !== title) parts.push(operator);
+  const capacity =
+    item.capacityText?.trim() ||
+    (typeof item.capacity === 'number' && item.capacity > 0 ? String(item.capacity) : null);
+  if (capacity) parts.push(capacity);
+  const country = item.country?.trim();
+  if (country && !parts.includes(country)) parts.push(country);
+  return { title, subtitle: parts.length > 0 ? parts.join(' · ') : null };
+}
+
 export function formatStorageSubstanceLabel(item: Pick<MiningLicense, 'substanceText' | 'commodity'>): string | null {
   const substance = item.substanceText?.trim();
   if (substance) return substance;
   const commodity = item.commodity?.trim();
   return commodity || null;
+}
+
+const GENERIC_STORAGE_TERMINAL_TITLES = new Set([
+  'unnamed storage terminal',
+  'unnamed storage tank',
+  'storage tank',
+  'storage terminal',
+]);
+
+/** True when popup title is a placeholder, not a tagged facility or operator name. */
+export function isGenericStorageTerminalTitle(company?: string | null): boolean {
+  if (isUnknownLicenseName(company)) return true;
+  const normalized = (company || '').trim().toLowerCase();
+  if (GENERIC_STORAGE_TERMINAL_TITLES.has(normalized)) return true;
+  return /^unnamed\s+storage\b/i.test((company || '').trim());
+}
+
+export function formatStorageSiteContextNearLine(siteContextName?: string | null): string | null {
+  const name = siteContextName?.trim();
+  if (!name) return null;
+  return `Near ${name}`;
+}
+
+export function shouldShowStorageSiteContextNear(
+  item: Pick<MiningLicense, 'company' | 'siteContextName'>,
+): boolean {
+  return Boolean(
+    item.siteContextName?.trim() && isGenericStorageTerminalTitle(item.company),
+  );
+}
+
+export const STORAGE_SITE_CONTEXT_INFERRED_BADGE = 'Inferred from OSM site';
+
+/** Popup/map badge when a lone OSM tank node lacks terminal-grade evidence. */
+export function formatStorageBadgeLabel(
+  item: Pick<MiningLicense, 'entitySubtype' | 'confidenceScore' | 'coverageState'>,
+): string {
+  if (
+    item.entitySubtype === 'storage_tank' &&
+    (item.coverageState === 'sparse_osm_node' || (item.confidenceScore ?? 1) < 0.7)
+  ) {
+    return 'OSM tank node (unverified)';
+  }
+  if (item.entitySubtype === 'storage_tank') {
+    return 'Storage tank';
+  }
+  if (item.entitySubtype === 'tank_farm') {
+    return 'Tank farm';
+  }
+  if (item.entitySubtype === 'fuel_depot') {
+    return 'Fuel depot';
+  }
+  return 'Storage terminal';
+}
+
+export function formatStorageLocatorContext(
+  item: Pick<
+    MiningLicense,
+    | 'locode'
+    | 'nearbyPort'
+    | 'operatorName'
+    | 'siteContextName'
+    | 'region'
+    | 'country'
+    | 'subdivision'
+  >,
+): string {
+  const segments: string[] = [];
+  const siteName = item.siteContextName?.trim();
+  if (siteName) {
+    segments.push(siteName);
+  } else if (item.locode?.trim()) {
+    segments.push(item.locode.trim());
+  }
+
+  const region = item.region?.trim();
+  const country = item.country?.trim();
+  const subdivision = item.subdivision?.trim();
+  const localityParts = [region, subdivision].filter(
+    (part): part is string => Boolean(part) && part !== country,
+  );
+  if (country) localityParts.push(country);
+  const locality = localityParts.join(', ');
+  if (locality) segments.push(locality);
+
+  if (item.nearbyPort?.name?.trim()) {
+    segments.push(item.nearbyPort.name.trim());
+  } else if (!siteName && item.operatorName?.trim()) {
+    segments.push(item.operatorName.trim());
+  }
+
+  if (segments.length === 0) return '—';
+  return segments.join(' · ');
 }
 
 export function storageTerminalOsmTagSummary(

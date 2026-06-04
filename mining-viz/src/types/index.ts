@@ -62,7 +62,28 @@ export interface MiningLicense {
   confidenceNote?: string | null;
   /** Curated ingest notes (OPEC Gulf, etc.) — short text, not full raw_payload. */
   enrichmentNote?: string | null;
+  /** When sparse OSM was enriched from a nearby curated hub reference row. */
+  curatedEnrichmentSourceId?: string | null;
+  curatedEnrichmentSourceName?: string | null;
+  curatedEnrichmentDistanceKm?: number | null;
+  /** Public operator/regulator URL used for curated enrichment. */
+  enrichmentSourceUrl?: string | null;
+  /** Which reference layer filled sparse OSM fields (`curated_reference`, `oil_terminal_reference`). */
+  referenceEnrichmentKind?: string | null;
+  portAuthorityLocode?: string | null;
+  portAuthorityPortName?: string | null;
+  portTenantName?: string | null;
+  portTenantCategory?: string | null;
+  operatorPartitionInferred?: boolean | null;
+  operatorAssignmentKind?: string | null;
+  operatorAssignmentNote?: string | null;
   nearbyPort?: MaritimePortReference | null;
+  /** Nearby named OSM industrial site (e.g. landuse=industrial name on a mapped polygon). */
+  siteContextName?: string | null;
+  /** True when `siteContextName` is inferred from proximity, not tagged on the tank node. */
+  siteContextInferred?: boolean | null;
+  /** Provenance for site context, e.g. `osm_nearby_site`. */
+  siteContextSource?: string | null;
   evidenceCount?: number | null;
   locode?: string | null;
   countryIso2?: string | null;
@@ -666,6 +687,9 @@ export interface StorageTerminalResponse {
   limitations: string[];
   stats: StorageTerminalStats;
   cached?: boolean;
+  data_source?: string;
+  coverage_gap?: boolean;
+  viewport_bbox?: [number, number, number, number];
 }
 
 export interface PortInfrastructureLink {
@@ -713,6 +737,51 @@ export interface PortLogisticsResponse {
   cached?: boolean;
 }
 
+export type PortAuthorityTenantCategory =
+  | 'tank_storage_and_refineries'
+  | 'bunker_suppliers'
+  | 'shipping_agents'
+  | 'aggregate_exporters'
+  | 'other';
+
+export interface PortAuthorityTenant {
+  name: string;
+  normalized_name?: string;
+  category: PortAuthorityTenantCategory;
+  category_label?: string;
+  role_note?: string | null;
+  source_url?: string | null;
+  curated_storage_external_id?: string | null;
+  storage_operator?: string | null;
+  capacity_text?: string | null;
+  storage_hub_id?: string | null;
+  record_origin?: string;
+  evidence_type?: string;
+}
+
+export interface PortAuthorityDirectory {
+  locode: string;
+  port_name?: string;
+  port_authority_name?: string;
+  country?: string;
+  country_iso2?: string;
+  lat?: number;
+  lng?: number;
+  source_url?: string;
+  source_accessed_at?: string;
+  record_origin?: string;
+  evidence_type?: string;
+  disclaimer?: string;
+  categories?: Array<{ id: string; label: string }>;
+  tenants: PortAuthorityTenant[];
+  stats?: {
+    total_tenants: number;
+    tenant_count_by_category: Record<string, number>;
+    with_storage_hub_link?: number;
+  };
+  data_as_of?: string;
+}
+
 export interface PortLogisticsDetails extends MiningLicense {
   sourceLabels?: string[];
   coverageNote?: string | null;
@@ -721,6 +790,7 @@ export interface PortLogisticsDetails extends MiningLicense {
   evidence: PortLogisticsEvidenceItem[];
   limitations: string[];
   rawPayload?: Record<string, unknown> | null;
+  portDirectory?: PortAuthorityDirectory | null;
 }
 
 export type CoverageStatus =

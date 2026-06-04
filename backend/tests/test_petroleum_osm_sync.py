@@ -17,10 +17,12 @@ class PetroleumOsmSyncTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
 
+    @patch("backend.services.petroleum_osm_store.layer_feature_stats")
     @patch("backend.services.petroleum_osm_store.layer_has_cached_features", return_value=True)
     @patch("backend.services.petroleum_osm_store.get_layer_geojson_from_db")
     @patch("backend.main.get_db_connection")
-    def test_osm_layer_reads_db_first(self, mock_conn, mock_db_geojson, _has_cache):
+    def test_osm_layer_reads_db_first(self, mock_conn, mock_db_geojson, _has_cache, mock_stats):
+        mock_stats.return_value = {"feature_count": 1, "last_fetched_at": "2026-06-01T00:00:00+00:00"}
         mock_db_geojson.return_value = {
             "type": "FeatureCollection",
             "features": [{"type": "Feature", "id": "osm/way/1"}],
@@ -35,7 +37,53 @@ class PetroleumOsmSyncTests(unittest.TestCase):
         body = res.json()
         self.assertEqual(body.get("source"), "database")
         self.assertEqual(body.get("feature_count"), 1)
+        self.assertEqual(body.get("read_path"), "postgres")
+        self.assertFalse(body.get("coverage_gap"))
         mock_db_geojson.assert_called_once()
+
+    @patch("backend.services.petroleum_osm_store.petroleum_osm_live_overpass_enabled", return_value=False)
+    @patch("backend.services.petroleum_osm_store.layer_has_cached_features", return_value=False)
+    @patch("backend.services.petroleum_osm_store.build_empty_osm_layer_response")
+    @patch("backend.main.get_db_connection")
+    def test_osm_layer_empty_db_returns_coverage_gap(self, mock_conn, mock_empty, _has_cache, _live):
+        mock_empty.return_value = {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": "pipelines",
+            "feature_count": 0,
+            "source": "database",
+            "coverage_gap": True,
+            "hint": "run petroleum-osm worker or graph-sync",
+            "read_path": "postgres",
+        }
+        mock_conn.return_value = MagicMock()
+
+        res = self.client.get("/api/petroleum/osm-layers/pipelines")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body.get("coverage_gap"))
+        self.assertIn("graph-sync", body.get("hint", ""))
+        mock_empty.assert_called_once()
+
+    @patch("backend.services.petroleum_osm_store.petroleum_osm_live_overpass_enabled", return_value=True)
+    @patch("backend.services.petroleum_osm_store.layer_has_cached_features", return_value=False)
+    @patch("backend.services.petroleum_osm_overpass.get_osm_layer_geojson")
+    @patch("backend.main.get_db_connection")
+    def test_osm_layer_live_overpass_when_flag_set(self, mock_conn, mock_overpass, _has_cache, _live):
+        mock_overpass.return_value = {
+            "type": "FeatureCollection",
+            "features": [{"type": "Feature", "id": "osm/way/2"}],
+            "layer_id": "pipelines",
+            "feature_count": 1,
+        }
+        mock_conn.return_value = MagicMock()
+
+        res = self.client.get("/api/petroleum/osm-layers/pipelines")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body.get("read_path"), "overpass")
+        self.assertEqual(body.get("source"), "overpass")
+        mock_overpass.assert_called_once()
 
     def test_admin_petroleum_osm_sync_requires_token(self):
         res = self.client.post(

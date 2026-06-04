@@ -22,6 +22,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/map/country-borders", s.CountryBorders)
 		api.Get("/map/petroleum-osm/layers", s.OSMLayersCatalog)
 		api.Get("/map/petroleum-osm/layers/{layer_id}", s.OSMLayerGeoJSON)
+		api.Get("/map/petroleum-osm/tiles/{layer_id}/{z}/{x}/{y}.pbf", s.OSMLayerMVT)
 		api.Get("/map-layers", s.MapLayers)
 
 		// Licenses

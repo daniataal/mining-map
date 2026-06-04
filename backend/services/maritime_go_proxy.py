@@ -35,3 +35,22 @@ def proxy_oil_live_get(path: str, params: Optional[dict[str, Any]] = None) -> di
         return parsed
     except Exception as exc:
         return {"error": str(exc), "proxy_error": True, "upstream": url}
+
+
+def proxy_oil_live_get_bytes(path: str) -> tuple[bytes, int, dict[str, str]]:
+    """Forward GET to oil-live-intel; return raw body, HTTP status, and response headers."""
+    base = path if path.startswith("/") else f"/{path}"
+    url = f"{OIL_INTEL_API_URL}{base}"
+    req = urllib.request.Request(
+        url,
+        headers={"Accept": "application/vnd.mapbox-vector-tile,*/*", "User-Agent": "mining-backend-proxy/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            return resp.read(), resp.status, headers
+    except urllib.error.HTTPError as exc:
+        headers = {k.lower(): v for k, v in exc.headers.items()}
+        return exc.read(), exc.code, headers
+    except Exception:
+        return b"", 502, {}

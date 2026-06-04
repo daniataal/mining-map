@@ -228,11 +228,29 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
             return None
         geom = {"type": "LineString", "coordinates": coordinates}
     elif layer_id in {"refineries", "storage_terminals"}:
-        center = _element_center(element)
-        if not center:
-            return None
-        lat, lng = center
-        geom = {"type": "Point", "coordinates": [lng, lat]}
+        geometry_pts = element.get("geometry") or []
+        if etype in {"way", "relation"} and len(geometry_pts) >= 3:
+            coordinates = [
+                [float(pt["lon"]), float(pt["lat"])]
+                for pt in geometry_pts
+                if isinstance(pt, dict) and pt.get("lat") is not None and pt.get("lon") is not None
+            ]
+            if len(coordinates) >= 3:
+                if coordinates[0] != coordinates[-1]:
+                    coordinates.append(coordinates[0])
+                geom = {"type": "Polygon", "coordinates": [coordinates]}
+            else:
+                center = _element_center(element)
+                if not center:
+                    return None
+                lat, lng = center
+                geom = {"type": "Point", "coordinates": [lng, lat]}
+        else:
+            center = _element_center(element)
+            if not center:
+                return None
+            lat, lng = center
+            geom = {"type": "Point", "coordinates": [lng, lat]}
     else:
         return None
 
@@ -254,6 +272,27 @@ def _element_to_feature(layer_id: str, element: dict[str, Any]) -> Optional[dict
     if layer_id == "refineries":
         for key in ("operator", "owner", "industrial", "description", "wikipedia", "wikidata"):
             value = tags.get(key)
+            if value is not None and str(value).strip():
+                properties[key] = value
+    if layer_id == "storage_terminals":
+        for key in (
+            "operator",
+            "owner",
+            "man_made",
+            "industrial",
+            "landuse",
+            "product",
+            "substance",
+            "capacity",
+            "content",
+            "description",
+        ):
+            value = tags.get(key)
+            if value is not None and str(value).strip():
+                properties[key] = value
+        for key, value in tags.items():
+            if not key.startswith("substance:") and not key.startswith("capacity:"):
+                continue
             if value is not None and str(value).strip():
                 properties[key] = value
 

@@ -7,6 +7,7 @@ export type LiveDealFeatureKind =
   | 'license'
   | 'server_cluster'
   | 'storage_terminal'
+  | 'storage_tank'
   | 'tank_farm'
   | 'refinery'
   | 'oil_field'

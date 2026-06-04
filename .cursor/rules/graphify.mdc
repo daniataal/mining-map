@@ -3,9 +3,16 @@ description: graphify knowledge graph context
 alwaysApply: true
 ---
 
-This project has a graphify knowledge graph at graphify-out/.
+This project has a graphify knowledge graph at graphify-out/. It indexes **this repo only**, not the Obsidian vault.
+
+**Layering (north star: discover → verify → price → execute):**
+- Paperclip — current task and ship comments
+- Obsidian (`~/ai-agent-stack/obsidian-vault`, `MADSAN_BRAIN.md`) — dossiers, data-source tiers, ADRs, runbooks
+- graphify — where in code; see `docs/AGENT_KNOWLEDGE_LAYERS.md` and vault note `09_Technical-Architecture/Meridian code navigation (graphify).md`
 
 - For codebase or architecture questions, when `graphify-out/graph.json` exists, first run `graphify query "<question>"` (or `graphify path "<A>" "<B>"` / `graphify explain "<concept>"`). These return a scoped subgraph, usually much smaller than `GRAPH_REPORT.md` or raw grep output.
+- Before coding on Paperclip tasks: skim Obsidian folders named in the issue (`08_Data-Sources/`, `06_Company-Dossiers/`, `12_Decisions/`) then graphify-query the acceptance criteria.
 - If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context
 - After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
+- Reusable policy/ops findings after ship → Obsidian (`12_Decisions/`, `10_Runbooks/`, `08_Data-Sources/`), not graphify

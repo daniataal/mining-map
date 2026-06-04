@@ -26,6 +26,7 @@ import {
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
+  PortAuthorityDirectory,
   PortLogisticsDetails,
   PortLogisticsResponse,
   AgentJobResponse,
@@ -59,6 +60,7 @@ import {
   SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from './licenseMapCluster';
 import {
+  applyCountrySummaryRequestParams,
   countrySummaryRowsToLicenses,
   isCountryLicenseSummary,
   parseLicenseCountrySummaryResponse,
@@ -569,15 +571,9 @@ async function fetchLicensesViewportFromApi(
       const requestParams = { ...params };
       if (path.endsWith('/map')) delete requestParams.map;
       if (path.includes('country-summary')) {
-        delete requestParams.map;
-        delete requestParams.zoom;
         // Low-zoom country summary should represent the full available country set
         // for the current sector/filter, not only centroids inside the current bbox.
-        // Bbox-clipped summaries can hide countries that reappear when zooming in.
-        delete requestParams.min_lat;
-        delete requestParams.max_lat;
-        delete requestParams.min_lng;
-        delete requestParams.max_lng;
+        applyCountrySummaryRequestParams(requestParams);
         const { data } = await apiClient.get<unknown>(path, {
           signal,
           timeout: 60_000,
@@ -725,6 +721,9 @@ export function useLicensesForMap(options: {
     return view;
   }, [countryScoped, countryFetchBounds, effectiveViewportBounds]);
 
+  const mapZoomKey =
+    mapZoom != null && Number.isFinite(mapZoom) ? Math.round(mapZoom * 10) / 10 : null;
+
   const query = useQuery({
     queryKey: [
       'licenses',
@@ -735,6 +734,7 @@ export function useLicensesForMap(options: {
       'scoped',
       fetchBounds,
       effectiveViewportBounds,
+      mapZoomKey,
     ] as const,
     staleTime: LICENSE_VIEWPORT_STALE_MS,
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
@@ -1455,16 +1455,93 @@ export {
 } from './vessels/useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
 
-export const useStorageTerminals = (enabled = true) => {
+export type StorageTerminalsQueryOptions = {
+  forceRefresh?: boolean;
+  viewport?: { south: number; west: number; north: number; east: number } | null;
+  limit?: number;
+};
+
+export const useStorageTerminals = (enabled = true, options: StorageTerminalsQueryOptions = {}) => {
+  const { forceRefresh = false, viewport = null, limit = 2000 } = options;
+  const bboxKey = viewport
+    ? `${viewport.south},${viewport.west},${viewport.north},${viewport.east}`
+    : 'world';
+
   return useQuery<StorageTerminalResponse>({
-    queryKey: ['storage-terminals'],
+    queryKey: ['storage-terminals', bboxKey, forceRefresh ? 'refresh' : 'cached', limit],
     queryFn: async () => {
-      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
-        timeout: 12_000,
-      });
-      return data;
+      const requestTimeoutMs = 90_000;
+      const startedAt = Date.now();
+      const baseURL = apiClient.defaults.baseURL ?? '';
+      // #region agent log
+      fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+        body: JSON.stringify({
+          sessionId: '7419a2',
+          hypothesisId: 'A',
+          location: 'api.ts:useStorageTerminals',
+          message: 'storage_fetch_start',
+          data: { requestTimeoutMs, forceRefresh, baseURL },
+          timestamp: startedAt,
+        }),
+      }).catch(() => {});
+      // #endregion
+      try {
+        const params: Record<string, string | number | boolean> = { limit };
+        if (forceRefresh) params.force_refresh = true;
+        if (viewport) {
+          params.south = viewport.south;
+          params.west = viewport.west;
+          params.north = viewport.north;
+          params.east = viewport.east;
+        }
+        const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
+          timeout: requestTimeoutMs,
+          params,
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+          body: JSON.stringify({
+            sessionId: '7419a2',
+            hypothesisId: 'A',
+            location: 'api.ts:useStorageTerminals',
+            message: 'storage_fetch_ok',
+            data: {
+              elapsedMs: Date.now() - startedAt,
+              entityCount: data?.entities?.length ?? 0,
+              cached: (data as StorageTerminalResponse & { cached?: boolean })?.cached,
+              dataSource: (data as StorageTerminalResponse & { data_source?: string })?.data_source,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        return data;
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+          body: JSON.stringify({
+            sessionId: '7419a2',
+            hypothesisId: 'A',
+            location: 'api.ts:useStorageTerminals',
+            message: 'storage_fetch_error',
+            data: {
+              elapsedMs: Date.now() - startedAt,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        throw err;
+      }
     },
-    enabled,
+    enabled: enabled && viewport != null,
     staleTime: 30 * 60_000,
     placeholderData: keepPreviousData,
     retry: 1,
@@ -1509,6 +1586,21 @@ export const usePortLogisticsDetails = (entityId?: string, enabled = true) => {
     },
     enabled: enabled && Boolean(entityId),
     staleTime: 15 * 60_000,
+  });
+};
+
+export const usePortAuthorityDirectory = (locode?: string, enabled = true) => {
+  const code = (locode || '').trim().toUpperCase();
+  return useQuery<PortAuthorityDirectory>({
+    queryKey: ['port-authority-directory', code],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortAuthorityDirectory>(
+        `/api/ports/${encodeURIComponent(code)}/directory`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(code),
+    staleTime: 60 * 60_000,
   });
 };
 

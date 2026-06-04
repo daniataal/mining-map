@@ -5497,19 +5497,50 @@ def _fetch_world_bank(iso2: str) -> dict:
 def get_company_intel(company: str = "", country: str = "", commodity: str = ""):
     """
     Aggregate open-data trade & economic context for a mining license dossier.
-    Returns UN Comtrade country-level trade flows, World Bank macro data,
-    and deep links for manual company verification.
-    Data provenance and known limitations are documented in the response.
+
+    Default read path is Postgres (oil_trade_flows, commodity_trade_flows,
+    trade_manifest_rows, eia_historic_imports). Live Comtrade / World Bank calls
+    run only when COMPANY_INTEL_LIVE_FALLBACK=1.
     """
     hs_code = _resolve_hs(commodity)
     codes = _resolve_codes(country)
 
+    read_path = "postgres"
+    sync_state: dict = {}
     trade_data: dict = {}
-    if hs_code and codes.get("m49"):
-        trade_data = _fetch_comtrade(codes["m49"], hs_code)
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.company_intel_store import fetch_company_intel_from_postgres
+        except ImportError:
+            from services.company_intel_store import fetch_company_intel_from_postgres
+        bundle = fetch_company_intel_from_postgres(
+            conn,
+            country=country,
+            company=company,
+            commodity=commodity,
+            hs_code=hs_code,
+            codes=codes,
+        )
+        trade_data = bundle.get("trade_data") or {}
+        sync_state = bundle.get("sync_state") or {}
+        read_path = bundle.get("read_path") or "postgres"
+    finally:
+        conn.close()
+
+    live_fallback = (os.getenv("COMPANY_INTEL_LIVE_FALLBACK") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if live_fallback and not (trade_data or {}).get("flows"):
+        if hs_code and codes.get("m49"):
+            trade_data = _fetch_comtrade(codes["m49"], hs_code, iso2=codes.get("iso2") or "")
+            read_path = "live_fallback"
 
     econ_data: dict = {}
-    if codes.get("iso2"):
+    if live_fallback and codes.get("iso2"):
         econ_data = _fetch_world_bank(codes["iso2"])
 
     # Pre-built deep links — no API calls, always available
@@ -5597,16 +5628,22 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
     trade_source_key = (trade_data or {}).get("source_key", "")
     trade_source_label = (trade_data or {}).get("source", "")
 
-    # The panel previously gated its "data available" hint on the paid
-    # Comtrade key.  We now honour any successful free upstream so the
-    # banner only shows when literally no source returned rows.
     free_trade_data_available = bool((trade_data or {}).get("flows"))
 
     limitations = [
-        "Trade data is country-level, not company-specific — company-level customs data requires paid government sources.",
-        "UN Comtrade data typically lags 12–24 months from the current date.",
-        "World Bank indicators lag approximately 12 months.",
+        "Trade data is country-level unless trade_manifest_rows matched the company name.",
+        "Primary read path is Postgres (graph-sync / ingest workers), not live Comtrade on pan.",
+        "UN Comtrade macro rows typically lag 12–24 months from the current date.",
     ]
+    if read_path == "live_fallback":
+        limitations.append(
+            "COMPANY_INTEL_LIVE_FALLBACK=1 — live Comtrade/World Bank used because Postgres returned no rows."
+        )
+    if not (econ_data or {}).get("indicators"):
+        limitations.append(
+            "World Bank macro indicators are omitted on the Postgres read path "
+            "(set COMPANY_INTEL_LIVE_FALLBACK=1 for live macro fetch)."
+        )
     if trade_source_key in {"comtrade_public", "mixed"}:
         limitations.append(
             "Primary source: UN Comtrade public preview (free, no key, "
@@ -5639,6 +5676,9 @@ def get_company_intel(company: str = "", country: str = "", commodity: str = "")
         "trade_flows": trade_data,
         "economy": econ_data,
         "deep_links": deep_links,
+        "read_path": read_path,
+        "last_sync": sync_state.get("last_sync"),
+        "stale": sync_state.get("stale"),
         "comtrade_available": has_comtrade_key,
         "trade_data_available": free_trade_data_available,
         "trade_source": trade_source_label,
@@ -5824,14 +5864,30 @@ def get_maritime_context(
 
 
 @app.get("/api/storage/terminals")
-def get_storage_terminals(force_refresh: bool = False):
+def get_storage_terminals(
+    force_refresh: bool = False,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    limit: Optional[int] = None,
+):
     """Live open/global storage terminal feed for the oil-and-gas view."""
     try:
         try:
-            from backend.services.storage_terminals import get_storage_terminals as build_storage_terminals
+            from backend.services.storage_terminals import (
+                _parse_storage_bbox,
+                get_storage_terminals as build_storage_terminals,
+            )
         except ImportError:
-            from services.storage_terminals import get_storage_terminals as build_storage_terminals
-        return build_storage_terminals(force_refresh=force_refresh)
+            from services.storage_terminals import (  # type: ignore
+                _parse_storage_bbox,
+                get_storage_terminals as build_storage_terminals,
+            )
+        bbox = _parse_storage_bbox(south, west, north, east)
+        return build_storage_terminals(force_refresh=force_refresh, bbox=bbox, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         return {
             "entities": [],
@@ -5851,6 +5907,69 @@ def get_storage_terminals(force_refresh: bool = False):
                 "top_countries": [],
             },
         }
+
+
+@app.get("/api/storage/coverage/report")
+def get_storage_coverage_report(
+    force_refresh: bool = False,
+    write_queue: bool = False,
+    write_audit: bool = False,
+):
+    """Per-country/tile storage coverage inventory and gap-candidate queue."""
+    try:
+        try:
+            from backend.services.storage_coverage_report import (
+                build_report_from_storage_feed,
+                write_coverage_audit,
+                write_gap_queue,
+            )
+        except ImportError:
+            from services.storage_coverage_report import (  # type: ignore
+                build_report_from_storage_feed,
+                write_coverage_audit,
+                write_gap_queue,
+            )
+        report = build_report_from_storage_feed(force_refresh=force_refresh)
+        if write_queue:
+            report["gap_queue_path"] = str(write_gap_queue(report))
+        if write_audit:
+            report["audit_path"] = str(write_coverage_audit(report))
+        return report
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Storage coverage report failed: {exc}")
+
+
+@app.post("/api/admin/storage/coverage-audit")
+def admin_storage_coverage_audit(x_admin_token: Optional[str] = Header(None)):
+    """Regenerate storage coverage audit JSON and gap queue (admin)."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    try:
+        try:
+            from backend.services.storage_coverage_report import (
+                build_report_from_storage_feed,
+                write_coverage_audit,
+                write_gap_queue,
+            )
+        except ImportError:
+            from services.storage_coverage_report import (  # type: ignore
+                build_report_from_storage_feed,
+                write_coverage_audit,
+                write_gap_queue,
+            )
+        report = build_report_from_storage_feed(force_refresh=False)
+        audit_path = write_coverage_audit(report)
+        queue_path = write_gap_queue(report)
+        return {
+            "status": "success",
+            "audit_path": str(audit_path),
+            "gap_queue_path": str(queue_path),
+            "gap_candidate_count": report.get("gap_candidate_count"),
+            "totals": report.get("totals"),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/storage/terminals/{terminal_id:path}")
@@ -5923,6 +6042,22 @@ def get_petroleum_layer(
         }
 
 
+@app.get("/api/petroleum/osm-tiles/{layer_id}/{z}/{x}/{y}.pbf")
+def proxy_petroleum_osm_mvt_tile(layer_id: str, z: int, x: int, y: int):
+    """Proxy MVT tiles to Go oil-live-intel when requests hit backend:8000 directly."""
+    from fastapi.responses import Response
+
+    try:
+        from backend.services.maritime_go_proxy import proxy_oil_live_get_bytes
+    except ImportError:
+        from services.maritime_go_proxy import proxy_oil_live_get_bytes
+
+    path = f"/api/oil-live/map/petroleum-osm/tiles/{layer_id}/{z}/{x}/{y}.pbf"
+    body, status, headers = proxy_oil_live_get_bytes(path)
+    media_type = headers.get("content-type", "application/vnd.mapbox-vector-tile")
+    return Response(content=body, status_code=status, media_type=media_type)
+
+
 @app.get("/api/petroleum/osm-layers")
 def get_petroleum_osm_layers_catalog():
     """Catalog of free OSM/Overpass petroleum layers (community data)."""
@@ -5950,7 +6085,7 @@ def get_petroleum_osm_layer(
     east: Optional[float] = None,
     zoom: Optional[float] = None,
 ):
-    """GeoJSON for OSM petroleum pipelines or refineries (DB snapshot first, Overpass fallback)."""
+    """GeoJSON for OSM petroleum pipelines or refineries (Postgres snapshot; live Overpass opt-in)."""
     try:
         try:
             from backend.services.petroleum_osm_store import get_osm_layer_geojson_with_fallback
@@ -6043,6 +6178,37 @@ def get_port_logistics_entities(force_refresh: bool = False):
                 "map_render_limit": 3000,
             },
         }
+
+
+@app.get("/api/ports/directory/coverage")
+def get_port_authority_directory_coverage():
+    """List locodes with curated port-authority tenant directories."""
+    try:
+        try:
+            from backend.services.port_authority_directory import list_directory_coverage
+        except ImportError:
+            from services.port_authority_directory import list_directory_coverage
+        return list_directory_coverage()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Port directory coverage failed: {exc}")
+
+
+@app.get("/api/ports/{locode}/directory")
+def get_port_authority_directory(locode: str):
+    """Major customers / tenants from public port authority pages (curated)."""
+    try:
+        try:
+            from backend.services.port_authority_directory import get_directory_by_locode
+        except ImportError:
+            from services.port_authority_directory import get_directory_by_locode
+        result = get_directory_by_locode(locode)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Port authority directory not found for locode")
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Port authority directory failed: {exc}")
 
 
 @app.get("/api/logistics/ports/{entity_id:path}")
@@ -6699,8 +6865,12 @@ def admin_eia_historic_imports_ingest(
 
 
 @app.post("/api/admin/petroleum-osm/sync")
-def admin_petroleum_osm_sync(x_admin_token: Optional[str] = Header(None)):
-    """Refresh petroleum_osm_features from Overpass world tiles."""
+def admin_petroleum_osm_sync(
+    x_admin_token: Optional[str] = Header(None),
+    tiles: Optional[str] = None,
+    from_gap_queue: bool = False,
+):
+    """Refresh petroleum_osm_features from Overpass world tiles (optional tile filter)."""
     forbidden = _check_admin_token(x_admin_token)
     if forbidden is not None:
         return forbidden
@@ -6708,12 +6878,25 @@ def admin_petroleum_osm_sync(x_admin_token: Optional[str] = Header(None)):
     conn = get_db_connection()
     try:
         try:
-            from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+            from backend.services.petroleum_osm_store import (
+                ensure_petroleum_osm_tables,
+                sync_all_layers,
+                sync_layers_for_tiles,
+            )
         except ImportError:
-            from services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
+            from services.petroleum_osm_store import (  # type: ignore
+                ensure_petroleum_osm_tables,
+                sync_all_layers,
+                sync_layers_for_tiles,
+            )
         ensure_petroleum_osm_tables(conn)
         conn.commit()
-        summary = sync_all_layers(conn)
+        if from_gap_queue:
+            summary = sync_layers_for_tiles(conn, from_gap_queue=True)
+        elif tiles:
+            summary = sync_layers_for_tiles(conn, tile_names=tiles)
+        else:
+            summary = sync_all_layers(conn)
         conn.commit()
         return {"status": "success", **summary}
     except Exception as exc:

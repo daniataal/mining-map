@@ -783,6 +783,34 @@
   width: 100%;
 }
 
+/* Storage terminal infrastructure popups (OSM tank farms) */
+.leaflet-popup.custom-popup--storage .leaflet-popup-content-wrapper {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.leaflet-popup.custom-popup--storage .leaflet-popup-content {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+}
+
+.leaflet-popup.custom-popup--storage a.leaflet-popup-close-button {
+  top: 10px;
+  right: 10px;
+  color: #94a3b8;
+  z-index: 2;
+}
+
+.leaflet-popup.custom-popup--storage a.leaflet-popup-close-button:hover {
+  color: #f8fafc;
+}
+
+.storage-terminal-popup {
+  width: 100%;
+}
+
 /* EIA historic origin popups */
 .leaflet-popup.eia-historic-leaflet-popup .leaflet-popup-content-wrapper {
   padding: 0;

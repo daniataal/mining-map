@@ -89,6 +89,33 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `usitc_dataweb.py` | U.S. HS flows / tariff context (DataWeb) | Free account + API token | `USITC_DATAWEB_API_KEY`; `data_source=usitc_dataweb` on graph sync |
 | Bundled `licenses.json` | Legacy snapshot | Deprecated for prod UX | `bundled_json`; excluded when `prefer_open_data=true` |
 
+### 2.2.1 Port authority major-customer directories (curated)
+
+| | |
+|--|--|
+| **File** | `data/port_authority_directories.json` |
+| **License** | Public port authority marketing / customer-list pages (manual transcription; cite `source_url` per port) |
+| **Refresh cadence** | Git commit + optional graph-sync step `port_authority_tenants` |
+| **API** | `GET /api/ports/{locode}/directory`, `GET /api/ports/directory/coverage`; merged into `GET /api/logistics/ports/{id}` detail as `portDirectory` |
+| **Match keys** | `locode` (UN/LOCODE, e.g. `AEFJR` Fujairah) → tenant `normalized_name` → `oil_companies` |
+| **Mapped fields** | Tenant `name`, `category` (tank storage, bunker, agents, …), optional `curated_storage_external_id` → storage seed hub |
+| **Tier honesty** | `record_origin=port_authority_curated`, `evidence_type=port_authority_page` — **not** audited capacity, berth contract, or ownership |
+| **Verify** | `curl http://127.0.0.1:8080/api/ports/AEFJR/directory`; Ports view dossier → Major customers; compare to [Port of Fujairah major customers](https://fujairahport.ae/port-overview/major-customers/) |
+
+**MVP ports in seed:** AEFJR, NLRTM, SGSIN, USHOU, BEANR, AEJEA, AEDXB. **Hub playbook batch 1 (2026-06):** SARTA (Ras Tanura), SAYNB (Yanbu), BRSSZ (Santos), INSIK (Jamnagar/Sikka).
+
+### 2.2.2 Global storage coverage inventory
+
+| | |
+|--|--|
+| **Report API** | `GET /api/storage/coverage/report` — per-country and per–world-tile OSM/curated counts, orphan rate, gap candidates |
+| **Gap queue** | `data/coverage/storage_gap_queue.json` — regional Overpass sync targets (`?write_queue=true` on report) |
+| **Audit file** | `data/coverage/storage_audit_YYYY-MM.json` — optional `?write_audit=true` or `POST /api/admin/storage/coverage-audit` |
+| **Map API** | `GET /api/storage/terminals?south=&west=&north=&east=&limit=` — viewport filter + `coverage_gap` when empty |
+| **Regional OSM sync** | `POST /api/admin/petroleum-osm/sync?from_gap_queue=true` or `?tiles=mena,europe` |
+| **Curated gap-fill** | `retain_near_osm` on seed rows; drop curated only when ≥3 OSM tanks within 2 km (not 8 km adjacent-farm suppression) |
+| **National GIS backlog** | [NATIONAL_GIS_STORAGE_BACKLOG.md](./NATIONAL_GIS_STORAGE_BACKLOG.md) |
+
 ### 2.3 Company / deal signals (in app today)
 
 | Signal | Endpoint / feature | License | Notes |

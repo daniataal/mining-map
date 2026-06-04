@@ -38,6 +38,27 @@ export const LICENSE_MAP_DEFAULT_ZOOM = 7;
 /** Server grid mode ends below this zoom (matches backend license_grid_degrees z >= 8). */
 export const SERVER_CLUSTER_MIN_DRILL_ZOOM = 8;
 
+/** Canvas stops merging nearby points above this zoom (see LICENSE_CANVAS_CLUSTER_MAX_ZOOM). */
+export const LICENSE_CANVAS_CLUSTER_UNPACK_ZOOM = 14;
+
+/** Max zoom when drilling client/dense clusters — one step above canvas unpack. */
+export const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = LICENSE_CANVAS_CLUSTER_UNPACK_ZOOM + 1;
+
+/** Dense grid/server bubbles (≥10) need deep drill or canvas re-clusters immediately. */
+export const LICENSE_DENSE_CLUSTER_MIN_COUNT = 10;
+
+/** Map zoom to fly when opening a cluster bubble into individual markers. */
+export function licenseClusterVisualDrillZoom(
+  mapClusterCount: number,
+  options?: { clientCluster?: boolean },
+): number {
+  if (options?.clientCluster) return LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM;
+  if (mapClusterCount >= LICENSE_DENSE_CLUSTER_MIN_COUNT) {
+    return LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM;
+  }
+  return SERVER_CLUSTER_MIN_DRILL_ZOOM;
+}
+
 /** Do not collapse grid cells into one mega-bubble above this license total (regional honesty). */
 export const MAX_VIEWPORT_CLUSTER_MERGE_TOTAL = 400;
 

@@ -271,4 +271,5 @@ OPENROUTER_MODEL=openrouter/google/gemma-2-9b-it:free bash ~/ai-agent-stack/scri
 
 - CEO roster IDs: `~/ai-agent-stack/scripts/paperclip-ceo-delegation.md`
 - Obsidian + Paperclip runbook: `~/ai-agent-stack/obsidian-vault/10_Runbooks/paperclip-obsidian.md`
-- Meridian agent rules: `AGENTS.md`, `.cursor/rules/obsidian-brain.mdc`
+- Agent knowledge layers (Obsidian + graphify): [AGENT_KNOWLEDGE_LAYERS.md](AGENT_KNOWLEDGE_LAYERS.md)
+- Meridian agent rules: `AGENTS.md`, `.cursor/rules/obsidian-brain.mdc`, `.cursor/rules/graphify.mdc`
