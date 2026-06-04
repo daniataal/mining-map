@@ -61,6 +61,7 @@ import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import GemGoitPipelineMapLayer from './petroleum/GemGoitPipelineMapLayer';
+import GemGogptPlantMapLayer from './petroleum/GemGogptPlantMapLayer';
 import OilLiveMapOverlays, {
   type OilLiveEntityClickPayload,
   type OilLiveLayerVisibility,
@@ -1983,6 +1984,12 @@ export default function MapComponent({
                                 isDark={isDark}
                             />
                             <GemGoitPipelineMapLayer
+                                bbox={oilGasBbox}
+                                enabled={oilGasLayersEnabled}
+                                mapZoom={petroleumMapZoom}
+                                isDark={isDark}
+                            />
+                            <GemGogptPlantMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}

@@ -6728,6 +6728,11 @@ class GemGoitPipelinesIngestRequest(BaseModel):
     routes_dir: Optional[str] = None
 
 
+class GemGogptPlantsIngestRequest(BaseModel):
+    path: Optional[str] = None
+    include_sub_threshold: Optional[bool] = None
+
+
 @app.get("/api/eia-historic-imports/summary")
 def eia_historic_imports_summary(
     importer: Optional[str] = None,
@@ -6917,6 +6922,72 @@ def get_gem_pipelines_layer(
             "type": "FeatureCollection",
             "features": [],
             "layer_id": "gem_pipelines",
+            "feature_count": 0,
+            "limitations": [str(exc)],
+            "coverage_gap": True,
+        }
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-gogpt-plants/ingest")
+def admin_gem_gogpt_plants_ingest(
+    request: GemGogptPlantsIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Ingest GEM GOGPT plant units (xlsx) into gem_plant_units."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_gogpt_plants_import import ingest_gem_gogpt_plants
+        except ImportError:
+            from services.ingest.gem_gogpt_plants_import import ingest_gem_gogpt_plants
+        summary = ingest_gem_gogpt_plants(
+            conn,
+            workbook_path=request.path,
+            include_sub_threshold=request.include_sub_threshold,
+        )
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/petroleum/gem-plants")
+def get_gem_plants_layer(
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    zoom: Optional[float] = None,
+    limit: int = 8000,
+):
+    """GeoJSON for GEM GOGPT oil/gas plant units in viewport."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.gem_plant_units import get_gem_plants_geojson
+            from backend.services.storage_terminals import _parse_storage_bbox
+        except ImportError:
+            from services.gem_plant_units import get_gem_plants_geojson  # type: ignore
+            from services.storage_terminals import _parse_storage_bbox  # type: ignore
+
+        bbox = None
+        if south is not None or west is not None or north is not None or east is not None:
+            bbox = _parse_storage_bbox(south, west, north, east)
+        return get_gem_plants_geojson(conn, bbox=bbox, zoom=zoom, limit=limit)
+    except ValueError as exc:
+        return {
+            "type": "FeatureCollection",
+            "features": [],
+            "layer_id": "gem_plants",
             "feature_count": 0,
             "limitations": [str(exc)],
             "coverage_gap": True,
