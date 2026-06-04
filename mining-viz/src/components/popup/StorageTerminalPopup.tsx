@@ -10,7 +10,6 @@ import {
 import type { MiningLicense } from '../../types';
 import AddToDueDiligenceButton from '../AddToDueDiligenceButton';
 import CompanyLeadButton from './CompanyLeadButton';
-import type { MiningLicense } from '../../types';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 
