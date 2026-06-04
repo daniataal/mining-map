@@ -5737,9 +5737,17 @@ def _probe_oil_live_health() -> dict:
     import urllib.request
 
     base = (os.getenv("OIL_INTEL_API_URL") or "http://oil-live-intel:8095").rstrip("/")
+    # Liveness only — full /health runs sync-status DB work (~7s on VM) and false-fails the 5s probe.
+    live_url = f"{base}/api/oil-live/health/live"
+    try:
+        with urllib.request.urlopen(live_url, timeout=5) as resp:
+            if resp.status != 200:
+                return {"ok": False, "url": live_url, "error": f"HTTP {resp.status}"}
+    except Exception as exc:
+        return {"ok": False, "url": live_url, "error": str(exc)}
     url = f"{base}/api/oil-live/health"
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        with urllib.request.urlopen(url, timeout=12) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         sync = payload.get("sync") if isinstance(payload.get("sync"), dict) else {}
         return {
