@@ -1175,10 +1175,13 @@ export default function MapComponent({
         onStorageInViewCountChange(countEntitiesInViewport(storageEntities, oilGasMapViewport));
     }, [isOilAndGasView, storageEntities, oilGasMapViewport, onStorageInViewCountChange]);
 
-    useEffect(() => {
-        if (!isOilAndGasView || !onOilGasMapViewportChange) return;
-        onOilGasMapViewportChange(oilGasMapViewport);
-    }, [isOilAndGasView, oilGasMapViewport, onOilGasMapViewportChange]);
+    const handleOilGasViewportBoundsChange = useCallback(
+        (bbox: MaritimeViewportBounds | null) => {
+            setOilGasMapViewport(bbox);
+            onOilGasMapViewportChange?.(bbox);
+        },
+        [setOilGasMapViewport, onOilGasMapViewportChange],
+    );
     const vesselsVisible =
       isMaritimeMapView &&
       (!isOilAndGasView || oilAndGasDisplayMode !== 'on_ground_only') &&
@@ -1771,7 +1774,7 @@ export default function MapComponent({
                 />
                 <ViewportBoundsTracker
                     active={isOilAndGasView}
-                    onBoundsChange={setOilGasMapViewport}
+                    onBoundsChange={handleOilGasViewportBoundsChange}
                 />
                 <ViewportBoundsTracker
                     active={isLiveDataView && oilLiveOverlaysEnabled}

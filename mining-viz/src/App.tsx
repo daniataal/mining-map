@@ -256,6 +256,29 @@ export default function App() {
   }, [licenseDrillExpandBounds, licenseMapZoom, rawData]);
   const licensesMapSecondaryStatus = null;
   const [oilGasMapViewport, setOilGasMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const handleOilGasMapViewportChange = useCallback((bbox: LicenseViewportBounds | null) => {
+    setOilGasMapViewport((prev) => {
+      if (
+        (prev == null && bbox == null) ||
+        (prev &&
+          bbox &&
+          prev.south === bbox.south &&
+          prev.west === bbox.west &&
+          prev.north === bbox.north &&
+          prev.east === bbox.east)
+      ) {
+        return prev;
+      }
+      return bbox
+        ? {
+            south: bbox.south,
+            west: bbox.west,
+            north: bbox.north,
+            east: bbox.east,
+          }
+        : null;
+    });
+  }, []);
   const debouncedOilGasMapViewport = useDebouncedValue(oilGasMapViewport, 450);
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
@@ -1691,19 +1714,7 @@ export default function App() {
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
                   }
                   onOilGasMapViewportChange={
-                    viewMode === 'oil_and_gas'
-                      ? (bbox) =>
-                          setOilGasMapViewport(
-                            bbox
-                              ? {
-                                  south: bbox.south,
-                                  west: bbox.west,
-                                  north: bbox.north,
-                                  east: bbox.east,
-                                }
-                              : null,
-                          )
-                      : undefined
+                    viewMode === 'oil_and_gas' ? handleOilGasMapViewportChange : undefined
                   }
                   oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}
