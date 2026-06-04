@@ -54,6 +54,8 @@ services:
       - OIL_LIVE_DISABLE_DEMO_SEED=1
     volumes:
       - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/meridian/gem:/data/meridian/gem:ro
+      - ./data/gem/goit-pipeline-routes:/data/gem/goit-pipeline-routes:ro
     healthcheck:
       test:
         [

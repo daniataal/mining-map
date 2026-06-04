@@ -11,6 +11,7 @@ from backend.services.storage_terminals import (
     _element_geometry_bounds,
     _enrich_orphan_tanks_with_site_context,
     _enrich_storage_entity_for_detail,
+    _expand_storage_bbox,
     _extract_operator_owner,
     _geojson_centroid_and_bounds,
     _overpass_urls,
@@ -490,17 +491,88 @@ class StorageTerminalTests(unittest.TestCase):
         module._storage_cache["loaded_at"] = 0.0
         module._storage_cache["response"] = None
 
-        with (
-            patch("backend.services.storage_terminal_display.storage_display_read_enabled", return_value=False),
-            patch("backend.services.storage_terminal_display.STORAGE_DISPLAY_WRITE_THROUGH", False),
+        with patch(
+            "backend.services.storage_terminals_seed.load_curated_storage_terminals",
+            return_value=[],
         ):
-            result = get_storage_terminal_details("osm:node:777")
+            with (
+                patch("backend.services.storage_terminal_display.storage_display_read_enabled", return_value=False),
+                patch("backend.services.storage_terminal_display.STORAGE_DISPLAY_WRITE_THROUGH", False),
+            ):
+                result = get_storage_terminal_details("osm:node:777")
         self.assertIsNotNone(result)
         self.assertEqual(result["operatorName"], "Shell Enriched")
         self.assertIn("evidence", result)
         self.assertIn("rawPayload", result)
         mock_load_db.assert_called_once_with("osm:node:777")
         mock_enrich_detail.assert_called_once()
+
+    def test_expand_storage_bbox_adds_padding(self):
+        bbox = (25.0, 56.0, 26.0, 57.0)
+        expanded = _expand_storage_bbox(bbox, pad_deg=0.1)
+        self.assertEqual(expanded, (24.9, 55.9, 26.1, 57.1))
+
+    @patch("backend.services.storage_terminals._package_storage_response")
+    @patch("backend.services.storage_terminals._enrich_and_build_storage_response")
+    @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals", return_value=[])
+    @patch("backend.services.storage_terminals.normalize_storage_terminal")
+    @patch("backend.services.storage_terminals._load_storage_terminals_from_db")
+    def test_viewport_fast_uses_bbox_db_load(
+        self,
+        mock_load_db,
+        mock_normalize,
+        _mock_curated,
+        mock_enrich_build,
+        mock_package,
+    ):
+        element = {
+            "type": "node",
+            "id": 9001,
+            "lat": 25.12,
+            "lon": 56.34,
+            "tags": {"man_made": "storage_tank", "substance": "oil"},
+        }
+        mock_load_db.return_value = ([element], "2026-06-04T12:00:00Z")
+        mock_normalize.return_value = {
+            "id": "osm:node:9001",
+            "lat": 25.12,
+            "lng": 56.34,
+            "confidenceScore": 0.7,
+            "country": "United Arab Emirates",
+        }
+        entities = [{"id": "osm:node:9001", "lat": 25.12, "lng": 56.34}]
+        mock_enrich_build.return_value = (
+            {
+                "entities": entities,
+                "data_source": "database+curated+viewport",
+                "limitations": [],
+                "stats": {"total": 1},
+                "source_labels": [],
+                "coverage_note": "",
+                "data_as_of": "2026-06-04T12:00:00Z",
+            },
+            entities,
+        )
+        mock_package.return_value = {
+            "entities": entities,
+            "data_source": "database+curated+viewport",
+            "limitations": [],
+            "stats": {"total": 1},
+        }
+
+        from backend.services import storage_terminals as module
+
+        module._storage_cache["loaded_at"] = 0.0
+        module._storage_cache["response"] = None
+
+        bbox = (25.0, 56.0, 26.0, 57.0)
+        response = get_storage_terminals(force_refresh=False, bbox=bbox, limit=100)
+        self.assertEqual(response.get("data_source"), "database+curated+viewport")
+        mock_package.assert_called_once()
+        mock_load_db.assert_called_once()
+        load_bbox = mock_load_db.call_args.kwargs.get("bbox") or mock_load_db.call_args[0][0]
+        self.assertIsNotNone(load_bbox)
+        self.assertLess(load_bbox[0], bbox[0])
 
 
 if __name__ == "__main__":
