@@ -1,7 +1,11 @@
 /** Dev/staging shadow metrics for Go vs Python license map fallback (console only). */
 
+import { isLocalDevHost } from './agentDebugIngest';
+
 export const LICENSE_MAP_SHADOW_METRICS_ENABLED =
-  import.meta.env.DEV || import.meta.env.VITE_LICENSE_MAP_SHADOW_METRICS === '1';
+  import.meta.env.VITE_LICENSE_MAP_SHADOW_METRICS === '1' ||
+  import.meta.env.VITE_LICENSE_MAP_SHADOW_DEBUG === '1' ||
+  (import.meta.env.DEV && typeof window !== 'undefined' && isLocalDevHost());
 
 export type LicenseMapShadowPathKind = 'go' | 'python';
 

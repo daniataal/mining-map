@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { postAgentDebugIngest } from './agentDebugIngest';
 import { apiClient } from './api';
 import type { PetroleumViewportBounds } from './petroleumLayers';
 
@@ -68,44 +69,32 @@ export function useOsmPetroleumCatalog(enabled = true) {
       const startedAt = Date.now();
       try {
         const { data, status } = await apiClient.get<OsmPetroleumCatalog>('/api/petroleum/osm-layers');
-        // #region agent log
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'cd3deb' },
-          body: JSON.stringify({
-            sessionId: 'cd3deb',
-            hypothesisId: 'H2',
-            location: 'osmPetroleumLayers.ts:useOsmPetroleumCatalog',
-            message: 'osm_catalog_fetch_ok',
-            data: { httpStatus: status, elapsedMs: Date.now() - startedAt, layerCount: data?.layers?.length ?? 0 },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          sessionId: 'cd3deb',
+          hypothesisId: 'H2',
+          location: 'osmPetroleumLayers.ts:useOsmPetroleumCatalog',
+          message: 'osm_catalog_fetch_ok',
+          data: { httpStatus: status, elapsedMs: Date.now() - startedAt, layerCount: data?.layers?.length ?? 0 },
+          timestamp: Date.now(),
+        });
         return data;
       } catch (err) {
         const axStatus =
           err && typeof err === 'object' && 'response' in err
             ? (err as { response?: { status?: number } }).response?.status
             : undefined;
-        // #region agent log
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'cd3deb' },
-          body: JSON.stringify({
-            sessionId: 'cd3deb',
-            hypothesisId: 'H2',
-            location: 'osmPetroleumLayers.ts:useOsmPetroleumCatalog',
-            message: 'osm_catalog_fetch_error',
-            data: {
-              httpStatus: axStatus ?? null,
-              elapsedMs: Date.now() - startedAt,
-              error: err instanceof Error ? err.message : String(err),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          sessionId: 'cd3deb',
+          hypothesisId: 'H2',
+          location: 'osmPetroleumLayers.ts:useOsmPetroleumCatalog',
+          message: 'osm_catalog_fetch_error',
+          data: {
+            httpStatus: axStatus ?? null,
+            elapsedMs: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          timestamp: Date.now(),
+        });
         throw err;
       }
     },
@@ -144,52 +133,40 @@ export function useOsmPetroleumLayerGeoJson(
             },
           },
         );
-        // #region agent log
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'cd3deb' },
-          body: JSON.stringify({
-            sessionId: 'cd3deb',
-            hypothesisId: 'H1',
-            location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
-            message: 'osm_layer_fetch_ok',
-            data: {
-              layerId,
-              elapsedMs: Date.now() - startedAt,
-              featureCount: data?.features?.length ?? data?.feature_count ?? 0,
-              coverageGap: Boolean(data?.coverage_gap),
-              hasBbox: bbox != null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          sessionId: 'cd3deb',
+          hypothesisId: 'H1',
+          location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
+          message: 'osm_layer_fetch_ok',
+          data: {
+            layerId,
+            elapsedMs: Date.now() - startedAt,
+            featureCount: data?.features?.length ?? data?.feature_count ?? 0,
+            coverageGap: Boolean(data?.coverage_gap),
+            hasBbox: bbox != null,
+          },
+          timestamp: Date.now(),
+        });
         return data;
       } catch (err) {
-        // #region agent log
         const axStatus =
           err && typeof err === 'object' && 'response' in err
             ? (err as { response?: { status?: number } }).response?.status
             : undefined;
-        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'cd3deb' },
-          body: JSON.stringify({
-            sessionId: 'cd3deb',
-            hypothesisId: 'H1',
-            location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
-            message: 'osm_layer_fetch_error',
-            data: {
-              layerId,
-              elapsedMs: Date.now() - startedAt,
-              hasBbox: bbox != null,
-              httpStatus: axStatus ?? null,
-              error: err instanceof Error ? err.message : String(err),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
+        postAgentDebugIngest({
+          sessionId: 'cd3deb',
+          hypothesisId: 'H1',
+          location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
+          message: 'osm_layer_fetch_error',
+          data: {
+            layerId,
+            elapsedMs: Date.now() - startedAt,
+            hasBbox: bbox != null,
+            httpStatus: axStatus ?? null,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          timestamp: Date.now(),
+        });
         throw err;
       }
     },
