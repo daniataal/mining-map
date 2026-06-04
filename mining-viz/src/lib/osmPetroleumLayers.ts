@@ -81,26 +81,71 @@ export function useOsmPetroleumLayerGeoJson(
 ) {
   return useQuery<OsmPetroleumLayerGeoJson>({
     queryKey: ['osm-petroleum-layer', layerId, bbox, mapZoom],
-    queryFn: async () => {
-      const { data } = await apiClient.get<OsmPetroleumLayerGeoJson>(
-        `/api/petroleum/osm-layers/${layerId}`,
-        {
-          params: {
-            ...(bbox
-              ? {
-                  south: bbox.south,
-                  west: bbox.west,
-                  north: bbox.north,
-                  east: bbox.east,
-                }
-              : {}),
-            ...(mapZoom != null && Number.isFinite(mapZoom)
-              ? { zoom: Math.round(mapZoom * 10) / 10 }
-              : {}),
+    queryFn: async ({ signal }) => {
+      const startedAt = Date.now();
+      try {
+        const { data } = await apiClient.get<OsmPetroleumLayerGeoJson>(
+          `/api/petroleum/osm-layers/${layerId}`,
+          {
+            signal,
+            params: {
+              ...(bbox
+                ? {
+                    south: bbox.south,
+                    west: bbox.west,
+                    north: bbox.north,
+                    east: bbox.east,
+                  }
+                : {}),
+              ...(mapZoom != null && Number.isFinite(mapZoom)
+                ? { zoom: Math.round(mapZoom * 10) / 10 }
+                : {}),
+            },
           },
-        },
-      );
-      return data;
+        );
+        // #region agent log
+        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+          body: JSON.stringify({
+            sessionId: '7419a2',
+            hypothesisId: 'P1',
+            location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
+            message: 'osm_layer_fetch_ok',
+            data: {
+              layerId,
+              elapsedMs: Date.now() - startedAt,
+              featureCount: data?.features?.length ?? data?.feature_count ?? 0,
+              coverageGap: Boolean(data?.coverage_gap),
+              hasBbox: bbox != null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        return data;
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+          body: JSON.stringify({
+            sessionId: '7419a2',
+            hypothesisId: 'P1',
+            location: 'osmPetroleumLayers.ts:useOsmPetroleumLayerGeoJson',
+            message: 'osm_layer_fetch_error',
+            data: {
+              layerId,
+              elapsedMs: Date.now() - startedAt,
+              hasBbox: bbox != null,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+        throw err;
+      }
     },
     enabled: enabled && Boolean(bbox),
     staleTime: 60 * 60_000,

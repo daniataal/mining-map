@@ -59,10 +59,9 @@
 			}
 		}
 	}
-	# Use handle (not handle_path) so uri replace sees the full path for catalog + nested layer routes
+	# OSM petroleum GeoJSON catalog + layers (Postgres snapshot; Python until Go parity is default)
 	handle /api/petroleum/osm-layers* {
-		uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
-		reverse_proxy oil-live-intel:8095 {
+		reverse_proxy backend:8000 {
 			transport http {
 				read_timeout 0
 				write_timeout 0

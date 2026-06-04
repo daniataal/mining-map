@@ -383,7 +383,8 @@ export default function OsmPetroleumMapLayersGeoJson({
   const { t } = useI18n();
   const { data: catalog } = usePetroleumLayerCatalog(enabled);
   const mapboxOff = isPetroleumMapboxDisabled(catalog);
-  const osmDefaults = defaultOsmLayerVisibility(mapboxOff);
+  /** Oil & Gas split toggles replace Mapbox pipelines — default OSM pipelines on. */
+  const osmDefaults = defaultOsmLayerVisibility(splitOilGasPipelineLayers ? true : mapboxOff);
   const activeIds = layerIds ?? OSM_MAP_LAYER_IDS;
 
   if (!enabled) return null;

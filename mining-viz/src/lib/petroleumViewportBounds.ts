@@ -13,6 +13,21 @@ export const WORLD_PETROLEUM_PRELOAD_BBOX: PetroleumViewportBounds = {
   east: 180,
 };
 
+/** Coarse bbox for storage API query keys — reduces refetch storms while panning. */
+export function quantizePetroleumViewportBounds(
+  viewport: PetroleumViewportBounds,
+  decimals = 2,
+): PetroleumViewportBounds {
+  const scale = 10 ** decimals;
+  const q = (n: number) => Math.round(n * scale) / scale;
+  return {
+    south: q(viewport.south),
+    west: q(viewport.west),
+    north: q(viewport.north),
+    east: q(viewport.east),
+  };
+}
+
 /** Use tracked viewport when ready; null until the map reports bounds (avoids world Overpass/DB scans). */
 export function resolvePetroleumViewportBounds(
   viewport: PetroleumViewportBounds | null | undefined,
