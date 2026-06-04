@@ -25,6 +25,7 @@ import { getEiaHistoricMap } from './api/eiaHistoricApi';
 import { useMiningData } from './hooks/use-mining-data';
 import { useLicenseAnnotations } from './hooks/use-license-annotations';
 import { useDebouncedValue } from './hooks/use-debounced-value';
+import { quantizePetroleumViewportBounds } from './lib/petroleumViewportBounds';
 import {
   EIA_HISTORIC_STALE_MS,
   eiaHistoricMapQueryKey,
@@ -279,14 +280,21 @@ export default function App() {
         : null;
     });
   }, []);
-  const debouncedOilGasMapViewport = useDebouncedValue(oilGasMapViewport, 450);
+  const debouncedOilGasMapViewport = useDebouncedValue(oilGasMapViewport, 800);
+  const storageFetchViewport = useMemo(
+    () =>
+      debouncedOilGasMapViewport
+        ? quantizePetroleumViewportBounds(debouncedOilGasMapViewport)
+        : null,
+    [debouncedOilGasMapViewport],
+  );
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
     error: storageError,
   } = useStorageTerminals(viewMode === 'oil_and_gas', {
-    viewport: debouncedOilGasMapViewport,
+    viewport: storageFetchViewport,
     limit: 2000,
   });
   const {

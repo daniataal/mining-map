@@ -1469,7 +1469,7 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
 
   return useQuery<StorageTerminalResponse>({
     queryKey: ['storage-terminals', bboxKey, forceRefresh ? 'refresh' : 'cached', limit],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const requestTimeoutMs = 90_000;
       const startedAt = Date.now();
       const baseURL = apiClient.defaults.baseURL ?? '';
@@ -1482,7 +1482,13 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
           hypothesisId: 'A',
           location: 'api.ts:useStorageTerminals',
           message: 'storage_fetch_start',
-          data: { requestTimeoutMs, forceRefresh, baseURL },
+          data: {
+            requestTimeoutMs,
+            forceRefresh,
+            baseURL,
+            bboxKey,
+            hasViewport: viewport != null,
+          },
           timestamp: startedAt,
         }),
       }).catch(() => {});
@@ -1499,6 +1505,7 @@ export const useStorageTerminals = (enabled = true, options: StorageTerminalsQue
         const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
           timeout: requestTimeoutMs,
           params,
+          signal,
         });
         // #region agent log
         fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {

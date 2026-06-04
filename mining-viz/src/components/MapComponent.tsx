@@ -58,7 +58,6 @@ import MaritimeVesselFocusLayers from './vessels/MaritimeVesselFocusLayers';
 import MaritimeFocusLegend from './vessels/MaritimeFocusLegend';
 import CanvasVesselMarkers from './vessels/CanvasVesselMarkers';
 import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
-import PetroleumMapLayers from './petroleum/PetroleumMapLayers';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import OilLiveMapOverlays, {
@@ -127,11 +126,7 @@ import MapCoverageBanners from './map/MapCoverageBanners';
 import MaritimeControlPanel from './map/MaritimeControlPanel';
 import MaritimeAdvancedControls from './map/MaritimeAdvancedControls';
 import { useCountryBordersLayer } from './map/useCountryBordersLayer';
-import {
-  isPetroleumMapboxDisabled,
-  resolvePetroleumViewportBounds,
-  usePetroleumLayerCatalog,
-} from '../lib/petroleumLayers';
+import { resolvePetroleumViewportBounds } from '../lib/petroleumLayers';
 import { useLicenseDisplayData } from './map/useLicenseDisplayData';
 import { useLicenseInteractions } from './map/useLicenseInteractions';
 import { useLicenseMarkerVisuals } from './map/useLicenseMarkerVisuals';
@@ -1191,8 +1186,6 @@ export default function MapComponent({
     const liveCanvasMapZoom = isOilAndGasView ? petroleumMapZoom : overlayMapZoom;
     const effectiveLicenseMapZoom = Math.max(licenseMapZoom ?? 0, liveCanvasMapZoom) || undefined;
     const oilGasLayersEnabled = isOilAndGasView && onGroundVisible;
-    const { data: petroleumCatalog } = usePetroleumLayerCatalog(oilGasLayersEnabled);
-    const petroleumMapboxOff = isPetroleumMapboxDisabled(petroleumCatalog);
     const oilGasBbox = useMemo(
         () => resolvePetroleumViewportBounds(oilGasMapViewport),
         [oilGasMapViewport],
@@ -1980,19 +1973,12 @@ export default function MapComponent({
                     )}
                     {isOilAndGasView && onGroundVisible && (
                         <>
-                            {!petroleumMapboxOff && oilGasBbox && (
-                                <PetroleumMapLayers
-                                    bbox={oilGasBbox}
-                                    mapZoom={petroleumMapZoom}
-                                    enabled={oilGasLayersEnabled}
-                                    isDark={isDark}
-                                />
-                            )}
                             <OsmPetroleumMapLayers
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
-                                splitOilGasPipelineLayers={petroleumMapboxOff}
+                                layerIds={['pipelines', 'refineries']}
+                                splitOilGasPipelineLayers
                                 isDark={isDark}
                             />
                             <StorageTankFarmsMapLayer

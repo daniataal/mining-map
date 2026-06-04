@@ -122,6 +122,27 @@ export default function StorageTankFarmsMapLayer({
 
   if (!storageTankFarmsLayerShouldMount(enabled, mapZoom)) return null;
 
+  // #region agent log
+  fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7419a2' },
+    body: JSON.stringify({
+      sessionId: '7419a2',
+      hypothesisId: 'C',
+      location: 'StorageTankFarmsMapLayer.tsx:render',
+      message: 'storage_layer_render',
+      data: {
+        enabled,
+        entityCount: entities.length,
+        placemarkCount: placemarks.length,
+        featureCount: features.length,
+        mapZoom: mapZoom ?? null,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   const layerLabel = t(
     'מסופי אחסון / טנקים (OSM + מקורות)',
     'Storage / tank farms (OSM + reference)',

@@ -70,7 +70,10 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
   const { data: catalog } = usePetroleumLayerCatalog(enabled);
   const { data: osmCatalog } = useOsmPetroleumCatalog(enabled);
   const mapboxOff = isPetroleumMapboxDisabled(catalog);
-  const osmDefaults = useMemo(() => defaultOsmLayerVisibility(mapboxOff), [mapboxOff]);
+  const osmDefaults = useMemo(
+    () => defaultOsmLayerVisibility(splitOilGasPipelineLayers ? true : mapboxOff),
+    [mapboxOff, splitOilGasPipelineLayers],
+  );
   const vectorMode = osmVectorTilesEnabled(osmCatalog);
   const activeIds = layerIds ?? OSM_MAP_LAYER_IDS;
 
