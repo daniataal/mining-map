@@ -7,6 +7,7 @@ services:
       context: ./backend
     container_name: mining-backend
     restart: always
+    command: ["python", "main.py"]
     # Secrets: prefer backend.env (production) or repo-root .env (local). Do not pass empty
     # AISSTREAM_API_KEY=${AISSTREAM_API_KEY} here — that overrides env_file with a blank value.
     env_file:

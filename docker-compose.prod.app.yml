@@ -1,0 +1,89 @@
+# Tier-1 app-only overlay for ~4 vCPU ARM VMs (interactive map/API; ingest on demand).
+#
+# Core (always on): db, redis, caddy, backend, route-service, oil-live-intel,
+# oil-live-intel-worker, frontend.
+#
+# Heavy sync workers → profile `ingest`. Elasticsearch → profile `search`.
+# Base docker-compose.prod.yml is unchanged; omit this file for the full default stack.
+#
+# Interactive only:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml up -d
+#
+# Enable scheduled ingest/sync workers:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml --profile ingest up -d
+#
+# Enable Elasticsearch full-text search (~512 MB RAM):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml --profile search up -d
+#
+# Ingest + search (indexer needs both):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml --profile ingest --profile search up -d
+#
+# Connection budget (Postgres default max_connections=100):
+#   backend: UVICORN_WORKERS × concurrent requests
+#   oil-live-intel/worker: OIL_INTEL_DB_MAX_CONNS each
+# Optional pgbouncer profile commented below if you hit "too many connections".
+
+services:
+  backend:
+    environment:
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+
+  oil-live-intel:
+    environment:
+      - OIL_INTEL_DB_MAX_CONNS=${OIL_INTEL_DB_MAX_CONNS:-10}
+
+  oil-live-intel-worker:
+    environment:
+      - OIL_INTEL_DB_MAX_CONNS=${OIL_INTEL_DB_MAX_CONNS:-10}
+
+  license-sync-worker:
+    profiles: ["ingest"]
+
+  comtrade-sync-worker:
+    profiles: ["ingest"]
+
+  ted-procurement-worker:
+    profiles: ["ingest"]
+
+  gov-procurement-sync-worker:
+    profiles: ["ingest"]
+
+  oil-live-graph-sync-worker:
+    profiles: ["ingest"]
+
+  uk-trade-manifest-sync-worker:
+    profiles: ["ingest"]
+
+  eia-historic-sync-worker:
+    profiles: ["ingest"]
+
+  oil-live-search-indexer:
+    profiles: ["ingest"]
+    environment:
+      - OIL_INTEL_DB_MAX_CONNS=${OIL_INTEL_DB_MAX_CONNS:-10}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  elasticsearch:
+    profiles: ["search"]
+
+  # Optional connection pooler — not enabled by default.
+  # 1) docker compose ... --profile pgbouncer up -d
+  # 2) Point DATABASE_URL / DB_HOST at pgbouncer:6432 for services you pool.
+  # pgbouncer:
+  #   profiles: ["pgbouncer"]
+  #   image: edoburu/pgbouncer:1.22.1-p0
+  #   platform: linux/arm64
+  #   container_name: mining-pgbouncer
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgresql://postgres:password@db:5432/mining_db
+  #     POOL_MODE: transaction
+  #     MAX_CLIENT_CONN: 200
+  #     DEFAULT_POOL_SIZE: 20
+  #   ports:
+  #     - "6432:5432"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
