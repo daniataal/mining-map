@@ -1,0 +1,124 @@
+# Tier-3 ingest VM overlay — background workers only (second host).
+#
+# App VM runs Postgres (or use a shared DB host). This overlay excludes the
+# interactive stack and points all workers at remote Postgres via DB_HOST /
+# DATABASE_URL. Do not combine with docker-compose.prod.app.yml on the same host.
+#
+# Prerequisites on ingest VM:
+#   - Firewall: allow egress to App VM Postgres (5432) and optional App VM
+#     oil-live-intel (8095) for graph-sync admin calls.
+#   - Copy backend.env (secrets) and data volume mounts (eia, uk manifests, gem).
+#   - export DB_HOST=<app-vm-private-ip>
+#   - export DATABASE_URL=postgresql://postgres:<password>@<app-vm-ip>:5432/mining_db?sslmode=disable
+#   - export OIL_INTEL_API_URL=http://<app-vm-ip>:8095   # graph-sync worker
+#
+# Core ingest workers (always on this host):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.ingest.yml up -d
+#
+# + Elasticsearch + search indexer:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.ingest.yml --profile search up -d
+#
+# + regional extended ingest:
+#   ... --profile extended-ingest up -d
+#
+# Validate: docker compose -f docker-compose.prod.yml -f docker-compose.prod.ingest.yml config >/dev/null
+
+x-ingest-remote-db: &ingest-remote-db
+  DB_HOST: ${DB_HOST:?Set DB_HOST to App VM or shared Postgres host}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_NAME: ${DB_NAME:-mining_db}
+  DB_USER: ${DB_USER:-postgres}
+  DB_PASSWORD: ${DB_PASSWORD:-password}
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to remote Postgres}
+
+services:
+  backend:
+    profiles: ["ingest-vm-excluded"]
+
+  route-service:
+    profiles: ["ingest-vm-excluded"]
+
+  frontend:
+    profiles: ["ingest-vm-excluded"]
+
+  caddy:
+    profiles: ["ingest-vm-excluded"]
+
+  db:
+    profiles: ["ingest-vm-excluded"]
+
+  oil-live-intel:
+    profiles: ["ingest-vm-excluded"]
+
+  redis:
+    ports: !reset []
+
+  license-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset
+      redis:
+        condition: service_started
+
+  comtrade-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  ted-procurement-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  gov-procurement-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  oil-live-graph-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+      OIL_INTEL_API_URL: ${OIL_INTEL_API_URL:?Set OIL_INTEL_API_URL to App VM oil-live-intel}
+    depends_on: !reset []
+
+  uk-trade-manifest-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  eia-historic-sync-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  sweden-mining-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  arcgis-probe-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  kazakhstan-mining-worker:
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset []
+
+  oil-live-intel-worker:
+    environment:
+      <<: *ingest-remote-db
+      OIL_INTEL_API_URL: ${OIL_INTEL_API_URL:?Set OIL_INTEL_API_URL to App VM oil-live-intel}
+    depends_on: !reset []
+
+  oil-live-search-indexer:
+    profiles: ["search"]
+    environment:
+      <<: *ingest-remote-db
+    depends_on: !reset
+      elasticsearch:
+        condition: service_healthy
+
+  elasticsearch:
+    profiles: ["search"]
