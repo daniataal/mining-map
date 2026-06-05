@@ -61,7 +61,7 @@ services:
     profiles: ["ingest"]
     environment:
       - OIL_INTEL_DB_MAX_CONNS=${OIL_INTEL_DB_MAX_CONNS:-10}
-    depends_on:
+    depends_on: !reset
       db:
         condition: service_healthy
 
