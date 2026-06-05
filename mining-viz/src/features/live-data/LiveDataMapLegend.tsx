@@ -41,6 +41,12 @@ const SWATCHES: { key: string; color: string; dash?: string; labelEn: string; la
     labelHe: 'יבוא היסטורי EIA',
   },
   {
+    key: 'sts',
+    color: '#7c3aed',
+    labelEn: 'Inferred STS proximity',
+    labelHe: 'קרבת STS מסקנית',
+  },
+  {
     key: 'terminal',
     color: '#2563eb',
     labelEn: 'Terminals',
@@ -65,6 +71,7 @@ export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn 
     if (s.key === 'eia') return eiaHistoricOn;
     if (s.key === 'terminal') return layers.terminals;
     if (s.key === 'coverage') return layers.coverage;
+    if (s.key === 'sts') return layers.stsEvents;
     return false;
   });
 

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Anchor, ExternalLink, Loader2, Ship } from 'lucide-react';
+import { Anchor, ArrowLeftRight, ExternalLink, Loader2, Ship } from 'lucide-react';
 import ShipVaultRegistryPanel from '../../components/vessels/ShipVaultRegistryPanel';
 import {
   getVesselDossier,
@@ -9,8 +9,19 @@ import {
   type OilPortCall,
   type VesselDossierParty,
 } from '../../api/oilLiveApi';
+import {
+  getVesselStsHistory,
+  isStsEventVerified,
+  stsInferenceDisclaimer,
+  stsVesselLabel,
+  verifyStsEvent,
+  type StsEvent,
+} from '../../api/stsEventsApi';
 import { useI18n } from '../../lib/i18n';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
+import StsConfidenceBadge from './StsConfidenceBadge';
+import StsEnrichmentBlock from './StsEnrichmentBlock';
+import { isStsAnalystMode } from './stsAnalystMode';
 
 type VesselDrawerTab = 'overview' | 'mcr' | 'registry';
 
@@ -118,6 +129,144 @@ function PortCallRow({ pc }: { pc: OilPortCall }) {
   );
 }
 
+function stsDurationLabel(start?: string, end?: string): string {
+  if (!start || !end) return '—';
+  const a = new Date(start).getTime();
+  const b = new Date(end).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return '—';
+  const mins = Math.round((b - a) / 60_000);
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
+}
+
+function StsEventRow({
+  event,
+  subjectMmsi,
+  onVerified,
+}: {
+  event: StsEvent;
+  subjectMmsi: string;
+  onVerified?: (updated: StsEvent) => void;
+}) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const analystMode = isStsAnalystMode();
+  const verified = isStsEventVerified(event);
+  const [showVerifyForm, setShowVerifyForm] = useState(false);
+  const [notes, setNotes] = useState('');
+
+  const verifyMutation = useMutation({
+    mutationFn: () => verifyStsEvent(event.id, notes.trim()),
+    onSuccess: (res) => {
+      const updated =
+        res.event ??
+        (res.id ? (res as StsEvent) : { ...event, status: 'verified', verification_notes: notes.trim() });
+      onVerified?.(updated);
+      queryClient.invalidateQueries({ queryKey: ['oil-live-vessel-sts-history', subjectMmsi] });
+      queryClient.invalidateQueries({ queryKey: ['oil-live-sts-events'] });
+      setShowVerifyForm(false);
+      setNotes('');
+    },
+  });
+
+  const subject = Number(subjectMmsi);
+  const otherSide = event.mmsi_a === subject ? 'b' : 'a';
+  const otherMmsi = otherSide === 'a' ? event.mmsi_a : event.mmsi_b;
+  const badgeTier = verified ? 'verified' : event.confidence_tier;
+
+  return (
+    <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-[10px] space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <StsConfidenceBadge tier={badgeTier} />
+        {event.status && !verified && (
+          <span className="text-[9px] uppercase text-slate-400">{event.status}</span>
+        )}
+      </div>
+      <p className="font-semibold text-slate-800 dark:text-slate-100">
+        {t('עם', 'With')}: {stsVesselLabel(event, otherSide)}
+      </p>
+      <p className="text-slate-500">
+        MMSI {otherMmsi} · {formatTs(event.start_ts)} → {formatTs(event.end_ts)}
+        {' · '}
+        {stsDurationLabel(event.start_ts, event.end_ts)}
+      </p>
+      {event.min_distance_m != null && (
+        <p className="text-slate-500">
+          {t('מרחק מינימלי', 'Min distance')}: {Math.round(event.min_distance_m)} m
+        </p>
+      )}
+      {event.zone_name && (
+        <p className="text-slate-500">
+          {t('אזור', 'Zone')}: {event.zone_name}
+        </p>
+      )}
+      <StsEnrichmentBlock event={event} compact />
+      {analystMode && !verified && (
+        <div className="pt-1 space-y-1.5">
+          {!showVerifyForm ? (
+            <button
+              type="button"
+              className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-300 hover:underline"
+              onClick={() => setShowVerifyForm(true)}
+            >
+              {t('סמן כמאומת', 'Mark verified')}
+            </button>
+          ) : (
+            <div className="space-y-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2">
+              <label className="block text-[9px] font-black uppercase text-emerald-700 dark:text-emerald-300">
+                {t('הערות אימות', 'Verification notes')}
+              </label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="w-full rounded-md border border-black/10 dark:border-white/10 bg-white dark:bg-slate-900 px-2 py-1 text-[10px]"
+                placeholder={t(
+                  'מה נבדק? (קרבה, נמל, מטען…)',
+                  'What was reviewed? (proximity, port, cargo…)',
+                )}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={verifyMutation.isPending || !notes.trim()}
+                  className="px-2 py-1 rounded-md bg-emerald-600 text-white text-[9px] font-bold uppercase disabled:opacity-40"
+                  onClick={() => verifyMutation.mutate()}
+                >
+                  {verifyMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin inline" />
+                  ) : (
+                    t('אשר', 'Confirm')
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="text-[9px] font-bold uppercase text-slate-500"
+                  onClick={() => {
+                    setShowVerifyForm(false);
+                    setNotes('');
+                  }}
+                >
+                  {t('ביטול', 'Cancel')}
+                </button>
+              </div>
+              {verifyMutation.isError && (
+                <p className="text-[9px] text-red-500">
+                  {verifyMutation.error instanceof Error
+                    ? verifyMutation.error.message
+                    : t('האימות נכשל', 'Verification failed')}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function McrRow({
   row,
   onOpenCargo,
@@ -173,6 +322,31 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
     queryFn: () => getVesselDossier(mmsi, { mcr_limit: mcrLimit, mcr_offset: mcrOffset }),
     staleTime: 30_000,
   });
+
+  const {
+    data: stsHistory,
+    isLoading: stsLoading,
+    isError: stsError,
+    error: stsErr,
+  } = useQuery({
+    queryKey: ['oil-live-vessel-sts-history', mmsi],
+    queryFn: () => getVesselStsHistory(mmsi, { limit: 30 }),
+    staleTime: 60_000,
+  });
+
+  const [localStsEvents, setLocalStsEvents] = useState<StsEvent[] | null>(null);
+  const stsEvents = localStsEvents ?? stsHistory?.events ?? [];
+
+  useEffect(() => {
+    setLocalStsEvents(null);
+  }, [mmsi]);
+
+  const handleStsVerified = (updated: StsEvent) => {
+    setLocalStsEvents((prev) => {
+      const base = prev ?? stsHistory?.events ?? [];
+      return base.map((ev) => (ev.id === updated.id ? { ...ev, ...updated } : ev));
+    });
+  };
 
   const refreshMutation = useMutation({
     mutationFn: () => refreshVesselEnrichment(mmsi),
@@ -320,6 +494,50 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {data.port_calls.map((pc) => (
                   <PortCallRow key={pc.id} pc={pc} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <ArrowLeftRight className="w-4 h-4 text-violet-500" />
+              <p className="text-[9px] font-black uppercase text-violet-500">
+                {t('קרבת STS מסקנית', 'Inferred STS proximity')} (
+                {stsHistory?.count ?? stsHistory?.events?.length ?? 0})
+              </p>
+            </div>
+            <p className="text-[9px] text-amber-800 dark:text-amber-200 leading-relaxed">
+              {stsInferenceDisclaimer(stsHistory?.disclaimer)}
+            </p>
+            {stsLoading && (
+              <p className="text-[10px] text-slate-500 flex items-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {t('טוען היסטוריית STS…', 'Loading STS history…')}
+              </p>
+            )}
+            {stsError && (
+              <p className="text-[10px] text-red-500">
+                {stsErr instanceof Error ? stsErr.message : 'Failed to load STS history'}
+              </p>
+            )}
+            {!stsLoading && !stsError && stsEvents.length === 0 && (
+              <p className="text-[10px] text-slate-500">
+                {t(
+                  'אין אירועי קרבה STS שמורים ל-MMSI זה',
+                  'No stored STS proximity events for this MMSI',
+                )}
+              </p>
+            )}
+            {stsEvents.length > 0 && (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {stsEvents.map((ev) => (
+                  <StsEventRow
+                    key={ev.id}
+                    event={ev}
+                    subjectMmsi={mmsi}
+                    onVerified={handleStsVerified}
+                  />
                 ))}
               </div>
             )}

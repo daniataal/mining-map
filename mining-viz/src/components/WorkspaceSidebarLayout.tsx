@@ -4,6 +4,7 @@ import { useI18n } from '../lib/i18n';
 import Sidebar from './Sidebar';
 import type { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
 import type { LicenseCoverageSector } from '../lib/licenseCoverage';
+import BrandMark from './BrandMark';
 
 export type MapSidebarTab = 'licenses' | 'live_data' | 'historic';
 
@@ -144,6 +145,9 @@ export default function WorkspaceSidebarLayout({
       className="flex h-full min-h-0 flex-1 bg-transparent text-slate-800 dark:text-slate-100 select-none"
     >
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-4 bg-white dark:bg-slate-950">
+        <div className="mb-2 flex shrink-0 items-center justify-center">
+          <BrandMark size="rail" variant="emblem" framed />
+        </div>
         <button
           type="button"
           onClick={() => {

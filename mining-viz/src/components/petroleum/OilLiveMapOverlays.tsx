@@ -54,6 +54,8 @@ export type OilLiveLayerVisibility = {
   tradeFlows: boolean;
   /** Open AIS coverage quality / gap overlay. */
   coverage: boolean;
+  /** Inferred ship-to-ship proximity events (AIS — not verified transfer). */
+  stsEvents: boolean;
 };
 
 /** Cap of per-MCR arrows kept on the map at once (Phase 1 constraint). */

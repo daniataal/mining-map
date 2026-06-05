@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 import { licenseCardSubtitle, licenseCardTitle } from '../lib/licenseSidebarCard';
+import BrandMark from './BrandMark';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -144,6 +145,9 @@ export default function Sidebar({
     <div className="flex h-full min-h-0 flex-1 bg-transparent text-slate-800 dark:text-slate-100 select-none">
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
+        <div className="mb-2 flex shrink-0 items-center justify-center">
+          <BrandMark size="rail" variant="emblem" framed />
+        </div>
         <button
           onClick={() => {
             onSelectWorkspaceTab?.('licenses');
