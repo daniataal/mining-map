@@ -112,10 +112,10 @@ Off-peak defaults in the example:
 
 Rebuild/publish frontend image after nginx changes.
 
-### Caddy (browser entry :8080)
+### Caddy (Tier-1 browser entry :8080)
 
 `Caddyfile` includes `@static_assets` and `@spa_shell` handlers (mirrored in `Caddyfile.edge`
-for copy/paste). Place a CDN or reverse proxy in front of `:8080`; origin sends correct
+and `Caddyfile.scale`). Place a CDN or reverse proxy in front of `:8080`; origin sends correct
 `Cache-Control` for hashed Vite assets.
 
 **Verify:**
@@ -144,7 +144,7 @@ Tune via env (see [env.tier4.example](./env.tier4.example)):
 docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml \
   -f docker-compose.prod.scale.yml ps pgbouncer
 docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml \
-  -f docker-compose.prod.scale.yml exec backend printenv DB_HOST
+  -f docker-compose.prod.scale.yml exec backend-a printenv DB_HOST
 # expect: pgbouncer
 ```
 
@@ -160,13 +160,16 @@ If you see `too many connections` without the scale overlay, the commented PgBou
 echo $?   # 0 = all probes OK, 1 = at least one failure
 ```
 
-Probes:
+Probes (mode `caddy-only` — default in cron example for scale tier):
 
 | Target | URL |
 |--------|-----|
-| backend | `http://127.0.0.1:8000/docs` |
-| oil-live-intel | `http://127.0.0.1:8095/api/oil-live/health/live` |
-| caddy (user path) | `http://127.0.0.1:8080/api/oil-live/health/live` |
+| caddy oil-live | `http://127.0.0.1:8080/api/oil-live/health/live` |
+| caddy platform | `http://127.0.0.1:8080/api/health` |
+| caddy entry | `http://127.0.0.1:8080/` |
+
+Set `VM_HEALTH_MODE=auto` on Tier-1 to also warn when direct `:8000`/`:8095` are down.
+Use `VM_HEALTH_MODE=full` to require all five probes.
 
 ### Alerting suggestions (wire externally)
 
