@@ -27,10 +27,16 @@ services:
   backend:
     environment:
       - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-1}
+      - RATE_LIMIT_RPM=${RATE_LIMIT_RPM:-30}
+      - RATE_LIMIT_ROUTE_RPM=${RATE_LIMIT_ROUTE_RPM:-60}
 
   oil-live-intel:
     environment:
       - OIL_INTEL_DB_MAX_CONNS=${OIL_INTEL_DB_MAX_CONNS:-10}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/1}
 
   oil-live-intel-worker:
     environment:

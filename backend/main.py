@@ -32,6 +32,11 @@ try:
 except ImportError:
     from api.routing import router as routing_router, is_route_planner_enabled
 
+try:
+    from backend.services.rate_limit import RateLimitMiddleware
+except ImportError:
+    from services.rate_limit import RateLimitMiddleware
+
 app = FastAPI()
 
 # Routing platform (supplier -> buyer product routing). The router itself
@@ -711,6 +716,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=800)
+app.add_middleware(RateLimitMiddleware)
 
 # Database connection parameters
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()

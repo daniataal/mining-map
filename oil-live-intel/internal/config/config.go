@@ -45,6 +45,18 @@ type Config struct {
 	ShipVaultBackfillEnabled       bool
 	ShipVaultBackfillLimit         int
 	ShipVaultBackfillIntervalHours int
+
+	// GFW historical AIS archive ingest (optional; requires free API token).
+	GFWAPIKey                     string
+	GFWArchiveIngestEnabled       bool
+	GFWArchiveBackfillDays        int
+	GFWArchiveIngestIntervalHours int
+
+	// Optional Redis URL for hot GET response cache (OIL_INTEL_REDIS_URL or REDIS_URL).
+	RedisURL string
+
+	// STS analyst verification (PATCH /sts-events/{id}); header X-Analyst-Token.
+	STSAnalystToken string
 }
 
 // ShipVaultConfigured reports whether ShipVault should run (env credentials or DB refresh token).
@@ -92,7 +104,23 @@ func Load() Config {
 		ShipVaultBackfillEnabled:       envBool("SHIPVAULT_BACKFILL_ENABLED", true),
 		ShipVaultBackfillLimit:         envInt("SHIPVAULT_BACKFILL_LIMIT", 25),
 		ShipVaultBackfillIntervalHours: envInt("SHIPVAULT_BACKFILL_INTERVAL_HOURS", 24),
+
+		GFWAPIKey:                     env("GFW_API_KEY", ""),
+		GFWArchiveIngestEnabled:       envBool("GFW_ARCHIVE_INGEST_ENABLED", false) && env("GFW_API_KEY", "") != "",
+		GFWArchiveBackfillDays:        envInt("GFW_ARCHIVE_BACKFILL_DAYS", 7),
+		GFWArchiveIngestIntervalHours: envInt("GFW_ARCHIVE_INGEST_INTERVAL_HOURS", 24),
+
+		RedisURL: redisURLFromEnv(),
+
+		STSAnalystToken: env("STS_ANALYST_TOKEN", ""),
 	}
+}
+
+func redisURLFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("OIL_INTEL_REDIS_URL")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_URL"))
 }
 
 func shipVaultEnabled() bool {

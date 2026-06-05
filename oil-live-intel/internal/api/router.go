@@ -6,14 +6,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/mining-map/oil-live-intel/internal/cache"
 )
 
-func NewRouter(s *Server) http.Handler {
+func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
+	if responseCache != nil {
+		r.Use(responseCache.Middleware)
+	}
 
 	r.Route("/api/oil-live", func(api chi.Router) {
 		api.Get("/health/live", s.HealthLive)
@@ -54,6 +59,7 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/vessels/lookup", s.LookupVesselByIMO)
 		api.Get("/vessels/{mmsi}", s.GetVessel)
 		api.Get("/vessels/{mmsi}/track", s.GetVesselTrack)
+		api.Get("/vessels/{mmsi}/sts-history", s.GetVesselSTSHistory)
 		api.Get("/vessels/{mmsi}/dossier", s.GetVesselDossier)
 		api.Get("/vessels/{mmsi}/shipvault", s.GetVesselShipVault)
 		api.Get("/vessels/{mmsi}/shipvault/detail", s.GetVesselShipVaultDetail)
@@ -62,6 +68,8 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/shipvault/companies/{id}/fleet", s.GetShipVaultCompanyFleet)
 		api.Get("/shipvault/yards/{id}", s.GetShipVaultYard)
 		api.Post("/admin/shipvault/bootstrap", s.ShipVaultBootstrap)
+		api.Get("/sts-events", s.ListSTSEvents)
+		api.Patch("/sts-events/{id}", s.PatchSTSEvent)
 		api.Get("/port-calls/recent", s.RecentPortCalls)
 		api.Get("/port-calls/{id}", s.GetPortCall)
 		api.Get("/port-calls/{id}/explain", s.ExplainPortCall)
