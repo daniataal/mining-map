@@ -69,6 +69,8 @@ import {
   type VesselFilters,
 } from './lib/vessels';
 import IntelligenceSearchBox from './components/IntelligenceSearchBox';
+import BrandMark from './components/BrandMark';
+import { BRAND_NAME_SHORT } from './lib/brand';
 import { useRoutePlanner } from './features/route-planner';
 import {
   applyLiveDataRouteHints,
@@ -1452,6 +1454,12 @@ export default function App() {
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
+                  <div className="flex h-10 items-center gap-2.5 rounded-2xl border border-amber-500/35 bg-slate-950/75 px-2.5 shadow-2xl backdrop-blur-xl">
+                    <BrandMark size="header" variant="emblem" framed />
+                    <span className="hidden lg:block text-[10px] font-black uppercase tracking-[0.22em] text-amber-100/95 whitespace-nowrap">
+                      {BRAND_NAME_SHORT}
+                    </span>
+                  </div>
                   <IntelligenceSearchBox
                     countries={miningData.countries}
                     externalFilter={miningData.filter}
@@ -1730,7 +1738,7 @@ export default function App() {
                   oilLiveLens={oilLiveLens}
                   onOilLiveLensChange={isLiveDataSidebar ? handleOilLiveLensChange : undefined}
                   oilLiveLayers={oilLiveLayers}
-                  onOilLiveLayersChange={isLiveDataSidebar ? setOilLiveLayers : undefined}
+                  onOilLiveLayersChange={setOilLiveLayers}
                   oilLiveTradeFlowGroup={oilLiveTradeFlowGroup}
                   onOilLiveTradeFlowGroupChange={
                     isLiveDataSidebar ? setOilLiveTradeFlowGroup : undefined

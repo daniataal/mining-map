@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Anchor,
   Archive,
+  ArrowLeftRight,
   ArrowRightLeft,
   Building2,
   Globe2,
@@ -95,6 +96,14 @@ const LAYER_META = [
     labelHe: 'כיסוי AIS',
     hintEn: 'Sparse/gap overlay for open AIS sources',
     hintHe: 'שכבת חוסרים ודלילות למקורות AIS פתוחים',
+  },
+  {
+    key: 'stsEvents' as const,
+    icon: ArrowLeftRight,
+    labelEn: 'STS proximity',
+    labelHe: 'קרבת STS',
+    hintEn: 'Inferred ship-to-ship proximity (not verified transfer)',
+    hintHe: 'קרבת כלי שיט מסקנית — לא העברת מטען מאומתת',
   },
   {
     key: 'corridors' as const,

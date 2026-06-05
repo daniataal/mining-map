@@ -5,6 +5,8 @@ import { Input } from './ui/input';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from './ui/card';
 import { LucideLock, LucideUser, LucideShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
+import BrandMark from './BrandMark';
+import { BRAND_COPYRIGHT, BRAND_NAME } from '../lib/brand';
 
 interface AuthOverlayProps {
   onLogin: (user: string, pass: string) => void;
@@ -31,11 +33,11 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
             >
                 <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800">
                     <CardHeader className="space-y-2 text-center pb-8">
-                        <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
-                            <LucideLock className="w-6 h-6 text-amber-500" />
+                        <div className="mx-auto mb-4 flex items-center justify-center">
+                            <BrandMark size="lg" />
                         </div>
                         <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {t("גישה למערכת", "MadSan Global Intelligence")}
+                            {t("גישה למערכת", BRAND_NAME)}
                         </CardTitle>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                             {t("אנא התחבר כדי לצפות ולנהל נתוני רישיונות", "Please sign in to view and manage license data.")}
@@ -96,7 +98,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                             <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
                         </div>
                         <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
-                            {t("צוות מורשה בלבד • 2026 MadSan Global Intelligence", "Authorized Personnel Only • 2026 MadSan Global Intelligence")}
+                            {t(`צוות מורשה בלבד • ${BRAND_COPYRIGHT}`, `Authorized Personnel Only • ${BRAND_COPYRIGHT}`)}
                         </p>
                     </CardFooter>
                 </Card>

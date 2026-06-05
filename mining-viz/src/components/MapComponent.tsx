@@ -79,6 +79,7 @@ import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
 import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
 import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
+import StsEventsMapLayer from '../features/live-data/StsEventsMapLayer';
 import {
   LIVE_DATA_HUB_BOUNDS,
   LIVE_DATA_DEFAULT_LAYERS,
@@ -1359,6 +1360,11 @@ export default function MapComponent({
             liveDataMapViewport,
         ],
     );
+    const stsMapViewport = isLiveDataView ? liveDataMapViewport : maritimeViewport;
+    const stsLayerEnabled =
+        oilLiveLayers.stsEvents &&
+        ((isLiveDataView && oilLiveOverlaysEnabled) ||
+            (isMaritimeMapView && isMaritimeLayerEnabled));
     const maritimeViewportAisGap =
         isMaritimeLayerEnabled &&
         maritimeVessels.length === 0 &&
@@ -1791,6 +1797,16 @@ export default function MapComponent({
                                                 : t('שגיאת טעינה לא ידועה', 'Unknown vessel loading error')
                                             : null
                                     }
+                                    stsEventsEnabled={oilLiveLayers.stsEvents}
+                                    onStsEventsChange={
+                                        onOilLiveLayersChange
+                                            ? (enabled) =>
+                                                  onOilLiveLayersChange({
+                                                      ...oilLiveLayers,
+                                                      stsEvents: enabled,
+                                                  })
+                                            : undefined
+                                    }
                                 />
                             </>
                         )}
@@ -2048,6 +2064,13 @@ export default function MapComponent({
                             }
                             onStatsChange={onOilLiveStatsChange}
                             onEntityClick={onOilLiveEntityClick}
+                        />
+                    )}
+                    {stsLayerEnabled && (
+                        <StsEventsMapLayer
+                            enabled
+                            viewport={stsMapViewport}
+                            onOpenVessel={onOilLiveEntityClick}
                         />
                     )}
                     {eiaHistoricMapEnabled && (eiaHistoricMapArcs.length > 0 || (eiaHistoricMapOrigins?.length ?? 0) > 0) && (

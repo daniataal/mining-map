@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion } from 'framer-motion';
+import { BRAND_NAME } from '../lib/brand';
 
 interface DashboardViewProps {
   licenses: MiningLicense[];
@@ -68,7 +69,7 @@ export default function DashboardView({
             {t("לוח בקרה טקטי", "Tactical Command Center")}
           </h1>
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mt-1">
-            MadSan Global Intelligence • System Status: Online
+            {BRAND_NAME} • System Status: Online
           </p>
         </div>
         <div className="flex gap-2 sm:gap-4 items-center flex-wrap justify-end">

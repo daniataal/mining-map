@@ -41,6 +41,8 @@ type MaritimeAdvancedControlsProps = {
   maritimeDetailNote: string;
   maritimeLimitationText: string | null;
   maritimeErrorMessage: string | null;
+  stsEventsEnabled?: boolean;
+  onStsEventsChange?: (enabled: boolean) => void;
 };
 
 export default function MaritimeAdvancedControls({
@@ -65,6 +67,8 @@ export default function MaritimeAdvancedControls({
   maritimeDetailNote,
   maritimeLimitationText,
   maritimeErrorMessage,
+  stsEventsEnabled = false,
+  onStsEventsChange,
 }: MaritimeAdvancedControlsProps) {
   return (
     <>
@@ -273,6 +277,28 @@ export default function MaritimeAdvancedControls({
                       )}
             </p>
           </div>
+
+          {onStsEventsChange && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-violet-500/25 bg-violet-500/5 px-2.5 py-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={stsEventsEnabled}
+                onChange={(e) => onStsEventsChange(e.target.checked)}
+              />
+              <span className="text-[9px] leading-snug text-slate-700 dark:text-slate-200">
+                <span className="font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  {t('קרבת STS', 'STS proximity')}
+                </span>
+                <span className="block opacity-90">
+                  {t(
+                    'אירועי קרבה מסקניים — לא העברת מטען מאומתת',
+                    'Inferred proximity events — not verified cargo transfer',
+                  )}
+                </span>
+              </span>
+            </label>
+          )}
 
           <p className="text-[9px] leading-snug text-slate-500">{maritimeDetailNote}</p>
 
