@@ -141,6 +141,8 @@ services:
       retries: 5
       start_period: 180s
     depends_on:
+      pgbouncer:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -178,6 +180,8 @@ services:
       retries: 5
       start_period: 180s
     depends_on:
+      pgbouncer:
+        condition: service_healthy
       db:
         condition: service_healthy
       redis:
@@ -189,21 +193,59 @@ services:
 
   oil-live-intel-worker:
     environment:
-      DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@db:5432/mining_db?sslmode=disable}
+      DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@pgbouncer:5432/mining_db?sslmode=disable}
       OIL_INTEL_API_URL: http://oil-live-intel-a:8095
       OIL_INTEL_DB_MAX_CONNS: ${OIL_INTEL_DB_MAX_CONNS:-8}
     depends_on: !reset
+      pgbouncer:
+        condition: service_healthy
       oil-live-intel-a:
         condition: service_healthy
 
+  license-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  comtrade-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  ted-procurement-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  gov-procurement-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
   oil-live-graph-sync-worker:
     environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
       OIL_INTEL_API_URL: http://oil-live-intel-a:8095
     depends_on: !reset
-      db:
+      pgbouncer:
         condition: service_healthy
       oil-live-intel-a:
         condition: service_healthy
+
+  uk-trade-manifest-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  eia-historic-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  oil-live-search-indexer:
+    environment:
+      DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@pgbouncer:5432/mining_db?sslmode=disable}
 
   frontend:
     depends_on: !reset
@@ -230,7 +272,6 @@ services:
         condition: service_healthy
 
   pgbouncer:
-    profiles: ["pgbouncer"]
     image: edoburu/pgbouncer:1.22.1-p0
     platform: linux/arm64
     container_name: mining-pgbouncer
