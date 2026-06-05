@@ -70,7 +70,7 @@ export default function TradeManifestUploadPanel({ className = '' }: Props) {
         <span className="text-[10px] text-slate-700 dark:text-slate-300">
           {t(
             'יש לי זכות להעלות ולשתף נתונים אלה במערכת',
-            'I have the right to upload and share this data in Meridian',
+            'I have the right to upload and share this data in MadSan Intelligence',
           )}
         </span>
       </label>

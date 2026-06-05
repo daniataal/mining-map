@@ -52,7 +52,7 @@ export function downloadDealPackMarkdown(pack: DealExecutionPack, opportunityId:
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `meridian-deal-pack-${opportunityId.slice(0, 8)}.md`;
+  a.download = `madsan-deal-pack-${opportunityId.slice(0, 8)}.md`;
   a.click();
   URL.revokeObjectURL(url);
 }

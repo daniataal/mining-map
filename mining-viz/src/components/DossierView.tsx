@@ -41,6 +41,7 @@ import {
   AlertTriangle as LucideAlertTriangle,
   CheckCircle2 as LucideCheckCircle2,
   Ship as LucideShip,
+  Pin as LucidePin,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -1060,7 +1061,19 @@ Output requirements:
             </div>
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
               {onAddToDueDiligence && onRemoveFromDueDiligence && (
-                <div className="hidden sm:block w-52">
+                <div className="hidden sm:flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-500/20 text-amber-500 hover:bg-amber-500/10"
+                    onClick={() => {
+                      // Stub functionality for the UX demo
+                      window.alert(`Pinned ${item.name} to Workspace!`);
+                    }}
+                  >
+                    <LucidePin className="w-4 h-4 mr-2" />
+                    Workspace
+                  </Button>
                   <AddToDueDiligenceButton
                     compact
                     isInQueue={isInDdQueue}
@@ -1117,7 +1130,17 @@ Output requirements:
               </div>
             )}
             {onAddToDueDiligence && onRemoveFromDueDiligence && (
-              <div className="sm:hidden mb-6">
+              <div className="sm:hidden mb-6 flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full justify-center border-amber-500/20 text-amber-500 hover:bg-amber-500/10"
+                  onClick={() => {
+                    window.alert(`Pinned ${item.name} to Workspace!`);
+                  }}
+                >
+                  <LucidePin className="w-4 h-4 mr-2" />
+                  Pin to Workspace
+                </Button>
                 <AddToDueDiligenceButton
                   isInQueue={isInDdQueue}
                   onAdd={onAddToDueDiligence}

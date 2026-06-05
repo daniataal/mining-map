@@ -35,6 +35,19 @@ import {
 } from './hooks/use-petroleum-sidebar-prefetch';
 import { useI18n } from './lib/i18n';
 import { MiningLicense, UserAnnotation, MaritimeVessel, MarketTickerRow } from './types';
+import { BrokerWorkspaceProvider } from './features/broker-workspace/BrokerWorkspaceContext';
+import { BrokerWorkspaceShell } from './features/broker-workspace/BrokerWorkspaceShell';
+import { MapComponentBridge } from './features/broker-workspace/MapComponentBridge';
+import { BROKER_WORKSPACE_ENABLED } from './lib/brokerWorkspaceFlag';
+import { syncWorkspaceAnnotation } from './lib/syncWorkspaceAnnotation';
+import { useIntelligenceNavigation } from './hooks/use-intelligence-navigation';
+import { IntelligenceModeNav } from './components/IntelligenceModeNav';
+import {
+  IntelligenceRail,
+  type IntelligenceSelection,
+} from './features/intelligence-rail/IntelligenceRail';
+import { LiveSignalsBar } from './components/LiveSignalsBar';
+import { isCountryLicenseSummary } from './lib/licenseCountrySummary';
 import { toast } from "sonner";
 
 import WorkspaceSidebarLayout, { type MapSidebarTab } from './components/WorkspaceSidebarLayout';
@@ -103,7 +116,6 @@ import {
   layersForLiveDataLens,
   type LiveDataLensMode,
 } from './features/live-data/liveDataMapDefaults';
-import { countSuppliersPipeline } from './lib/suppliersPipeline';
 
 import 'leaflet/dist/leaflet.css';
 import './App.css';
@@ -190,19 +202,26 @@ export default function App() {
   const { t, isRtl } = useI18n();
   const routePlanner = useRoutePlanner();
   const ddQueue = useDueDiligenceQueue();
-  const [viewMode, setViewMode] = useState<
-    'global' | 'mining' | 'oil_and_gas' | 'suppliers' | 'ports' | 'investigations' | 'route_planner' | 'admin'
-  >('global');
+  const nav = useIntelligenceNavigation();
+  const {
+    viewMode,
+    setViewMode,
+    licenseSector,
+    suppliersPipelineMode,
+    intelligenceMode,
+    intelligenceSublayer,
+    switchIntelligenceMode,
+    switchIntelligenceSublayer,
+    switchSectorView,
+    cockpitEnabled,
+    closeAdmin,
+  } = nav;
   const [mapSidebarTab, setMapSidebarTab] = useState<MapSidebarTab>('licenses');
   const [investigationsSubTab, setInvestigationsSubTab] = useState<InvestigationsSubTab>('due_diligence');
+  const [intelligenceSelection, setIntelligenceSelection] = useState<IntelligenceSelection>(null);
+  const [intelligenceRailOpen, setIntelligenceRailOpen] = useState(false);
   const [euProcurementCpvBucket, setEuProcurementCpvBucket] = useState<string | null>(null);
   const [highlightedDealRoomId, setHighlightedDealRoomId] = useState<string | null>(null);
-  const licenseSector =
-    viewMode === 'mining'
-      ? 'mining'
-      : viewMode === 'oil_and_gas'
-        ? 'oil_and_gas'
-        : undefined;
   const licenseFetchTroubleshooting = useMemo(() => {
     const h = describeLicenseFetchFailureContext();
     return t(h.he, h.en);
@@ -519,13 +538,9 @@ export default function App() {
 
   // Filtering Hook
   const miningData = useMiningData(allLicenses, userAnnotations, {
-    suppliersPipelineMode: viewMode === 'suppliers',
+    suppliersPipelineMode,
     skipCountryFilterForMap: Boolean(countryFocusCountry?.trim()),
   });
-  const suppliersCounts = useMemo(
-    () => countSuppliersPipeline(allLicenses.map((l) => l.id), userAnnotations),
-    [allLicenses, userAnnotations],
-  );
   const mapProcessedData = useDeferredValue(
     countryFocusCountry?.trim() ? miningData.mapProcessedData : miningData.processedData,
   );
@@ -754,10 +769,7 @@ export default function App() {
     } else {
       miningData.setSelectedSector(null);
     }
-    if (viewMode === 'suppliers') {
-      miningData.setSuppliersShowAll(false);
-    }
-  }, [viewMode, miningData.setSelectedSector, miningData.setSuppliersShowAll]);
+  }, [viewMode, miningData.setSelectedSector]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -827,11 +839,46 @@ export default function App() {
     [dealRooms],
   );
 
+  const handleCloseIntelligenceRail = useCallback(() => {
+    setIntelligenceRailOpen(false);
+    setIntelligenceSelection(null);
+  }, []);
+
   const handleSelectItem = useCallback((item: MiningLicense | null) => {
     setSelectedMaritimeVessel(null);
     setOilLiveEntity(null);
     setSelectedItem(item);
-  }, []);
+    if (item && isCountryLicenseSummary(item) && item.country) {
+      setIntelligenceSelection({ type: 'country', country: item.country });
+      setIntelligenceRailOpen(true);
+    } else if (item) {
+      setIntelligenceSelection({ type: 'license', item });
+      setIntelligenceRailOpen(true);
+    } else {
+      handleCloseIntelligenceRail();
+    }
+  }, [handleCloseIntelligenceRail]);
+
+  const handleCountryIntelligenceSelect = useCallback(
+    (country: string) => {
+      setIntelligenceSelection({ type: 'country', country });
+      setIntelligenceRailOpen(true);
+      applyCountryFocus(country);
+    },
+    [applyCountryFocus],
+  );
+
+  useEffect(() => {
+    if (
+      viewMode === 'route_planner' ||
+      viewMode === 'supply_chain' ||
+      viewMode === 'workspace' ||
+      viewMode === 'investigations' ||
+      viewMode === 'admin'
+    ) {
+      setIntelligenceRailOpen(false);
+    }
+  }, [viewMode]);
 
   const handleOilLiveEntityClick = useCallback((payload: OilLiveEntityClickPayload) => {
     setSelectedItem(null);
@@ -961,6 +1008,7 @@ export default function App() {
 
   const updateAnnotation = useCallback((id: string, updates: Partial<UserAnnotation>) => {
     persistAnnotation(id, updates);
+    void syncWorkspaceAnnotation(id, updates);
 
     const targetEntity = entityIndex[id];
     if (targetEntity?.entityKind === 'storage_terminal') {
@@ -1085,15 +1133,6 @@ export default function App() {
     }
     setViewMode('global');
   };
-
-  const switchSectorView = useCallback((mode: 'global' | 'mining' | 'oil_and_gas') => {
-    startTransition(() => {
-      setViewMode(mode);
-      // Oil & Gas top-nav view = license/storage map; Live/Historic are sidebar tabs only.
-      setMapSidebarTab('licenses');
-      setOilLiveEntity(null);
-    });
-  }, []);
 
   const handleOilLiveLensChange = useCallback((lens: LiveDataLensMode) => {
     setOilLiveLens(lens);
@@ -1236,7 +1275,9 @@ export default function App() {
     });
   }, [username, maritimeMapViewActive, isLiveDataSidebar, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
-  return (
+  const MapEl = BROKER_WORKSPACE_ENABLED ? MapComponentBridge : MapComponent;
+
+  const appShell = (
     <div className={`h-screen w-screen flex flex-col bg-stone-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans ${isRtl ? 'rtl' : 'ltr'}`}>
       {/* 1. Global Market Ticker (Entrepreneur Desk) */}
       <div className="h-8 w-full bg-slate-50 dark:bg-slate-950 border-b border-black/5 dark:border-white/5 flex items-center overflow-hidden">
@@ -1325,8 +1366,7 @@ export default function App() {
         >
           {(viewMode === 'global' ||
             viewMode === 'mining' ||
-            viewMode === 'oil_and_gas' ||
-            viewMode === 'suppliers') && (
+            viewMode === 'oil_and_gas') && (
             <WorkspaceSidebarLayout
               tab={mapSidebarTab}
               onTabChange={handleMapSidebarTabChange}
@@ -1337,16 +1377,17 @@ export default function App() {
               onSidebarViewModeChange={handleSidebarViewModeChange}
               onToggleFilter={() => setIsFilterOpen(!isFilterOpen)}
               onToggleAdmin={() => setViewMode('admin')}
+              onToggleWorkspace={() => switchIntelligenceMode('supply_chain')}
+              onToggleSearch={() => {
+                switchIntelligenceMode('supply_chain');
+                switchIntelligenceSublayer('suppliers');
+              }}
               isFilterOpen={isFilterOpen}
               onLogout={handleLogout}
               processedData={miningData.processedData}
               setIsAddModalOpen={setIsAddModalOpen}
               onOpenBulkImport={() => setIsBulkImportOpen(true)}
-              loading={
-                viewMode === 'ports'
-                  ? isPortsLoading
-                  : Boolean(isLoading && rawData.length === 0)
-              }
+              loading={Boolean(isLoading && rawData.length === 0)}
               userAnnotations={userAnnotations}
               selectedItem={selectedItem}
               setSelectedItem={(item: MiningLicense) => {
@@ -1354,9 +1395,7 @@ export default function App() {
                 setMapFlyTrigger((prev) => prev + 1);
               }}
               infrastructureStats={
-                viewMode === 'oil_and_gas' || viewMode === 'ports'
-                  ? miningData.infrastructureStats
-                  : undefined
+                viewMode === 'oil_and_gas' ? miningData.infrastructureStats : undefined
               }
               isInDdQueue={ddQueue.isInQueue}
               onAddToDueDiligence={ddQueue.addToQueue}
@@ -1399,14 +1438,15 @@ export default function App() {
         </aside>
 
         {/* PANEL 2: Central Map Workspace */}
-        <main className="flex-1 relative z-0 h-full overflow-hidden">
+        <main className="flex min-w-0 flex-1 relative z-0 h-full overflow-hidden">
+          <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Top Command Toolbar - Only show on Map, Pipeline, Logistics, Oil */}
           {/* Oil mode uses its own full-screen chrome — avoid stacking two toolbars */}
           {(viewMode === 'global' ||
             viewMode === 'mining' ||
             viewMode === 'oil_and_gas' ||
-            viewMode === 'suppliers' ||
             viewMode === 'ports' ||
+            viewMode === 'supply_chain' ||
             viewMode === 'investigations' ||
             viewMode === 'route_planner') && (
             <div className="absolute top-4 left-3 right-3 sm:left-6 sm:right-6 z-[1000] flex justify-end sm:justify-between items-center pointer-events-none">
@@ -1418,6 +1458,7 @@ export default function App() {
                     countryFocusCountry={countryFocusCountry}
                     onApplyCountryFocus={applyCountryFocus}
                     onCommitLicenseSearch={handleCommitLicenseSearch}
+                    onOpenCountryIntelligence={handleCountryIntelligenceSelect}
                   />
                   {countryFocusCountry && (
                     <button
@@ -1461,28 +1502,6 @@ export default function App() {
                       {t(mapViewHelpTitle(viewMode), mapViewHelpTitle(viewMode))}
                     </span>
                   </div>
-                  {viewMode === 'suppliers' && (
-                    <div className="hidden sm:flex items-center gap-2">
-                      <div className="flex items-center px-3 h-10 rounded-2xl bg-emerald-500/10 backdrop-blur-2xl border border-emerald-500/30 shadow-2xl text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-                        {t('ספקים פעילים', 'Active suppliers')}: {suppliersCounts.active}
-                        <span className="mx-1 opacity-50">/</span>
-                        {suppliersCounts.total}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => miningData.setSuppliersShowAll((v) => !v)}
-                        className={`h-10 rounded-2xl border px-3 text-[9px] font-black uppercase tracking-widest shadow-2xl backdrop-blur-2xl ${
-                          miningData.suppliersShowAll
-                            ? 'border-amber-500/50 bg-amber-500/15 text-amber-800 dark:text-amber-200'
-                            : 'border-stone-200/90 bg-stone-100/90 text-slate-600 dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-300'
-                        }`}
-                      >
-                        {miningData.suppliersShowAll
-                          ? t('הצג pipeline בלבד', 'Pipeline only')
-                          : t('הצג את כל הרישיונות', 'Show all licenses')}
-                      </button>
-                    </div>
-                  )}
                   {miningData.activeFilterCount > 0 && (
                     <div className="hidden lg:flex items-center gap-2 px-3 h-10 rounded-2xl bg-amber-500/10 backdrop-blur-2xl border border-amber-500/30 shadow-2xl text-[9px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400">
                       {t("מסננים פעילים", "Active filters")}: {miningData.activeFilterCount}
@@ -1498,6 +1517,15 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
+                  {cockpitEnabled ? (
+                    <IntelligenceModeNav
+                      mode={intelligenceMode}
+                      sublayer={intelligenceSublayer}
+                      onModeChange={switchIntelligenceMode}
+                      onSublayerChange={switchIntelligenceSublayer}
+                      investigationsBadge={ddQueue.queue.length + dealRooms.count}
+                    />
+                  ) : (
                   <div className="flex gap-0.5 sm:gap-1.5 bg-stone-100/90 sm:bg-stone-100/80 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-stone-200/90 sm:border-stone-200/70 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
                     <button
                       onClick={() => switchSectorView('global')}
@@ -1517,17 +1545,6 @@ export default function App() {
                     >
                       <LucideDroplets className="w-3.5 h-3.5" />
                       {t("נפט וגז", "Oil & Gas")}
-                    </button>
-                    <button
-                      onClick={() => setViewMode('suppliers')}
-                      className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 flex items-center gap-1.5 ${viewMode === 'suppliers' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
-                    >
-                      {t("ספקים", "Suppliers")}
-                      {suppliersCounts.active > 0 && (
-                        <span className="inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-emerald-500/30 text-[9px] font-black px-1">
-                          {suppliersCounts.active}
-                        </span>
-                      )}
                     </button>
                     <button
                       onClick={() => setViewMode('ports')}
@@ -1554,6 +1571,7 @@ export default function App() {
                       )}
                     </button>
                   </div>
+                  )}
 
                   {/* Filter button — hidden on mobile (available in bottom nav) */}
                   <ThemeToggle className="hidden sm:flex" />
@@ -1623,29 +1641,16 @@ export default function App() {
             </>
           )}
 
-          {viewMode === 'suppliers' &&
-            !miningData.suppliersShowAll &&
-            mapProcessedData.length === 0 &&
-            !isLoading && (
-              <div className="absolute inset-x-0 top-28 z-[998] mx-auto max-w-md pointer-events-none px-4">
-                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-[11px] font-semibold text-emerald-900 shadow-xl backdrop-blur-xl dark:text-emerald-100">
-                  {t(
-                    'סמן אות עסקה (ירוק) בדוסייה → סקירה כדי להוסיף ספקים. או הצג את כל הרישיונות לגילוי.',
-                    'Mark Deal signal (green) on dossier Overview to add suppliers here. Or use Show all licenses for discovery.',
-                  )}
-                </div>
-              </div>
-            )}
-
           <div className="w-full h-full z-0">
             {(viewMode === 'global' ||
               viewMode === 'mining' ||
-              viewMode === 'suppliers' ||
               viewMode === 'ports' ||
               viewMode === 'oil_and_gas' ||
-              viewMode === 'route_planner') && (
+              viewMode === 'route_planner' ||
+              viewMode === 'supply_chain' ||
+              viewMode === 'workspace') && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
-                <MapComponent
+                <MapEl
                   processedData={viewMode === 'route_planner' ? [] : mapProcessedData}
                   allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
                   userAnnotations={userAnnotations}
@@ -1791,6 +1796,12 @@ export default function App() {
                     isLiveDataSidebar ? setLiveDataMacroTradeOn : undefined
                   }
                   oilLiveSidebarActive={isLiveDataSidebar}
+                  cockpitEnabled={cockpitEnabled}
+                  cockpitLegendMode={intelligenceMode}
+                  cockpitLegendSublayer={intelligenceSublayer}
+                  onCountrySelect={
+                    cockpitEnabled ? handleCountryIntelligenceSelect : undefined
+                  }
                 />
               </Suspense>
             )}
@@ -1930,7 +1941,10 @@ export default function App() {
                 <Suspense fallback={<LazySurfaceFallback label={t('טוען ניהול...', 'Loading admin...')} />}>
                   <AdminPanel
                     isOpen={true}
-                    onClose={() => setViewMode('global')}
+                    onClose={() => {
+                      closeAdmin();
+                      setViewMode('global');
+                    }}
                     token={token || undefined}
                     isFullPage={true}
                     currentUserId={userId}
@@ -1939,6 +1953,51 @@ export default function App() {
               </div>
             )}
           </div>
+          </div>
+          {intelligenceRailOpen &&
+            cockpitEnabled &&
+            viewMode !== 'route_planner' &&
+            viewMode !== 'supply_chain' &&
+            viewMode !== 'workspace' &&
+            viewMode !== 'investigations' &&
+            viewMode !== 'admin' && (
+              <IntelligenceRail
+                selection={intelligenceSelection}
+                onClose={handleCloseIntelligenceRail}
+                onViewAssets={(country) => {
+                  switchIntelligenceMode('assets');
+                  switchIntelligenceSublayer('mines');
+                  applyCountryFocus(country);
+                }}
+                onFindSuppliers={(country) => {
+                  switchIntelligenceMode('supply_chain');
+                  switchIntelligenceSublayer('suppliers');
+                  applyCountryFocus(country);
+                }}
+                onBuildDealPack={(country) => {
+                  switchIntelligenceMode('supply_chain');
+                  switchIntelligenceSublayer('deal_packs');
+                  applyCountryFocus(country);
+                }}
+              />
+            )}
+          {(viewMode === 'supply_chain' || viewMode === 'workspace') && (
+            <aside className="flex h-full min-h-0 w-[28rem] shrink-0 flex-col overflow-hidden border-l border-black/10 dark:border-white/10">
+              <Suspense fallback={<LazySurfaceFallback label={t('טוען...', 'Loading...')} />}>
+                <BrokerWorkspaceShell
+                  licenses={allLicenses}
+                  userAnnotations={userAnnotations}
+                  sublayer={
+                    intelligenceSublayer === 'buyers' ||
+                    intelligenceSublayer === 'deal_packs' ||
+                    intelligenceSublayer === 'suppliers'
+                      ? intelligenceSublayer
+                      : 'suppliers'
+                  }
+                />
+              </Suspense>
+            </aside>
+          )}
         </main>
 
         {/* PANEL 3: Right Tactical Filter Hub */}
@@ -1977,7 +2036,7 @@ export default function App() {
           entitySubtypes={miningData.entitySubtypes}
           sourceLabels={miningData.sourceLabels}
           maritimeSection={
-            maritimeMapViewActive
+            maritimeMapViewActive && !cockpitEnabled
               ? {
                   layerEnabled: isMaritimeLayerEnabled,
                   onLayerEnabledChange: setIsMaritimeLayerEnabled,
@@ -2075,8 +2134,60 @@ export default function App() {
         />
       </div>
 
+      {cockpitEnabled && (
+        <LiveSignalsBar
+          onVesselClick={() => switchIntelligenceMode('routes')}
+          onLicenseClick={() => switchIntelligenceMode('global_view')}
+          onSupplierClick={() => {
+            switchIntelligenceMode('supply_chain');
+            switchIntelligenceSublayer('suppliers');
+          }}
+          onAlertClick={() => setViewMode('investigations')}
+        />
+      )}
+
       {/* Mobile Bottom Nav — part of the flex-col layout so it shrinks the content above it */}
       <nav className="md:hidden h-16 bg-stone-50/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-stone-200/90 dark:border-white/10 flex items-center justify-start gap-1 overflow-x-auto z-50 shrink-0 px-1">
+        {cockpitEnabled ? (
+          <>
+            <button
+              onClick={() => switchIntelligenceMode('global_view')}
+              className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${intelligenceMode === 'global_view' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            >
+              <LucideMapPin className="w-5 h-5" />
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('גלובלי', 'Global')}</span>
+            </button>
+            <button
+              onClick={() => switchIntelligenceMode('assets')}
+              className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${intelligenceMode === 'assets' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            >
+              <LucideLayoutGrid className="w-5 h-5" />
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('נכסים', 'Assets')}</span>
+            </button>
+            <button
+              onClick={() => switchIntelligenceMode('supply_chain')}
+              className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${intelligenceMode === 'supply_chain' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            >
+              <LucideDroplets className="w-5 h-5" />
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('שרשרת', 'Supply')}</span>
+            </button>
+            <button
+              onClick={() => switchIntelligenceMode('routes')}
+              className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors shrink-0 ${intelligenceMode === 'routes' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            >
+              <LucideNavigation className="w-5 h-5" />
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('מסלול', 'Routes')}</span>
+            </button>
+            <button
+              onClick={() => switchIntelligenceMode('investigations')}
+              className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${intelligenceMode === 'investigations' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
+            >
+              <LucidePieChart className="w-5 h-5" />
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('חקירות', 'Investigate')}</span>
+            </button>
+          </>
+        ) : (
+          <>
         <button
           onClick={() => switchSectorView('global')}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
@@ -2112,6 +2223,8 @@ export default function App() {
           <LucidePieChart className="w-5 h-5" />
           <span className="text-[8px] font-black uppercase tracking-wider">{t('חקירות', 'Investigate')}</span>
         </button>
+          </>
+        )}
         <button
           onClick={() => setIsFilterOpen(!isFilterOpen)}
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${isFilterOpen ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
@@ -2129,4 +2242,9 @@ export default function App() {
       </nav>
     </div>
   );
+
+  if (BROKER_WORKSPACE_ENABLED) {
+    return <BrokerWorkspaceProvider>{appShell}</BrokerWorkspaceProvider>;
+  }
+  return appShell;
 }

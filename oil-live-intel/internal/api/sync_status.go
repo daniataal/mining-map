@@ -29,48 +29,48 @@ type TradeFlowSourceCount struct {
 }
 
 type syncStatusSummary struct {
-	TerminalCount                 int            `json:"terminal_count"`
-	CompanyCount                  int            `json:"company_count"`
-	CargoRecordCount              int            `json:"cargo_record_count"`
-	PortCallCount                 int            `json:"port_call_count"`
-	OpenOpportunityCount          int            `json:"open_opportunity_count"`
-	CorridorFullCount             int            `json:"corridor_full_count"`
-	CorridorPartialCount          int            `json:"corridor_partial_count"`
-	McrWithLeiCount               int            `json:"mcr_with_lei_count"`
-	McrWithSanctionsScreenedCount int            `json:"mcr_with_sanctions_screened_count"`
-	McrCorridorCompanyPairCount   int            `json:"mcr_corridor_company_pair_count"`
-	TopCorridors                  []TopCorridor  `json:"top_corridors"`
-	McrByTier                     []McrTierCount         `json:"mcr_by_tier"`
-	ManifestByTier                []McrTierCount         `json:"manifest_by_tier"`
-	OilTradeFlowsBySource         []TradeFlowSourceCount `json:"oil_trade_flows_by_source"`
-	OilTradeFlowCount             int                    `json:"oil_trade_flow_count"`
-	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
-	TradeManifestRowCount         int            `json:"trade_manifest_row_count"`
-	LiveVesselCount               int            `json:"live_vessel_count"`
-	LiveAisPortCallCount          int            `json:"live_ais_port_call_count"`
-	VesselObservationCount        int            `json:"vessel_observation_count"`
-	ShipVaultCacheCount          int            `json:"shipvault_cache_count"`
-	ShipVaultCredentialCount     int            `json:"shipvault_credential_count"`
-	LastShipVaultCacheAt         any            `json:"last_shipvault_cache_at"`
-	CoverageWatchZoneCount        int            `json:"coverage_watch_zone_count"`
-	CoverageGapWatchZoneCount     int            `json:"coverage_gap_watch_zone_count"`
-	LastGraphSyncAt               any            `json:"last_graph_sync_at"`
-	LastCargoAt                   any            `json:"last_cargo_at"`
-	LastComtradeSyncAt            any            `json:"last_comtrade_sync_at"`
-	LastComtradeSyncStatus        *string        `json:"last_comtrade_sync_status"`
-	EurostatTradeFlowCount        int            `json:"eurostat_trade_flow_count"`
-	LastEurostatSyncAt            any            `json:"last_eurostat_sync_at"`
-	LastEurostatSyncStatus        *string        `json:"last_eurostat_sync_status"`
-	JodiSnapshotCount             int            `json:"jodi_snapshot_count"`
-	LastJodiSyncAt                any            `json:"last_jodi_sync_at"`
-	LastJodiSyncStatus            *string        `json:"last_jodi_sync_status"`
-	DemoPortCallCount             int            `json:"demo_port_call_count"`
-	DemoCargoRecordCount          int            `json:"demo_cargo_record_count"`
-	ProductionCargoRecordCount    int            `json:"production_cargo_record_count"`
-	LastVesselObservationAt       any                    `json:"last_vessel_observation_at"`
-	GraphSyncSteps                []GraphSyncStepOutcome `json:"graph_sync_steps,omitempty"`
+	TerminalCount                 int                       `json:"terminal_count"`
+	CompanyCount                  int                       `json:"company_count"`
+	CargoRecordCount              int                       `json:"cargo_record_count"`
+	PortCallCount                 int                       `json:"port_call_count"`
+	OpenOpportunityCount          int                       `json:"open_opportunity_count"`
+	CorridorFullCount             int                       `json:"corridor_full_count"`
+	CorridorPartialCount          int                       `json:"corridor_partial_count"`
+	McrWithLeiCount               int                       `json:"mcr_with_lei_count"`
+	McrWithSanctionsScreenedCount int                       `json:"mcr_with_sanctions_screened_count"`
+	McrCorridorCompanyPairCount   int                       `json:"mcr_corridor_company_pair_count"`
+	TopCorridors                  []TopCorridor             `json:"top_corridors"`
+	McrByTier                     []McrTierCount            `json:"mcr_by_tier"`
+	ManifestByTier                []McrTierCount            `json:"manifest_by_tier"`
+	OilTradeFlowsBySource         []TradeFlowSourceCount    `json:"oil_trade_flows_by_source"`
+	OilTradeFlowCount             int                       `json:"oil_trade_flow_count"`
+	EiaHistoricImportCount        int                       `json:"eia_historic_import_count"`
+	TradeManifestRowCount         int                       `json:"trade_manifest_row_count"`
+	LiveVesselCount               int                       `json:"live_vessel_count"`
+	LiveAisPortCallCount          int                       `json:"live_ais_port_call_count"`
+	VesselObservationCount        int                       `json:"vessel_observation_count"`
+	ShipVaultCacheCount           int                       `json:"shipvault_cache_count"`
+	ShipVaultCredentialCount      int                       `json:"shipvault_credential_count"`
+	LastShipVaultCacheAt          any                       `json:"last_shipvault_cache_at"`
+	CoverageWatchZoneCount        int                       `json:"coverage_watch_zone_count"`
+	CoverageGapWatchZoneCount     int                       `json:"coverage_gap_watch_zone_count"`
+	LastGraphSyncAt               any                       `json:"last_graph_sync_at"`
+	LastCargoAt                   any                       `json:"last_cargo_at"`
+	LastComtradeSyncAt            any                       `json:"last_comtrade_sync_at"`
+	LastComtradeSyncStatus        *string                   `json:"last_comtrade_sync_status"`
+	EurostatTradeFlowCount        int                       `json:"eurostat_trade_flow_count"`
+	LastEurostatSyncAt            any                       `json:"last_eurostat_sync_at"`
+	LastEurostatSyncStatus        *string                   `json:"last_eurostat_sync_status"`
+	JodiSnapshotCount             int                       `json:"jodi_snapshot_count"`
+	LastJodiSyncAt                any                       `json:"last_jodi_sync_at"`
+	LastJodiSyncStatus            *string                   `json:"last_jodi_sync_status"`
+	DemoPortCallCount             int                       `json:"demo_port_call_count"`
+	DemoCargoRecordCount          int                       `json:"demo_cargo_record_count"`
+	ProductionCargoRecordCount    int                       `json:"production_cargo_record_count"`
+	LastVesselObservationAt       any                       `json:"last_vessel_observation_at"`
+	GraphSyncSteps                []GraphSyncStepOutcome    `json:"graph_sync_steps,omitempty"`
 	WatchZoneObservations24h      []WatchZoneObservation24h `json:"watch_zone_observations_24h,omitempty"`
-	Disclaimer                    string                 `json:"disclaimer"`
+	Disclaimer                    string                    `json:"disclaimer"`
 }
 
 func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary {
@@ -264,7 +264,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		LastVesselObservationAt:       formatTimePtr(lastVesselObs),
 		GraphSyncSteps:                graphSteps,
 		WatchZoneObservations24h:      watchZoneObs,
-		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted; demo/seed rows reported separately.",
+		Disclaimer:                    "Counts from MadSan Intelligence DB — inferred tiers where noted; demo/seed rows reported separately.",
 	}
 }
 
