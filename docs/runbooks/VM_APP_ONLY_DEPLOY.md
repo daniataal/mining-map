@@ -79,6 +79,10 @@ Do not run `oil-live-search-indexer` without Elasticsearch (enable both profiles
 **CPU:** Reserve ~2 vCPU for interactive path (backend + map frontend + oil-live-intel).
 Ingest workers are I/O-bound and can contend with route planning; run `ingest` off-peak.
 
+**Connection budget:** Overlay sets `UVICORN_WORKERS=2` and `OIL_INTEL_DB_MAX_CONNS=10` on Go
+services. Override via env if needed. Optional commented `pgbouncer` profile in the overlay if
+Postgres hits `max_connections`.
+
 **When to scale up:** Move to full `docker-compose.prod.yml` (no overlay) or add
 `docker-compose.prod.large-vm.yml` on a ≥16 GB host if Elasticsearch + all workers must run
 continuously.
@@ -95,5 +99,5 @@ curl -sf http://localhost:8080/ >/dev/null && echo caddy ok
 With `--profile ingest`, confirm workers are running:
 
 ```bash
-docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml ps | grep -E 'sync|indexer'
+docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml --profile ingest ps | grep -E 'sync|indexer'
 ```
