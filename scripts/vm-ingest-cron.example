@@ -1,0 +1,20 @@
+# Example crontab for Tier-4 VM ingest automation (/opt/mining-map).
+# Install: crontab -e  (merge lines below; adjust paths and user)
+#
+# Requires: backend.env with ADMIN_TOKEN for graph-sync curl mode.
+# Logs: /var/log/mining-map/ (create dir, chown deploy user)
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MINING_MAP_ROOT=/opt/mining-map
+MINING_MAP_COMPOSE_FILES="docker-compose.prod.yml docker-compose.prod.app.yml docker-compose.prod.scale.yml"
+
+# Daily graph-sync at 02:00 local (off-peak; ~10 min typical, up to 600s timeout)
+0 2 * * * cd $MINING_MAP_ROOT && MINING_MAP_ROOT=$MINING_MAP_ROOT ./scripts/vm-ingest-sync.sh graph-sync >> /var/log/mining-map/graph-sync.log 2>&1
+
+# Weekly license open-data sync — Sunday 03:30 (compose one-shot, 1h window)
+30 3 * * 0 cd $MINING_MAP_ROOT && MINING_MAP_ROOT=$MINING_MAP_ROOT MINING_MAP_COMPOSE_FILES="$MINING_MAP_COMPOSE_FILES" VM_INGEST_LICENSE_WAIT_SECONDS=3600 ./scripts/vm-ingest-sync.sh license-sync >> /var/log/mining-map/license-sync.log 2>&1
+
+# Lightweight health probe every 5 minutes (non-zero exit → wire to alerting)
+# Use caddy-only on Tier-3 scale overlay (backend/oil-live-intel not on host ports)
+*/5 * * * * cd $MINING_MAP_ROOT && VM_HEALTH_MODE=caddy-only ./scripts/vm-health-check.sh >> /var/log/mining-map/health.log 2>&1

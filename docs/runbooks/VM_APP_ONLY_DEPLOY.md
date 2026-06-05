@@ -159,3 +159,54 @@ curl -s -D - "http://localhost:8095/api/oil-live/maritime/stats" -o /dev/null | 
 # Rate limit (429 after exceeding RATE_LIMIT_RPM)
 RATE_LIMIT_ENABLED=1 REDIS_HOST=redis pytest backend/tests/test_rate_limit.py -q
 ```
+
+## Tier 3 — Scale overlay (8+ vCPU / ~16 GB)
+
+Horizontal scale for busier app VMs: dual `backend-a`/`backend-b` and
+`oil-live-intel-a`/`oil-live-intel-b` behind Caddy round-robin (`Caddyfile.scale`).
+Optional second **ingest VM** uses [`docker-compose.prod.ingest.yml`](../../docker-compose.prod.ingest.yml).
+
+```bash
+docker compose \
+  -f docker-compose.prod.yml \
+  -f docker-compose.prod.app.yml \
+  -f docker-compose.prod.scale.yml up -d
+```
+
+| Setting | Default (scale overlay) | Purpose |
+|---------|-------------------------|---------|
+| `UVICORN_WORKERS` | 3 per backend replica | Parallel Python API |
+| `OIL_INTEL_DB_MAX_CONNS` | 8 per Go replica | Go pool per process |
+| `RATE_LIMIT_RPM` | 60 | Multi-tab headroom |
+| Backend / Go replicas | 2 each | Caddy load balance |
+
+**Expected capacity:** ~30–60 concurrent interactive users when Tier-2 Redis is warm and ingest
+runs off-peak (cron or separate ingest VM). Route planning and agent exports remain CPU-heavy.
+
+**Rollback:** omit `docker-compose.prod.scale.yml` from the compose command.
+
+## Tier 4 — Ops automation, CDN headers, PgBouncer
+
+See **[VM_TIER4_OPS.md](./VM_TIER4_OPS.md)** for full detail. Summary:
+
+| Deliverable | Location |
+|-------------|----------|
+| Scheduled graph-sync / license cron | `scripts/vm-ingest-sync.sh`, `scripts/vm-ingest-cron.example` |
+| Health probe (monitoring exit code) | `scripts/vm-health-check.sh` |
+| PgBouncer (default with scale overlay) | `docker-compose.prod.scale.yml` |
+| CDN-ready cache headers | `mining-viz/nginx.prod.conf`, `Caddyfile`, `Caddyfile.scale`, `Caddyfile.edge` |
+| Ingest-only second VM | `docker-compose.prod.ingest.yml` |
+| Env placeholders | [env.tier4.example](./env.tier4.example) |
+
+**Compose (Tier 1 + 2 + 3 + 4):**
+
+```bash
+docker compose \
+  -f docker-compose.prod.yml \
+  -f docker-compose.prod.app.yml \
+  -f docker-compose.prod.scale.yml up -d
+```
+
+Off-peak ingest via cron (graph-sync 02:00, license sync weekly) keeps CPU for interactive
+traffic while maintaining data freshness. Target **~30–60 concurrent** sessions with scale +
+ingest split on an 8 vCPU / 16 GB host.
