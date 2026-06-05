@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Archive, Layers, List, LogOut, PieChart, Radio, Settings } from 'lucide-react';
+import { Archive, Layers, List, LogOut, PieChart, Radio, Settings, Network, Search as LucideSearch } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import Sidebar from './Sidebar';
 import type { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
@@ -19,6 +19,8 @@ export type WorkspaceSidebarLayoutProps = {
   onSidebarViewModeChange: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
+  onToggleWorkspace: () => void;
+  onToggleSearch: () => void;
   isFilterOpen: boolean;
   onLogout: () => void;
   /** License list sidebar props */
@@ -54,6 +56,8 @@ export default function WorkspaceSidebarLayout({
   onSidebarViewModeChange,
   onToggleFilter,
   onToggleAdmin,
+  onToggleWorkspace,
+  onToggleSearch,
   isFilterOpen,
   onLogout,
   processedData,
@@ -111,6 +115,8 @@ export default function WorkspaceSidebarLayout({
           setViewMode={onSidebarViewModeChange}
           onToggleFilter={onToggleFilter}
           onToggleAdmin={onToggleAdmin}
+          onToggleWorkspace={onToggleWorkspace}
+          onToggleSearch={onToggleSearch}
           isFilterOpen={isFilterOpen}
           isPinned={isPinned}
           setIsPinned={setIsPinned}
@@ -201,6 +207,20 @@ export default function WorkspaceSidebarLayout({
           className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 border border-transparent"
         >
           <Settings className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleSearch}
+          className="w-10 h-10 rounded-xl hover:bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-transparent"
+        >
+          <LucideSearch className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleWorkspace}
+          className="w-10 h-10 rounded-xl hover:bg-amber-500/10 flex items-center justify-center text-amber-500 border border-transparent"
+        >
+          <Network className="w-5 h-5" />
         </button>
         <button
           type="button"

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # CI uses dannyatalla/oil-live-intel-base:latest (pre-downloaded modules). Local default: stock Go image.
-ARG BASE_IMAGE=golang:1.23-alpine
+ARG BASE_IMAGE=golang:1.24-alpine
 FROM ${BASE_IMAGE} AS build
 WORKDIR /src
 RUN apk add --no-cache git

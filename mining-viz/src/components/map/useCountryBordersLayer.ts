@@ -63,7 +63,7 @@ export function useCountryBordersLayer({
             fillColor: '#06b6d4',
             color: '#06b6d4',
             weight: 1.5,
-            opacity: 0.5,
+            opacity: 0.4,
             fillOpacity: 0.05,
             lineCap: 'round' as const,
             lineJoin: 'round' as const,

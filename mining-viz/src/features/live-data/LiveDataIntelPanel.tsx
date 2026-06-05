@@ -641,7 +641,7 @@ export default function LiveDataIntelPanel({
         r.recipe ?? '',
       ]);
       const stamp = new Date().toISOString().slice(0, 10);
-      downloadCsv(`meridian-cargo-records-${stamp}.csv`, headers, rows);
+      downloadCsv(`madsan-cargo-records-${stamp}.csv`, headers, rows);
       toast.success(t('יוצא CSV', 'CSV exported'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Export failed');
@@ -671,7 +671,7 @@ export default function LiveDataIntelPanel({
       const stamp = new Date().toISOString().slice(0, 10);
       if (cargo.length > 0) {
         downloadCsv(
-          `meridian-audit-cargo-${stamp}.csv`,
+          `madsan-audit-cargo-${stamp}.csv`,
           ['id', 'bol_tier', 'shipper_name', 'consignee_name', 'commodity_family', 'event_date'],
           cargo.map((r) => [
             r.id,
@@ -685,7 +685,7 @@ export default function LiveDataIntelPanel({
       }
       if (manifests.length > 0) {
         downloadCsv(
-          `meridian-audit-manifests-${stamp}.csv`,
+          `madsan-audit-manifests-${stamp}.csv`,
           [
             'id',
             'bol_tier',
@@ -765,7 +765,7 @@ export default function LiveDataIntelPanel({
         o.terminal_country ?? '',
       ]);
       const stamp = new Date().toISOString().slice(0, 10);
-      downloadCsv(`meridian-opportunities-${stamp}.csv`, headers, rows);
+      downloadCsv(`madsan-opportunities-${stamp}.csv`, headers, rows);
       toast.success(t('יוצא CSV', 'CSV exported'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Export failed');

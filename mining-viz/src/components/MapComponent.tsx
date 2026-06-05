@@ -128,6 +128,9 @@ import MapOverlayStatusPanel from './map/MapOverlayStatusPanel';
 import MapEmptyStateOverlay from './map/MapEmptyStateOverlay';
 import MapCoverageBanners from './map/MapCoverageBanners';
 import MaritimeControlPanel from './map/MaritimeControlPanel';
+import LayerDrawer from './map/LayerDrawer';
+import { MapIntelligenceLegend } from './map/MapIntelligenceLegend';
+import type { IntelligenceMode, IntelligenceSublayer } from '../lib/intelligenceModes';
 import MaritimeAdvancedControls from './map/MaritimeAdvancedControls';
 import { useCountryBordersLayer } from './map/useCountryBordersLayer';
 import { resolvePetroleumViewportBounds } from '../lib/petroleumLayers';
@@ -141,6 +144,8 @@ import {
   ESG_CONSERVATION_ZONES,
   getEsgZoneIntersection,
 } from '../lib/esgConservationZones';
+import { WorkspaceMapLayer } from '../features/broker-workspace/WorkspaceMapLayer';
+import type { WorkspaceMapSnapshot } from '../api/brokerWorkspaceApi';
 
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -401,6 +406,17 @@ interface MapComponentProps {
   /** Comtrade/Census macro country-pair arcs (gray). */
   macroTradeFlowsEnabled?: boolean;
   macroTradeFlows?: MacroTradeFlow[];
+  brokerWorkspaceMap?: WorkspaceMapSnapshot;
+  brokerPackLocationMode?: boolean;
+  onBrokerPackLocationPick?: (lat: number, lng: number) => void;
+  onBrokerPackSelect?: (packId: string) => void;
+  onAddToBrokerWorkspace?: (
+    body: { entity_type: string; ref_kind: string; ref_id: string; display_name: string; lat: number; lng: number; deal_signal?: string },
+  ) => void;
+  cockpitEnabled?: boolean;
+  cockpitLegendMode?: IntelligenceMode;
+  cockpitLegendSublayer?: IntelligenceSublayer;
+  onCountrySelect?: (country: string) => void;
 }
 
 /** Max markers before we always zoom instead of spiderfy (spiderfy disabled anyway). */
@@ -636,6 +652,8 @@ const MapClickHandler = ({
     onMapClick,
     routePlannerPickRole,
     onRoutePlannerMapPick,
+    workspaceCustomPinMode,
+    onWorkspaceMapPick,
 }: {
     onMapClick: () => void;
     routePlannerPickRole?: 'supplier' | 'buyer' | null;
@@ -646,10 +664,16 @@ const MapClickHandler = ({
       label?: string,
       country?: string,
     ) => void;
+    workspaceCustomPinMode?: boolean;
+    onWorkspaceMapPick?: (lat: number, lng: number) => void;
 }) => {
     useMapEvents({
         click(e) {
             if ((e.originalEvent as MouseEvent & { __liveDealCanvasHandled?: boolean }).__liveDealCanvasHandled) {
+                return;
+            }
+            if (workspaceCustomPinMode && onWorkspaceMapPick) {
+                onWorkspaceMapPick(e.latlng.lat, e.latlng.lng);
                 return;
             }
             if (routePlannerPickRole && onRoutePlannerMapPick) {
@@ -965,6 +989,15 @@ export default function MapComponent({
   liveDataEiaHistoricOn = false,
   onLiveDataEiaHistoricChange,
   oilLiveSidebarActive = false,
+  brokerWorkspaceMap,
+  brokerPackLocationMode = false,
+  onBrokerPackLocationPick,
+  onBrokerPackSelect,
+  onAddToBrokerWorkspace,
+  cockpitEnabled = false,
+  cockpitLegendMode = 'global_view',
+  cockpitLegendSublayer = 'countries',
+  onCountrySelect,
 }: MapComponentProps) {
     const { t } = useI18n();
     const { resolvedTheme } = useTheme();
@@ -974,7 +1007,8 @@ export default function MapComponent({
         viewModeKey === 'mining' ||
         viewModeKey === 'oil_and_gas' ||
         viewModeKey === 'global' ||
-        viewModeKey === 'suppliers';
+        viewModeKey === 'workspace' ||
+        viewModeKey === 'supply_chain';
     const isLiveDataView = oilLiveSidebarActive;
     const {
         data: oilLiveSyncStatus,
@@ -988,6 +1022,8 @@ export default function MapComponent({
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
     const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
+
+    const isWorkspaceView = viewModeKey === 'workspace' || viewModeKey === 'supply_chain';
     const {
         currentVisibleViewport,
         oilGasMapViewport,
@@ -1520,7 +1556,8 @@ export default function MapComponent({
                 t={t}
                 show={
                     !isRoutePlannerView &&
-                    viewModeKey !== 'suppliers' &&
+                    viewModeKey !== 'workspace' &&
+                    viewModeKey !== 'supply_chain' &&
                     !licensesFetchPending &&
                     ((onGroundVisible ? processedData.length : 0) === 0) &&
                     (vesselsVisible && isMaritimeLayerEnabled
@@ -1597,8 +1634,21 @@ export default function MapComponent({
                 </div>
             )}
             {isMaritimeMapView && !isLiveDataView && (
+                <LayerDrawer
+                    t={t}
+                    isMaritimeLayerEnabled={isMaritimeLayerEnabled}
+                    isMaritimeLoading={isMaritimeLoading}
+                    hasMaritimeFeed={Boolean(maritimeFeed)}
+                    maritimeIdleHint={maritimeIdleHint}
+                    defaultExpanded={viewModeKey === 'route_planner'}
+                    onToggleLayer={() => {
+                        startTransition(() => setIsMaritimeLayerEnabled((current) => !current));
+                    }}
+                >
                 <MaritimeControlPanel
                     t={t}
+                    embedded
+                    hideToggle
                     isMaritimeLayerEnabled={isMaritimeLayerEnabled}
                     isMaritimeLoading={isMaritimeLoading}
                     hasMaritimeFeed={Boolean(maritimeFeed)}
@@ -1745,6 +1795,10 @@ export default function MapComponent({
                             </>
                         )}
                 </MaritimeControlPanel>
+                </LayerDrawer>
+            )}
+            {cockpitEnabled && !isLiveDataView && (
+                <MapIntelligenceLegend mode={cockpitLegendMode} sublayer={cockpitLegendSublayer} />
             )}
             <MapContainer 
               center={mapCenter} 
@@ -1765,6 +1819,12 @@ export default function MapComponent({
                 <MapClickHandler
                     routePlannerPickRole={isRoutePlannerView ? routePlannerPickRole ?? undefined : undefined}
                     onRoutePlannerMapPick={isRoutePlannerView ? onRoutePlannerMapPick : undefined}
+                    workspaceCustomPinMode={isWorkspaceView ? brokerPackLocationMode : false}
+                    onWorkspaceMapPick={(lat, lng) => {
+                      if (brokerPackLocationMode && onBrokerPackLocationPick) {
+                        onBrokerPackLocationPick(lat, lng);
+                      }
+                    }}
                     onMapClick={() => {
                       setSelectedItem(null);
                       onSelectMaritimeVessel(null);
@@ -1849,6 +1909,7 @@ export default function MapComponent({
                     onRemoveFromDueDiligence={onRemoveFromDueDiligence}
                     getDealRoomForLicense={getDealRoomForLicense}
                     oilAndGasMap={isOilAndGasView}
+                    onAddToBrokerWorkspace={onAddToBrokerWorkspace}
                 />
                 <RoutePlannerBoundsEffect overlay={isRoutePlannerView ? routePlannerOverlay : null} />
                 <RoutePlannerFlyEffect
@@ -1881,6 +1942,16 @@ export default function MapComponent({
                     active={isMaritimeMapView && isMaritimeLayerEnabled}
                     view={maritimeTankerView}
                 />
+
+                {isWorkspaceView && brokerWorkspaceMap && (
+                  <WorkspaceMapLayer
+                    entities={brokerWorkspaceMap.entities}
+                    packs={brokerWorkspaceMap.packs}
+                    edges={brokerWorkspaceMap.edges}
+                    onPackClick={(pack) => onBrokerPackSelect?.(pack.id)}
+                  />
+                )}
+
                 {viewModeKey === 'ports' && processedData.length > mapDisplayData.length && (
                     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950/85 text-slate-100 border border-cyan-500/20 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
                         <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
@@ -1934,8 +2005,26 @@ export default function MapComponent({
                             <GeoJSON
                                 key={`country-borders:${isDark ? 'd' : 'l'}:${countryFocusCountry?.trim() ?? 'viewport'}`}
                                 data={filteredGeoJson!}
-                                interactive={false}
+                                interactive={Boolean(onCountrySelect)}
                                 style={countryBorderLayerStyle}
+                                onEachFeature={(feature, layer) => {
+                                    const name =
+                                        (feature.properties?.name as string | undefined) ??
+                                        (feature.properties?.ADMIN as string | undefined) ??
+                                        (feature.properties?.country as string | undefined);
+                                    if (!name || !onCountrySelect) return;
+                                    layer.on({
+                                        mouseover: (e) => {
+                                            const target = e.target;
+                                            target.setStyle({ opacity: 0.85, fillOpacity: 0.12 });
+                                        },
+                                        mouseout: (e) => {
+                                            const target = e.target;
+                                            target.setStyle(countryBorderLayerStyle);
+                                        },
+                                        click: () => onCountrySelect(name),
+                                    });
+                                }}
                             />
                         </LayersControl.Overlay>
                     )}

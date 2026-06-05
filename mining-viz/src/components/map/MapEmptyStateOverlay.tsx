@@ -13,8 +13,8 @@ export default function MapEmptyStateOverlay({ t, show }: MapEmptyStateOverlayPr
       <h3 className="text-lg font-bold">{t('לא נמצאו נכסים', 'No assets found')}</h3>
       <p className="text-sm text-slate-400">
         {t(
-          'נסה לשנות את המסננים או להפעיל מחדש את שכבת האחסון',
-          'Try adjusting filters or reloading the storage layer',
+          'נסה לשנות מסננים, להתקרב לזום, או לבדוק כיסוי AIS — ייתכן שאין נתונים באזור זה.',
+          'Try adjusting filters, zooming in, or check AIS coverage — data may be sparse in this region.',
         )}
       </p>
     </div>

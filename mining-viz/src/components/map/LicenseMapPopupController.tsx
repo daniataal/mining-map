@@ -56,6 +56,9 @@ export type LicenseMapPopupControllerProps = {
   onRemoveFromDueDiligence?: (id: string) => void;
   getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
   oilAndGasMap?: boolean;
+  onAddToBrokerWorkspace?: (
+    body: { entity_type: string; ref_kind: string; ref_id: string; display_name: string; lat: number; lng: number; deal_signal?: string },
+  ) => void;
 };
 
 function licensePopupItemSignature(item: MiningLicense): string {
@@ -91,6 +94,7 @@ export default function LicenseMapPopupController({
   onRemoveFromDueDiligence,
   getDealRoomForLicense,
   oilAndGasMap = false,
+  onAddToBrokerWorkspace,
 }: LicenseMapPopupControllerProps) {
   const map = useMap();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +109,7 @@ export default function LicenseMapPopupController({
     onAddToDueDiligence,
     onRemoveFromDueDiligence,
     getDealRoomForLicense,
+    onAddToBrokerWorkspace,
   });
 
   propsRef.current = {
@@ -115,6 +120,7 @@ export default function LicenseMapPopupController({
     onAddToDueDiligence,
     onRemoveFromDueDiligence,
     getDealRoomForLicense,
+    onAddToBrokerWorkspace,
   };
 
   useEffect(() => {
@@ -340,6 +346,7 @@ export default function LicenseMapPopupController({
         esgZoneName={esgZone?.name}
         dealRoomTitle={dealRoomTitle}
         oilAndGasMap={oilAndGasMap}
+        onAddToBrokerWorkspace={onAddToBrokerWorkspace}
       />
     </I18nProvider>,
     hostRef.current,

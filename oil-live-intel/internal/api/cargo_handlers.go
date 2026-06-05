@@ -431,7 +431,7 @@ func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
 		"count":      len(arcs),
 		"group":      group,
 		"zoom":       zoom,
-		"disclaimer": "Aggregated from synthetic Meridian Cargo Records — inferred from public sources, not legal BOLs.",
+		"disclaimer": "Aggregated from synthetic MadSan Cargo Records — inferred from public sources, not legal BOLs.",
 	}, 120)
 }
 

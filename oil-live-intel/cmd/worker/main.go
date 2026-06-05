@@ -48,6 +48,7 @@ func main() {
 	go workers.StartGleifSyncLoop(ctx, pool, cfg, log)
 	go workers.StartEIARefineryCapacitySyncLoop(ctx, pool, cfg, log)
 	go workers.RunAlertEngineLoop(ctx, pool, log)
+	go workers.RunPortManifestScraper(ctx, pool, log)
 
 	log.Info().
 		Bool("ais", cfg.EnableAIS).

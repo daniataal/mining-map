@@ -98,6 +98,7 @@ func allSyntheticRecipes() []recipeFn {
 		{RecipeGovOfftake, recipeGovOfftake},
 		{RecipeRepeatDealer, recipeRepeatDealer},
 		{RecipeRefineryDriven, recipeRefineryDriven},
+		{RecipePortManifestMatch, recipePortManifestMatch},
 	}
 }
 
@@ -1182,4 +1183,58 @@ func clampConf(v float64) float64 {
 		return 0.35
 	}
 	return v
+}
+
+const RecipePortManifestMatch = "A_port_manifest_match"
+
+func recipePortManifestMatch(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
+	if !tableExists(ctx, pool, "port_manifests") {
+		return nil, nil
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT vessel_imo, vessel_name, load_port, discharge_port, cargo_type, quantity_tons, created_at
+		FROM port_manifests
+		WHERE created_at > NOW() - INTERVAL '30 days'
+		LIMIT 1000
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var drafts []mcrDraft
+	for rows.Next() {
+		var imo string
+		var name, loadPort, dischargePort, cargoType *string
+		var quantity *float64
+		var createdAt time.Time
+		if err := rows.Scan(&imo, &name, &loadPort, &dischargePort, &cargoType, &quantity, &createdAt); err != nil {
+			continue
+		}
+
+		desc := "Unknown Cargo"
+		if cargoType != nil {
+			desc = *cargoType
+		}
+
+		d := mcrDraft{
+			Fingerprint:          fingerprint("manifest", imo, desc, createdAt.Format(time.RFC3339)),
+			Recipe:               RecipePortManifestMatch,
+			CommodityFamily:      "petroleum", // Assume petroleum for now, could be derived from cargoType
+			Confidence:           0.95, // High confidence since it's a direct manifest
+			TriangulationScore:   10,
+			VesselName:           name,
+			IMO:                  &imo,
+			LoadPortName:         loadPort,
+			DischargeHint:        dischargePort,
+			CommodityDescription: &desc,
+			VolumeLow:            quantity,
+			VolumeHigh:           quantity,
+			VolumeUnit:           "tons",
+			EventDate:            &createdAt,
+		}
+		drafts = append(drafts, d)
+	}
+	return drafts, nil
 }
