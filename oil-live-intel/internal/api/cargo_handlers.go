@@ -478,7 +478,7 @@ func (s *Server) ListCommercialEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
-func (s *Server) TriggerSyntheticBolRebuild(w http.ResponseWriter, r *http.Request) {
+func (s *Server) TriggerInferredTradeRebuild(w http.ResponseWriter, r *http.Request) {
 	if s.Config.InternalBroadcastKey == "" || r.Header.Get("X-Oil-Intel-Internal") != s.Config.InternalBroadcastKey {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return

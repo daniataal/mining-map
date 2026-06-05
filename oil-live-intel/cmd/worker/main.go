@@ -35,7 +35,7 @@ func main() {
 	go workers.RunPositionCleanup(ctx, pool, cfg.AISPositionRetainHours, log)
 	go workers.RunTradeSync(ctx, pool, cfg, log)
 	go workers.RunOpportunityScanner(ctx, pool, cfg, log)
-	go workers.RunSyntheticBolBuilder(ctx, pool, log)
+	go workers.RunInferredTradeBuilder(ctx, pool, log)
 	if cfg.EnableAIS {
 		go workers.RunAISIngestor(ctx, pool, cfg, log)
 	}
@@ -47,6 +47,7 @@ func main() {
 	go workers.StartShipVaultBackfillLoop(ctx, pool, cfg, log)
 	go workers.StartGleifSyncLoop(ctx, pool, cfg, log)
 	go workers.StartEIARefineryCapacitySyncLoop(ctx, pool, cfg, log)
+	go workers.RunAlertEngineLoop(ctx, pool, log)
 
 	log.Info().
 		Bool("ais", cfg.EnableAIS).

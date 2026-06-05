@@ -48,6 +48,7 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { GraphExplorer } from './GraphExplorer';
 import {
   LIFECYCLE_STEPS,
   normalizeDealStage,
@@ -1198,9 +1199,10 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'trade-evidence', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'network-graph', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'trade-evidence', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
+                  'network-graph': 'Network Graph',
                   'deal-room': 'Deal Room',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
@@ -1236,6 +1238,14 @@ Output requirements:
                 </button>
               )})}
             </nav>
+
+            {/* NETWORK GRAPH TAB */}
+            {activeTab === 'network-graph' && (
+              <GraphExplorer
+                nodeId={item.legacy_id || item.id}
+                nodeType={item.type === 'company' || item.type === 'vessel' ? 'organization' : 'asset'} // Adjust based on item model
+              />
+            )}
 
             {/* DEAL ROOM TAB */}
             {activeTab === 'deal-room' && (
