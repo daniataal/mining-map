@@ -49,8 +49,8 @@ jobs:
           - service: frontend
             context: ./mining-viz
             image: dannyatalla/mining-frontend
-            dockerfile: Dockerfile
-            build_args: ""
+            dockerfile: Dockerfile.prod
+            build_args: VITE_API_BASE=
           - service: oil-live-intel
             context: ./oil-live-intel
             image: dannyatalla/oil-live-intel
@@ -299,9 +299,8 @@ jobs:
 
           # Pull and restart full production stack (docker-compose.prod.yml from repo).
           export VERSION_TAG="${VERSION_TAG}"
-          # Empty base → browser uses :5173 same-origin; Vite proxies /api/oil-live → Go (see vite.config.ts).
-          # Backend :8000 also proxies /api/oil-live/* to oil-live-intel when clients still target :8000.
-          export VITE_API_BASE="${VITE_API_BASE:-}"
+          # Frontend image is static nginx (Dockerfile.prod); VITE_API_BASE is set at CI build, not runtime.
+          # Use Caddy :8080 for same-origin /api/*; backend :8000 also proxies /api/oil-live/* when needed.
           export GROQ_API_KEY="${GROQ_EFFECTIVE}"
           export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
           export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"
