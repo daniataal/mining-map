@@ -49,6 +49,9 @@ type syncStatusSummary struct {
 	LiveVesselCount               int            `json:"live_vessel_count"`
 	LiveAisPortCallCount          int            `json:"live_ais_port_call_count"`
 	VesselObservationCount        int            `json:"vessel_observation_count"`
+	ShipVaultCacheCount          int            `json:"shipvault_cache_count"`
+	ShipVaultCredentialCount     int            `json:"shipvault_credential_count"`
+	LastShipVaultCacheAt         any            `json:"last_shipvault_cache_at"`
 	CoverageWatchZoneCount        int            `json:"coverage_watch_zone_count"`
 	CoverageGapWatchZoneCount     int            `json:"coverage_gap_watch_zone_count"`
 	LastGraphSyncAt               any            `json:"last_graph_sync_at"`
@@ -76,8 +79,9 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	var mcrWithLEI, mcrWithSanctions, mcrCorridorCompanyPairs int
 	var oilTradeFlows, eiaHistoric, tradeManifests, eurostatTradeFlows, jodiSnapshots int
 	var liveVessels, liveAisPortCalls, vesselObservations, coverageWatchZones, coverageGapZones int
+	var shipVaultCacheCount, shipVaultCredentialCount int
 	var demoPortCalls, demoCargo, productionCargo int
-	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat, lastJodi, lastVesselObs *time.Time
+	var lastGraphSync, lastCargoAt, lastComtrade, lastEurostat, lastJodi, lastVesselObs, lastShipVaultCache *time.Time
 	var lastComtradeStatus, lastEurostatStatus, lastJodiStatus *string
 
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM oil_terminals`).Scan(&terminalCount)
@@ -118,6 +122,13 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	eiaHistoric = countTable(ctx, pool, `SELECT COUNT(*)::int FROM eia_historic_imports`)
 	tradeManifests = countTable(ctx, pool, `SELECT COUNT(*)::int FROM trade_manifest_rows`)
 	vesselObservations = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_vessel_position_observations`)
+	shipVaultCacheCount = countTable(ctx, pool, `SELECT COUNT(*)::int FROM vessel_enrichment_cache`)
+	shipVaultCredentialCount = countTable(ctx, pool, `
+		SELECT COUNT(*)::int
+		FROM integration_credentials
+		WHERE provider = 'shipvault' AND credential_key = 'refresh_token'
+		  AND NULLIF(TRIM(credential_value), '') IS NOT NULL
+	`)
 	liveVessels = countTable(ctx, pool, `
 		SELECT COUNT(DISTINCT mmsi)::int
 		FROM (
@@ -206,6 +217,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 			FROM oil_ais_positions
 		) v
 	`).Scan(&lastVesselObs)
+	_ = pool.QueryRow(ctx, `SELECT MAX(updated_at) FROM vessel_enrichment_cache`).Scan(&lastShipVaultCache)
 
 	graphSteps := queryGraphSyncSteps(ctx, pool)
 	watchZoneObs := queryWatchZoneObservations24h(ctx, pool)
@@ -232,6 +244,9 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		LiveVesselCount:               liveVessels,
 		LiveAisPortCallCount:          liveAisPortCalls,
 		VesselObservationCount:        vesselObservations,
+		ShipVaultCacheCount:           shipVaultCacheCount,
+		ShipVaultCredentialCount:      shipVaultCredentialCount,
+		LastShipVaultCacheAt:          formatTimePtr(lastShipVaultCache),
 		CoverageWatchZoneCount:        coverageWatchZones,
 		CoverageGapWatchZoneCount:     coverageGapZones,
 		LastGraphSyncAt:               formatTimePtr(lastGraphSync),

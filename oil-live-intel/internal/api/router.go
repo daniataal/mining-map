@@ -73,6 +73,8 @@ func NewRouter(s *Server) http.Handler {
 		api.Post("/alerts/{id}/read", s.MarkAlertRead)
 		api.Post("/alerts/mark-all-read", s.MarkAllAlertsRead)
 		api.Post("/alerts/{id}/assign", s.AssignAlert)
+		api.Get("/assets", s.ListAssets)
+		api.Get("/assets/{id}/dossier", s.GetAssetDossier)
 		api.Get("/trade/flows", s.ListTradeFlows)
 		api.Get("/trade-manifests", s.ListTradeManifests)
 		api.Get("/trade-flows", s.ListMcrTradeFlows)

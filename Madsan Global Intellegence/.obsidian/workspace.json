@@ -4,17 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "0d2f440d5d3d6775",
+        "id": "9ec01af602c13244",
         "type": "tabs",
         "children": [
           {
-            "id": "f35ed6fc974c3f4a",
+            "id": "851d5afe3f9dccd6",
             "type": "leaf",
             "state": {
-              "type": "empty",
+              "type": "graph",
               "state": {},
-              "icon": "lucide-file",
-              "title": "New tab"
+              "icon": "lucide-git-fork",
+              "title": "Graph view"
             }
           }
         ]
@@ -176,8 +176,12 @@
       "bases:Create new base": false
     }
   },
-  "active": "f35ed6fc974c3f4a",
+  "active": "dc1d8c28d1ed12a4",
   "lastOpenFiles": [
+    "2026-06-05.md",
+    "Untitled.base",
+    "Untitled 1.canvas",
+    "Untitled.canvas",
     "Welcome.md",
     "Untitled",
     "OPEN_REAL_VAULT.md",

@@ -2,6 +2,19 @@
 
 All agents work inside the existing repository. Read `.agents/context/PLATFORM_VISION.md` and `.agents/context/KNOWN_FINDINGS_AND_CONSTRAINTS.md` before acting.
 
+## Shared graphify knowledge graph
+
+All agents must use the single repository graphify graph at `graphify-out/` under the repository root:
+
+`/Users/daniatallah/Gold Project /mining-map/graphify-out/`
+
+- Run graphify commands from `/Users/daniatallah/Gold Project /mining-map`, not nested app directories such as `mining-viz`.
+- Before broad codebase, architecture or data-flow work, run a scoped query first: `graphify query "<task or acceptance criteria>"`.
+- Use `graphify explain "<node>"` or `graphify path "<A>" "<B>"` when tracing relationships.
+- After modifying code files, run `graphify update .` from the repository root so Cursor, Codex and Antigravity share current code topology.
+- Do not create duplicate `graphify-out/` directories in subprojects.
+- For docs, images or semantic corpus changes, report that a full graphify refresh is needed; the fast `graphify update .` path is code-only.
+
 ## Shared Rules for Every Agent
 
 1. Inspect before changing. Locate the actual code, database, Docker services, API routes, models, background jobs, providers and map components relevant to the task.
