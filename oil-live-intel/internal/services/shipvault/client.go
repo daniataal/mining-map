@@ -106,6 +106,16 @@ type EnrichmentResult struct {
 	DataSource     string          `json:"data_source"`
 	EnrichmentTier string          `json:"enrichment_tier"`
 	Disclaimer     string          `json:"disclaimer"`
+	CacheStatus    CacheStatus     `json:"cache_status"`
+}
+
+// CacheStatus makes the DB-backed registry path observable to the UI and sync-status checks.
+type CacheStatus struct {
+	Hit         bool   `json:"hit"`
+	Source      string `json:"source"`
+	Stale       bool   `json:"stale,omitempty"`
+	WriteStatus string `json:"write_status,omitempty"`
+	WriteError  string `json:"write_error,omitempty"`
 }
 
 // NewService creates a ShipVault client. Auto-auth performs an initial Firebase login
@@ -420,7 +430,7 @@ func (s *Service) EnrichVessel(ctx context.Context, pool *pgxpool.Pool, mmsi int
 
 	// 1. Serve from cache if available and not force-refreshing.
 	if !forceRefresh {
-		cached, err := loadFromCache(ctx, pool, imo)
+		cached, err := loadFromCache(ctx, pool, imo, s.cacheTTL)
 		if err == nil && cached != nil {
 			return cached, nil
 		}
@@ -452,14 +462,24 @@ func (s *Service) EnrichVessel(ctx context.Context, pool *pgxpool.Pool, mmsi int
 		Disclaimer:     "Vessel registry data sourced from ShipVault. Values (e.g. estimated valuation) are indicative, not certified.",
 	}
 
-	// 3. Persist to cache asynchronously so the request stays fast.
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := upsertCache(bgCtx, pool, mmsi, imo, result); err != nil {
-			s.log.Warn().Err(err).Str("imo", imo).Msg("shipvault cache upsert failed")
+	// 3. Persist before returning so a successful live enrichment is auditable and reusable.
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := upsertCache(writeCtx, pool, mmsi, imo, result); err != nil {
+		s.log.Warn().Err(err).Str("imo", imo).Msg("shipvault cache upsert failed")
+		result.CacheStatus = CacheStatus{
+			Hit:         false,
+			Source:      "shipvault_live",
+			WriteStatus: "failed",
+			WriteError:  "cache upsert failed",
 		}
-	}()
+		return result, nil
+	}
+	result.CacheStatus = CacheStatus{
+		Hit:         false,
+		Source:      "shipvault_live",
+		WriteStatus: "persisted",
+	}
 
 	return result, nil
 }

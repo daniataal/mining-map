@@ -3,6 +3,18 @@
 ## Mission
 This repository builds a global commodity intelligence platform: map layers for mining, oil/gas, terminals, vessels and trade infrastructure; evidence-backed dossiers for assets and counterparties; supplier/buyer workflow; and eventually gated real-commodity transaction workflows with legal/compliance/insurance/finance controls.
 
+## Shared graphify knowledge graph
+This repo has one shared graphify knowledge graph at `graphify-out/` under the repository root:
+
+`/Users/daniatallah/Gold Project /mining-map/graphify-out/`
+
+- Use the repository root, not nested app directories such as `mining-viz`, when running graphify commands.
+- Before broad codebase, architecture or data-flow work, run a scoped query first: `graphify query "<task or acceptance criteria>"`.
+- Use `graphify explain "<node>"` or `graphify path "<A>" "<B>"` when tracing relationships.
+- After modifying code files, run `graphify update .` from the repository root so Cursor, Codex and Antigravity share current code topology.
+- Do not create duplicate `graphify-out/` directories in subprojects.
+- For docs, images or semantic corpus changes, call out that a full graphify refresh is needed; the fast `graphify update .` path is code-only.
+
 ## Permanent backend direction
 The long-term backend target is **Go**. Existing Python/FastAPI code and workers are transitional only.
 

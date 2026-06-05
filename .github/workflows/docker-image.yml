@@ -107,6 +107,10 @@ jobs:
   #   EIA_API_KEY, CENSUS_API_KEY, USITC_DATAWEB_API_KEY — trade / graph sync
   #   OIL_INTEL_INTERNAL_KEY — shared auth between backend and oil-live-intel (required in prod)
   #   SECRET_KEY — JWT/session signing for backend (required in prod)
+  #   SHIPVAULT_REFRESH_TOKEN — optional long-lived vessel registry enrichment token
+  #   SHIPVAULT_SESSION_JSON / SHIPVAULT_BEARER_TOKEN — optional emergency bootstrap fallbacks
+  #   SHIPVAULT_FIREBASE_API_KEY / SHIPVAULT_CACHE_TTL_DAYS — optional ShipVault tuning
+  #   SHIPVAULT_BACKFILL_ENABLED / LIMIT / INTERVAL_HOURS — optional bounded registry cache backfill tuning
   #   KZ_EGOV_API_KEY, OPENSANCTIONS_API_KEY, COURTLISTENER_API_KEY — optional ingest
   #   SYNC_ALERT_WEBHOOK_URL — optional drift alerts
   # VM: full stack ~4–6 GB RAM. One-time host sysctl for Elasticsearch:
@@ -188,13 +192,21 @@ jobs:
         SYNC_ALERT_WEBHOOK_URL: ${{ secrets.SYNC_ALERT_WEBHOOK_URL }}
         OIL_INTEL_INTERNAL_KEY: ${{ secrets.OIL_INTEL_INTERNAL_KEY }}
         SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        SHIPVAULT_REFRESH_TOKEN: ${{ secrets.SHIPVAULT_REFRESH_TOKEN }}
+        SHIPVAULT_SESSION_JSON: ${{ secrets.SHIPVAULT_SESSION_JSON }}
+        SHIPVAULT_BEARER_TOKEN: ${{ secrets.SHIPVAULT_BEARER_TOKEN }}
+        SHIPVAULT_FIREBASE_API_KEY: ${{ secrets.SHIPVAULT_FIREBASE_API_KEY }}
+        SHIPVAULT_CACHE_TTL_DAYS: ${{ vars.SHIPVAULT_CACHE_TTL_DAYS }}
+        SHIPVAULT_BACKFILL_ENABLED: ${{ vars.SHIPVAULT_BACKFILL_ENABLED }}
+        SHIPVAULT_BACKFILL_LIMIT: ${{ vars.SHIPVAULT_BACKFILL_LIMIT }}
+        SHIPVAULT_BACKFILL_INTERVAL_HOURS: ${{ vars.SHIPVAULT_BACKFILL_INTERVAL_HOURS }}
         VERSION_TAG: v${{ needs.meta.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,CENSUS_API_KEY,USITC_DATAWEB_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL,OIL_INTEL_INTERNAL_KEY,SECRET_KEY
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,CENSUS_API_KEY,USITC_DATAWEB_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL,OIL_INTEL_INTERNAL_KEY,SECRET_KEY,SHIPVAULT_REFRESH_TOKEN,SHIPVAULT_SESSION_JSON,SHIPVAULT_BEARER_TOKEN,SHIPVAULT_FIREBASE_API_KEY,SHIPVAULT_CACHE_TTL_DAYS,SHIPVAULT_BACKFILL_ENABLED,SHIPVAULT_BACKFILL_LIMIT,SHIPVAULT_BACKFILL_INTERVAL_HOURS
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
@@ -239,6 +251,30 @@ jobs:
             fi
             printf 'OIL_INTEL_INTERNAL_KEY=%s\n' "${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}"
             printf 'SECRET_KEY=%s\n' "${SECRET_KEY:-}"
+            if [ -n "${SHIPVAULT_REFRESH_TOKEN:-}" ]; then
+              printf 'SHIPVAULT_REFRESH_TOKEN=%s\n' "$SHIPVAULT_REFRESH_TOKEN"
+            fi
+            if [ -n "${SHIPVAULT_SESSION_JSON:-}" ]; then
+              printf 'SHIPVAULT_SESSION_JSON=%s\n' "$SHIPVAULT_SESSION_JSON"
+            fi
+            if [ -n "${SHIPVAULT_BEARER_TOKEN:-}" ]; then
+              printf 'SHIPVAULT_BEARER_TOKEN=%s\n' "$SHIPVAULT_BEARER_TOKEN"
+            fi
+            if [ -n "${SHIPVAULT_FIREBASE_API_KEY:-}" ]; then
+              printf 'SHIPVAULT_FIREBASE_API_KEY=%s\n' "$SHIPVAULT_FIREBASE_API_KEY"
+            fi
+            if [ -n "${SHIPVAULT_CACHE_TTL_DAYS:-}" ]; then
+              printf 'SHIPVAULT_CACHE_TTL_DAYS=%s\n' "$SHIPVAULT_CACHE_TTL_DAYS"
+            fi
+            if [ -n "${SHIPVAULT_BACKFILL_ENABLED:-}" ]; then
+              printf 'SHIPVAULT_BACKFILL_ENABLED=%s\n' "$SHIPVAULT_BACKFILL_ENABLED"
+            fi
+            if [ -n "${SHIPVAULT_BACKFILL_LIMIT:-}" ]; then
+              printf 'SHIPVAULT_BACKFILL_LIMIT=%s\n' "$SHIPVAULT_BACKFILL_LIMIT"
+            fi
+            if [ -n "${SHIPVAULT_BACKFILL_INTERVAL_HOURS:-}" ]; then
+              printf 'SHIPVAULT_BACKFILL_INTERVAL_HOURS=%s\n' "$SHIPVAULT_BACKFILL_INTERVAL_HOURS"
+            fi
             printf 'OIL_LIVE_DISABLE_DEMO_SEED=1\n'
             printf 'OIL_INTEL_SEED_ON_STARTUP=false\n'
             printf 'ELASTICSEARCH_URL=http://elasticsearch:9200\n'

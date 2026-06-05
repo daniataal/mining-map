@@ -44,11 +44,15 @@ func main() {
 	go workers.StartKazakhstanEgovSyncLoop(ctx, pool)
 	go workers.StartArcGISProbesSyncLoop(ctx, pool)
 	go workers.StartGraphSyncGoStepsLoop(ctx, pool)
+	go workers.StartShipVaultBackfillLoop(ctx, pool, cfg, log)
+	go workers.StartGleifSyncLoop(ctx, pool, cfg, log)
+	go workers.StartEIARefineryCapacitySyncLoop(ctx, pool, cfg, log)
 
 	log.Info().
 		Bool("ais", cfg.EnableAIS).
 		Bool("eia", cfg.EnableEIA).
 		Bool("comtrade", cfg.EnableComtrade).
+		Bool("shipvault_backfill", cfg.ShipVaultBackfillEnabled).
 		Msg("oil-live-intel worker started")
 
 	stop := make(chan os.Signal, 1)

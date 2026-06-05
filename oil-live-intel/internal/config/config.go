@@ -31,17 +31,20 @@ type Config struct {
 	// ShipVault vessel registry enrichment (optional).
 	// When ShipVaultEnabled=true, the dossier API fetches owner, builder,
 	// name history and estimated value on-demand and caches in Postgres.
-	ShipVaultEnabled        bool
-	ShipVaultBearerToken    string
-	ShipVaultRefreshToken   string
-	ShipVaultSessionJSON    string
-	ShipVaultEmail          string
-	ShipVaultPassword       string
-	ShipVaultFirebaseAPIKey string
-	ShipVaultAppOriginURL   string
-	ShipVaultCacheTTLDays      int
-	ShipVaultBaseURL           string
-	ShipVaultBootstrapAllowed  bool
+	ShipVaultEnabled               bool
+	ShipVaultBearerToken           string
+	ShipVaultRefreshToken          string
+	ShipVaultSessionJSON           string
+	ShipVaultEmail                 string
+	ShipVaultPassword              string
+	ShipVaultFirebaseAPIKey        string
+	ShipVaultAppOriginURL          string
+	ShipVaultCacheTTLDays          int
+	ShipVaultBaseURL               string
+	ShipVaultBootstrapAllowed      bool
+	ShipVaultBackfillEnabled       bool
+	ShipVaultBackfillLimit         int
+	ShipVaultBackfillIntervalHours int
 }
 
 // ShipVaultConfigured reports whether ShipVault should run (env credentials or DB refresh token).
@@ -75,17 +78,20 @@ func Load() Config {
 		SearchIndexerInterval:  envInt("SEARCH_INDEXER_INTERVAL_SECONDS", 300),
 
 		// ShipVault: enabled when any supported credential is present.
-		ShipVaultBearerToken:    env("SHIPVAULT_BEARER_TOKEN", ""),
-		ShipVaultRefreshToken:   env("SHIPVAULT_REFRESH_TOKEN", ""),
-		ShipVaultSessionJSON:    env("SHIPVAULT_SESSION_JSON", ""),
-		ShipVaultEmail:          env("SHIPVAULT_EMAIL", ""),
-		ShipVaultPassword:       env("SHIPVAULT_PASSWORD", ""),
-		ShipVaultFirebaseAPIKey: env("SHIPVAULT_FIREBASE_API_KEY", ""),
-		ShipVaultAppOriginURL:   strings.TrimRight(env("SHIPVAULT_APP_ORIGIN_URL", "https://app.shipvault.io"), "/"),
-		ShipVaultCacheTTLDays:   envInt("SHIPVAULT_CACHE_TTL_DAYS", 7),
-		ShipVaultBaseURL:          strings.TrimRight(env("SHIPVAULT_BASE_URL", "https://shipvaultapi-gjb8c.ondigitalocean.app"), "/"),
-		ShipVaultEnabled:          shipVaultEnabled(),
-		ShipVaultBootstrapAllowed: envBool("SHIPVAULT_BOOTSTRAP_ALLOWED", false),
+		ShipVaultBearerToken:           env("SHIPVAULT_BEARER_TOKEN", ""),
+		ShipVaultRefreshToken:          env("SHIPVAULT_REFRESH_TOKEN", ""),
+		ShipVaultSessionJSON:           env("SHIPVAULT_SESSION_JSON", ""),
+		ShipVaultEmail:                 env("SHIPVAULT_EMAIL", ""),
+		ShipVaultPassword:              env("SHIPVAULT_PASSWORD", ""),
+		ShipVaultFirebaseAPIKey:        env("SHIPVAULT_FIREBASE_API_KEY", ""),
+		ShipVaultAppOriginURL:          strings.TrimRight(env("SHIPVAULT_APP_ORIGIN_URL", "https://app.shipvault.io"), "/"),
+		ShipVaultCacheTTLDays:          envInt("SHIPVAULT_CACHE_TTL_DAYS", 7),
+		ShipVaultBaseURL:               strings.TrimRight(env("SHIPVAULT_BASE_URL", "https://shipvaultapi-gjb8c.ondigitalocean.app"), "/"),
+		ShipVaultEnabled:               shipVaultEnabled(),
+		ShipVaultBootstrapAllowed:      envBool("SHIPVAULT_BOOTSTRAP_ALLOWED", false),
+		ShipVaultBackfillEnabled:       envBool("SHIPVAULT_BACKFILL_ENABLED", true),
+		ShipVaultBackfillLimit:         envInt("SHIPVAULT_BACKFILL_LIMIT", 25),
+		ShipVaultBackfillIntervalHours: envInt("SHIPVAULT_BACKFILL_INTERVAL_HOURS", 24),
 	}
 }
 
