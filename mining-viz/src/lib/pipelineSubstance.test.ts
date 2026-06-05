@@ -5,6 +5,7 @@ import {
   pipelineSubstanceDisplayLabel,
   shouldIncludeInOilGasPipelineLayer,
   splitOsmPipelineFeatures,
+  splitOsmPipelineFeaturesForOilGasLayers,
 } from './pipelineSubstance';
 
 describe('classifyPipelineSubstance', () => {
@@ -64,6 +65,32 @@ describe('splitOsmPipelineFeatures', () => {
     ];
     const { oilGas, water } = splitOsmPipelineFeatures(features);
     expect(oilGas).toHaveLength(1);
+    expect(water).toHaveLength(1);
+  });
+});
+
+describe('splitOsmPipelineFeaturesForOilGasLayers', () => {
+  it('routes gas lines to the gas overlay bucket', () => {
+    const features: GeoJSON.Feature[] = [
+      {
+        type: 'Feature',
+        properties: { substance: 'oil' },
+        geometry: { type: 'LineString', coordinates: [] },
+      },
+      {
+        type: 'Feature',
+        properties: { substance: 'gas' },
+        geometry: { type: 'LineString', coordinates: [] },
+      },
+      {
+        type: 'Feature',
+        properties: { name: 'City water main' },
+        geometry: { type: 'LineString', coordinates: [] },
+      },
+    ];
+    const { oil, gas, water } = splitOsmPipelineFeaturesForOilGasLayers(features);
+    expect(oil).toHaveLength(1);
+    expect(gas).toHaveLength(1);
     expect(water).toHaveLength(1);
   });
 });

@@ -3,6 +3,7 @@ import {
   buildRoutePlannerHintsFromOpportunity,
   buildRoutePlannerHintsFromCargo,
   matchPortPreset,
+  resolveRoutePartyFromPort,
 } from './liveDataRoutePrefill';
 import type { MeridianCargoRecord, OilOpportunity } from '../../api/oilLiveApi';
 
@@ -54,5 +55,13 @@ describe('liveDataRoutePrefill', () => {
     expect(hints.discharge_port_name).toBe('Rotterdam');
     expect(hints.commodity_family).toBe('diesel');
     expect(hints.opportunity_id).toBe('opp-1');
+  });
+
+  it('resolveRoutePartyFromPort falls back to country hub when port and coords are missing', () => {
+    const party = resolveRoutePartyFromPort(undefined, 'United States', {});
+    expect(party).not.toBeNull();
+    expect(party?.country).toMatch(/United States|USA/i);
+    expect(typeof party?.lat).toBe('number');
+    expect(typeof party?.lng).toBe('number');
   });
 });

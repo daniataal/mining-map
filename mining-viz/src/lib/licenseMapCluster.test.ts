@@ -12,6 +12,9 @@ import {
   shouldRenderServerLicenseCluster,
   serverClusterFlyBounds,
   MAX_VIEWPORT_CLUSTER_MERGE_TOTAL,
+  LICENSE_DENSE_CLUSTER_MIN_COUNT,
+  LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
+  licenseClusterVisualDrillZoom,
   MIN_SERVER_LICENSE_CLUSTER_COUNT,
   SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from './licenseMapCluster';
@@ -43,6 +46,25 @@ describe('licenseMapCluster', () => {
     it('stays at drill threshold or above', () => {
       expect(clusterTargetZoom(2)).toBe(8);
       expect(clusterTargetZoom(2)).toBeGreaterThanOrEqual(SERVER_CLUSTER_MIN_DRILL_ZOOM);
+    });
+  });
+
+  describe('licenseClusterVisualDrillZoom', () => {
+    it('flies dense server clusters deep enough to unpack canvas re-clustering', () => {
+      expect(licenseClusterVisualDrillZoom(78)).toBe(LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM);
+      expect(licenseClusterVisualDrillZoom(LICENSE_DENSE_CLUSTER_MIN_COUNT)).toBe(
+        LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
+      );
+    });
+
+    it('keeps small server clusters at API drill threshold', () => {
+      expect(licenseClusterVisualDrillZoom(3)).toBe(SERVER_CLUSTER_MIN_DRILL_ZOOM);
+    });
+
+    it('always expands client clusters to detail zoom', () => {
+      expect(licenseClusterVisualDrillZoom(2, { clientCluster: true })).toBe(
+        LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
+      );
     });
   });
 

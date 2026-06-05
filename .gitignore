@@ -15,6 +15,8 @@ data/exports/
 data/eia_downloads/*.xls
 data/eia_downloads/*.xlsx
 !data/eia_downloads/README.md
+# GEM GOIT pipeline route GeoJSON (fetch via scripts/fetch_gem_goit_pipeline_routes.sh)
+data/gem/goit-pipeline-routes/
 !data/eia_downloads/.gitkeep
 .DS_Store
 .idea/

@@ -1,7 +1,9 @@
+/** @vitest-environment jsdom */
 import { describe, expect, it } from 'vitest';
 import {
   OSM_PETROLEUM_LAYER_IDS,
   defaultOsmLayerVisibility,
+  osmPetroleumCoverageGapMessage,
 } from './osmPetroleumLayers';
 
 describe('osmPetroleumLayers', () => {
@@ -12,5 +14,18 @@ describe('osmPetroleumLayers', () => {
   it('defaults storage layer off in map panel (dedicated StorageTankFarmsMapLayer is on)', () => {
     expect(defaultOsmLayerVisibility(true).storage_terminals).toBe(false);
     expect(defaultOsmLayerVisibility(false).storage_terminals).toBe(false);
+  });
+
+  it('surfaces backend coverage_gap hint for empty OSM snapshots', () => {
+    expect(
+      osmPetroleumCoverageGapMessage({
+        type: 'FeatureCollection',
+        features: [],
+        layer_id: 'pipelines',
+        coverage_gap: true,
+        hint: 'run petroleum-osm worker or graph-sync',
+      }),
+    ).toContain('graph-sync');
+    expect(osmPetroleumCoverageGapMessage(null)).toBeNull();
   });
 });

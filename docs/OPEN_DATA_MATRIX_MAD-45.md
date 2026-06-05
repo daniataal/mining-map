@@ -68,6 +68,7 @@ Legend — **Tier:** `live` | `historic` | `macro` | `synthetic` | `inferred` | 
 | `eia_refinery_padd` | EIA weekly PADD | US govt | Weekly | PADD, utilization, crude input | PADD code → US Gulf terminals | `macro` | Yes — Recipe G |
 | `mapbox_oilmap` | Mapbox oilmap MVT | **Paid** Mapbox | Static ~2019 | Layer features | — | `inferred` | Optional — `PETROLEUM_DISABLE_MAPBOX=1` preferred |
 | `national_gis_storage` | KZ, US, EU national GIS | Varies | **Gap** | Licence polygons, tank farms | Country-specific ID | `historic` | Per-country probes only |
+| `port_authority_curated` | Port authority major-customer pages | Public marketing web | Git + graph-sync | Tenant name, category, locode | `normalized_name` + country → `oil_companies` | `curated_reference` (directory) | Yes — `data/port_authority_directories.json`, `/api/ports/{locode}/directory` |
 
 ### 2.4 Trade / manifest-like & macro
 

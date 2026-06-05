@@ -76,10 +76,21 @@ type recipeFn struct {
 	run  func(context.Context, *pgxpool.Pool) ([]mcrDraft, error)
 }
 
-// RunRebuild executes triangulation recipes A–F and upserts MCR rows.
+// RunRebuild executes triangulation recipes A–G and upserts MCR rows.
 func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (BuildResult, error) {
-	res := BuildResult{Recipes: map[string]int{}}
-	recipes := []recipeFn{
+	return runRecipeBatch(ctx, pool, log, allSyntheticRecipes())
+}
+
+// RunPortCallMCR runs recipes derived from oil_port_calls (A likely load, B corridor pairs).
+func RunPortCallMCR(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (BuildResult, error) {
+	return runRecipeBatch(ctx, pool, log, []recipeFn{
+		{RecipeLikelyLoad, recipeLikelyLoad},
+		{RecipeCorridor, recipeCorridorTrade},
+	})
+}
+
+func allSyntheticRecipes() []recipeFn {
+	return []recipeFn{
 		{RecipeLikelyLoad, recipeLikelyLoad},
 		{RecipeCorridor, recipeCorridorTrade},
 		{RecipeTenderBuyer, recipeTenderBuyer},
@@ -88,6 +99,10 @@ func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (Bu
 		{RecipeRepeatDealer, recipeRepeatDealer},
 		{RecipeRefineryDriven, recipeRefineryDriven},
 	}
+}
+
+func runRecipeBatch(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger, recipes []recipeFn) (BuildResult, error) {
+	res := BuildResult{Recipes: map[string]int{}}
 	for _, rf := range recipes {
 		drafts, err := rf.run(ctx, pool)
 		if err != nil {
@@ -125,6 +140,23 @@ func RunRebuild(ctx context.Context, pool *pgxpool.Pool, log zerolog.Logger) (Bu
 	return res, nil
 }
 
+// portCallLiveOnlyClause excludes demo seed rows and requires live AIS provenance.
+func portCallLiveOnlyClause(alias string) string {
+	return fmt.Sprintf(`
+		  AND COALESCE(%[1]s.metadata->>'source', '') <> 'seed_port_calls'
+		  AND COALESCE(%[1]s.evidence::text, '') NOT ILIKE '%%seed_port_calls%%'
+		  AND COALESCE(%[1]s.metadata::text, '') NOT ILIKE '%%seed_port_calls%%'
+		  AND (
+		    COALESCE(%[1]s.metadata->>'source', '') = 'live_ais'
+		    OR COALESCE(%[1]s.evidence::text, '') ILIKE '%%live_ais%%'
+		  )`, alias)
+}
+
+// tankerVesselJoin restricts recipes to petroleum tanker classes (not container/cargo).
+const tankerVesselJoin = `
+		JOIN oil_vessels v ON v.mmsi = pc.mmsi
+		  AND v.tanker_class IN ('crude', 'product', 'chemical', 'lng', 'lpg')`
+
 func recipeLikelyLoad(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, pc.draft_delta, pc.arrival_ts, pc.confidence,
@@ -132,12 +164,11 @@ func recipeLikelyLoad(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, erro
 			ST_Y(t.geom::geometry) AS lat, ST_X(t.geom::geometry) AS lon,
 			v.crude_capable, v.product_tanker, v.deadweight_tons, v.max_draft_m, v.imo, v.name AS vname
 		FROM oil_port_calls pc
-		JOIN oil_terminals t ON t.id = pc.terminal_id
-		LEFT JOIN oil_vessels v ON v.mmsi = pc.mmsi
+		JOIN oil_terminals t ON t.id = pc.terminal_id`+tankerVesselJoin+`
 		WHERE pc.status = 'closed'
 		  AND pc.event_type = 'possible_loading'
 		  AND pc.draft_delta >= 1
-		  AND pc.arrival_ts > now() - interval '180 days'
+		  AND pc.arrival_ts > now() - interval '180 days'`+portCallLiveOnlyClause("pc")+`
 	`)
 	if err != nil {
 		return nil, err
@@ -252,6 +283,8 @@ func recipeCorridorTrade(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, e
 			ST_Y(ti.geom::geometry) AS ilat, ST_X(ti.geom::geometry) AS ilon
 		FROM oil_port_calls e
 		JOIN oil_terminals te ON te.id = e.terminal_id
+		JOIN oil_vessels v ON v.mmsi = e.mmsi
+		  AND v.tanker_class IN ('crude', 'product', 'chemical', 'lng', 'lpg')
 		JOIN oil_port_calls i ON i.mmsi = e.mmsi
 			AND i.status = 'closed'
 			AND i.event_type = 'possible_unloading'
@@ -262,7 +295,7 @@ func recipeCorridorTrade(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, e
 		  AND e.event_type = 'possible_loading'
 		  AND te.country IS NOT NULL AND ti.country IS NOT NULL
 		  AND te.country <> ti.country
-		  AND e.arrival_ts > now() - interval '120 days'
+		  AND e.arrival_ts > now() - interval '120 days'`+portCallLiveOnlyClause("e")+portCallLiveOnlyClause("i")+`
 		ORDER BY e.arrival_ts DESC
 		LIMIT 500
 	`)

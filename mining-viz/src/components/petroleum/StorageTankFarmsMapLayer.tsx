@@ -1,12 +1,19 @@
-import { useMemo } from 'react';
-import { LayerGroup, LayersControl } from 'react-leaflet';
+import { useCallback, useMemo } from 'react';
+import L from 'leaflet';
+import { LayerGroup, LayersControl, useMap } from 'react-leaflet';
 import type { MiningLicense } from '../../types';
 import { useI18n } from '../../lib/i18n';
 import {
+  formatStorageMapFeatureLabels,
   storageTankFarmsLayerShouldMount,
 } from '../../lib/storageTankFarmsLayer';
 import CanvasLiveDealLayer from './CanvasLiveDealLayer';
 import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
+import { isLiveDealClientClusterData } from '../../lib/liveDealMap/liveDealMapLod';
+
+const STORAGE_CANVAS_CLUSTER_KINDS = ['storage_terminal', 'tank_farm', 'storage_tank'] as const;
+const STORAGE_CANVAS_CLUSTER_MAX_ZOOM = 14;
+const STORAGE_CANVAS_CLUSTER_MIN_COUNT = 2;
 
 interface StorageTankFarmsMapLayerProps {
   entities: MiningLicense[];
@@ -14,6 +21,58 @@ interface StorageTankFarmsMapLayerProps {
   mapZoom?: number;
   selectedId?: string | null;
   onSelect: (item: MiningLicense) => void;
+}
+
+function StorageTankFarmsCanvas({
+  features,
+  mapZoom,
+  selectedUid,
+  onSelect,
+}: {
+  features: LiveDealMapFeature[];
+  mapZoom: number;
+  selectedUid: string | null;
+  onSelect: (item: MiningLicense) => void;
+}) {
+  const map = useMap();
+
+  const handleFeatureClick = useCallback(
+    (feature: LiveDealMapFeature) => {
+      if (
+        feature.kind === 'server_cluster' &&
+        isLiveDealClientClusterData(feature.data)
+      ) {
+        const { bounds } = feature.data;
+        const leafletBounds = L.latLngBounds(
+          [bounds.south, bounds.west],
+          [bounds.north, bounds.east],
+        );
+        map.stop();
+        map.flyToBounds(leafletBounds.pad(0.12), {
+          maxZoom: STORAGE_CANVAS_CLUSTER_MAX_ZOOM + 1,
+          padding: [36, 36],
+          duration: 0.5,
+        });
+        return;
+      }
+      const item = feature.data as MiningLicense | undefined;
+      if (item) onSelect(item);
+    },
+    [map, onSelect],
+  );
+
+  return (
+    <CanvasLiveDealLayer
+      features={features}
+      mapZoom={mapZoom}
+      selectedUid={selectedUid}
+      onFeatureClick={handleFeatureClick}
+      clusterPoints
+      clusterKinds={STORAGE_CANVAS_CLUSTER_KINDS}
+      clusterMaxZoom={STORAGE_CANVAS_CLUSTER_MAX_ZOOM}
+      clusterMinCount={STORAGE_CANVAS_CLUSTER_MIN_COUNT}
+    />
+  );
 }
 
 export default function StorageTankFarmsMapLayer({
@@ -34,22 +93,30 @@ export default function StorageTankFarmsMapLayer({
   );
   const features = useMemo<LiveDealMapFeature[]>(
     () =>
-      placemarks.map((item) => ({
+      placemarks.map((item) => {
+        const labels = formatStorageMapFeatureLabels(item);
+        return {
         shape: 'point',
         uid: `storage:${item.id}`,
         id: item.id,
-        kind: item.entitySubtype === 'tank_farm' ? 'tank_farm' : 'storage_terminal',
+        kind:
+          item.entitySubtype === 'tank_farm'
+            ? 'tank_farm'
+            : item.entitySubtype === 'storage_tank'
+              ? 'storage_tank'
+              : 'storage_terminal',
         lat: item.lat,
         lng: item.lng,
-        title: item.company,
-        subtitle: [item.operatorName, item.ownerName, item.country].filter(Boolean).join(' · '),
+        title: labels.title,
+        subtitle: labels.subtitle ?? undefined,
         tier: item.recordOrigin ?? item.sourceKind ?? 'inferred',
         confidence: item.confidenceScore ?? item.geoConfidence ?? undefined,
         sourceCount: item.sourceLabels?.length ?? item.evidenceCount ?? 0,
         dealScore: item.confidenceScore ?? 0.6,
         styleKey: item.entitySubtype ?? 'storage_terminal',
         data: item,
-      })),
+      };
+      }),
     [placemarks],
   );
 
@@ -63,14 +130,11 @@ export default function StorageTankFarmsMapLayer({
   return (
     <LayersControl.Overlay checked name={layerLabel}>
       <LayerGroup>
-        <CanvasLiveDealLayer
+        <StorageTankFarmsCanvas
           features={features}
           mapZoom={mapZoom ?? 5}
           selectedUid={selectedId ? `storage:${selectedId}` : null}
-          onFeatureClick={(feature) => {
-            const item = feature.data as MiningLicense | undefined;
-            if (item) onSelect(item);
-          }}
+          onSelect={onSelect}
         />
       </LayerGroup>
     </LayersControl.Overlay>

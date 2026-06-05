@@ -7,6 +7,7 @@
 | Area | Status | Notes |
 |------|--------|-------|
 | **Unified map** | Done | Terminals, vessels, corridors, opportunity markers on main map. Default fly-to Gulf hub bbox (24–55°E, 12–32°N) on tab entry. |
+| **Petroleum OSM map layers** | Done | Pipelines, refineries, storage terminals from `petroleum_osm_features`. **MVT vector tiles** via Go `GET /api/petroleum/osm-tiles/{layer}/{z}/{x}/{y}.pbf` + MapLibre GL overlay in Leaflet. GeoJSON fallback when `VITE_OSM_VECTOR_TILES=0`. Nightly sync: `oil-live-intel-worker` (`PETROLEUM_OSM_SYNC_*`). |
 | **Intel drawer** | Done | Tabs: Intelligence, Opportunities, Cargo, Companies, Alerts. Product filter. Coverage health banner. |
 | **Meridian Cargo Records (MCR)** | Done | Cargo ledger; row click opens left drawer with full MCR + evidence. CSV export. **Include seed data** toggle dev/localhost only (`VITE_ALLOW_SEED_DATA_TOGGLE` or `import.meta.env.DEV`). |
 | **Deal Execution Pack** | Done | Left drawer from map/opportunity/cargo. Deal-pack API + inline economics/margin sheet. |
@@ -490,6 +491,8 @@ BASE_URL=http://127.0.0.1:8080 ./scripts/license_bundle_parity.sh
 | `VITE_LICENSE_MAP_SHADOW_METRICS` | off (prod) | `1` + rebuild frontend to log fallback parity on staging |
 | `VITE_LICENSE_MAP_GO_STRICT` | off | `1` removes Python `/licenses` fallback (use only after shadow + parity green ~14d) |
 
+Full cutover checklist: [LICENSE_MAP_CUTOVER_GATE.md](./LICENSE_MAP_CUTOVER_GATE.md).
+
 **CI:** PRs run `.github/workflows/platform-health.yml` — Go tests, `mining-viz` build, manifest ingest tests, and `scripts/platform_map_smoke.sh` + `license_bundle_parity.sh` with `SMOKE_SKIP_IF_DOWN=1` when no compose stack is present.
 
 ---
@@ -507,7 +510,8 @@ Graph-sync may insert demo **seed port calls** (`source=seed_port_calls`) when A
 | Provenance badges | Hides `seed_port_calls`; inferred MCR still labelled **Synthetic** | Shows seed badge when toggle enabled |
 
 - **API:** `GET /api/oil-live/cargo-records?exclude_seed=true` (default in prod via `OIL_LIVE_DISABLE_DEMO_SEED=1`).
-- **Purge existing demo rows (admin):** `POST /api/admin/oil-live/purge-demo-seed` with `X-Admin-Token`.
+- **Purge existing demo rows (admin):** `POST /api/admin/oil-live/purge-demo-seed` with `X-Admin-Token` — deletes seed port calls, seed-linked MCRs, and restores hijacked vessel names from latest AIS when available.
+- **Synthetic BOL recipes** (`B_corridor_trade`, `A_likely_load`) require `live_ais` port-call provenance and petroleum tanker class; corridor aggregate views exclude seed-linked MCRs (migration `023`).
 
 ---
 

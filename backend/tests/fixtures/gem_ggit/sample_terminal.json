@@ -1,0 +1,14 @@
+{
+  "GEM location ID": "LNG9999TEST",
+  "Terminal Name": "Example Gulf LNG Hub",
+  "Country/Area": "United Arab Emirates",
+  "Latitude": 25.12,
+  "Longitude": 56.35,
+  "Status": "operating",
+  "Terminal Type": "import",
+  "Capacity (Mtpa)": 9.5,
+  "Operator(s)": "Example LNG Operator LLC",
+  "Owner(s)": "Example Energy Parent",
+  "Location accuracy": "exact",
+  "Wiki URL": "https://www.gem.wiki/example_lng"
+}

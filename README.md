@@ -26,9 +26,9 @@ Replace `YOUR_SERVER_IP` with your actual IP address (e.g. `129.159.148.51`).
 
 ```bash
 sudo docker run -d \
-  -e VITE_API_BASE=http://YOUR_SERVER_IP:8000 \
   -p 8000:8000 \
   -p 5173:5173 \
+  -p 8080:80 \
   -v /opt/mining-map:/data \
   -e MINING_DB_PATH=/data/mining.db \
   --name mining-map-v2 \
@@ -36,8 +36,9 @@ sudo docker run -d \
 ```
 
 ### 2. Access the Application
-*   **Frontend**: `http://YOUR_SERVER_IP:5173`
-*   **Backend API**: `http://YOUR_SERVER_IP:8000/licenses`
+*   **Recommended (UI + API routing)**: `http://YOUR_SERVER_IP:8080` (Caddy → Vite + Go oil-live + Python backend)
+*   **Frontend only**: `http://YOUR_SERVER_IP:5173` (omit `VITE_API_BASE` so the dev proxy routes `/api/oil-live/*` to Go)
+*   **Python API direct**: `http://YOUR_SERVER_IP:8000/licenses` (also proxies `/api/oil-live/*` to Go when using full compose)
 
 ### 3. Troubleshooting
 If you see **"Database error"** or permissions issues:

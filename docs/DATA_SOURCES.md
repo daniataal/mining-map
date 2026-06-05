@@ -73,6 +73,58 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | **Tier honesty** | Global NGO field-level extraction reference — **not** an official licence/block registry (`record_origin=global_open_fallback`) |
 | **Verify** | After ingest: `SELECT COUNT(*) FROM licenses WHERE source_id='gem_global_extraction_tracker_march_2026'`; sample `id` like `gem_global_extraction_tracker_march_2026:L100000321006`; Oil & Gas map with `prefer_open_data=true` |
 
+#### GEM — `gem_goit_oil_ngl_pipelines_march_2025` (GOIT pipelines)
+
+| | |
+|--|--|
+| **Files** | `GEM-GOIT-Oil-NGL-Pipelines-2025-03.xlsx` (sheet `Pipelines`, attributes only) + route GeoJSON per `ProjectID` from [GOIT-GGIT-pipeline-routes](https://github.com/GlobalEnergyMonitor/GOIT-GGIT-pipeline-routes) (`data/gem/goit-pipeline-routes/data/individual-routes/liquid-pipelines/`) |
+| **License** | CC BY 4.0 — citation: *Global Energy Monitor, Global Oil Infrastructure Tracker - Oil/NGL Pipelines - March 2025 release* |
+| **Fetch routes** | `./scripts/fetch_gem_goit_pipeline_routes.sh` (sparse clone; directory gitignored) |
+| **Refresh** | `POST /api/admin/gem-goit-pipelines/ingest`; optional graph-sync when `GEM_GOIT_PIPELINES_AUTO_INGEST=true` |
+| **Storage** | Postgres `gem_pipeline_segments` (LineString/MultiLineString, tags JSONB) — separate from `petroleum_osm_features` |
+| **Map API** | `GET /api/petroleum/gem-pipelines?south&west&north&east`; coverage `GET /api/petroleum/gem-pipelines/coverage` |
+| **Tier honesty** | NGO-researched routes (`RouteAccuracy` in xlsx); **not** official cadastre; Excel has no geometry (routes only in GeoJSON) |
+| **Verify** | After ingest: `SELECT COUNT(*) FROM gem_pipeline_segments`; `curl` Gulf bbox → `feature_count` > 0; map layer **Pipelines — GEM GOIT (CC BY)** |
+
+#### OSM vs GEM vs Mapbox (product principle)
+
+| Layer | What it shows | Gulf/MENA strength | Do not use for |
+|-------|----------------|-------------------|----------------|
+| **OSM** (`petroleum_osm_features`) | Community-mapped tanks, pipes, refineries | Local visible detail where mappers are active | Official capacity, owners, underground completeness |
+| **GEM GOIT** (`gem_pipeline_segments`) | NGO pipeline routes + capacity/owner tags | Corridor metadata; CC BY routes | Oil **storage** (excluded from GOIT — see [GOIT FAQ](https://globalenergymonitor.org/projects/global-oil-gas-infrastructure-tracker/)) |
+| **GEM GOGPT** (`gem_plant_units`) | Power/CHP units, owners, captive industry | Plant operators near hubs | Tank lessors / berth contracts |
+| **GEM GGIT** (`gem_lng_terminals`) | LNG import/export terminals | Gulf LNG hubs with owners | Storage-only or bunkering-only sites |
+| **Port directories** | Port-authority tenant lists | Best commercial lead (Fujairah-style) | Signed contracts |
+| **Mapbox oilmap** (optional) | Legacy global sketch | Broad context | Official or current data |
+
+Map UI: `GET /api/petroleum/infrastructure-coverage` drives the Oil & Gas honesty banner. Never merge layers without `source_id` and `limitations[]`.
+
+VM ingest order: [docs/runbooks/GEM_GULF_VM_INGEST.md](runbooks/GEM_GULF_VM_INGEST.md).
+
+#### GEM — `gem_gogpt_plants_january_2026` (GOGPT plants)
+
+| | |
+|--|--|
+| **File** | `Global-Oil-and-Gas-Plant-Tracker-GOGPT-January-2026.xlsx` (sheet `Gas & Oil Units`; optional `sub-threshold units` via `GEM_GOGPT_INCLUDE_SUB_THRESHOLD=true`) |
+| **License** | [Global Energy Monitor GOGPT](https://globalenergymonitor.org/projects/global-oil-gas-plant-tracker/) (January 2026) |
+| **Refresh** | `POST /api/admin/gem-gogpt-plants/ingest`; graph-sync when `GEM_GOGPT_AUTO_INGEST=true` |
+| **Storage** | Postgres `gem_plant_units` (Point, tags JSONB) |
+| **Commercial fields** | `Operator(s)`, `Owner(s)`, `Parent(s)`, GEM entity IDs, captive industry use/type, equipment vendor — **not** tank lessors |
+| **Map API** | `GET /api/petroleum/gem-plants?south&west&north&east` |
+| **Verify** | `SELECT COUNT(*) FROM gem_plant_units`; map layer **Plants — GEM GOGPT (power/CHP)**; popup shows owner/operator/captive rows |
+
+#### GEM — `gem_ggit_lng_terminals_september_2025` (GGIT LNG)
+
+| | |
+|--|--|
+| **File** | `Global-Gas-Infrastructure-Tracker-GGIT-September-2025.xlsx` (`GEM_GGIT_XLSX_PATH`) |
+| **License** | [GEM GGIT](https://globalenergymonitor.org/projects/global-gas-infrastructure-tracker/) |
+| **Refresh** | `POST /api/admin/gem-ggit-lng/ingest`; graph-sync `gem_ggit_lng` when `GEM_GGIT_AUTO_INGEST=true` |
+| **Storage** | Postgres `gem_lng_terminals` (Point, tags JSONB) |
+| **Map API** | `GET /api/petroleum/gem-lng-terminals?south&west&north&east` |
+| **Commercial** | Included in storage `commercialIntel.nearbyGemLngTerminals` (≤25 km) |
+| **Verify** | `SELECT COUNT(*) FROM gem_lng_terminals`; runbook [GEM_GGIT_LNG.md](runbooks/GEM_GGIT_LNG.md) |
+
 ### 2.2 Other backend ingest (not ArcGIS list)
 
 | Module | Data | Free? | Verification |
@@ -81,6 +133,8 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `gov_procurement_sync.py` | USAspending contract awards | Yes (US federal) | Award ID on USAspending.gov |
 | `csv_fallback_import.py` | User/admin CSV (e.g. SA/Ghana mining) | User-provided | `user_import_csv`; source file + row hash |
 | `gem_extraction_tracker_import.py` | GEM Global Oil & Gas Extraction Tracker (March 2026 xlsx) | Yes (GEM open data) | `source_id=gem_global_extraction_tracker_march_2026`; `record_origin=global_open_fallback`; admin `POST /api/admin/gem-extraction-tracker/ingest`; auto on graph-sync when xlsx present |
+| `gem_goit_pipelines_import.py` | GEM GOIT Oil/NGL pipelines (xlsx + GitHub route GeoJSON) | Yes (CC BY 4.0) | `gem_pipeline_segments`; admin `POST /api/admin/gem-goit-pipelines/ingest`; map `GET /api/petroleum/gem-pipelines` |
+| `gem_gogpt_plants_import.py` | GEM GOGPT oil/gas power plants (January 2026 xlsx) | Yes (GEM open data) | `gem_plant_units`; admin `POST /api/admin/gem-gogpt-plants/ingest`; map `GET /api/petroleum/gem-plants` |
 | `petroleum_infrastructure.py` | Exploration polygons, pipelines, refineries | **Mapbox** (oilmap tilesets) | Layer catalog `limitations`; token env `MAPBOX_ACCESS_TOKEN` |
 | `petroleum_trade.py` / Comtrade | Bilateral HS27 trade flows | UN Comtrade (free tier limits) | Reporter/partner codes in API response |
 | `ingest_oil_trades.py` | Static Comtrade-style seeds | Reference | Documented M49/HS codes |
@@ -88,6 +142,49 @@ This document is the operational source-of-truth for **what** Meridian ingests, 
 | `census_trade.py` | U.S. bilateral HS 2709/2710/2711 (Census timeseries API) | Free API key ([signup](https://api.census.gov/data/key_signup.html)) | `oil_trade_flows.data_source=census_api`; macro tier; runs on graph sync |
 | `usitc_dataweb.py` | U.S. HS flows / tariff context (DataWeb) | Free account + API token | `USITC_DATAWEB_API_KEY`; `data_source=usitc_dataweb` on graph sync |
 | Bundled `licenses.json` | Legacy snapshot | Deprecated for prod UX | `bundled_json`; excluded when `prefer_open_data=true` |
+
+### 2.2.0 Country · commodity snapshot (license click / dossier)
+
+Shown on **map license popup** and **dossier Overview / Exports** via `GET /entities/{id}/country-commodity-snapshot`. Answers: for this license’s **country** and **commodity**, what do we know about national **export/import** (trade) and **extraction/production** (where ingested)?
+
+| Tier | Source | What it means |
+|------|--------|----------------|
+| **Asset** | GEM extraction tracker (`licenses` + `raw_payload.production`) | Field-level NGO data; country rollup sums matched GEM fields — not official national statistics |
+| **Macro trade** | `oil_trade_flows`, `commodity_trade_flows` (Comtrade, Eurostat, Census, USITC) | Country reporter × HS code; `bol_tier=macro` — **not** the license company’s customs filings |
+| **Macro supply** | `jodi_oil_snapshots` | JODI national oil indicators; supplementary context for petroleum countries |
+| **Mining production** | — (v2) | No national mining production table in v1; UI shows export trade as proxy + honest gap label |
+
+**Prerequisites:** `COMTRADE_API_KEY` + `POST /api/admin/oil-live/graph-sync` for fresh trade rows; GEM xlsx ingest for oil/gas field rollups. HS mapping: `backend/services/commodity_hs.py` (gold `7108`, diesel `2710`, copper `7403`, etc.).
+
+**Rollback:** API is additive; remove UI by not rendering `CountryCommoditySnapshotCard`.
+
+### 2.2.1 Port authority major-customer directories (curated)
+
+| | |
+|--|--|
+| **File** | `data/port_authority_directories.json` |
+| **License** | Public port authority marketing / customer-list pages (manual transcription; cite `source_url` per port) |
+| **Refresh cadence** | Git commit + optional graph-sync step `port_authority_tenants` |
+| **API** | `GET /api/ports/{locode}/directory`, `GET /api/ports/directory/coverage`; merged into `GET /api/logistics/ports/{id}` detail as `portDirectory` |
+| **Match keys** | `locode` (UN/LOCODE, e.g. `AEFJR` Fujairah) → tenant `normalized_name` → `oil_companies` |
+| **Mapped fields** | Tenant `name`, `category` (tank storage, bunker, agents, …), optional `curated_storage_external_id` → storage seed hub |
+| **Tier honesty** | `record_origin=port_authority_curated`, `evidence_type=port_authority_page` — **not** audited capacity, berth contract, or ownership |
+| **Verify** | `curl http://127.0.0.1:8080/api/ports/AEFJR/directory`; Ports view dossier → Major customers; compare to [Port of Fujairah major customers](https://fujairahport.ae/port-overview/major-customers/) |
+
+**MVP ports in seed:** AEFJR, NLRTM, SGSIN, USHOU, BEANR, AEJEA, AEDXB. **Hub playbook batch 1 (2026-06):** SARTA (Ras Tanura), SAYNB (Yanbu), BRSSZ (Santos), INSIK (Jamnagar/Sikka).
+
+### 2.2.2 Global storage coverage inventory
+
+| | |
+|--|--|
+| **Report API** | `GET /api/storage/coverage/report` — per-country and per–world-tile OSM/curated counts, orphan rate, gap candidates |
+| **Gap queue** | `data/coverage/storage_gap_queue.json` — regional Overpass sync targets (`?write_queue=true` on report) |
+| **Audit file** | `data/coverage/storage_audit_YYYY-MM.json` — optional `?write_audit=true` or `POST /api/admin/storage/coverage-audit` |
+| **Map API** | `GET /api/storage/terminals?south=&west=&north=&east=&limit=` — viewport filter + `coverage_gap` when empty |
+| **Commercial intel** | `GET /api/storage/terminals/{id}` adds `commercialIntel`: port-authority tenants (by LOCODE or nearest port), nearby GEM plants/pipelines/extraction fields — outreach leads, not tank lessors |
+| **Regional OSM sync** | `POST /api/admin/petroleum-osm/sync?from_gap_queue=true` or `?tiles=mena,europe` |
+| **Curated gap-fill** | `retain_near_osm` on seed rows; drop curated only when ≥3 OSM tanks within 2 km (not 8 km adjacent-farm suppression) |
+| **National GIS backlog** | [NATIONAL_GIS_STORAGE_BACKLOG.md](./NATIONAL_GIS_STORAGE_BACKLOG.md) |
 
 ### 2.3 Company / deal signals (in app today)
 
@@ -117,6 +214,10 @@ Meridian **Live Data** merges free sources into `mining_db` via `POST /api/admin
 | **JODI oil snapshots** | `jodi_oil.sync_jodi_snapshots` | `JODI_CSV_URL` or `JODI_CSV_PATH` (public export) | `jodi_oil_snapshots`; validates corridors / benchmarks |
 | **Mining HS Comtrade** | `commodity_trade_flows.sync_mining_hs_comtrade` | `COMTRADE_API_KEY`; `COMMODITY_COMTRADE_SYNC_ENABLED` | `commodity_trade_flows` (HS 26xx/71xx/74xx); license dossier trade panel |
 | **UK / user trade manifests** | `trade_manifest_ingest.sync_uk_open_trade_rows` | `UK_MANIFEST_CSV_DIR`, `USER_MANIFEST_CSV_DIR`; admin `POST /api/admin/trade-manifests/upload`; sample CSV in `data/uk_trade_manifests/`; `uk-trade-manifest-sync-worker` | `trade_manifest_rows` (`customs_open`, `user_upload`, `macro`) |
+
+**Dev verify (Phase 1):** drop HMRC-style `*.csv` under `data/uk_trade_manifests/`, then run `./scripts/ingest_uk_manifests_dev.sh` (or graph-sync step `trade_manifest_uk`). Confirm `GET /api/oil-live/trade-manifests?bol_tier=customs_open` and `sync-status.manifest_by_tier` show `customs_open` counts. Live Data intel panel surfaces the tier badge — not paid BOL.
+
+**Brazil (MAD-4x-c2):** `BRAZIL_MANIFEST_CSV_DIR` → graph-sync `trade_manifest_brazil` → same table with `data_source=brazil_comex_open`. Sample: `data/brazil_trade_manifests/sample_open_trade.csv`.
 | **AIS (live)** | `oil-live-intel-worker` (Go) | `AISSTREAM_API_KEY` | `oil_ais_positions`, `oil_vessels`, `oil_port_calls`, `maritime_source_health`; `/api/oil-live/vessels/live`. Partial open/community coverage, not global truth |
 | **Vessel positions (multi-source merge)** | `oil-live-intel` map API | `OIL_LIVE_MERGED_VESSEL_POSITIONS` optional | `oil_vessel_position_observations` — per-source rows; **`GET /api/oil-live/vessels/live`** is primary map path |
 | **Maritime Redis snapshot (retired)** | — | — | **Removed** — was Python `maritime-worker` → Redis; graph-sync mirror retired. Historical `data_source=maritime_redis` rows may remain in DB |
@@ -460,6 +561,9 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `backend/arcgis_probe_sync_worker.py` | Weekly KZ + PH ArcGIS probes |
 | `mining-viz/src/components/dossier/CompanyRegistryLinks.tsx` | Dossier OC + national register chips |
 | `mining-viz/src/components/dossier/EntityTradeFlowsPanel.tsx` | Stored macro trade rows (Comtrade + Eurostat) in dossier |
+| `mining-viz/src/components/CountryCommoditySnapshotCard.tsx` | Map popup + dossier country/commodity export/import KPIs |
+| `backend/services/country_commodity_snapshot.py` | Aggregates macro trade + GEM/JODI for `GET /entities/{id}/country-commodity-snapshot` |
+| `backend/services/commodity_hs.py` | Shared license commodity → HS code mapping |
 | `backend/services/sync_alert_store.py` | Drift `sync_alert_events` + webhook stub |
 | `backend/services/petroleum_osm_sync_store.py` | OSM sync run logging |
 | `backend/ted_procurement_sync_worker.py` | Weekly TED refresh worker |

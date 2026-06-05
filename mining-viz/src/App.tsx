@@ -15,6 +15,7 @@ import {
   type LicenseViewportBounds,
   normalizeLicenseViewportBounds,
 } from './lib/api';
+import { postAgentDebugIngest } from './lib/agentDebugIngest';
 import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
 import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
 import { DEFAULT_OSM_LAYER_VISIBILITY } from './lib/osmPetroleumLayers';
@@ -25,6 +26,7 @@ import { getEiaHistoricMap } from './api/eiaHistoricApi';
 import { useMiningData } from './hooks/use-mining-data';
 import { useLicenseAnnotations } from './hooks/use-license-annotations';
 import { useDebouncedValue } from './hooks/use-debounced-value';
+import { quantizePetroleumViewportBounds } from './lib/petroleumViewportBounds';
 import {
   EIA_HISTORIC_STALE_MS,
   eiaHistoricMapQueryKey,
@@ -44,6 +46,7 @@ import type { InvestigationsSubTab } from './components/InvestigationsPanel';
 import AuthOverlay from './components/AuthOverlay';
 import FilterPanel from './components/FilterPanel';
 import { excludeHiddenFallbackPlaceholders } from './lib/licenseVisibility';
+import { storageViewportCoverageGapMessage } from './lib/storageCoverageBanner';
 import { LICENSE_MAP_DEFAULT_ZOOM } from './lib/licenseMapCluster';
 import OilMaritimePanel from './components/OilMaritimePanel';
 import { resolveFleetVesselSelection } from './lib/vessels/resolveFleetVessel';
@@ -93,6 +96,7 @@ import {
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
 import type { HistoricArcSelection } from './features/live-data/HistoricArcDetailDrawer';
 import {
+  CRISIS_HORMUZ_BBOX,
   LIVE_DATA_HUB_CENTER,
   LIVE_DATA_EIA_HISTORIC_DEFAULT_YEAR,
   LIVE_DATA_VESSEL_FILTERS,
@@ -253,12 +257,47 @@ export default function App() {
     }
   }, [licenseDrillExpandBounds, licenseMapZoom, rawData]);
   const licensesMapSecondaryStatus = null;
+  const [oilGasMapViewport, setOilGasMapViewport] = useState<LicenseViewportBounds | null>(null);
+  const handleOilGasMapViewportChange = useCallback((bbox: LicenseViewportBounds | null) => {
+    setOilGasMapViewport((prev) => {
+      if (
+        (prev == null && bbox == null) ||
+        (prev &&
+          bbox &&
+          prev.south === bbox.south &&
+          prev.west === bbox.west &&
+          prev.north === bbox.north &&
+          prev.east === bbox.east)
+      ) {
+        return prev;
+      }
+      return bbox
+        ? {
+            south: bbox.south,
+            west: bbox.west,
+            north: bbox.north,
+            east: bbox.east,
+          }
+        : null;
+    });
+  }, []);
+  const debouncedOilGasMapViewport = useDebouncedValue(oilGasMapViewport, 800);
+  const storageFetchViewport = useMemo(
+    () =>
+      debouncedOilGasMapViewport
+        ? quantizePetroleumViewportBounds(debouncedOilGasMapViewport)
+        : null,
+    [debouncedOilGasMapViewport],
+  );
   // Viewport loads use keepPreviousData — no full sidebar spinner on pan/cluster drill.
   const {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
     error: storageError,
-  } = useStorageTerminals(viewMode === 'oil_and_gas' && mapSidebarTab === 'licenses');
+  } = useStorageTerminals(viewMode === 'oil_and_gas', {
+    viewport: storageFetchViewport,
+    limit: 2000,
+  });
   const {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
@@ -375,6 +414,39 @@ export default function App() {
     [licenseSector, localLicenses]
   );
   const storageEntities = storageTerminalResponse?.entities || [];
+  useEffect(() => {
+    if (viewMode !== 'oil_and_gas' || !storageTerminalResponse?.entities) return;
+    const ents = storageTerminalResponse.entities;
+    const uae = ents.filter((e) => (e.country || '').includes('United Arab Emirates'));
+    const fuj = ents.filter(
+      (e) =>
+        e.lat != null &&
+        e.lng != null &&
+        e.lat >= 25.0 &&
+        e.lat <= 25.25 &&
+        e.lng >= 56.2 &&
+        e.lng <= 56.5,
+    );
+    const isr = ents.filter((e) => (e.country || '').includes('Israel'));
+    const curated = ents.filter(
+      (e) => e.sourceKind === 'curated_reference' || String(e.id || '').startsWith('curated_storage_'),
+    );
+    postAgentDebugIngest({
+      sessionId: '7419a2',
+      hypothesisId: 'C',
+      location: 'App.tsx:storageEntities',
+      message: 'storage_entities_region_counts',
+      data: {
+        total: ents.length,
+        curated: curated.length,
+        uae: uae.length,
+        fujairah: fuj.length,
+        israel: isr.length,
+        statsBySource: storageTerminalResponse.stats?.by_source,
+      },
+      timestamp: Date.now(),
+    });
+  }, [viewMode, storageTerminalResponse]);
   const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
     () => {
@@ -656,8 +728,11 @@ export default function App() {
   );
 
   const handleLicenseClusterDrillComplete = useCallback(
-    (expandBounds: LicenseViewportBounds) => {
+    (expandBounds: LicenseViewportBounds, zoom?: number) => {
       setLicenseDrillExpandBounds(normalizeLicenseViewportBounds(expandBounds));
+      if (zoom != null && Number.isFinite(zoom)) {
+        setLicenseMapZoom(zoom);
+      }
       queryClient.invalidateQueries({ queryKey: ['licenses', 'viewport'] });
     },
     [queryClient],
@@ -1023,10 +1098,27 @@ export default function App() {
   const handleOilLiveLensChange = useCallback((lens: LiveDataLensMode) => {
     setOilLiveLens(lens);
     setOilLiveLayers(layersForLiveDataLens(lens));
-    setOilLiveTradeFlowGroup(lens === 'raw' ? 'country_pair' : 'company_pair');
+    setOilLiveTradeFlowGroup(
+      lens === 'raw' || lens === 'crisis' ? 'country_pair' : 'company_pair',
+    );
     setLiveDataMacroTradeOn(lens !== 'infrastructure');
     setLiveDataEiaHistoricOn(false);
-    setIsMaritimeLayerEnabled(lens === 'raw');
+    setIsMaritimeLayerEnabled(lens === 'raw' || lens === 'crisis');
+    if (lens === 'infrastructure') {
+      setInfrastructureLayerVisibility({
+        pipelines: true,
+        refineries: true,
+        storage_terminals: true,
+      });
+    }
+    if (lens === 'crisis') {
+      const b = CRISIS_HORMUZ_BBOX;
+      setLiveDataFlyTarget({
+        lat: (b.south + b.north) / 2,
+        lng: (b.west + b.east) / 2,
+      });
+      setLiveDataFlyTrigger((n) => n + 1);
+    }
   }, []);
 
   useEffect(() => {
@@ -1480,6 +1572,13 @@ export default function App() {
               <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
                 <OilGasOnboardingTip active />
               </div>
+              {storageViewportCoverageGapMessage(storageTerminalResponse) && (
+                <div className="absolute top-[7.5rem] left-3 right-3 z-[999] pointer-events-none max-w-xl">
+                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-[10px] font-semibold text-amber-950 shadow-xl backdrop-blur-xl dark:text-amber-100">
+                    {storageViewportCoverageGapMessage(storageTerminalResponse)}
+                  </div>
+                </div>
+              )}
               {(isStorageLoading || storageTerminalResponse?.stats) && (
                 <div className="absolute top-[4.5rem] right-3 z-[999] pointer-events-none hidden sm:block">
                   <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-900 shadow-xl backdrop-blur-xl dark:text-cyan-100">
@@ -1616,6 +1715,9 @@ export default function App() {
                   storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={
                     viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
+                  }
+                  onOilGasMapViewportChange={
+                    viewMode === 'oil_and_gas' ? handleOilGasMapViewportChange : undefined
                   }
                   oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}

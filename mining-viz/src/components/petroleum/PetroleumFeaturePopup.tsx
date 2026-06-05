@@ -1,8 +1,13 @@
+import { useQuery } from '@tanstack/react-query';
 import {
   buildPetroleumFeatureViewModel,
+  collectGemCommercialDetails,
   formatCoordinates,
   petroleumLayerTypeLabel,
 } from '../../lib/petroleumFeatureFields';
+import { fetchNearestGemPipeline } from '../../lib/infrastructureCoverage';
+import CompanyLeadButton from '../popup/CompanyLeadButton';
+import type { MiningLicense } from '../../types';
 import type { PetroleumLayerId } from '../../lib/petroleumLayers';
 import { pipelineSubstancePopupLayerId } from '../../lib/pipelineSubstance';
 import { useI18n } from '../../lib/i18n';
@@ -54,6 +59,7 @@ interface PetroleumFeaturePopupProps {
   layerId: PetroleumLayerId;
   properties: Record<string, unknown>;
   coordinates?: { lat: number; lng: number } | null;
+  onOpenCompanyLead?: (item: MiningLicense) => void;
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -103,6 +109,7 @@ export default function PetroleumFeaturePopup({
   layerId,
   properties,
   coordinates,
+  onOpenCompanyLead,
 }: PetroleumFeaturePopupProps) {
   const { t } = useI18n();
   const model = buildPetroleumFeatureViewModel(properties, layerId);
@@ -128,6 +135,22 @@ export default function PetroleumFeaturePopup({
     'מפעיל לא מתויג ב-OSM',
     'Operator not tagged in OSM'
   );
+
+  const { data: nearestGem } = useQuery({
+    queryKey: ['nearest-gem-pipeline', coordinates?.lat, coordinates?.lng],
+    queryFn: () =>
+      fetchNearestGemPipeline(coordinates!.lat, coordinates!.lng),
+    enabled: isOsmPipeline && coordinates != null,
+    staleTime: 120_000,
+  });
+
+  const gemEnrichmentRows =
+    nearestGem?.found && nearestGem.tags
+      ? collectGemCommercialDetails({
+          ...nearestGem.tags,
+          source: 'gem_goit_oil_ngl_pipelines_march_2025',
+        })
+      : [];
 
   const detailRows: { label: string; value: string }[] = [];
   if (model.facilityType && model.facilityType !== layerLabel) {
@@ -213,6 +236,46 @@ export default function PetroleumFeaturePopup({
           }
           unknownHint={isOsmPipeline ? operatorMissingHint : companiesUnknownHint}
         />
+      )}
+
+      {isOsmPipeline && gemEnrichmentRows.length > 0 && (
+        <div className="mb-3 rounded-md border border-amber-500/25 bg-amber-950/20 px-2.5 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-200/90 mb-2">
+            {t('GEM GOIT (קרוב)', 'Nearby GEM GOIT (≤2 km)')}
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {gemEnrichmentRows.map((row) => {
+              const isParty =
+                onOpenCompanyLead &&
+                (row.label === 'Owner' ||
+                  row.label === 'Operator' ||
+                  row.label === 'Parent');
+              return (
+                <div key={`gem-${row.label}-${row.value}`} className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-0.5">
+                    {row.label}
+                  </p>
+                  {isParty ? (
+                    <CompanyLeadButton
+                      name={row.value}
+                      country={String(model.country || '')}
+                      source="gem_goit"
+                      onOpenDossier={onOpenCompanyLead}
+                      className="text-[12px]"
+                    />
+                  ) : (
+                    <p className="text-[12px] font-medium text-slate-100 break-words">{row.value}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {nearestGem?.distance_m != null && (
+            <p className="mt-1.5 text-[10px] text-slate-500">
+              {t('מרחק', 'Distance')}: ~{Math.round(nearestGem.distance_m)} m
+            </p>
+          )}
+        </div>
       )}
 
       {detailRows.length > 0 && (

@@ -1,4 +1,5 @@
 import axios, { isCancel } from 'axios';
+import { isLocalDevConsoleDebugEnabled, postAgentDebugIngest } from './agentDebugIngest';
 import { useMemo } from 'react';
 import {
   keepPreviousData,
@@ -26,6 +27,7 @@ import {
   MaritimeContextResponse,
   StorageTerminalDetails,
   StorageTerminalResponse,
+  PortAuthorityDirectory,
   PortLogisticsDetails,
   PortLogisticsResponse,
   AgentJobResponse,
@@ -59,7 +61,9 @@ import {
   SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from './licenseMapCluster';
 import {
+  applyCountrySummaryRequestParams,
   countrySummaryRowsToLicenses,
+  isCountryLicenseSummary,
   parseLicenseCountrySummaryResponse,
 } from './licenseCountrySummary';
 import {
@@ -568,8 +572,9 @@ async function fetchLicensesViewportFromApi(
       const requestParams = { ...params };
       if (path.endsWith('/map')) delete requestParams.map;
       if (path.includes('country-summary')) {
-        delete requestParams.map;
-        delete requestParams.zoom;
+        // Low-zoom country summary should represent the full available country set
+        // for the current sector/filter, not only centroids inside the current bbox.
+        applyCountrySummaryRequestParams(requestParams);
         const { data } = await apiClient.get<unknown>(path, {
           signal,
           timeout: 60_000,
@@ -595,7 +600,7 @@ async function fetchLicensesViewportFromApi(
         displayBounds,
         zoomRounded ?? undefined,
       );
-      if (import.meta.env.DEV) {
+      if (isLocalDevConsoleDebugEnabled()) {
         const ghanaCluster = collapsed.find(
           (row) =>
             (row.mapClusterCount ?? 0) >= 100 &&
@@ -717,6 +722,9 @@ export function useLicensesForMap(options: {
     return view;
   }, [countryScoped, countryFetchBounds, effectiveViewportBounds]);
 
+  const mapZoomKey =
+    mapZoom != null && Number.isFinite(mapZoom) ? Math.round(mapZoom * 10) / 10 : null;
+
   const query = useQuery({
     queryKey: [
       'licenses',
@@ -727,6 +735,7 @@ export function useLicensesForMap(options: {
       'scoped',
       fetchBounds,
       effectiveViewportBounds,
+      mapZoomKey,
     ] as const,
     staleTime: LICENSE_VIEWPORT_STALE_MS,
     gcTime: LICENSE_VIEWPORT_STALE_MS * 2,
@@ -750,8 +759,15 @@ export function useLicensesForMap(options: {
   const mapData = useMemo(() => {
     const rows = query.data ?? [];
     if (!effectiveViewportBounds) return rows;
+    const lowZoomCountrySummary =
+      mapZoom != null &&
+      mapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
+      rows.some(isCountryLicenseSummary);
+    // Keep low-zoom country-summary rows intact so border/bubble presence stays stable
+    // while panning near country-edge centroids; strict point-in-bbox trim can hide both.
+    if (lowZoomCountrySummary) return rows;
     return filterLicenseMapRowsToBounds(rows, effectiveViewportBounds);
-  }, [query.data, effectiveViewportBounds]);
+  }, [query.data, effectiveViewportBounds, mapZoom]);
 
   const stillLoadingCountryCount =
     query.isLoading && !query.data?.length ? 1 : 0;
@@ -979,6 +995,63 @@ export async function getEntityRelationships(entityId: string, entityKind = 'lic
     },
   );
   return Array.isArray(data) ? data : [];
+}
+
+export interface CountryCommodityTradePartner {
+  partner: string;
+  totalUsd: number;
+}
+
+export interface CountryCommoditySnapshotTrade {
+  latestYear?: number | null;
+  exportUsd?: number | null;
+  importUsd?: number | null;
+  exportKg?: number | null;
+  importKg?: number | null;
+  topExportPartners?: CountryCommodityTradePartner[];
+  topImportPartners?: CountryCommodityTradePartner[];
+  dataSources?: string[];
+}
+
+export interface CountryCommoditySnapshotExtraction {
+  available?: boolean;
+  tier?: string | null;
+  summary?: string | null;
+  fieldCount?: number;
+  productionValueAggregate?: number | null;
+  limitations?: string[];
+  jodi?: {
+    tier?: string;
+    summary?: string;
+    limitations?: string[];
+  };
+}
+
+export interface CountryCommoditySnapshot {
+  entityId?: string;
+  entityKind?: string;
+  company?: string;
+  country?: string;
+  commodity?: string;
+  hsCodes?: string[];
+  bolTier?: string;
+  trade?: CountryCommoditySnapshotTrade;
+  extraction?: CountryCommoditySnapshotExtraction;
+  limitations?: string[];
+  warnings?: string[];
+  syncCta?: string;
+  provenance?: string;
+}
+
+export async function getCountryCommoditySnapshot(
+  entityId: string,
+  entityKind = 'license',
+): Promise<CountryCommoditySnapshot> {
+  const { data } = await apiClient.get<CountryCommoditySnapshot>(
+    `/entities/${encodeURIComponent(entityId)}/country-commodity-snapshot`,
+    { params: { entity_kind: entityKind, limit: 80 } },
+  );
+  return data;
 }
 
 export async function getLatestDdReport(entityId: string, entityKind = 'license'): Promise<DdReport | null> {
@@ -1440,16 +1513,77 @@ export {
 } from './vessels/useVessels';
 export type { MaritimeVesselQueryOptions, MaritimeSnapshotFetchOptions } from './vessels/useVessels';
 
-export const useStorageTerminals = (enabled = true) => {
+export type StorageTerminalsQueryOptions = {
+  forceRefresh?: boolean;
+  viewport?: { south: number; west: number; north: number; east: number } | null;
+  limit?: number;
+};
+
+export const useStorageTerminals = (enabled = true, options: StorageTerminalsQueryOptions = {}) => {
+  const { forceRefresh = false, viewport = null, limit = 2000 } = options;
+  const bboxKey = viewport
+    ? `${viewport.south},${viewport.west},${viewport.north},${viewport.east}`
+    : 'world';
+
   return useQuery<StorageTerminalResponse>({
-    queryKey: ['storage-terminals'],
-    queryFn: async () => {
-      const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
-        timeout: 12_000,
+    queryKey: ['storage-terminals', bboxKey, forceRefresh ? 'refresh' : 'cached', limit],
+    queryFn: async ({ signal }) => {
+      const requestTimeoutMs = 90_000;
+      const startedAt = Date.now();
+      const baseURL = apiClient.defaults.baseURL ?? '';
+      postAgentDebugIngest({
+        hypothesisId: 'A',
+        location: 'api.ts:useStorageTerminals',
+        message: 'storage_fetch_start',
+        data: {
+          requestTimeoutMs,
+          forceRefresh,
+          baseURL,
+          bboxKey,
+          hasViewport: viewport != null,
+        },
+        timestamp: startedAt,
       });
-      return data;
+      try {
+        const params: Record<string, string | number | boolean> = { limit };
+        if (forceRefresh) params.force_refresh = true;
+        if (viewport) {
+          params.south = viewport.south;
+          params.west = viewport.west;
+          params.north = viewport.north;
+          params.east = viewport.east;
+        }
+        const { data } = await apiClient.get<StorageTerminalResponse>('/api/storage/terminals', {
+          timeout: requestTimeoutMs,
+          params,
+          signal,
+        });
+        postAgentDebugIngest({
+          hypothesisId: 'A',
+          location: 'api.ts:useStorageTerminals',
+          message: 'storage_fetch_ok',
+          data: {
+            elapsedMs: Date.now() - startedAt,
+            entityCount: data?.entities?.length ?? 0,
+            cached: (data as StorageTerminalResponse & { cached?: boolean })?.cached,
+            dataSource: (data as StorageTerminalResponse & { data_source?: string })?.data_source,
+          },
+        });
+        return data;
+      } catch (err) {
+        postAgentDebugIngest({
+          hypothesisId: 'A',
+          location: 'api.ts:useStorageTerminals',
+          message: 'storage_fetch_error',
+          data: {
+            elapsedMs: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        throw err;
+      }
     },
-    enabled,
+    enabled: enabled && viewport != null,
     staleTime: 30 * 60_000,
     placeholderData: keepPreviousData,
     retry: 1,
@@ -1457,7 +1591,30 @@ export const useStorageTerminals = (enabled = true) => {
   });
 };
 
-export const useStorageTerminalDetails = (terminalId?: string, enabled = true) => {
+/** Skip detail round-trip when list row already has materialized / enriched display fields. */
+export function storageTerminalDetailFetchEnabled(
+  item?: Pick<
+    StorageTerminalDetails,
+    'id' | 'displayReady' | 'curatedEnrichmentSourceId' | 'operatorName'
+  > | null,
+): boolean {
+  if (!item?.id) return false;
+  if (item.displayReady) return false;
+  if (item.curatedEnrichmentSourceId) return false;
+  if (item.operatorName) return false;
+  return true;
+}
+
+export const useStorageTerminalDetails = (
+  terminalId?: string,
+  enabled = true,
+  item?: Pick<
+    StorageTerminalDetails,
+    'id' | 'displayReady' | 'curatedEnrichmentSourceId' | 'operatorName'
+  > | null,
+) => {
+  const shouldFetch =
+    enabled && storageTerminalDetailFetchEnabled(item ?? (terminalId ? { id: terminalId } : null));
   return useQuery<StorageTerminalDetails>({
     queryKey: ['storage-terminal-detail', terminalId],
     queryFn: async () => {
@@ -1466,7 +1623,7 @@ export const useStorageTerminalDetails = (terminalId?: string, enabled = true) =
       );
       return data;
     },
-    enabled: enabled && Boolean(terminalId),
+    enabled: shouldFetch,
     staleTime: 30 * 60_000,
   });
 };
@@ -1494,6 +1651,21 @@ export const usePortLogisticsDetails = (entityId?: string, enabled = true) => {
     },
     enabled: enabled && Boolean(entityId),
     staleTime: 15 * 60_000,
+  });
+};
+
+export const usePortAuthorityDirectory = (locode?: string, enabled = true) => {
+  const code = (locode || '').trim().toUpperCase();
+  return useQuery<PortAuthorityDirectory>({
+    queryKey: ['port-authority-directory', code],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PortAuthorityDirectory>(
+        `/api/ports/${encodeURIComponent(code)}/directory`
+      );
+      return data;
+    },
+    enabled: enabled && Boolean(code),
+    staleTime: 60 * 60_000,
   });
 };
 

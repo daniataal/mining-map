@@ -1980,6 +1980,28 @@ def get_source_registry_index() -> dict[str, dict[str, Any]]:
             get_source_registry_entry as gem_tracker_registry_entry,
         )
     registry[GEM_TRACKER_SOURCE_ID] = gem_tracker_registry_entry()
+    try:
+        from backend.services.ingest.gem_goit_pipelines_import import (
+            SOURCE_ID as GEM_GOIT_SOURCE_ID,
+            get_source_registry_entry as gem_goit_registry_entry,
+        )
+    except ImportError:
+        from services.ingest.gem_goit_pipelines_import import (  # type: ignore
+            SOURCE_ID as GEM_GOIT_SOURCE_ID,
+            get_source_registry_entry as gem_goit_registry_entry,
+        )
+    registry[GEM_GOIT_SOURCE_ID] = gem_goit_registry_entry()
+    try:
+        from backend.services.ingest.gem_gogpt_plants_import import (
+            SOURCE_ID as GEM_GOGPT_SOURCE_ID,
+            get_source_registry_entry as gem_gogpt_registry_entry,
+        )
+    except ImportError:
+        from services.ingest.gem_gogpt_plants_import import (  # type: ignore
+            SOURCE_ID as GEM_GOGPT_SOURCE_ID,
+            get_source_registry_entry as gem_gogpt_registry_entry,
+        )
+    registry[GEM_GOGPT_SOURCE_ID] = gem_gogpt_registry_entry()
     for source in OPEN_DATA_SOURCES:
         kind = _clean_text(source.metadata.get("kind")) or "official_arcgis_registry"
         if kind == "official_arcgis_registry":

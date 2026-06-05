@@ -19,6 +19,28 @@ const LICENSE_POPUP_OPTIONS: L.PopupOptions = {
   closeOnClick: false,
 };
 
+const STORAGE_POPUP_OPTIONS: L.PopupOptions = {
+  className: 'custom-popup custom-popup--storage',
+  minWidth: 340,
+  maxWidth: 360,
+  autoPan: true,
+  autoClose: false,
+  closeOnClick: false,
+};
+
+function applyLicensePopupShell(popup: L.Popup, item: MiningLicense) {
+  const isStorage = item.entityKind === 'storage_terminal';
+  const next = isStorage ? STORAGE_POPUP_OPTIONS : LICENSE_POPUP_OPTIONS;
+  popup.options.className = next.className;
+  popup.options.minWidth = next.minWidth;
+  popup.options.maxWidth = next.maxWidth;
+  const el = popup.getElement();
+  if (el) {
+    el.classList.remove('custom-popup--license', 'custom-popup--storage');
+    el.classList.add(isStorage ? 'custom-popup--storage' : 'custom-popup--license');
+  }
+}
+
 export type LicenseMapPopupControllerProps = {
   selectedItem: MiningLicense | null;
   mapFlyTrigger: number;
@@ -33,6 +55,7 @@ export type LicenseMapPopupControllerProps = {
   onAddToDueDiligence?: (id: string) => void;
   onRemoveFromDueDiligence?: (id: string) => void;
   getDealRoomForLicense?: (id: string, entityKind?: string) => { title: string } | null | undefined;
+  oilAndGasMap?: boolean;
 };
 
 function licensePopupItemSignature(item: MiningLicense): string {
@@ -67,6 +90,7 @@ export default function LicenseMapPopupController({
   onAddToDueDiligence,
   onRemoveFromDueDiligence,
   getDealRoomForLicense,
+  oilAndGasMap = false,
 }: LicenseMapPopupControllerProps) {
   const map = useMap();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -137,6 +161,8 @@ export default function LicenseMapPopupController({
         forceCoordinate || preferCoordinatePopup
           ? L.latLng(itemLat, itemLng)
           : (marker?.getLatLng?.() ?? L.latLng(itemLat, itemLng));
+
+      applyLicensePopupShell(popup, item);
 
       if (!popup.isOpen()) {
         popup.setLatLng(latlng).setContent(host).openOn(map);
@@ -271,6 +297,10 @@ export default function LicenseMapPopupController({
     if (item) propsRef.current.handleOpenDossier(item);
   }, []);
 
+  const onOpenCompanyLeadStable = useCallback((lead: MiningLicense) => {
+    propsRef.current.handleOpenDossier(lead);
+  }, []);
+
   const onAddDdStable = useCallback(() => {
     const id = selectedItemRef.current?.id;
     if (id) propsRef.current.onAddToDueDiligence?.(id);
@@ -298,6 +328,7 @@ export default function LicenseMapPopupController({
         updateAnnotation={updateAnnotationStable}
         onDelete={onDeleteStable}
         onOpenDossier={onOpenDossierStable}
+        onOpenCompanyLead={onOpenCompanyLeadStable}
         isInDdQueue={isInQueue}
         onAddToDueDiligence={
           onAddToDueDiligence ? onAddDdStable : undefined
@@ -308,6 +339,7 @@ export default function LicenseMapPopupController({
         isEsgRisk={esgZone !== null}
         esgZoneName={esgZone?.name}
         dealRoomTitle={dealRoomTitle}
+        oilAndGasMap={oilAndGasMap}
       />
     </I18nProvider>,
     hostRef.current,

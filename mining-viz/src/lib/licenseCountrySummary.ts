@@ -10,6 +10,26 @@ export type LicenseCountrySummaryRow = {
 
 export const LICENSE_MAP_BORDER_COUNTRY_CAP = 80;
 
+/** Go country-summary requires a valid bbox; nearly-world extent returns global country hubs. */
+export const LICENSE_COUNTRY_SUMMARY_WORLD_BBOX = {
+  min_lat: -85,
+  max_lat: 85,
+  min_lng: -180,
+  max_lng: 180,
+} as const;
+
+export const LICENSE_COUNTRY_SUMMARY_LIMIT = 120;
+
+/** Normalize viewport fetch params for `/licenses/country-summary`. */
+export function applyCountrySummaryRequestParams(
+  params: Record<string, string | number | boolean>,
+): void {
+  delete params.map;
+  delete params.zoom;
+  params.limit = LICENSE_COUNTRY_SUMMARY_LIMIT;
+  Object.assign(params, LICENSE_COUNTRY_SUMMARY_WORLD_BBOX);
+}
+
 /** Low-zoom hub markers use this id prefix (distinct from grid `cluster:` cells). */
 export function isCountryLicenseSummary(item: MiningLicense | null | undefined): boolean {
   if (!item?.id) return false;

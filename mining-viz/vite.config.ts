@@ -31,6 +31,8 @@ export default defineConfig({
     },
   },
   server: {
+    // Caddy serves the UI on :8080 with Host localhost:8080 — allow proxy API calls from that host.
+    allowedHosts: ['localhost', '127.0.0.1', 'frontend', 'mining-frontend'],
     proxy: {
       '/api/oil-live/ws': {
         target: oilIntelProxyTarget,
@@ -88,6 +90,20 @@ export default defineConfig({
         proxyTimeout: 120000,
         ws: true,
       },
+      '/api/petroleum/osm-tiles': {
+        target: oilIntelProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+        rewrite: (path) =>
+          path.replace(/^\/api\/petroleum\/osm-tiles/, '/api/oil-live/map/petroleum-osm/tiles'),
+      },
+      '/api/petroleum/osm-layers': {
+        target: backendProxyTarget,
+        changeOrigin: true,
+        timeout: 120000,
+        proxyTimeout: 120000,
+      },
       '/licenses': {
         target: oilIntelProxyTarget,
         changeOrigin: true,
@@ -133,6 +149,7 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           map: ['leaflet', 'react-leaflet', 'react-leaflet-cluster'],
+          maplibre: ['maplibre-gl', '@maplibre/maplibre-gl-leaflet'],
           markdown: ['react-markdown', 'remark-gfm'],
           motion: ['framer-motion'],
           query: ['@tanstack/react-query', 'axios'],

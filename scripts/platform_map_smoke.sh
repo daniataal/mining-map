@@ -48,6 +48,18 @@ code=$(curl_json "$BASE_URL/api/maritime/vessels?limit=5")
 code=$(curl_json "$BASE_URL/api/petroleum/osm-layers")
 [[ "$code" == "200" ]] || fail "petroleum osm catalog HTTP $code"
 
+code=$(curl_json "$BASE_URL/api/oil-live/scenarios")
+[[ "$code" == "200" ]] || fail "scenarios HTTP $code"
+grep -q '"scenarios"' /tmp/platform_smoke_body.json || fail "scenarios missing scenarios array"
+
+code=$(curl_json "$BASE_URL/api/oil-live/scenarios/hormuz_disruption_v1/digest")
+[[ "$code" == "200" ]] || fail "scenario digest HTTP $code"
+grep -q '"top_corridors"' /tmp/platform_smoke_body.json || fail "scenario digest missing top_corridors"
+ok "scenario digest includes top_corridors"
+
+code=$(curl_json "$BASE_URL/api/oil-live/corridors/delta?window_days=30&limit=5")
+[[ "$code" == "200" ]] || fail "corridors/delta HTTP $code"
+
 code=$(curl_json "$BASE_URL/api/oil-live/search?q=test&limit=3")
 if [[ "$code" == "200" ]]; then
   ok "search HTTP 200 (Elasticsearch up)"

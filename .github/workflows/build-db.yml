@@ -11,15 +11,12 @@ on:
 jobs:
   build-db:
     name: Build and Push Multi-Arch PostGIS
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -34,7 +31,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: ./db
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/arm64
         push: true
         tags: |
           dannyatalla/mining-db:${{ github.event.inputs.version }}

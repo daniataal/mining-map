@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +41,7 @@ type syncStatusSummary struct {
 	McrCorridorCompanyPairCount   int            `json:"mcr_corridor_company_pair_count"`
 	TopCorridors                  []TopCorridor  `json:"top_corridors"`
 	McrByTier                     []McrTierCount         `json:"mcr_by_tier"`
+	ManifestByTier                []McrTierCount         `json:"manifest_by_tier"`
 	OilTradeFlowsBySource         []TradeFlowSourceCount `json:"oil_trade_flows_by_source"`
 	OilTradeFlowCount             int                    `json:"oil_trade_flow_count"`
 	EiaHistoricImportCount        int            `json:"eia_historic_import_count"`
@@ -64,6 +66,7 @@ type syncStatusSummary struct {
 	ProductionCargoRecordCount    int            `json:"production_cargo_record_count"`
 	LastVesselObservationAt       any                    `json:"last_vessel_observation_at"`
 	GraphSyncSteps                []GraphSyncStepOutcome `json:"graph_sync_steps,omitempty"`
+	WatchZoneObservations24h      []WatchZoneObservation24h `json:"watch_zone_observations_24h,omitempty"`
 	Disclaimer                    string                 `json:"disclaimer"`
 }
 
@@ -117,8 +120,13 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	vesselObservations = countTable(ctx, pool, `SELECT COUNT(*)::int FROM oil_vessel_position_observations`)
 	liveVessels = countTable(ctx, pool, `
 		SELECT COUNT(DISTINCT mmsi)::int
-		FROM oil_vessel_position_observations
-		WHERE COALESCE(position_time, observed_at) > now() - interval '24 hours'
+		FROM (
+			SELECT mmsi, COALESCE(position_time, observed_at) AS ts
+			FROM oil_vessel_position_observations
+			UNION ALL
+			SELECT mmsi, ts FROM oil_ais_positions
+		) v
+		WHERE v.ts > now() - interval '24 hours'
 	`)
 	liveAisPortCalls = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM oil_port_calls
@@ -134,10 +142,16 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		SELECT COUNT(*)::int
 		FROM maritime_watch_zones z
 		WHERE NOT EXISTS (
-		  SELECT 1 FROM oil_vessel_position_observations o
+		  SELECT 1 FROM (
+		    SELECT lat, lng, COALESCE(position_time, observed_at) AS ts
+		    FROM oil_vessel_position_observations
+		    UNION ALL
+		    SELECT lat, lon AS lng, ts
+		    FROM oil_ais_positions
+		  ) o
 		  WHERE o.lat >= z.min_lat AND o.lat <= z.max_lat
 		    AND o.lng >= z.min_lng AND o.lng <= z.max_lng
-		    AND COALESCE(o.position_time, o.observed_at) > now() - interval '3 hours'
+		    AND o.ts > now() - interval '3 hours'
 		)
 	`)
 	demoPortCalls = countTable(ctx, pool, `
@@ -148,19 +162,20 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 	`)
 	demoCargo = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM meridian_cargo_records
-		WHERE COALESCE(evidence::text, '') ILIKE '%seed_port_calls%'
-		   OR COALESCE(evidence::text, '') ILIKE '%demo seed%'
+		WHERE COALESCE(evidence_chain::text, '') ILIKE '%seed_port_calls%'
+		   OR COALESCE(evidence_chain::text, '') ILIKE '%demo seed%'
 		   OR LOWER(COALESCE(bol_tier, '')) IN ('demo', 'seed', 'seed_port_calls')
 	`)
 	productionCargo = countTable(ctx, pool, `
 		SELECT COUNT(*)::int FROM meridian_cargo_records
-		WHERE COALESCE(evidence::text, '') NOT ILIKE '%seed_port_calls%'
-		  AND COALESCE(evidence::text, '') NOT ILIKE '%demo seed%'
+		WHERE COALESCE(evidence_chain::text, '') NOT ILIKE '%seed_port_calls%'
+		  AND COALESCE(evidence_chain::text, '') NOT ILIKE '%demo seed%'
 		  AND LOWER(COALESCE(bol_tier, '')) NOT IN ('demo', 'seed', 'seed_port_calls')
 	`)
 
 	topCorridors := queryTopCorridors(ctx, pool)
 	mcrByTier := queryMcrByTier(ctx, pool)
+	manifestByTier := queryManifestByTier(ctx, pool)
 	oilFlowsBySource := queryOilTradeFlowsBySource(ctx, pool)
 
 	_ = pool.QueryRow(ctx, `
@@ -183,11 +198,17 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		WHERE key = 'last_jodi_sync'
 	`).Scan(&lastJodi, &lastJodiStatus) //nolint:errcheck — row may be absent
 	_ = pool.QueryRow(ctx, `
-		SELECT MAX(COALESCE(position_time, observed_at))
-		FROM oil_vessel_position_observations
+		SELECT MAX(ts) FROM (
+			SELECT COALESCE(position_time, observed_at) AS ts
+			FROM oil_vessel_position_observations
+			UNION ALL
+			SELECT ts
+			FROM oil_ais_positions
+		) v
 	`).Scan(&lastVesselObs)
 
 	graphSteps := queryGraphSyncSteps(ctx, pool)
+	watchZoneObs := queryWatchZoneObservations24h(ctx, pool)
 
 	return syncStatusSummary{
 		TerminalCount:                 terminalCount,
@@ -202,6 +223,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		McrCorridorCompanyPairCount:   mcrCorridorCompanyPairs,
 		TopCorridors:                  topCorridors,
 		McrByTier:                     mcrByTier,
+		ManifestByTier:                manifestByTier,
 		OilTradeFlowsBySource:         oilFlowsBySource,
 		OilTradeFlowCount:             oilTradeFlows,
 		EurostatTradeFlowCount:        eurostatTradeFlows,
@@ -226,6 +248,7 @@ func querySyncStatus(ctx context.Context, pool *pgxpool.Pool) syncStatusSummary 
 		ProductionCargoRecordCount:    productionCargo,
 		LastVesselObservationAt:       formatTimePtr(lastVesselObs),
 		GraphSyncSteps:                graphSteps,
+		WatchZoneObservations24h:      watchZoneObs,
 		Disclaimer:                    "Counts from Meridian DB — inferred tiers where noted; demo/seed rows reported separately.",
 	}
 }
@@ -255,13 +278,23 @@ func queryOilTradeFlowsBySource(ctx context.Context, pool *pgxpool.Pool) []Trade
 }
 
 func queryMcrByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {
+	return queryBolTierCounts(ctx, pool, "meridian_cargo_records")
+}
+
+func queryManifestByTier(ctx context.Context, pool *pgxpool.Pool) []McrTierCount {
+	return queryBolTierCounts(ctx, pool, "trade_manifest_rows")
+}
+
+func queryBolTierCounts(ctx context.Context, pool *pgxpool.Pool, table string) []McrTierCount {
 	out := []McrTierCount{}
-	rows, err := pool.Query(ctx, `
+	// table name is fixed internal constant — not user input.
+	sql := fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(TRIM(bol_tier), ''), 'inferred') AS tier, COUNT(*)::int
-		FROM meridian_cargo_records
+		FROM %s
 		GROUP BY 1
 		ORDER BY 2 DESC
-	`)
+	`, table)
+	rows, err := pool.Query(ctx, sql)
 	if err != nil {
 		return out
 	}

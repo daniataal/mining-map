@@ -41,6 +41,12 @@ def run_once() -> dict[str, Any]:
         ensure_petroleum_osm_tables(conn)
         conn.commit()
         summary = sync_all_layers(conn)
+        try:
+            from backend.services.storage_terminal_display import maybe_materialize_after_osm_sync
+        except ImportError:
+            from services.storage_terminal_display import maybe_materialize_after_osm_sync  # type: ignore
+
+        summary["storage_terminal_display"] = maybe_materialize_after_osm_sync(conn)
         conn.commit()
     finally:
         conn.close()

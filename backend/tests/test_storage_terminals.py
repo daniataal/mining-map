@@ -7,10 +7,18 @@ from backend.services.storage_terminals import (
     WORLD_TILES,
     _commodity_hints_from_tags,
     _db_snapshot_is_globally_complete,
+    _element_from_db_row,
+    _element_geometry_bounds,
+    _enrich_orphan_tanks_with_site_context,
+    _enrich_storage_entity_for_detail,
+    _expand_storage_bbox,
     _extract_operator_owner,
+    _geojson_centroid_and_bounds,
     _overpass_urls,
+    _parse_storage_terminal_osm_id,
     _should_cache_storage_response,
     build_overpass_query,
+    get_storage_terminal_details,
     get_storage_terminals,
     infer_terminal_subtype,
     normalize_storage_terminal,
@@ -64,6 +72,7 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertGreaterEqual(len(osm_entities), 1)
         self.assertIn("bulk seed", " ".join(response.get("limitations", [])).lower())
 
+    @patch.dict("os.environ", {"STORAGE_SKIP_LIVE_OVERPASS": "false"}, clear=False)
     @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals", return_value=[])
     @patch("backend.services.storage_terminals._load_bulk_osm_seed_elements", return_value=[])
     @patch("backend.services.storage_terminals.fetch_overpass_elements")
@@ -134,6 +143,24 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertGreaterEqual(confidence, 0.7)
         self.assertIn("storage tank", note.lower())
 
+    def test_infer_terminal_subtype_rejects_fuel_only_storage_tank(self):
+        subtype, confidence, _note = infer_terminal_subtype(
+            {"man_made": "storage_tank", "substance": "fuel"},
+        )
+        self.assertEqual(subtype, "")
+        self.assertEqual(confidence, 0.0)
+
+    def test_infer_terminal_subtype_rejects_cooling_storage_tank(self):
+        subtype, confidence, _note = infer_terminal_subtype(
+            {
+                "man_made": "storage_tank",
+                "substance": "fuel",
+                "description": "cooling water tank",
+            },
+        )
+        self.assertEqual(subtype, "")
+        self.assertEqual(confidence, 0.0)
+
     def test_infer_terminal_subtype_oil_silo(self):
         subtype, confidence, note = infer_terminal_subtype(
             {"man_made": "silo", "product": "soybean oil"}
@@ -154,6 +181,146 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertIn('man_made"="storage_tank"', query)
         self.assertIn('man_made"="silo"', query)
         self.assertIn('substance', query)
+        self.assertIn('landuse"="industrial"', query)
+        self.assertIn('industrial"="refinery"', query)
+        self.assertIn('industrial"="oil"', query)
+
+    def test_infer_terminal_subtype_adnoc_landuse_industrial(self):
+        subtype, confidence, note = infer_terminal_subtype(
+            {
+                "landuse": "industrial",
+                "name:en": "Abu Dhabi National Oil Company",
+                "name": "Abu Dhabi National Oil Company",
+            }
+        )
+        self.assertEqual(subtype, "storage_terminal")
+        self.assertGreaterEqual(confidence, 0.68)
+        self.assertIn("industrial landuse", note.lower())
+
+    @patch("backend.services.storage_terminals.find_nearest_ports")
+    @patch("backend.services.storage_terminals.resolve_country")
+    def test_normalize_storage_terminal_adnoc_landuse_polygon(
+        self,
+        mock_resolve_country,
+        mock_find_nearest_ports,
+    ):
+        mock_resolve_country.return_value = ("United Arab Emirates", "AE")
+        mock_find_nearest_ports.return_value = []
+
+        entity = normalize_storage_terminal(
+            {
+                "type": "way",
+                "id": 217437068,
+                "center": {"lat": 24.43, "lon": 54.51},
+                "tags": {
+                    "landuse": "industrial",
+                    "name:en": "Abu Dhabi National Oil Company",
+                    "name": "Abu Dhabi National Oil Company",
+                    "operator": "ADNOC",
+                },
+            },
+            "2026-06-03T00:00:00Z",
+        )
+
+        assert entity is not None
+        self.assertEqual(entity["entitySubtype"], "storage_terminal")
+        self.assertEqual(entity["company"], "Abu Dhabi National Oil Company")
+        self.assertEqual(entity["operatorName"], "ADNOC")
+
+    def test_enrich_orphan_tank_gets_site_context(self):
+        site = {
+            "id": "osm:way:217437068",
+            "company": "Abu Dhabi National Oil Company",
+            "entitySubtype": "storage_terminal",
+            "country": "United Arab Emirates",
+            "lat": 24.43,
+            "lng": 54.51,
+            "sourceRecordUrl": "https://www.openstreetmap.org/way/217437068",
+            "confidenceNote": "Named industrial landuse polygon with petroleum identity in OSM tags.",
+            "evidence": [],
+        }
+        orphan_tank = {
+            "id": "osm:node:2265554182",
+            "company": "Unnamed Storage Terminal",
+            "entitySubtype": "storage_tank",
+            "country": "United Arab Emirates",
+            "lat": 24.431,
+            "lng": 54.512,
+            "confidenceNote": "Mapped petroleum storage tank; may be one tank within a larger site.",
+            "evidence": [{"id": "osm:node:2265554182:facility"}],
+        }
+
+        enriched = _enrich_orphan_tanks_with_site_context([site, orphan_tank])
+        tank = next(item for item in enriched if item["id"] == orphan_tank["id"])
+
+        self.assertEqual(tank["company"], "Unnamed Storage Terminal")
+        self.assertEqual(tank["siteContextName"], "Abu Dhabi National Oil Company")
+        self.assertEqual(tank["siteContextSource"], "osm:way:217437068")
+        self.assertTrue(tank["siteContextInferred"])
+        self.assertIn("Inferred nearby site context", tank["confidenceNote"])
+        self.assertEqual(tank["evidenceCount"], 2)
+
+    def test_enrich_orphan_tank_inside_site_polygon_gets_operator(self):
+        site = {
+            "id": "osm:way:217437068",
+            "company": "Abu Dhabi National Oil Company",
+            "operatorName": "ADNOC",
+            "entitySubtype": "storage_terminal",
+            "country": "United Arab Emirates",
+            "lat": 24.43,
+            "lng": 54.51,
+            "siteBounds": {"south": 24.42, "north": 24.44, "west": 54.49, "east": 54.53},
+            "sourceRecordUrl": "https://www.openstreetmap.org/way/217437068",
+            "evidence": [],
+        }
+        orphan_tank = {
+            "id": "osm:node:2265554182",
+            "company": "Unnamed Storage Terminal",
+            "entitySubtype": "storage_tank",
+            "country": "United Arab Emirates",
+            "lat": 24.431,
+            "lng": 54.512,
+            "evidence": [{"id": "osm:node:2265554182:facility"}],
+        }
+
+        enriched = _enrich_orphan_tanks_with_site_context([site, orphan_tank])
+        tank = next(item for item in enriched if item["id"] == orphan_tank["id"])
+
+        self.assertEqual(tank["operatorName"], "ADNOC")
+        self.assertEqual(tank["siteContextName"], "Abu Dhabi National Oil Company")
+        self.assertFalse(tank["siteContextInferred"])
+        self.assertIn("site polygon", tank["confidenceNote"].lower())
+
+    def test_geojson_polygon_centroid_and_bounds(self):
+        lat, lng, bounds = _geojson_centroid_and_bounds(
+            {
+                "type": "Polygon",
+                "coordinates": [[[54.49, 24.42], [54.53, 24.42], [54.53, 24.44], [54.49, 24.44], [54.49, 24.42]]],
+            }
+        )
+        self.assertAlmostEqual(lat, 24.43, places=2)
+        self.assertAlmostEqual(lng, 54.51, places=2)
+        assert bounds is not None
+        self.assertEqual(bounds["south"], 24.42)
+
+    def test_element_from_db_row_preserves_site_bounds(self):
+        element = _element_from_db_row(
+            "way",
+            217437068,
+            {"landuse": "industrial", "operator": "ADNOC"},
+            {"type": "Polygon", "coordinates": []},
+            lat=24.43,
+            lng=54.51,
+            bounds={"south": 24.42, "north": 24.44, "west": 54.49, "east": 54.53},
+        )
+        assert element is not None
+        self.assertIn("siteBounds", element)
+
+    def test_build_overpass_query_includes_expanded_industrial_patterns(self):
+        query = build_overpass_query(WORLD_TILES[0][1])
+        self.assertIn('industrial"="petrochemical"', query)
+        self.assertIn('man_made"="works"', query)
+        self.assertIn('landuse"="industrial"]["owner"', query)
 
     def test_db_snapshot_rejects_regional_only_cache(self):
         regional = [
@@ -203,6 +370,7 @@ class StorageTerminalTests(unittest.TestCase):
                 },
             },
             "2026-05-12T21:00:00Z",
+            include_nearby_port=True,
         )
 
         assert entity is not None
@@ -248,6 +416,163 @@ class StorageTerminalTests(unittest.TestCase):
         self.assertIsNone(entity["operatorName"])
         self.assertEqual(entity["ownerName"], "Vopak")
         self.assertEqual(entity["company"], "Vopak")
+
+    def test_parse_storage_terminal_osm_id(self):
+        self.assertEqual(_parse_storage_terminal_osm_id("osm:node:4242"), ("node", 4242))
+        self.assertIsNone(_parse_storage_terminal_osm_id("curated_storage_rotterdam_netherlands"))
+        self.assertIsNone(_parse_storage_terminal_osm_id("osm:invalid:id"))
+
+    @patch("backend.services.storage_terminals._enrich_orphan_tanks_with_site_context", side_effect=lambda rows: rows)
+    @patch("backend.services.storage_terminals_seed.enrich_osm_from_reference_hubs")
+    @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals")
+    def test_enrich_storage_entity_for_detail_applies_curated_hub(
+        self,
+        mock_load_curated,
+        mock_enrich_hubs,
+        _mock_site_context,
+    ):
+        sparse = {
+            "id": "osm:node:99",
+            "lat": 25.0,
+            "lng": 55.0,
+            "company": "Unnamed Storage Terminal",
+            "operatorName": None,
+            "capacityText": None,
+            "confidenceScore": 0.6,
+        }
+        hub = {
+            "id": "curated_storage_fujairah_uae",
+            "sourceKind": "curated_reference",
+            "lat": 25.01,
+            "lng": 55.01,
+            "operatorName": "Vopak",
+            "capacityText": "~2M bbl (public reference)",
+        }
+        mock_load_curated.return_value = [hub]
+        mock_enrich_hubs.return_value = [
+            {
+                **sparse,
+                "operatorName": "Vopak",
+                "capacityText": "2M bbl",
+                "curatedEnrichmentSourceId": hub["id"],
+                "referenceEnrichmentKind": "curated_reference",
+            }
+        ]
+
+        enriched = _enrich_storage_entity_for_detail(sparse, "2026-06-04T00:00:00Z")
+        self.assertEqual(enriched["operatorName"], "Vopak")
+        self.assertEqual(enriched["curatedEnrichmentSourceId"], hub["id"])
+
+    @patch("backend.services.storage_terminals._enrich_storage_entity_for_detail")
+    @patch("backend.services.storage_terminals._load_storage_terminal_element_from_db")
+    @patch("backend.services.storage_terminals._fresh_cache", return_value=None)
+    @patch("backend.services.storage_terminals.get_storage_terminals")
+    def test_get_storage_terminal_details_loads_from_db_when_not_cached(
+        self,
+        _mock_list,
+        _mock_cache,
+        mock_load_db,
+        mock_enrich_detail,
+    ):
+        element = {
+            "type": "node",
+            "id": 777,
+            "lat": 51.9,
+            "lon": 4.4,
+            "tags": {"industrial": "petroleum_terminal", "name": "Test Terminal", "operator": "Shell"},
+        }
+        mock_load_db.return_value = (element, "2026-06-04T12:00:00Z")
+        normalized = normalize_storage_terminal(element, "2026-06-04T12:00:00Z", include_nearby_port=True)
+        assert normalized is not None
+        mock_enrich_detail.return_value = {**normalized, "operatorName": "Shell Enriched"}
+
+        from backend.services import storage_terminals as module
+
+        module._storage_cache["loaded_at"] = 0.0
+        module._storage_cache["response"] = None
+
+        with patch(
+            "backend.services.storage_terminals_seed.load_curated_storage_terminals",
+            return_value=[],
+        ):
+            with (
+                patch("backend.services.storage_terminal_display.storage_display_read_enabled", return_value=False),
+                patch("backend.services.storage_terminal_display.STORAGE_DISPLAY_WRITE_THROUGH", False),
+            ):
+                result = get_storage_terminal_details("osm:node:777")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["operatorName"], "Shell Enriched")
+        self.assertIn("evidence", result)
+        self.assertIn("rawPayload", result)
+        mock_load_db.assert_called_once_with("osm:node:777")
+        mock_enrich_detail.assert_called_once()
+
+    def test_expand_storage_bbox_adds_padding(self):
+        bbox = (25.0, 56.0, 26.0, 57.0)
+        expanded = _expand_storage_bbox(bbox, pad_deg=0.1)
+        self.assertEqual(expanded, (24.9, 55.9, 26.1, 57.1))
+
+    @patch("backend.services.storage_terminals._package_storage_response")
+    @patch("backend.services.storage_terminals._enrich_and_build_storage_response")
+    @patch("backend.services.storage_terminals_seed.load_curated_storage_terminals", return_value=[])
+    @patch("backend.services.storage_terminals.normalize_storage_terminal")
+    @patch("backend.services.storage_terminals._load_storage_terminals_from_db")
+    def test_viewport_fast_uses_bbox_db_load(
+        self,
+        mock_load_db,
+        mock_normalize,
+        _mock_curated,
+        mock_enrich_build,
+        mock_package,
+    ):
+        element = {
+            "type": "node",
+            "id": 9001,
+            "lat": 25.12,
+            "lon": 56.34,
+            "tags": {"man_made": "storage_tank", "substance": "oil"},
+        }
+        mock_load_db.return_value = ([element], "2026-06-04T12:00:00Z")
+        mock_normalize.return_value = {
+            "id": "osm:node:9001",
+            "lat": 25.12,
+            "lng": 56.34,
+            "confidenceScore": 0.7,
+            "country": "United Arab Emirates",
+        }
+        entities = [{"id": "osm:node:9001", "lat": 25.12, "lng": 56.34}]
+        mock_enrich_build.return_value = (
+            {
+                "entities": entities,
+                "data_source": "database+curated+viewport",
+                "limitations": [],
+                "stats": {"total": 1},
+                "source_labels": [],
+                "coverage_note": "",
+                "data_as_of": "2026-06-04T12:00:00Z",
+            },
+            entities,
+        )
+        mock_package.return_value = {
+            "entities": entities,
+            "data_source": "database+curated+viewport",
+            "limitations": [],
+            "stats": {"total": 1},
+        }
+
+        from backend.services import storage_terminals as module
+
+        module._storage_cache["loaded_at"] = 0.0
+        module._storage_cache["response"] = None
+
+        bbox = (25.0, 56.0, 26.0, 57.0)
+        response = get_storage_terminals(force_refresh=False, bbox=bbox, limit=100)
+        self.assertEqual(response.get("data_source"), "database+curated+viewport")
+        mock_package.assert_called_once()
+        mock_load_db.assert_called_once()
+        load_bbox = mock_load_db.call_args.kwargs.get("bbox") or mock_load_db.call_args[0][0]
+        self.assertIsNotNone(load_bbox)
+        self.assertLess(load_bbox[0], bbox[0])
 
 
 if __name__ == "__main__":

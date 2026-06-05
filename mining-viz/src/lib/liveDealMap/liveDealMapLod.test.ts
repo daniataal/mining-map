@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   isLiveDealClientClusterData,
+  LIVE_DEAL_CLIENT_CLUSTER_EXPAND_ZOOM,
   planLiveDealPointDraw,
   planLiveDealPointFeatureDraw,
+  targetZoomForLiveDealClientCluster,
 } from './liveDealMapLod';
 import type { LiveDealMapFeature } from './liveDealMapTypes';
 
@@ -77,5 +79,15 @@ describe('planLiveDealPointDraw', () => {
     expect(cluster.kind).toBe('server_cluster');
     expect(cluster.sourceCount).toBe(30);
     expect(isLiveDealClientClusterData(cluster.data)).toBe(true);
+  });
+});
+
+describe('targetZoomForLiveDealClientCluster', () => {
+  it('reaches expand zoom even when fit-bounds zoom is low', () => {
+    expect(targetZoomForLiveDealClientCluster(6)).toBe(LIVE_DEAL_CLIENT_CLUSTER_EXPAND_ZOOM);
+  });
+
+  it('respects tighter fit-bounds when already near detail zoom', () => {
+    expect(targetZoomForLiveDealClientCluster(15)).toBe(16);
   });
 });

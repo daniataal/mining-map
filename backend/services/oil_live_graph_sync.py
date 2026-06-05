@@ -70,8 +70,10 @@ _MIGRATION_008 = _MIGRATIONS_DIR / "008_commercial_graph.sql"
 _MIGRATION_010 = _MIGRATIONS_DIR / "010_oil_live_sync_state.sql"
 _MIGRATION_011 = _MIGRATIONS_DIR / "011_port_calls_metadata.sql"
 _MIGRATION_018 = _MIGRATIONS_DIR / "018_oil_trade_flows_source_unique.sql"
-# Public tanker MMSI patterns (not live AIS) for corridor seed density.
-_SEED_TANKER_MMSIS = (636023100, 636023101, 636023102, 636023103, 636023104)
+# Demo-only MMSIs for dev seed port calls — never real AIS identities.
+_SEED_TANKER_MMSIS = (636012340, 636012341, 636012342, 636012343, 636012344)
+# Real MMSIs previously hijacked by seed (purge restores vessel rows from AIS).
+_LEGACY_HIJACKED_MMSIS = (636023100, 636023101, 636023102, 636023103, 636023104)
 _SEED_VESSEL_NAMES = (
     "MT MERIDIAN STAR",
     "MT ATLAS TRADER",
@@ -523,8 +525,16 @@ def _ensure_petroleum_osm_storage_layer(conn: Any) -> dict[str, Any]:
             )
         ensure_petroleum_osm_tables(conn)
         if layer_has_cached_features(conn, "storage_terminals"):
-            return {"status": "skipped", "reason": "storage_terminals already cached"}
-        return sync_layer_tiles(conn, "storage_terminals")
+            result: dict[str, Any] = {"status": "skipped", "reason": "storage_terminals already cached"}
+        else:
+            result = sync_layer_tiles(conn, "storage_terminals")
+        try:
+            from backend.services.storage_terminal_display import maybe_materialize_after_osm_sync
+        except ImportError:
+            from services.storage_terminal_display import maybe_materialize_after_osm_sync  # type: ignore
+
+        result["storage_terminal_display"] = maybe_materialize_after_osm_sync(conn)
+        return result
     except Exception as exc:
         return {"status": "error", "message": str(exc)[:500]}
 
@@ -879,7 +889,7 @@ def _seed_port_calls_if_sparse(cur: Any) -> dict[str, Any]:
             """
             INSERT INTO oil_vessels (mmsi, name, vessel_type, tanker_class, crude_capable, product_tanker, deadweight_tons, max_draft_m)
             VALUES (%s, %s, 'Tanker', 'crude', true, false, 280000, 16.0)
-            ON CONFLICT (mmsi) DO UPDATE SET name = EXCLUDED.name, crude_capable = true
+            ON CONFLICT (mmsi) DO NOTHING
             """,
             (mmsi, vessel),
         )
@@ -1201,6 +1211,17 @@ def _sync_eia_refinery_throughput(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_eia_padd_storage(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.eia_imports import sync_eia_padd_storage
+    except ImportError:
+        from services.eia_imports import sync_eia_padd_storage
+    try:
+        return sync_eia_padd_storage(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _sync_eia_historic_downloads(conn: Any) -> dict[str, Any]:
     try:
         from backend.services.eia_historic_imports import try_auto_ingest_eia_downloads
@@ -1219,6 +1240,39 @@ def _sync_gem_extraction_tracker(conn: Any) -> dict[str, Any]:
         from services.ingest.gem_extraction_tracker_import import try_auto_ingest_gem_tracker
     try:
         return try_auto_ingest_gem_tracker(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_gem_goit_pipelines(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_goit_pipelines_import import try_auto_ingest_gem_goit_pipelines
+    except ImportError:
+        from services.ingest.gem_goit_pipelines_import import try_auto_ingest_gem_goit_pipelines
+    try:
+        return try_auto_ingest_gem_goit_pipelines(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_gem_gogpt_plants(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_gogpt_plants_import import try_auto_ingest_gem_gogpt_plants
+    except ImportError:
+        from services.ingest.gem_gogpt_plants_import import try_auto_ingest_gem_gogpt_plants
+    try:
+        return try_auto_ingest_gem_gogpt_plants(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_gem_ggit_lng(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_ggit_lng_terminals_import import try_auto_ingest_gem_ggit_lng
+    except ImportError:
+        from services.ingest.gem_ggit_lng_terminals_import import try_auto_ingest_gem_ggit_lng
+    try:
+        return try_auto_ingest_gem_ggit_lng(conn)
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -1263,6 +1317,17 @@ def _sync_uk_trade_manifests(conn: Any) -> dict[str, Any]:
         from services.trade_manifest_ingest import sync_uk_open_trade_rows
     try:
         return sync_uk_open_trade_rows(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_brazil_trade_manifests(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.trade_manifest_ingest import sync_brazil_open_trade_rows
+    except ImportError:
+        from services.trade_manifest_ingest import sync_brazil_open_trade_rows
+    try:
+        return sync_brazil_open_trade_rows(conn)
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -1388,6 +1453,11 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
             summary["steps"]["terminal_operators"] = _graph_sync_go_skip_payload("terminal_operators")
         else:
             summary["steps"]["terminal_operators"] = _index_terminal_operators(cur)
+        try:
+            from backend.services.port_authority_directory import sync_port_authority_tenants_to_companies
+        except ImportError:
+            from services.port_authority_directory import sync_port_authority_tenants_to_companies  # type: ignore
+        summary["steps"]["port_authority_tenants"] = sync_port_authority_tenants_to_companies(cur)
         summary["steps"]["seed_port_calls"] = _seed_port_calls_if_sparse(cur)
         if _graph_sync_go_step_enabled("trade_flows"):
             summary["steps"]["trade_flows"] = _graph_sync_go_skip_payload("trade_flows")
@@ -1398,12 +1468,17 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         # Phase 4b — EIA crude imports + refinery throughput (macro tier, country-level).
         summary["steps"]["eia_crude_imports"] = _sync_eia_crude_imports(conn)
         summary["steps"]["eia_refinery_throughput"] = _sync_eia_refinery_throughput(conn)
+        summary["steps"]["eia_padd_storage"] = _sync_eia_padd_storage(conn)
         summary["steps"]["eia_historic_imports"] = _sync_eia_historic_downloads(conn)
         summary["steps"]["gem_extraction_tracker"] = _sync_gem_extraction_tracker(conn)
+        summary["steps"]["gem_goit_pipelines"] = _sync_gem_goit_pipelines(conn)
+        summary["steps"]["gem_gogpt_plants"] = _sync_gem_gogpt_plants(conn)
+        summary["steps"]["gem_ggit_lng"] = _sync_gem_ggit_lng(conn)
         summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)
         summary["steps"]["trade_manifest_uk"] = _sync_uk_trade_manifests(conn)
+        summary["steps"]["trade_manifest_brazil"] = _sync_brazil_trade_manifests(conn)
         # Phase 4c — LEI + Wikidata batch enrichment for oil_companies.
         summary["steps"]["gleif_batch"] = _run_gleif_batch(conn, limit=gleif_limit)
         summary["steps"]["wikidata_enrich"] = _run_wikidata_batch(
@@ -1463,22 +1538,65 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
     return summary
 
 
+
 def purge_demo_seed(conn: Any) -> dict[str, int]:
     """
-    Remove demo opportunities and seeded/demo port calls from mining_db.
+    Remove demo opportunities, seed port calls, seed-linked MCRs, and restore hijacked vessels.
 
     Admin: POST /api/admin/oil-live/purge-demo-seed with X-Admin-Token.
     Example:
       curl -X POST "http://localhost:8000/api/admin/oil-live/purge-demo-seed" \\
         -H "X-Admin-Token: $ADMIN_API_TOKEN"
     """
+    hijacked_mmsis = list(_LEGACY_HIJACKED_MMSIS) + list(_SEED_TANKER_MMSIS) + [636012345]
+    seed_names = list(_SEED_VESSEL_NAMES)
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM meridian_cargo_records m
+            WHERE EXISTS (
+                SELECT 1 FROM oil_port_calls pc
+                WHERE pc.id = m.port_call_id
+                  AND (
+                    COALESCE(pc.evidence::text, '') ILIKE '%%seed_port_calls%%'
+                    OR COALESCE(pc.metadata::text, '') ILIKE '%%seed_port_calls%%'
+                    OR pc.vessel_name ILIKE '%%DEMO%%'
+                  )
+              )
+               OR EXISTS (
+                SELECT 1 FROM oil_port_calls pc
+                WHERE pc.id::text = m.metadata->>'import_port_call_id'
+                  AND (
+                    COALESCE(pc.evidence::text, '') ILIKE '%%seed_port_calls%%'
+                    OR COALESCE(pc.metadata::text, '') ILIKE '%%seed_port_calls%%'
+                  )
+              )
+               OR (
+                m.mmsi = ANY(%s)
+                AND (
+                  COALESCE(m.evidence_chain::text, '') ILIKE '%%seed_port_calls%%'
+                  OR m.vessel_name = ANY(%s)
+                  OR EXISTS (
+                    SELECT 1 FROM oil_port_calls pc
+                    WHERE pc.id = m.port_call_id
+                      AND (
+                        COALESCE(pc.evidence::text, '') ILIKE '%%seed_port_calls%%'
+                        OR COALESCE(pc.metadata::text, '') ILIKE '%%seed_port_calls%%'
+                      )
+                  )
+                )
+              )
+            """,
+            (hijacked_mmsis, seed_names),
+        )
+        mcr_deleted = int(cur.rowcount or 0)
+
         cur.execute(
             """
             DELETE FROM oil_opportunities o
             WHERE o.title ILIKE '%%DEMO%%'
                OR o.hypothesis ILIKE '%%DEMO%%'
-               OR o.mmsi = 636012345
+               OR o.mmsi = ANY(%s)
                OR EXISTS (
                  SELECT 1 FROM oil_port_calls pc
                  WHERE pc.id = o.port_call_id
@@ -1488,21 +1606,56 @@ def purge_demo_seed(conn: Any) -> dict[str, int]:
                      OR pc.vessel_name ILIKE '%%DEMO%%'
                    )
                )
-            """
+            """,
+            (hijacked_mmsis,),
         )
         opportunities_deleted = int(cur.rowcount or 0)
+
         cur.execute(
             """
             DELETE FROM oil_port_calls
             WHERE vessel_name ILIKE '%%DEMO%%'
-               OR mmsi = 636012345
+               OR mmsi = ANY(%s)
                OR COALESCE(evidence::text, '') ILIKE '%%seed_port_calls%%'
                OR COALESCE(metadata::text, '') ILIKE '%%seed_port_calls%%'
-            """
+               OR vessel_name = ANY(%s)
+            """,
+            (hijacked_mmsis, seed_names),
         )
         port_calls_deleted = int(cur.rowcount or 0)
+
+        cur.execute(
+            """
+            UPDATE oil_vessels v
+            SET
+              name = sub.latest_name,
+              updated_at = now()
+            FROM (
+              SELECT DISTINCT ON (p.mmsi)
+                p.mmsi,
+                COALESCE(
+                  NULLIF(TRIM(p.raw->'MetaData'->>'ShipName'), ''),
+                  NULLIF(TRIM(p.raw->'Message'->'ShipStaticData'->>'Name'), '')
+                ) AS latest_name
+              FROM oil_ais_positions p
+              WHERE p.mmsi = ANY(%s)
+              ORDER BY p.mmsi, p.ts DESC
+            ) sub
+            WHERE v.mmsi = sub.mmsi
+              AND sub.latest_name IS NOT NULL
+              AND (
+                v.name = ANY(%s)
+                OR v.name ILIKE '%%DEMO%%'
+                OR v.mmsi = ANY(%s)
+              )
+            """,
+            (hijacked_mmsis, seed_names, list(_LEGACY_HIJACKED_MMSIS)),
+        )
+        vessels_reset = int(cur.rowcount or 0)
     conn.commit()
     return {
+        "mcr_deleted": mcr_deleted,
         "opportunities_deleted": opportunities_deleted,
         "port_calls_deleted": port_calls_deleted,
+        "vessels_reset": vessels_reset,
     }

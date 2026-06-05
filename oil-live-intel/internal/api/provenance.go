@@ -39,3 +39,12 @@ func inferCargoProvenance(bolTier string) string {
 	}
 	return tier
 }
+
+// cargoRecordIsSeed reports whether an MCR row is linked to graph-sync demo seed data.
+func cargoRecordIsSeed(mcrEvidence, pcEvidence, pcMetadata []byte) bool {
+	if inferPortCallProvenance(pcEvidence, pcMetadata) == "seed_port_calls" {
+		return true
+	}
+	text := strings.ToLower(string(mcrEvidence))
+	return strings.Contains(text, "seed_port_calls")
+}

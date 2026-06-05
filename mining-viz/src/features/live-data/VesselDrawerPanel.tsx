@@ -292,9 +292,17 @@ export default function VesselDrawerPanel({ mmsi, title, onOpenCargo, onOpenComp
               )}
             </section>
           ) : (
-            <p className="text-slate-500 text-[10px]">
-              {t('אין מיקום AIS שמור ל-MMSI זה', 'No stored AIS position for this MMSI')}
-            </p>
+            <div className="space-y-1">
+              <p className="text-slate-500 text-[10px]">
+                {t('אין מיקום AIS שמור ל-MMSI זה', 'No stored AIS position for this MMSI')}
+              </p>
+              <p className="text-[9px] text-amber-800 dark:text-amber-200 leading-relaxed">
+                {t(
+                  'חוסר AIS במפרץ הפרסי / מפרץ עומאן הוא לעיתים מגבלת ספק — לא הוכחה שאין תנועה.',
+                  'Missing AIS in the Persian Gulf / Gulf of Oman is often provider coverage — not proof of no traffic.',
+                )}
+              </p>
+            </div>
           )}
 
           <section className="space-y-2">

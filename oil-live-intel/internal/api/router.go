@@ -16,12 +16,14 @@ func NewRouter(s *Server) http.Handler {
 	r.Use(middleware.Timeout(60 * time.Second))
 
 	r.Route("/api/oil-live", func(api chi.Router) {
+		api.Get("/health/live", s.HealthLive)
 		api.Get("/health", s.Health)
 		api.Get("/sync-status", s.SyncStatus)
 		api.Get("/map", s.Map)
 		api.Get("/map/country-borders", s.CountryBorders)
 		api.Get("/map/petroleum-osm/layers", s.OSMLayersCatalog)
 		api.Get("/map/petroleum-osm/layers/{layer_id}", s.OSMLayerGeoJSON)
+		api.Get("/map/petroleum-osm/tiles/{layer_id}/{z}/{x}/{y}.pbf", s.OSMLayerMVT)
 		api.Get("/map-layers", s.MapLayers)
 
 		// Licenses
@@ -74,6 +76,9 @@ func NewRouter(s *Server) http.Handler {
 		api.Get("/trade/flows", s.ListTradeFlows)
 		api.Get("/trade-manifests", s.ListTradeManifests)
 		api.Get("/trade-flows", s.ListMcrTradeFlows)
+		api.Get("/corridors/delta", s.CorridorDelta)
+		api.Get("/scenarios", s.ListCrisisScenarios)
+		api.Get("/scenarios/{slug}/digest", s.ScenarioDigest)
 		api.Get("/opportunities", s.ListOpportunities)
 		api.Get("/opportunities/{id}/deal-pack", s.OpportunityDealPack)
 		api.Get("/opportunities/{id}/economics", s.OpportunityEconomics)

@@ -6,46 +6,14 @@ import os
 import re
 from typing import Any, Optional
 
-# HS chapter 27 petroleum codes synced by comtrade worker
-HS27_CODES = ("2709", "2710", "2711")
+try:
+    from backend.services.commodity_hs import hs_codes_for_entity, resolve_hs
+except ImportError:
+    from services.commodity_hs import hs_codes_for_entity, resolve_hs  # type: ignore
 
-_COMMODITY_HS: dict[str, str] = {
-    "gold": "7108",
-    "crude oil": "2709",
-    "crude petroleum": "2709",
-    "petroleum": "2709",
-    "oil": "2709",
-    "petroleum products": "2710",
-    "refined petroleum": "2710",
-    "natural gas": "2711",
-    "lng": "2711",
-    "lpg": "2711",
-}
-
-
-def _resolve_hs(commodity: str) -> Optional[str]:
-    key = (commodity or "").strip().lower()
-    if not key:
-        return None
-    if key in _COMMODITY_HS:
-        return _COMMODITY_HS[key]
-    for token, hs in _COMMODITY_HS.items():
-        if token in key or key in token:
-            return hs
-    return None
-
-
-def _hs_codes_for_entity(commodity: str) -> list[str]:
-    hs = _resolve_hs(commodity)
-    if hs and hs.startswith("27"):
-        return [hs]
-    if hs:
-        return [hs]
-    # Oil/gas licenses without explicit commodity still get chapter 27 bundle
-    commodity_l = (commodity or "").lower()
-    if any(tok in commodity_l for tok in ("oil", "petroleum", "gas", "lng", "lpg", "crude")):
-        return list(HS27_CODES)
-    return []
+# Backwards-compatible aliases for company_intel_store and tests
+_resolve_hs = resolve_hs
+_hs_codes_for_entity = hs_codes_for_entity
 
 
 def _load_license_row(conn: Any, entity_id: str) -> Optional[dict[str, Any]]:

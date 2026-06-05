@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { usePortLogisticsDetails } from '../lib/api';
+import { usePortAuthorityDirectory, usePortLogisticsDetails } from '../lib/api';
+import PortAuthorityDirectoryPanel from './PortAuthorityDirectoryPanel';
 import { MiningLicense } from '../types';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -46,6 +47,12 @@ export default function PortLogisticsPanel({
   const { t } = useI18n();
   const isEnabled = enabled && Boolean(item.entityKind === 'port' || item.entityKind === 'logistics_node');
   const { data, isLoading, error } = usePortLogisticsDetails(item.id, isEnabled);
+  const locode = (item.locode || data?.locode || '').trim().toUpperCase();
+  const { data: directoryFallback } = usePortAuthorityDirectory(
+    locode,
+    isEnabled && Boolean(locode) && !data?.portDirectory,
+  );
+  const portDirectory = data?.portDirectory ?? directoryFallback ?? null;
 
   const visibleSections = useMemo(() => {
     if (section === 'all') return new Set(['summary', 'evidence']);
@@ -105,6 +112,10 @@ export default function PortLogisticsPanel({
           {t('עודכן', 'Updated')} {fmtSeenAt(data.dataAsOf || data.sourceUpdatedAt || data.lastSyncedAt)}
         </span>
       </div>
+
+      {portDirectory && portDirectory.tenants.length > 0 && (
+        <PortAuthorityDirectoryPanel directory={portDirectory} />
+      )}
 
       {showSummary && (
         <Card className="bg-white/5 border-white/5 rounded-3xl p-5 space-y-4">

@@ -1,6 +1,8 @@
 # Production VM stack — registry images only (no build: contexts).
 # Deploy: export VERSION_TAG=v<run> (and secrets via backend.env), then:
 #   docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+# Optional regional workers (need ingest modules in backend image):
+#   docker compose -f docker-compose.prod.yml --profile extended-ingest up -d
 #
 # Full stack needs ~4–6 GB RAM. Elasticsearch host prep (one-time on Linux VM):
 #   sudo sysctl -w vm.max_map_count=262144
@@ -52,6 +54,8 @@ services:
       - OIL_LIVE_DISABLE_DEMO_SEED=1
     volumes:
       - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/meridian/gem:/data/meridian/gem:ro
+      - ./data/gem/goit-pipeline-routes:/data/gem/goit-pipeline-routes:ro
     healthcheck:
       test:
         [
@@ -280,7 +284,9 @@ services:
       db:
         condition: service_healthy
 
+  # Optional regional ingest — not required for map/API; idle if ingest modules are absent.
   sweden-mining-worker:
+    profiles: ["extended-ingest"]
     image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
     platform: linux/arm64
     container_name: mining-sweden-mining-worker
@@ -300,6 +306,7 @@ services:
         condition: service_healthy
 
   arcgis-probe-worker:
+    profiles: ["extended-ingest"]
     image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
     platform: linux/arm64
     container_name: mining-arcgis-probe-worker
@@ -322,6 +329,7 @@ services:
         condition: service_healthy
 
   kazakhstan-mining-worker:
+    profiles: ["extended-ingest"]
     image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
     platform: linux/arm64
     container_name: mining-kazakhstan-mining-worker
@@ -360,6 +368,8 @@ services:
     environment:
       - VITE_API_BASE=${VITE_API_BASE:-}
       - OIL_INTEL_PROXY_TARGET=http://oil-live-intel:8095
+      # Vite dev proxy must reach Docker service names, not 127.0.0.1 inside the container.
+      - BACKEND_PROXY_TARGET=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy
@@ -394,11 +404,11 @@ services:
       - COMTRADE_API_KEY
       - OIL_INTEL_INTERNAL_KEY
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/api/oil-live/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/api/oil-live/health/live"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 45s
     depends_on:
       db:
         condition: service_healthy

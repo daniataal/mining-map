@@ -26,6 +26,8 @@ export function liveDealFeaturePriority(feature: LiveDealPointFeature): number {
         ? 400
         : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
           ? 380
+          : feature.kind === 'storage_tank'
+            ? 200
           : feature.kind === 'refinery' || feature.kind === 'oil_field'
             ? 360
         : feature.kind === 'cargo'
@@ -263,4 +265,14 @@ export function planLiveDealPointFeatureDraw(
   }
 
   return { drawFeatures, lodSubsampling: clustered || visible.length !== drawFeatures.length };
+}
+
+/** Max zoom when drilling canvas aggregate bubbles (storage, licenses). */
+export const LIVE_DEAL_CLIENT_CLUSTER_EXPAND_ZOOM = 15;
+
+export function targetZoomForLiveDealClientCluster(
+  boundsFitZoom: number | null,
+): number {
+  const fitZoom = boundsFitZoom ?? 0;
+  return Math.min(18, Math.max(LIVE_DEAL_CLIENT_CLUSTER_EXPAND_ZOOM, fitZoom + 1));
 }
