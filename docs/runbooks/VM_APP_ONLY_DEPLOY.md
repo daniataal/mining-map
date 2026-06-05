@@ -101,3 +101,61 @@ With `--profile ingest`, confirm workers are running:
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml --profile ingest ps | grep -E 'sync|indexer'
 ```
+
+## Tier 2 — Redis cache and rate limits
+
+Optional scalability layer for repeated map reads and protection of expensive Python routes.
+Enabled in `docker-compose.prod.app.yml` when Redis is running.
+
+### Environment variables
+
+| Service | Variable | Default (app overlay) | Purpose |
+|---------|----------|----------------------|---------|
+| `oil-live-intel` | `REDIS_URL` or `OIL_INTEL_REDIS_URL` | `redis://redis:6379/1` | Hot GET response cache; unset = cache off |
+| `backend` | `REDIS_HOST` | `redis` | Rate limit counters (falls back to in-memory if down) |
+| `backend` | `RATE_LIMIT_ENABLED` | `1` | Set `0` to disable rate limits |
+| `backend` | `RATE_LIMIT_RPM` | `30` | AI/agent + bulk export routes per client per minute |
+| `backend` | `RATE_LIMIT_ROUTE_RPM` | `60` | `/api/routing/*` per client per minute |
+
+**Cached Go paths** (fail-open if Redis unavailable): `licenses/country-summary`,
+`map/country-borders`, `intelligence/country/{country}` (TTL ~120s),
+`maritime/stats` (TTL 30s). Existing `Cache-Control` headers are preserved.
+
+**Rate-limited Python paths:** `/api/agents/*`, `/api/routing/*`, `/licenses/export`,
+`/api/deal-rooms/{id}/export(.pdf)`. Returns HTTP 429 with an honest message when exceeded.
+
+### Expected capacity gain
+
+- **Map pan/zoom:** Repeat viewport requests hit Redis instead of Postgres for country
+  summaries and borders — typically 2–5× lower DB load during active map sessions.
+- **Maritime stats banner:** 30s Redis TTL cuts repeated health queries during live view.
+- **Abuse protection:** Agent and route planner calls capped per IP or JWT, reducing CPU
+  spikes from scripted traffic on a 4 vCPU VM.
+
+### Rollback
+
+No redeploy required — disable via env and restart affected containers:
+
+```bash
+# Disable Go response cache
+docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml exec oil-live-intel sh -c 'unset REDIS_URL OIL_INTEL_REDIS_URL'
+
+# Or in compose / .env:
+REDIS_URL=
+RATE_LIMIT_ENABLED=0
+
+docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml up -d backend oil-live-intel
+```
+
+Removing `docker-compose.prod.app.yml` from the compose command reverts Tier-1 and Tier-2
+overlay settings together.
+
+### Verify Tier 2 locally
+
+```bash
+# Go cache (second request should include X-Cache: HIT when Redis is up)
+curl -s -D - "http://localhost:8095/api/oil-live/maritime/stats" -o /dev/null | grep -i x-cache
+
+# Rate limit (429 after exceeding RATE_LIMIT_RPM)
+RATE_LIMIT_ENABLED=1 REDIS_HOST=redis pytest backend/tests/test_rate_limit.py -q
+```

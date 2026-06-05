@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mining-map/oil-live-intel/internal/api"
+	"github.com/mining-map/oil-live-intel/internal/cache"
 	"github.com/mining-map/oil-live-intel/internal/config"
 	"github.com/mining-map/oil-live-intel/internal/db"
 	"github.com/mining-map/oil-live-intel/internal/seed"
@@ -84,7 +85,10 @@ func main() {
 	default:
 		log.Info().Msg("ShipVault: bootstrap needed — set SHIPVAULT_REFRESH_TOKEN or persist via admin bootstrap")
 	}
-	router := api.NewRouter(srv)
+	responseCache := cache.New(cfg.RedisURL, log)
+	defer responseCache.Close()
+
+	router := api.NewRouter(srv, responseCache)
 
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.Port,
