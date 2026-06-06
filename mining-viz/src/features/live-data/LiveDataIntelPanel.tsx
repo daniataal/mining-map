@@ -313,7 +313,7 @@ export default function LiveDataIntelPanel({
     refetchOnWindowFocus: false,
   });
 
-  const { data: companiesData } = useQuery({
+  const { data: companiesData, isError: companiesError, error: companiesErr } = useQuery({
     queryKey: ['oil-live-companies', productFilter, companyRoleFilter, companyCountryFilter, companyOffset, tab],
     queryFn: async () =>
       getOilCompanies({
@@ -2054,7 +2054,22 @@ export default function LiveDataIntelPanel({
           <p className="text-xs text-slate-500">{t('אין כרטיסי מודיעין', 'No intelligence cards yet')}</p>
         )}
 
-        {tab === 'companies' && !companies.length && companiesTotal === 0 && (
+        {tab === 'companies' && companiesError && (
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-900 dark:text-rose-200">
+            <p className="font-bold">{t('טעינת חברות נכשלה', 'Failed to load companies')}</p>
+            <p className="mt-1 text-xs opacity-90">
+              {companiesErr instanceof Error ? companiesErr.message : String(companiesErr)}
+            </p>
+            <p className="mt-2 text-xs opacity-80">
+              {t(
+                'ייתכן שה-API איטי מדי — נסו לרענן. אם הבעיה נמשכת, הפעילו מחדש את oil-live-intel.',
+                'The companies API may have timed out — try refresh. If it persists, restart oil-live-intel.',
+              )}
+            </p>
+          </div>
+        )}
+
+        {tab === 'companies' && !companiesError && !companies.length && companiesTotal === 0 && (
           <GraphSyncEmptyCta context="companies" />
         )}
         </div>

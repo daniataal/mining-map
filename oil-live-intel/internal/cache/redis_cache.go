@@ -91,7 +91,8 @@ func TTLForPath(path string) time.Duration {
 	case path == "/api/oil-live/maritime/stats":
 		return 30 * time.Second
 	case path == "/api/oil-live/licenses/country-summary",
-		path == "/api/oil-live/map/country-borders":
+		path == "/api/oil-live/map/country-borders",
+		path == "/api/oil-live/sanctions/country-summary":
 		return 120 * time.Second
 	case strings.HasPrefix(path, "/api/oil-live/intelligence/country/"):
 		return 120 * time.Second

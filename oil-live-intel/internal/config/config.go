@@ -57,6 +57,11 @@ type Config struct {
 
 	// STS analyst verification (PATCH /sts-events/{id}); header X-Analyst-Token.
 	STSAnalystToken string
+
+	// OpenSanctions screening (oil_companies graph-sync + country choropleth).
+	OpenSanctionsAPIKey          string
+	OpenSanctionsUserAgent       string
+	OpenSanctionsCountryCacheTTL int
 }
 
 // ShipVaultConfigured reports whether ShipVault should run (env credentials or DB refresh token).
@@ -113,6 +118,10 @@ func Load() Config {
 		RedisURL: redisURLFromEnv(),
 
 		STSAnalystToken: env("STS_ANALYST_TOKEN", ""),
+
+		OpenSanctionsAPIKey:          env("OPENSANCTIONS_API_KEY", ""),
+		OpenSanctionsUserAgent:       env("OPENSANCTIONS_USER_AGENT", "Meridian/1.0 (open-data screening; ops@meridian.example)"),
+		OpenSanctionsCountryCacheTTL: envInt("OPENSANCTIONS_COUNTRY_CACHE_TTL_SECONDS", 3600),
 	}
 }
 

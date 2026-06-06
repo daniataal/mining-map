@@ -74,7 +74,7 @@ export function sublayerLabel(sublayer: IntelligenceSublayer): string {
     countries: 'Countries',
     licenses: 'Licenses',
     trade_flows: 'Trade flows',
-    risk: 'Risk',
+    risk: 'Risk (beta)',
     mines: 'Mines',
     oil_fields: 'Oil fields',
     refineries: 'Refineries',

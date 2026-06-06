@@ -11,6 +11,11 @@ type UseLicenseInteractionsArgs<TPending extends MiningLicense> = {
   onSelectMaritimeVessel: (vessel: null) => void;
   setSelectedItem: (item: MiningLicense | null) => void;
   buildClientClusterFly: (feature: LiveDealMapFeature) => TPending;
+  onPrepareClusterDrill?: (item: MiningLicense) => void;
+  /** When false, apply side-effects but skip scheduling a map fly (e.g. country hub already drilled). */
+  shouldScheduleClusterDrill?: (item: MiningLicense) => boolean;
+  /** Grid cluster click — open Intelligence rail (Global › Licenses). */
+  onLicenseClusterSelect?: (item: MiningLicense) => void;
 };
 
 export function useLicenseInteractions<TPending extends MiningLicense>({
@@ -19,6 +24,9 @@ export function useLicenseInteractions<TPending extends MiningLicense>({
   onSelectMaritimeVessel,
   setSelectedItem,
   buildClientClusterFly,
+  onPrepareClusterDrill,
+  shouldScheduleClusterDrill,
+  onLicenseClusterSelect,
 }: UseLicenseInteractionsArgs<TPending>) {
   const [pendingLicenseClusterFly, setPendingLicenseClusterFly] = useState<TPending | null>(null);
 
@@ -26,13 +34,18 @@ export function useLicenseInteractions<TPending extends MiningLicense>({
     (item: MiningLicense, isServerCluster: boolean) => {
       onSelectMaritimeVessel(null);
       if (isServerCluster) {
+        onPrepareClusterDrill?.(item);
+        onLicenseClusterSelect?.(item);
+        if (shouldScheduleClusterDrill && !shouldScheduleClusterDrill(item)) {
+          return;
+        }
         setSelectedItem(null);
         setPendingLicenseClusterFly(item as TPending);
         return;
       }
       setSelectedItem(item);
     },
-    [onSelectMaritimeVessel, setSelectedItem],
+    [onSelectMaritimeVessel, onPrepareClusterDrill, onLicenseClusterSelect, shouldScheduleClusterDrill, setSelectedItem],
   );
 
   const handleLicenseCanvasFeatureClick = useCallback(
@@ -43,8 +56,10 @@ export function useLicenseInteractions<TPending extends MiningLicense>({
         isLiveDealClientClusterData(feature.data)
       ) {
         onSelectMaritimeVessel(null);
+        const pending = buildClientClusterFly(feature);
+        onLicenseClusterSelect?.(pending);
         setSelectedItem(null);
-        setPendingLicenseClusterFly(buildClientClusterFly(feature));
+        setPendingLicenseClusterFly(pending);
         return;
       }
       const item = feature.data as MiningLicense | undefined;
@@ -52,7 +67,7 @@ export function useLicenseInteractions<TPending extends MiningLicense>({
       onSelectMaritimeVessel(null);
       setSelectedItem(item);
     },
-    [buildClientClusterFly, onSelectMaritimeVessel, setSelectedItem],
+    [buildClientClusterFly, onLicenseClusterSelect, onSelectMaritimeVessel, setSelectedItem],
   );
 
   const handleSingleClusterMarkerClick = useCallback(
@@ -70,13 +85,18 @@ export function useLicenseInteractions<TPending extends MiningLicense>({
       if (!item) return;
       onSelectMaritimeVessel(null);
       if (isServerLicenseCluster(item)) {
+        onPrepareClusterDrill?.(item);
+        onLicenseClusterSelect?.(item);
+        if (shouldScheduleClusterDrill && !shouldScheduleClusterDrill(item)) {
+          return;
+        }
         setSelectedItem(null);
         setPendingLicenseClusterFly(item as TPending);
         return;
       }
       setSelectedItem(item);
     },
-    [mapDisplayData, markerRefs, onSelectMaritimeVessel, setSelectedItem],
+    [mapDisplayData, markerRefs, onPrepareClusterDrill, onLicenseClusterSelect, shouldScheduleClusterDrill, onSelectMaritimeVessel, setSelectedItem],
   );
 
   return {

@@ -21,6 +21,11 @@ type companyFilters struct {
 	MinEvents                              int
 }
 
+type companyListOpts struct {
+	CompanyID  *uuid.UUID
+	IncludeMap bool
+}
+
 func (s *Server) listTerminals(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
 	q := `
 		SELECT id, name, terminal_type, operator_name, owner_name, country, port, city,
@@ -323,10 +328,15 @@ func (s *Server) getIntelligence(r *http.Request, id string) (map[string]any, er
 	return nil, fmt.Errorf("not found")
 }
 
-func (s *Server) companyListWhere(f companyFilters) (where string, args []any) {
+func (s *Server) companyListWhere(f companyFilters, opts companyListOpts) (where string, args []any) {
 	where = ` WHERE c.confidence >= $1`
 	args = []any{f.MinConfidence}
 	n := 2
+	if opts.CompanyID != nil {
+		where += fmt.Sprintf(` AND c.id = $%d`, n)
+		args = append(args, *opts.CompanyID)
+		n++
+	}
 	if f.Q != "" {
 		where += fmt.Sprintf(` AND (c.name ILIKE $%d OR c.normalized_name ILIKE $%d)`, n, n)
 		args = append(args, "%"+f.Q+"%")
@@ -396,56 +406,21 @@ func companySourcesFromMeta(sourceCol string, metaMap map[string]any) []string {
 	return out
 }
 
-func (s *Server) countCompanies(r *http.Request, f companyFilters) (int, error) {
-	where, args := s.companyListWhere(f)
+func (s *Server) countCompanies(r *http.Request, f companyFilters, opts companyListOpts) (int, error) {
+	where, args := s.companyListWhere(f, opts)
 	var total int
 	err := s.Pool.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM oil_companies c`+where, args...).Scan(&total)
 	return total, err
 }
 
-func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset int) ([]map[string]any, error) {
-	where, args := s.companyListWhere(f)
+func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset int, opts companyListOpts) ([]map[string]any, error) {
+	where, args := s.companyListWhere(f, opts)
 	q := `SELECT c.id, c.name, c.company_type, c.country, c.website, c.confidence, c.supplier_status, c.supplier_id, c.source, c.metadata,
 			COALESCE((SELECT COUNT(*)::int FROM meridian_cargo_records m WHERE m.shipper_company_id = c.id OR m.consignee_company_id = c.id), 0) AS mcr_count,
 			COALESCE((SELECT COUNT(*)::int FROM oil_commercial_events e WHERE e.company_id = c.id), 0) AS event_count,
 			COALESCE((SELECT COUNT(*)::int FROM oil_company_contacts cc WHERE cc.company_id = c.id), 0) AS contact_count,
-			COALESCE(c.metadata->'roles', '[]'::jsonb) AS roles,
-			COALESCE(term.lat, mcr.lat) AS map_lat,
-			COALESCE(term.lon, mcr.lon) AS map_lng,
-			term.terminal_id AS map_terminal_id,
-			CASE
-				WHEN term.lat IS NOT NULL THEN 'terminal'
-				WHEN mcr.lat IS NOT NULL THEN 'corridor'
-				ELSE NULL
-			END AS map_location_source
-		FROM oil_companies c
-		LEFT JOIN LATERAL (
-			SELECT
-				ST_Y(t.geom::geometry) AS lat,
-				ST_X(t.geom::geometry) AS lon,
-				t.id::text AS terminal_id
-			FROM oil_terminals t
-			WHERE t.geom IS NOT NULL
-				AND (
-					LOWER(TRIM(COALESCE(t.operator_name, ''))) = LOWER(TRIM(c.name))
-					OR LOWER(TRIM(COALESCE(t.owner_name, ''))) = LOWER(TRIM(c.name))
-				)
-				AND (
-					TRIM(COALESCE(c.country, '')) = ''
-					OR UPPER(TRIM(c.country)) IN ('UNKNOWN', 'N/A')
-					OR LOWER(TRIM(COALESCE(t.country, ''))) = LOWER(TRIM(c.country))
-				)
-			ORDER BY t.confidence DESC NULLS LAST, t.name
-			LIMIT 1
-		) term ON true
-		LEFT JOIN LATERAL (
-			SELECT m.corridor_load_lat AS lat, m.corridor_load_lng AS lon
-			FROM meridian_cargo_records m
-			WHERE (m.shipper_company_id = c.id OR m.consignee_company_id = c.id)
-				AND m.corridor_load_lat IS NOT NULL AND m.corridor_load_lng IS NOT NULL
-			ORDER BY m.updated_at DESC NULLS LAST
-			LIMIT 1
-		) mcr ON true` + where
+			COALESCE(c.metadata->'roles', '[]'::jsonb) AS roles
+		FROM oil_companies c` + where
 	n := len(args) + 1
 	q += fmt.Sprintf(` ORDER BY c.confidence DESC, c.name LIMIT $%d OFFSET $%d`, n, n+1)
 	args = append(args, limit, offset)
@@ -463,11 +438,8 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 		var meta []byte
 		var mcrCount, eventCount, contactCount int
 		var roles []byte
-		var mapLat, mapLng *float64
-		var mapTerminalID, mapLocationSource *string
 		if err := rows.Scan(&id, &name, &ctype, &country, &website, &conf, &status, &supplierID, &sourceCol, &meta,
-			&mcrCount, &eventCount, &contactCount, &roles,
-			&mapLat, &mapLng, &mapTerminalID, &mapLocationSource); err != nil {
+			&mcrCount, &eventCount, &contactCount, &roles); err != nil {
 			return nil, err
 		}
 		var metaMap map[string]any
@@ -484,32 +456,21 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 			"mcr_count": mcrCount, "event_count": eventCount, "contact_count": contactCount,
 			"roles": rolesList, "sources": companySourcesFromMeta(sourceCol, metaMap),
 		}
-		if mapLat != nil && mapLng != nil {
-			item["map_lat"] = *mapLat
-			item["map_lng"] = *mapLng
-			if mapTerminalID != nil && *mapTerminalID != "" {
-				item["map_terminal_id"] = *mapTerminalID
-			}
-			if mapLocationSource != nil && *mapLocationSource != "" {
-				item["map_location_source"] = *mapLocationSource
-			}
-		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if opts.IncludeMap {
+		if err := enrichCompanyMapLocations(r.Context(), s.Pool, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) getCompany(r *http.Request, id string) (map[string]any, error) {
-	items, err := s.listCompanies(r, companyFilters{}, 1000, 0)
-	if err != nil {
-		return nil, err
-	}
-	for _, it := range items {
-		if it["id"] == id {
-			return it, nil
-		}
-	}
-	return nil, fmt.Errorf("not found")
+	return s.getCompanyByID(r, id)
 }
 
 func (s *Server) getCompanyRow(r *http.Request, id uuid.UUID) (supplier.Company, error) {
