@@ -24,7 +24,7 @@ export default function MapCoverageBanners({
     <>
       {showLiveDataVesselWatch && liveDataVesselStatus && (
         <div
-          className="pointer-events-none absolute left-3 right-3 top-3 z-[640] sm:left-6 sm:max-w-xl"
+          className="pointer-events-none absolute left-3 right-3 top-16 z-[640] sm:left-6 sm:top-[4.5rem] sm:max-w-xl"
           role="status"
         >
           <div className="rounded-2xl border border-sky-500/35 bg-sky-500/12 px-4 py-3 text-[10px] font-semibold leading-snug text-sky-950 shadow-lg dark:text-sky-50">
@@ -42,7 +42,7 @@ export default function MapCoverageBanners({
       )}
       {showLimitedAisCoverageBanner && (
         <div
-          className="pointer-events-auto absolute left-3 right-3 top-3 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:max-w-xl"
+          className="pointer-events-auto absolute left-3 right-3 top-16 z-[650] rounded-2xl border border-amber-500/40 bg-amber-500/15 px-4 py-3 text-[10px] font-semibold leading-snug text-amber-950 shadow-lg dark:text-amber-50 sm:left-6 sm:top-[4.5rem] sm:max-w-xl"
           role="status"
         >
           <p className="font-black uppercase tracking-widest text-[9px] text-amber-700 dark:text-amber-200">

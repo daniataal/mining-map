@@ -134,7 +134,7 @@ export function isMapVisibleMode(mode: IntelligenceMode): boolean {
 export function isSidebarVisibleMode(mode: IntelligenceMode, mapSidebarTab: string): boolean {
   if (mode === 'global_view' || mode === 'assets') return true;
   if (mode === 'supply_chain' || mode === 'routes') return false;
-  return mapSidebarTab === 'licenses';
+  return mapSidebarTab === 'licenses' || mapSidebarTab === 'data_health';
 }
 
 export function maritimeActiveForMode(mode: IntelligenceMode, sublayer: IntelligenceSublayer): boolean {

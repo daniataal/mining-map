@@ -52,7 +52,7 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     opportunities: true,
     tradeFlows: false,
     coverage: false,
-    stsEvents: false,
+    stsEvents: true,
   },
   raw: {
     terminals: true,

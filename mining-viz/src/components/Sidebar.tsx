@@ -146,7 +146,7 @@ export default function Sidebar({
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
         <div className="mb-2 flex shrink-0 items-center justify-center">
-          <BrandMark size="rail" variant="emblem" framed />
+          <BrandMark size="rail" framed />
         </div>
         <button
           onClick={() => {

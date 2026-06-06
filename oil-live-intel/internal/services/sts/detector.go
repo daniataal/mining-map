@@ -14,12 +14,35 @@ import (
 )
 
 const (
-	DefaultMaxDistanceM  = 500
-	DefaultMaxSOG        = 1.5
-	DefaultMinDuration   = 2 * time.Hour
-	DefaultTimeMatchSec  = 900
-	DefaultBucketMinutes = 15
+	DefaultMaxDistanceM         = 500
+	DefaultMaxSOG               = 1.5
+	DefaultMinDuration          = 2 * time.Hour
+	DefaultTimeMatchSec         = 900
+	DefaultBucketMinutes        = 15
+	maxSTSDetectWindowHours     = 24
+	maxArchiveDetectWindowHours = 24
 )
+
+func capDetectWindowHours(retainHours int) int {
+	if retainHours <= 0 {
+		retainHours = 72
+	}
+	if retainHours > maxSTSDetectWindowHours {
+		return maxSTSDetectWindowHours
+	}
+	return retainHours
+}
+
+func capArchiveWindowHours(backfillDays int) int {
+	if backfillDays <= 0 {
+		backfillDays = 7
+	}
+	hours := backfillDays * 24
+	if hours > maxArchiveDetectWindowHours {
+		return maxArchiveDetectWindowHours
+	}
+	return hours
+}
 
 // Candidate is a detected co-proximity session between two MMSIs.
 type Candidate struct {
@@ -53,15 +76,14 @@ type DetectConfig struct {
 	SpeedColumn    string
 }
 
-// DefaultDetectConfig returns settings for the live 72h rolling buffer.
+// DefaultDetectConfig returns settings for the live AIS rolling buffer.
+// Scan window is capped (24h) so pairwise detection stays bounded; events accumulate via upsert.
 func DefaultDetectConfig(retainHours int) DetectConfig {
-	if retainHours <= 0 {
-		retainHours = 72
-	}
 	end := time.Now().UTC()
+	scanHours := capDetectWindowHours(retainHours)
 	return DetectConfig{
 		WindowEnd:      end,
-		WindowStart:    end.Add(-time.Duration(retainHours) * time.Hour),
+		WindowStart:    end.Add(-time.Duration(scanHours) * time.Hour),
 		MaxDistanceM:   DefaultMaxDistanceM,
 		MaxSOG:         DefaultMaxSOG,
 		MinDuration:    DefaultMinDuration,
@@ -74,13 +96,11 @@ func DefaultDetectConfig(retainHours int) DetectConfig {
 
 // ArchiveDetectConfig returns settings for GFW archive track points.
 func ArchiveDetectConfig(backfillDays int) DetectConfig {
-	if backfillDays <= 0 {
-		backfillDays = 7
-	}
 	end := time.Now().UTC()
+	scanHours := capArchiveWindowHours(backfillDays)
 	return DetectConfig{
 		WindowEnd:      end,
-		WindowStart:    end.Add(-time.Duration(backfillDays) * 24 * time.Hour),
+		WindowStart:    end.Add(-time.Duration(scanHours) * time.Hour),
 		MaxDistanceM:   DefaultMaxDistanceM,
 		MaxSOG:         DefaultMaxSOG,
 		MinDuration:    DefaultMinDuration,
@@ -116,26 +136,37 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 	}
 
 	speedCol := cfg.SpeedColumn
+	// Pre-aggregate to one row per (mmsi, bucket) before pairwise join — raw position
+	// self-join over the full retain window is too slow at production AIS volume.
 	q := fmt.Sprintf(`
-		WITH proximity AS (
+		WITH bucketed AS (
+			SELECT
+				mmsi,
+				date_trunc('hour', ts) +
+					(floor(extract(minute FROM ts) / %d) * %d) * interval '1 minute' AS bucket,
+				MIN(ts) AS ts,
+				ST_Centroid(ST_Collect(geom)) AS geom,
+				AVG(COALESCE(%s, 0)) AS speed
+			FROM %s
+			WHERE ts >= $1 AND ts <= $2
+				AND COALESCE(%s, 99) <= $3
+			GROUP BY mmsi, 2
+		),
+		proximity AS (
 			SELECT
 				LEAST(a.mmsi, b.mmsi) AS mmsi_a,
 				GREATEST(a.mmsi, b.mmsi) AS mmsi_b,
-				date_trunc('hour', a.ts) +
-					(floor(extract(minute FROM a.ts) / %d) * %d) * interval '1 minute' AS bucket,
+				a.bucket,
 				MIN(ST_Distance(a.geom::geography, b.geom::geography)) AS min_dist_m,
-				AVG((COALESCE(a.%s, 0) + COALESCE(b.%s, 0)) / 2.0) AS avg_sog,
+				AVG((a.speed + b.speed) / 2.0) AS avg_sog,
 				AVG((ST_Y(a.geom::geometry) + ST_Y(b.geom::geometry)) / 2.0) AS lat,
 				AVG((ST_X(a.geom::geometry) + ST_X(b.geom::geometry)) / 2.0) AS lon,
 				MIN(a.ts) AS bucket_start,
 				MAX(a.ts) AS bucket_end
-			FROM %s a
-			INNER JOIN %s b ON a.mmsi < b.mmsi
-				AND abs(extract(epoch FROM (a.ts - b.ts))) <= $5
-				AND ST_DWithin(a.geom::geography, b.geom::geography, $6)
-			WHERE a.ts >= $1 AND a.ts <= $2
-				AND COALESCE(a.%s, 99) <= $3
-				AND COALESCE(b.%s, 99) <= $3
+			FROM bucketed a
+			INNER JOIN bucketed b ON a.mmsi < b.mmsi
+				AND a.bucket = b.bucket
+				AND ST_DWithin(a.geom::geography, b.geom::geography, $5)
 			GROUP BY 1, 2, 3
 		)
 		SELECT
@@ -150,11 +181,11 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 		FROM proximity
 		GROUP BY mmsi_a, mmsi_b
 		HAVING MAX(bucket_end) - MIN(bucket_start) >= $4::interval
-	`, cfg.BucketMinutes, cfg.BucketMinutes, speedCol, speedCol, cfg.PositionsTable, cfg.PositionsTable, speedCol, speedCol)
+	`, cfg.BucketMinutes, cfg.BucketMinutes, speedCol, cfg.PositionsTable, speedCol)
 
 	minDur := fmt.Sprintf("%f hours", cfg.MinDuration.Hours())
 	rows, err := pool.Query(ctx, q,
-		cfg.WindowStart, cfg.WindowEnd, cfg.MaxSOG, minDur, cfg.TimeMatchSec, cfg.MaxDistanceM)
+		cfg.WindowStart, cfg.WindowEnd, cfg.MaxSOG, minDur, cfg.MaxDistanceM)
 	if err != nil {
 		return nil, err
 	}

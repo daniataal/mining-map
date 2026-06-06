@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Popup, Rectangle, LayerGroup } from 'react-leaflet';
+import { Popup, Rectangle, LayerGroup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import CanvasLiveDealLayer from './CanvasLiveDealLayer';
 import OilLiveMapPopupController, {
@@ -40,6 +40,8 @@ import {
   volumeToWeight,
   type LatLngTuple,
 } from '../../lib/corridorGeometry';
+import type { LiveDataCompanyMapHover } from '../../features/live-data/liveDataCompanyMapHover';
+import { companyMapHoverUid } from '../../features/live-data/liveDataCompanyMapHover';
 import type { LiveDealMapFeature } from '../../lib/liveDealMap/liveDealMapTypes';
 
 export type { OilLiveEntityClickPayload } from './oilLiveEntityPayload';
@@ -84,6 +86,21 @@ function inViewport(
   return lat >= vp.south && lat <= vp.north && lng >= vp.west && lng <= vp.east;
 }
 
+function LiveDataSidebarHoverPan({
+  target,
+}: {
+  target: { lat: number; lng: number } | null;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    const latLng = L.latLng(target.lat, target.lng);
+    if (map.getBounds().contains(latLng)) return;
+    map.panTo(latLng, { animate: true, duration: 0.55 });
+  }, [target, map]);
+  return null;
+}
+
 function hasLoadCoords(r: MeridianCargoRecord): boolean {
   return r.corridor_load_lat != null && r.corridor_load_lng != null;
 }
@@ -122,6 +139,8 @@ type Props = {
     vesselMeta?: import('../../api/oilLiveApi').OilLiveVesselMeta | null;
   }) => void;
   onEntityClick?: (payload: OilLiveEntityClickPayload) => void;
+  /** Sidebar company list hover — highlight linked terminal or corridor point. */
+  sidebarCompanyHover?: LiveDataCompanyMapHover | null;
 };
 
 function OilLiveMapOverlays({
@@ -137,6 +156,7 @@ function OilLiveMapOverlays({
   coverageSources,
   onStatsChange,
   onEntityClick,
+  sidebarCompanyHover = null,
 }: Props) {
   const queryClient = useQueryClient();
   const [liveVessels, setLiveVessels] = useState<Record<number, OilLiveVessel>>({});
@@ -638,6 +658,33 @@ function OilLiveMapOverlays({
     vessels,
   ]);
 
+  const sidebarHoverUid = sidebarCompanyHover ? companyMapHoverUid(sidebarCompanyHover) : null;
+
+  const canvasFeaturesWithHover = useMemo(() => {
+    if (!sidebarCompanyHover || !sidebarHoverUid) return canvasFeatures;
+    if (canvasFeatures.some((feature) => feature.uid === sidebarHoverUid)) {
+      return canvasFeatures;
+    }
+    return [
+      ...canvasFeatures,
+      {
+        shape: 'point' as const,
+        uid: sidebarHoverUid,
+        id: sidebarCompanyHover.companyId,
+        kind: 'terminal' as const,
+        lat: sidebarCompanyHover.lat,
+        lng: sidebarCompanyHover.lng,
+        title: sidebarCompanyHover.name ?? 'Company',
+        subtitle: sidebarCompanyHover.terminalId
+          ? 'Linked terminal operator'
+          : 'Latest cargo corridor load',
+        tier: 'inferred' as const,
+        confidence: 0.55,
+        styleKey: 'company-hover',
+      } satisfies LiveDealMapFeature,
+    ];
+  }, [canvasFeatures, sidebarCompanyHover, sidebarHoverUid]);
+
   useEffect(() => {
     if (!onStatsChange) return;
     onStatsChange({
@@ -716,10 +763,18 @@ function OilLiveMapOverlays({
           </Rectangle>
         ))}
       <CanvasLiveDealLayer
-        features={canvasFeatures}
+        features={canvasFeaturesWithHover}
         mapZoom={mapZoom}
         selectedUid={popupSnapshot?.uid ?? null}
+        hoveredUid={sidebarHoverUid}
         onFeatureClick={handleCanvasFeatureClick}
+      />
+      <LiveDataSidebarHoverPan
+        target={
+          sidebarCompanyHover
+            ? { lat: sidebarCompanyHover.lat, lng: sidebarCompanyHover.lng }
+            : null
+        }
       />
       <OilLiveMapPopupController
         snapshot={popupSnapshot}

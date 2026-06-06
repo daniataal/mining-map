@@ -24,6 +24,78 @@ func TestListSTSEvents_NoDatabase(t *testing.T) {
 	}
 }
 
+func TestGetSTSEventsSummary_NoDatabase(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodGet, "/api/oil-live/sts-events/summary", nil)
+	w := httptest.NewRecorder()
+	s.GetSTSEventsSummary(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", w.Code)
+	}
+}
+
+func TestGetSTSEventsSummary_InvalidBBox(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodGet, "/api/oil-live/sts-events/summary?bbox=bad", nil)
+	w := httptest.NewRecorder()
+	s.GetSTSEventsSummary(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetSTSEventsSummary_InvalidFrom(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodGet, "/api/oil-live/sts-events/summary?from=not-a-time", nil)
+	w := httptest.NewRecorder()
+	s.GetSTSEventsSummary(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetSTSEvent_InvalidID(t *testing.T) {
+	s := &Server{}
+	req := withSTSIDParam(httptest.NewRequest(http.MethodGet, "/api/oil-live/sts-events/not-a-uuid", nil), "not-a-uuid")
+	w := httptest.NewRecorder()
+	s.GetSTSEvent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetSTSEvent_NoDatabase(t *testing.T) {
+	s := &Server{}
+	req := withSTSIDParam(
+		httptest.NewRequest(http.MethodGet, "/api/oil-live/sts-events/00000000-0000-0000-0000-000000000001", nil),
+		"00000000-0000-0000-0000-000000000001",
+	)
+	w := httptest.NewRecorder()
+	s.GetSTSEvent(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSTSEmptyTierCounts(t *testing.T) {
+	counts := stsEmptyTierCounts()
+	for _, tier := range []string{"low", "medium", "high", "very_high", "verified"} {
+		if _, ok := counts[tier]; !ok {
+			t.Fatalf("missing tier %q in %#v", tier, counts)
+		}
+	}
+}
+
+func TestSTSLastScanHint(t *testing.T) {
+	if stsLastScanHint(nil) == "" {
+		t.Fatal("expected hint for nil scan")
+	}
+	ts := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
+	if got := stsLastScanHint(&ts); got != "2026-06-06T12:00:00Z" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestGetVesselSTSHistory_InvalidMMSI(t *testing.T) {
 	s := &Server{}
 	req := withMMSIParam(httptest.NewRequest(http.MethodGet, "/api/oil-live/vessels/bad/sts-history", nil), "bad")

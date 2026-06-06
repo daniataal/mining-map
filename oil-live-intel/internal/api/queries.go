@@ -409,8 +409,43 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 			COALESCE((SELECT COUNT(*)::int FROM meridian_cargo_records m WHERE m.shipper_company_id = c.id OR m.consignee_company_id = c.id), 0) AS mcr_count,
 			COALESCE((SELECT COUNT(*)::int FROM oil_commercial_events e WHERE e.company_id = c.id), 0) AS event_count,
 			COALESCE((SELECT COUNT(*)::int FROM oil_company_contacts cc WHERE cc.company_id = c.id), 0) AS contact_count,
-			COALESCE(c.metadata->'roles', '[]'::jsonb) AS roles
-		FROM oil_companies c` + where
+			COALESCE(c.metadata->'roles', '[]'::jsonb) AS roles,
+			COALESCE(term.lat, mcr.lat) AS map_lat,
+			COALESCE(term.lon, mcr.lon) AS map_lng,
+			term.terminal_id AS map_terminal_id,
+			CASE
+				WHEN term.lat IS NOT NULL THEN 'terminal'
+				WHEN mcr.lat IS NOT NULL THEN 'corridor'
+				ELSE NULL
+			END AS map_location_source
+		FROM oil_companies c
+		LEFT JOIN LATERAL (
+			SELECT
+				ST_Y(t.geom::geometry) AS lat,
+				ST_X(t.geom::geometry) AS lon,
+				t.id::text AS terminal_id
+			FROM oil_terminals t
+			WHERE t.geom IS NOT NULL
+				AND (
+					LOWER(TRIM(COALESCE(t.operator_name, ''))) = LOWER(TRIM(c.name))
+					OR LOWER(TRIM(COALESCE(t.owner_name, ''))) = LOWER(TRIM(c.name))
+				)
+				AND (
+					TRIM(COALESCE(c.country, '')) = ''
+					OR UPPER(TRIM(c.country)) IN ('UNKNOWN', 'N/A')
+					OR LOWER(TRIM(COALESCE(t.country, ''))) = LOWER(TRIM(c.country))
+				)
+			ORDER BY t.confidence DESC NULLS LAST, t.name
+			LIMIT 1
+		) term ON true
+		LEFT JOIN LATERAL (
+			SELECT m.corridor_load_lat AS lat, m.corridor_load_lng AS lon
+			FROM meridian_cargo_records m
+			WHERE (m.shipper_company_id = c.id OR m.consignee_company_id = c.id)
+				AND m.corridor_load_lat IS NOT NULL AND m.corridor_load_lng IS NOT NULL
+			ORDER BY m.updated_at DESC NULLS LAST
+			LIMIT 1
+		) mcr ON true` + where
 	n := len(args) + 1
 	q += fmt.Sprintf(` ORDER BY c.confidence DESC, c.name LIMIT $%d OFFSET $%d`, n, n+1)
 	args = append(args, limit, offset)
@@ -428,8 +463,11 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 		var meta []byte
 		var mcrCount, eventCount, contactCount int
 		var roles []byte
+		var mapLat, mapLng *float64
+		var mapTerminalID, mapLocationSource *string
 		if err := rows.Scan(&id, &name, &ctype, &country, &website, &conf, &status, &supplierID, &sourceCol, &meta,
-			&mcrCount, &eventCount, &contactCount, &roles); err != nil {
+			&mcrCount, &eventCount, &contactCount, &roles,
+			&mapLat, &mapLng, &mapTerminalID, &mapLocationSource); err != nil {
 			return nil, err
 		}
 		var metaMap map[string]any
@@ -439,13 +477,24 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 		if rolesList == nil {
 			rolesList = []any{ctype}
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id": id.String(), "name": name, "company_type": ctype, "country": country,
 			"website": website, "confidence": conf, "supplier_status": status,
 			"supplier_id": supplierID, "metadata": metaMap, "source": sourceCol,
 			"mcr_count": mcrCount, "event_count": eventCount, "contact_count": contactCount,
 			"roles": rolesList, "sources": companySourcesFromMeta(sourceCol, metaMap),
-		})
+		}
+		if mapLat != nil && mapLng != nil {
+			item["map_lat"] = *mapLat
+			item["map_lng"] = *mapLng
+			if mapTerminalID != nil && *mapTerminalID != "" {
+				item["map_terminal_id"] = *mapTerminalID
+			}
+			if mapLocationSource != nil && *mapLocationSource != "" {
+				item["map_location_source"] = *mapLocationSource
+			}
+		}
+		out = append(out, item)
 	}
 	return out, rows.Err()
 }

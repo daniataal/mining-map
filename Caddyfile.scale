@@ -63,7 +63,8 @@
 			path /api/petroleum/osm-layers /api/petroleum/osm-layers/*
 		}
 		handle @petroleum_osm_layers {
-			reverse_proxy backend-a:8000 backend-b:8000 {
+			uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
 				transport http {
 					read_timeout 0
 					write_timeout 0

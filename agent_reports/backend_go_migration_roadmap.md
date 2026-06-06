@@ -9,7 +9,7 @@ This document outlines the controlled, phased migration of the Meridian platform
 - **Auth & Activity**: `/auth/login`, `/auth/register`, `/auth/users`, `/activity/log`
 - **Mining & Licenses**: `/licenses`, `/licenses/batch-delete`, `/licenses/import`, `/licenses/export`, `/licenses/{id}/files`
 - **Entity & Due Diligence**: `/entities/{id}/contacts`, `/entities/{id}/relationships`, `/entities/{id}/dd/latest`, `/entities/{id}/legal-events`, `/entities/{id}/gov-procurement`
-- **Marketplace & Deals**: `/api/deal-rooms`, `/api/deal-rooms/{id}/export`, `/miner-listings`, `/meeting-points`
+- **Marketplace & Deals**: `/api/deal-rooms`, `/api/deal-rooms/{id}/export`
 - **Routing & Cost**: `/api/routing/plans`, `/api/routing/cost-estimate`
 - **Agent Intelligence**: `/api/agents/route-intelligence`, `/api/agents/contact-enrichment`, `/api/agents/operator-validation`, `/api/agents/data-validation/run`
 - **Map & Geospatial**: `/api/map/country-borders`
@@ -78,16 +78,21 @@ A Python subsystem or file can be deleted when:
 **Target:** Migrate `maritime_worker.py` to `oil-live-intel-worker` natively in Go.
 **Why:** The Go service already handles the read-paths (`/coverage/status`, `/terminals`). Moving the ingest worker to Go centralizes all maritime logic in a single compiled binary, eliminating the largest real-time Python memory overhead. It requires no frontend changes and is easily reversible.
 
-## Recent cutovers (branch `go-maritime-worker-cutover`)
+## Recent cutovers (2026-06-06, branch `feat/vm-scale-tier1`)
 
 | Item | Status | Notes |
 |------|--------|-------|
 | License map clusters (`GET /api/oil-live/licenses/map`) | **Cut over** | Frontend defaults to Go for zoom &lt; 8; Python `/licenses` remains fallback + point mode |
 | Maritime read APIs (`/api/maritime/stats`, `/context`) | **Routed to Go** | Caddy + Vite dev proxy; Python stubs kept for `:8000` direct access |
-| `GET /api/maritime/vessels` | **Routed to Go** | Caddy + Vite dev proxy; Python shim for `:8000` direct only |
+| `GET /api/maritime/vessels` | **Routed to Go** | Shim narrowed; smoke uses `/api/oil-live/vessels/live` |
 | Vite dev `/licenses` CRUD | **Routed to Go** | Annotations `/api/licenses/*/annotations` still Python |
 | Maritime ingest (`oil-live-intel-worker`) | **Done** | Do not reintroduce Python websocket worker |
-| `oil-live-graph-sync-worker` | **In progress** | Go cold steps: `terminal_operators`, `licenses`, `trade_flows`, `port_calls`, `ted`, `gov_awards`; Python orchestrator still primary |
+| Graph-sync CPU steps (6) | **Cut over** | Compose defaults flags `true`; Python worker skips when matched; validate via `oil-live-intel/scripts/validate_graphsync_go_steps.sh` |
+| `GET /api/petroleum/osm-layers` | **Routed to Go** | Caddy + Vite → `/api/oil-live/map/petroleum-osm/layers` |
+| `sync_license_contacts` on license CRUD | **Done** | Go `license_crud.go` + `contacts/license_sync.go` |
+| `eurostat_trade` graph-sync step | **Go port (opt-in)** | `OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE` default `false`; first IO step |
+| Community miners + mobile app | **Removed** | `community-miner-viz/`, `meridian-mobile/` deleted; rebuild later |
+| `oil-live-graph-sync-worker` | **In progress** | Python still orchestrates IO steps (Comtrade, EIA, manifests, etc.) |
 
 ### Graph-sync inventory (`backend/services/oil_live_graph_sync.py`)
 
@@ -105,7 +110,7 @@ A Python subsystem or file can be deleted when:
 | `eia_crude_imports` | IO | `EIA_API_KEY` | `oil_trade_flows`, `oil_refinery_throughput` | upsert | — |
 | `eia_historic_imports` | IO | `EIA_DOWNLOADS_DIR` | `eia_historic_imports` | upsert | — |
 | `gem_extraction_tracker` | IO | xlsx path | terminals/events | upsert | — |
-| `eurostat_trade` | IO | public REST | `oil_trade_flows`, `oil_live_sync_state` | upsert | — |
+| **`eurostat_trade`** | **IO** | **public REST** | **`oil_trade_flows`, `oil_live_sync_state`** | **upsert** | **Go (`OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE`, opt-in)** |
 | `jodi_oil` | IO | `JODI_CSV_URL` | snapshots | upsert | — |
 | `commodity_trade_flows` | IO | `COMTRADE_API_KEY` | `oil_trade_flows` | upsert | — |
 | `trade_manifest_uk` | IO | UK API | trade rows | upsert | — |
@@ -131,6 +136,7 @@ A Python subsystem or file can be deleted when:
 | `port_calls` | `OIL_GRAPH_SYNC_GO_PORT_CALLS` | `graphsync/port_calls.go` | `graphsync_port_calls` |
 | `ted` | `OIL_GRAPH_SYNC_GO_TED` | `graphsync/ted.go` | `graphsync_ted` |
 | `gov_awards` | `OIL_GRAPH_SYNC_GO_GOV_AWARDS` | `graphsync/gov_awards.go` | `graphsync_gov_awards` |
+| `eurostat_trade` | `OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE` | `graphsync/eurostat_trade.go` | `graphsync_eurostat_trade` / `last_eurostat_sync` |
 
 Shared helpers: `graphsync/commercial_event.go`, `graphsync/commodity_helpers.go`, `graphsync/company.go`.
 
@@ -140,8 +146,8 @@ Python `run_full_graph_sync` skips each step when its Go flag is true (returns `
 
 ### Next bounded step: graph-sync (continued)
 
-1. **Validate Go steps in dev** — enable all `OIL_GRAPH_SYNC_GO_*` flags; compare sync_state after one worker tick.
-2. **Port next cold step** — IO steps (`census_trade`, `eurostat_trade`) or guarded `seed_port_calls` (demo-gated).
+1. **Validate Go CPU steps in dev** — restart workers; run `validate_graphsync_go_steps.sh`; confirm 48h stability.
+2. **Port next IO step** — `census_trade` (Eurostat port done, opt-in); or guarded `seed_port_calls` (demo-gated).
 3. **Admin trigger** — optional Go handler for individual graph-sync steps before Python cutover.
 4. **Cutover criteria** — 48h stable scheduled runs, parity row counts; rollback = disable Go flags + Python worker.
 
@@ -155,7 +161,7 @@ Python `run_full_graph_sync` skips each step when its Go flag is true (returns `
 
 ### Phase 3 partial — license CRUD on Go
 
-Go serves: `GET/POST/PUT/DELETE /api/oil-live/licenses/*`, map clusters, import/export, files. **Dev parity:** Vite now proxies `/licenses` → Go (annotations `/api/licenses/*/annotations` still → Python). Caddy already rewrites `/api/licenses*` and `/licenses*` to Go (annotations exceptions unchanged). Gap: `sync_license_contacts` still deferred to Python on create (`license_crud.go`).
+Go serves: `GET/POST/PUT/DELETE /api/oil-live/licenses/*`, map clusters, import/export, files, and `sync_license_contacts` on create/update. **Dev parity:** Vite proxies `/licenses` → Go (annotations `/api/licenses/*/annotations` still → Python). Caddy rewrites `/api/licenses*` and `/licenses*` to Go (annotations exceptions unchanged).
 
 ### License sync worker inventory
 
@@ -163,3 +169,17 @@ Go serves: `GET/POST/PUT/DELETE /api/oil-live/licenses/*`, map clusters, import/
 |--------|---------|-------|---------------|
 | `license_daily_sync_worker.py` | Python | `open_data_sync.sync_open_data_sources()` | Partial — Go runs Sweden/Kazakhstan/ArcGIS on **oil-live-intel-worker** |
 | Python-only open-data sources | Python | ~40 ArcGIS/country sources in `open_data_sync.py` | **Not ported** — next after graph-sync IO steps validated |
+
+## Effort estimate (2026-06-06)
+
+**Completion today:** ~55–60% trader hot paths; ~40–45% toward zero Python.
+
+| Milestone | Scope | Engineer-weeks | Calendar (1 engineer) |
+|-----------|--------|----------------|------------------------|
+| **Level A** | No Python on synchronous trader hot paths (map, search, dossier reads, routing) | 16–20 | ~4–5 months |
+| **Level B** | Decommission `backend` container (auth, admin, deal rooms, AI agents) | 36–46 cumulative | ~9–12 months |
+| **Level C** | Zero Python (`route-service`, all 7 workers, delete `backend/`) | 60–78 cumulative | ~15–20 months |
+
+**Top blockers (effort × risk):** `open_data_sync.py` (8–12w), graph-sync IO orchestration (~18 steps, 10–14w), `route-service` (4–6w), AI/agents (5–7w), admin + auth (5–8w).
+
+**Recommended next:** validate graph-sync CPU cutover → port hot read routes (storage, EIA, petroleum Mapbox, dossier proxies) → route-service → ingest batches last.

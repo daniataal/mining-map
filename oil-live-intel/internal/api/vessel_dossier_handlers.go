@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,34 @@ import (
 	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/services/vesselmerge"
 )
+
+// #region agent log
+func debugVesselDossierLog(hypothesisID, location, message string, data map[string]any) {
+	logPath := os.Getenv("DEBUG_LOG_PATH")
+	if logPath == "" {
+		logPath = "/Users/daniatallah/Gold Project /mining-map/.cursor/debug-bea506.log"
+	}
+	payload := map[string]any{
+		"sessionId":    "bea506",
+		"hypothesisId": hypothesisID,
+		"location":     location,
+		"message":      message,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	}
+	line, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(line, '\n'))
+	_ = f.Close()
+}
+
+// #endregion
 
 // GetVesselDossier returns AIS position, port calls, linked MCR rows, and party candidates for one MMSI.
 func (s *Server) GetVesselDossier(w http.ResponseWriter, r *http.Request) {
@@ -209,16 +238,45 @@ func (s *Server) RefreshVesselEnrichment(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) lookupVesselLatestPosition(ctx context.Context, mmsi int64) (map[string]any, error) {
-	if vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.MergedPositionsEnabled() {
+	mergedReady := vesselmerge.TableReady(ctx, s.Pool) && vesselmerge.MergedPositionsEnabled()
+	// #region agent log
+	debugVesselDossierLog("D", "vessel_dossier_handlers.go:lookupVesselLatestPosition", "position_lookup_start", map[string]any{
+		"mmsi": mmsi, "merged_table_ready": mergedReady,
+	})
+	// #endregion
+	if mergedReady {
 		pos, err := s.lookupMergedPosition(ctx, mmsi)
 		if err != nil {
+			// #region agent log
+			debugVesselDossierLog("B", "vessel_dossier_handlers.go:lookupMergedPosition", "merged_query_error", map[string]any{
+				"mmsi": mmsi, "error": err.Error(),
+			})
+			// #endregion
 			return nil, err
 		}
 		if pos != nil {
+			// #region agent log
+			debugVesselDossierLog("D", "vessel_dossier_handlers.go:lookupVesselLatestPosition", "merged_hit", map[string]any{"mmsi": mmsi})
+			// #endregion
 			return pos, nil
 		}
+		// #region agent log
+		debugVesselDossierLog("D", "vessel_dossier_handlers.go:lookupVesselLatestPosition", "merged_miss_fallback_legacy", map[string]any{"mmsi": mmsi})
+		// #endregion
 	}
-	return s.lookupLegacyAisPosition(ctx, mmsi)
+	pos, err := s.lookupLegacyAisPosition(ctx, mmsi)
+	// #region agent log
+	if err != nil {
+		debugVesselDossierLog("A", "vessel_dossier_handlers.go:lookupLegacyAisPosition", "legacy_query_error", map[string]any{
+			"mmsi": mmsi, "error": err.Error(),
+		})
+	} else if pos != nil {
+		debugVesselDossierLog("A", "vessel_dossier_handlers.go:lookupLegacyAisPosition", "legacy_hit", map[string]any{"mmsi": mmsi})
+	} else {
+		debugVesselDossierLog("A", "vessel_dossier_handlers.go:lookupLegacyAisPosition", "legacy_no_rows", map[string]any{"mmsi": mmsi})
+	}
+	// #endregion
+	return pos, err
 }
 
 func (s *Server) lookupMergedPosition(ctx context.Context, mmsi int64) (map[string]any, error) {
@@ -277,7 +335,7 @@ func (s *Server) lookupMergedPosition(ctx context.Context, mmsi int64) (map[stri
 
 func (s *Server) lookupLegacyAisPosition(ctx context.Context, mmsi int64) (map[string]any, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT p.mmsi, p.lat, p.lng, p.speed, p.course, p.draft_m, p.ts,
+		SELECT p.mmsi, p.lat, p.lon, p.speed, p.course, p.draft_m, p.ts,
 			COALESCE(v.name, '') AS vessel_name
 		FROM oil_ais_positions p
 		LEFT JOIN oil_vessels v ON v.mmsi = p.mmsi

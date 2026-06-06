@@ -52,6 +52,10 @@ func graphSyncGoPetroleumOsmStorageEnabled() bool {
 	return graphSyncGoFlagEnabled("PETROLEUM_OSM_STORAGE")
 }
 
+func graphSyncGoEurostatTradeEnabled() bool {
+	return graphSyncGoFlagEnabled("EUROSTAT_TRADE")
+}
+
 func graphSyncGoPortCallMCREnabled() bool {
 	return graphSyncGoFlagEnabled("PORT_CALL_MCR")
 }
@@ -63,6 +67,7 @@ func anyGraphSyncGoStepEnabled() bool {
 		graphSyncGoPortCallsEnabled() ||
 		graphSyncGoTEDEnabled() ||
 		graphSyncGoGovAwardsEnabled() ||
+		graphSyncGoEurostatTradeEnabled() ||
 		graphSyncGoPetroleumOsmStorageEnabled() ||
 		graphSyncGoPortCallMCREnabled()
 }
@@ -185,6 +190,40 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 			}
 			log.Info().Int("events", result.Events).Msg("[graph-sync-go] gov_awards done")
 			return map[string]any{"events": result.Events}, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if graphSyncGoEurostatTradeEnabled() {
+		log.Info().Msg("[graph-sync-go] running eurostat_trade step…")
+		err := g.runStep(ctx, "graphsync_eurostat_trade", func(ctx context.Context) (map[string]any, error) {
+			result, err := graphsync.SyncEurostatTrade(ctx, g.Pool)
+			if err != nil {
+				return nil, err
+			}
+			log.Info().
+				Str("status", result.Status).
+				Int("rows_upserted", result.RowsUpserted).
+				Msg("[graph-sync-go] eurostat_trade done")
+			payload := map[string]any{"status": result.Status}
+			if result.RowsUpserted > 0 {
+				payload["rows_upserted"] = result.RowsUpserted
+			}
+			if result.DataSource != "" {
+				payload["data_source"] = result.DataSource
+			}
+			if result.Reason != "" {
+				payload["reason"] = result.Reason
+			}
+			if result.Error != "" {
+				payload["error"] = result.Error
+			}
+			if result.Note != "" {
+				payload["note"] = result.Note
+			}
+			return payload, nil
 		})
 		if err != nil && firstErr == nil {
 			firstErr = err
