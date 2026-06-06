@@ -62,12 +62,13 @@
 			}
 		}
 
-		# OSM petroleum GeoJSON catalog + layers (Postgres snapshot; Python until Go parity is default)
+		# OSM petroleum GeoJSON catalog + layers (Go parity; Python fallback on :8000 direct)
 		@petroleum_osm_layers {
 			path /api/petroleum/osm-layers /api/petroleum/osm-layers/*
 		}
 		handle @petroleum_osm_layers {
-			reverse_proxy backend:8000 {
+			uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+			reverse_proxy oil-live-intel:8095 {
 				transport http {
 					read_timeout 0
 					write_timeout 0

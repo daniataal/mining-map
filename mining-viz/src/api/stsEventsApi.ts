@@ -90,6 +90,18 @@ export type StsEventsResponse = {
   data_source?: string;
 };
 
+export type StsEventsSummaryResponse = {
+  count: number;
+  by_confidence_tier?: Record<string, number>;
+  from?: string;
+  to?: string;
+  disclaimer?: StsDisclaimer;
+};
+
+export type StsEventDetailResponse = StsEvent & {
+  disclaimer?: StsDisclaimer;
+};
+
 export type VesselStsHistoryResponse = StsEventsResponse & {
   mmsi: number;
 };
@@ -150,6 +162,38 @@ function stsPatchHeaders(): HeadersInit {
   if (token) h['Authorization'] = `Bearer ${token}`;
   if (adminToken) h['X-Admin-Token'] = adminToken;
   return h;
+}
+
+export function stsViewportBbox(viewport: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}): string {
+  return `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`;
+}
+
+/** GET /api/oil-live/sts-events/summary — viewport counts without event payloads. */
+export async function getStsEventsSummary(
+  bbox: string,
+  options: { from?: string; to?: string } = {},
+): Promise<StsEventsSummaryResponse> {
+  const res = await fetch(
+    stsUrl('/api/oil-live/sts-events/summary', {
+      bbox,
+      from: options.from,
+      to: options.to,
+    }),
+  );
+  if (!res.ok) throw new Error(`sts-events-summary ${res.status}`);
+  return res.json();
+}
+
+/** GET /api/oil-live/sts-events/{id} — full enrichment for map popup / dossier. */
+export async function getStsEventById(id: string): Promise<StsEventDetailResponse> {
+  const res = await fetch(stsUrl(`/api/oil-live/sts-events/${encodeURIComponent(id)}`));
+  if (!res.ok) throw new Error(`sts-event ${res.status}`);
+  return res.json();
 }
 
 /** GET /api/oil-live/sts-events */

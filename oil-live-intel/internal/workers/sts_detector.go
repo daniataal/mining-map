@@ -29,9 +29,7 @@ func RunSTSDetector(ctx context.Context, pool *pgxpool.Pool, retainHours, archiv
 			log.Warn().Err(err).Msg("sts detector cycle failed")
 			return
 		}
-		if n > 0 {
-			log.Info().Int("events_upserted", n).Msg("sts detector cycle complete")
-		}
+		log.Info().Int("events_upserted", n).Msg("sts detector cycle complete")
 	}
 
 	runOnce()

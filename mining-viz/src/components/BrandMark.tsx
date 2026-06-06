@@ -7,12 +7,12 @@ const sizeClass: Record<BrandMarkSize, string> = {
   sm: 'h-8 w-8',
   md: 'h-14 w-14',
   lg: 'h-24 w-24',
-  rail: 'h-12 w-12',
-  header: 'h-10 w-10',
+  rail: 'h-14 w-14',
+  header: 'h-11 w-11',
 };
 
 const frameClass =
-  'rounded-xl border border-amber-500/45 bg-slate-800/95 p-1 shadow-[0_0_18px_rgba(245,158,11,0.22)] ring-1 ring-amber-400/15';
+  'rounded-xl border border-amber-500/35 bg-white/95 p-1 shadow-[0_0_18px_rgba(245,158,11,0.18)] ring-1 ring-amber-500/10';
 
 type BrandMarkProps = {
   size?: BrandMarkSize;

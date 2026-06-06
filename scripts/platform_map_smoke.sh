@@ -42,8 +42,8 @@ grep -q '"mode":"clusters"' /tmp/platform_smoke_body.json || fail "licenses/map 
 code=$(curl_json "$BASE_URL/api/oil-live/licenses?$BBOX&zoom=9&limit=50&map=1")
 [[ "$code" == "200" ]] || fail "licenses point mode HTTP $code"
 
-code=$(curl_json "$BASE_URL/api/maritime/vessels?limit=5")
-[[ "$code" == "200" ]] || fail "maritime/vessels HTTP $code"
+code=$(curl_json "$BASE_URL/api/oil-live/vessels/live?limit=5")
+[[ "$code" == "200" ]] || fail "oil-live vessels HTTP $code"
 
 code=$(curl_json "$BASE_URL/api/petroleum/osm-layers")
 [[ "$code" == "200" ]] || fail "petroleum osm catalog HTTP $code"

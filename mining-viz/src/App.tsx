@@ -102,12 +102,8 @@ import {
 import ThemeToggle from './components/ThemeToggle';
 import PlatformHealthChip from './components/PlatformHealthChip';
 import OilGasOnboardingTip from './components/OilGasOnboardingTip';
-import { mapViewHelpBody, mapViewHelpTitle, WORLD_COVERAGE_BANNER_NOTE } from './lib/mapViewHelp';
-import {
-  formatCoverageSummaryCounts,
-  sectorCoverageSummary as getSectorCoverageSummary,
-  type LicenseCoverageSector,
-} from './lib/licenseCoverage';
+import { mapViewHelpBody, mapViewHelpTitle } from './lib/mapViewHelp';
+import { type LicenseCoverageSector } from './lib/licenseCoverage';
 import type { OilLiveEntityClickPayload } from './components/petroleum/OilLiveMapOverlays';
 import type { HistoricArcSelection } from './features/live-data/HistoricArcDetailDrawer';
 import {
@@ -128,6 +124,7 @@ const AdminPanel = lazy(() => import('./components/AdminPanel'));
 const InvestigationsPanel = lazy(() => import('./components/InvestigationsPanel'));
 const RoutePlannerPanel = lazy(() => import('./features/route-planner/RoutePlannerPanel'));
 const LiveDataIntelPanel = lazy(() => import('./features/live-data/LiveDataIntelPanel'));
+const DataHealthPanel = lazy(() => import('./features/data-health/DataHealthPanel'));
 const EiaHistoricImportsPanel = lazy(() => import('./features/live-data/EiaHistoricImportsPanel'));
 const OilLiveEntityDrawer = lazy(() => import('./features/live-data/OilLiveEntityDrawer'));
 const InfrastructureFeatureDrawer = lazy(
@@ -387,6 +384,9 @@ export default function App() {
   const [liveDataFlyTarget, setLiveDataFlyTarget] = useState<{ lat: number; lng: number } | null>(
     null,
   );
+  const [liveDataCompanyHover, setLiveDataCompanyHover] = useState<
+    import('./features/live-data/liveDataCompanyMapHover').LiveDataCompanyMapHover | null
+  >(null);
   const [macroTradeFlows, setMacroTradeFlows] = useState<MacroTradeFlow[]>([]);
   const [infrastructureLayerVisibility, setInfrastructureLayerVisibility] = useState<
     Record<OsmPetroleumLayerId, boolean>
@@ -646,12 +646,20 @@ export default function App() {
           });
         }
       }
+      if (tab === 'data_health') {
+        setIsSidebarCollapsed(false);
+        setIsSidebarPinned(true);
+      }
       if (tab !== 'live_data') {
         setOilLiveEntity(null);
       }
     },
     [queryClient],
   );
+
+  const handleOpenDataHealth = useCallback(() => {
+    handleMapSidebarTabChange('data_health');
+  }, [handleMapSidebarTabChange]);
 
   useEffect(() => {
     if (!isHistoricSidebar) return;
@@ -893,6 +901,15 @@ export default function App() {
     setLiveDataFlyTrigger((n) => n + 1);
   }, []);
 
+  const handleCompanyMapHover = useCallback(
+    (
+      payload: import('./features/live-data/liveDataCompanyMapHover').LiveDataCompanyMapHover | null,
+    ) => {
+      setLiveDataCompanyHover(payload);
+    },
+    [],
+  );
+
   const handleCreateDealRoomFromOpportunity = useCallback(async () => {
     if (!oilLiveEntity || oilLiveEntity.entityKind !== 'opportunity') return;
     try {
@@ -1092,21 +1109,6 @@ export default function App() {
   
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
-  const bannerCoverageSector: LicenseCoverageSector | null =
-    viewMode === 'mining'
-      ? 'mining'
-      : viewMode === 'oil_and_gas'
-        ? 'oil_and_gas'
-        : viewMode === 'global'
-          ? 'mining'
-          : null;
-  const sectorCoverageBanner = bannerCoverageSector
-    ? getSectorCoverageSummary(worldCoverage, bannerCoverageSector)
-    : null;
-  const oilCoverageBannerLine =
-    viewMode === 'global'
-      ? formatCoverageSummaryCounts(getSectorCoverageSummary(worldCoverage, 'oil_and_gas'))
-      : null;
   const licenseCoveragePanelSector: LicenseCoverageSector | null =
     viewMode === 'mining'
       ? 'mining'
@@ -1115,9 +1117,6 @@ export default function App() {
         : viewMode === 'global'
           ? 'mining'
           : null;
-  const showLicenseCoveragePanel =
-    mapSidebarTab === 'licenses' &&
-    (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas');
   const sidebarViewMode =
     viewMode === 'admin'
       ? 'admin'
@@ -1406,7 +1405,7 @@ export default function App() {
               worldCoverage={worldCoverage}
               licenseCoverageSector={licenseCoveragePanelSector}
               licenseCoverageAlsoShowSector={viewMode === 'global' ? 'oil_and_gas' : null}
-              showLicenseCoveragePanel={showLicenseCoveragePanel}
+              showLicenseCoveragePanel={false}
               liveDataPanel={
                 <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
                   <LiveDataIntelPanel
@@ -1423,6 +1422,7 @@ export default function App() {
                     onLiveDataLensChange={handleOilLiveLensChange}
                     onOpenLiveEntity={handleOilLiveEntityClick}
                     onMapFlyTo={handleLiveDataMapFlyTo}
+                    onCompanyMapHover={handleCompanyMapHover}
                   />
                 </Suspense>
               }
@@ -1432,6 +1432,16 @@ export default function App() {
                     onMapArcsChange={setHistoricSidebarMap}
                     importerFromMap={historicImporterFromMap}
                     onImporterFromMapConsumed={() => setHistoricImporterFromMap(null)}
+                  />
+                </Suspense>
+              }
+              dataHealthPanel={
+                <Suspense fallback={<LazySurfaceFallback label={t('טוען בריאות נתונים…', 'Loading data health…')} />}>
+                  <DataHealthPanel
+                    worldCoverage={worldCoverage}
+                    licenseCoverageSector={licenseCoveragePanelSector}
+                    licenseCoverageAlsoShowSector={viewMode === 'global' ? 'oil_and_gas' : null}
+                    coverageStats={isLiveDataSidebar ? oilLiveCoverageStats : null}
                   />
                 </Suspense>
               }
@@ -1455,7 +1465,7 @@ export default function App() {
               {/* Search bar — hidden on mobile, shown on sm+ */}
               <div className="hidden sm:flex items-start gap-3 pointer-events-auto flex-wrap">
                   <div className="flex h-10 items-center gap-2.5 rounded-2xl border border-amber-500/35 bg-slate-950/75 px-2.5 shadow-2xl backdrop-blur-xl">
-                    <BrandMark size="header" variant="emblem" framed />
+                    <BrandMark size="header" framed />
                     <span className="hidden lg:block text-[10px] font-black uppercase tracking-[0.22em] text-amber-100/95 whitespace-nowrap">
                       {BRAND_NAME_SHORT}
                     </span>
@@ -1479,27 +1489,6 @@ export default function App() {
                       </span>
                       <LucideX className="h-4 w-4 shrink-0" aria-hidden />
                     </button>
-                  )}
-                  {sectorCoverageBanner && viewMode !== 'route_planner' && (
-                    <div
-                      className="hidden lg:flex flex-col justify-center px-3 min-h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 max-w-md"
-                      title={WORLD_COVERAGE_BANNER_NOTE}
-                    >
-                      <span>
-                        {t('כיסוי רישיונות', 'License coverage')}
-                        {viewMode === 'global'
-                          ? ` (${t('כרייה', 'Mining')})`
-                          : ''}
-                        :{' '}
-                        {formatCoverageSummaryCounts(sectorCoverageBanner) ??
-                          t('אין נתוני כיסוי', 'No coverage data')}
-                      </span>
-                      {oilCoverageBannerLine && (
-                        <span className="text-[8px] font-bold normal-case tracking-normal text-slate-500 mt-0.5">
-                          {t('נפט וגז', 'Oil & gas')}: {oilCoverageBannerLine}
-                        </span>
-                      )}
-                    </div>
                   )}
                   <div
                     className="hidden lg:flex items-center gap-1.5 px-2 h-10 rounded-2xl bg-stone-100/90 dark:bg-slate-950/60 backdrop-blur-2xl border border-stone-200/90 dark:border-white/10 shadow-2xl text-slate-500 dark:text-slate-400"
@@ -1750,6 +1739,7 @@ export default function App() {
                   onLiveDataMapFlyTo={isLiveDataSidebar ? handleLiveDataMapFlyTo : undefined}
                   liveDataFlyTrigger={isLiveDataSidebar ? liveDataFlyTrigger : 0}
                   liveDataFlyTarget={isLiveDataSidebar ? liveDataFlyTarget : null}
+                  liveDataCompanyHover={isLiveDataSidebar ? liveDataCompanyHover : null}
                   eiaHistoricMapEnabled={eiaHistoricMapEnabled}
                   eiaHistoricMapArcs={eiaHistoricMapArcs}
                   eiaHistoricMapOrigins={eiaHistoricMapOrigins}
@@ -1804,6 +1794,7 @@ export default function App() {
                     isLiveDataSidebar ? setLiveDataMacroTradeOn : undefined
                   }
                   oilLiveSidebarActive={isLiveDataSidebar}
+                  onOpenDataHealth={handleOpenDataHealth}
                   cockpitEnabled={cockpitEnabled}
                   cockpitLegendMode={intelligenceMode}
                   cockpitLegendSublayer={intelligenceSublayer}

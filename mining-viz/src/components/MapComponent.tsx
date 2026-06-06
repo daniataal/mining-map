@@ -76,10 +76,11 @@ import type { MacroTradeFlow } from '../api/oilLiveApi';
 import InfrastructureLayersPanel from './map/InfrastructureLayersPanel';
 import type { OsmPetroleumLayerId } from '../lib/osmPetroleumLayers';
 import LiveDataMapLegend from '../features/live-data/LiveDataMapLegend';
-import GraphSyncMapBanner from '../features/live-data/GraphSyncMapBanner';
-import { LiveDataSyncStatusBanner } from '../features/live-data/LiveDataSyncStatusBanner.tsx';
+import { LiveDataHealthMapStatus } from '../features/data-health/LiveDataHealthMapStatus.tsx';
 import LiveDataMapCompanySearch from '../features/live-data/LiveDataMapCompanySearch';
 import StsEventsMapLayer from '../features/live-data/StsEventsMapLayer';
+import StsEventsMapStatus from '../features/live-data/StsEventsMapStatus';
+import { useStsEventsSummary } from '../features/live-data/useStsEventsSummary';
 import {
   LIVE_DATA_HUB_BOUNDS,
   LIVE_DATA_DEFAULT_LAYERS,
@@ -371,6 +372,7 @@ interface MapComponentProps {
   liveDataEiaHistoricOn?: boolean;
   onLiveDataEiaHistoricChange?: (on: boolean) => void;
   oilLiveSidebarActive?: boolean;
+  onOpenDataHealth?: () => void;
   onOilLiveEntityClick?: (payload: OilLiveEntityClickPayload) => void;
   onOilLiveDismiss?: () => void;
   /** Fly map when a Live Data search hit has coordinates. */
@@ -379,6 +381,8 @@ interface MapComponentProps {
   liveDataFlyTrigger?: number;
   /** When set, fly to this point instead of the default hub (search hit). */
   liveDataFlyTarget?: { lat: number; lng: number } | null;
+  /** Sidebar Companies tab hover — highlight linked map point. */
+  liveDataCompanyHover?: import('../features/live-data/liveDataCompanyMapHover').LiveDataCompanyMapHover | null;
   /** EIA historic file-import corridor arcs (purple dashed). */
   eiaHistoricMapEnabled?: boolean;
   eiaHistoricMapArcs?: EiaHistoricMapArc[];
@@ -990,6 +994,7 @@ export default function MapComponent({
   liveDataEiaHistoricOn = false,
   onLiveDataEiaHistoricChange,
   oilLiveSidebarActive = false,
+  onOpenDataHealth,
   brokerWorkspaceMap,
   brokerPackLocationMode = false,
   onBrokerPackLocationPick,
@@ -1365,6 +1370,15 @@ export default function MapComponent({
         oilLiveLayers.stsEvents &&
         ((isLiveDataView && oilLiveOverlaysEnabled) ||
             (isMaritimeMapView && isMaritimeLayerEnabled));
+    const stsSummaryQueryEnabled = Boolean(
+        stsMapViewport &&
+            ((isLiveDataView && oilLiveOverlaysEnabled) || isMaritimeMapView),
+    );
+    const {
+        data: stsEventsSummary,
+        isFetching: stsEventsSummaryFetching,
+        isPending: stsEventsSummaryPending,
+    } = useStsEventsSummary(stsMapViewport, stsSummaryQueryEnabled);
     const maritimeViewportAisGap =
         isMaritimeLayerEnabled &&
         maritimeVessels.length === 0 &&
@@ -1537,16 +1551,14 @@ export default function MapComponent({
 
             <MapCoverageBanners
                 t={t}
-                showLiveDataVesselWatch={Boolean(isLiveDataView && oilLiveOverlaysEnabled && oilLiveLayers.vessels)}
+                showLiveDataVesselWatch={false}
                 liveDataVesselStatus={liveDataVesselStatus}
                 showLimitedAisCoverageBanner={Boolean(
-                    isMaritimeLayerEnabled &&
+                    !isLiveDataView &&
+                        isMaritimeLayerEnabled &&
                         ((isMaritimeMapView &&
                             (maritimeTankerView === 'persian_gulf' || maritimeTankerView === 'strait_of_hormuz')) ||
-                            (isOilAndGasView && maritimeFeed?.aisstream_persian_gulf_coverage_gap) ||
-                            (isLiveDataView &&
-                                oilLiveOverlaysEnabled &&
-                                viewportOverlapsPersianGulfHub(liveDataMapViewport))),
+                            (isOilAndGasView && maritimeFeed?.aisstream_persian_gulf_coverage_gap)),
                 )}
             />
             {isOilAndGasView && onGroundVisible && (
@@ -1588,17 +1600,29 @@ export default function MapComponent({
                         macroTradeOn={liveDataMacroTradeOn && macroTradeFlowsEnabled}
                     />
                 </div>
-                <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-auto px-2 w-full max-w-[520px] flex justify-center">
-                    <LiveDataSyncStatusBanner
+                <div className="absolute left-1/2 -translate-x-1/2 top-16 z-[955] pointer-events-auto px-2 w-full max-w-[520px] flex justify-center sm:top-[4.5rem]">
+                    <LiveDataHealthMapStatus
                         syncStatus={oilLiveSyncStatus}
                         unreachable={oilLiveSyncStatusError}
                         pending={oilLiveSyncStatusPending}
+                        onOpenDataHealth={onOpenDataHealth}
                     />
                 </div>
-                <div className="absolute left-1/2 -translate-x-1/2 top-[7.5rem] z-[950] pointer-events-auto">
-                    <GraphSyncMapBanner cargoRecordCount={oilLiveSyncStatus?.cargo_record_count} />
-                </div>
                 </>
+            )}
+            {stsLayerEnabled && (
+                <div
+                    className={`pointer-events-none absolute left-1/2 z-[954] flex w-full max-w-md -translate-x-1/2 justify-center px-2 ${
+                        isLiveDataView && oilLiveOverlaysEnabled ? 'top-24 sm:top-[6.5rem]' : 'top-16 sm:top-[4.5rem]'
+                    }`}
+                >
+                    <StsEventsMapStatus
+                        enabled
+                        summary={stsEventsSummary}
+                        pending={stsEventsSummaryPending || stsEventsSummaryFetching}
+                        className="w-full"
+                    />
+                </div>
             )}
             {isLiveDataView && oilLiveOverlaysEnabled && onOilLiveLayersChange && (
                 <div className="absolute left-4 bottom-4 z-[950] pointer-events-auto">
@@ -1622,6 +1646,8 @@ export default function MapComponent({
                         governmentAisCoverageEnabled={governmentAisCoverageEnabled}
                         onGovernmentAisCoverageChange={setGovernmentAisCoverageEnabled}
                         mapZoom={overlayMapZoom}
+                        stsEventsCount={stsEventsSummary?.count ?? null}
+                        stsEventsSummaryPending={stsEventsSummaryPending || stsEventsSummaryFetching}
                     />
                 </div>
             )}
@@ -2064,6 +2090,7 @@ export default function MapComponent({
                             }
                             onStatsChange={onOilLiveStatsChange}
                             onEntityClick={onOilLiveEntityClick}
+                            sidebarCompanyHover={liveDataCompanyHover}
                         />
                     )}
                     {stsLayerEnabled && (

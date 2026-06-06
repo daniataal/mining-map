@@ -13,8 +13,12 @@ func TestDefaultDetectConfig_RetainHours(t *testing.T) {
 	if cfg.PositionsTable != "oil_ais_positions" {
 		t.Fatalf("table %s", cfg.PositionsTable)
 	}
-	if cfg.WindowEnd.Sub(cfg.WindowStart) != 48*time.Hour {
+	if cfg.WindowEnd.Sub(cfg.WindowStart) != maxSTSDetectWindowHours*time.Hour {
 		t.Fatalf("window %v", cfg.WindowEnd.Sub(cfg.WindowStart))
+	}
+	short := DefaultDetectConfig(12)
+	if short.WindowEnd.Sub(short.WindowStart) != 12*time.Hour {
+		t.Fatalf("short window %v", short.WindowEnd.Sub(short.WindowStart))
 	}
 }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useI18n } from '../lib/i18n';
-import { User, ActivityLog, MeetingPoint, MinerListing } from '../types';
+import { User, ActivityLog } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LucideUsers, LucideHistory, LucideMapPin, LucidePickaxe, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip } from 'lucide-react';
+import { LucideUsers, LucideHistory, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
 import EuProcurementFacets from './EuProcurementFacets';
@@ -88,8 +88,6 @@ export default function AdminPanel({
     const [activeTab, setActiveTab] = useState('users');
     const [users, setUsers] = useState<User[]>([]);
     const [logs, setLogs] = useState<ActivityLog[]>([]);
-    const [meetingPoints, setMeetingPoints] = useState<MeetingPoint[]>([]);
-    const [minerListings, setMinerListings] = useState<MinerListing[]>([]);
     const [syncRuns, setSyncRuns] = useState<LicenseSyncRun[]>([]);
     const [syncAlerts, setSyncAlerts] = useState<SyncAlertEvent[]>([]);
     const [syncAlertUnread, setSyncAlertUnread] = useState(0);
@@ -369,8 +367,6 @@ export default function AdminPanel({
         if (isOpen || isFullPage) {
             fetchData('/auth/users', setUsers);
             fetchData('/activity/logs?limit=100', setLogs);
-            fetchData('/meeting-points', setMeetingPoints);
-            fetchData('/miner-listings', setMinerListings);
             fetchSyncRuns();
             if (resolvedAdminToken) {
                 fetchComtradeRuns();
@@ -419,12 +415,6 @@ export default function AdminPanel({
                         </TabsTrigger>
                         <TabsTrigger value="logs" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideHistory className="w-4 h-4" /> {t("יומנים", "Logs")}
-                        </TabsTrigger>
-                        <TabsTrigger value="meeting-points" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
-                            <LucideMapPin className="w-4 h-4" /> {t("נקודות מפגש", "Meeting Points")}
-                        </TabsTrigger>
-                        <TabsTrigger value="miner-listings" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
-                            <LucidePickaxe className="w-4 h-4" /> {t("מודעות כורים", "Miner Listings")}
                         </TabsTrigger>
                         <TabsTrigger value="open-data" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideDatabase className="w-4 h-4" /> {t("נתונים פתוחים", "Open Data")}

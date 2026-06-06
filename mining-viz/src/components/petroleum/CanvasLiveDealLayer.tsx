@@ -8,6 +8,8 @@ export interface CanvasLiveDealLayerProps {
   features: LiveDealMapFeature[];
   mapZoom: number;
   selectedUid: string | null;
+  /** External hover (e.g. sidebar company list) — distinct from map mousemove hover. */
+  hoveredUid?: string | null;
   onFeatureClick: (feature: LiveDealMapFeature) => void;
   layerApiRef?: MutableRefObject<CanvasLiveDealLayer | null>;
   clusterPoints?: boolean;
@@ -32,6 +34,7 @@ function createCanvasLiveDealLayer(
     isDark: props.isDark,
   });
   layer.setFeatures(props.features);
+  layer.setHoveredUid(props.hoveredUid ?? null);
   if (props.layerApiRef) {
     props.layerApiRef.current = layer;
     layer.on('remove', () => {
@@ -49,6 +52,7 @@ function updateCanvasLiveDealLayer(
   if (props.features !== prevProps.features) layer.setFeatures(props.features);
   if (props.mapZoom !== prevProps.mapZoom) layer.setMapZoom(props.mapZoom);
   if (props.selectedUid !== prevProps.selectedUid) layer.setSelectedUid(props.selectedUid);
+  if (props.hoveredUid !== prevProps.hoveredUid) layer.setHoveredUid(props.hoveredUid ?? null);
   if (props.onFeatureClick !== prevProps.onFeatureClick) {
     layer.setOnFeatureClick(props.onFeatureClick);
   }

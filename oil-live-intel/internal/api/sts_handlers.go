@@ -24,12 +24,129 @@ var stsResponseDisclaimer = map[string]any{
 	},
 }
 
-// ListSTSEvents returns inferred STS proximity events for map/query use.
-func (s *Server) ListSTSEvents(w http.ResponseWriter, r *http.Request) {
+const stsEventSelectSQL = `
+	SELECT e.id, e.mmsi_a, e.mmsi_b, e.start_ts, e.end_ts,
+		e.centroid_lat, e.centroid_lon, e.min_distance_m, e.avg_sog,
+		e.confidence_tier, e.confidence_score, e.status, e.data_source,
+		e.evidence, e.metadata, e.zone_id,
+		COALESCE(z.name, ''),
+		COALESCE(va.name, ''), COALESCE(vb.name, ''),
+		COALESCE(va.tanker_class, ''), COALESCE(vb.tanker_class, '')
+	FROM oil_sts_events e
+	LEFT JOIN oil_sts_zones z ON z.id = e.zone_id
+	LEFT JOIN oil_vessels va ON va.mmsi = e.mmsi_a
+	LEFT JOIN oil_vessels vb ON vb.mmsi = e.mmsi_b
+`
+
+// GetSTSEventsSummary returns cheap count-only STS aggregates for map badges.
+func (s *Server) GetSTSEventsSummary(w http.ResponseWriter, r *http.Request) {
+	from, to, err := parseTimeRange(r, 72*time.Hour)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	where, args, bboxRaw, err := stsEventsFilterClause(r, from, to)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if s.Pool == nil {
 		writeErr(w, http.StatusServiceUnavailable, "database_unavailable")
 		return
 	}
+
+	var total int
+	var lastScan *time.Time
+	if err := s.Pool.QueryRow(r.Context(), `
+		SELECT COUNT(*)::int, MAX(e.updated_at)
+		FROM oil_sts_events e
+		`+where, args...).Scan(&total, &lastScan); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	byTier := stsEmptyTierCounts()
+	rows, err := s.Pool.Query(r.Context(), `
+		SELECT e.confidence_tier, COUNT(*)::int
+		FROM oil_sts_events e
+		`+where+`
+		GROUP BY e.confidence_tier
+	`, args...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tier string
+		var count int
+		if err := rows.Scan(&tier, &count); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		byTier[tier] = count
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := map[string]any{
+		"count":              total,
+		"by_confidence_tier": byTier,
+		"disclaimer":         stsResponseDisclaimer,
+		"last_scan_hint":     stsLastScanHint(lastScan),
+		"from":               from.UTC().Format(time.RFC3339),
+		"to":                 to.UTC().Format(time.RFC3339),
+	}
+	if bboxRaw != "" {
+		resp["bbox"] = bboxRaw
+	}
+	writeJSONCached(w, http.StatusOK, resp, 30)
+}
+
+// GetSTSEvent returns one STS event with full on-read enrichment (popup/detail).
+func (s *Server) GetSTSEvent(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if s.Pool == nil {
+		writeErr(w, http.StatusServiceUnavailable, "database_unavailable")
+		return
+	}
+
+	rows, err := s.Pool.Query(r.Context(), stsEventSelectSQL+`
+		WHERE e.id = $1
+	`, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	scanned, events, err := collectSTSEventRows(rows)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(events) == 0 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err := s.applySTSEnrichment(r, scanned, events); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSONCached(w, http.StatusOK, map[string]any{
+		"event":       events[0],
+		"disclaimer":  stsResponseDisclaimer,
+		"data_source": "ais_proximity",
+	}, 60)
+}
+
+// ListSTSEvents returns inferred STS proximity events for map/query use.
+func (s *Server) ListSTSEvents(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 100)
 	if limit > 500 {
 		limit = 500
@@ -39,32 +156,17 @@ func (s *Server) ListSTSEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	args := []any{from, to, limit}
-	q := `
-		SELECT e.id, e.mmsi_a, e.mmsi_b, e.start_ts, e.end_ts,
-			e.centroid_lat, e.centroid_lon, e.min_distance_m, e.avg_sog,
-			e.confidence_tier, e.confidence_score, e.status, e.data_source,
-			e.evidence, e.metadata, e.zone_id,
-			COALESCE(z.name, ''),
-			COALESCE(va.name, ''), COALESCE(vb.name, ''),
-			COALESCE(va.tanker_class, ''), COALESCE(vb.tanker_class, '')
-		FROM oil_sts_events e
-		LEFT JOIN oil_sts_zones z ON z.id = e.zone_id
-		LEFT JOIN oil_vessels va ON va.mmsi = e.mmsi_a
-		LEFT JOIN oil_vessels vb ON vb.mmsi = e.mmsi_b
-		WHERE e.end_ts >= $1 AND e.start_ts <= $2
-	`
-	if bbox := strings.TrimSpace(r.URL.Query().Get("bbox")); bbox != "" {
-		minLon, minLat, maxLon, maxLat, ok := parseBBox(bbox)
-		if !ok {
-			writeErr(w, http.StatusBadRequest, "bbox required: minLon,minLat,maxLon,maxLat")
-			return
-		}
-		q += ` AND e.centroid_lon BETWEEN $4 AND $5 AND e.centroid_lat BETWEEN $6 AND $7`
-		args = append(args, minLon, maxLon, minLat, maxLat)
+	where, filterArgs, _, err := stsEventsFilterClause(r, from, to)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	q += ` ORDER BY e.start_ts DESC LIMIT $3`
+	if s.Pool == nil {
+		writeErr(w, http.StatusServiceUnavailable, "database_unavailable")
+		return
+	}
+	args := append(filterArgs, limit)
+	q := stsEventSelectSQL + where + ` ORDER BY e.start_ts DESC LIMIT $` + strconv.Itoa(len(args))
 
 	rows, err := s.Pool.Query(r.Context(), q, args...)
 	if err != nil {
@@ -76,9 +178,11 @@ func (s *Server) ListSTSEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.applySTSEnrichment(r, scanned, events); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	if queryBool(r, "enrich", false) {
+		if err := s.applySTSEnrichment(r, scanned, events); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	writeJSONCached(w, http.StatusOK, map[string]any{
@@ -112,18 +216,7 @@ func (s *Server) GetVesselSTSHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.Pool.Query(r.Context(), `
-		SELECT e.id, e.mmsi_a, e.mmsi_b, e.start_ts, e.end_ts,
-			e.centroid_lat, e.centroid_lon, e.min_distance_m, e.avg_sog,
-			e.confidence_tier, e.confidence_score, e.status, e.data_source,
-			e.evidence, e.metadata, e.zone_id,
-			COALESCE(z.name, ''),
-			COALESCE(va.name, ''), COALESCE(vb.name, ''),
-			COALESCE(va.tanker_class, ''), COALESCE(vb.tanker_class, '')
-		FROM oil_sts_events e
-		LEFT JOIN oil_sts_zones z ON z.id = e.zone_id
-		LEFT JOIN oil_vessels va ON va.mmsi = e.mmsi_a
-		LEFT JOIN oil_vessels vb ON vb.mmsi = e.mmsi_b
+	rows, err := s.Pool.Query(r.Context(), stsEventSelectSQL+`
 		WHERE (e.mmsi_a = $1 OR e.mmsi_b = $1)
 			AND e.end_ts >= $2 AND e.start_ts <= $3
 		ORDER BY e.start_ts DESC
@@ -372,6 +465,47 @@ func scanSTSEventRow(scan rowScanner) (map[string]any, sts.EventInput, error) {
 	}
 	return item, input, nil
 }
+
+func stsEventsFilterClause(r *http.Request, from, to time.Time) (where string, args []any, bboxRaw string, err error) {
+	args = []any{from, to}
+	where = `WHERE e.end_ts >= $1 AND e.start_ts <= $2`
+	bboxRaw = strings.TrimSpace(r.URL.Query().Get("bbox"))
+	if bboxRaw == "" {
+		return where, args, "", nil
+	}
+	minLon, minLat, maxLon, maxLat, ok := parseBBox(bboxRaw)
+	if !ok {
+		return "", nil, "", errInvalidBBox()
+	}
+	where += ` AND e.centroid_lon BETWEEN $3 AND $4 AND e.centroid_lat BETWEEN $5 AND $6`
+	args = append(args, minLon, maxLon, minLat, maxLat)
+	return where, args, bboxRaw, nil
+}
+
+func stsEmptyTierCounts() map[string]int {
+	return map[string]int{
+		sts.TierLow:      0,
+		sts.TierMedium:   0,
+		sts.TierHigh:     0,
+		sts.TierVeryHigh: 0,
+		sts.TierVerified: 0,
+	}
+}
+
+func stsLastScanHint(lastScan *time.Time) string {
+	if lastScan == nil || lastScan.IsZero() {
+		return "no STS events in range — detector scans live AIS buffer (~72h) every ~30 minutes"
+	}
+	return lastScan.UTC().Format(time.RFC3339)
+}
+
+func errInvalidBBox() error {
+	return &bboxParseError{}
+}
+
+type bboxParseError struct{}
+
+func (e *bboxParseError) Error() string { return "bbox required: minLon,minLat,maxLon,maxLat" }
 
 func parseTimeRange(r *http.Request, defaultSpan time.Duration) (from, to time.Time, err error) {
 	to = time.Now().UTC()

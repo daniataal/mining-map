@@ -1474,7 +1474,11 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["gem_goit_pipelines"] = _sync_gem_goit_pipelines(conn)
         summary["steps"]["gem_gogpt_plants"] = _sync_gem_gogpt_plants(conn)
         summary["steps"]["gem_ggit_lng"] = _sync_gem_ggit_lng(conn)
-        summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
+        summary["steps"]["eurostat_trade"] = (
+            _graph_sync_go_skip_payload("eurostat_trade")
+            if _graph_sync_go_step_enabled("eurostat_trade")
+            else _sync_eurostat_trade_flows(conn)
+        )
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)
         summary["steps"]["trade_manifest_uk"] = _sync_uk_trade_manifests(conn)

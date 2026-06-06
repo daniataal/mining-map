@@ -50,6 +50,11 @@ import {
 } from 'lucide-react';
 import OilLiveProvenanceBadge from './OilLiveProvenanceBadge';
 import GraphSyncEmptyCta from './GraphSyncEmptyCta';
+import {
+  companyMapEntityOpenPayload,
+  companyMapHoverFromRecord,
+  type LiveDataCompanyMapHover,
+} from './liveDataCompanyMapHover';
 import TradeManifestUploadPanel from './TradeManifestUploadPanel';
 import CustomsOpenTierBadge from './CustomsOpenTierBadge';
 import LiveDataCrisisDeskPanel from './LiveDataCrisisDeskPanel';
@@ -188,6 +193,8 @@ export type LiveDataIntelPanelProps = {
   }) => void;
   /** Fly map to search hit coordinates before opening drawer. */
   onMapFlyTo?: (lat: number, lng: number) => void;
+  /** Highlight a company-linked map point while hovering the Companies list. */
+  onCompanyMapHover?: (payload: LiveDataCompanyMapHover | null) => void;
 };
 
 export default function LiveDataIntelPanel({
@@ -204,6 +211,7 @@ export default function LiveDataIntelPanel({
   onLiveDataLensChange,
   onOpenLiveEntity,
   onMapFlyTo,
+  onCompanyMapHover,
 }: LiveDataIntelPanelProps) {
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('opportunities');
@@ -370,6 +378,10 @@ export default function LiveDataIntelPanel({
   const cards = cardsData ?? [];
   const companies = companiesData?.companies ?? [];
   const companiesTotal = companiesData?.total ?? companies.length;
+
+  useEffect(() => {
+    if (tab !== 'companies') onCompanyMapHover?.(null);
+  }, [tab, onCompanyMapHover]);
   const opportunities = useMemo(
     () => dedupeOpportunities(opportunitiesData ?? [], 40, { excludeDemo: true }),
     [opportunitiesData],
@@ -814,6 +826,18 @@ export default function LiveDataIntelPanel({
       toast.info(t('פתחו את המגירה מהמפה', 'Open the drawer from the map'));
     },
     [onOpenLiveEntity, onOpenCargoRecord, onOpenCompanyDossier, onMapFlyTo, t],
+  );
+
+  const openMappableCompany = useCallback(
+    (company: OilCompany, mapHover: LiveDataCompanyMapHover) => {
+      onCompanyMapHover?.(null);
+      onMapFlyTo?.(mapHover.lat, mapHover.lng);
+      const terminal = company.map_terminal_id
+        ? terminalsIndex?.find((t) => t.id === company.map_terminal_id)
+        : undefined;
+      onOpenLiveEntity?.(companyMapEntityOpenPayload(company, terminal));
+    },
+    [onCompanyMapHover, onMapFlyTo, onOpenLiveEntity, terminalsIndex],
   );
 
   async function handleSave(company: OilCompany) {
@@ -1797,16 +1821,49 @@ export default function LiveDataIntelPanel({
           companies.map((co) => {
             const expanded = expandedCompany === co.id;
             const contacts = companyContacts[co.id] ?? [];
+            const mapHover = companyMapHoverFromRecord(co);
             return (
               <article
                 key={co.id}
-                className="rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-slate-900 p-3"
+                role={mapHover && onOpenLiveEntity ? 'button' : undefined}
+                tabIndex={mapHover && onOpenLiveEntity ? 0 : undefined}
+                className={`rounded-xl border border-black/5 dark:border-white/10 bg-white dark:bg-slate-900 p-3 ${
+                  mapHover
+                    ? 'cursor-pointer hover:border-sky-500/45 hover:ring-1 hover:ring-sky-500/25 transition-colors'
+                    : ''
+                }`}
+                onClick={() => {
+                  if (mapHover && onOpenLiveEntity) openMappableCompany(co, mapHover);
+                }}
+                onKeyDown={(e) => {
+                  if (!mapHover || !onOpenLiveEntity) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openMappableCompany(co, mapHover);
+                  }
+                }}
+                onMouseEnter={() => {
+                  if (mapHover) onCompanyMapHover?.(mapHover);
+                }}
+                onMouseLeave={() => onCompanyMapHover?.(null)}
               >
                 <div className="flex justify-between items-start gap-2">
                   <div>
                     <h3 className="text-xs font-bold flex items-center gap-1">
                       <Building2 className="w-3.5 h-3.5 text-slate-400" />
                       {co.name}
+                      {mapHover && (
+                        <span
+                          className="text-[8px] font-black uppercase text-sky-600 dark:text-sky-300"
+                          title={
+                            co.map_terminal_id
+                              ? t('לחץ לפתיחת מסוף במפה', 'Click to open terminal on map')
+                              : t('לחץ לפתיחת חברה במפה', 'Click to open company on map')
+                          }
+                        >
+                          {co.map_terminal_id ? t('מסוף', 'Terminal') : t('מפה', 'Map')}
+                        </span>
+                      )}
                     </h3>
                     <p className="text-[9px] text-slate-500 uppercase">
                       {co.company_type} · {co.country}
@@ -1827,7 +1884,10 @@ export default function LiveDataIntelPanel({
                   {co.supplier_id && onOpenCompanyDossier && (
                     <button
                       type="button"
-                      onClick={() => onOpenCompanyDossier(co.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenCompanyDossier(co.id);
+                      }}
                       className="flex-1 min-w-[120px] py-1.5 rounded-lg border border-sky-500/40 text-xs font-bold uppercase text-sky-700 dark:text-sky-300"
                     >
                       {t('פתח דוסייה', 'Open dossier')}
@@ -1835,14 +1895,18 @@ export default function LiveDataIntelPanel({
                   )}
                   <button
                     type="button"
-                    onClick={() => void handleSave(co)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleSave(co);
+                    }}
                     className="flex-1 min-w-[120px] py-1.5 rounded-lg bg-amber-500 text-slate-950 text-xs font-black uppercase"
                   >
                     {t('שמור לספקים', 'Save to Suppliers')}
                   </button>
                   <button
                     type="button"
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       try {
                         const { draft } = await draftOilOutreach(co.id);
                         await navigator.clipboard.writeText(draft);
@@ -1860,7 +1924,8 @@ export default function LiveDataIntelPanel({
                   <button
                     type="button"
                     className="mt-2 w-full py-1.5 rounded-lg border border-violet-500/30 text-[9px] font-bold uppercase text-violet-700"
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       try {
                         const job = await runContactEnrichmentAgent(co.supplier_id!, 'license');
                         toast.success(
@@ -1881,7 +1946,8 @@ export default function LiveDataIntelPanel({
                 <button
                   type="button"
                   className="mt-2 w-full py-1.5 text-[9px] font-bold uppercase text-sky-600"
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     if (expanded) {
                       setExpandedCompany(null);
                       return;
@@ -1934,7 +2000,8 @@ export default function LiveDataIntelPanel({
                       <button
                         type="button"
                         className="text-[9px] font-bold px-2 rounded-lg bg-slate-800 text-white"
-                        onClick={async () => {
+                        onClick={async (e) => {
+                          e.stopPropagation();
                           if (!newContact.value.trim()) return;
                           try {
                             await addOilCompanyContact(co.id, {

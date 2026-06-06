@@ -1,8 +1,10 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { CircleMarker, LayerGroup, Popup } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
+import { Loader2 } from 'lucide-react';
 import {
+  getStsEventById,
   getStsEvents,
   isStsEventVerified,
   stsEventCoords,
@@ -15,6 +17,8 @@ import type { MaritimeViewportBounds } from '../../types';
 import { useI18n } from '../../lib/i18n';
 import StsConfidenceBadge from './StsConfidenceBadge';
 import StsEnrichmentBlock from './StsEnrichmentBlock';
+
+const STS_CLUSTER_MAX_ZOOM = 8;
 
 const TIER_MARKER_COLOR: Record<string, string> = {
   low: '#64748b',
@@ -79,7 +83,7 @@ function VesselLink({
   );
 }
 
-function StsEventPopup({
+function StsEventPopupBody({
   event,
   disclaimerText,
   onOpenVessel,
@@ -166,18 +170,110 @@ function StsEventPopup({
   );
 }
 
+function StsEventPopup({
+  event,
+  fallbackDisclaimer,
+  onOpenVessel,
+}: {
+  event: StsEvent;
+  fallbackDisclaimer: string;
+  onOpenVessel?: (payload: OilLiveEntityClickPayload) => void;
+}) {
+  const { t } = useI18n();
+  const [popupOpen, setPopupOpen] = useState(false);
+
+  const { data: enriched, isLoading, isError } = useQuery({
+    queryKey: ['oil-live-sts-event', event.id],
+    queryFn: () => getStsEventById(event.id),
+    enabled: popupOpen,
+    staleTime: 120_000,
+  });
+
+  const displayEvent = enriched ?? event;
+  const disclaimerText = stsInferenceDisclaimer(enriched?.disclaimer) || fallbackDisclaimer;
+
+  return (
+    <Popup
+      eventHandlers={{
+        add: () => setPopupOpen(true),
+        remove: () => setPopupOpen(false),
+      }}
+    >
+      {popupOpen && isLoading ? (
+        <div className="oil-live-popup-body flex items-center gap-2 py-2 text-xs text-slate-600 dark:text-slate-300">
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+          {t('טוען העשרה…', 'Loading enrichment…')}
+        </div>
+      ) : (
+        <>
+          {isError && (
+            <p className="text-[9px] text-amber-700 dark:text-amber-300 mb-1">
+              {t('העשרה לא זמינה — מוצגות נתוני בסיס', 'Enrichment unavailable — showing base event')}
+            </p>
+          )}
+          <StsEventPopupBody
+            event={displayEvent}
+            disclaimerText={disclaimerText}
+            onOpenVessel={onOpenVessel}
+          />
+        </>
+      )}
+    </Popup>
+  );
+}
+
+function StsEventMarker({
+  event,
+  disclaimerText,
+  onOpenVessel,
+}: {
+  event: StsEvent;
+  disclaimerText: string;
+  onOpenVessel?: (payload: OilLiveEntityClickPayload) => void;
+}) {
+  const coords = stsEventCoords(event)!;
+  const color = markerColor(event.confidence_tier, event.status);
+
+  return (
+    <CircleMarker
+      center={[coords.lat, coords.lon]}
+      radius={8}
+      pathOptions={{
+        color,
+        fillColor: color,
+        fillOpacity: 0.75,
+        weight: 2,
+      }}
+    >
+      <StsEventPopup
+        event={event}
+        fallbackDisclaimer={disclaimerText}
+        onOpenVessel={onOpenVessel}
+      />
+    </CircleMarker>
+  );
+}
+
 type Props = {
   enabled: boolean;
   viewport?: MaritimeViewportBounds | null;
+  mapZoom?: number;
   limit?: number;
   onOpenVessel?: (payload: OilLiveEntityClickPayload) => void;
 };
 
-function StsEventsMapLayer({ enabled, viewport, limit = 150, onOpenVessel }: Props) {
+function StsEventsMapLayer({
+  enabled,
+  viewport,
+  mapZoom = 5,
+  limit = 150,
+  onOpenVessel,
+}: Props) {
   const bbox = viewport
     ? `${viewport.west},${viewport.south},${viewport.east},${viewport.north}`
     : undefined;
   const viewportReady = Boolean(bbox);
+  const clusterMarkers = mapZoom < STS_CLUSTER_MAX_ZOOM;
 
   const { data } = useQuery({
     queryKey: ['oil-live-sts-events', bbox, limit],
@@ -196,40 +292,29 @@ function StsEventsMapLayer({ enabled, viewport, limit = 150, onOpenVessel }: Pro
 
   if (!enabled) return null;
 
+  const markers = events.map((event) => (
+    <StsEventMarker
+      key={event.id}
+      event={event}
+      disclaimerText={disclaimerText}
+      onOpenVessel={onOpenVessel}
+    />
+  ));
+
   return (
     <LayerGroup>
-      <MarkerClusterGroup
-        showCoverageOnHover={false}
-        spiderfyOnMaxZoom
-        maxClusterRadius={48}
-        disableClusteringAtZoom={12}
-      >
-        {events.map((event) => {
-          const coords = stsEventCoords(event)!;
-          const color = markerColor(event.confidence_tier, event.status);
-          return (
-            <CircleMarker
-              key={event.id}
-              center={[coords.lat, coords.lon]}
-              radius={8}
-              pathOptions={{
-                color,
-                fillColor: color,
-                fillOpacity: 0.75,
-                weight: 2,
-              }}
-            >
-              <Popup>
-                <StsEventPopup
-                  event={event}
-                  disclaimerText={disclaimerText}
-                  onOpenVessel={onOpenVessel}
-                />
-              </Popup>
-            </CircleMarker>
-          );
-        })}
-      </MarkerClusterGroup>
+      {clusterMarkers ? (
+        <MarkerClusterGroup
+          showCoverageOnHover={false}
+          spiderfyOnMaxZoom
+          maxClusterRadius={52}
+          disableClusteringAtZoom={STS_CLUSTER_MAX_ZOOM}
+        >
+          {markers}
+        </MarkerClusterGroup>
+      ) : (
+        markers
+      )}
     </LayerGroup>
   );
 }

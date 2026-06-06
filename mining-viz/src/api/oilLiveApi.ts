@@ -377,6 +377,11 @@ export type OilCompany = {
   /** Wikidata QID + facts (optional — populated by Worker C). */
   wikidata_qid?: string | null;
   wikidata_facts?: Record<string, unknown> | null;
+  /** Resolved map point — terminal operator match or latest MCR corridor load. */
+  map_lat?: number;
+  map_lng?: number;
+  map_terminal_id?: string;
+  map_location_source?: 'terminal' | 'corridor' | string;
 };
 
 export type OilCompanyFilters = {
@@ -1214,7 +1219,11 @@ export async function getVesselDossier(
   );
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error((data as { error?: string }).error || `oil-live vessel dossier ${res.status}`);
+    const errMsg = (data as { error?: string }).error || `oil-live vessel dossier ${res.status}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bea506'},body:JSON.stringify({sessionId:'bea506',location:'oilLiveApi.ts:getVesselDossier',message:'vessel_dossier_error',data:{mmsi:String(mmsi),status:res.status,error:errMsg},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    throw new Error(errMsg);
   }
   return res.json();
 }

@@ -257,7 +257,8 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _features: LiveDealMapFeature[] = [];
   private _mapZoom = 5;
   private _selectedUid: string | null = null;
-  private _hoveredUid: string | null = null;
+  private _externalHoveredUid: string | null = null;
+  private _mouseHoveredUid: string | null = null;
   private _onFeatureClick?: (feature: LiveDealMapFeature) => void;
   private _raf = 0;
   private _lastPaintKey = '';
@@ -304,6 +305,17 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._selectedUid = uid;
     this._lastPaintKey = '';
     this._scheduleRedraw();
+  }
+
+  setHoveredUid(uid: string | null): void {
+    if (this._externalHoveredUid === uid) return;
+    this._externalHoveredUid = uid;
+    this._lastPaintKey = '';
+    this._scheduleRedraw();
+  }
+
+  private _effectiveHoveredUid(): string | null {
+    return this._externalHoveredUid ?? this._mouseHoveredUid;
   }
 
   setOnFeatureClick(handler: ((feature: LiveDealMapFeature) => void) | undefined): void {
@@ -406,7 +418,8 @@ export class CanvasLiveDealLayer extends L.Layer {
       this._mapZoom,
       this._dataEpoch,
       this._selectedUid ?? '',
-      this._hoveredUid ?? '',
+      this._externalHoveredUid ?? '',
+      this._mouseHoveredUid ?? '',
     ].join('|');
   }
 
@@ -415,6 +428,8 @@ export class CanvasLiveDealLayer extends L.Layer {
     const canvas = this._canvas;
     const ctx = this._ctx;
     if (!map || !canvas || !ctx) return;
+
+    const hoveredUid = this._effectiveHoveredUid();
 
     const size = map.getSize();
     const dpr = effectiveDpr();
@@ -451,20 +466,20 @@ export class CanvasLiveDealLayer extends L.Layer {
     for (const feature of this._features) {
       if (feature.shape === 'arc') {
         if (feature.uid === this._selectedUid) selected.push(feature);
-        else if (feature.uid === this._hoveredUid) hovered.push(feature);
+        else if (feature.uid === hoveredUid) hovered.push(feature);
         else normal.push(feature);
       }
     }
     for (const feature of pointPlan.drawFeatures) {
       if (feature.uid === this._selectedUid) selected.push(feature);
-      else if (feature.uid === this._hoveredUid) hovered.push(feature);
+      else if (feature.uid === hoveredUid) hovered.push(feature);
       else normal.push(feature);
     }
 
     const drawn = [...normal, ...hovered, ...selected];
     for (const feature of normal) this._drawFeature(ctx, map, feature, false, false);
     for (const feature of hovered) this._drawFeature(ctx, map, feature, false, true);
-    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === this._hoveredUid);
+    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === hoveredUid);
     this._drawnFeatures = drawn;
     this._lastPaintKey = paintKey;
   }
@@ -543,8 +558,8 @@ export class CanvasLiveDealLayer extends L.Layer {
     map.getContainer().style.cursor = hit ? 'pointer' : '';
 
     const nextHoveredUid = hit ? hit.uid : null;
-    if (this._hoveredUid !== nextHoveredUid) {
-      this._hoveredUid = nextHoveredUid;
+    if (this._mouseHoveredUid !== nextHoveredUid) {
+      this._mouseHoveredUid = nextHoveredUid;
       this._lastPaintKey = '';
       this._scheduleRedraw();
     }
@@ -552,8 +567,8 @@ export class CanvasLiveDealLayer extends L.Layer {
 
   private _onMapMouseOut = (): void => {
     this._map?.getContainer().style.removeProperty('cursor');
-    if (this._hoveredUid !== null) {
-      this._hoveredUid = null;
+    if (this._mouseHoveredUid !== null) {
+      this._mouseHoveredUid = null;
       this._lastPaintKey = '';
       this._scheduleRedraw();
     }
