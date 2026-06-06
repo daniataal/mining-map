@@ -58,7 +58,7 @@ export function countrySummaryDrillTargetZoom(currentZoom: number): number {
 
 /** Step zoom in for any cluster drill — never hold at the same zoom level. */
 export function steppedClusterDrillTargetZoom(currentZoom: number, ceiling: number): number {
-  return Math.min(ceiling, Math.max(currentZoom + 1, SERVER_CLUSTER_MIN_DRILL_ZOOM));
+  return Math.min(ceiling, Math.max(currentZoom + 2, SERVER_CLUSTER_MIN_DRILL_ZOOM));
 }
 
 /** Map zoom to fly when opening a cluster bubble into individual markers. */
