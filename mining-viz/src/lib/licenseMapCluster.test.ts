@@ -52,10 +52,10 @@ describe('licenseMapCluster', () => {
   });
 
   describe('steppedClusterDrillTargetZoom', () => {
-    it('always steps at least one zoom level below the ceiling', () => {
-      expect(steppedClusterDrillTargetZoom(10, 15)).toBe(11);
+    it('steps by +2 but capped by ceiling and SERVER_CLUSTER_MIN_DRILL_ZOOM', () => {
+      expect(steppedClusterDrillTargetZoom(10, 15)).toBe(12);
       expect(steppedClusterDrillTargetZoom(14, 15)).toBe(15);
-      expect(steppedClusterDrillTargetZoom(7, 13)).toBe(8);
+      expect(steppedClusterDrillTargetZoom(7, 13)).toBe(9);
     });
   });
 

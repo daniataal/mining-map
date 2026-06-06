@@ -749,7 +749,7 @@ const LicenseClusterFlyEffect = ({
             } else {
                 map.flyToBounds(bounds.pad(0.12), {
                     maxZoom: Math.max(
-                        currentZoom + 1,
+                        currentZoom + 2,
                         Math.min(drillCeiling, boundsFitZoom ?? drillCeiling)
                     ),
                     duration: 0.55,
