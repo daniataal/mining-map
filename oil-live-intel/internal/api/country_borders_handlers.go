@@ -9,65 +9,15 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/mining-map/oil-live-intel/internal/data"
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
+	"github.com/mining-map/oil-live-intel/internal/services/countrymatch"
 )
 
-var countryAliases = map[string]string{
-	"cape verde":                   "cabo verde",
-	"congo kinshasa":               "democratic republic of the congo",
-	"congo brazzaville":            "republic of the congo",
-	"cote divoire":                 "cote d ivoire",
-	"czech republic":               "czechia",
-	"dem rep congo":                "democratic republic of the congo",
-	"democratic republic of congo": "democratic republic of the congo",
-	"drc":                          "democratic republic of the congo",
-	"ivory coast":                  "cote d ivoire",
-	"laos":                         "lao pdr",
-	"macedonia":                    "north macedonia",
-	"myanmar burma":                "myanmar",
-	"palestine":                    "state of palestine",
-	"republic of congo":            "republic of the congo",
-	"republic of moldova":          "moldova",
-	"republic of north macedonia":  "north macedonia",
-	"russia":                       "russian federation",
-	"south korea":                  "korea",
-	"swaziland":                    "eswatini",
-	"syria":                        "syrian arab republic",
-	"tanzania":                     "united republic of tanzania",
-	"the bahamas":                  "bahamas",
-	"the gambia":                   "gambia",
-	"timor leste":                  "east timor",
-	"uae":                          "united arab emirates",
-	"uk":                           "united kingdom",
-	"usa":                          "united states of america",
-	"united states":                "united states of america",
-	"venezuela":                    "venezuela bolivarian republic of",
-	"viet nam":                     "vietnam",
-}
-
-var (
-	nonAlnumRe = regexp.MustCompile(`[^a-z0-9]+`)
-	spacesRe   = regexp.MustCompile(`\s+`)
-)
+var spacesRe = regexp.MustCompile(`\s+`)
 
 func normalizeCountryName(value string) string {
-	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-	s, _, _ := transform.String(t, value)
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.ReplaceAll(s, "&", " and ")
-
-	s = nonAlnumRe.ReplaceAllString(s, " ")
-	s = strings.TrimSpace(spacesRe.ReplaceAllString(s, " "))
-
-	if alias, ok := countryAliases[s]; ok {
-		return alias
-	}
-	return s
+	return countrymatch.NormalizeCountryName(value)
 }
 
 func parseRequestedCountries(raw string) []string {
@@ -161,7 +111,7 @@ func (s *Server) CountryBorders(w http.ResponseWriter, r *http.Request) {
 		if payload.Features == nil {
 			payload.Features = []GeoJSONFeature{} // ensure json emits [] instead of null
 		}
-		
+
 		h := sha256.New()
 		h.Write([]byte(baseEtag + "|" + strings.Join(requested, ",")))
 		etag = hex.EncodeToString(h.Sum(nil))

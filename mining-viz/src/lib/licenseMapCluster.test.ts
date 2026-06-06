@@ -12,6 +12,8 @@ import {
   shouldRenderServerLicenseCluster,
   serverClusterFlyBounds,
   MAX_VIEWPORT_CLUSTER_MERGE_TOTAL,
+  countrySummaryDrillTargetZoom,
+  steppedClusterDrillTargetZoom,
   LICENSE_DENSE_CLUSTER_MIN_COUNT,
   LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
   licenseClusterVisualDrillZoom,
@@ -46,6 +48,23 @@ describe('licenseMapCluster', () => {
     it('stays at drill threshold or above', () => {
       expect(clusterTargetZoom(2)).toBe(8);
       expect(clusterTargetZoom(2)).toBeGreaterThanOrEqual(SERVER_CLUSTER_MIN_DRILL_ZOOM);
+    });
+  });
+
+  describe('steppedClusterDrillTargetZoom', () => {
+    it('always steps at least one zoom level below the ceiling', () => {
+      expect(steppedClusterDrillTargetZoom(10, 15)).toBe(11);
+      expect(steppedClusterDrillTargetZoom(14, 15)).toBe(15);
+      expect(steppedClusterDrillTargetZoom(7, 13)).toBe(8);
+    });
+  });
+
+  describe('countrySummaryDrillTargetZoom', () => {
+    it('steps in from low zoom without overshooting detail cap', () => {
+      expect(countrySummaryDrillTargetZoom(4)).toBe(8);
+      expect(countrySummaryDrillTargetZoom(7)).toBe(8);
+      expect(countrySummaryDrillTargetZoom(9)).toBe(10);
+      expect(countrySummaryDrillTargetZoom(10)).toBe(10);
     });
   });
 

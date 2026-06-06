@@ -96,9 +96,11 @@ import {
     clusterTargetZoom,
     isServerLicenseCluster,
     LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
+    countrySummaryDrillTargetZoom,
+    steppedClusterDrillTargetZoom,
+    LICENSE_COUNTRY_SUMMARY_DRILL_MAX_ZOOM,
     LICENSE_MAP_DEFAULT_ZOOM,
     licenseClusterVisualDrillZoom,
-    planClusterDrillFly,
     serverClusterFlyBounds,
     SERVER_CLUSTER_MIN_DRILL_ZOOM,
 } from '../lib/licenseMapCluster';
@@ -133,6 +135,22 @@ import MaritimeControlPanel from './map/MaritimeControlPanel';
 import LayerDrawer from './map/LayerDrawer';
 import { MapIntelligenceLegend } from './map/MapIntelligenceLegend';
 import type { IntelligenceMode, IntelligenceSublayer } from '../lib/intelligenceModes';
+import type { GlobalMapLens } from '../lib/globalMapLens';
+import {
+  isRiskGlobalLens,
+  shouldDimLicenseMarkers,
+} from '../lib/globalMapLens';
+import type { AssetsMapLens } from '../lib/assetsMapLens';
+import { assetsPetroleumLayerPrefs } from '../lib/assetsMapLens';
+import RiskLensCoverageOverlay from '../features/live-data/RiskLensCoverageOverlay';
+import SanctionsCountryLayer from '../features/live-data/SanctionsCountryLayer';
+import { getSanctionsCountrySummary } from '../api/oilLiveApi';
+import {
+  buildSanctionsLookup,
+  sanctionsChoroplethStyle,
+  sanctionsFlagLevelForCountry,
+} from '../lib/sanctionsCountryLayer';
+import { useQuery } from '@tanstack/react-query';
 import MaritimeAdvancedControls from './map/MaritimeAdvancedControls';
 import { useCountryBordersLayer } from './map/useCountryBordersLayer';
 import { resolvePetroleumViewportBounds } from '../lib/petroleumLayers';
@@ -325,6 +343,8 @@ interface MapComponentProps {
   ) => void;
   routePlannerPorts?: RoutePlannerHubMarker[];
   routePlannerShowPorts?: boolean;
+  /** Larger port/airport markers when Routes › Hubs sublayer is active. */
+  routePlannerHubsEmphasized?: boolean;
   onRoutePlannerPortPick?: (port: RoutePlannerHubMarker, role: 'supplier' | 'buyer') => void;
   routePlannerAirports?: RoutePlannerHubMarker[];
   routePlannerShowAirports?: boolean;
@@ -339,6 +359,10 @@ interface MapComponentProps {
   countryFocusCountry?: string | null;
   /** Increment when country focus is applied so the map can fit bounds after borders load. */
   countryFocusBoundsTrigger?: number;
+  onClearCountryFocus?: () => void;
+  onApplyCountryFocus?: (country: string, options?: { fitBounds?: boolean }) => void;
+  /** License rows used to pick neighbor country outlines while one country is focused. */
+  borderSourceData?: MiningLicense[];
   /** Open-data storage terminals / tank farms (Oil & Gas view). */
   storageEntities?: MiningLicense[];
   onStorageInViewCountChange?: (count: number) => void;
@@ -411,6 +435,9 @@ interface MapComponentProps {
   /** Comtrade/Census macro country-pair arcs (gray). */
   macroTradeFlowsEnabled?: boolean;
   macroTradeFlows?: MacroTradeFlow[];
+  /** Global › Trade flows lens — toggle macro arcs without leaving sublayer. */
+  globalMacroTradeOn?: boolean;
+  onGlobalMacroTradeChange?: (on: boolean) => void;
   brokerWorkspaceMap?: WorkspaceMapSnapshot;
   brokerPackLocationMode?: boolean;
   onBrokerPackLocationPick?: (lat: number, lng: number) => void;
@@ -421,6 +448,9 @@ interface MapComponentProps {
   cockpitEnabled?: boolean;
   cockpitLegendMode?: IntelligenceMode;
   cockpitLegendSublayer?: IntelligenceSublayer;
+  globalMapLens?: GlobalMapLens | null;
+  assetsMapLens?: AssetsMapLens | null;
+  onLicenseClusterSelect?: (item: MiningLicense) => void;
   onCountrySelect?: (country: string) => void;
 }
 
@@ -438,6 +468,42 @@ type PendingLicenseClusterFly = MiningLicense & {
     _clientCluster?: boolean;
     _clientClusterBounds?: MaritimeViewportBounds;
 };
+
+type MapFeatureClickEvent = MouseEvent & {
+    __liveDealCanvasHandled?: boolean;
+    __mapFeatureClickHandled?: boolean;
+};
+
+function markMapFeatureClickHandled(event: L.LeafletEvent): void {
+    const oe = event.originalEvent as MapFeatureClickEvent | undefined;
+    if (oe) oe.__mapFeatureClickHandled = true;
+}
+
+function mapFeatureClickWasHandled(event: L.LeafletEvent): boolean {
+    const oe = event.originalEvent as MapFeatureClickEvent | undefined;
+    return Boolean(oe?.__liveDealCanvasHandled || oe?.__mapFeatureClickHandled);
+}
+
+function resolveCountryFeatureBounds(
+    geojson: object,
+    countryName: string,
+): L.LatLngBounds | null {
+    try {
+        const gj = geojson as { features?: Array<{ properties?: Record<string, unknown> }> };
+        const match = gj.features?.find((feature) => {
+            const name =
+                (feature.properties?.name as string | undefined) ??
+                (feature.properties?.ADMIN as string | undefined) ??
+                (feature.properties?.country as string | undefined);
+            return name === countryName;
+        });
+        const layer = L.geoJSON((match ?? geojson) as never);
+        const bounds = layer.getBounds();
+        return bounds.isValid() ? bounds : null;
+    } catch {
+        return null;
+    }
+}
 
 /** Capture the Leaflet MarkerClusterGroup instance for popup timing. */
 function ClusterGroupRefBridge({
@@ -463,6 +529,7 @@ function ClusterGroupRefBridge({
         const group = asLicenseMarkerClusterGroup(layerContainer);
         clusterGroupRef.current = group;
         const onClusterClick = (event: L.LeafletEvent) => {
+            markMapFeatureClickHandled(event);
             const layer = event.layer as L.Layer & {
                 getAllChildMarkers?: () => L.Marker[];
                 getLatLng?: () => L.LatLng;
@@ -478,12 +545,16 @@ function ClusterGroupRefBridge({
                 const bounds = L.latLngBounds(children.map((m) => m.getLatLng()));
                 const padded = bounds.pad(0.15);
                 const fitMaxZoom = Math.max(
+                    map.getZoom() + 1,
                     clusterTargetZoom(map.getZoom()),
                     Math.min(
                         LICENSE_CLUSTER_FIT_MAX_ZOOM,
                         map.getBoundsZoom(bounds.pad(0.12)) ?? clusterTargetZoom(map.getZoom()),
                     ),
                 );
+                // #region agent log
+                fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:markerClusterClick',message:'marker cluster drill',data:{childCount:children.length,currentZoom:map.getZoom(),fitMaxZoom},timestamp:Date.now(),runId:'post-fix-v4'})}).catch(()=>{});
+                // #endregion
                 map.stop();
                 map.flyToBounds(padded, {
                     maxZoom: fitMaxZoom,
@@ -549,18 +620,21 @@ const MapEffect = ({
 /** Fly into a server-side license cluster; sync zoom/bbox from map on moveend (zoom ≥ 7 → points). */
 const LicenseClusterFlyEffect = ({
     cluster,
+    drillSeq,
     onLicenseMapZoomChange,
     onLicenseMapViewportChange,
     onLicenseClusterDrillComplete,
     onComplete,
 }: {
     cluster: PendingLicenseClusterFly | null;
+    drillSeq: number;
     onLicenseMapZoomChange?: (zoom: number) => void;
     onLicenseMapViewportChange?: (bbox: MaritimeViewportBounds) => void;
     onLicenseClusterDrillComplete?: (expandBounds: MaritimeViewportBounds, zoom?: number) => void;
     onComplete: () => void;
 }) => {
     const map = useMap();
+    const flyGenerationRef = useRef(0);
     const onLicenseMapZoomChangeRef = useRef(onLicenseMapZoomChange);
     const onLicenseMapViewportChangeRef = useRef(onLicenseMapViewportChange);
     const onLicenseClusterDrillCompleteRef = useRef(onLicenseClusterDrillComplete);
@@ -575,6 +649,7 @@ const LicenseClusterFlyEffect = ({
     useEffect(() => {
         const clusterItem = clusterRef.current;
         if (!clusterFlyId || !clusterItem) return;
+        const generation = ++flyGenerationRef.current;
         const lat = clusterItem._displayLat ?? clusterItem.lat;
         const lng = clusterItem._displayLng ?? clusterItem.lng;
         if (lat == null || lng == null) {
@@ -596,23 +671,52 @@ const LicenseClusterFlyEffect = ({
             Math.abs(flyBox.east - flyBox.west),
         );
         const boundsFitZoom = map.getBoundsZoom(bounds, false, [36, 36]);
-        const flyPlan = planClusterDrillFly(map.getZoom(), boundsSpanDeg, boundsFitZoom);
-        const drillMaxZoom = Math.min(
-            LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
-            flyPlan.mode === 'bounds'
-                ? flyPlan.maxZoom
-                : licenseClusterVisualDrillZoom(clusterCount, { clientCluster: isClientCluster }),
-        );
+        const isCountrySummary = isCountryLicenseSummary(clusterItem);
+        const currentZoom = map.getZoom();
+        const countrySummaryTargetZoom = isCountrySummary
+            ? countrySummaryDrillTargetZoom(currentZoom)
+            : null;
+        const visualDrillCeiling = licenseClusterVisualDrillZoom(clusterCount, {
+            clientCluster: isClientCluster,
+            countrySummary: isCountrySummary,
+        });
+        // Never cap below current+1 — flyPlan.bounds maxZoom on wide cells caused same-zoom hangs.
+        const drillCeiling = isCountrySummary
+            ? countrySummaryTargetZoom!
+            : Math.min(
+                LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM,
+                Math.max(visualDrillCeiling, currentZoom + 1),
+            );
+        const steppedDrillZoom = isCountrySummary
+            ? countrySummaryTargetZoom!
+            : steppedClusterDrillTargetZoom(currentZoom, drillCeiling);
+        // #region agent log
+        if (!isCountrySummary) {
+            fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:gridClusterDrill',message:'grid cluster drill',data:{clusterId:clusterItem.id,clusterCount,isClientCluster,currentZoom,steppedDrillZoom,drillCeiling,visualDrillCeiling,boundsFitZoom},timestamp:Date.now(),runId:'post-fix-v7',hypothesisId:'H4'})}).catch(()=>{});
+        }
+        // #endregion
         let finished = false;
         const finish = () => {
-            if (finished) return;
+            if (finished || generation !== flyGenerationRef.current) return;
             finished = true;
-            let zoom = map.getZoom();
-            if (!isClientCluster && zoom < SERVER_CLUSTER_MIN_DRILL_ZOOM) {
+            const zoomBefore = map.getZoom();
+            let zoom = zoomBefore;
+            if (!isClientCluster && !isCountrySummary && zoom < SERVER_CLUSTER_MIN_DRILL_ZOOM) {
                 map.setView([lat, lng], SERVER_CLUSTER_MIN_DRILL_ZOOM, { animate: false });
                 zoom = map.getZoom();
             }
             const mapBounds = map.getBounds();
+            const expandBounds = mapBounds.isValid()
+                ? {
+                      south: Number(mapBounds.getSouth().toFixed(4)),
+                      west: Number(mapBounds.getWest().toFixed(4)),
+                      north: Number(mapBounds.getNorth().toFixed(4)),
+                      east: Number(mapBounds.getEast().toFixed(4)),
+                  }
+                : flyBox;
+            // #region agent log
+            fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:clusterFlyFinish',message:'cluster fly finish',data:{clusterId:clusterItem.id,generation,flyGeneration:flyGenerationRef.current,zoomBefore,zoomAfter:zoom,isCountrySummary,isClientCluster},timestamp:Date.now(),runId:'post-fix-v6',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
             if (mapBounds.isValid()) {
                 onLicenseMapViewportChangeRef.current?.({
                     south: Number(mapBounds.getSouth().toFixed(4)),
@@ -622,45 +726,78 @@ const LicenseClusterFlyEffect = ({
                 });
             }
             onLicenseMapZoomChangeRef.current?.(zoom);
-            onLicenseClusterDrillCompleteRef.current?.(flyBox, zoom);
+            onLicenseClusterDrillCompleteRef.current?.(expandBounds, zoom);
             onCompleteRef.current();
         };
         map.stop();
-        if (isClientCluster) {
-            map.flyToBounds(bounds.pad(0.12), {
-                maxZoom: drillMaxZoom,
-                duration: 0.55,
-                padding: [48, 48],
-            });
-        } else if (flyPlan.mode === 'center') {
-            map.flyTo([lat, lng], drillMaxZoom, { duration: 0.75 });
+        if (isCountrySummary) {
+            // #region agent log
+            fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:countrySummaryDrill',message:'country summary zoom-in',data:{currentZoom,targetZoom:countrySummaryTargetZoom,boundsSpanDeg,generation},timestamp:Date.now(),runId:'post-fix-v7',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
+            if (countrySummaryTargetZoom! <= currentZoom) {
+                finish();
+                return;
+            }
+            map.flyTo([lat, lng], countrySummaryTargetZoom!, { duration: 0.55 });
+        } else if (isClientCluster) {
+            if (steppedDrillZoom <= currentZoom) {
+                finish();
+                return;
+            }
+            if (boundsFitZoom != null && boundsFitZoom <= currentZoom) {
+                map.flyTo([lat, lng], steppedDrillZoom, { duration: 0.55 });
+            } else {
+                map.flyToBounds(bounds.pad(0.12), {
+                    maxZoom: Math.max(
+                        currentZoom + 1,
+                        Math.min(drillCeiling, boundsFitZoom ?? drillCeiling)
+                    ),
+                    duration: 0.55,
+                    padding: [48, 48],
+                });
+            }
         } else {
-            map.flyToBounds(bounds, {
-                maxZoom: drillMaxZoom,
-                duration: 0.75,
-                padding: [36, 36],
-            });
+            if (steppedDrillZoom <= currentZoom) {
+                finish();
+                return;
+            }
+            map.flyTo([lat, lng], steppedDrillZoom, { duration: 0.55 });
         }
         map.once('moveend', finish);
+        
+        // Leaflet won't fire moveend if it doesn't actually move (e.g. maxZoom reached and center identical).
+        // Fallback timer ensures pending state is cleared and doesn't cause a hang on subsequent clicks.
+        const fallbackTimer = window.setTimeout(finish, 800);
+
         return () => {
+            window.clearTimeout(fallbackTimer);
             map.off('moveend', finish);
-            map.stop();
-            if (!finished) {
-                finish();
+            // #region agent log
+            fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:clusterFlyCleanup',message:'cluster fly cleanup',data:{clusterId:clusterItem.id,generation,flyGeneration:flyGenerationRef.current,finished,zoom:map.getZoom()},timestamp:Date.now(),runId:'post-fix-v6',hypothesisId:'H1'})}).catch(()=>{});
+            // #endregion
+            if (generation === flyGenerationRef.current) {
+                flyGenerationRef.current += 1;
             }
+            map.stop();
         };
-    }, [clusterFlyId, map]);
+    }, [clusterFlyId, drillSeq, map]);
     return null;
 };
 
 const MapClickHandler = ({
     onMapClick,
+    countryFocusCountry,
+    countryFocusBounds,
+    onClearCountryFocus,
     routePlannerPickRole,
     onRoutePlannerMapPick,
     workspaceCustomPinMode,
     onWorkspaceMapPick,
 }: {
     onMapClick: () => void;
+    countryFocusCountry?: string | null;
+    countryFocusBounds?: L.LatLngBounds | null;
+    onClearCountryFocus?: () => void;
     routePlannerPickRole?: 'supplier' | 'buyer' | null;
     onRoutePlannerMapPick?: (
       lat: number,
@@ -683,6 +820,16 @@ const MapClickHandler = ({
             }
             if (routePlannerPickRole && onRoutePlannerMapPick) {
                 onRoutePlannerMapPick(e.latlng.lat, e.latlng.lng, routePlannerPickRole);
+                return;
+            }
+            const focus = countryFocusCountry?.trim();
+            if (
+                focus &&
+                countryFocusBounds?.isValid() &&
+                !countryFocusBounds.contains(e.latlng) &&
+                onClearCountryFocus
+            ) {
+                onClearCountryFocus();
                 return;
             }
             onMapClick();
@@ -735,28 +882,46 @@ const RoutePlannerBoundsEffect = ({
 const CountryFocusBoundsFly = ({
     active,
     geojson,
+    countryFocusCountry,
     trigger,
 }: {
     active: boolean;
     geojson: object | null | undefined;
+    countryFocusCountry?: string | null;
     trigger: number;
 }) => {
     const map = useMap();
+    const lastFlownTriggerRef = useRef(0);
     useEffect(() => {
         if (!active || !geojson || trigger <= 0) return;
+        if (lastFlownTriggerRef.current === trigger) return;
+        lastFlownTriggerRef.current = trigger;
         const timer = window.setTimeout(() => {
             try {
                 map.invalidateSize({ animate: false, pan: false });
-                const gjLayer = L.geoJSON(geojson as never);
-                const bounds = gjLayer.getBounds();
-                if (!bounds.isValid()) return;
+                const focus = countryFocusCountry?.trim();
+                const bounds = focus
+                    ? resolveCountryFeatureBounds(geojson, focus)
+                    : L.geoJSON(geojson as never).getBounds();
+                if (!bounds?.isValid()) return;
+                const zoomBefore = map.getZoom();
+                const center = map.getCenter();
+                const alreadyShowingCountry =
+                    zoomBefore >= SERVER_CLUSTER_MIN_DRILL_ZOOM && bounds.contains(center);
+                // #region agent log
+                fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:CountryFocusBoundsFly',message:alreadyShowingCountry?'focus fitBounds skipped':'focus fitBounds',data:{trigger,zoomBefore,alreadyShowingCountry,focus,runId:'post-fix-v3'},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
+                if (alreadyShowingCountry) return;
                 map.fitBounds(bounds, { padding: [48, 48], maxZoom: 9, animate: true });
             } catch {
                 /* ignore malformed GeoJSON during development */
             }
         }, 80);
         return () => window.clearTimeout(timer);
-    }, [active, geojson, trigger, map]);
+    }, [active, geojson, countryFocusCountry, trigger, map]);
+    useEffect(() => {
+        if (!active) lastFlownTriggerRef.current = 0;
+    }, [active]);
     return null;
 };
 
@@ -935,6 +1100,7 @@ export default function MapComponent({
   onRoutePlannerMapPick,
   routePlannerPorts = [],
   routePlannerShowPorts = false,
+  routePlannerHubsEmphasized = false,
   onRoutePlannerPortPick,
   routePlannerAirports = [],
   routePlannerShowAirports = false,
@@ -947,6 +1113,9 @@ export default function MapComponent({
   getDealRoomForLicense,
   countryFocusCountry = null,
   countryFocusBoundsTrigger = 0,
+  onClearCountryFocus,
+  onApplyCountryFocus,
+  borderSourceData,
   onLicenseMapViewportChange,
   onLicenseMapZoomChange,
   licenseMapZoom,
@@ -970,6 +1139,7 @@ export default function MapComponent({
   onLiveDataMapFlyTo,
   liveDataFlyTrigger = 0,
   liveDataFlyTarget = null,
+  liveDataCompanyHover = null,
   eiaHistoricMapEnabled = false,
   eiaHistoricMapArcs = [],
   eiaHistoricMapOrigins = [],
@@ -989,6 +1159,8 @@ export default function MapComponent({
   onInfrastructureFeatureClick,
   macroTradeFlowsEnabled = false,
   macroTradeFlows = [],
+  globalMacroTradeOn = true,
+  onGlobalMacroTradeChange,
   liveDataMacroTradeOn = true,
   onLiveDataMacroTradeChange,
   liveDataEiaHistoricOn = false,
@@ -1003,6 +1175,9 @@ export default function MapComponent({
   cockpitEnabled = false,
   cockpitLegendMode = 'global_view',
   cockpitLegendSublayer = 'countries',
+  globalMapLens: activeGlobalLens = null,
+  assetsMapLens: activeAssetsLens = null,
+  onLicenseClusterSelect,
   onCountrySelect,
 }: MapComponentProps) {
     const { t } = useI18n();
@@ -1028,6 +1203,7 @@ export default function MapComponent({
     const markerRefs = useRef<Record<string, L.Marker>>({});
     const clusterGroupRef = useRef<LicenseMarkerClusterGroup | null>(null);
     const markerIconCacheRef = useRef(createLicenseMarkerIconCache());
+    const [licenseClusterDrillSeq, setLicenseClusterDrillSeq] = useState(0);
 
     const isWorkspaceView = viewModeKey === 'workspace' || viewModeKey === 'supply_chain';
     const {
@@ -1193,11 +1369,27 @@ export default function MapComponent({
         maritimeFeed && (maritimeFeed.cached || maritimeFeed.memory_cached || !isMaritimeLoading),
     );
     const countryFocusActive = Boolean(countryFocusCountry?.trim());
+    const tradeLensActive = activeGlobalLens === 'trade_flows';
+    const licensesLensActive = activeGlobalLens === 'licenses';
+    const countriesLensActive = activeGlobalLens === 'countries' || activeGlobalLens === null;
+    const riskLensActive = isRiskGlobalLens(activeGlobalLens);
+    const { data: sanctionsSummary } = useQuery({
+        queryKey: ['oil-live-sanctions-country-summary'] as const,
+        queryFn: () => getSanctionsCountrySummary(),
+        enabled: riskLensActive,
+        staleTime: 120_000,
+    });
+    const sanctionsLookup = useMemo(
+        () => buildSanctionsLookup(sanctionsSummary?.countries),
+        [sanctionsSummary?.countries],
+    );
+    const dimLicenseMarkersForLens =
+      shouldDimLicenseMarkers(activeGlobalLens) && !countryFocusActive;
     const onGroundVisible =
       (!isOilAndGasView || oilAndGasDisplayMode !== 'vessels_only') &&
       !isRoutePlannerView &&
       (!isLiveDataView || countryFocusActive);
-    const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers;
+    const showLicenseMarkers = onGroundVisible && !hideLicenseMarkers && !dimLicenseMarkersForLens;
     const useCanvasLicenseMarkers = isLicenseMapView && !suppressLicenseClusters;
 
     const { mapDisplayData, licenseMarkersCapped, licenseServerClusterMode } = useLicenseDisplayData({
@@ -1230,8 +1422,20 @@ export default function MapComponent({
     const hideCountryBordersForVesselsOnly = isOilAndGasView && oilAndGasDisplayMode === 'vessels_only';
     /** Canvas clustering must track local map zoom — parent licenseMapZoom lags one React frame. */
     const liveCanvasMapZoom = isOilAndGasView ? petroleumMapZoom : overlayMapZoom;
-    const effectiveLicenseMapZoom = Math.max(licenseMapZoom ?? 0, liveCanvasMapZoom) || undefined;
+    const effectiveLicenseMapZoom = Math.max(licenseMapZoom ?? 0, liveCanvasMapZoom);
+    const markerMapDisplayData = useMemo(() => {
+        if (effectiveLicenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM) return mapDisplayData;
+        return mapDisplayData.filter((item) => !isCountryLicenseSummary(item));
+    }, [mapDisplayData, effectiveLicenseMapZoom]);
+    const markerServerClusterMode = useMemo(
+        () => markerMapDisplayData.some(isServerLicenseCluster),
+        [markerMapDisplayData],
+    );
     const oilGasLayersEnabled = isOilAndGasView && onGroundVisible;
+    const assetsPetroleumPrefs = useMemo(
+        () => assetsPetroleumLayerPrefs(activeAssetsLens),
+        [activeAssetsLens],
+    );
     const oilGasBbox = useMemo(
         () => resolvePetroleumViewportBounds(oilGasMapViewport),
         [oilGasMapViewport],
@@ -1414,26 +1618,35 @@ export default function MapComponent({
     });
 
     const {
+        borderCountries,
         borderCountriesCapped,
         borderGeoJsonMatchesMarkers,
         filteredGeoJson,
         countryBorderLayerStyle,
+        countryBorderNeighborStyle,
     } = useCountryBordersLayer({
         displayData,
+        borderSourceData,
         countryFocusCountry,
         isRoutePlannerView,
         isDark,
     });
+
+    const countryFocusBounds = useMemo(() => {
+        const focus = countryFocusCountry?.trim();
+        if (!focus || !filteredGeoJson) return null;
+        return resolveCountryFeatureBounds(filteredGeoJson, focus);
+    }, [countryFocusCountry, filteredGeoJson]);
 
     const {
         licenseCanvasFeatures,
         licenseMarkerIcons,
         licenseClusterIconCreate,
     } = useLicenseMarkerVisuals({
-        mapDisplayData,
+        mapDisplayData: markerMapDisplayData,
         showLicenseMarkers,
         useCanvasLicenseMarkers,
-        licenseServerClusterMode,
+        licenseServerClusterMode: markerServerClusterMode,
         userAnnotations,
         isDark,
         markerIconCache: markerIconCacheRef.current,
@@ -1475,6 +1688,25 @@ export default function MapComponent({
         },
         [isOilAndGasView],
     );
+    const focusCountryFromSummaryCluster = useCallback(
+        (item: MiningLicense) => {
+            if (!isCountryLicenseSummary(item)) return;
+            const country = item.country?.trim();
+            if (!country || !onApplyCountryFocus) return;
+            onApplyCountryFocus(country, { fitBounds: false });
+        },
+        [onApplyCountryFocus],
+    );
+    const shouldScheduleClusterDrill = useCallback(
+        (item: MiningLicense) => {
+            if (isCountryLicenseSummary(item)) {
+                const target = countrySummaryDrillTargetZoom(effectiveLicenseMapZoom);
+                return effectiveLicenseMapZoom < target;
+            }
+            return true;
+        },
+        [effectiveLicenseMapZoom],
+    );
     const {
         pendingLicenseClusterFly,
         setPendingLicenseClusterFly,
@@ -1482,20 +1714,55 @@ export default function MapComponent({
         handleLicenseCanvasFeatureClick,
         handleSingleClusterMarkerClick,
     } = useLicenseInteractions<PendingLicenseClusterFly>({
-        mapDisplayData,
+        mapDisplayData: markerMapDisplayData,
         markerRefs,
         onSelectMaritimeVessel: () => onSelectMaritimeVessel(null),
         setSelectedItem,
         buildClientClusterFly,
+        onPrepareClusterDrill: focusCountryFromSummaryCluster,
+        shouldScheduleClusterDrill,
+        onLicenseClusterSelect,
     });
+    const handleLicenseMarkerClickWithDrill = useCallback(
+        (item: MiningLicense, isServerCluster: boolean) => {
+            // #region agent log
+            fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:serverClusterMarkerClick',message:'server cluster marker click',data:{clusterId:item.id,isServerCluster,mapClusterCount:item.mapClusterCount,zoom:effectiveLicenseMapZoom,pendingId:pendingLicenseClusterFly?.id ?? null},timestamp:Date.now(),runId:'post-fix-v7',hypothesisId:'H5'})}).catch(()=>{});
+            // #endregion
+            handleLicenseMarkerClick(item, isServerCluster);
+            if (isServerCluster) {
+                setLicenseClusterDrillSeq((seq) => seq + 1);
+            }
+        },
+        [
+            effectiveLicenseMapZoom,
+            handleLicenseMarkerClick,
+            pendingLicenseClusterFly?.id,
+        ],
+    );
+    const handleLicenseCanvasFeatureClickWrapped = useCallback(
+        (feature: LiveDealMapFeature) => {
+            if (
+                feature.shape === 'point' &&
+                feature.kind === 'server_cluster' &&
+                isLiveDealClientClusterData(feature.data)
+            ) {
+                // #region agent log
+                fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'64f303'},body:JSON.stringify({sessionId:'64f303',location:'MapComponent.tsx:canvasClusterClick',message:'canvas client cluster click',data:{uid:feature.uid,zoom:effectiveLicenseMapZoom},timestamp:Date.now(),runId:'post-fix-v7'})}).catch(()=>{});
+                // #endregion
+                setLicenseClusterDrillSeq((seq) => seq + 1);
+            }
+            handleLicenseCanvasFeatureClick(feature);
+        },
+        [effectiveLicenseMapZoom, handleLicenseCanvasFeatureClick],
+    );
     const { serverClusterMarkers, licensePointMarkers } = useLicenseMarkerNodes({
-        mapDisplayData,
+        mapDisplayData: markerMapDisplayData,
         showLicenseMarkers,
         licenseMarkerIcons,
         licenseMapZoom: effectiveLicenseMapZoom,
-        licenseServerClusterMode,
+        licenseServerClusterMode: markerServerClusterMode,
         markerRefs,
-        onMarkerClick: handleLicenseMarkerClick,
+        onMarkerClick: handleLicenseMarkerClickWithDrill,
     });
 
     const handleMaritimeVesselClick = useCallback(
@@ -1539,6 +1806,7 @@ export default function MapComponent({
                 licenseMarkersCapped={licenseMarkersCapped}
                 licenseMapDomMarkerCap={LICENSE_MAP_DOM_MARKER_CAP}
                 showWorldCountrySummaryNotice={
+                    countriesLensActive &&
                     licenseServerClusterMode &&
                     licenseMapZoom != null &&
                     licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
@@ -1561,6 +1829,53 @@ export default function MapComponent({
                             (isOilAndGasView && maritimeFeed?.aisstream_persian_gulf_coverage_gap)),
                 )}
             />
+            {licensesLensActive &&
+              effectiveLicenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
+              showLicenseMarkers && (
+                <div className="pointer-events-none absolute left-1/2 top-3 z-[955] flex w-full max-w-md -translate-x-1/2 justify-center px-2">
+                  <div className="rounded-2xl border border-amber-500/35 bg-slate-950/85 px-3 py-2 text-center text-[10px] font-bold text-amber-100 shadow-xl backdrop-blur-xl">
+                    {t('התקרב כדי לראות רישיונות בודדים', 'Zoom in to see individual license assets')}
+                  </div>
+                </div>
+              )}
+            {tradeLensActive && (
+              <div className="pointer-events-auto absolute left-1/2 top-3 z-[955] flex w-full max-w-lg -translate-x-1/2 justify-center px-2">
+                <div className="flex flex-col items-center gap-2 rounded-2xl border border-slate-500/40 bg-slate-950/85 px-3 py-2 text-center shadow-xl backdrop-blur-xl sm:flex-row sm:gap-3">
+                  <p className="text-[10px] font-bold text-slate-200">
+                    {t(
+                      'מסדרונות מאקרו (Comtrade) — tier: macro',
+                      'Macro trade corridors (Comtrade) — tier: macro',
+                    )}
+                  </p>
+                  {onGlobalMacroTradeChange && (
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-500/30 bg-slate-900/60 px-2.5 py-1 text-[9px] font-bold text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={globalMacroTradeOn}
+                        onChange={(e) => onGlobalMacroTradeChange(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-slate-500 accent-slate-400"
+                      />
+                      {t('הצג קשתות מאקרו', 'Show macro arcs')}
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+            {riskLensActive && (
+              <div className="pointer-events-none absolute left-1/2 top-3 z-[955] flex w-full max-w-lg -translate-x-1/2 justify-center px-2">
+                <div className="space-y-1 rounded-2xl border border-emerald-500/35 bg-slate-950/85 px-3 py-2 text-center shadow-xl backdrop-blur-xl">
+                  <p className="text-[10px] font-bold text-emerald-100">
+                    {t('ESG + פערי כיסוי AIS + סנקציות (beta)', 'ESG + AIS coverage gaps + sanctions (beta)')}
+                  </p>
+                  <p className="text-[9px] font-semibold text-slate-400">
+                    {t(
+                      'אות סינון OpenSanctions — לא קביעה משפטית',
+                      'Screening signal — not legal determination',
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
             {isOilAndGasView && onGroundVisible && (
                 <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-none px-2 w-full max-w-[540px] flex justify-center">
                     <InfrastructureCoverageBanner
@@ -1667,12 +1982,15 @@ export default function MapComponent({
             )}
             {isMaritimeMapView && !isLiveDataView && (
                 <LayerDrawer
+                    key={`maritime-drawer-${cockpitLegendSublayer ?? 'default'}`}
                     t={t}
                     isMaritimeLayerEnabled={isMaritimeLayerEnabled}
                     isMaritimeLoading={isMaritimeLoading}
                     hasMaritimeFeed={Boolean(maritimeFeed)}
                     maritimeIdleHint={maritimeIdleHint}
-                    defaultExpanded={viewModeKey === 'route_planner'}
+                    defaultExpanded={
+                      isRoutePlannerView && cockpitLegendSublayer === 'vessels'
+                    }
                     onToggleLayer={() => {
                         startTransition(() => setIsMaritimeLayerEnabled((current) => !current));
                     }}
@@ -1840,7 +2158,14 @@ export default function MapComponent({
                 </LayerDrawer>
             )}
             {cockpitEnabled && !isLiveDataView && (
-                <MapIntelligenceLegend mode={cockpitLegendMode} sublayer={cockpitLegendSublayer} />
+                <MapIntelligenceLegend
+                  mode={cockpitLegendMode}
+                  sublayer={cockpitLegendSublayer}
+                  globalMacroTradeOn={tradeLensActive ? globalMacroTradeOn : undefined}
+                  onGlobalMacroTradeChange={
+                    tradeLensActive ? onGlobalMacroTradeChange : undefined
+                  }
+                />
             )}
             <MapContainer 
               center={mapCenter} 
@@ -1859,6 +2184,9 @@ export default function MapComponent({
             >
                 <ZoomControl position="bottomleft" />
                 <MapClickHandler
+                    countryFocusCountry={countryFocusCountry}
+                    countryFocusBounds={countryFocusBounds}
+                    onClearCountryFocus={onClearCountryFocus}
                     routePlannerPickRole={isRoutePlannerView ? routePlannerPickRole ?? undefined : undefined}
                     onRoutePlannerMapPick={isRoutePlannerView ? onRoutePlannerMapPick : undefined}
                     workspaceCustomPinMode={isWorkspaceView ? brokerPackLocationMode : false}
@@ -1929,6 +2257,7 @@ export default function MapComponent({
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
                 <LicenseClusterFlyEffect
                     cluster={pendingLicenseClusterFly}
+                    drillSeq={licenseClusterDrillSeq}
                     onLicenseMapZoomChange={handleLicenseZoomChange}
                     onLicenseMapViewportChange={handleLicenseViewportChange}
                     onLicenseClusterDrillComplete={handleLicenseClusterDrillCompleteLocal}
@@ -1969,6 +2298,7 @@ export default function MapComponent({
                 <CountryFocusBoundsFly
                     active={Boolean(countryFocusCountry?.trim())}
                     geojson={filteredGeoJson ?? null}
+                    countryFocusCountry={countryFocusCountry}
                     trigger={countryFocusBoundsTrigger}
                 />
                 {isLiveDataView && (
@@ -2009,6 +2339,7 @@ export default function MapComponent({
                 )}
                 
                 <MapBasemapLayers isDark={isDark}>
+                    {!riskLensActive && (
                     <LayersControl.Overlay checked name={t("אזורי שימור סביבתיים (ESG)", "ESG Protected Zones")}>
                         <FeatureGroup>
                             {ESG_CONSERVATION_ZONES.map((zone, idx) => (
@@ -2041,6 +2372,48 @@ export default function MapComponent({
                             ))}
                         </FeatureGroup>
                     </LayersControl.Overlay>
+                    )}
+                    {riskLensActive && (
+                        <FeatureGroup>
+                            {ESG_CONSERVATION_ZONES.map((zone, idx) => (
+                                <Circle
+                                    key={`risk-esg-${idx}`}
+                                    center={zone.center}
+                                    radius={zone.radius}
+                                    pathOptions={{
+                                        color: zone.color,
+                                        fillColor: zone.fillColor,
+                                        fillOpacity: 0.22,
+                                        weight: 2.4,
+                                        dashArray: '6, 6',
+                                    }}
+                                    eventHandlers={{
+                                        click: (e) => {
+                                            L.DomEvent.stopPropagation(e);
+                                        },
+                                    }}
+                                >
+                                    <Popup
+                                        className="esg-leaflet-popup"
+                                        minWidth={320}
+                                        maxWidth={380}
+                                        autoPanPadding={[16, 16]}
+                                    >
+                                        <EsgProtectedZonePopup zone={zone} />
+                                    </Popup>
+                                </Circle>
+                            ))}
+                        </FeatureGroup>
+                    )}
+                    {riskLensActive && <RiskLensCoverageOverlay enabled />}
+                    {riskLensActive && (
+                        <SanctionsCountryLayer
+                            enabled
+                            isDark={isDark}
+                            existingBorderCountries={borderCountries}
+                            onCountrySelect={onCountrySelect}
+                        />
+                    )}
 
                     {borderGeoJsonMatchesMarkers && !hideCountryBordersForVesselsOnly && !isRoutePlannerView && (
                         <LayersControl.Overlay checked={!isOilAndGasView} name={t("גבולות מדינות", "Country borders")}>
@@ -2048,13 +2421,40 @@ export default function MapComponent({
                                 key={`country-borders:${isDark ? 'd' : 'l'}:${countryFocusCountry?.trim() ?? 'viewport'}`}
                                 data={filteredGeoJson!}
                                 interactive={Boolean(onCountrySelect)}
-                                style={countryBorderLayerStyle}
+                                style={(feature) => {
+                                    const name =
+                                        (feature?.properties?.name as string | undefined) ??
+                                        (feature?.properties?.ADMIN as string | undefined) ??
+                                        (feature?.properties?.country as string | undefined);
+                                    const focus = countryFocusCountry?.trim();
+                                    if (riskLensActive) {
+                                        const row = sanctionsFlagLevelForCountry(sanctionsLookup, name);
+                                        const choropleth = sanctionsChoroplethStyle(row, isDark);
+                                        if (choropleth) {
+                                            return {
+                                                className: 'map-sanctions-choropleth',
+                                                ...choropleth,
+                                                lineCap: 'round' as const,
+                                                lineJoin: 'round' as const,
+                                            };
+                                        }
+                                    }
+                                    if (focus && name && name !== focus) {
+                                        return countryBorderNeighborStyle;
+                                    }
+                                    return countryBorderLayerStyle;
+                                }}
                                 onEachFeature={(feature, layer) => {
                                     const name =
                                         (feature.properties?.name as string | undefined) ??
                                         (feature.properties?.ADMIN as string | undefined) ??
                                         (feature.properties?.country as string | undefined);
                                     if (!name || !onCountrySelect) return;
+                                    const focus = countryFocusCountry?.trim();
+                                    const isFocusCountry = Boolean(focus && name === focus);
+                                    const baseStyle = isFocusCountry
+                                        ? countryBorderLayerStyle
+                                        : countryBorderNeighborStyle;
                                     layer.on({
                                         mouseover: (e) => {
                                             const target = e.target;
@@ -2062,9 +2462,14 @@ export default function MapComponent({
                                         },
                                         mouseout: (e) => {
                                             const target = e.target;
-                                            target.setStyle(countryBorderLayerStyle);
+                                            target.setStyle(baseStyle);
                                         },
-                                        click: () => onCountrySelect(name),
+                                        click: (e) => {
+                                            if (mapFeatureClickWasHandled(e)) return;
+                                            if (focus && name === focus) return;
+                                            L.DomEvent.stopPropagation(e);
+                                            onCountrySelect(name);
+                                        },
                                     });
                                 }}
                             />
@@ -2120,7 +2525,8 @@ export default function MapComponent({
                     {showInfrastructureLayers &&
                         onGroundVisible &&
                         !isLiveDataView &&
-                        !isOilAndGasView && (
+                        !isOilAndGasView &&
+                        (!isRoutePlannerView || infrastructureForcedLayers?.pipelines) && (
                         <OsmPetroleumMapLayers
                             bbox={infrastructureMapBbox ?? null}
                             enabled
@@ -2132,32 +2538,43 @@ export default function MapComponent({
                     )}
                     {isOilAndGasView && onGroundVisible && (
                         <>
+                            {assetsPetroleumPrefs.showOsmPetroleum && (
                             <OsmPetroleumMapLayers
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
-                                layerIds={['pipelines', 'refineries']}
-                                splitOilGasPipelineLayers
+                                layerIds={assetsPetroleumPrefs.osmLayerIds}
+                                layerVisibility={assetsPetroleumPrefs.osmLayerVisibility}
+                                forcedLayers={assetsPetroleumPrefs.osmForcedLayers}
+                                splitOilGasPipelineLayers={assetsPetroleumPrefs.splitOilGasPipelineLayers}
                                 isDark={isDark}
                             />
+                            )}
+                            {assetsPetroleumPrefs.showGemPipelines && (
                             <GemGoitPipelineMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
                                 isDark={isDark}
                             />
+                            )}
+                            {assetsPetroleumPrefs.showGemPlants && (
                             <GemGogptPlantMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
                                 isDark={isDark}
                             />
+                            )}
+                            {assetsPetroleumPrefs.showGemLng && (
                             <GemGgitLngMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
                                 isDark={isDark}
                             />
+                            )}
+                            {assetsPetroleumPrefs.showStorageTankFarms && (
                             <StorageTankFarmsMapLayer
                                 entities={storageEntities}
                                 enabled={oilGasLayersEnabled}
@@ -2168,6 +2585,7 @@ export default function MapComponent({
                                     setSelectedItem(item);
                                 }}
                             />
+                            )}
                         </>
                     )}
                     {vesselsVisible && isMaritimeLayerEnabled && (
@@ -2202,7 +2620,7 @@ export default function MapComponent({
                         features={licenseCanvasFeatures}
                         mapZoom={liveCanvasMapZoom}
                         selectedUid={selectedItem ? `license:${selectedItem.id}` : null}
-                        onFeatureClick={handleLicenseCanvasFeatureClick}
+                        onFeatureClick={handleLicenseCanvasFeatureClickWrapped}
                         clusterPoints
                         clusterKinds={LICENSE_CANVAS_CLUSTER_KINDS}
                         clusterMaxZoom={LICENSE_CANVAS_CLUSTER_MAX_ZOOM}
@@ -2246,6 +2664,7 @@ export default function MapComponent({
                       ports={routePlannerPorts}
                       pickRole={routePlannerPickRole ?? null}
                       onPortPick={onRoutePlannerPortPick}
+                      emphasized={routePlannerHubsEmphasized}
                     />
                   </Suspense>
                 )}
@@ -2255,6 +2674,7 @@ export default function MapComponent({
                       airports={routePlannerAirports}
                       pickRole={routePlannerPickRole ?? null}
                       onAirportPick={onRoutePlannerAirportPick}
+                      emphasized={routePlannerHubsEmphasized}
                     />
                   </Suspense>
                 )}

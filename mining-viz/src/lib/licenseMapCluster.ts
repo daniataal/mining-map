@@ -47,11 +47,26 @@ export const LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM = LICENSE_CANVAS_CLUSTER_UNPACK_
 /** Dense grid/server bubbles (≥10) need deep drill or canvas re-clusters immediately. */
 export const LICENSE_DENSE_CLUSTER_MIN_COUNT = 10;
 
+/** Max zoom when drilling a low-zoom country-summary hub (e.g. "1129" for Ghana). */
+export const LICENSE_COUNTRY_SUMMARY_DRILL_MAX_ZOOM = 10;
+
+/** Zoom into a country-summary hub — always step in, never fit the huge server padding bbox. */
+export function countrySummaryDrillTargetZoom(currentZoom: number): number {
+  const stepped = Math.max(currentZoom + 1, SERVER_CLUSTER_MIN_DRILL_ZOOM);
+  return Math.min(LICENSE_COUNTRY_SUMMARY_DRILL_MAX_ZOOM, stepped);
+}
+
+/** Step zoom in for any cluster drill — never hold at the same zoom level. */
+export function steppedClusterDrillTargetZoom(currentZoom: number, ceiling: number): number {
+  return Math.min(ceiling, Math.max(currentZoom + 1, SERVER_CLUSTER_MIN_DRILL_ZOOM));
+}
+
 /** Map zoom to fly when opening a cluster bubble into individual markers. */
 export function licenseClusterVisualDrillZoom(
   mapClusterCount: number,
-  options?: { clientCluster?: boolean },
+  options?: { clientCluster?: boolean; countrySummary?: boolean },
 ): number {
+  if (options?.countrySummary) return LICENSE_COUNTRY_SUMMARY_DRILL_MAX_ZOOM;
   if (options?.clientCluster) return LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM;
   if (mapClusterCount >= LICENSE_DENSE_CLUSTER_MIN_COUNT) {
     return LICENSE_CLIENT_CLUSTER_EXPAND_ZOOM;

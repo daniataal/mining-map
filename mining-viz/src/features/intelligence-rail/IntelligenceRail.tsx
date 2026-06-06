@@ -2,6 +2,7 @@ import { LucidePanelRightClose, LucideSparkles } from 'lucide-react';
 import type { MiningLicense } from '../../types';
 import { useI18n } from '../../lib/i18n';
 import { CountryIntelligencePanel } from './CountryIntelligencePanel';
+import { CountrySanctionsSection } from './CountrySanctionsSection';
 
 export type IntelligenceSelection =
   | { type: 'country'; country: string }
@@ -16,6 +17,7 @@ type Props = {
   onViewAssets?: (country: string) => void;
   onFindSuppliers?: (country: string) => void;
   onBuildDealPack?: (country: string) => void;
+  onOpenLicenseList?: () => void;
 };
 
 export function IntelligenceRail({
@@ -24,6 +26,7 @@ export function IntelligenceRail({
   onViewAssets,
   onFindSuppliers,
   onBuildDealPack,
+  onOpenLicenseList,
 }: Props) {
   const { t } = useI18n();
 
@@ -65,12 +68,17 @@ export function IntelligenceRail({
           )}
 
           {selection?.type === 'country' && (
-            <CountryIntelligencePanel
-              country={selection.country}
-              onViewAssets={onViewAssets}
-              onFindSuppliers={onFindSuppliers}
-              onBuildDealPack={onBuildDealPack}
-            />
+            <>
+              <CountryIntelligencePanel
+                country={selection.country}
+                onViewAssets={onViewAssets}
+                onFindSuppliers={onFindSuppliers}
+                onBuildDealPack={onBuildDealPack}
+              />
+              <div className="mt-4">
+                <CountrySanctionsSection country={selection.country} />
+              </div>
+            </>
           )}
 
           {selection?.type === 'cluster' && (
@@ -82,6 +90,15 @@ export function IntelligenceRail({
               <p className="text-xs text-slate-400">
                 {t('התקרב לפרטים או לחץ שוב לזום', 'Zoom in for detail or click again to drill')}
               </p>
+              {onOpenLicenseList && (
+                <button
+                  type="button"
+                  onClick={onOpenLicenseList}
+                  className="mt-2 w-full rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-200 hover:bg-amber-500/20"
+                >
+                  {t('פתח רשימה בסרגל', 'Open list in sidebar')}
+                </button>
+              )}
             </div>
           )}
 

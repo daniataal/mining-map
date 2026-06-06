@@ -47,6 +47,7 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 
 		api.Get("/coverage", s.VesselCoverage)
 		api.Get("/coverage/status", s.CoverageStatus)
+		api.Get("/sanctions/country-summary", s.SanctionsCountrySummary)
 		api.Get("/source-health", s.SourceHealth)
 		api.Get("/maritime/context", s.MaritimeContext)
 		api.Get("/maritime/stats", s.MaritimeStats)

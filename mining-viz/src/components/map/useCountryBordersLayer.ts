@@ -11,6 +11,8 @@ import { LICENSE_MAP_BORDER_COUNTRY_CAP } from '../../lib/licenseCountrySummary'
 
 type UseCountryBordersLayerArgs = {
   displayData: MiningLicense[];
+  /** When country-focused, use this wider dataset so neighbor outlines stay clickable. */
+  borderSourceData?: MiningLicense[];
   countryFocusCountry?: string | null;
   isRoutePlannerView: boolean;
   isDark: boolean;
@@ -18,6 +20,7 @@ type UseCountryBordersLayerArgs = {
 
 export function useCountryBordersLayer({
   displayData,
+  borderSourceData,
   countryFocusCountry,
   isRoutePlannerView,
   isDark,
@@ -27,8 +30,13 @@ export function useCountryBordersLayer({
       return { borderCountries: [] as string[], borderCountriesCapped: false };
     }
     const focus = countryFocusCountry?.trim();
+    const source = borderSourceData ?? displayData;
     if (focus) {
-      return { borderCountries: [focus], borderCountriesCapped: false };
+      const regional = countriesForMapBorders(source, LICENSE_MAP_BORDER_COUNTRY_CAP).filter(
+        (c) => c !== focus,
+      );
+      const borderList = [focus, ...regional].slice(0, LICENSE_MAP_BORDER_COUNTRY_CAP);
+      return { borderCountries: borderList, borderCountriesCapped: false };
     }
     const borderList = countriesForMapBorders(displayData, LICENSE_MAP_BORDER_COUNTRY_CAP);
     const ranked = countryLicenseCountsForBorders(displayData);
@@ -37,7 +45,7 @@ export function useCountryBordersLayer({
       borderCountries: borderList,
       borderCountriesCapped: capped,
     };
-  }, [countryFocusCountry, displayData, isRoutePlannerView]);
+  }, [countryFocusCountry, displayData, borderSourceData, isRoutePlannerView]);
 
   const borderCountriesKey = useMemo(
     () => borderCountries.slice().sort((a, b) => a.localeCompare(b)).join('|'),
@@ -113,10 +121,40 @@ export function useCountryBordersLayer({
     };
   }, [countryFocusCountry, isDark, countryBorderPathStyle, countryBorderRenderer]);
 
+  const countryBorderNeighborStyle = useMemo(
+    () =>
+      isDark
+        ? {
+            className: 'map-country-border map-country-border--neighbor map-country-border--dark',
+            fillColor: '#06b6d4',
+            color: '#64748b',
+            weight: 1.25,
+            opacity: 0.45,
+            fillOpacity: 0.02,
+            renderer: countryBorderRenderer,
+            lineCap: 'round' as const,
+            lineJoin: 'round' as const,
+          }
+        : {
+            className: 'map-country-border map-country-border--neighbor map-country-border--light',
+            fillColor: '#0284c7',
+            color: '#64748b',
+            weight: 1.25,
+            opacity: 0.55,
+            fillOpacity: 0.02,
+            renderer: countryBorderRenderer,
+            lineCap: 'round' as const,
+            lineJoin: 'round' as const,
+          },
+    [isDark, countryBorderRenderer],
+  );
+
   return {
+    borderCountries,
     borderCountriesCapped,
     borderGeoJsonMatchesMarkers,
     filteredGeoJson,
     countryBorderLayerStyle,
+    countryBorderNeighborStyle,
   };
 }

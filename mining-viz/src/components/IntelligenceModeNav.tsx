@@ -7,6 +7,8 @@ import {
   type IntelligenceMode,
   type IntelligenceSublayer,
 } from '../lib/intelligenceModes';
+import { globalMapLens, globalMapLensHelperCopy } from '../lib/globalMapLens';
+import { assetsMapLens, assetsMapLensHelperCopy } from '../lib/assetsMapLens';
 
 type Props = {
   mode: IntelligenceMode;
@@ -25,6 +27,13 @@ export function IntelligenceModeNav({
 }: Props) {
   const { t } = useI18n();
   const sublayers = SUBLAYERS_FOR_MODE[mode];
+  const activeGlobalLens = globalMapLens(mode, sublayer);
+  const activeAssetsLens = assetsMapLens(mode, sublayer);
+  const lensHelper = activeGlobalLens
+    ? globalMapLensHelperCopy(activeGlobalLens)
+    : activeAssetsLens
+      ? assetsMapLensHelperCopy(activeAssetsLens)
+      : null;
 
   return (
     <div className="flex flex-col gap-2 items-end">
@@ -66,6 +75,11 @@ export function IntelligenceModeNav({
             </button>
           ))}
         </div>
+      )}
+      {lensHelper && (
+        <p className="text-[9px] font-bold text-slate-500 dark:text-slate-400 text-right max-w-[min(100%,28rem)]">
+          {t(lensHelper.he, lensHelper.en)}
+        </p>
       )}
     </div>
   );

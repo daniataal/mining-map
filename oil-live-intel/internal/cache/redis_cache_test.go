@@ -29,6 +29,7 @@ func TestTTLForPath(t *testing.T) {
 		"/api/oil-live/maritime/stats":              30 * time.Second,
 		"/api/oil-live/licenses/country-summary":    120 * time.Second,
 		"/api/oil-live/map/country-borders":         120 * time.Second,
+		"/api/oil-live/sanctions/country-summary":   120 * time.Second,
 		"/api/oil-live/intelligence/country/Brazil": 120 * time.Second,
 		"/api/oil-live/vessels/live":                0,
 	}
