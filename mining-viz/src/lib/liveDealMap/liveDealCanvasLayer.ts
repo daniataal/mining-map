@@ -43,7 +43,14 @@ function colorForFeature(feature: LiveDealMapFeature): string {
     if (feature.styleKey?.startsWith('#')) return feature.styleKey;
     return feature.styleKey === 'gold' ? '#facc15' : '#64748b';
   }
-  if (feature.kind === 'server_cluster') return '#2563eb';
+  if (feature.kind === 'server_cluster') {
+    const clusterKind = (feature.data as any)?.clusterKind;
+    if (clusterKind === 'storage_terminal') return '#06b6d4';
+    if (clusterKind === 'tank_farm') return '#f97316';
+    if (clusterKind === 'refinery') return '#fb923c';
+    if (clusterKind === 'storage_tank') return '#94a3b8';
+    return '#2563eb';
+  }
   if (feature.kind === 'vessel') return '#f59e0b';
   if (feature.kind === 'trade_flow') return '#a855f7';
   return '#fb923c';
