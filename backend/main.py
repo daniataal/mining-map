@@ -5814,6 +5814,39 @@ def get_petroleum_osm_layers_catalog():
         }
 
 
+@app.get("/api/petroleum/osm-features/{layer_id}/{osm_type}/{osm_id}")
+def get_petroleum_osm_feature(layer_id: str, osm_type: str, osm_id: int):
+    """Full OSM tags for one persisted petroleum_osm_features row (map click enrichment)."""
+    try:
+        try:
+            from backend.services.petroleum_osm_store import get_osm_feature_properties
+        except ImportError:
+            from services.petroleum_osm_store import get_osm_feature_properties
+
+        conn = get_db_connection()
+        try:
+            props = get_osm_feature_properties(conn, layer_id, osm_type, osm_id)
+        finally:
+            conn.close()
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown OSM petroleum layer: {layer_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"OSM feature lookup failed: {exc}") from exc
+
+    if not props:
+        raise HTTPException(status_code=404, detail="OSM feature not found")
+    return _licenses_json_response(
+        {
+            "layer_id": layer_id,
+            "osm_type": osm_type,
+            "osm_id": osm_id,
+            "properties": props,
+            "attribution": "© OpenStreetMap contributors (ODbL)",
+        },
+        max_age=3600,
+    )
+
+
 @app.get("/api/petroleum/osm-layers/{layer_id}")
 def get_petroleum_osm_layer(
     layer_id: str,

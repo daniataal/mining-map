@@ -83,12 +83,12 @@ export function assetsMapLensHelperCopy(lens: AssetsMapLens): { en: string; he: 
     case 'mines':
       return { en: 'Mining licenses & cadastre', he: 'רישיונות כרייה' };
     case 'oil_fields':
-      return { en: 'Upstream blocks, pipelines & extraction', he: 'בלוקים, צינורות וייצור' };
+      return { en: 'Upstream licenses and known fields; field coverage is source-limited', he: 'בלוקים, צינורות וייצור' };
     case 'refineries':
-      return { en: 'Refineries & processing plants (OSM + GEM)', he: 'זיקוק ומתקני עיבוד (OSM + GEM)' };
+      return { en: 'Refineries and processing plants', he: 'זיקוק ומתקני עיבוד (OSM + GEM)' };
     case 'tank_farms':
-      return { en: 'Storage terminals & tank farms (OSM + reference)', he: 'מסופי אחסון וטנקים (OSM + מקורות)' };
+      return { en: 'Storage terminals and tank farms', he: 'מסופי אחסון וטנקים (OSM + מקורות)' };
     case 'ports':
-      return { en: 'Port authorities & maritime hubs', he: 'רשויות נמל ומרכזי ימי' };
+      return { en: 'Ports, terminals and export hubs', he: 'רשויות נמל ומרכזי ימי' };
   }
 }

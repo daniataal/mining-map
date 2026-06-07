@@ -38,8 +38,12 @@ export function MapComponentBridge(props: MapProps) {
       {...props}
       processedData={filteredProcessedData}
       brokerWorkspaceMap={isWorkspace ? bw.mapSnapshot : undefined}
+      brokerWorkspaceSelectedEntityIds={isWorkspace ? bw.selectedEntityIds : undefined}
       brokerPackLocationMode={isWorkspace && bw.packLocationMode}
       onBrokerPackLocationPick={isWorkspace ? onPackLocationPick : undefined}
+      onBrokerWorkspaceEntitySelect={
+        isWorkspace ? bw.toggleEntitySelection : undefined
+      }
       onBrokerPackSelect={
         isWorkspace ? (packId: string) => bw.setSelectedPackId(packId) : undefined
       }

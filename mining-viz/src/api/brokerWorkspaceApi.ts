@@ -13,8 +13,8 @@ export type BrokerWorkspace = {
 export type WorkspaceEntity = {
   id: string;
   workspace_id: string;
-  entity_type: 'supplier' | 'buyer' | 'custom_pin';
-  ref_kind: 'license' | 'oil_company' | 'vessel' | 'custom';
+  entity_type: string;
+  ref_kind: string;
   ref_id?: string;
   display_name: string;
   lat: number;
@@ -49,17 +49,60 @@ export type DealPackJournal = {
   done: string[];
   missing: string[];
   notes: string;
+  dd_status?: string;
+  next_action?: string;
+};
+
+export type DealPackRouteLeg = {
+  id?: string;
+  sequence: number;
+  from: string;
+  to: string;
+  mode: 'truck' | 'rail' | 'pipeline' | 'vessel' | 'air' | 'other';
+  hub_name?: string;
+  notes?: string;
 };
 
 export type DealPackTransport = {
   mode?: string;
+  vessel_mmsi?: string;
   vessel_imo?: string;
   vessel_name?: string;
+  vessel_call_sign?: string;
+  vessel_type?: string;
+  vessel_tanker_class?: string;
+  vessel_deadweight_tons?: number;
+  vessel_max_draft_m?: number;
+  vessel_flag?: string;
+  vessel_last_lat?: number;
+  vessel_last_lng?: number;
+  vessel_last_position_at?: string;
+  vessel_destination?: string;
+  vessel_speed_knots?: number;
+  vessel_draft_m?: number;
+  vessel_crude_capable?: boolean;
+  vessel_product_tanker?: boolean;
   port_id?: string;
   port_name?: string;
   terminal_id?: string;
   refinery_id?: string;
   pipeline_id?: string;
+  product?: string;
+  quantity?: number;
+  unit?: string;
+  incoterm?: string;
+  route_legs?: DealPackRouteLeg[];
+  route_plan_snapshot?: Record<string, unknown>;
+};
+
+export type DealPackCostItem = {
+  id: string;
+  label: string;
+  amount: number;
+  currency?: string;
+  category?: 'loading' | 'unloading' | 'port_fee' | 'storage' | 'vessel' | 'inspection' | 'demurrage' | 'other';
+  entity_id?: string;
+  notes?: string;
 };
 
 export type DealPackEconomics = {
@@ -68,6 +111,7 @@ export type DealPackEconomics = {
   volume?: number;
   freight_cost?: number;
   misc_costs?: number;
+  cost_items?: DealPackCostItem[];
   margin_pct?: number;
   calculated_profit?: number;
 };
@@ -78,6 +122,47 @@ export type WorkspaceEdge = {
   source_node_id: string;
   target_node_id: string;
   label?: string;
+};
+
+export type WorkspaceSearchHit = {
+  type: string;
+  id: string;
+  score?: number;
+  source: Record<string, unknown>;
+};
+
+export type WorkspaceSearchResponse = {
+  hits: WorkspaceSearchHit[];
+  total: number;
+  query: string;
+  took_ms?: number;
+  degraded?: string;
+  error?: string;
+};
+
+export type DealPackVesselHit = {
+  mmsi: number | string;
+  imo?: string;
+  name?: string;
+  callsign?: string;
+  vessel_type?: string;
+  tanker_class?: string;
+  crude_capable?: boolean;
+  product_tanker?: boolean;
+  deadweight_tons?: number;
+  max_draft_m?: number;
+  flag?: string;
+  lat?: number;
+  lng?: number;
+  last_position_at?: string;
+  destination?: string;
+  speed_knots?: number;
+  draft_m?: number;
+};
+
+export type DealPackVesselSearchResponse = {
+  vessels: DealPackVesselHit[];
+  query: string;
 };
 
 export type DealPackFollowup = {
@@ -154,6 +239,26 @@ export async function deleteBrokerWorkspace(id: string): Promise<{ status: strin
 
 export async function getWorkspaceMap(workspaceId: string): Promise<WorkspaceMapSnapshot> {
   return brokerFetch(`/api/oil-live/workspaces/${workspaceId}/map`);
+}
+
+export async function searchWorkspaceLicenses(
+  q: string,
+  limit = 12,
+): Promise<WorkspaceSearchResponse> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  return brokerFetch(`/api/oil-live/licenses/search?${params.toString()}`);
+}
+
+export async function searchDealPackVessels(
+  q: string,
+  limit = 8,
+): Promise<DealPackVesselSearchResponse> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  return brokerFetch(`/api/oil-live/vessels/search?${params.toString()}`);
 }
 
 export async function createWorkspaceEntity(
@@ -337,13 +442,18 @@ export function parsePackTransport(raw: unknown): DealPackTransport {
 }
 
 export function parsePackEconomics(raw: unknown): DealPackEconomics {
-  return (raw && typeof raw === 'object' ? raw : {}) as DealPackEconomics;
+  const economics = (raw && typeof raw === 'object' ? raw : {}) as DealPackEconomics;
+  return {
+    ...economics,
+    cost_items: Array.isArray(economics.cost_items) ? economics.cost_items : [],
+  };
 }
 
 export function calcDealProfit(e: DealPackEconomics): number {
   const vol = e.volume ?? 0;
   const buy = e.buy_price ?? 0;
   const sell = e.sell_price ?? 0;
-  const costs = (e.freight_cost ?? 0) + (e.misc_costs ?? 0);
+  const itemizedCosts = (e.cost_items ?? []).reduce((sum, item) => sum + (item.amount || 0), 0);
+  const costs = (e.freight_cost ?? 0) + (e.misc_costs ?? 0) + itemizedCosts;
   return vol * (sell - buy) - costs;
 }

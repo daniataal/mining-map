@@ -259,6 +259,8 @@ func (s *Server) ImportSearchEntity(w http.ResponseWriter, r *http.Request) {
 	switch req.HitType {
 	case "vessel":
 		refKind = "vessel"
+	case "terminal":
+		refKind = "terminal"
 	case "company", "organization":
 		refKind = "oil_company"
 	case "license":
@@ -561,7 +563,7 @@ func (s *Server) GetWorkspaceMap(w http.ResponseWriter, r *http.Request) {
 	entityRows, err := s.Pool.Query(ctx, `
 		SELECT id, workspace_id, entity_type, ref_kind, ref_id, display_name, lat, lng,
 			deal_signal, dd_stage, in_dd_queue, packed_into_pack_id, metadata, created_at, updated_at
-		FROM workspace_entities WHERE workspace_id = $1 AND packed_into_pack_id IS NULL
+		FROM workspace_entities WHERE workspace_id = $1
 		ORDER BY created_at DESC
 	`, wsID)
 	if err != nil {

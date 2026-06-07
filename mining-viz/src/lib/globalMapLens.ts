@@ -31,22 +31,22 @@ export function globalMapLensHelperCopy(lens: GlobalMapLens): { en: string; he: 
   switch (lens) {
     case 'countries':
       return {
-        en: 'Country activity hubs',
+        en: 'Country opportunity hubs',
         he: 'מרכזי פעילות לפי מדינה',
       };
     case 'licenses':
       return {
-        en: 'Individual license markers',
+        en: 'Asset inventory and drill-down markers',
         he: 'סימוני רישיון בודדים',
       };
     case 'trade_flows':
       return {
-        en: 'Macro trade corridors (Comtrade)',
+        en: 'Macro commodity corridors (Comtrade)',
         he: 'מסדרונות סחר מאקרו (Comtrade)',
       };
     case 'risk':
       return {
-        en: 'ESG, coverage gaps & OpenSanctions screening',
+        en: 'Risk signals, data coverage and OpenSanctions screening',
         he: 'ESG, פערי כיסוי וסינון OpenSanctions',
       };
   }

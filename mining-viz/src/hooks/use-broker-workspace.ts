@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createBrokerDealPack,
@@ -34,6 +34,7 @@ export function useBrokerWorkspace() {
     else localStorage.removeItem('broker_active_workspace_id');
   }, []);
   const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
   const [packLocationMode, setPackLocationMode] = useState(false);
   const [pendingPackId, setPendingPackId] = useState<string | null>(null);
   const [pendingConstituents, setPendingConstituents] = useState<string[]>([]);
@@ -54,6 +55,20 @@ export function useBrokerWorkspace() {
     enabled: Boolean(effectiveWorkspaceId),
     refetchInterval: 60_000,
   });
+
+  useEffect(() => {
+    setSelectedEntityIds([]);
+  }, [effectiveWorkspaceId]);
+
+  const toggleEntitySelection = useCallback((id: string) => {
+    setSelectedEntityIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
+
+  const clearEntitySelection = useCallback(() => {
+    setSelectedEntityIds([]);
+  }, []);
 
   const invalidateMap = useCallback(() => {
     if (effectiveWorkspaceId) {
@@ -206,6 +221,9 @@ export function useBrokerWorkspace() {
     selectedPackId,
     setSelectedPackId,
     selectedPack,
+    selectedEntityIds,
+    toggleEntitySelection,
+    clearEntitySelection,
     packLocationMode,
     setPackLocationMode,
     createWs,

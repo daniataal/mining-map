@@ -16,6 +16,13 @@ type CountrySummaryRow struct {
 	Lng     float64 `json:"lng"`
 }
 
+// CountryCounts separates broker-visible map rows from broader stored evidence.
+type CountryCounts struct {
+	MapVisibleCount      int `json:"map_visible_count"`
+	CoordinateValidCount int `json:"coordinate_valid_count"`
+	StoredTotalCount     int `json:"stored_total_count"`
+}
+
 // CountrySummaryQuery bounds and filters for per-country aggregation.
 type CountrySummaryQuery struct {
 	MinLat, MaxLat, MinLng, MaxLng float64
@@ -85,6 +92,7 @@ func QueryCountrySummary(ctx context.Context, pool *pgxpool.Pool, q CountrySumma
 		WHERE %s
 		  AND (%s)
 		  AND country IS NOT NULL AND TRIM(country) <> ''
+		  AND LOWER(TRIM(country)) <> 'global'
 		  AND lat IS NOT NULL AND lng IS NOT NULL
 		  AND lat BETWEEN -90 AND 90
 		  AND lng BETWEEN -180 AND 180
@@ -129,4 +137,65 @@ func QueryCountrySummary(ctx context.Context, pool *pgxpool.Pool, q CountrySumma
 		})
 	}
 	return out, rows.Err()
+}
+
+// QueryCountryCounts returns aligned count semantics for country hubs and country intelligence.
+func QueryCountryCounts(ctx context.Context, pool *pgxpool.Pool, country string, sector string, preferOpenData bool) (CountryCounts, error) {
+	sectorSQL := "TRUE"
+	var args []any
+	if sec := normalizeSector(sector); sec != "" {
+		sectorSQL = "LOWER(TRIM(COALESCE(NULLIF(TRIM(sector), ''), 'mining'))) = $1"
+		args = append(args, sec)
+	}
+
+	countries := expandCountryNames([]string{country})
+	lower := make([]string, len(countries))
+	for i, c := range countries {
+		lower[i] = strings.ToLower(c)
+	}
+	n := len(args)
+	countrySQL := fmt.Sprintf("(country = ANY($%d) OR LOWER(country) = ANY($%d))", n+1, n+2)
+	args = append(args, countries, lower)
+
+	baseSQL := fmt.Sprintf(`
+		%s
+		AND (%s)
+		AND country IS NOT NULL
+		AND TRIM(country) <> ''
+		AND LOWER(TRIM(country)) <> 'global'
+	`, sectorSQL, countrySQL)
+	validCoordsSQL := `
+		AND lat IS NOT NULL AND lng IS NOT NULL
+		AND lat BETWEEN -90 AND 90
+		AND lng BETWEEN -180 AND 180
+		AND NOT (ABS(lat) < 0.05 AND ABS(lng) < 0.05)
+	`
+	openClause := ""
+	if preferOpenData {
+		openClause = fmt.Sprintf(` AND (
+			LOWER(TRIM(COALESCE(record_origin, ''))) <> 'bundled_json'
+			OR country IS NULL
+			OR country NOT IN (
+				SELECT country FROM licenses
+				WHERE LOWER(TRIM(COALESCE(record_origin, ''))) IN ('open_data', 'global_open_fallback')
+				AND country IS NOT NULL
+				AND %s
+			)
+		)`, sectorSQL)
+	}
+
+	sql := fmt.Sprintf(`
+		SELECT
+			(SELECT COUNT(*)::int FROM licenses WHERE %s) AS stored_total,
+			(SELECT COUNT(*)::int FROM licenses WHERE %s %s) AS coordinate_valid,
+			(SELECT COUNT(*)::int FROM licenses WHERE %s %s %s) AS map_visible
+	`, baseSQL, baseSQL, validCoordsSQL, baseSQL, validCoordsSQL, openClause)
+
+	var counts CountryCounts
+	err := pool.QueryRow(ctx, sql, args...).Scan(
+		&counts.StoredTotalCount,
+		&counts.CoordinateValidCount,
+		&counts.MapVisibleCount,
+	)
+	return counts, err
 }

@@ -33,6 +33,7 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 
 		// Licenses
 		api.Get("/licenses", s.ListLicenses)
+		api.Get("/licenses/search", s.SearchLicenses)
 		api.Post("/licenses", s.CreateLicense)
 		api.Put("/licenses/{id}", s.UpdateLicense)
 		api.Delete("/licenses/{id}", s.DeleteLicense)
@@ -57,6 +58,7 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 		api.Post("/terminals/import-geojson", s.ImportGeoJSON)
 		api.Get("/vessels", s.ListVessels)
 		api.Get("/vessels/live", s.LiveVessels)
+		api.Get("/vessels/search", s.SearchVessels)
 		api.Get("/vessels/lookup", s.LookupVesselByIMO)
 		api.Get("/vessels/{mmsi}", s.GetVessel)
 		api.Get("/vessels/{mmsi}/track", s.GetVesselTrack)
