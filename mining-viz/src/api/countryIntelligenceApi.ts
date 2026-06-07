@@ -12,7 +12,15 @@ export type CountryIntelligenceTradeSignal = {
 
 export type CountryIntelligence = {
   country: string;
-  license_counts: { mining: number; oil_and_gas: number; total: number };
+  license_counts: {
+    mining: number;
+    oil_and_gas: number;
+    total: number;
+    map_visible_count?: number;
+    coordinate_valid_count?: number;
+    stored_total_count?: number;
+    count_explanation?: string;
+  };
   port_count: number;
   vessel_count: number | null;
   vessel_coverage_note: string | null;

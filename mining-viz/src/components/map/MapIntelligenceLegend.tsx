@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Info } from 'lucide-react';
 import type { IntelligenceMode, IntelligenceSublayer } from '../../lib/intelligenceModes';
 import { globalMapLens } from '../../lib/globalMapLens';
 import { assetsMapLens } from '../../lib/assetsMapLens';
+import type { AssetLayerVisibility } from '../../lib/assetLayerCockpit';
 import { INTELLIGENCE_COLORS } from '../../lib/intelligenceColors';
 import { useI18n } from '../../lib/i18n';
 
@@ -11,6 +12,7 @@ type Props = {
   sublayer: IntelligenceSublayer;
   globalMacroTradeOn?: boolean;
   onGlobalMacroTradeChange?: (on: boolean) => void;
+  assetLayerVisibility?: AssetLayerVisibility;
 };
 
 const LEGEND_ITEMS = [
@@ -75,9 +77,32 @@ function itemsForAssetsLens(lens: NonNullable<ReturnType<typeof assetsMapLens>>)
   }
 }
 
-function itemsForMode(mode: IntelligenceMode, sublayer: IntelligenceSublayer) {
+function itemsForAssetVisibility(visibility: AssetLayerVisibility) {
+  const keys = new Set<string>(['border']);
+  if (visibility.mines) keys.add('mining');
+  if (visibility.oil_fields) {
+    keys.add('oil');
+    keys.add('cluster');
+  }
+  if (visibility.refineries) keys.add('refinery');
+  if (visibility.tank_farms) keys.add('storage');
+  if (visibility.ports) keys.add('port');
+  if (visibility.pipelines) keys.add('pipeline');
+  if (visibility.ais_vessels) keys.add('vessel');
+  if (visibility.esg_zones) keys.add('esg');
+  return LEGEND_ITEMS.filter((i) => keys.has(i.key));
+}
+
+function itemsForMode(
+  mode: IntelligenceMode,
+  sublayer: IntelligenceSublayer,
+  assetLayerVisibility?: AssetLayerVisibility,
+) {
   const globalLens = globalMapLens(mode, sublayer);
   if (globalLens) return itemsForGlobalLens(globalLens);
+  if (mode === 'assets' && assetLayerVisibility) {
+    return itemsForAssetVisibility(assetLayerVisibility);
+  }
   const assetsLens = assetsMapLens(mode, sublayer);
   if (assetsLens) return itemsForAssetsLens(assetsLens);
   if (mode === 'supply_chain') {
@@ -94,11 +119,12 @@ export function MapIntelligenceLegend({
   sublayer,
   globalMacroTradeOn = true,
   onGlobalMacroTradeChange,
+  assetLayerVisibility,
 }: Props) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const lens = globalMapLens(mode, sublayer);
-  const items = itemsForMode(mode, sublayer);
+  const items = itemsForMode(mode, sublayer, assetLayerVisibility);
 
   return (
     <div className="absolute right-4 bottom-20 z-[940] pointer-events-auto max-w-[14rem]">

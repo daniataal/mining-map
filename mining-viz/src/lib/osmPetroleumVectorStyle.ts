@@ -5,13 +5,21 @@ import { OSM_MVT_SOURCE_LAYER } from './osmPetroleumVectorTiles';
 
 export type OsmVectorVisibility = Record<OsmPetroleumLayerId, boolean>;
 
+export type OsmVectorStyleOptions = {
+  isDark?: boolean;
+  splitOilGasPipelineLayers?: boolean;
+};
+
+/** Leaflet pane for OSM petroleum MVT — above basemap tiles, below license canvas. */
+export const OSM_PETROLEUM_VECTOR_PANE = 'petroleumVectorPane';
+
 const SOURCE_IDS: Record<OsmPetroleumLayerId, string> = {
   pipelines: 'osm-pipelines',
   refineries: 'osm-refineries',
   storage_terminals: 'osm-storage-terminals',
 };
 
-const STYLE_LAYER_IDS = {
+export const STYLE_LAYER_IDS = {
   pipelinesOilGas: 'osm-pipelines-oil-gas',
   pipelinesWater: 'osm-pipelines-water',
   refineries: 'osm-refineries-circles',
@@ -54,13 +62,41 @@ function sourceForLayer(
   };
 }
 
+function pipelineLinePaint(options?: OsmVectorStyleOptions) {
+  const split = Boolean(options?.splitOilGasPipelineLayers);
+  const isDark = options?.isDark !== false;
+  if (split) {
+    return {
+      'line-color': [
+        'match',
+        ['get', 'pipeline_substance'],
+        'oil',
+        isDark ? '#fbbf24' : '#b45309',
+        'gas',
+        isDark ? '#38bdf8' : '#0284c7',
+        isDark ? '#fbbf24' : '#b45309',
+      ],
+      'line-width': 3,
+      'line-opacity': isDark ? 0.92 : 0.88,
+    };
+  }
+  return {
+    'line-color': isDark ? '#fbbf24' : '#b45309',
+    'line-width': 3,
+    'line-opacity': isDark ? 0.9 : 0.85,
+    'line-dasharray': [5, 4],
+  };
+}
+
 /** MapLibre style: transparent background + petroleum OSM vector tile layers. */
 export function buildOsmPetroleumVectorStyle(
   visibilityMap: OsmVectorVisibility,
   catalogLayers: OsmPetroleumCatalogLayer[] | undefined,
   origin: string,
+  styleOptions?: OsmVectorStyleOptions,
 ): StyleSpecification {
   const byId = new Map(catalogLayers?.map((layer) => [layer.id, layer]));
+  const pipelinePaint = pipelineLinePaint(styleOptions);
 
   return {
     version: 8,
@@ -86,12 +122,7 @@ export function buildOsmPetroleumVectorStyle(
           'line-join': 'round',
         },
         filter: ['!=', ['get', 'pipeline_substance'], 'water'],
-        paint: {
-          'line-color': '#64748b',
-          'line-width': 2.5,
-          'line-opacity': 0.75,
-          'line-dasharray': [5, 4],
-        },
+        paint: pipelinePaint,
       },
       {
         id: STYLE_LAYER_IDS.pipelinesWater,
@@ -118,7 +149,7 @@ export function buildOsmPetroleumVectorStyle(
         'source-layer': OSM_MVT_SOURCE_LAYER,
         layout: { visibility: visibility(visibilityMap.refineries) },
         paint: {
-          'circle-radius': 5,
+          'circle-radius': 6,
           'circle-color': '#fb923c',
           'circle-opacity': 0.85,
           'circle-stroke-color': '#c2410c',

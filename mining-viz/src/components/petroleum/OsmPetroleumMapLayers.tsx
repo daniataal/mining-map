@@ -12,15 +12,12 @@ import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/p
 import { infrastructureLayerShouldRender } from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
-import type { OsmPetroleumCatalog } from '../../lib/osmPetroleumLayers';
 import { osmVectorTilesEnabled } from '../../lib/osmPetroleumVectorTiles';
 import type { OsmVectorVisibility } from '../../lib/osmPetroleumVectorStyle';
 import { OsmVisibilityBridge } from './OsmVisibilityBridge';
+import OsmPetroleumMapLayersGeoJson from './OsmPetroleumMapLayersGeoJson';
 
 const OsmPetroleumVectorMap = lazy(() => import('./OsmPetroleumVectorLayers'));
-
-// GeoJSON fallback components (legacy path)
-import OsmPetroleumMapLayersGeoJson from './OsmPetroleumMapLayersGeoJson';
 
 const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
 
@@ -38,7 +35,6 @@ interface OsmPetroleumMapLayersProps {
   forcedLayers?: Partial<Record<OsmPetroleumLayerId, boolean>>;
   mapZoom?: number;
   onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
-  /** Oil & Gas view without Mapbox: split OSM pipelines into oil vs gas layer toggles. */
   splitOilGasPipelineLayers?: boolean;
   isDark?: boolean;
 }
@@ -90,14 +86,14 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
     setLocalVisibility((prev) => ({ ...prev, [layerId]: on }));
   }, []);
 
-  const pipelinesEnabled =
+  const pipelinesToggled =
     enabled &&
     activeIds.includes('pipelines') &&
     (layerVisibility?.pipelines ?? localVisibility.pipelines ?? osmDefaults.pipelines);
   const { data: pipelinesData } = useOsmPetroleumLayerGeoJson(
     'pipelines',
     bbox,
-    enabled && pipelinesEnabled && Boolean(bbox),
+    !vectorMode && pipelinesToggled && Boolean(bbox),
     mapZoom,
   );
   const coverageGapMessage = osmPetroleumCoverageGapMessage(pipelinesData);
@@ -129,28 +125,26 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
     refineries: visibleForRender.includes('refineries'),
     storage_terminals: visibleForRender.includes('storage_terminals'),
   };
+  const osmActive = visibleForRender.length > 0;
+  const osmLabel = t(
+    'תשתיות נפט/גז OSM (צינורות, זיקוק, אחסון)',
+    'Oil/gas infrastructure — OpenStreetMap (pipelines, refineries, storage)',
+  );
 
   return (
     <>
-      {coverageGapMessage ? (
-        <div
-          className="pointer-events-none absolute left-2 top-2 z-[500] max-w-xs rounded-md border border-amber-500/40 bg-amber-950/85 px-2 py-1 text-[11px] leading-snug text-amber-100 shadow"
-          role="status"
-        >
-          {t(
-            'שכבות OSM: אין נתונים שמורים — הריצו petroleum-osm worker או graph-sync.',
-            coverageGapMessage,
-          )}
-        </div>
-      ) : null}
-      <Suspense fallback={null}>
-        <OsmPetroleumVectorMap
-          enabled={visibleForRender.length > 0}
-          visibility={vectorVisibility}
-          catalogLayers={osmCatalog?.layers}
-          onFeatureClick={onFeatureClick}
-        />
-      </Suspense>
+      <LayersControl.Overlay checked={osmActive} name={osmLabel}>
+        <Suspense fallback={null}>
+          <OsmPetroleumVectorMap
+            enabled={osmActive}
+            visibility={vectorVisibility}
+            catalogLayers={osmCatalog?.layers}
+            onFeatureClick={onFeatureClick}
+            isDark={isDark}
+            splitOilGasPipelineLayers={splitOilGasPipelineLayers}
+          />
+        </Suspense>
+      </LayersControl.Overlay>
       {layerVisibility == null &&
         activeIds.map((layerId) => {
           const label = t(OSM_LABELS[layerId][0], OSM_LABELS[layerId][1]);

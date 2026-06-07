@@ -53,9 +53,15 @@ export function CountryIntelligencePanel({
 
       <div className="grid grid-cols-2 gap-2">
         <StatCard
-          label={t('רישיונות', 'Licenses')}
-          value={String(data.license_counts.total)}
-          sub={`${data.license_counts.mining} mining · ${data.license_counts.oil_and_gas} O&G`}
+          label={t('נכסים במפה', 'Map assets')}
+          value={String(data.license_counts.map_visible_count ?? data.license_counts.total)}
+          sub={
+            data.license_counts.stored_total_count != null &&
+            data.license_counts.stored_total_count !==
+              (data.license_counts.map_visible_count ?? data.license_counts.total)
+              ? `${data.license_counts.stored_total_count} stored · ${data.license_counts.coordinate_valid_count ?? '—'} mappable`
+              : `${data.license_counts.mining} mining · ${data.license_counts.oil_and_gas} O&G`
+          }
         />
         <StatCard label={t('נמלים', 'Ports')} value={String(data.port_count)} />
         <StatCard
@@ -110,6 +116,7 @@ export function CountryIntelligencePanel({
       )}
 
       <p className="text-[10px] leading-snug text-slate-500 border-t border-black/5 dark:border-white/5 pt-3">
+        {data.license_counts.count_explanation ? `${data.license_counts.count_explanation} ` : ''}
         {data.disclaimer}
       </p>
 

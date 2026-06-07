@@ -421,6 +421,23 @@ def simplify_tolerance_for_zoom(zoom: Optional[float]) -> float:
     return min(0.35, 0.04 * math.pow(2, 8 - z))
 
 
+def pipeline_geojson_limit_for_zoom(zoom: Optional[float]) -> int:
+    """Cap OSM pipeline features per viewport — keeps Leaflet GeoJSON fetches fast."""
+    try:
+        z = float(zoom) if zoom is not None else 7.0
+    except (TypeError, ValueError):
+        z = 7.0
+    if z >= 11:
+        return 12000
+    if z >= 9:
+        return 8000
+    if z >= 7:
+        return 3500
+    if z >= 5:
+        return 2000
+    return 1000
+
+
 def license_cluster_limit_for_zoom(zoom: Optional[float], requested: int = 800) -> int:
     """Fewer markers at world zoom — avoids hundreds of DOM nodes."""
     try:

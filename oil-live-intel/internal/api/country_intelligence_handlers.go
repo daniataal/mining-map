@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mining-map/oil-live-intel/internal/services/licensemap"
 )
 
 // CountryIntelligence aggregates license, port, vessel and operator signals for one country.
@@ -32,6 +33,17 @@ func (s *Server) CountryIntelligence(w http.ResponseWriter, r *http.Request) {
 		WHERE LOWER(TRIM(country)) = LOWER(TRIM($1))
 		   OR LOWER(TRIM(country)) = $2
 	`, country, norm).Scan(&miningCount, &oilCount, &totalCount)
+	counts, countErr := licensemap.QueryCountryCounts(ctx, s.Pool, country, "", true)
+	if countErr != nil {
+		s.Log.Warn().Err(countErr).Str("country", country).Msg("country count semantics fallback")
+		counts.StoredTotalCount = totalCount
+		counts.CoordinateValidCount = totalCount
+		counts.MapVisibleCount = totalCount
+	}
+	countExplanation := "Map-visible count: deduped open-data rows with usable coordinates. Stored total includes records that may be bundled, duplicate, or missing map coordinates."
+	if counts.MapVisibleCount == counts.StoredTotalCount {
+		countExplanation = "Map-visible count matches the stored total for this country."
+	}
 
 	var portCount int
 	_ = s.Pool.QueryRow(ctx, `
@@ -109,18 +121,22 @@ func (s *Server) CountryIntelligence(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONCached(w, http.StatusOK, map[string]any{
 		"country": country,
-		"license_counts": map[string]int{
-			"mining":      miningCount,
-			"oil_and_gas": oilCount,
-			"total":       totalCount,
+		"license_counts": map[string]any{
+			"mining":                 miningCount,
+			"oil_and_gas":            oilCount,
+			"total":                  counts.MapVisibleCount,
+			"map_visible_count":      counts.MapVisibleCount,
+			"coordinate_valid_count": counts.CoordinateValidCount,
+			"stored_total_count":     counts.StoredTotalCount,
+			"count_explanation":      countExplanation,
 		},
-		"port_count":            portCount,
-		"vessel_count":          vesselCount,
-		"vessel_coverage_note":  vesselNote,
-		"top_operators":         operators,
-		"trade_signals":         tradeSignals,
-		"data_tier":             "open_data_aggregate",
-		"disclaimer":            "Counts from stored licenses and inferred trade flows. AIS vessel counts are global-store snapshots, not country-attributed traffic.",
-		"runtime":               "go",
+		"port_count":           portCount,
+		"vessel_count":         vesselCount,
+		"vessel_coverage_note": vesselNote,
+		"top_operators":        operators,
+		"trade_signals":        tradeSignals,
+		"data_tier":            "open_data_aggregate",
+		"disclaimer":           "Counts from stored licenses and inferred trade flows. AIS vessel counts are global-store snapshots, not country-attributed traffic.",
+		"runtime":              "go",
 	}, 60)
 }

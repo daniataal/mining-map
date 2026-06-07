@@ -9,7 +9,10 @@ import {
 } from '../../lib/osmPetroleumLayers';
 import type { PetroleumLayerId, PetroleumViewportBounds } from '../../lib/petroleumLayers';
 import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/petroleumLayers';
-import { infrastructureLayerShouldRender } from '../../lib/infrastructureLayer';
+import {
+  infrastructureLayerShouldRender,
+  pipelineLeafletShouldFetch,
+} from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
 import {
@@ -24,9 +27,9 @@ const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'st
 
 const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
   pipelines: {
-    color: '#64748b',
-    weight: 2.5,
-    opacity: 0.75,
+    color: '#fbbf24',
+    weight: 3,
+    opacity: 0.9,
     dashArray: '5 4',
     lineCap: 'round',
   },
@@ -367,6 +370,74 @@ interface OsmPetroleumMapLayersGeoJsonProps {
   isDark?: boolean;
 }
 
+export interface OsmPipelineLeafletLayersProps {
+  bbox: PetroleumViewportBounds | null;
+  enabled: boolean;
+  layerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  forcedLayers?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+  mapZoom?: number;
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
+  coverageGapMessage?: string | null;
+  splitOilGasPipelineLayers?: boolean;
+  isDark?: boolean;
+  defaultVisible?: boolean;
+}
+
+/** Leaflet GeoJSON + canvas for OSM pipelines (static snapshot — no MVT). */
+export function OsmPipelineLeafletLayers({
+  bbox,
+  enabled,
+  layerVisibility,
+  forcedLayers,
+  mapZoom,
+  onFeatureClick,
+  coverageGapMessage,
+  splitOilGasPipelineLayers = false,
+  isDark = true,
+  defaultVisible = true,
+}: OsmPipelineLeafletLayersProps) {
+  const { t } = useI18n();
+  const { data: catalog } = usePetroleumLayerCatalog(enabled);
+  const mapboxOff = isPetroleumMapboxDisabled(catalog);
+  const osmDefaults = defaultOsmLayerVisibility(splitOilGasPipelineLayers ? true : mapboxOff);
+
+  if (!enabled) return null;
+
+  const toggled = layerVisibility?.pipelines ?? defaultVisible ?? osmDefaults.pipelines;
+  if (!toggled) return null;
+  if (!pipelineLeafletShouldFetch(mapZoom, toggled)) return null;
+
+  const visible = toggled;
+  const label = t(OSM_LABELS.pipelines[0], OSM_LABELS.pipelines[1]);
+
+  return (
+    <>
+      {coverageGapMessage ? (
+        <div
+          className="pointer-events-none absolute left-2 top-2 z-[500] max-w-xs rounded-md border border-amber-500/40 bg-amber-950/85 px-2 py-1 text-[11px] leading-snug text-amber-100 shadow"
+          role="status"
+        >
+          {t(
+            'שכבות OSM: אין נתונים שמורים — הריצו petroleum-osm worker או graph-sync.',
+            coverageGapMessage,
+          )}
+        </div>
+      ) : null}
+      <OsmLayerOverlay
+        layerId="pipelines"
+        label={label}
+        bbox={bbox}
+        enabled={enabled && visible}
+        defaultVisible={visible}
+        mapZoom={mapZoom}
+        onFeatureClick={onFeatureClick}
+        splitOilGasPipelineLayers={splitOilGasPipelineLayers}
+        isDark={isDark}
+      />
+    </>
+  );
+}
+
 /** GeoJSON + canvas fallback when MVT vector tiles are disabled. */
 export default function OsmPetroleumMapLayersGeoJson({
   bbox,
@@ -404,7 +475,9 @@ export default function OsmPetroleumMapLayersGeoJson({
       ) : null}
       {activeIds.map((layerId) => {
         const toggled = layerVisibility?.[layerId] ?? osmDefaults[layerId];
-        if (layerVisibility != null) {
+        if (layerId === 'pipelines') {
+          if (!pipelineLeafletShouldFetch(mapZoom, toggled)) return null;
+        } else if (layerVisibility != null) {
           if (!toggled) return null;
           if (
             !infrastructureLayerShouldRender(layerId, mapZoom, layerVisibility, forcedLayers ?? {})

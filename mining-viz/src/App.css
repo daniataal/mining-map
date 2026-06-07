@@ -783,6 +783,25 @@
   width: 100%;
 }
 
+/* OSM pipeline hover label (MapLibre MVT layer) */
+.leaflet-popup.osm-pipeline-hover-tip .leaflet-popup-content-wrapper {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.leaflet-popup.osm-pipeline-hover-tip .leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.leaflet-popup.osm-pipeline-hover-tip .leaflet-popup-content {
+  margin: 0;
+  color: #f8fafc;
+  line-height: 1.3;
+}
+
 /* Storage terminal infrastructure popups (OSM tank farms) */
 .leaflet-popup.custom-popup--storage .leaflet-popup-content-wrapper {
   padding: 0;

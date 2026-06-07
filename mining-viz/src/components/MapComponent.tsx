@@ -142,6 +142,11 @@ import {
 } from '../lib/globalMapLens';
 import type { AssetsMapLens } from '../lib/assetsMapLens';
 import { assetsPetroleumLayerPrefs } from '../lib/assetsMapLens';
+import {
+  assetsPetroleumLayerPrefsFromVisibility,
+  type AssetLayerVisibility,
+} from '../lib/assetLayerCockpit';
+import { STORAGE_MVT_HIDE_MIN_ZOOM } from '../lib/infrastructureLayer';
 import RiskLensCoverageOverlay from '../features/live-data/RiskLensCoverageOverlay';
 import SanctionsCountryLayer from '../features/live-data/SanctionsCountryLayer';
 import { getSanctionsCountrySummary } from '../api/oilLiveApi';
@@ -439,8 +444,10 @@ interface MapComponentProps {
   globalMacroTradeOn?: boolean;
   onGlobalMacroTradeChange?: (on: boolean) => void;
   brokerWorkspaceMap?: WorkspaceMapSnapshot;
+  brokerWorkspaceSelectedEntityIds?: readonly string[];
   brokerPackLocationMode?: boolean;
   onBrokerPackLocationPick?: (lat: number, lng: number) => void;
+  onBrokerWorkspaceEntitySelect?: (entityId: string) => void;
   onBrokerPackSelect?: (packId: string) => void;
   onAddToBrokerWorkspace?: (
     body: { entity_type: string; ref_kind: string; ref_id: string; display_name: string; lat: number; lng: number; deal_signal?: string },
@@ -450,6 +457,7 @@ interface MapComponentProps {
   cockpitLegendSublayer?: IntelligenceSublayer;
   globalMapLens?: GlobalMapLens | null;
   assetsMapLens?: AssetsMapLens | null;
+  assetLayerVisibility?: AssetLayerVisibility;
   onLicenseClusterSelect?: (item: MiningLicense) => void;
   onCountrySelect?: (country: string) => void;
 }
@@ -1168,8 +1176,10 @@ export default function MapComponent({
   oilLiveSidebarActive = false,
   onOpenDataHealth,
   brokerWorkspaceMap,
+  brokerWorkspaceSelectedEntityIds,
   brokerPackLocationMode = false,
   onBrokerPackLocationPick,
+  onBrokerWorkspaceEntitySelect,
   onBrokerPackSelect,
   onAddToBrokerWorkspace,
   cockpitEnabled = false,
@@ -1177,6 +1187,7 @@ export default function MapComponent({
   cockpitLegendSublayer = 'countries',
   globalMapLens: activeGlobalLens = null,
   assetsMapLens: activeAssetsLens = null,
+  assetLayerVisibility,
   onLicenseClusterSelect,
   onCountrySelect,
 }: MapComponentProps) {
@@ -1433,9 +1444,23 @@ export default function MapComponent({
     );
     const oilGasLayersEnabled = isOilAndGasView && onGroundVisible;
     const assetsPetroleumPrefs = useMemo(
-        () => assetsPetroleumLayerPrefs(activeAssetsLens),
-        [activeAssetsLens],
+        () =>
+            assetLayerVisibility
+                ? assetsPetroleumLayerPrefsFromVisibility(assetLayerVisibility)
+                : assetsPetroleumLayerPrefs(activeAssetsLens),
+        [activeAssetsLens, assetLayerVisibility],
     );
+    const oilGasOsmLayerVisibility = useMemo(() => {
+        const vis = assetsPetroleumPrefs.osmLayerVisibility;
+        if (!vis?.storage_terminals || !assetsPetroleumPrefs.showStorageTankFarms) return vis;
+        if (petroleumMapZoom < STORAGE_MVT_HIDE_MIN_ZOOM) return vis;
+        return { ...vis, storage_terminals: false };
+    }, [
+        assetsPetroleumPrefs.osmLayerVisibility,
+        assetsPetroleumPrefs.showStorageTankFarms,
+        petroleumMapZoom,
+    ]);
+    const esgZonesVisible = !assetLayerVisibility || assetLayerVisibility.esg_zones;
     const oilGasBbox = useMemo(
         () => resolvePetroleumViewportBounds(oilGasMapViewport),
         [oilGasMapViewport],
@@ -2161,6 +2186,7 @@ export default function MapComponent({
                 <MapIntelligenceLegend
                   mode={cockpitLegendMode}
                   sublayer={cockpitLegendSublayer}
+                  assetLayerVisibility={assetLayerVisibility}
                   globalMacroTradeOn={tradeLensActive ? globalMacroTradeOn : undefined}
                   onGlobalMacroTradeChange={
                     tradeLensActive ? onGlobalMacroTradeChange : undefined
@@ -2320,6 +2346,8 @@ export default function MapComponent({
                     entities={brokerWorkspaceMap.entities}
                     packs={brokerWorkspaceMap.packs}
                     edges={brokerWorkspaceMap.edges}
+                    selectedEntityIds={brokerWorkspaceSelectedEntityIds}
+                    onEntityClick={(entity) => onBrokerWorkspaceEntitySelect?.(entity.id)}
                     onPackClick={(pack) => onBrokerPackSelect?.(pack.id)}
                   />
                 )}
@@ -2339,7 +2367,7 @@ export default function MapComponent({
                 )}
                 
                 <MapBasemapLayers isDark={isDark}>
-                    {!riskLensActive && (
+                    {!riskLensActive && esgZonesVisible && (
                     <LayersControl.Overlay checked name={t("אזורי שימור סביבתיים (ESG)", "ESG Protected Zones")}>
                         <FeatureGroup>
                             {ESG_CONSERVATION_ZONES.map((zone, idx) => (
@@ -2544,10 +2572,11 @@ export default function MapComponent({
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
                                 layerIds={assetsPetroleumPrefs.osmLayerIds}
-                                layerVisibility={assetsPetroleumPrefs.osmLayerVisibility}
+                                layerVisibility={oilGasOsmLayerVisibility}
                                 forcedLayers={assetsPetroleumPrefs.osmForcedLayers}
                                 splitOilGasPipelineLayers={assetsPetroleumPrefs.splitOilGasPipelineLayers}
                                 isDark={isDark}
+                                onFeatureClick={onInfrastructureFeatureClick}
                             />
                             )}
                             {assetsPetroleumPrefs.showGemPipelines && (

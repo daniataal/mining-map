@@ -19,7 +19,10 @@ import { postAgentDebugIngest } from './lib/agentDebugIngest';
 import { getMacroTradeFlows, type MacroTradeFlow } from './api/oilLiveApi';
 import type { OsmPetroleumLayerId } from './lib/osmPetroleumLayers';
 import { DEFAULT_OSM_LAYER_VISIBILITY } from './lib/osmPetroleumLayers';
-import { infrastructureLayersPanelHint } from './lib/infrastructureLayer';
+import {
+  infrastructureLayersPanelHint,
+  portMarkersShouldRender,
+} from './lib/infrastructureLayer';
 import type { InfrastructureFeatureSelection } from './features/infrastructure/InfrastructureFeatureDrawer';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getEiaHistoricMap } from './api/eiaHistoricApi';
@@ -46,6 +49,7 @@ import {
   isSidebarVisibleMode,
   SUBLAYERS_FOR_MODE,
   sublayerLabel,
+  type IntelligenceSublayer,
 } from './lib/intelligenceModes';
 import {
   globalMapLens,
@@ -53,6 +57,17 @@ import {
   shouldShowGlobalMacroTradeFlows,
 } from './lib/globalMapLens';
 import { assetsMapLens } from './lib/assetsMapLens';
+import {
+  DEFAULT_ASSET_LAYER_VISIBILITY,
+  CORE_ASSET_LAYER_IDS,
+  applyAssetLayerPreset,
+  assetLicenseMarkersEnabled,
+  resolveAssetLicenseSector,
+  resolveAssetMapViewKey,
+  toggleAssetLayer,
+  type AssetLayerId,
+  type AssetLayerPresetId,
+} from './lib/assetLayerCockpit';
 import { isServerLicenseCluster } from './lib/licenseMapCluster';
 import { IntelligenceModeNav } from './components/IntelligenceModeNav';
 import {
@@ -243,6 +258,17 @@ export default function App() {
   } = nav;
   const activeGlobalLens = globalMapLens(intelligenceMode, intelligenceSublayer);
   const activeAssetsLens = assetsMapLens(intelligenceMode, intelligenceSublayer);
+  const [assetLayerVisibility, setAssetLayerVisibility] = useState(
+    () => DEFAULT_ASSET_LAYER_VISIBILITY,
+  );
+  const assetCockpitActive = cockpitEnabled && intelligenceMode === 'assets';
+  const effectiveViewMode = assetCockpitActive
+    ? resolveAssetMapViewKey(assetLayerVisibility)
+    : viewMode;
+  const effectiveLicenseSector = assetCockpitActive
+    ? resolveAssetLicenseSector(assetLayerVisibility)
+    : licenseSector;
+  const assetLicenseLayerActive = !assetCockpitActive || assetLicenseMarkersEnabled(assetLayerVisibility);
   const [mapSidebarTab, setMapSidebarTab] = useState<MapSidebarTab>('licenses');
   const showMapSidebar = cockpitEnabled
     ? isSidebarVisibleMode(intelligenceMode, mapSidebarTab)
@@ -283,18 +309,21 @@ export default function App() {
   const globalMacroTradeLensActive = shouldShowGlobalMacroTradeFlows(activeGlobalLens);
   const hideLicenseMarkersOnMap = isHistoricSidebar || isLiveDataSidebar;
   const licenseMapFetchEnabled =
-    viewMode !== 'route_planner' &&
-    viewMode !== 'ports' &&
+    effectiveViewMode !== 'route_planner' &&
+    effectiveViewMode !== 'supply_chain' &&
+    effectiveViewMode !== 'workspace' &&
+    !(effectiveViewMode === 'ports' && !assetCockpitActive) &&
+    assetLicenseLayerActive &&
     !hideLicenseMarkersOnMap;
   const { data: worldCoverage } = useWorldCoverage(
-    viewMode === 'mining' || viewMode === 'oil_and_gas' || viewMode === 'global',
+    effectiveViewMode === 'mining' || effectiveViewMode === 'oil_and_gas' || effectiveViewMode === 'global',
   );
   const {
     data: rawData = [],
     isLoading,
     error: fetchError,
   } = useLicensesForMap({
-    sector: licenseSector,
+    sector: effectiveLicenseSector,
     bounds: licenseMapViewport,
     filterCountries: licenseFetchCountries,
     mapZoom: licenseMapZoom,
@@ -354,15 +383,22 @@ export default function App() {
     data: storageTerminalResponse,
     isLoading: isStorageLoading,
     error: storageError,
-  } = useStorageTerminals(viewMode === 'oil_and_gas', {
+  } = useStorageTerminals(
+    effectiveViewMode === 'oil_and_gas' && (!assetCockpitActive || assetLayerVisibility.tank_farms),
+    {
     viewport: storageFetchViewport,
     limit: 2000,
-  });
+    },
+  );
   const {
     data: portLogisticsResponse,
     isLoading: isPortsLoading,
     error: portsError,
-  } = usePortLogisticsEntities(viewMode === 'ports' || viewMode === 'route_planner');
+  } = usePortLogisticsEntities(
+    effectiveViewMode === 'ports' ||
+      effectiveViewMode === 'route_planner' ||
+      (assetCockpitActive && assetLayerVisibility.ports),
+  );
   const updateLicenseMutation = useUpdateLicense();
   const deleteLicenseMutation = useDeleteLicense();
   const logActivityMutation = useLogActivity();
@@ -475,14 +511,14 @@ export default function App() {
 
   const visibleLocalLicenses = useMemo(
     () =>
-      licenseSector
-        ? localLicenses.filter((item) => (item.sector || 'mining') === licenseSector)
+      effectiveLicenseSector
+        ? localLicenses.filter((item) => (item.sector || 'mining') === effectiveLicenseSector)
         : localLicenses,
-    [licenseSector, localLicenses]
+    [effectiveLicenseSector, localLicenses]
   );
   const storageEntities = storageTerminalResponse?.entities || [];
   useEffect(() => {
-    if (viewMode !== 'oil_and_gas' || !storageTerminalResponse?.entities) return;
+    if (effectiveViewMode !== 'oil_and_gas' || !storageTerminalResponse?.entities) return;
     const ents = storageTerminalResponse.entities;
     const uae = ents.filter((e) => (e.country || '').includes('United Arab Emirates'));
     const fuj = ents.filter(
@@ -513,16 +549,69 @@ export default function App() {
       },
       timestamp: Date.now(),
     });
-  }, [viewMode, storageTerminalResponse]);
+  }, [effectiveViewMode, storageTerminalResponse]);
   const portEntities = portLogisticsResponse?.entities || [];
   const allLicenses = useMemo(
     () => {
+      if (assetCockpitActive) {
+        const assetRows: MiningLicense[] = assetLicenseLayerActive
+          ? [...rawData, ...visibleLocalLicenses]
+          : [];
+        if (portMarkersShouldRender(licenseMapZoom, assetLayerVisibility.ports)) {
+          assetRows.push(...portEntities);
+        }
+        return excludeHiddenFallbackPlaceholders(assetRows);
+      }
       if (viewMode === 'ports') {
         return excludeHiddenFallbackPlaceholders(portEntities);
       }
       return excludeHiddenFallbackPlaceholders([...rawData, ...visibleLocalLicenses]);
     },
-    [rawData, visibleLocalLicenses, viewMode, portEntities]
+    [
+      assetCockpitActive,
+      assetLayerVisibility.ports,
+      assetLicenseLayerActive,
+      licenseMapZoom,
+      rawData,
+      visibleLocalLicenses,
+      viewMode,
+      portEntities,
+    ]
+  );
+  const assetLayerCounts = useMemo<Partial<Record<AssetLayerId, number | null>>>(() => {
+    const rows = [...rawData, ...visibleLocalLicenses];
+    return {
+      mines: rows.filter((item) => (item.sector || 'mining') === 'mining').length,
+      oil_fields: rows.filter((item) => item.sector === 'oil_and_gas').length,
+      refineries: null,
+      tank_farms: storageTerminalResponse?.stats?.total ?? storageEntities.length,
+      ports: portEntities.length,
+      pipelines: null,
+      lng: null,
+      ais_vessels: null,
+      country_borders: null,
+      esg_zones: null,
+    };
+  }, [rawData, visibleLocalLicenses, storageTerminalResponse?.stats?.total, storageEntities.length, portEntities.length]);
+
+  const handleAssetLayerToggle = useCallback(
+    (layerId: AssetLayerId) => {
+      setAssetLayerVisibility((prev) => toggleAssetLayer(prev, layerId));
+      if ((CORE_ASSET_LAYER_IDS as readonly string[]).includes(layerId)) {
+        switchIntelligenceSublayer(layerId as IntelligenceSublayer);
+      }
+    },
+    [switchIntelligenceSublayer],
+  );
+
+  const handleAssetPreset = useCallback(
+    (presetId: AssetLayerPresetId) => {
+      const next = applyAssetLayerPreset(presetId);
+      setAssetLayerVisibility(next);
+      const primary = CORE_ASSET_LAYER_IDS.find((id) => next[id]) ?? 'mines';
+      switchIntelligenceSublayer(primary as IntelligenceSublayer);
+    },
+    [switchIntelligenceSublayer],
   );
   const debouncedRouteSupplierCountry = useDebouncedValue(routePlanner.supplier.country);
   const debouncedRouteBuyerCountry = useDebouncedValue(routePlanner.buyer.country);
@@ -578,9 +667,9 @@ export default function App() {
 
   const entityIndex = useMemo(() => {
     const searchable =
-      viewMode === 'oil_and_gas' ? [...allLicenses, ...storageEntities] : allLicenses;
+      effectiveViewMode === 'oil_and_gas' ? [...allLicenses, ...storageEntities] : allLicenses;
     return Object.fromEntries(searchable.map((item) => [item.id, item]));
-  }, [allLicenses, storageEntities, viewMode]);
+  }, [allLicenses, storageEntities, effectiveViewMode]);
 
   const [storageInViewCount, setStorageInViewCount] = useState<number | null>(null);
 
@@ -845,12 +934,24 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (viewMode === 'mining' || viewMode === 'oil_and_gas') {
-      miningData.setSelectedSector(viewMode);
+    if (
+      assetCockpitActive &&
+      (assetLayerVisibility.ports || (assetLayerVisibility.mines && assetLayerVisibility.oil_fields))
+    ) {
+      miningData.setSelectedSector(null);
+    } else if (effectiveLicenseSector) {
+      miningData.setSelectedSector(effectiveLicenseSector === 'oil_and_gas' ? 'oil_and_gas' : 'mining');
     } else {
       miningData.setSelectedSector(null);
     }
-  }, [viewMode, miningData.setSelectedSector]);
+  }, [
+    assetCockpitActive,
+    assetLayerVisibility.mines,
+    assetLayerVisibility.oil_fields,
+    assetLayerVisibility.ports,
+    effectiveLicenseSector,
+    miningData.setSelectedSector,
+  ]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -1222,7 +1323,7 @@ export default function App() {
   }, [t, deleteLicenseMutation, localLicenses, userId, username, logActivityMutation, entityIndex]);
 
   const mapCenter: [number, number] =
-    viewMode === 'ports'
+    effectiveViewMode === 'ports'
       ? [20, 0]
       : isLiveDataSidebar
         ? LIVE_DATA_HUB_CENTER
@@ -1231,11 +1332,11 @@ export default function App() {
   // Market Prices State
   const [marketPrices, setMarketPrices] = useState<MarketTickerRow[]>([]);
   const licenseCoveragePanelSector: LicenseCoverageSector | null =
-    viewMode === 'mining'
+    effectiveViewMode === 'mining'
       ? 'mining'
-      : viewMode === 'oil_and_gas'
+      : effectiveViewMode === 'oil_and_gas'
         ? 'oil_and_gas'
-        : viewMode === 'global'
+        : effectiveViewMode === 'global'
           ? 'mining'
           : null;
   const sidebarViewMode =
@@ -1366,15 +1467,17 @@ export default function App() {
 
   // Triple-Panel States
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const assetAisLayerActive = assetCockpitActive && assetLayerVisibility.ais_vessels;
   const maritimeMapViewActive =
     MARITIME_MAP_VIEWS.has(viewMode) ||
-    (cockpitEnabled && intelligenceMode === 'routes' && viewMode === 'route_planner');
+    (cockpitEnabled && intelligenceMode === 'routes' && viewMode === 'route_planner') ||
+    assetAisLayerActive;
 
   useEffect(() => {
-    if (viewMode === 'oil_and_gas' || isLiveDataSidebar) {
+    if (effectiveViewMode === 'oil_and_gas' || isLiveDataSidebar) {
       setPrioritizePetroleumVessels(true);
     }
-  }, [viewMode, isLiveDataSidebar]);
+  }, [effectiveViewMode, isLiveDataSidebar]);
 
   useEffect(() => {
     if (!isLiveDataSidebar) return;
@@ -1391,13 +1494,13 @@ export default function App() {
 
   useEffect(() => {
     if (!username || !maritimeMapViewActive || isLiveDataSidebar) return;
-    const scope = viewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
+    const scope = effectiveViewMode === 'oil_and_gas' ? ('oil_tankers' as const) : ('all_vessels' as const);
     void prefetchMaritimeVesselSnapshot(queryClient, {
       maxVessels: Number(maritimeMaxVessels) || 15000,
       captureWindowSeconds: Number(maritimeCaptureWindow) || 25,
       scope,
     });
-  }, [username, maritimeMapViewActive, isLiveDataSidebar, viewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
+  }, [username, maritimeMapViewActive, isLiveDataSidebar, effectiveViewMode, queryClient, maritimeMaxVessels, maritimeCaptureWindow]);
 
   const MapEl = BROKER_WORKSPACE_ENABLED ? MapComponentBridge : MapComponent;
 
@@ -1435,7 +1538,7 @@ export default function App() {
 
       <PlatformHealthChip />
 
-      {viewMode !== 'ports' && viewMode !== 'route_planner' && fetchError && (
+      {effectiveViewMode !== 'ports' && effectiveViewMode !== 'route_planner' && fetchError && (
         <div
           className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
           role="alert"
@@ -1449,7 +1552,7 @@ export default function App() {
           {licenseFetchTroubleshooting}
         </div>
       )}
-      {viewMode === 'ports' && portsError && (
+      {effectiveViewMode === 'ports' && portsError && (
         <div
           className="shrink-0 px-4 py-2 bg-red-950/95 border-b border-red-500/30 text-red-100 text-[11px] font-bold text-center"
           role="alert"
@@ -1458,7 +1561,7 @@ export default function App() {
           : {formatLicenseFetchError(portsError)}
         </div>
       )}
-      {viewMode === 'oil_and_gas' && storageError && (
+      {effectiveViewMode === 'oil_and_gas' && storageError && (
         <div
           className="shrink-0 px-4 py-2 bg-amber-950/95 border-b border-amber-500/30 text-amber-100 text-[11px] font-bold text-center"
           role="alert"
@@ -1517,7 +1620,7 @@ export default function App() {
                 setMapFlyTrigger((prev) => prev + 1);
               }}
               infrastructureStats={
-                viewMode === 'oil_and_gas' ? miningData.infrastructureStats : undefined
+                effectiveViewMode === 'oil_and_gas' ? miningData.infrastructureStats : undefined
               }
               isInDdQueue={ddQueue.isInQueue}
               onAddToDueDiligence={ddQueue.addToQueue}
@@ -1525,7 +1628,7 @@ export default function App() {
               getDealRoomForLicense={getDealRoomForLicense}
               worldCoverage={worldCoverage}
               licenseCoverageSector={licenseCoveragePanelSector}
-              licenseCoverageAlsoShowSector={viewMode === 'global' ? 'oil_and_gas' : null}
+              licenseCoverageAlsoShowSector={effectiveViewMode === 'global' ? 'oil_and_gas' : null}
               showLicenseCoveragePanel={false}
               liveDataPanel={
                 <Suspense fallback={<LazySurfaceFallback label={t('טוען נתונים חיים...', 'Loading live data...')} />}>
@@ -1561,7 +1664,7 @@ export default function App() {
                   <DataHealthPanel
                     worldCoverage={worldCoverage}
                     licenseCoverageSector={licenseCoveragePanelSector}
-                    licenseCoverageAlsoShowSector={viewMode === 'global' ? 'oil_and_gas' : null}
+                    licenseCoverageAlsoShowSector={effectiveViewMode === 'global' ? 'oil_and_gas' : null}
                     coverageStats={isLiveDataSidebar ? oilLiveCoverageStats : null}
                   />
                 </Suspense>
@@ -1637,6 +1740,10 @@ export default function App() {
                       onModeChange={switchIntelligenceMode}
                       onSublayerChange={switchIntelligenceSublayer}
                       investigationsBadge={ddQueue.queue.length + dealRooms.count}
+                      assetLayerVisibility={assetLayerVisibility}
+                      assetLayerCounts={assetLayerCounts}
+                      onAssetLayerToggle={handleAssetLayerToggle}
+                      onAssetPreset={handleAssetPreset}
                     />
                   ) : (
                   <div className="flex gap-0.5 sm:gap-1.5 bg-stone-100/90 sm:bg-stone-100/80 dark:bg-slate-950/60 dark:sm:bg-slate-950/40 backdrop-blur-2xl p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-stone-200/90 sm:border-stone-200/70 dark:border-white/10 dark:sm:border-white/5 shadow-2xl">
@@ -1644,7 +1751,7 @@ export default function App() {
                       onClick={() => switchSectorView('global')}
                       className={`px-3 sm:px-4 py-2 sm:py-1.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-h-[44px] sm:min-h-0 ${viewMode === 'global' ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-stone-200/60 dark:hover:bg-white/5'}`}
                     >
-                      {t("עולמי", "Global")}
+                      {t("מפת עולם", "World Map")}
                     </button>
                     <button
                       onClick={() => switchSectorView('mining')}
@@ -1709,7 +1816,7 @@ export default function App() {
             </div>
           )}
 
-          {viewMode === 'oil_and_gas' && (
+          {effectiveViewMode === 'oil_and_gas' && (
             <>
               <div className="absolute top-[4.5rem] left-3 right-3 z-[999] pointer-events-auto max-w-lg">
                 <OilGasOnboardingTip active />
@@ -1769,16 +1876,28 @@ export default function App() {
             {(showMapSurface) && (
               <Suspense fallback={<LazySurfaceFallback label={t('טוען מפה...', 'Loading map...')} />}>
                 <MapEl
-                  processedData={viewMode === 'route_planner' ? [] : mapProcessedData}
-                  allLicenses={viewMode === 'route_planner' ? [] : allLicenses}
+                  processedData={
+                    effectiveViewMode === 'route_planner' ||
+                    effectiveViewMode === 'supply_chain' ||
+                    effectiveViewMode === 'workspace'
+                      ? []
+                      : mapProcessedData
+                  }
+                  allLicenses={
+                    effectiveViewMode === 'route_planner' ||
+                    effectiveViewMode === 'supply_chain' ||
+                    effectiveViewMode === 'workspace'
+                      ? []
+                      : allLicenses
+                  }
                   userAnnotations={userAnnotations}
                   selectedItem={selectedItem}
                   mapFlyTrigger={mapFlyTrigger}
-                  viewModeKey={viewMode}
+                  viewModeKey={effectiveViewMode}
                   worldCoverage={worldCoverage}
                   licensesFetchPending={
-                    viewMode !== 'route_planner' &&
-                    (viewMode === 'global' || viewMode === 'mining' || viewMode === 'oil_and_gas') &&
+                    effectiveViewMode !== 'route_planner' &&
+                    (effectiveViewMode === 'global' || effectiveViewMode === 'mining' || effectiveViewMode === 'oil_and_gas') &&
                     isLoading &&
                     rawData.length === 0 &&
                     !fetchError
@@ -1794,8 +1913,8 @@ export default function App() {
                   deleteLicense={deleteLicense}
                   selectedMaritimeVessel={selectedMaritimeVessel}
                   onSelectMaritimeVessel={setSelectedMaritimeVessel}
-                  maritimeMapViewActive={maritimeMapViewActive}
-                  isMaritimeLayerEnabled={isMaritimeLayerEnabled}
+                  maritimeMapViewActive={maritimeMapViewActive || (assetCockpitActive && assetLayerVisibility.ais_vessels)}
+                  isMaritimeLayerEnabled={isMaritimeLayerEnabled || (assetCockpitActive && assetLayerVisibility.ais_vessels)}
                   onMaritimeLayerEnabledChange={setIsMaritimeLayerEnabled}
                   vesselFilters={vesselFilters}
                   onVesselFiltersChange={setVesselFilters}
@@ -1841,12 +1960,12 @@ export default function App() {
                   onLicenseClusterDrillComplete={
                     licenseMapFetchEnabled ? handleLicenseClusterDrillComplete : undefined
                   }
-                  storageEntities={viewMode === 'oil_and_gas' ? storageEntities : []}
+                  storageEntities={effectiveViewMode === 'oil_and_gas' ? storageEntities : []}
                   onStorageInViewCountChange={
-                    viewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
+                    effectiveViewMode === 'oil_and_gas' ? setStorageInViewCount : undefined
                   }
                   onOilGasMapViewportChange={
-                    viewMode === 'oil_and_gas' ? handleOilGasMapViewportChange : undefined
+                    effectiveViewMode === 'oil_and_gas' ? handleOilGasMapViewportChange : undefined
                   }
                   oilLiveOverlaysEnabled={isLiveDataSidebar}
                   oilLiveProductFilter={oilLiveProductFilter}
@@ -1880,61 +1999,63 @@ export default function App() {
                   onLiveDataEiaHistoricChange={
                     isLiveDataSidebar ? setLiveDataEiaHistoricOn : undefined
                   }
-                  hideLicenseMarkers={hideLicenseMarkersOnMap}
+                  hideLicenseMarkers={hideLicenseMarkersOnMap || (assetCockpitActive && !assetLicenseLayerActive)}
                   suppressLicenseClusters={licenseServerClustered}
                   macroTradeFlowsEnabled={macroTradeFlowsMapEnabled}
                   showInfrastructureLayers={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    viewMode === 'oil_and_gas' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    effectiveViewMode === 'oil_and_gas' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                   }
                   infrastructureLayerVisibility={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? infrastructureLayerVisibility
                       : undefined
                   }
                   onInfrastructureLayerChange={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? handleInfrastructureLayerChange
                       : undefined
                   }
                   infrastructureForcedLayers={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? infrastructureForcedLayers
                       : undefined
                   }
                   infrastructureMapZoom={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? licenseMapZoom
                       : undefined
                   }
                   infrastructureMapBbox={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? licenseMapViewport
                       : undefined
                   }
                   infrastructurePanelHint={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    effectiveViewMode === 'oil_and_gas' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? infrastructurePanelHint
                       : undefined
                   }
                   onInfrastructureFeatureClick={
-                    viewMode === 'mining' ||
-                    viewMode === 'global' ||
-                    (viewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    effectiveViewMode === 'oil_and_gas' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
                       ? setSelectedInfrastructureFeature
                       : undefined
                   }
@@ -1954,6 +2075,7 @@ export default function App() {
                   cockpitLegendSublayer={intelligenceSublayer}
                   globalMapLens={activeGlobalLens}
                   assetsMapLens={activeAssetsLens}
+                  assetLayerVisibility={assetCockpitActive ? assetLayerVisibility : undefined}
                   onLicenseClusterSelect={
                     activeGlobalLens === 'licenses' || countryFocusCountry
                       ? handleLicenseClusterSelect
@@ -1977,7 +2099,7 @@ export default function App() {
                 </div>
               </div>
             )}
-            {maritimeMapViewActive && selectedMaritimeVessel && !isDossierOpen && (
+            {(maritimeMapViewActive || (assetCockpitActive && assetLayerVisibility.ais_vessels)) && selectedMaritimeVessel && !isDossierOpen && (
               <div className="absolute top-20 left-4 z-[1100] pointer-events-auto">
                 <OilMaritimePanel
                   key={selectedMaritimeVessel.id || String(selectedMaritimeVessel.mmsi)}
@@ -1994,7 +2116,9 @@ export default function App() {
                 />
               </div>
             )}
-            {(viewMode === 'mining' || viewMode === 'global') &&
+            {(effectiveViewMode === 'mining' ||
+              effectiveViewMode === 'global' ||
+              effectiveViewMode === 'oil_and_gas') &&
               selectedInfrastructureFeature &&
               !isDossierOpen && (
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1150] flex justify-start sm:inset-x-auto sm:left-4 sm:bottom-4 sm:top-24 sm:right-auto">
@@ -2209,7 +2333,7 @@ export default function App() {
                   onVesselFiltersChange: setVesselFilters,
                   prioritizePetroleum: prioritizePetroleumVessels,
                   onPrioritizePetroleumChange: setPrioritizePetroleumVessels,
-                  showPetroleumPriority: viewMode === 'oil_and_gas',
+                  showPetroleumPriority: effectiveViewMode === 'oil_and_gas',
                 }
               : undefined
           }
@@ -2339,7 +2463,7 @@ export default function App() {
               className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${intelligenceMode === 'global_view' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
             >
               <LucideMapPin className="w-5 h-5" />
-              <span className="text-[8px] font-black uppercase tracking-wider">{t('גלובלי', 'Global')}</span>
+              <span className="text-[8px] font-black uppercase tracking-wider">{t('מפת עולם', 'World Map')}</span>
             </button>
             <button
               onClick={() => switchIntelligenceMode('assets')}
@@ -2377,7 +2501,7 @@ export default function App() {
           className={`flex flex-col items-center gap-0.5 min-w-[44px] min-h-[44px] justify-center px-2 transition-colors ${viewMode === 'global' ? 'text-amber-500' : 'text-slate-600 dark:text-slate-500'}`}
         >
           <LucideMapPin className="w-5 h-5" />
-          <span className="text-[8px] font-black uppercase tracking-wider">{t("עולמי", "Global")}</span>
+          <span className="text-[8px] font-black uppercase tracking-wider">{t("מפת עולם", "World Map")}</span>
         </button>
         <button
           onClick={() => switchSectorView('mining')}

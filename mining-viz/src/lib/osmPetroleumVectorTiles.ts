@@ -19,3 +19,4 @@ export function osmVectorTilesEnabled(catalog?: OsmPetroleumCatalog | null): boo
   if (env === '1' || env === 'true' || env === 'on') return hasTileTemplate !== false;
   return catalog?.render_mode === 'mvt' && Boolean(hasTileTemplate);
 }
+

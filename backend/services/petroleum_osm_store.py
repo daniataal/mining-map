@@ -294,6 +294,58 @@ def sync_all_layers(
     return summary
 
 
+def get_osm_feature_properties(
+    conn: Any,
+    layer_id: str,
+    osm_type: str,
+    osm_id: int,
+) -> Optional[dict[str, Any]]:
+    """Load one persisted OSM feature's tags for map click / dossier enrichment."""
+    if layer_id not in OSM_LAYERS:
+        raise KeyError(layer_id)
+
+    ensure_petroleum_osm_tables(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT tags, osm_type, osm_id, layer_id,
+                   ST_Y(ST_Centroid(geom::geometry)) AS lat,
+                   ST_X(ST_Centroid(geom::geometry)) AS lng
+            FROM petroleum_osm_features
+            WHERE layer_id = %s AND osm_type = %s AND osm_id = %s
+            LIMIT 1;
+            """,
+            (layer_id, osm_type, int(osm_id)),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return None
+
+    tags_raw, row_osm_type, row_osm_id, row_layer_id, lat, lng = row
+    tags: dict[str, Any] = {}
+    if isinstance(tags_raw, dict):
+        tags = tags_raw
+    elif isinstance(tags_raw, str):
+        try:
+            tags = json.loads(tags_raw)
+        except json.JSONDecodeError:
+            tags = {}
+
+    name = (tags.get("name") or tags.get("operator") or f"OSM {row_osm_type} {row_osm_id}").strip()
+    return {
+        **tags,
+        "name": name,
+        "layer_id": row_layer_id,
+        "osm_type": row_osm_type,
+        "osm_id": row_osm_id,
+        "source": "openstreetmap",
+        "persisted": True,
+        "lat": lat,
+        "lng": lng,
+    }
+
+
 def get_layer_geojson_from_db(
     conn: Any,
     layer_id: str,
@@ -306,29 +358,47 @@ def get_layer_geojson_from_db(
         raise KeyError(layer_id)
 
     ensure_petroleum_osm_tables(conn)
-    params: list[Any] = [layer_id]
+    where_params: list[Any] = [layer_id]
     bbox_clause = ""
     if bbox is not None:
         south, west, north, east = bbox
-        bbox_clause = """
+        # Pipelines: gist && prefilter is enough for viewport fetch and much faster than ST_Intersects.
+        if layer_id == "pipelines":
+            bbox_clause = """
+            AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+        """
+        else:
+            bbox_clause = """
             AND ST_Intersects(
                 geom,
                 ST_MakeEnvelope(%s, %s, %s, %s, 4326)
             )
         """
-        params.extend([west, south, east, north])
+        where_params.extend([west, south, east, north])
 
     try:
-        from backend.services.license_map_perf import simplify_tolerance_for_zoom
+        from backend.services.license_map_perf import (
+            pipeline_geojson_limit_for_zoom,
+            simplify_tolerance_for_zoom,
+        )
     except ImportError:
-        from services.license_map_perf import simplify_tolerance_for_zoom
+        from services.license_map_perf import (
+            pipeline_geojson_limit_for_zoom,
+            simplify_tolerance_for_zoom,
+        )
 
     tolerance = simplify_tolerance_for_zoom(zoom)
+    select_params: list[Any] = []
     if tolerance > 0:
-        geom_sql = "ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom::geometry, %s))::json"
-        params.append(tolerance)
+        if layer_id == "pipelines":
+            geom_sql = "ST_AsGeoJSON(ST_Simplify(geom::geometry, %s))::json"
+        else:
+            geom_sql = "ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom::geometry, %s))::json"
+        select_params.append(tolerance)
     else:
         geom_sql = "ST_AsGeoJSON(geom)::json"
+
+    row_limit = pipeline_geojson_limit_for_zoom(zoom) if layer_id == "pipelines" else 50000
 
     with conn.cursor() as cur:
         cur.execute(
@@ -338,9 +408,9 @@ def get_layer_geojson_from_db(
             WHERE layer_id = %s
             {bbox_clause}
             ORDER BY osm_id
-            LIMIT 50000;
+            LIMIT %s;
             """,
-            tuple(params),
+            tuple([*select_params, *where_params, row_limit]),
         )
         rows = cur.fetchall()
 

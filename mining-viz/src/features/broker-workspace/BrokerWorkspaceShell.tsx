@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { LucideBriefcase } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,6 +11,11 @@ import { WorkspaceSearchImport } from './WorkspaceSearchImport';
 import { WorkspaceEntityList } from './WorkspaceEntityList';
 import { DealPackBuilder } from './DealPackBuilder';
 import { DealPackDetailPanel } from './DealPackDetailPanel';
+import {
+  isBuyerEntity,
+  resolveSelectedRouteEndpointIds,
+  isSupplierEntity,
+} from '../../lib/brokerWorkspaceRoles';
 
 type Props = {
   licenses: MiningLicense[];
@@ -21,7 +26,6 @@ type Props = {
 
 export function BrokerWorkspaceShell({ licenses, userAnnotations, sublayer = 'suppliers' }: Props) {
   const bw = useBrokerWorkspaceContext();
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useWorkspaceSeed(true, licenses, userAnnotations, (wsId) => {
     bw.setActiveWorkspaceId(wsId);
@@ -40,36 +44,48 @@ export function BrokerWorkspaceShell({ licenses, userAnnotations, sublayer = 'su
     }
   }, [dueQuery.data?.followups]);
 
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  }, []);
-
   const allEntities = bw.mapSnapshot?.entities ?? [];
-  const entities = allEntities.filter((e) => {
-    if (sublayer === 'deal_packs') return Boolean(e.packed_into_pack_id);
-    if (sublayer === 'buyers') return e.entity_type.toLowerCase().includes('buyer');
-    if (sublayer === 'suppliers') {
-      return (
-        !e.packed_into_pack_id &&
-        (e.entity_type.toLowerCase().includes('supplier') ||
-          !e.entity_type.toLowerCase().includes('buyer'))
-      );
-    }
-    return true;
-  });
+  const packs = bw.mapSnapshot?.packs ?? [];
+  const looseEntities = allEntities.filter((e) => !e.packed_into_pack_id);
+  const visibleEntities = looseEntities;
+  const selectedIds = bw.selectedEntityIds;
+  const selectedEntities = visibleEntities.filter((entity) => selectedIds.includes(entity.id));
+  const selectedSuppliers = selectedEntities.filter(isSupplierEntity);
+  const selectedBuyers = selectedEntities.filter(isBuyerEntity);
+  const routeEndpointIds = resolveSelectedRouteEndpointIds(visibleEntities, selectedIds);
+  const routeAlreadyExists = routeEndpointIds
+    ? (bw.mapSnapshot?.edges ?? []).some((edge) => {
+        const [sourceId, targetId] = routeEndpointIds;
+        return (
+          (edge.source_node_id === sourceId && edge.target_node_id === targetId) ||
+          (edge.source_node_id === targetId && edge.target_node_id === sourceId)
+        );
+      })
+    : false;
+  const routeEndpointNames = routeEndpointIds
+    ?.map((id) => visibleEntities.find((entity) => entity.id === id)?.display_name)
+    .filter(Boolean)
+    .join(' → ');
+  const knownEntityIds = new Set(allEntities.map((entity) => entity.id));
   const allEntitiesForPack = [
-    ...entities,
-    ...(bw.mapSnapshot?.packs.flatMap((p) =>
-      p.constituent_entity_ids.map((id) => {
-        const e = entities.find((x) => x.id === id);
+    ...allEntities,
+    ...(packs.flatMap((p) =>
+      p.constituent_entity_ids.filter((id) => !knownEntityIds.has(id)).map((id) => {
+        const e = allEntities.find((x) => x.id === id);
         return e
           ? { id: e.id, display_name: e.display_name, entity_type: e.entity_type }
           : { id, display_name: id, entity_type: 'unknown' };
       }),
     ) ?? []),
   ];
+  const panelSubtitle =
+    sublayer === 'deal_packs'
+      ? 'Saved deal packs'
+      : 'Deal canvas';
+  const selectedPackName =
+    selectedSuppliers[0] && selectedBuyers[0]
+      ? `${selectedSuppliers[0].display_name} → ${selectedBuyers[0].display_name}`
+      : 'Deal Pack';
 
   if (bw.selectedPack && bw.activeWorkspaceId) {
     return (
@@ -98,13 +114,7 @@ export function BrokerWorkspaceShell({ licenses, userAnnotations, sublayer = 'su
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-xl font-black tracking-tight">Supply Chain</h2>
-            <p className="text-xs text-slate-500">
-              {sublayer === 'buyers'
-                ? 'Buyers on map'
-                : sublayer === 'deal_packs'
-                  ? 'Deal packs'
-                  : 'Suppliers on map'}
-            </p>
+            <p className="text-xs text-slate-500">{panelSubtitle}</p>
           </div>
           {(dueQuery.data?.followups?.length ?? 0) > 0 && (
             <span className="text-[10px] font-black uppercase bg-red-500/20 text-red-600 px-2 py-1 rounded-full">
@@ -124,43 +134,114 @@ export function BrokerWorkspaceShell({ licenses, userAnnotations, sublayer = 'su
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         <WorkspaceSearchImport
           onImport={(hit) =>
-            bw.importFromSearch.mutate(hit, {
-              onError: (e) => toast.error(e.message),
-            })
+            bw.importFromSearch.mutate(
+              {
+                ...hit,
+                deal_signal: hit.entity_type === 'supplier' ? 'good' : 'maybe',
+              },
+              {
+                onError: (e) => toast.error(e.message),
+              },
+            )
           }
+          onAddCustomLicense={(body) => bw.addEntity.mutateAsync(body)}
         />
 
+        {sublayer === 'deal_packs' && (
+          <section>
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Deal packs</h3>
+            {packs.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-4 border border-dashed rounded-xl">
+                No deal packs yet. Add a supplier and buyer, select both, then pack the deal.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {packs.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => bw.setSelectedPackId(p.id)}
+                    className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left hover:bg-amber-500/20"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-black">{p.name}</span>
+                      <span className="shrink-0 rounded-full bg-slate-950/10 px-2 py-0.5 text-[9px] font-black uppercase text-slate-500 dark:bg-white/10">
+                        {p.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {p.constituent_entity_ids.length} parties · click to manage DD, route, economics and follow-ups
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <section>
-          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Map entities</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Deal canvas</h3>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+              {visibleEntities.length} loose
+            </span>
+          </div>
           <WorkspaceEntityList
-            entities={entities}
+            entities={visibleEntities}
             selectedIds={selectedIds}
-            onToggleSelect={toggleSelect}
+            onToggleSelect={bw.toggleEntitySelection}
             onRemove={(id) => bw.removeEntity.mutate(id)}
           />
         </section>
 
         <DealPackBuilder
-          entities={entities}
+          entities={visibleEntities}
           selectedIds={selectedIds}
           packLocationMode={bw.packLocationMode}
-          onPack={() => bw.startPackFlow(selectedIds)}
+          onPack={() => bw.startPackFlow(selectedIds, selectedPackName)}
+          canDrawRoute={Boolean(routeEndpointIds) && !routeAlreadyExists}
+          routePending={bw.addEdge.isPending}
+          routeButtonLabel={
+            routeAlreadyExists
+              ? 'Route already on map'
+              : routeEndpointIds
+                ? 'Show route on map'
+                : 'Select route points'
+          }
+          routeHint={
+            routeEndpointNames
+              ? `Route preview: ${routeEndpointNames}.`
+              : 'Select exactly two points, or select a supplier and buyer. Optional ports, vessels and facilities can stay selected for the deal pack.'
+          }
           onAddRoute={() => {
-            if (selectedIds.length !== 2 || !bw.activeWorkspaceId) return;
-            bw.addEdge.mutate({
-              source_entity_id: selectedIds[0],
-              target_entity_id: selectedIds[1],
-              label: 'logistics_route',
-            });
-            toast.success('Route added');
+            if (!routeEndpointIds || !bw.activeWorkspaceId) {
+              toast.error('Select two route points first');
+              return;
+            }
+            if (routeAlreadyExists) {
+              toast.info('Route is already on the map');
+              return;
+            }
+            const [sourceId, targetId] = routeEndpointIds;
+            bw.addEdge.mutate(
+              {
+                source_entity_id: sourceId,
+                target_entity_id: targetId,
+                label: 'planned_logistics_route',
+              },
+              {
+                onSuccess: () => toast.success('Route shown on map'),
+                onError: (e) => toast.error(e.message),
+              },
+            );
           }}
         />
 
-        {bw.mapSnapshot?.packs && bw.mapSnapshot.packs.length > 0 && (
+        {sublayer !== 'deal_packs' && packs.length > 0 && (
           <section>
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Packed deals</h3>
             <div className="space-y-1">
-              {bw.mapSnapshot.packs.map((p) => (
+              {packs.map((p) => (
                 <button
                   key={p.id}
                   type="button"

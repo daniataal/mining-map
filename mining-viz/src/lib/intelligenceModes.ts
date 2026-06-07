@@ -57,7 +57,7 @@ export const SUBLAYERS_FOR_MODE: Record<IntelligenceMode, readonly IntelligenceS
 export function intelligenceModeLabel(mode: IntelligenceMode): string {
   switch (mode) {
     case 'global_view':
-      return 'Global';
+      return 'World Map';
     case 'assets':
       return 'Assets';
     case 'supply_chain':
@@ -71,14 +71,14 @@ export function intelligenceModeLabel(mode: IntelligenceMode): string {
 
 export function sublayerLabel(sublayer: IntelligenceSublayer): string {
   const labels: Record<string, string> = {
-    countries: 'Countries',
-    licenses: 'Licenses',
-    trade_flows: 'Trade flows',
-    risk: 'Risk (beta)',
+    countries: 'Country Hubs',
+    licenses: 'Asset Inventory',
+    trade_flows: 'Trade Corridors',
+    risk: 'Risk & Coverage',
     mines: 'Mines',
-    oil_fields: 'Oil fields',
+    oil_fields: 'Oil Fields',
     refineries: 'Refineries',
-    tank_farms: 'Tank farms',
+    tank_farms: 'Tank Farms',
     ports: 'Ports',
     suppliers: 'Suppliers',
     buyers: 'Buyers',
