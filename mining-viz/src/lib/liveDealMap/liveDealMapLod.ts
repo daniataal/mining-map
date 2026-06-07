@@ -68,6 +68,7 @@ export type LiveDealClientClusterData = {
   bounds: LiveDealViewport;
   sourceIds: string[];
   sourceUids: string[];
+  clusterKind?: LiveDealFeatureKind;
 };
 
 export interface LiveDealPointFeatureDrawOptions {
@@ -239,6 +240,7 @@ export function planLiveDealPointFeatureDraw(
         bounds: { south, west, north, east },
         sourceIds,
         sourceUids,
+        clusterKind: first.kind,
       } satisfies LiveDealClientClusterData,
     });
   }
