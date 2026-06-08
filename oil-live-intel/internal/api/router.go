@@ -29,6 +29,7 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 		api.Get("/map/petroleum-osm/layers", s.OSMLayersCatalog)
 		api.Get("/map/petroleum-osm/layers/{layer_id}", s.OSMLayerGeoJSON)
 		api.Get("/map/petroleum-osm/tiles/{layer_id}/{z}/{x}/{y}.pbf", s.OSMLayerMVT)
+		api.Get("/map/petroleum-osm/features/{layer_id}/{osm_type}/{osm_id}", s.OSMFeatureProperties)
 		api.Get("/map-layers", s.MapLayers)
 
 		// Licenses

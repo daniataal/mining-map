@@ -5,6 +5,7 @@ import type { MiningLicense } from '../../types';
 import { useI18n } from '../../lib/i18n';
 import {
   formatStorageMapFeatureLabels,
+  storageTankFarmClusterGridMultiplier,
   storageTankFarmsLayerShouldMount,
 } from '../../lib/storageTankFarmsLayer';
 import CanvasLiveDealLayer from './CanvasLiveDealLayer';
@@ -62,6 +63,7 @@ function StorageTankFarmsCanvas({
       clusterKinds={STORAGE_CANVAS_CLUSTER_KINDS}
       clusterMaxZoom={STORAGE_CANVAS_CLUSTER_MAX_ZOOM}
       clusterMinCount={STORAGE_CANVAS_CLUSTER_MIN_COUNT}
+      clusterGridMultiplier={storageTankFarmClusterGridMultiplier(mapZoom)}
     />
   );
 }

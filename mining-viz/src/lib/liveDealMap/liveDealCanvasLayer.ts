@@ -20,6 +20,7 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
   clusterMinCount?: number;
+  clusterGridMultiplier?: number;
   isDark?: boolean;
 }
 
@@ -279,6 +280,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _clusterKinds: readonly LiveDealFeatureKind[] | undefined;
   private _clusterMaxZoom = 13;
   private _clusterMinCount = 2;
+  private _clusterGridMultiplier = 1;
   private _isDark = true;
 
   constructor(options: CanvasLiveDealLayerOptions) {
@@ -290,6 +292,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._clusterKinds = options.clusterKinds;
     this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
     this._clusterMinCount = options.clusterMinCount ?? 2;
+    this._clusterGridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
     this._isDark = options.isDark !== false;
   }
 
@@ -334,18 +337,21 @@ export class CanvasLiveDealLayer extends L.Layer {
     clusterKinds?: readonly LiveDealFeatureKind[];
     clusterMaxZoom?: number;
     clusterMinCount?: number;
+    clusterGridMultiplier?: number;
     isDark?: boolean;
   }): void {
     const nextClusterPoints = Boolean(options.clusterPoints);
     const nextClusterKinds = options.clusterKinds;
     const nextClusterMaxZoom = options.clusterMaxZoom ?? 13;
     const nextClusterMinCount = options.clusterMinCount ?? 2;
+    const nextClusterGridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
     const nextIsDark = options.isDark !== false;
     if (
       this._clusterPoints === nextClusterPoints &&
       this._clusterKinds === nextClusterKinds &&
       this._clusterMaxZoom === nextClusterMaxZoom &&
       this._clusterMinCount === nextClusterMinCount &&
+      this._clusterGridMultiplier === nextClusterGridMultiplier &&
       this._isDark === nextIsDark
     ) {
       return;
@@ -354,6 +360,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._clusterKinds = nextClusterKinds;
     this._clusterMaxZoom = nextClusterMaxZoom;
     this._clusterMinCount = nextClusterMinCount;
+    this._clusterGridMultiplier = nextClusterGridMultiplier;
     this._isDark = nextIsDark;
     this._lastPaintKey = '';
     this._scheduleRedraw();
@@ -464,6 +471,7 @@ export class CanvasLiveDealLayer extends L.Layer {
       clusterKinds: this._clusterKinds,
       clusterMaxZoom: this._clusterMaxZoom,
       clusterMinCount: this._clusterMinCount,
+      clusterGridMultiplier: this._clusterGridMultiplier,
     });
     this._lodSubsampling = pointPlan.lodSubsampling;
 

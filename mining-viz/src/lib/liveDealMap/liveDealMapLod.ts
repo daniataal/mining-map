@@ -76,6 +76,7 @@ export interface LiveDealPointFeatureDrawOptions {
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMinCount?: number;
   clusterMaxZoom?: number;
+  clusterGridMultiplier?: number;
 }
 
 export function isLiveDealClientClusterData(value: unknown): value is LiveDealClientClusterData {
@@ -145,8 +146,9 @@ export function planLiveDealPointFeatureDraw(
   }
 
   const clusterMaxZoom = options.clusterMaxZoom ?? 13;
+  const gridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
   const clusterGrid = options.clusterPoints && zoom < clusterMaxZoom
-    ? clientClusterGridDegreesForZoom(zoom)
+    ? clientClusterGridDegreesForZoom(zoom) * gridMultiplier
     : 0;
 
   if (!options.clusterPoints || clusterGrid <= 0) {

@@ -30,6 +30,13 @@ def run_once() -> dict[str, Any]:
     if enabled in {"0", "false", "no", "off"}:
         return {"status": "skipped", "reason": "PETROLEUM_OSM_SYNC_ENABLED is off"}
 
+    go_owner = (os.getenv("PETROLEUM_OSM_SYNC_GO_OWNER") or "true").strip().lower()
+    if go_owner in {"1", "true", "yes", "on"}:
+        return {
+            "status": "skipped",
+            "reason": "Go oil-live-intel worker owns petroleum OSM sync (PETROLEUM_OSM_SYNC_GO_OWNER)",
+        }
+
     try:
         from backend.services.petroleum_osm_store import ensure_petroleum_osm_tables, sync_all_layers
     except ImportError:

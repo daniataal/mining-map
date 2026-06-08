@@ -61,24 +61,28 @@ export default function GemGoitPipelineMapLayer({
             );
           }}
           renderer={svgRenderer}
-          onEachFeature={(feature, layer) => {
-            const props = (feature.properties || {}) as Record<string, unknown>;
-            const popupLayerId = gemFuelGroupToPopupLayerId(String(props.fuel_group || ''));
-            const lineStyle = gemPipelineStyle(
-              String(props.fuel_group || ''),
-              String(props.status || ''),
-              isDark,
-            );
-            bindPipelineMapInteraction({
-              layer,
-              popupLayerId,
-              properties: props,
-              geometry: feature.geometry ?? null,
-              onFeatureClick,
-              visibleWeight: lineStyle.weight,
-              visibleOpacity: lineStyle.opacity,
-            });
-          }}
+          onEachFeature={
+            onFeatureClick
+              ? (feature, layer) => {
+                  const props = (feature.properties || {}) as Record<string, unknown>;
+                  const popupLayerId = gemFuelGroupToPopupLayerId(String(props.fuel_group || ''));
+                  const lineStyle = gemPipelineStyle(
+                    String(props.fuel_group || ''),
+                    String(props.status || ''),
+                    isDark,
+                  );
+                  bindPipelineMapInteraction({
+                    layer,
+                    popupLayerId,
+                    properties: props,
+                    geometry: feature.geometry ?? null,
+                    onFeatureClick,
+                    visibleWeight: lineStyle.weight,
+                    visibleOpacity: lineStyle.opacity,
+                  });
+                }
+              : undefined
+          }
         />
       </LayerGroup>
     </LayersControl.Overlay>

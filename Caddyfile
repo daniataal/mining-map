@@ -85,6 +85,16 @@
 				}
 			}
 		}
+
+		handle /api/petroleum/osm-features* {
+			uri replace /api/petroleum/osm-features /api/oil-live/map/petroleum-osm/features
+			reverse_proxy oil-live-intel:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
 		handle /api/maritime/stats* {
 			uri replace /api/maritime/stats /api/oil-live/maritime/stats
 			reverse_proxy oil-live-intel:8095 {

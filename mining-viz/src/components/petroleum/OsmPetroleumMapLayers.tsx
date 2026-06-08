@@ -9,24 +9,19 @@ import {
 } from '../../lib/osmPetroleumLayers';
 import type { PetroleumViewportBounds } from '../../lib/petroleumLayers';
 import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/petroleumLayers';
-import { infrastructureLayerShouldRender } from '../../lib/infrastructureLayer';
+import {
+  infrastructureLayerShouldRender,
+  osmPointMvtOverviewShouldRender,
+} from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
 import { osmVectorTilesEnabled } from '../../lib/osmPetroleumVectorTiles';
 import type { OsmVectorVisibility } from '../../lib/osmPetroleumVectorStyle';
 import { OsmVisibilityBridge } from './OsmVisibilityBridge';
 import OsmPetroleumMapLayersGeoJson from './OsmPetroleumMapLayersGeoJson';
-import OsmPipelineInteractionOverlay from './OsmPipelineInteractionOverlay';
+import { OSM_LABELS, OSM_MAP_LAYER_IDS } from '../../lib/osmPetroleumConstants';
 
 const OsmPetroleumVectorMap = lazy(() => import('./OsmPetroleumVectorLayers'));
-
-const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
-
-const OSM_LABELS: Record<OsmPetroleumLayerId, [string, string]> = {
-  pipelines: ['צינורות נפט/גז OSM', 'Oil/gas pipelines — OpenStreetMap'],
-  refineries: ['זיקוק OSM (קהילה)', 'Refineries — OpenStreetMap (community)'],
-  storage_terminals: ['מאגרי אחסון OSM', 'Tank storage — OpenStreetMap'],
-};
 
 interface OsmPetroleumMapLayersProps {
   bbox: PetroleumViewportBounds | null;
@@ -116,6 +111,9 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
     const toggled = effectiveVisibility[layerId];
     if (!toggled) return false;
     if (layerVisibility != null) {
+      if (layerId === 'storage_terminals' || layerId === 'refineries') {
+        return osmPointMvtOverviewShouldRender(mapZoom, Boolean(layerVisibility[layerId]));
+      }
       return infrastructureLayerShouldRender(layerId, mapZoom, layerVisibility, forcedLayers ?? {});
     }
     return true;
@@ -141,20 +139,10 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
               enabled={osmActive}
               visibility={vectorVisibility}
               catalogLayers={osmCatalog?.layers}
-              onFeatureClick={onFeatureClick}
               isDark={isDark}
               splitOilGasPipelineLayers={splitOilGasPipelineLayers}
             />
           </Suspense>
-          {vectorVisibility.pipelines && onFeatureClick ? (
-            <OsmPipelineInteractionOverlay
-              bbox={bbox}
-              enabled={osmActive && vectorVisibility.pipelines}
-              mapZoom={mapZoom}
-              onFeatureClick={onFeatureClick}
-              splitOilGasPipelineLayers={splitOilGasPipelineLayers}
-            />
-          ) : null}
         </LayerGroup>
       </LayersControl.Overlay>
       {layerVisibility == null &&

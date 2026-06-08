@@ -2062,6 +2062,14 @@ export default function App() {
                       ? setSelectedInfrastructureFeature
                       : undefined
                   }
+                  onDismissInfrastructureFeature={
+                    effectiveViewMode === 'mining' ||
+                    effectiveViewMode === 'global' ||
+                    effectiveViewMode === 'oil_and_gas' ||
+                    (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')
+                      ? () => setSelectedInfrastructureFeature(null)
+                      : undefined
+                  }
                   macroTradeFlows={macroTradeFlows}
                   liveDataMacroTradeOn={isLiveDataSidebar ? liveDataMacroTradeOn : undefined}
                   onLiveDataMacroTradeChange={

@@ -121,13 +121,22 @@ export default function PetroleumFeaturePopup({
             ? pipelineSubstancePopupLayerId(model.pipelineSubstance)
             : layerId
         ] ?? LAYER_ACCENT[layerId];
-  const layerLabel = model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(layerId);
+  const storageLayer =
+    String(properties.layer_id ?? '') === 'storage_terminals';
+  const layerLabel = storageLayer
+    ? t('אחסון', 'Storage')
+    : model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(layerId);
   const showExploringSection =
     layerId === 'exploration' || layerId === 'production' || layerId === 'bid_rounds';
   const isOsmPipeline =
     model.isOsmFeature &&
     (layerId === 'oil_pipelines' || layerId === 'gas_pipelines');
-  const showOperatorSection = isOsmPipeline || (model.operator && !showExploringSection);
+  const isOsmPoint =
+    model.isOsmFeature &&
+    (String(properties.layer_id ?? '') === 'refineries' ||
+      String(properties.layer_id ?? '') === 'storage_terminals');
+  const showOperatorSection =
+    isOsmPipeline || isOsmPoint || (model.operator && !showExploringSection);
   const companiesUnknownHint = model.sourceUrl
     ? t('לא ידוע — ראה מקור', 'Unknown — see source')
     : t('לא ידוע', 'Unknown');
