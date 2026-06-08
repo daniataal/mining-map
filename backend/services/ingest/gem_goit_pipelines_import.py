@@ -163,6 +163,7 @@ def normalize_row_tags(row: dict[str, Any], row_index: int) -> Optional[dict[str
         "countries": _clean_text(row.get("Countries")),
         "start_location": _clean_text(row.get("StartLocation")),
         "start_country": _clean_text(row.get("StartCountry")),
+        "end_location": _clean_text(row.get("EndLocation")),
         "end_country": _clean_text(row.get("EndCountry")),
         "wiki": _clean_text(row.get("Wiki")),
         "route_type": _clean_text(row.get("RouteType")),

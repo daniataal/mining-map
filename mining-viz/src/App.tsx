@@ -266,9 +266,12 @@ export default function App() {
     ? resolveAssetMapViewKey(assetLayerVisibility)
     : viewMode;
   const effectiveLicenseSector = assetCockpitActive
-    ? resolveAssetLicenseSector(assetLayerVisibility)
+    ? resolveAssetLicenseSector(assetLayerVisibility) ?? licenseSector
     : licenseSector;
-  const assetLicenseLayerActive = !assetCockpitActive || assetLicenseMarkersEnabled(assetLayerVisibility);
+  const assetLicenseLayerActive =
+    !assetCockpitActive ||
+    assetLicenseMarkersEnabled(assetLayerVisibility) ||
+    Boolean(licenseSector);
   const [mapSidebarTab, setMapSidebarTab] = useState<MapSidebarTab>('licenses');
   const showMapSidebar = cockpitEnabled
     ? isSidebarVisibleMode(intelligenceMode, mapSidebarTab)
@@ -2118,7 +2121,8 @@ export default function App() {
             )}
             {(effectiveViewMode === 'mining' ||
               effectiveViewMode === 'global' ||
-              effectiveViewMode === 'oil_and_gas') &&
+              effectiveViewMode === 'oil_and_gas' ||
+              (effectiveViewMode === 'route_planner' && intelligenceSublayer === 'pipelines')) &&
               selectedInfrastructureFeature &&
               !isDossierOpen && (
               <div className="pointer-events-none absolute inset-x-2 bottom-3 top-24 z-[1150] flex justify-start sm:inset-x-auto sm:left-4 sm:bottom-4 sm:top-24 sm:right-auto">

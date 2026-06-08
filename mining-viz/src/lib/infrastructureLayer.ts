@@ -51,6 +51,30 @@ export function pipelineLeafletShouldFetch(
   return mapZoom != null && mapZoom >= PIPELINE_LEAFLET_MIN_ZOOM;
 }
 
+/** True when OSM pipeline layer is toggled on (independent of GEM visibility). */
+export function osmPipelinesLayerVisible(
+  opts: {
+    isOilAndGasView: boolean;
+    showInfrastructureLayers: boolean;
+    isLiveDataView: boolean;
+    infrastructurePipelinesOn: boolean;
+    showOsmPetroleum: boolean;
+    osmLayerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+    osmLayerIds?: OsmPetroleumLayerId[];
+  },
+): boolean {
+  if (
+    opts.showInfrastructureLayers &&
+    !opts.isOilAndGasView &&
+    !opts.isLiveDataView &&
+    opts.infrastructurePipelinesOn
+  ) {
+    return true;
+  }
+  if (!opts.isOilAndGasView || !opts.showOsmPetroleum) return false;
+  return opts.osmLayerVisibility?.pipelines ?? opts.osmLayerIds?.includes('pipelines') ?? true;
+}
+
 export function portMarkersShouldRender(
   mapZoom: number | undefined,
   portsEnabled: boolean,
