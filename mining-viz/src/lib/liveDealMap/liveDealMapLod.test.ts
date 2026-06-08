@@ -80,6 +80,27 @@ describe('planLiveDealPointDraw', () => {
     expect(cluster.sourceCount).toBe(30);
     expect(isLiveDealClientClusterData(cluster.data)).toBe(true);
   });
+
+  it('uses cluster grid multiplier to make storage clusters coarser at low zoom', () => {
+    const features: LiveDealMapFeature[] = [
+      point('storage-1', 'storage_terminal', 0, 0),
+      point('storage-2', 'storage_terminal', 1.5, 1.5),
+    ];
+
+    const normal = planLiveDealPointFeatureDraw(features, viewport, 4, null, {
+      clusterPoints: true,
+      clusterKinds: ['storage_terminal'],
+    });
+    const coarse = planLiveDealPointFeatureDraw(features, viewport, 4, null, {
+      clusterPoints: true,
+      clusterKinds: ['storage_terminal'],
+      clusterGridMultiplier: 7,
+    });
+
+    expect(normal.drawFeatures).toHaveLength(2);
+    expect(coarse.drawFeatures).toHaveLength(1);
+    expect(coarse.drawFeatures[0].kind).toBe('server_cluster');
+  });
 });
 
 describe('targetZoomForLiveDealClientCluster', () => {

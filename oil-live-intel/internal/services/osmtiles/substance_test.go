@@ -12,6 +12,9 @@ func TestClassifyPipelineSubstance(t *testing.T) {
 		{map[string]string{"type": "water"}, "water"},
 		{map[string]string{"usage": "irrigation"}, "water"},
 		{map[string]string{"pipeline_substance": "gas"}, "gas"},
+		{map[string]string{"name": "Basra Oil Pipeline"}, "oil"},
+		{map[string]string{"name": "Natural Gas trunk line"}, "gas"},
+		{map[string]string{"name": "Municipal water main"}, "water"},
 		{map[string]string{}, "unknown"},
 	}
 	for _, tc := range tests {

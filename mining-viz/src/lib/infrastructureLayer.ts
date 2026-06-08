@@ -6,6 +6,15 @@ export const INFRASTRUCTURE_MIN_DETAIL_ZOOM = 9;
 /** OSM pipeline MVT tiles are generated from this zoom (catalog min_zoom=4). */
 export const PIPELINE_MVT_MIN_ZOOM = 4;
 
+/** Refineries are strategic anchor assets and can be shown before dense point layers. */
+export const REFINERY_MVT_MIN_ZOOM = 6;
+
+/** Individual OSM storage points are too dense globally; aggregate canvas handles low zoom. */
+export const STORAGE_INDIVIDUAL_MIN_ZOOM = 10;
+
+/** Lightweight MVT overview keeps tank farms visible without the global cyan carpet. */
+export const STORAGE_OVERVIEW_MIN_ZOOM = 4;
+
 /** Leaflet GeoJSON fallback only — viewport fetch; GeoJSON API is slow at scale. */
 export const PIPELINE_LEAFLET_MIN_ZOOM = 5;
 
@@ -37,9 +46,13 @@ export function infrastructureLayerShouldRender(
   forcedLayers: Partial<Record<OsmPetroleumLayerId, boolean>>,
 ): boolean {
   if (!visibility[layerId]) return false;
-  if (Boolean(forcedLayers[layerId])) return true;
+  if (Boolean(forcedLayers[layerId]) && layerId !== 'storage_terminals') return true;
   const minZoom =
-    layerId === 'pipelines' ? PIPELINE_MVT_MIN_ZOOM : INFRASTRUCTURE_MIN_DETAIL_ZOOM;
+    layerId === 'pipelines'
+      ? PIPELINE_MVT_MIN_ZOOM
+      : layerId === 'refineries'
+        ? REFINERY_MVT_MIN_ZOOM
+        : STORAGE_INDIVIDUAL_MIN_ZOOM;
   return mapZoom != null && mapZoom >= minZoom;
 }
 
@@ -49,6 +62,53 @@ export function pipelineLeafletShouldFetch(
 ): boolean {
   if (!visible) return false;
   return mapZoom != null && mapZoom >= PIPELINE_LEAFLET_MIN_ZOOM;
+}
+
+export function storageMvtOverviewShouldRender(
+  mapZoom: number | undefined,
+  visible: boolean,
+): boolean {
+  return osmPointMvtOverviewShouldRender(mapZoom, visible);
+}
+
+/** Lightweight MVT circles for refineries and storage — visible at regional zoom without dense dots. */
+export function osmPointMvtOverviewShouldRender(
+  mapZoom: number | undefined,
+  visible: boolean,
+): boolean {
+  if (!visible) return false;
+  return mapZoom != null && mapZoom >= STORAGE_OVERVIEW_MIN_ZOOM;
+}
+
+export function refineryMvtOverviewShouldRender(
+  mapZoom: number | undefined,
+  visible: boolean,
+): boolean {
+  return osmPointMvtOverviewShouldRender(mapZoom, visible);
+}
+
+/** True when a specific OSM petroleum layer is toggled on for the active map view. */
+export function osmInfrastructureLayerVisible(
+  layerId: OsmPetroleumLayerId,
+  opts: {
+    isOilAndGasView: boolean;
+    showInfrastructureLayers: boolean;
+    isLiveDataView: boolean;
+    infrastructureLayerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+    showOsmPetroleum: boolean;
+    osmLayerVisibility?: Partial<Record<OsmPetroleumLayerId, boolean>>;
+    osmLayerIds?: OsmPetroleumLayerId[];
+  },
+): boolean {
+  if (
+    opts.showInfrastructureLayers &&
+    !opts.isOilAndGasView &&
+    !opts.isLiveDataView
+  ) {
+    return Boolean(opts.infrastructureLayerVisibility?.[layerId]);
+  }
+  if (!opts.isOilAndGasView || !opts.showOsmPetroleum) return false;
+  return opts.osmLayerVisibility?.[layerId] ?? opts.osmLayerIds?.includes(layerId) ?? true;
 }
 
 /** True when OSM pipeline layer is toggled on (independent of GEM visibility). */
@@ -71,8 +131,7 @@ export function osmPipelinesLayerVisible(
   ) {
     return true;
   }
-  if (!opts.isOilAndGasView || !opts.showOsmPetroleum) return false;
-  return opts.osmLayerVisibility?.pipelines ?? opts.osmLayerIds?.includes('pipelines') ?? true;
+  return osmInfrastructureLayerVisible('pipelines', opts);
 }
 
 export function portMarkersShouldRender(

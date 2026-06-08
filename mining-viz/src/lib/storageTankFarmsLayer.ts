@@ -9,6 +9,15 @@ export function storageTankFarmsLayerShouldMount(enabled: boolean, _mapZoom?: nu
   return enabled;
 }
 
+/** Tank farms are extremely dense globally; keep low zoom as coarse hub aggregates. */
+export function storageTankFarmClusterGridMultiplier(mapZoom: number | undefined): number {
+  const z = mapZoom ?? 5;
+  if (z < 5) return 7;
+  if (z < 7) return 4.5;
+  if (z < 9) return 2.5;
+  return 1;
+}
+
 export const STORAGE_OPERATOR_UNTAGGED = 'Operator not tagged';
 
 export function formatStorageSourceLabel(

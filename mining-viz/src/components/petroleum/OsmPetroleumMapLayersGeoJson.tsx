@@ -27,58 +27,15 @@ import {
   pipelineVisibleStyle,
 } from '../../lib/pipelineMapInteraction';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
-
-const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
-
-const OSM_STYLE: Record<OsmPetroleumLayerId, PathOptions> = {
-  pipelines: {
-    color: '#fbbf24',
-    weight: 3,
-    opacity: 0.9,
-    dashArray: '5 4',
-    lineCap: 'round',
-  },
-  refineries: { color: '#c2410c', weight: 1, fillColor: '#fb923c', fillOpacity: 0.85 },
-  storage_terminals: { color: '#06b6d4', weight: 1, fillColor: '#22d3ee', fillOpacity: 0.85 },
-};
-
-const OSM_WATER_PIPELINE_STYLE: PathOptions = {
-  color: '#0891b2',
-  weight: 2.5,
-  opacity: 0.8,
-  dashArray: '2 6',
-  lineCap: 'round',
-};
-
-const OSM_LABELS: Record<OsmPetroleumLayerId, [string, string]> = {
-  pipelines: ['צינורות נפט/גז OSM', 'Oil/gas pipelines — OpenStreetMap'],
-  refineries: ['זיקוק OSM (קהילה)', 'Refineries — OpenStreetMap (community)'],
-  storage_terminals: ['מאגרי אחסון OSM', 'Tank storage — OpenStreetMap'],
-};
-
-const OIL_GAS_PIPELINE_LABELS = {
-  oil_pipelines: ['צינורות נפט', 'Oil pipelines'] as [string, string],
-  gas_pipelines: ['צינורות גז', 'Gas pipelines'] as [string, string],
-};
-
-function oilGasPipelineStyle(layerId: 'oil_pipelines' | 'gas_pipelines', isDark: boolean): PathOptions {
-  if (layerId === 'oil_pipelines') {
-    return {
-      color: isDark ? '#fbbf24' : '#0f172a',
-      weight: 3,
-      opacity: isDark ? 0.92 : 0.88,
-      lineCap: 'round',
-      lineJoin: 'round',
-    };
-  }
-  return {
-    color: isDark ? '#38bdf8' : '#0284c7',
-    weight: 2.6,
-    opacity: 0.88,
-    dashArray: isDark ? undefined : '6 4',
-    lineCap: 'round',
-  };
-}
+import { getFeatureCoordinates } from '../../lib/geojsonUtils';
+import {
+  OIL_GAS_PIPELINE_LABELS,
+  OSM_LABELS,
+  OSM_MAP_LAYER_IDS,
+  OSM_STYLE,
+  OSM_WATER_PIPELINE_STYLE,
+} from '../../lib/osmPetroleumConstants';
+import { oilGasPipelineLeafletStyle } from '../../lib/petroleumLayerStyles';
 
 const OSM_WATER_PIPELINE_LABEL: [string, string] = [
   'צינורות מים OSM',
@@ -112,7 +69,7 @@ function OsmOilGasPipelineOverlays({
       <OsmPipelineGeoJson
         label={t(OIL_GAS_PIPELINE_LABELS.oil_pipelines[0], OIL_GAS_PIPELINE_LABELS.oil_pipelines[1])}
         features={oil}
-        style={oilGasPipelineStyle('oil_pipelines', isDark)}
+        style={oilGasPipelineLeafletStyle('oil_pipelines', isDark)}
         defaultVisible={defaultVisible}
         osmLayerId="pipelines"
         onFeatureClick={onFeatureClick}
@@ -120,7 +77,7 @@ function OsmOilGasPipelineOverlays({
       <OsmPipelineGeoJson
         label={t(OIL_GAS_PIPELINE_LABELS.gas_pipelines[0], OIL_GAS_PIPELINE_LABELS.gas_pipelines[1])}
         features={gas}
-        style={oilGasPipelineStyle('gas_pipelines', isDark)}
+        style={oilGasPipelineLeafletStyle('gas_pipelines', isDark)}
         defaultVisible={defaultVisible}
         osmLayerId="pipelines"
         onFeatureClick={onFeatureClick}
@@ -129,21 +86,7 @@ function OsmOilGasPipelineOverlays({
   );
 }
 
-function getFeatureCoordinates(
-  geometry: GeoJSON.Geometry | null | undefined,
-): { lat: number; lng: number } | null {
-  if (!geometry) return null;
-  if (geometry.type === 'Point') {
-    const [lng, lat] = geometry.coordinates as [number, number];
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-    return null;
-  }
-  if (geometry.type === 'MultiPoint' && geometry.coordinates.length > 0) {
-    const [lng, lat] = geometry.coordinates[0] as [number, number];
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
-  }
-  return null;
-}
+
 
 function osmLayerToPopupLayerId(
   layerId: OsmPetroleumLayerId,
@@ -235,16 +178,20 @@ function OsmPipelineGeoJson({
           data={geojson}
           style={pipelineVisibleStyle(style)}
           renderer={svgRenderer}
-          onEachFeature={(feature, layer) => {
-            const props = (feature.properties || {}) as Record<string, unknown>;
-            bindOsmFeatureInteraction(
-              layer,
-              osmLayerId,
-              props,
-              feature.geometry ?? null,
-              onFeatureClick,
-            );
-          }}
+          onEachFeature={
+            onFeatureClick
+              ? (feature, layer) => {
+                  const props = (feature.properties || {}) as Record<string, unknown>;
+                  bindOsmFeatureInteraction(
+                    layer,
+                    osmLayerId,
+                    props,
+                    feature.geometry ?? null,
+                    onFeatureClick,
+                  );
+                }
+              : undefined
+          }
         />
       </LayerGroup>
     </LayersControl.Overlay>
@@ -356,20 +303,24 @@ function OsmLayerOverlay({
           pointToLayer={(_feature, latlng) =>
             L.circleMarker(latlng, {
               renderer: canvasRenderer,
-              radius: layerId === 'refineries' ? 5 : 4,
+              radius: layerId === 'refineries' ? 7 : 3.5,
               ...style,
             })
           }
-          onEachFeature={(feature, layer) => {
-            const props = (feature.properties || {}) as Record<string, unknown>;
-            bindOsmFeatureInteraction(
-              layer,
-              layerId,
-              props,
-              feature.geometry ?? null,
-              onFeatureClick,
-            );
-          }}
+          onEachFeature={
+            onFeatureClick
+              ? (feature, layer) => {
+                  const props = (feature.properties || {}) as Record<string, unknown>;
+                  bindOsmFeatureInteraction(
+                    layer,
+                    layerId,
+                    props,
+                    feature.geometry ?? null,
+                    onFeatureClick,
+                  );
+                }
+              : undefined
+          }
         />
       </LayerGroup>
     </LayersControl.Overlay>

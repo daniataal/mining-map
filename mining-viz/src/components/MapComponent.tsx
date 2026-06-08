@@ -61,10 +61,12 @@ import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import GemGoitPipelineMapLayer from './petroleum/GemGoitPipelineMapLayer';
-import PipelineInteractionPaneInit from './petroleum/PipelineInteractionPaneInit';
-import PipelineMapInteractionBridge from './petroleum/PipelineMapInteractionBridge';
-import GemGogptPlantMapLayer from './petroleum/GemGogptPlantMapLayer';
-import GemGgitLngMapLayer from './petroleum/GemGgitLngMapLayer';
+import GemPointMarkerLayer from './petroleum/GemPointMarkerLayer';
+import InfrastructureMapInteraction from './petroleum/InfrastructureMapInteraction';
+import { useGemPlantGeoJson } from '../lib/gemPlants';
+import { gemPlantMarkerStyle } from '../lib/gemPlantMapStyle';
+import { useGemLngGeoJson } from '../lib/gemLngTerminals';
+import { gemLngMarkerStyle } from '../lib/gemLngMapStyle';
 import InfrastructureCoverageBanner from './petroleum/InfrastructureCoverageBanner';
 import OilLiveMapOverlays, {
   type OilLiveEntityClickPayload,
@@ -149,7 +151,7 @@ import {
   type AssetLayerVisibility,
 } from '../lib/assetLayerCockpit';
 import {
-    STORAGE_MVT_HIDE_MIN_ZOOM,
+    osmInfrastructureLayerVisible,
     osmPipelinesLayerVisible,
 } from '../lib/infrastructureLayer';
 import RiskLensCoverageOverlay from '../features/live-data/RiskLensCoverageOverlay';
@@ -442,6 +444,7 @@ interface MapComponentProps {
   onInfrastructureFeatureClick?: (
     selection: import('../features/infrastructure/InfrastructureFeatureDrawer').InfrastructureFeatureSelection,
   ) => void;
+  onDismissInfrastructureFeature?: () => void;
   /** Comtrade/Census macro country-pair arcs (gray). */
   macroTradeFlowsEnabled?: boolean;
   macroTradeFlows?: MacroTradeFlow[];
@@ -1170,6 +1173,7 @@ export default function MapComponent({
   infrastructurePanelHint,
   onInfrastructureLayerChange,
   onInfrastructureFeatureClick,
+  onDismissInfrastructureFeature,
   macroTradeFlowsEnabled = false,
   macroTradeFlows = [],
   globalMacroTradeOn = true,
@@ -1457,16 +1461,7 @@ export default function MapComponent({
                 : assetsPetroleumLayerPrefs(activeAssetsLens),
         [activeAssetsLens, assetLayerVisibility],
     );
-    const oilGasOsmLayerVisibility = useMemo(() => {
-        const vis = assetsPetroleumPrefs.osmLayerVisibility;
-        if (!vis?.storage_terminals || !assetsPetroleumPrefs.showStorageTankFarms) return vis;
-        if (petroleumMapZoom < STORAGE_MVT_HIDE_MIN_ZOOM) return vis;
-        return { ...vis, storage_terminals: false };
-    }, [
-        assetsPetroleumPrefs.osmLayerVisibility,
-        assetsPetroleumPrefs.showStorageTankFarms,
-        petroleumMapZoom,
-    ]);
+    const oilGasOsmLayerVisibility = assetsPetroleumPrefs.osmLayerVisibility;
     const esgZonesVisible = !assetLayerVisibility || assetLayerVisibility.esg_zones;
     const oilGasBbox = useMemo(
         () => resolvePetroleumViewportBounds(oilGasMapViewport),
@@ -1490,15 +1485,36 @@ export default function MapComponent({
         isLiveDataView,
         infrastructurePipelinesOn,
         showOsmPetroleum: assetsPetroleumPrefs.showOsmPetroleum,
-        osmLayerVisibility: assetsPetroleumPrefs.osmLayerVisibility,
+        osmLayerVisibility: isOilAndGasView
+            ? oilGasOsmLayerVisibility
+            : assetsPetroleumPrefs.osmLayerVisibility,
         osmLayerIds: assetsPetroleumPrefs.osmLayerIds,
     });
     const gemPipelinesOn =
         infrastructurePipelinesOn ||
         (isOilAndGasView && assetsPetroleumPrefs.showGemPipelines);
-    const pipelineMapInteractionOn = osmPipelinesOn || gemPipelinesOn;
+    const osmLayerVisibilityOpts = {
+        isOilAndGasView,
+        showInfrastructureLayers,
+        isLiveDataView,
+        infrastructureLayerVisibility,
+        showOsmPetroleum: assetsPetroleumPrefs.showOsmPetroleum,
+        osmLayerVisibility: isOilAndGasView
+            ? oilGasOsmLayerVisibility
+            : assetsPetroleumPrefs.osmLayerVisibility,
+        osmLayerIds: assetsPetroleumPrefs.osmLayerIds,
+    };
+    const osmRefineriesOn = osmInfrastructureLayerVisible('refineries', osmLayerVisibilityOpts);
+    const osmStorageOn = osmInfrastructureLayerVisible('storage_terminals', osmLayerVisibilityOpts);
+    const infrastructureMapInteractionOn = Boolean(
+        onInfrastructureFeatureClick &&
+            (osmPipelinesOn || gemPipelinesOn || osmRefineriesOn || osmStorageOn),
+    );
     const pipelineInteractionBbox = isOilAndGasView ? oilGasBbox : effectiveInfrastructureBbox;
     const pipelineInteractionZoom = isOilAndGasView ? petroleumMapZoom : infrastructureMapZoom;
+    // Unconditional hook calls — must not be inside conditional JSX (Rules of Hooks).
+    const gemPlantQueryResult = useGemPlantGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumMapZoom);
+    const gemLngQueryResult = useGemLngGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumMapZoom);
     const storageInViewCount = useMemo(
         () =>
             isOilAndGasView
@@ -2243,19 +2259,6 @@ export default function MapComponent({
               ref={mapRef}
             >
                 <ZoomControl position="bottomleft" />
-                <PipelineInteractionPaneInit />
-                {onGroundVisible &&
-                    onInfrastructureFeatureClick &&
-                    pipelineMapInteractionOn && (
-                    <PipelineMapInteractionBridge
-                        bbox={pipelineInteractionBbox}
-                        enabled
-                        mapZoom={pipelineInteractionZoom}
-                        loadOsm={osmPipelinesOn}
-                        loadGem={gemPipelinesOn}
-                        onFeatureClick={onInfrastructureFeatureClick}
-                    />
-                )}
                 <MapClickHandler
                     countryFocusCountry={countryFocusCountry}
                     countryFocusBounds={countryFocusBounds}
@@ -2274,6 +2277,19 @@ export default function MapComponent({
                       if (isLiveDataView) onOilLiveDismiss?.();
                     }}
                 />
+                {infrastructureMapInteractionOn && (
+                    <InfrastructureMapInteraction
+                        bbox={pipelineInteractionBbox}
+                        enabled
+                        mapZoom={pipelineInteractionZoom}
+                        loadOsmPipelines={osmPipelinesOn}
+                        loadGemPipelines={gemPipelinesOn}
+                        loadOsmRefineries={osmRefineriesOn}
+                        loadOsmStorage={osmStorageOn}
+                        onFeatureClick={onInfrastructureFeatureClick}
+                        onDismissInfrastructureFeature={onDismissInfrastructureFeature}
+                    />
+                )}
                 <ViewportBoundsTracker
                     active={isMaritimeMapView && isMaritimeLayerEnabled}
                     onBoundsChange={setMaritimeViewport}
@@ -2613,7 +2629,6 @@ export default function MapComponent({
                             layerVisibility={infrastructureLayerVisibility}
                             forcedLayers={infrastructureForcedLayers}
                             mapZoom={infrastructureMapZoom}
-                            onFeatureClick={onInfrastructureFeatureClick}
                         />
                         {infrastructureLayerVisibility?.pipelines && (
                             <GemGoitPipelineMapLayer
@@ -2621,7 +2636,6 @@ export default function MapComponent({
                                 enabled
                                 mapZoom={infrastructureMapZoom}
                                 isDark={isDark}
-                                onFeatureClick={onInfrastructureFeatureClick}
                             />
                         )}
                         </>
@@ -2638,7 +2652,6 @@ export default function MapComponent({
                                 forcedLayers={assetsPetroleumPrefs.osmForcedLayers}
                                 splitOilGasPipelineLayers={assetsPetroleumPrefs.splitOilGasPipelineLayers}
                                 isDark={isDark}
-                                onFeatureClick={onInfrastructureFeatureClick}
                             />
                             )}
                             {assetsPetroleumPrefs.showGemPipelines && (
@@ -2647,23 +2660,28 @@ export default function MapComponent({
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
                                 isDark={isDark}
-                                onFeatureClick={onInfrastructureFeatureClick}
                             />
                             )}
                             {assetsPetroleumPrefs.showGemPlants && (
-                            <GemGogptPlantMapLayer
-                                bbox={oilGasBbox}
+                            <GemPointMarkerLayer
+                                label="Plants — GEM GOGPT (power/CHP)"
+                                layerKey="gem-gogpt-plants"
+                                queryResult={gemPlantQueryResult}
+                                getStyle={(props) => gemPlantMarkerStyle(String(props.fuel || ''), String(props.status || ''), isDark)}
+                                getFeatureKey={(f) => String(f.id ?? (f.properties as Record<string,unknown>)?.unit_key ?? '')}
+                                popupLayerId="refineries"
                                 enabled={oilGasLayersEnabled}
-                                mapZoom={petroleumMapZoom}
-                                isDark={isDark}
                             />
                             )}
                             {assetsPetroleumPrefs.showGemLng && (
-                            <GemGgitLngMapLayer
-                                bbox={oilGasBbox}
+                            <GemPointMarkerLayer
+                                label="LNG terminals — GEM GGIT"
+                                layerKey="gem-ggit-lng"
+                                queryResult={gemLngQueryResult}
+                                getStyle={(props) => gemLngMarkerStyle(String(props.terminal_type || ''), String(props.status || ''), isDark)}
+                                getFeatureKey={(f) => String(f.id ?? (f.properties as Record<string,unknown>)?.terminal_key ?? '')}
+                                popupLayerId="refineries"
                                 enabled={oilGasLayersEnabled}
-                                mapZoom={petroleumMapZoom}
-                                isDark={isDark}
                             />
                             )}
                             {assetsPetroleumPrefs.showStorageTankFarms && (
@@ -2674,6 +2692,7 @@ export default function MapComponent({
                                 selectedId={selectedItem?.entityKind === 'storage_terminal' ? selectedItem.id : null}
                                 onSelect={(item) => {
                                     onSelectMaritimeVessel(null);
+                                    onDismissInfrastructureFeature?.();
                                     setSelectedItem(item);
                                 }}
                             />

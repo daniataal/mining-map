@@ -8,6 +8,7 @@ import {
   formatStorageSubstanceLabel,
   isGenericStorageTerminalTitle,
   shouldShowStorageSiteContextNear,
+  storageTankFarmClusterGridMultiplier,
   storageTankFarmsLayerShouldMount,
   storageTerminalOsmTagSummary,
   STORAGE_OPERATOR_UNTAGGED,
@@ -18,6 +19,18 @@ describe('storageTankFarmsLayerShouldMount', () => {
     expect(storageTankFarmsLayerShouldMount(true)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(true, 5)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(false)).toBe(false);
+  });
+});
+
+describe('storageTankFarmClusterGridMultiplier', () => {
+  it('coarsens tank-farm clusters at world zoom and relaxes at detail zoom', () => {
+    expect(storageTankFarmClusterGridMultiplier(4)).toBeGreaterThan(
+      storageTankFarmClusterGridMultiplier(6),
+    );
+    expect(storageTankFarmClusterGridMultiplier(6)).toBeGreaterThan(
+      storageTankFarmClusterGridMultiplier(8),
+    );
+    expect(storageTankFarmClusterGridMultiplier(10)).toBe(1);
   });
 });
 

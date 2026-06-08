@@ -1,6 +1,7 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { apiClient } from './api';
 import type { PetroleumViewportBounds } from './petroleumViewportBounds';
+import { useLayerGeoJson } from './useLayerGeoJson';
 
 export {
   gemFuelGroupToPopupLayerId,
@@ -40,32 +41,12 @@ export function useGemPipelineGeoJson(
   enabled: boolean,
   mapZoom?: number,
 ) {
-  return useQuery<GemPipelineGeoJson>({
-    queryKey: ['gem-pipelines', bbox, mapZoom],
-    queryFn: async ({ signal }) => {
-      const { data } = await apiClient.get<GemPipelineGeoJson>('/api/petroleum/gem-pipelines', {
-        signal,
-        params: {
-          ...(bbox
-            ? {
-                south: bbox.south,
-                west: bbox.west,
-                north: bbox.north,
-                east: bbox.east,
-              }
-            : {}),
-          ...(mapZoom != null && Number.isFinite(mapZoom)
-            ? { zoom: Math.round(mapZoom * 10) / 10 }
-            : {}),
-        },
-      });
-      return data;
-    },
-    enabled: enabled && Boolean(bbox),
-    staleTime: 60 * 60_000,
-    placeholderData: keepPreviousData,
-    refetchOnWindowFocus: false,
-  });
+  return useLayerGeoJson<GemPipelineGeoJson>(
+    '/api/petroleum/gem-pipelines',
+    bbox,
+    enabled,
+    mapZoom,
+  );
 }
 
 export function useGemPipelineCoverage(

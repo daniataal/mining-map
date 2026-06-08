@@ -9,19 +9,12 @@ import {
   isGemPipelineFeature,
   pipelineClickCoordinates,
 } from './petroleumFeatureFields';
+import { escapeHtml } from './htmlUtils';
 
 /** Above license canvas + OSM MVT so pipeline hits win pointer events. */
 export const PIPELINE_INTERACTION_PANE = 'pipelineInteractionPane';
 
 const PIPELINE_HIT_WEIGHT = 20;
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 export function ensurePipelineInteractionPane(map: LeafletMap): void {
   if (map.getPane(PIPELINE_INTERACTION_PANE)) return;

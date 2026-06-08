@@ -2,6 +2,10 @@ import type { Map as MaplibreMap, StyleSpecification } from 'maplibre-gl';
 import type { OsmPetroleumLayerId } from './osmPetroleumLayers';
 import type { OsmPetroleumCatalogLayer } from './osmPetroleumLayers';
 import { OSM_MVT_SOURCE_LAYER } from './osmPetroleumVectorTiles';
+import {
+  oilGasPipelineMvtColors,
+  osmCombinedPipelineMvtColor,
+} from './petroleumLayerStyles';
 
 export type OsmVectorVisibility = Record<OsmPetroleumLayerId, boolean>;
 
@@ -70,23 +74,24 @@ function sourceForLayer(
 function pipelineLinePaint(options?: OsmVectorStyleOptions) {
   const split = Boolean(options?.splitOilGasPipelineLayers);
   const isDark = options?.isDark !== false;
+  const colors = oilGasPipelineMvtColors(isDark);
   if (split) {
     return {
       'line-color': [
         'match',
         ['get', 'pipeline_substance'],
         'oil',
-        isDark ? '#fbbf24' : '#b45309',
+        colors.oil,
         'gas',
-        isDark ? '#38bdf8' : '#0284c7',
-        isDark ? '#fbbf24' : '#b45309',
+        colors.gas,
+        colors.fallback,
       ],
       'line-width': 3,
       'line-opacity': isDark ? 0.92 : 0.88,
     };
   }
   return {
-    'line-color': isDark ? '#fbbf24' : '#b45309',
+    'line-color': osmCombinedPipelineMvtColor(isDark),
     'line-width': 3,
     'line-opacity': isDark ? 0.9 : 0.85,
     'line-dasharray': [5, 4],
@@ -148,31 +153,31 @@ export function buildOsmPetroleumVectorStyle(
         },
       },
       {
-        id: STYLE_LAYER_IDS.refineries,
-        type: 'circle',
-        source: SOURCE_IDS.refineries,
-        'source-layer': OSM_MVT_SOURCE_LAYER,
-        layout: { visibility: visibility(visibilityMap.refineries) },
-        paint: {
-          'circle-radius': 6,
-          'circle-color': '#fb923c',
-          'circle-opacity': 0.85,
-          'circle-stroke-color': '#c2410c',
-          'circle-stroke-width': 1,
-        },
-      },
-      {
         id: STYLE_LAYER_IDS.storage,
         type: 'circle',
         source: SOURCE_IDS.storage_terminals,
         'source-layer': OSM_MVT_SOURCE_LAYER,
         layout: { visibility: visibility(visibilityMap.storage_terminals) },
         paint: {
-          'circle-radius': 4,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 1.25, 7, 1.8, 10, 3.2, 12, 4.5],
           'circle-color': '#22d3ee',
-          'circle-opacity': 0.85,
-          'circle-stroke-color': '#06b6d4',
-          'circle-stroke-width': 1,
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 7, 0.3, 10, 0.48, 12, 0.62],
+          'circle-stroke-color': '#0e7490',
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 9, 0.8, 12, 1],
+        },
+      },
+      {
+        id: STYLE_LAYER_IDS.refineries,
+        type: 'circle',
+        source: SOURCE_IDS.refineries,
+        'source-layer': OSM_MVT_SOURCE_LAYER,
+        layout: { visibility: visibility(visibilityMap.refineries) },
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2.2, 7, 4, 10, 6, 12, 8],
+          'circle-color': '#f97316',
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.35, 7, 0.55, 10, 0.88, 12, 0.95],
+          'circle-stroke-color': '#fed7aa',
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.4, 9, 1, 12, 1.6],
         },
       },
       {

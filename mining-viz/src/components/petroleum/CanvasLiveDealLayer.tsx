@@ -16,6 +16,7 @@ export interface CanvasLiveDealLayerProps {
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
   clusterMinCount?: number;
+  clusterGridMultiplier?: number;
   isDark?: boolean;
 }
 
@@ -31,6 +32,7 @@ function createCanvasLiveDealLayer(
     clusterKinds: props.clusterKinds,
     clusterMaxZoom: props.clusterMaxZoom,
     clusterMinCount: props.clusterMinCount,
+    clusterGridMultiplier: props.clusterGridMultiplier,
     isDark: props.isDark,
   });
   layer.setFeatures(props.features);
@@ -61,6 +63,7 @@ function updateCanvasLiveDealLayer(
     props.clusterKinds !== prevProps.clusterKinds ||
     props.clusterMaxZoom !== prevProps.clusterMaxZoom ||
     props.clusterMinCount !== prevProps.clusterMinCount ||
+    props.clusterGridMultiplier !== prevProps.clusterGridMultiplier ||
     props.isDark !== prevProps.isDark
   ) {
     layer.setClusterOptions({
@@ -68,6 +71,7 @@ function updateCanvasLiveDealLayer(
       clusterKinds: props.clusterKinds,
       clusterMaxZoom: props.clusterMaxZoom,
       clusterMinCount: props.clusterMinCount,
+      clusterGridMultiplier: props.clusterGridMultiplier,
       isDark: props.isDark,
     });
   }
