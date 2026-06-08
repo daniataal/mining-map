@@ -19,6 +19,7 @@ import {
   classifyPipelineSubstance,
   pipelineSubstancePopupLayerId,
 } from '../../lib/pipelineSubstance';
+import { buildPipelineHoverSummary } from '../../lib/petroleumFeatureFields';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
 import type { PetroleumLayerId } from '../../lib/petroleumLayers';
 
@@ -31,6 +32,28 @@ const POINT_LAYER_IDS = new Set([
   STYLE_LAYER_IDS.refineries,
   STYLE_LAYER_IDS.storage,
 ]);
+
+const PIPELINE_QUERY_PAD_PX = 24;
+const OSM_VECTOR_LAYER_ID_SET = new Set<string>(OSM_VECTOR_CLICK_LAYERS);
+
+function queryOsmFeaturesAtPoint(
+  map: MaplibreMap,
+  point: { x: number; y: number },
+  layers: string[],
+) {
+  const pad = PIPELINE_QUERY_PAD_PX;
+  const box: [[number, number], [number, number]] = [
+    [point.x - pad, point.y - pad],
+    [point.x + pad, point.y + pad],
+  ];
+  let features = layers.length ? map.queryRenderedFeatures(box, { layers }) : [];
+  if (!features.length) {
+    features = map
+      .queryRenderedFeatures(box)
+      .filter((feature) => OSM_VECTOR_LAYER_ID_SET.has(feature.layer.id));
+  }
+  return features;
+}
 
 /** Prefer point features over pipeline lines when both overlap at the same pixel. */
 function pickTopOsmFeature(features: GeoJSONFeature[]): GeoJSONFeature {
@@ -72,12 +95,19 @@ function featureSelectionFromMvt(
   };
 }
 
-function hoverLabelForFeature(props: Record<string, unknown>, layerId: OsmPetroleumLayerId): string {
+function hoverHtmlForFeature(props: Record<string, unknown>, layerId: OsmPetroleumLayerId): string {
+  if (layerId === 'pipelines') {
+    const summary = buildPipelineHoverSummary(props);
+    return `<span class="font-semibold">${escapeHtml(summary.title)}</span>${
+      summary.subtitle
+        ? `<br/><span class="text-slate-300/90">${escapeHtml(summary.subtitle)}</span>`
+        : ''
+    }`;
+  }
   const name = String(props.name ?? '').trim();
-  if (name) return name;
+  if (name) return escapeHtml(name);
   const operator = String(props.operator ?? '').trim();
-  if (operator) return operator;
-  if (layerId === 'pipelines') return 'OSM pipeline';
+  if (operator) return escapeHtml(operator);
   if (layerId === 'refineries') return 'OSM refinery';
   return 'OSM storage';
 }
@@ -102,7 +132,7 @@ function attachInteractionHandlers(
       return;
     }
 
-    const features = map.queryRenderedFeatures(event.point, { layers });
+    const features = queryOsmFeaturesAtPoint(map, event.point, layers);
     if (!features.length) {
       map.getCanvas().style.cursor = '';
       hoverPopup?.remove();
@@ -116,18 +146,18 @@ function attachInteractionHandlers(
     map.getCanvas().style.cursor = 'pointer';
 
     if (event.lngLat) {
-      const label = hoverLabelForFeature(props, layerId);
+      const labelHtml = hoverHtmlForFeature(props, layerId);
       if (!hoverPopup) {
         hoverPopup = L.popup({
           closeButton: false,
           autoPan: false,
-          className: 'osm-pipeline-hover-tip',
+          className: 'osm-pipeline-hover-tip pipeline-map-hover-tooltip',
           offset: [0, -6],
         });
       }
       hoverPopup
         .setLatLng([event.lngLat.lat, event.lngLat.lng])
-        .setContent(`<span class="text-xs font-semibold">${escapeHtml(label)}</span>`)
+        .setContent(`<div class="text-xs leading-snug">${labelHtml}</div>`)
         .openOn(leafletMap);
       return;
     }
@@ -141,7 +171,7 @@ function attachInteractionHandlers(
     const layers = interactiveLayers();
     if (!layers.length) return;
 
-    const features = map.queryRenderedFeatures(event.point, { layers });
+    const features = queryOsmFeaturesAtPoint(map, event.point, layers);
     if (!features.length) return;
 
     const top = pickTopOsmFeature(features);
@@ -207,10 +237,19 @@ export interface OsmPetroleumVectorMapProps {
 }
 
 function ensurePetroleumVectorPane(map: L.Map): void {
-  if (map.getPane(OSM_PETROLEUM_VECTOR_PANE)) return;
-  map.createPane(OSM_PETROLEUM_VECTOR_PANE);
+  if (!map.getPane(OSM_PETROLEUM_VECTOR_PANE)) {
+    map.createPane(OSM_PETROLEUM_VECTOR_PANE);
+  }
   const pane = map.getPane(OSM_PETROLEUM_VECTOR_PANE);
-  if (pane) pane.style.zIndex = '380';
+  if (pane) {
+    pane.style.zIndex = '380';
+    // MVT is visual-only — pipeline clicks use Leaflet hit targets on pipelineInteractionPane (z700).
+    pane.style.pointerEvents = 'none';
+  }
+}
+
+function disableMaplibrePointerEvents(map: MaplibreMap): void {
+  map.getCanvas().style.pointerEvents = 'none';
 }
 
 function bindInteractions(
@@ -244,6 +283,7 @@ function createOsmVectorLayer(
     const map = glLayer.getMaplibreMap();
     const leafletMap = (glLayer as unknown as { _map?: L.Map })._map ?? context.map;
     const onLoad = () => {
+      disableMaplibrePointerEvents(map);
       applyOsmVectorVisibility(map, props.visibility);
       bindInteractions(glLayer, map, leafletMap, props.onFeatureClick);
     };

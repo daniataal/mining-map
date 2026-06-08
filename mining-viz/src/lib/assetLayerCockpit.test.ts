@@ -45,7 +45,12 @@ describe('assetLayerCockpit', () => {
 
     expect(assetLicenseMarkersEnabled(clean)).toBe(false);
     expect(resolveAssetLicenseSector(clean)).toBeUndefined();
-    expect(resolveAssetMapViewKey(clean)).toBe('mining');
+  });
+
+  it('resolves oil-only asset visibility to oil_and_gas sector', () => {
+    const oilOnly = { ...DEFAULT_ASSET_LAYER_VISIBILITY, mines: false, oil_fields: true };
+    expect(resolveAssetLicenseSector(oilOnly)).toBe('oil_and_gas');
+    expect(resolveAssetMapViewKey(oilOnly)).toBe('oil_and_gas');
   });
 
   it('renders petroleum overlays from independent layer visibility', () => {

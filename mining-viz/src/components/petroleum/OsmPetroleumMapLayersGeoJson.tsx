@@ -21,6 +21,11 @@ import {
   splitOsmPipelineFeaturesForOilGasLayers,
   classifyPipelineSubstance,
 } from '../../lib/pipelineSubstance';
+import {
+  bindPipelineMapInteraction,
+  pipelineInteractiveRenderer,
+  pipelineVisibleStyle,
+} from '../../lib/pipelineMapInteraction';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
 
 const OSM_MAP_LAYER_IDS: OsmPetroleumLayerId[] = ['pipelines', 'refineries', 'storage_terminals'];
@@ -173,6 +178,17 @@ function bindOsmFeatureInteraction(
   geometry: GeoJSON.Geometry | null | undefined,
   onFeatureClick?: (selection: InfrastructureFeatureSelection) => void,
 ) {
+  if (osmLayerId === 'pipelines') {
+    bindPipelineMapInteraction({
+      layer,
+      popupLayerId: osmLayerToPopupLayerId(osmLayerId, props),
+      properties: props,
+      geometry: geometry ?? null,
+      onFeatureClick,
+      osmLayerId,
+    });
+    return;
+  }
   if (onFeatureClick) {
     layer.on('click', (e) => {
       L.DomEvent.stopPropagation(e);
@@ -186,9 +202,12 @@ function bindOsmFeatureInteraction(
     });
     return;
   }
-  const substance = classifyPipelineSubstance(props);
-  const popupLayerId = pipelineSubstancePopupLayerId(substance);
-  bindPetroleumFeaturePopup(layer, popupLayerId, props, geometry ?? null);
+  bindPetroleumFeaturePopup(
+    layer,
+    osmLayerToPopupLayerId(osmLayerId, props),
+    props,
+    geometry ?? null,
+  );
 }
 
 function OsmPipelineGeoJson({
@@ -206,7 +225,7 @@ function OsmPipelineGeoJson({
     () => ({ type: 'FeatureCollection' as const, features }),
     [features],
   );
-  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.3 }), []);
+  const svgRenderer = useMemo(() => pipelineInteractiveRenderer(), []);
 
   return (
     <LayersControl.Overlay checked={defaultVisible} name={label}>
@@ -214,8 +233,8 @@ function OsmPipelineGeoJson({
         <GeoJSON
           key={label}
           data={geojson}
-          style={style}
-          renderer={canvasRenderer}
+          style={pipelineVisibleStyle(style)}
+          renderer={svgRenderer}
           onEachFeature={(feature, layer) => {
             const props = (feature.properties || {}) as Record<string, unknown>;
             bindOsmFeatureInteraction(

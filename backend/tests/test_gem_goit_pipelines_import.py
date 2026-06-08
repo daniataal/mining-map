@@ -30,6 +30,8 @@ class GemGoitPipelinesImportTests(unittest.TestCase):
             "LengthMergedKm": 100,
             "Wiki": "https://www.gem.wiki/Test",
         }
+        row["StartLocation"] = "Point A"
+        row["EndLocation"] = "Point B"
         tags = mod.normalize_row_tags(row, 2)
         self.assertIsNotNone(tags)
         assert tags is not None
@@ -37,6 +39,8 @@ class GemGoitPipelinesImportTests(unittest.TestCase):
         self.assertEqual(tags["fuel_group"], "oil")
         self.assertIn("bpd", tags["capacity_text"] or "")
         self.assertEqual(tags["status"], "operating")
+        self.assertEqual(tags["start_location"], "Point A")
+        self.assertEqual(tags["end_location"], "Point B")
 
     def test_extract_geometries_linestring(self):
         payload = json.loads((FIXTURES / "P0001.geojson").read_text())

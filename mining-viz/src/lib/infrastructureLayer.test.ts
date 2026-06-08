@@ -6,6 +6,7 @@ import {
   PORT_MARKERS_MIN_ZOOM,
   infrastructureLayerShouldRender,
   infrastructureLayersPanelHint,
+  osmPipelinesLayerVisible,
   pipelineLeafletShouldFetch,
   portMarkersShouldRender,
 } from './infrastructureLayer';
@@ -65,5 +66,30 @@ describe('infrastructureLayer', () => {
     expect(
       infrastructureLayersPanelHint(10, { ...off, pipelines: true }, {}),
     ).toBe(null);
+  });
+
+  it('detects OSM pipelines independently of GEM', () => {
+    expect(
+      osmPipelinesLayerVisible({
+        isOilAndGasView: true,
+        showInfrastructureLayers: false,
+        isLiveDataView: false,
+        infrastructurePipelinesOn: false,
+        showOsmPetroleum: true,
+        osmLayerVisibility: { pipelines: true },
+        osmLayerIds: ['pipelines'],
+      }),
+    ).toBe(true);
+    expect(
+      osmPipelinesLayerVisible({
+        isOilAndGasView: true,
+        showInfrastructureLayers: false,
+        isLiveDataView: false,
+        infrastructurePipelinesOn: false,
+        showOsmPetroleum: false,
+        osmLayerVisibility: { pipelines: true },
+        osmLayerIds: ['pipelines'],
+      }),
+    ).toBe(false);
   });
 });

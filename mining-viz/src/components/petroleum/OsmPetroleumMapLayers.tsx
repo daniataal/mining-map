@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, lazy, Suspense } from 'react';
-import { LayersControl } from 'react-leaflet';
+import { LayerGroup, LayersControl } from 'react-leaflet';
 import {
   OsmPetroleumLayerId,
   defaultOsmLayerVisibility,
@@ -16,6 +16,7 @@ import { osmVectorTilesEnabled } from '../../lib/osmPetroleumVectorTiles';
 import type { OsmVectorVisibility } from '../../lib/osmPetroleumVectorStyle';
 import { OsmVisibilityBridge } from './OsmVisibilityBridge';
 import OsmPetroleumMapLayersGeoJson from './OsmPetroleumMapLayersGeoJson';
+import OsmPipelineInteractionOverlay from './OsmPipelineInteractionOverlay';
 
 const OsmPetroleumVectorMap = lazy(() => import('./OsmPetroleumVectorLayers'));
 
@@ -134,16 +135,27 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
   return (
     <>
       <LayersControl.Overlay checked={osmActive} name={osmLabel}>
-        <Suspense fallback={null}>
-          <OsmPetroleumVectorMap
-            enabled={osmActive}
-            visibility={vectorVisibility}
-            catalogLayers={osmCatalog?.layers}
-            onFeatureClick={onFeatureClick}
-            isDark={isDark}
-            splitOilGasPipelineLayers={splitOilGasPipelineLayers}
-          />
-        </Suspense>
+        <LayerGroup>
+          <Suspense fallback={null}>
+            <OsmPetroleumVectorMap
+              enabled={osmActive}
+              visibility={vectorVisibility}
+              catalogLayers={osmCatalog?.layers}
+              onFeatureClick={onFeatureClick}
+              isDark={isDark}
+              splitOilGasPipelineLayers={splitOilGasPipelineLayers}
+            />
+          </Suspense>
+          {vectorVisibility.pipelines && onFeatureClick ? (
+            <OsmPipelineInteractionOverlay
+              bbox={bbox}
+              enabled={osmActive && vectorVisibility.pipelines}
+              mapZoom={mapZoom}
+              onFeatureClick={onFeatureClick}
+              splitOilGasPipelineLayers={splitOilGasPipelineLayers}
+            />
+          ) : null}
+        </LayerGroup>
       </LayersControl.Overlay>
       {layerVisibility == null &&
         activeIds.map((layerId) => {

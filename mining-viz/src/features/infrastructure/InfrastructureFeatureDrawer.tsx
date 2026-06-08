@@ -3,6 +3,7 @@ import { Button } from '../../components/ui/button';
 import {
   buildPetroleumFeatureViewModel,
   formatCoordinates,
+  isGemPipelineFeature,
   petroleumLayerTypeLabel,
 } from '../../lib/petroleumFeatureFields';
 import {
@@ -41,9 +42,13 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export default function InfrastructureFeatureDrawer({ selection, onClose }: Props) {
   const { t } = useI18n();
   const model = buildPetroleumFeatureViewModel(selection.properties, selection.popupLayerId);
+  const isGem = isGemPipelineFeature(selection.properties);
   const layerLabel = model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(selection.popupLayerId);
-  const osmType =
-    selection.properties.man_made != null
+  const infrastructureType = isGem
+    ? model.sector
+      ? `${model.sector} pipeline`
+      : 'Oil/NGL pipeline (GEM GOIT)'
+    : selection.properties.man_made != null
       ? String(selection.properties.man_made).replace(/_/g, ' ')
       : selection.layerId.replace(/_/g, ' ');
 
@@ -57,13 +62,17 @@ export default function InfrastructureFeatureDrawer({ selection, onClose }: Prop
     tagRows.push({ label: t('בעלים', 'Owner'), value: model.owner });
   }
   if (model.country) tagRows.push({ label: t('מדינה', 'Country'), value: model.country });
-  if (model.capacity) tagRows.push({ label: t('קיבולת', 'Capacity'), value: model.capacity });
+  if (model.capacity && !model.pipelineDetails.some((r) => r.label === 'Capacity')) {
+    tagRows.push({ label: t('קיבולת', 'Capacity'), value: model.capacity });
+  }
   for (const row of model.extraRows) tagRows.push(row);
 
   const sourceLinkLabel =
     model.sourceLabel && model.sourceUrl && model.sourceLabel !== model.sourceUrl
       ? model.sourceLabel
-      : t('מקור OSM', 'View on OpenStreetMap');
+      : isGem
+        ? t('GEM wiki', 'GEM wiki')
+        : t('מקור OSM', 'View on OpenStreetMap');
 
   return (
     <div className="flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95 sm:w-[min(400px,calc(100vw-2rem))]">
@@ -90,10 +99,13 @@ export default function InfrastructureFeatureDrawer({ selection, onClose }: Prop
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        <DetailRow label={t('סוג תשתית', 'Infrastructure type')} value={osmType} />
+        <DetailRow label={t('סוג תשתית', 'Infrastructure type')} value={infrastructureType} />
         <DetailRow
           label={t('מקור', 'Source')}
-          value={model.source ?? 'OpenStreetMap (community)'}
+          value={
+            model.source ??
+            (isGem ? 'Global Energy Monitor (CC BY 4.0)' : 'OpenStreetMap (community)')
+          }
         />
 
         {tagRows.length > 0 && (

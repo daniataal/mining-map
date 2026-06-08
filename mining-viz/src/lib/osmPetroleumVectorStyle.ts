@@ -21,12 +21,17 @@ const SOURCE_IDS: Record<OsmPetroleumLayerId, string> = {
 
 export const STYLE_LAYER_IDS = {
   pipelinesOilGas: 'osm-pipelines-oil-gas',
+  pipelinesOilGasHit: 'osm-pipelines-oil-gas-hit',
   pipelinesWater: 'osm-pipelines-water',
+  pipelinesWaterHit: 'osm-pipelines-water-hit',
   refineries: 'osm-refineries-circles',
   storage: 'osm-storage-circles',
 } as const;
 
+/** Wide invisible MVT layers are listed first for easier line hit-testing. */
 export const OSM_VECTOR_CLICK_LAYERS = [
+  STYLE_LAYER_IDS.pipelinesOilGasHit,
+  STYLE_LAYER_IDS.pipelinesWaterHit,
   STYLE_LAYER_IDS.pipelinesOilGas,
   STYLE_LAYER_IDS.pipelinesWater,
   STYLE_LAYER_IDS.refineries,
@@ -170,6 +175,40 @@ export function buildOsmPetroleumVectorStyle(
           'circle-stroke-width': 1,
         },
       },
+      {
+        id: STYLE_LAYER_IDS.pipelinesOilGasHit,
+        type: 'line',
+        source: SOURCE_IDS.pipelines,
+        'source-layer': OSM_MVT_SOURCE_LAYER,
+        layout: {
+          visibility: visibility(visibilityMap.pipelines),
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        filter: ['!=', ['get', 'pipeline_substance'], 'water'],
+        paint: {
+          'line-color': '#000000',
+          'line-width': 22,
+          'line-opacity': 0.05,
+        },
+      },
+      {
+        id: STYLE_LAYER_IDS.pipelinesWaterHit,
+        type: 'line',
+        source: SOURCE_IDS.pipelines,
+        'source-layer': OSM_MVT_SOURCE_LAYER,
+        layout: {
+          visibility: visibility(visibilityMap.pipelines),
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        filter: ['==', ['get', 'pipeline_substance'], 'water'],
+        paint: {
+          'line-color': '#000000',
+          'line-width': 20,
+          'line-opacity': 0.05,
+        },
+      },
     ],
   };
 }
@@ -181,6 +220,8 @@ export function applyOsmVectorVisibility(
   const pairs: Array<[string, boolean]> = [
     [STYLE_LAYER_IDS.pipelinesOilGas, visibilityMap.pipelines],
     [STYLE_LAYER_IDS.pipelinesWater, visibilityMap.pipelines],
+    [STYLE_LAYER_IDS.pipelinesOilGasHit, visibilityMap.pipelines],
+    [STYLE_LAYER_IDS.pipelinesWaterHit, visibilityMap.pipelines],
     [STYLE_LAYER_IDS.refineries, visibilityMap.refineries],
     [STYLE_LAYER_IDS.storage, visibilityMap.storage_terminals],
   ];
