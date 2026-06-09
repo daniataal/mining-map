@@ -14,6 +14,8 @@ export type NearbySupplier = {
   product_types?: string[];
   fuels_supplied?: string;
   contact_person?: string;
+  phone?: string;
+  email?: string;
   address?: string;
   license_authority?: string;
   source_url?: string;

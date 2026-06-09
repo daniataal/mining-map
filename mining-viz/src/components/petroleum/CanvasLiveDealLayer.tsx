@@ -11,6 +11,7 @@ export interface CanvasLiveDealLayerProps {
   /** External hover (e.g. sidebar company list) — distinct from map mousemove hover. */
   hoveredUid?: string | null;
   onFeatureClick: (feature: LiveDealMapFeature) => void;
+  passThroughClicks?: boolean;
   layerApiRef?: MutableRefObject<CanvasLiveDealLayer | null>;
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
@@ -28,6 +29,7 @@ function createCanvasLiveDealLayer(
     mapZoom: props.mapZoom,
     selectedUid: props.selectedUid,
     onFeatureClick: props.onFeatureClick,
+    passThroughClicks: props.passThroughClicks,
     clusterPoints: props.clusterPoints,
     clusterKinds: props.clusterKinds,
     clusterMaxZoom: props.clusterMaxZoom,
@@ -57,6 +59,9 @@ function updateCanvasLiveDealLayer(
   if (props.hoveredUid !== prevProps.hoveredUid) layer.setHoveredUid(props.hoveredUid ?? null);
   if (props.onFeatureClick !== prevProps.onFeatureClick) {
     layer.setOnFeatureClick(props.onFeatureClick);
+  }
+  if ((props.passThroughClicks ?? false) !== (prevProps.passThroughClicks ?? false)) {
+    layer.setPassThroughClicks(props.passThroughClicks ?? false);
   }
   if (
     props.clusterPoints !== prevProps.clusterPoints ||

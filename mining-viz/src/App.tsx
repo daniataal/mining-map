@@ -531,6 +531,10 @@ export default function App() {
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [dossierItem, setDossierItem] = useState<MiningLicense | null>(null);
   const [mapFlyTrigger, setMapFlyTrigger] = useState(0);
+  const [bunkerMapFlyTrigger, setBunkerMapFlyTrigger] = useState(0);
+  const [bunkerMapFlyTarget, setBunkerMapFlyTarget] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
@@ -1604,12 +1608,15 @@ export default function App() {
     id: supplier.id,
     company: supplier.name,
     country: supplier.country ?? '',
-    commodity: 'Oil & Energy',
-    licenseType: 'Partner',
-    status: 'Prospect',
+    commodity: supplier.fuels_supplied ?? 'Bunker fuel',
+    licenseType: supplier.license_authority ?? 'Bunker supplier',
+    status: 'Licensed register',
     lat: supplier.lat ?? 0,
     lng: supplier.lng ?? 0,
     source: 'bunker_fuel_suppliers_curated',
+    phoneNumber: supplier.phone ?? null,
+    address: supplier.address,
+    sector: supplier.port_name ?? supplier.port_locode,
   }), []);
 
   const handleOpenBunkerRegistry = useCallback(
@@ -1643,22 +1650,25 @@ export default function App() {
 
   const handleBunkerMarkerSelect = useCallback((supplier: NearbySupplier) => {
     setBunkerRegistrySelectedId(supplier.id);
+    setSelectedItem(null);
+    setIntelligenceSelection({ type: 'bunker_supplier', supplier });
+    setIntelligenceRailOpen(true);
     if (supplier.port_locode) {
       setBunkerRegistryHub(supplier.port_locode);
       persistLastBunkerHub(supplier.port_locode);
     }
   }, []);
 
-  const handleBunkerRegistrySupplierSelect = useCallback(
-    (supplier: NearbySupplier) => {
-      setBunkerRegistrySelectedId(supplier.id);
-      if (supplier.lat != null && supplier.lng != null) {
-        handleSelectItem(supplierToMapLicense(supplier));
-        setMapFlyTrigger((prev) => prev + 1);
-      }
-    },
-    [handleSelectItem, supplierToMapLicense],
-  );
+  const handleBunkerRegistrySupplierSelect = useCallback((supplier: NearbySupplier) => {
+    setBunkerRegistrySelectedId(supplier.id);
+    setSelectedItem(null);
+    setIntelligenceSelection({ type: 'bunker_supplier', supplier });
+    setIntelligenceRailOpen(true);
+    if (supplier.lat != null && supplier.lng != null) {
+      setBunkerMapFlyTarget({ lat: supplier.lat, lng: supplier.lng });
+      setBunkerMapFlyTrigger((prev) => prev + 1);
+    }
+  }, []);
 
   const MapEl = BROKER_WORKSPACE_ENABLED ? MapComponentBridge : MapComponent;
 
@@ -2085,6 +2095,8 @@ export default function App() {
                   userAnnotations={userAnnotations}
                   selectedItem={selectedItem}
                   mapFlyTrigger={mapFlyTrigger}
+                  bunkerMapFlyTrigger={bunkerMapFlyTrigger}
+                  bunkerMapFlyTarget={bunkerMapFlyTarget}
                   viewModeKey={effectiveViewMode}
                   worldCoverage={worldCoverage}
                   licensesFetchPending={

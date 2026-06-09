@@ -23,6 +23,8 @@ type NearbyRow struct {
 	ProductTypes    []string `json:"product_types"`
 	FuelsSupplied   string   `json:"fuels_supplied,omitempty"`
 	ContactPerson   string   `json:"contact_person,omitempty"`
+	Phone             string   `json:"phone,omitempty"`
+	Email             string   `json:"email,omitempty"`
 	Address           string   `json:"address,omitempty"`
 	LicenseAuthority  string   `json:"license_authority,omitempty"`
 	SourceURL         string   `json:"source_url,omitempty"`
@@ -147,7 +149,9 @@ func shapeNearbyRow(
 		ProductTypes:      metaStringSlice(meta, "product_types"),
 		FuelsSupplied:     metaString(meta, "fuels_supplied"),
 		ContactPerson:     metaString(meta, "contact_person"),
-		Address:           metaString(meta, "register_address"),
+		Phone:             metaString(meta, "phone"),
+		Email:             metaString(meta, "email"),
+		Address:           firstNonEmpty(metaString(meta, "register_address"), metaString(meta, "address")),
 		LicenseAuthority:  metaString(meta, "license_authority"),
 		SourceURL:         sourceURL,
 		EnrichmentTier:    metaString(meta, "enrichment_tier"),
@@ -156,6 +160,15 @@ func shapeNearbyRow(
 		GeocodeTier:       tier,
 		GeocodeDisclaimer: disclaimer,
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func metaString(meta map[string]any, key string) string {

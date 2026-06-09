@@ -44,6 +44,8 @@ func IndexBunkerFuelSuppliers(ctx context.Context, pool *pgxpool.Pool, seedPath 
 			"product_types":       row.ProductTypes,
 			"fuels_supplied":      row.FuelsSupplied,
 			"contact_person":      row.ContactPerson,
+			"phone":               row.Phone,
+			"email":               row.Email,
 			"register_address":    row.Address,
 			"port_locode":         row.Locode,
 			"port_name":           row.PortName,
@@ -53,7 +55,7 @@ func IndexBunkerFuelSuppliers(ctx context.Context, pool *pgxpool.Pool, seedPath 
 			"license_authority":   row.LicenseAuthority,
 			"register_source_url": row.RegisterSourceURL,
 			"source_url":          sourceURL,
-			"enrichment_tier":     "regulator_curated",
+			"enrichment_tier":     "bunker_fuel_suppliers_curated",
 			"notes":               row.Notes,
 		}
 		meta = supplier.ApplyPlacementMetadata(ctx, meta, row, supplier.PlacementOptions{

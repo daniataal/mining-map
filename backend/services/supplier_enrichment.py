@@ -115,6 +115,8 @@ def sync_bunker_fuel_suppliers_to_companies(cur: Any) -> dict[str, Any]:
                 "product_types": row.get("product_types") or [],
                 "fuels_supplied": row.get("fuels_supplied"),
                 "contact_person": row.get("contact_person"),
+                "phone": row.get("phone"),
+                "email": row.get("email"),
                 "register_address": row.get("address"),
                 "port_locode": row.get("locode"),
                 "port_name": row.get("port_name"),
@@ -124,7 +126,7 @@ def sync_bunker_fuel_suppliers_to_companies(cur: Any) -> dict[str, Any]:
                 "license_authority": row.get("license_authority"),
                 "register_source_url": row.get("register_source_url"),
                 "source_url": source_url,
-                "enrichment_tier": "regulator_curated",
+                "enrichment_tier": "bunker_fuel_suppliers_curated",
                 "notes": row.get("notes"),
             },
         )

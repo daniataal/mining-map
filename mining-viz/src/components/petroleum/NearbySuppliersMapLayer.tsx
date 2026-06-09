@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { CircleMarker, LayerGroup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { PathOptions } from 'leaflet';
@@ -42,20 +42,33 @@ export default function NearbySuppliersMapLayer({
   const map = useMap();
   const popupRef = useRef<ReturnType<typeof openBunkerSupplierPopup> | null>(null);
 
+  const openSupplierPopup = useCallback(
+    (supplier: NearbySupplier) => {
+      if (supplier.lat == null || supplier.lng == null) return;
+      popupRef.current?.close();
+      popupRef.current = openBunkerSupplierPopup(map, supplier.lat, supplier.lng, supplier, {
+        onOpenDossier: onOpenDossier ? () => onOpenDossier(supplier) : undefined,
+        onViewInRegistry: onViewInRegistry ? () => onViewInRegistry(supplier) : undefined,
+      });
+    },
+    [map, onOpenDossier, onViewInRegistry],
+  );
+
+  useEffect(() => {
+    if (!selectedSupplierId) return;
+    const supplier = suppliers.find((s) => s.id === selectedSupplierId);
+    if (!supplier) return;
+    openSupplierPopup(supplier);
+  }, [selectedSupplierId, suppliers, openSupplierPopup]);
+
   const handleSupplierClick = useCallback(
     (supplier: NearbySupplier, e: L.LeafletMouseEvent) => {
       L.DomEvent.stopPropagation(e);
       markMapFeatureClickHandled(e);
       onSupplierSelect?.(supplier);
-      popupRef.current?.close();
-      const lat = supplier.lat as number;
-      const lng = supplier.lng as number;
-      popupRef.current = openBunkerSupplierPopup(map, lat, lng, supplier, {
-        onOpenDossier: onOpenDossier ? () => onOpenDossier(supplier) : undefined,
-        onViewInRegistry: onViewInRegistry ? () => onViewInRegistry(supplier) : undefined,
-      });
+      openSupplierPopup(supplier);
     },
-    [map, onOpenDossier, onViewInRegistry, onSupplierSelect],
+    [onSupplierSelect, openSupplierPopup],
   );
 
   if (!enabled) return null;

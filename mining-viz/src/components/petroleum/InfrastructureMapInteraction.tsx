@@ -305,6 +305,9 @@ export default function InfrastructureMapInteraction({
       hoverTooltipRef.current?.remove();
       hoverTooltipRef.current = null;
 
+      // Open drawer immediately; enrich asynchronously (backend may still be starting).
+      onFeatureClick(selection);
+
       void (async () => {
         let props = await enrichSelectionWithMaterializedPopup(selection, controller.signal);
         if (controller.signal.aborted) return;
@@ -314,7 +317,9 @@ export default function InfrastructureMapInteraction({
           props = resolved.properties;
         }
         if (controller.signal.aborted) return;
-        onFeatureClick(resolved);
+        if (resolved.properties !== selection.properties) {
+          onFeatureClick(resolved);
+        }
 
         const layerId = resolved.layerId as OsmPetroleumLayerId;
         const needsEnrich =

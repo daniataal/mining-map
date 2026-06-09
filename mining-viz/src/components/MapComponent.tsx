@@ -323,6 +323,8 @@ interface MapComponentProps {
   deleteLicense: (id: string) => void;
   handleOpenDossier: (item: MiningLicense) => void;
   mapFlyTrigger: number;
+  bunkerMapFlyTrigger?: number;
+  bunkerMapFlyTarget?: { lat: number; lng: number } | null;
   viewModeKey: string;
   worldCoverage?: { countries: { country: string }[] };
   /** True while the active sector's license query has no data yet (keeps map from feeling frozen on sector switch). */
@@ -643,6 +645,22 @@ const MapEffect = ({
         const targetZoom = Math.max(currentZoom, 16);
         map.flyTo([tgt.lat, tgt.lng], targetZoom, { duration: 1.0 });
     }, [mapFlyTrigger, map, selectedItem, flyTarget]);
+    return null;
+};
+
+const BunkerMapFlyEffect = ({
+    target,
+    trigger,
+}: {
+    target: { lat: number; lng: number } | null;
+    trigger: number;
+}) => {
+    const map = useMap();
+    useEffect(() => {
+        if (!target || trigger <= 0) return;
+        const targetZoom = Math.max(map.getZoom(), 14);
+        map.flyTo([target.lat, target.lng], targetZoom, { duration: 1.0 });
+    }, [target, trigger, map]);
     return null;
 };
 
@@ -1106,6 +1124,8 @@ export default function MapComponent({
   deleteLicense,
   handleOpenDossier,
   mapFlyTrigger,
+  bunkerMapFlyTrigger = 0,
+  bunkerMapFlyTarget = null,
   viewModeKey,
   licensesFetchPending = false,
   licensesRefetching = false,
@@ -2382,6 +2402,7 @@ export default function MapComponent({
                     <MapZoomTracker onZoomChange={setMaritimeMapZoom} />
                 )}
                 <MapEffect selectedItem={selectedItem} mapFlyTrigger={mapFlyTrigger} flyTarget={flyTarget} />
+                <BunkerMapFlyEffect target={bunkerMapFlyTarget} trigger={bunkerMapFlyTrigger} />
                 <LicenseClusterFlyEffect
                     cluster={pendingLicenseClusterFly}
                     drillSeq={licenseClusterDrillSeq}

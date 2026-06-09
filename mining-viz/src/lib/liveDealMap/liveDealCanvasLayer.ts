@@ -17,6 +17,8 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   mapZoom: number;
   selectedUid: string | null;
   onFeatureClick?: (feature: LiveDealMapFeature) => void;
+  /** Visual-only: do not capture clicks/hover — map-level handlers own interaction. */
+  passThroughClicks?: boolean;
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
@@ -300,6 +302,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _externalHoveredUid: string | null = null;
   private _mouseHoveredUid: string | null = null;
   private _onFeatureClick?: (feature: LiveDealMapFeature) => void;
+  private _passThroughClicks = false;
   private _raf = 0;
   private _lastPaintKey = '';
   private _dataEpoch = 0;
@@ -320,6 +323,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._mapZoom = options.mapZoom;
     this._selectedUid = options.selectedUid;
     this._onFeatureClick = options.onFeatureClick;
+    this._passThroughClicks = Boolean(options.passThroughClicks);
     this._clusterPoints = Boolean(options.clusterPoints);
     this._clusterKinds = options.clusterKinds;
     this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
@@ -362,6 +366,10 @@ export class CanvasLiveDealLayer extends L.Layer {
 
   setOnFeatureClick(handler: ((feature: LiveDealMapFeature) => void) | undefined): void {
     this._onFeatureClick = handler;
+  }
+
+  setPassThroughClicks(passThrough: boolean): void {
+    this._passThroughClicks = passThrough;
   }
 
   setClusterOptions(options: {
@@ -593,6 +601,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   }
 
   private _onMapClick = (event: L.LeafletMouseEvent): void => {
+    if (this._passThroughClicks) return;
     const hit = this._findAtPoint(event.containerPoint);
     if (!hit) return;
     if (event.originalEvent) {
@@ -603,6 +612,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   };
 
   private _onMapMouseMove = (event: L.LeafletMouseEvent): void => {
+    if (this._passThroughClicks) return;
     const map = this._map;
     if (!map) return;
     const hit = this._findAtPoint(event.containerPoint);

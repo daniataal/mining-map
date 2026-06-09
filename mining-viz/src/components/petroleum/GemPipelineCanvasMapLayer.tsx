@@ -42,6 +42,7 @@ export default function GemPipelineCanvasMapLayer({
         mapZoom={mapZoom}
         selectedUid={null}
         onFeatureClick={() => {}}
+        passThroughClicks
         isDark={isDark}
       />
     </LayerGroup>
