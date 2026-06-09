@@ -75,6 +75,7 @@ import EntityRelationshipPanel from './EntityRelationshipPanel';
 import OperationsTab from './OperationsTab';
 import SecFilingsLink from './dossier/SecFilingsLink';
 import GleifLeiLink from './dossier/GleifLeiLink';
+import CompanyContactEnvelope from './dossier/CompanyContactEnvelope';
 import CompanyRegistryLinks from './dossier/CompanyRegistryLinks';
 import EntityTradeFlowsPanel from './dossier/EntityTradeFlowsPanel';
 import { CountryCoveragePanel } from './dossier/CountryCoveragePanel';
@@ -2625,6 +2626,14 @@ Output requirements:
                       entityKind={item.entityKind || 'license'}
                       variant="full"
                       onViewPartners={() => setActiveTab('trade-evidence')}
+                    />
+                  )}
+
+                  {(item.company || item.operatorName) && (
+                    <CompanyContactEnvelope
+                      companyName={item.company || item.operatorName || ''}
+                      country={item.country || ''}
+                      operatorName={item.operatorName}
                     />
                   )}
 

@@ -22,6 +22,7 @@ export type AssetsPetroleumLayerPrefs = {
   showGemPlants: boolean;
   showGemLng: boolean;
   showStorageTankFarms: boolean;
+  showBunkerSuppliers: boolean;
 };
 
 const DEFAULT_PETROLEUM_PREFS: AssetsPetroleumLayerPrefs = {
@@ -32,6 +33,7 @@ const DEFAULT_PETROLEUM_PREFS: AssetsPetroleumLayerPrefs = {
   showGemPlants: true,
   showGemLng: true,
   showStorageTankFarms: true,
+  showBunkerSuppliers: true,
 };
 
 /** Layer emphasis for Assets › oil_fields | refineries | tank_farms (legacy oil_and_gas uses defaults). */
@@ -50,6 +52,7 @@ export function assetsPetroleumLayerPrefs(lens: AssetsMapLens | null): AssetsPet
         showGemPlants: false,
         showGemLng: false,
         showStorageTankFarms: false,
+        showBunkerSuppliers: true,
       };
     case 'refineries':
       return {
@@ -62,6 +65,7 @@ export function assetsPetroleumLayerPrefs(lens: AssetsMapLens | null): AssetsPet
         showGemPlants: true,
         showGemLng: false,
         showStorageTankFarms: false,
+        showBunkerSuppliers: true,
       };
     case 'tank_farms':
       return {
@@ -74,6 +78,7 @@ export function assetsPetroleumLayerPrefs(lens: AssetsMapLens | null): AssetsPet
         showGemPlants: false,
         showGemLng: false,
         showStorageTankFarms: true,
+        showBunkerSuppliers: true,
       };
   }
 }

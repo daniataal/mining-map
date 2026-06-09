@@ -587,6 +587,7 @@ export default function App() {
       mines: rows.filter((item) => (item.sector || 'mining') === 'mining').length,
       oil_fields: rows.filter((item) => item.sector === 'oil_and_gas').length,
       refineries: null,
+      plants: null,
       tank_farms: storageTerminalResponse?.stats?.total ?? storageEntities.length,
       ports: portEntities.length,
       pipelines: null,
@@ -2143,6 +2144,10 @@ export default function App() {
                     <InfrastructureFeatureDrawer
                       selection={selectedInfrastructureFeature}
                       onClose={() => setSelectedInfrastructureFeature(null)}
+                      onOpenDossier={(item) => {
+                        setSelectedInfrastructureFeature(null);
+                        handleSelectItem(item);
+                      }}
                     />
                   </Suspense>
                 </div>

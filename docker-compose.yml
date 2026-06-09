@@ -243,6 +243,7 @@ services:
       - OIL_GRAPH_SYNC_GO_GOV_AWARDS=${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-true}
       - OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE=${OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE:-false}
       - OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE=${OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE:-true}
+      - OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS=${OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS:-true}
       - EIA_DOWNLOADS_DIR=/data/eia_downloads
       - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
       - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
@@ -380,6 +381,10 @@ services:
       # ShipVault registry enrichment — secrets (EMAIL/PASSWORD/FIREBASE_API_KEY/BEARER_TOKEN) via env_file only.
       SHIPVAULT_BASE_URL: ${SHIPVAULT_BASE_URL:-https://shipvaultapi-gjb8c.ondigitalocean.app}
       SHIPVAULT_CACHE_TTL_DAYS: ${SHIPVAULT_CACHE_TTL_DAYS:-7}
+      MERIDIAN_DATA_DIR: /data/meridian
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-meridian-bunker-geocode/1.0 (contact admin)}
+    volumes:
+      - ./data:/data/meridian:ro
     healthcheck:
       test:
         [
@@ -391,7 +396,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 120s
     depends_on:
       db:
         condition: service_healthy
@@ -428,8 +433,13 @@ services:
       OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE: ${OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE:-false}
       OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE: ${OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE:-false}
       OIL_GRAPH_SYNC_GO_PORT_CALL_MCR: ${OIL_GRAPH_SYNC_GO_PORT_CALL_MCR:-true}
+      OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS: ${OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS:-true}
+      MERIDIAN_DATA_DIR: /data/meridian
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-meridian-bunker-geocode/1.0 (contact admin)}
       OIL_GRAPH_SYNC_INTERVAL_SECONDS: ${OIL_GRAPH_SYNC_INTERVAL_SECONDS:-86400}
       OIL_GRAPH_SYNC_BACKOFF_SECONDS: ${OIL_GRAPH_SYNC_BACKOFF_SECONDS:-3600}
+    volumes:
+      - ./data:/data/meridian:ro
     depends_on:
       db:
         condition: service_healthy

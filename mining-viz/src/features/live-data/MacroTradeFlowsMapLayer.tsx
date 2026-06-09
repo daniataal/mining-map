@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
+import { useMap } from 'react-leaflet';
+import L from 'leaflet';
 import { bezierMidpoint, type LatLngTuple } from '../../lib/corridorGeometry';
 import { countryCentroid } from '../../lib/countryCentroids';
 import type { MacroTradeFlow } from '../../api/oilLiveApi';
@@ -55,6 +57,8 @@ type Props = {
 const MACRO_COLOR = '#64748b';
 
 export default function MacroTradeFlowsMapLayer({ enabled, flows }: Props) {
+  const map = useMap();
+  const popupRef = useRef<L.Popup | null>(null);
   const arcs = useMemo(() => flowsToMacroArcs(flows), [flows]);
   const features = useMemo<LiveDealMapFeature[]>(
     () =>
@@ -93,7 +97,21 @@ export default function MacroTradeFlowsMapLayer({ enabled, flows }: Props) {
       features={features}
       mapZoom={5}
       selectedUid={null}
-      onFeatureClick={() => {}}
+      onFeatureClick={(feature) => {
+        const arc = feature.data as MacroTradeFlowArc | undefined;
+        if (!arc) return;
+        popupRef.current?.remove();
+        popupRef.current = L.popup({ className: 'macro-trade-flow-popup', maxWidth: 300 })
+          .setLatLng([feature.popupLat ?? arc.load[0], feature.popupLng ?? arc.load[1]])
+          .setContent(
+            `<div class="text-xs space-y-1">
+              <p class="font-bold text-slate-100">${arc.partner} → ${arc.reporter}</p>
+              <p class="text-slate-300">HS ${arc.hs_code || '—'} · $${Math.round(arc.trade_value_usd).toLocaleString()} trade value (macro)</p>
+              <p class="text-slate-500">Open-data macro flow — verify before commercial use.</p>
+            </div>`,
+          )
+          .openOn(map);
+      }}
     />
   );
 }

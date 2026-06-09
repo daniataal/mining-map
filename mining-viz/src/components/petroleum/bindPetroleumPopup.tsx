@@ -1,9 +1,12 @@
 import { createRoot, type Root } from 'react-dom/client';
+import type { ReactNode } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import type { Layer, Map as LeafletMap, PopupOptions } from 'leaflet';
 import L from 'leaflet';
 import PetroleumFeaturePopup from './PetroleumFeaturePopup';
 import type { PetroleumLayerId } from '../../lib/petroleumLayers';
 import { I18nProvider } from '../../lib/i18n';
+import { queryClient } from '../../lib/queryClient';
 import { getFeatureCoordinates } from '../../lib/geojsonUtils';
 
 const popupRoots = new WeakMap<Layer, Root>();
@@ -16,6 +19,20 @@ const MAP_POPUP_OPTIONS: PopupOptions = {
   autoClose: true,
   closeOnClick: false,
 };
+
+function PopupProviders({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider>{children}</I18nProvider>
+    </QueryClientProvider>
+  );
+}
+
+function scheduleRootUnmount(root: Root) {
+  queueMicrotask(() => {
+    root.unmount();
+  });
+}
 
 export type PetroleumMapPopupHandle = {
   close: () => void;
@@ -34,27 +51,31 @@ export function openPetroleumFeaturePopupOnMap(
   host.className = 'petroleum-map-popup-mount';
   const root = createRoot(host);
   const popup = L.popup(MAP_POPUP_OPTIONS);
+  let mounted = true;
 
   const render = (props: Record<string, unknown>) => {
+    if (!mounted) return;
     root.render(
-      <I18nProvider>
+      <PopupProviders>
         <PetroleumFeaturePopup
           layerId={layerId}
           properties={props}
           coordinates={coordinates}
         />
-      </I18nProvider>,
+      </PopupProviders>,
     );
   };
 
   render(properties);
   popup.setLatLng(latlng).setContent(host).openOn(map);
   popup.on('remove', () => {
-    root.unmount();
+    mounted = false;
+    scheduleRootUnmount(root);
   });
 
   return {
     close: () => {
+      mounted = false;
       if (popup.isOpen()) map.closePopup(popup);
     },
     updateProperties: (props) => render(props),
@@ -78,13 +99,13 @@ export function bindPetroleumFeaturePopup(
       const root = createRoot(container);
       popupRoots.set(layer, root);
       root.render(
-        <I18nProvider>
+        <PopupProviders>
           <PetroleumFeaturePopup
             layerId={layerId}
             properties={properties}
             coordinates={coordinates}
           />
-        </I18nProvider>
+        </PopupProviders>
       );
       return container;
     },
@@ -100,7 +121,7 @@ export function bindPetroleumFeaturePopup(
   layer.on('popupclose', () => {
     const root = popupRoots.get(layer);
     if (root) {
-      root.unmount();
+      scheduleRootUnmount(root);
       popupRoots.delete(layer);
     }
   });

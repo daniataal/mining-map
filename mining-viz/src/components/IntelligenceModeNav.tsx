@@ -3,6 +3,7 @@ import {
   Database,
   Droplets,
   Factory,
+  Fuel,
   Map as MapIcon,
   Pickaxe,
   Route,
@@ -24,6 +25,8 @@ import {
   ASSET_LAYER_PRESETS,
   CORE_ASSET_LAYER_IDS,
   OPTIONAL_ASSET_LAYER_IDS,
+  ALL_ASSET_LAYER_IDS,
+  assetLayerIdsForPreset,
   activeAssetLayerCount,
   type AssetLayerId,
   type AssetLayerPresetId,
@@ -46,10 +49,12 @@ const ASSET_LAYER_LABELS: Record<AssetLayerId, string> = {
   mines: 'Mines',
   oil_fields: 'Oil Fields',
   refineries: 'Refineries',
+  plants: 'Plants',
   tank_farms: 'Tank Farms',
   ports: 'Ports',
   pipelines: 'Pipelines',
   lng: 'LNG',
+  bunker_suppliers: 'Bunker',
   ais_vessels: 'AIS',
   country_borders: 'Borders',
   esg_zones: 'ESG',
@@ -67,19 +72,16 @@ const ASSET_LAYER_ICONS: Record<AssetLayerId, typeof Pickaxe> = {
   mines: Pickaxe,
   oil_fields: Droplets,
   refineries: Factory,
+  plants: Factory,
   tank_farms: Database,
   ports: Anchor,
   pipelines: Route,
   lng: Droplets,
+  bunker_suppliers: Fuel,
   ais_vessels: Ship,
   country_borders: MapIcon,
   esg_zones: Shield,
 };
-
-const ALL_ASSET_LAYER_IDS: readonly AssetLayerId[] = [
-  ...CORE_ASSET_LAYER_IDS,
-  ...OPTIONAL_ASSET_LAYER_IDS,
-];
 
 export function IntelligenceModeNav({
   mode,
@@ -103,6 +105,13 @@ export function IntelligenceModeNav({
         ),
       )
     : null;
+  const visibleLayerChromeIds = assetLayerIdsForPreset(activeAssetPreset ?? undefined);
+  const visibleCoreLayerIds = CORE_ASSET_LAYER_IDS.filter((id) =>
+    visibleLayerChromeIds.includes(id),
+  );
+  const visibleOptionalLayerIds = OPTIONAL_ASSET_LAYER_IDS.filter((id) =>
+    visibleLayerChromeIds.includes(id),
+  );
   const baseLensHelper = activeGlobalLens
     ? globalMapLensHelperCopy(activeGlobalLens)
     : activeAssetsLens
@@ -167,7 +176,7 @@ export function IntelligenceModeNav({
             ))}
           </div>
           <div className="flex w-full flex-wrap justify-end gap-1">
-            {CORE_ASSET_LAYER_IDS.map((id) => {
+            {visibleCoreLayerIds.map((id) => {
               const Icon = ASSET_LAYER_ICONS[id];
               const active = assetLayerVisibility[id];
               const count = assetLayerCounts?.[id];
@@ -195,7 +204,7 @@ export function IntelligenceModeNav({
             })}
           </div>
           <div className="flex w-full flex-wrap justify-end gap-1">
-            {OPTIONAL_ASSET_LAYER_IDS.map((id) => {
+            {visibleOptionalLayerIds.map((id) => {
               const Icon = ASSET_LAYER_ICONS[id];
               const active = assetLayerVisibility[id];
               return (

@@ -4,6 +4,32 @@ import {
   formatStoragePopupTitle,
 } from './storageTerminalPopup';
 
+import { haversineMeters } from './pipelineMapPick';
+
+/** Max distance to fuse an OSM storage click with a curated DB storage terminal. */
+export const STORAGE_TERMINAL_FUSION_MAX_M = 2500;
+
+export function findNearestStorageTerminal(
+  entities: MiningLicense[],
+  lat: number,
+  lng: number,
+  maxDistanceM = STORAGE_TERMINAL_FUSION_MAX_M,
+): MiningLicense | null {
+  let best: MiningLicense | null = null;
+  let bestDistance = maxDistanceM + 1;
+  for (const item of entities) {
+    const itemLat = item.lat;
+    const itemLng = item.lng;
+    if (!Number.isFinite(itemLat) || !Number.isFinite(itemLng)) continue;
+    const distance = haversineMeters(lat, lng, itemLat, itemLng);
+    if (distance <= maxDistanceM && distance < bestDistance) {
+      best = item;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** Leaflet LayersControl only registers overlays present on first mount — never gate on entity count. */
 export function storageTankFarmsLayerShouldMount(enabled: boolean, _mapZoom?: number): boolean {
   return enabled;

@@ -22,8 +22,12 @@ Rebuild backend after env changes: `docker compose up -d --build backend`
 2. `POST /api/admin/gem-goit-pipelines/ingest`
 3. `POST /api/admin/gem-gogpt-plants/ingest`
 4. `POST /api/admin/gem-ggit-lng/ingest`
+5. `POST /api/admin/gem-ggit-gas-pipelines/ingest` (GGIT gas transmission routes)
+6. `POST /api/admin/bunker-fuel-suppliers/sync` (licensed bunker/fuel suppliers → `oil_companies`)
 
 Or one shot: `POST /api/admin/oil-live/graph-sync` (includes auto-ingest when `GEM_*_AUTO_INGEST=true`).
+
+See also: [SUPPLIER_ENRICHMENT_PIPELINE.md](../SUPPLIER_ENRICHMENT_PIPELINE.md) and [BUNKER_REGISTER_EXPANSION.md](../BUNKER_REGISTER_EXPANSION.md) for bunker supplier hub playbook.
 
 ## 3. OSM petroleum (Gulf tiles)
 

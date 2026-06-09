@@ -60,6 +60,10 @@ func graphSyncGoPortCallMCREnabled() bool {
 	return graphSyncGoFlagEnabled("PORT_CALL_MCR")
 }
 
+func graphSyncGoBunkerFuelSuppliersEnabled() bool {
+	return graphSyncGoFlagEnabled("BUNKER_FUEL_SUPPLIERS")
+}
+
 func anyGraphSyncGoStepEnabled() bool {
 	return graphSyncGoTerminalOperatorsEnabled() ||
 		graphSyncGoLicensesEnabled() ||
@@ -69,7 +73,8 @@ func anyGraphSyncGoStepEnabled() bool {
 		graphSyncGoGovAwardsEnabled() ||
 		graphSyncGoEurostatTradeEnabled() ||
 		graphSyncGoPetroleumOsmStorageEnabled() ||
-		graphSyncGoPortCallMCREnabled()
+		graphSyncGoPortCallMCREnabled() ||
+		graphSyncGoBunkerFuelSuppliersEnabled()
 }
 
 func (g *GraphSyncGoSteps) runStep(
@@ -265,6 +270,31 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 				"reason":   result.Reason,
 				"layer_id": result.LayerID,
 				"cached":   result.Cached,
+			}, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if graphSyncGoBunkerFuelSuppliersEnabled() {
+		log.Info().Msg("[graph-sync-go] running bunker_fuel_suppliers step…")
+		err := g.runStep(ctx, "graphsync_bunker_fuel_suppliers", func(ctx context.Context) (map[string]any, error) {
+			result, err := graphsync.IndexBunkerFuelSuppliers(ctx, g.Pool, "")
+			if err != nil {
+				return nil, err
+			}
+			log.Info().
+				Int("suppliers_indexed", result.SuppliersIndexed).
+				Int("contacts_written", result.ContactsWritten).
+				Int("geocoded", result.Geocoded).
+				Msg("[graph-sync-go] bunker_fuel_suppliers done")
+			return map[string]any{
+				"suppliers_indexed": result.SuppliersIndexed,
+				"contacts_written":  result.ContactsWritten,
+				"records_skipped":   result.RecordsSkipped,
+				"seed_hubs":         result.SeedHubs,
+				"geocoded":          result.Geocoded,
 			}, nil
 		})
 		if err != nil && firstErr == nil {

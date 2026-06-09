@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatInfrastructureCoverageBanner,
   infrastructureCoverageGapMessage,
+  tankFarmEmptyHintMessage,
 } from './infrastructureCoverageFormat';
 
 describe('infrastructureCoverage', () => {
@@ -25,5 +26,22 @@ describe('infrastructureCoverage', () => {
     expect(
       infrastructureCoverageGapMessage({ coverage_gap: true }),
     ).toMatch(/No OSM\/GEM/);
+  });
+
+  it('hints when tank farms toggle is on but no terminals loaded', () => {
+    expect(
+      tankFarmEmptyHintMessage({
+        tankFarmsEnabled: true,
+        storageInView: 0,
+        catalogTotal: 0,
+      }),
+    ).toMatch(/Tank farms layer is on/);
+    expect(
+      tankFarmEmptyHintMessage({
+        tankFarmsEnabled: false,
+        storageInView: 0,
+        catalogTotal: 0,
+      }),
+    ).toBeNull();
   });
 });
