@@ -3,34 +3,67 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
-func defaultRawDir() string {
-	return resolveRawDir("")
-}
+const madsanModule = "github.com/madsan/intelligence"
 
-// resolveRawDir normalizes MADSAN_RAW_DIR for hybrid dev (cwd madsan/backend).
-// Repo-relative values like "madsan/raw" must not resolve to madsan/backend/madsan/raw.
+// resolveRawDir resolves MADSAN_RAW_DIR to an absolute path.
+// Default and repo-relative values (madsan/raw, raw, ../raw) map to madsan/raw next to
+// madsan/backend, independent of process cwd — avoids …/backend/madsan/raw when the worker
+// runs from madsan/backend with MADSAN_RAW_DIR=madsan/raw.
 func resolveRawDir(raw string) string {
-	if raw == "" {
-		if wd, err := os.Getwd(); err == nil && filepath.Base(wd) == "backend" {
-			raw = filepath.Join(filepath.Dir(wd), "raw")
-		} else {
-			raw = "../raw"
+	if raw == "" || isMadsanRawReference(raw) {
+		if dir := locateMadsanRawDir(); dir != "" {
+			return dir
 		}
-	} else if !filepath.IsAbs(raw) {
-		if wd, err := os.Getwd(); err == nil && filepath.Base(wd) == "backend" {
-			if filepath.Base(filepath.Clean(raw)) == "raw" {
-				raw = filepath.Join(filepath.Dir(wd), "raw")
-			}
-		}
+	}
+	if filepath.IsAbs(raw) {
+		return raw
 	}
 	if ap, err := filepath.Abs(raw); err == nil {
 		return ap
 	}
 	return raw
+}
+
+func isMadsanRawReference(raw string) bool {
+	switch filepath.Clean(raw) {
+	case "raw", "../raw", "./raw", "madsan/raw", "./madsan/raw":
+		return true
+	default:
+		return false
+	}
+}
+
+// locateMadsanRawDir walks up from this package to github.com/madsan/intelligence go.mod
+// and returns ../raw (i.e. madsan/raw in the repo layout).
+func locateMadsanRawDir() string {
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+	dir := filepath.Dir(self)
+	for {
+		modPath := filepath.Join(dir, "go.mod")
+		b, err := os.ReadFile(modPath)
+		if err == nil && strings.Contains(string(b), "module "+madsanModule) {
+			raw := filepath.Join(filepath.Dir(dir), "raw")
+			if ap, err := filepath.Abs(raw); err == nil {
+				return ap
+			}
+			return raw
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 type Config struct {
