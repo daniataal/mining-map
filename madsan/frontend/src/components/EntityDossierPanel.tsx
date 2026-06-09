@@ -14,6 +14,9 @@ export type MapSelection = {
   asset_type?: string;
   country_code?: string;
   confidence_score?: number | string;
+  operator?: string;
+  substance?: string;
+  pipeline_substance?: string;
 };
 
 type EvidenceClaim = {
@@ -132,17 +135,26 @@ export default function EntityDossierPanel({ selection, onNavigate, onRelationsh
     } else if (mmsi && entityType === "vessel") {
       url = `${API_BASE}/api/energy/vessels/by-mmsi/${mmsi}`;
     } else {
+      const isPipeline = selection._layer === "pipelines";
       setDossier({
         id: "",
         entity_type: entityType,
-        name: String(selection.name ?? "Unknown"),
+        name: String(selection.name ?? (isPipeline ? "Pipeline" : "Unknown")),
         summary: {
-          asset_type: selection.asset_type,
+          asset_type: selection.asset_type ?? (isPipeline ? "pipeline" : undefined),
           country_code: selection.country_code,
+          operator: selection.operator,
+          substance: selection.substance || selection.pipeline_substance,
         },
         confidence: { score: Number(selection.confidence_score) || undefined },
-        evidence: [],
-        limitations: ["No registry ID — live AIS overlay only"],
+        evidence: isPipeline
+          ? [{ source_name: "OpenStreetMap petroleum", claim_type: "geometry", tier: "observed" }]
+          : [],
+        limitations: [
+          isPipeline
+            ? "Pipeline geometry from OSM; full asset dossier available after legacy import links this feature."
+            : "No registry ID — live AIS overlay only",
+        ],
       });
       return;
     }

@@ -44,6 +44,14 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 	hub := realtime.NewHub(log)
 	hub.SetPool(pool)
 	go hub.Run()
+	var legacyPool *pgxpool.Pool
+	if cfg.LegacyDBURL != "" {
+		if legacy, err := database.ConnectURL(context.Background(), cfg.LegacyDBURL); err != nil {
+			log.Warn().Err(err).Msg("legacy db unavailable for pipeline tiles")
+		} else {
+			legacyPool = legacy
+		}
+	}
 	srv := &Server{
 		pool:   pool,
 		log:    log,
@@ -53,7 +61,7 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		hub:    hub,
 		deals:  deals.New(pool, cfg.OpenSanctionsAPIKey),
 		search: search.New(pool),
-		tiles:  tiles.New(pool),
+		tiles:  tiles.New(pool, legacyPool),
 		ingest: ingestion.New(pool, cfg),
 	}
 	srv.startAISSync()

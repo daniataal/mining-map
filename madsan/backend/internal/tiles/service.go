@@ -11,11 +11,12 @@ import (
 )
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	legacyPool *pgxpool.Pool
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+func New(pool *pgxpool.Pool, legacyPool *pgxpool.Pool) *Service {
+	return &Service{pool: pool, legacyPool: legacyPool}
 }
 
 func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +36,8 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	case "energy-assets":
 		table = "map_energy_assets"
 		layerName = "energy_assets"
+	case "pipelines":
+		layerName = "petroleum_osm"
 	default:
 		http.Error(w, "unknown layer", http.StatusNotFound)
 		return
@@ -73,9 +76,25 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 					id::text, name, asset_type, country_code, confidence_score
 				FROM assets
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND geom IS NOT NULL
-				  AND asset_type IN ('tank_farm','terminal','refinery','pipeline','port','sts_zone','storage','berth')
+				  AND asset_type IN ('tank_farm','terminal','refinery','port','sts_zone','storage','berth')
 				  AND ` + tileFilter + `
 			) mvt`
+	case "pipelines":
+		if s.legacyPool == nil || z < pipelineMinZoom {
+			w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		err := s.legacyPool.QueryRow(r.Context(), pipelineMVTQuery, z, x, y, layerName).Scan(&tile)
+		if err != nil || len(tile) == 0 {
+			w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = w.Write(tile)
+		return
 	default:
 		query = `
 			SELECT ST_AsMVT(mvt.*, $4) FROM (
@@ -95,7 +114,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	switch layer {
 	case "vessels":
 		cache = "public, max-age=30"
-	case "energy-assets", "metals-assets":
+	case "energy-assets", "metals-assets", "pipelines":
 		cache = "public, max-age=120"
 	}
 	w.Header().Set("Cache-Control", cache)

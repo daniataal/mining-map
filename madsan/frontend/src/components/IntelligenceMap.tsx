@@ -51,6 +51,76 @@ function entityTypeForLayer(layerId: string): string {
   return "asset";
 }
 
+function mvtSourceLayer(tileLayer: string): string {
+  switch (tileLayer) {
+    case "vessels":
+      return "vessels";
+    case "metals-assets":
+      return "metals_assets";
+    case "pipelines":
+      return "petroleum_osm";
+    default:
+      return "energy_assets";
+  }
+}
+
+const PIPELINE_LAYER_IDS = ["pipelines-hit", "pipelines", "pipelines-water"] as const;
+
+function isPipelineLayer(layerId: string): boolean {
+  return PIPELINE_LAYER_IDS.includes(layerId as (typeof PIPELINE_LAYER_IDS)[number]);
+}
+
+function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  map.addLayer({
+    id: "pipelines",
+    type: "line",
+    source: src,
+    "source-layer": "petroleum_osm",
+    filter: ["!=", ["get", "pipeline_substance"], "water"],
+    paint: {
+      "line-color": [
+        "match",
+        ["get", "pipeline_substance"],
+        "oil",
+        "#fbbf24",
+        "gas",
+        "#38bdf8",
+        "#fbbf24",
+      ],
+      "line-width": 3,
+      "line-opacity": 0.9,
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+  map.addLayer({
+    id: "pipelines-water",
+    type: "line",
+    source: src,
+    "source-layer": "petroleum_osm",
+    filter: ["==", ["get", "pipeline_substance"], "water"],
+    paint: {
+      "line-color": "#0891b2",
+      "line-width": 2.5,
+      "line-opacity": 0.8,
+      "line-dasharray": [2, 6],
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+  map.addLayer({
+    id: "pipelines-hit",
+    type: "line",
+    source: src,
+    "source-layer": "petroleum_osm",
+    paint: {
+      "line-color": "#000000",
+      "line-width": 12,
+      "line-opacity": 0,
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+}
+
 export default function IntelligenceMap({ vertical, onSelect, mapFocus, relationshipLines }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -95,14 +165,18 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
         map.addSource(src, {
           type: "vector",
           tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
-          minzoom: 0,
+          minzoom: layer.id === "pipelines" ? 4 : 0,
           maxzoom: 14,
         });
+        if (layer.id === "pipelines") {
+          addPipelineLayers(map, src, !!layers[layer.id]);
+          return;
+        }
         map.addLayer({
           id: layer.id,
           type: "circle",
           source: src,
-          "source-layer": layer.tileLayer === "vessels" ? "vessels" : layer.tileLayer === "metals-assets" ? "metals_assets" : "energy_assets",
+          "source-layer": mvtSourceLayer(layer.tileLayer!),
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
             "circle-color": layer.id === "vessels" ? "#5eb3ff" : layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
@@ -118,20 +192,28 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
         const feats = map.queryRenderedFeatures(e.point);
         const activeIds = new Set(layersForVertical(vertical).map((l) => l.id));
         const hit = feats.find(
-          (f) => activeIds.has(f.layer.id) || (vertical === "energy" && f.layer.id === "live-vessels")
+          (f) =>
+            activeIds.has(f.layer.id) ||
+            isPipelineLayer(f.layer.id) ||
+            (vertical === "energy" && f.layer.id === "live-vessels")
         );
         if (!hit) {
           onSelect(null);
           return;
         }
         const props = hit.properties as MapSelection;
+        const layerId = isPipelineLayer(hit.layer.id) ? "pipelines" : hit.layer.id;
         onSelect({
           ...props,
           id: props.id != null ? String(props.id) : undefined,
           mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
           name: props.name != null ? String(props.name) : undefined,
-          _layer: hit.layer.id,
-          _entityType: entityTypeForLayer(hit.layer.id),
+          asset_type: props.asset_type != null ? String(props.asset_type) : undefined,
+          operator: props.operator != null ? String(props.operator) : undefined,
+          substance: props.substance != null ? String(props.substance) : undefined,
+          pipeline_substance: props.pipeline_substance != null ? String(props.pipeline_substance) : undefined,
+          _layer: layerId,
+          _entityType: entityTypeForLayer(layerId),
         });
       });
 
@@ -253,6 +335,13 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     const map = mapRef.current;
     if (!map) return;
     layersForVertical(vertical).forEach((l) => {
+      if (l.id === "pipelines") {
+        const vis = layers[l.id] ? "visible" : "none";
+        for (const pid of PIPELINE_LAYER_IDS) {
+          if (map.getLayer(pid)) map.setLayoutProperty(pid, "visibility", vis);
+        }
+        return;
+      }
       if (map.getLayer(l.id)) {
         map.setLayoutProperty(l.id, "visibility", layers[l.id] ? "visible" : "none");
       }
