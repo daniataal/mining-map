@@ -27,6 +27,7 @@ type Evaluation struct {
 	Checks         []Check `json:"checks"`
 	ScoreDeduction float64 `json:"score_deduction"`
 	Recommendation string  `json:"recommendation"`
+	RulesVersion   string  `json:"rules_version,omitempty"`
 }
 
 func EvaluateDeal(ctx DealContext) (Evaluation, error) {
@@ -85,6 +86,23 @@ func EvaluateDeal(ctx DealContext) (Evaluation, error) {
 		deduction += rules.Scoring.FailDeduction
 	}
 
+	if ctx.Seller == "" || ctx.Buyer == "" {
+		missing := []string{}
+		if ctx.Seller == "" {
+			missing = append(missing, "seller")
+		}
+		if ctx.Buyer == "" {
+			missing = append(missing, "buyer")
+		}
+		checks = append(checks, Check{
+			Dimension: "kyc",
+			Status:    "warn",
+			Message:   "Entity name(s) missing for: " + strings.Join(missing, ", ") + " — KYC screening incomplete",
+			Tier:      "inferred",
+		})
+		deduction += rules.Scoring.WarnDeduction
+	}
+
 	if ctx.PriceUSD >= rules.KYCThresholds["enhanced_kyc_above_usd"] {
 		checks = append(checks, Check{
 			Dimension: "kyc",
@@ -93,9 +111,27 @@ func EvaluateDeal(ctx DealContext) (Evaluation, error) {
 			Tier:      "inferred",
 		})
 		deduction += rules.Scoring.WarnDeduction
+	} else if ctx.PriceUSD == 0 {
+		checks = append(checks, Check{
+			Dimension: "kyc",
+			Status:    "warn",
+			Message:   "Transaction value not provided — defaulting to enhanced-KYC posture",
+			Tier:      "inferred",
+		})
+		deduction += rules.Scoring.WarnDeduction
 	}
 
-	if ctx.Quantity > 50000 && family == "oil" {
+	for _, c := range commodityChecks(ctx, rules, family) {
+		checks = append(checks, c)
+		switch c.Status {
+		case "fail":
+			deduction += rules.Scoring.FailDeduction
+		case "warn":
+			deduction += rules.Scoring.WarnDeduction
+		}
+	}
+
+	if ctx.Quantity > 50000 && (family == "oil" || family == "petroleum" || family == "gas") {
 		checks = append(checks, Check{
 			Dimension: "logistics",
 			Status:    "warn",
@@ -120,7 +156,70 @@ func EvaluateDeal(ctx DealContext) (Evaluation, error) {
 		}
 	}
 
-	return Evaluation{Checks: checks, ScoreDeduction: deduction, Recommendation: rec}, nil
+	return Evaluation{
+		Checks:         checks,
+		ScoreDeduction: deduction,
+		Recommendation: rec,
+		RulesVersion:   rules.Version,
+	}, nil
+}
+
+func commodityChecks(ctx DealContext, rules Rules, family string) []Check {
+	cr := CommodityRuleForFamily(rules, family)
+	var checks []Check
+
+	if len(cr.ConflictMinerals) > 0 {
+		if ctx.Commodity == "" {
+			checks = append(checks, Check{
+				Dimension: "commodity",
+				Status:    "warn",
+				Message:   "Commodity not specified — cannot perform conflict-mineral screening",
+				Tier:      "inferred",
+			})
+		} else if isConflictMineral(ctx.Commodity, cr.ConflictMinerals) {
+			if countryInList(ctx.SellerCountry, cr.ConflictMineralHighRiskCountries) {
+				checks = append(checks, Check{
+					Dimension: "commodity",
+					Status:    "fail",
+					Message:   ctx.Commodity + " is a potential conflict mineral from high-risk origin " + ctx.SellerCountry + " — OECD/ICGLR certification required",
+					Tier:      "observed",
+				})
+			} else {
+				checks = append(checks, Check{
+					Dimension: "commodity",
+					Status:    "warn",
+					Message:   ctx.Commodity + " is listed as a potential conflict mineral — provenance documentation recommended",
+					Tier:      "inferred",
+				})
+			}
+		}
+	}
+
+	if cr.OffshoreExtraCheck {
+		checks = append(checks, Check{
+			Dimension: "commodity",
+			Status:    "warn",
+			Message:   "Oil/petroleum route flagged for offshore-field extra check — confirm field classification and permits",
+			Tier:      "inferred",
+		})
+	}
+	if cr.PipelineCheck {
+		checks = append(checks, Check{
+			Dimension: "commodity",
+			Status:    "warn",
+			Message:   "Gas route may involve cross-border pipeline transit — verify transit-country agreements",
+			Tier:      "inferred",
+		})
+	}
+	if len(cr.CertificationsAdvisory) > 0 {
+		checks = append(checks, Check{
+			Dimension: "commodity",
+			Status:    "pass",
+			Message:   "Advisory: consider verifying " + strings.Join(cr.CertificationsAdvisory, ", ") + " certification for " + family + " trades",
+			Tier:      "inferred",
+		})
+	}
+	return checks
 }
 
 func EnergyMissingDocuments(commodity string) []string {
@@ -136,4 +235,9 @@ func EnergyMissingDocuments(commodity string) []string {
 	default:
 		return base
 	}
+}
+
+// MissingDocuments is the energy commodity document checklist (legacy alias).
+func MissingDocuments(commodity string) []string {
+	return EnergyMissingDocuments(commodity)
 }

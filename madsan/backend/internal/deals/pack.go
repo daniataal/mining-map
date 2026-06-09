@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/madsan/intelligence/internal/compliance"
+	"github.com/madsan/intelligence/internal/markets"
 )
 
 type partyEvidence struct {
@@ -59,10 +62,17 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 
 	graph := s.buildRelationshipGraph(ctx, seller, buyer, verification)
 
+	vertical := "energy"
+	if compliance.CommodityFamily(commodity) == "mining" {
+		vertical = "metals"
+	}
+	priceCtx := s.buildPriceContext(commodity, quantityUnit, price, currency)
+
 	pack := map[string]any{
 		"pack_version":  "1.1",
 		"generated_at":  time.Now().UTC().Format(time.RFC3339),
 		"platform":      "MadSan Intelligence",
+		"vertical":      vertical,
 		"deal_id":       id,
 		"title":         title,
 		"status":        status,
@@ -76,6 +86,7 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 			"price":         derefFloat(price),
 			"currency":      currency,
 		},
+		"price_context":        priceCtx,
 		"parties":              parties,
 		"relationship_graph":   graph,
 		"verification":         verification,
@@ -92,9 +103,46 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 			"sanctions_screening":   verification["sanctions_screening"],
 		},
 		"limitations": verification["limitations"],
-		"disclaimer":  "Intelligence pack for due diligence — not legal, compliance, or trading advice. OpenSanctions and corridor hits require human review before any transaction.",
+		"disclaimer":  packDisclaimer(vertical),
 	}
 	return pack, nil
+}
+
+func packDisclaimer(vertical string) string {
+	if vertical == "metals" {
+		return "Metals intelligence pack for due diligence — not legal, compliance, or trading advice. Assay and license claims require independent verification; OpenSanctions matches are leads for review."
+	}
+	return "Intelligence pack for due diligence — not legal, compliance, or trading advice. OpenSanctions and corridor hits require human review before any transaction."
+}
+
+func (s *Service) buildPriceContext(commodity string, quantityUnit *string, price *float64, currency string) map[string]any {
+	out := map[string]any{"comparable": false}
+	ticker := markets.NewHandler(s.eiaKey)
+	now := time.Now().UTC()
+	q, ok := ticker.LookupBenchmark(commodity, now)
+	if !ok {
+		out["message"] = "No benchmark mapped for commodity"
+		return out
+	}
+	out["benchmark_symbol"] = q.Symbol
+	out["benchmark_label"] = q.Label
+	out["benchmark_price"] = q.Price
+	out["benchmark_unit"] = q.Unit
+	out["benchmark_tier"] = q.Tier
+	out["benchmark_as_of"] = q.ObservedAt.UTC().Format(time.RFC3339)
+	unit := derefStr(quantityUnit)
+	if price != nil && *price > 0 && markets.PriceComparable(commodity, unit) {
+		delta := pctDelta(*price, q.Price)
+		out["comparable"] = true
+		out["claimed_price"] = *price
+		out["claimed_currency"] = currency
+		out["delta_pct"] = delta
+	} else if price != nil && *price > 0 {
+		out["claimed_price"] = *price
+		out["claimed_currency"] = currency
+		out["message"] = "Claimed price unit not comparable to benchmark — showing reference quote only"
+	}
+	return out
 }
 
 func (s *Service) partyProfile(ctx context.Context, role, name string) partyProfile {
@@ -171,7 +219,12 @@ func PackToMarkdown(pack map[string]any) string {
 	var b strings.Builder
 	write := func(format string, args ...any) { _, _ = fmt.Fprintf(&b, format, args...) }
 
-	write("# MadSan Deal Due Diligence Pack\n\n")
+	vertical, _ := pack["vertical"].(string)
+	if vertical == "metals" {
+		b.WriteString("# MadSan Metals Deal Due Diligence Pack\n\n")
+	} else {
+		b.WriteString("# MadSan Deal Due Diligence Pack\n\n")
+	}
 	write("**Deal ID:** %s  \n", pack["deal_id"])
 	write("**Title:** %s  \n", pack["title"])
 	write("**Generated:** %s  \n\n", pack["generated_at"])
@@ -183,6 +236,20 @@ func PackToMarkdown(pack map[string]any) string {
 			if v := sum[k]; v != nil && fmt.Sprint(v) != "" {
 				write("| %s | %v |\n", strings.ReplaceAll(k, "_", " "), v)
 			}
+		}
+		write("\n")
+	}
+
+	if pc, ok := pack["price_context"].(map[string]any); ok && len(pc) > 0 {
+		write("## Price context\n\n")
+		if sym, ok := pc["benchmark_symbol"].(string); ok && sym != "" {
+			write("- **Benchmark:** %s (%v)\n", pc["benchmark_label"], sym)
+			write("- **Reference:** %.2f USD%v (%v tier)\n", pc["benchmark_price"], pc["benchmark_unit"], pc["benchmark_tier"])
+		}
+		if comparable, _ := pc["comparable"].(bool); comparable {
+			write("- **Claimed vs benchmark:** %.2f %v → Δ %+.2f%%\n", pc["claimed_price"], pc["claimed_currency"], pc["delta_pct"])
+		} else if msg, ok := pc["message"].(string); ok && msg != "" {
+			write("- %s\n", msg)
 		}
 		write("\n")
 	}

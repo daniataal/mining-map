@@ -96,10 +96,27 @@ func (s *Server) adminInsightsV2(w http.ResponseWriter, r *http.Request) {
 		) s
 	`).Scan(&dupClusters, &dupExtra)
 
+	var assetsVerified, assetsPartial, assetsUnverified int
+	var companiesVerified, companiesPartial, companiesUnverified int
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM assets WHERE data_quality_status = 'verified'`).Scan(&assetsVerified)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM assets WHERE data_quality_status = 'partial'`).Scan(&assetsPartial)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM assets WHERE data_quality_status NOT IN ('verified','partial')`).Scan(&assetsUnverified)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM companies WHERE data_quality_status = 'verified'`).Scan(&companiesVerified)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM companies WHERE data_quality_status = 'partial'`).Scan(&companiesPartial)
+	_ = s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM companies WHERE data_quality_status NOT IN ('verified','partial')`).Scan(&companiesUnverified)
+
 	writeJSON(w, map[string]any{
 		"entities": map[string]any{
 			"assets": assets, "companies": companies, "vessels": vessels,
 			"vessels_ais_24h": vesselsFresh,
+		},
+		"data_quality": map[string]any{
+			"assets": map[string]int{
+				"verified": assetsVerified, "partial": assetsPartial, "unverified": assetsUnverified,
+			},
+			"companies": map[string]int{
+				"verified": companiesVerified, "partial": companiesPartial, "unverified": companiesUnverified,
+			},
 		},
 		"provenance": map[string]any{
 			"sources": sources, "evidence_rows": evidence, "staging_rows": staging,

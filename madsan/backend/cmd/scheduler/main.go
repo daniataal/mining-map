@@ -22,6 +22,7 @@ var schedules = []struct {
 	{interval: 6 * time.Hour, jobType: "watch_folder", source: "raw_watch"},
 	{interval: 7 * 24 * time.Hour, jobType: "bunker_seed", source: "bunker_fuel_suppliers"},
 	{interval: 24 * time.Hour, jobType: "legacy_import", source: "legacy_mining_db"},
+	{interval: 1 * time.Hour, jobType: "deal_watch_scan", source: "deal_watch"},
 }
 
 func main() {

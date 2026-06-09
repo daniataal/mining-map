@@ -16,6 +16,7 @@ import (
 
 	"github.com/madsan/intelligence/internal/compliance"
 	"github.com/madsan/intelligence/internal/markets"
+	"github.com/madsan/intelligence/internal/notify"
 )
 
 const (
@@ -94,7 +95,11 @@ func (s *Service) CaptureWatchSnapshot(ctx context.Context, dealID, userID uuid.
 		VALUES ($1, $2, $3)
 		ON CONFLICT (deal_id, user_id) DO UPDATE SET last_snapshot = EXCLUDED.last_snapshot
 	`, dealID, userID, b)
-	return err
+	if err != nil {
+		return err
+	}
+	_, _ = s.ScanWatchSubscription(ctx, dealID, userID)
+	return nil
 }
 
 func (s *Service) GetChanges(ctx context.Context, dealID uuid.UUID, userID uuid.UUID) (ChangesResponse, error) {
@@ -135,16 +140,40 @@ func (s *Service) GetChanges(ctx context.Context, dealID uuid.UUID, userID uuid.
 	}
 	resp.SnapshotAt = snap.CapturedAt
 
-	now := time.Now().UTC()
-	ticker := markets.NewHandler(s.eiaKey)
-	items := []ChangeItem{
-		detectBenchmarkPriceDelta(snap, ticker, now),
-		detectSanctionsRescreen(ctx, s.screener, snap, now),
-		detectVesselLastSeenStale(ctx, s.pool, snap, now),
+	items, err := s.loadChangeEvents(ctx, dealID, userID, 50)
+	if err != nil {
+		return resp, err
+	}
+	if len(items) == 0 {
+		now := time.Now().UTC()
+		items = s.computeChangeItems(ctx, snap, now)
 	}
 	resp.Changes = items
 	resp.Tier = aggregateChangesTier(items)
+	if resp.Tier == ChangeTierObserved {
+		s.maybeNotifyDealWatch(ctx, dealID, userID, items)
+	}
 	return resp, nil
+}
+
+func (s *Service) maybeNotifyDealWatch(ctx context.Context, dealID, userID uuid.UUID, items []ChangeItem) {
+	if s == nil || s.notifier == nil {
+		return
+	}
+	var email string
+	if err := s.pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email); err != nil || email == "" {
+		return
+	}
+	types := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.Tier == ChangeTierObserved {
+			types = append(types, it.Type)
+		}
+	}
+	if len(types) == 0 {
+		return
+	}
+	_ = notify.DealWatchAlert(ctx, s.notifier, email, dealID.String(), types)
 }
 
 func (s *Service) buildWatchSnapshot(ctx context.Context, dealID string) (watchSnapshot, error) {

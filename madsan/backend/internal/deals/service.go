@@ -12,6 +12,7 @@ import (
 
 	"github.com/madsan/intelligence/internal/compliance"
 	"github.com/madsan/intelligence/internal/confidence"
+	"github.com/madsan/intelligence/internal/notify"
 )
 
 type VerifyInput struct {
@@ -34,6 +35,14 @@ type Service struct {
 	pool     *pgxpool.Pool
 	screener *compliance.Screener
 	eiaKey   string
+	notifier notify.Sender
+}
+
+// SetNotifier wires the transactional notification sender (log-only scaffold by default).
+func (s *Service) SetNotifier(sender notify.Sender) {
+	if s != nil {
+		s.notifier = sender
+	}
 }
 
 func New(pool *pgxpool.Pool, openSanctionsAPIKey, eiaAPIKey string) *Service {

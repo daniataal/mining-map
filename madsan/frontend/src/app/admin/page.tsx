@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
@@ -398,9 +399,14 @@ export default function AdminPage() {
     <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0 }}>Admin console</h1>
-        <button type="button" onClick={refresh} style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
-          Refresh
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/admin/data-quality" style={{ padding: "8px 12px", border: "1px solid var(--border)", color: "var(--accent)", textDecoration: "none" }}>
+            Data quality
+          </Link>
+          <button type="button" onClick={refresh} style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
+            Refresh
+          </button>
+        </div>
       </div>
 
       <section style={{ ...card, marginBottom: "1.5rem" }}>
