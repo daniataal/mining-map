@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/madsan/intelligence/internal/assets"
 	"github.com/madsan/intelligence/internal/deals"
-	"github.com/madsan/intelligence/internal/intelligence"
+	"github.com/madsan/intelligence/internal/search"
 )
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -136,11 +137,12 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	var rawPayload []byte
 	var geomType string
 	var commodities []string
+	var lastVerified *time.Time
 	err = s.pool.QueryRow(r.Context(), `
 		SELECT name, asset_type, COALESCE(country_code,''), latitude, longitude, confidence_score, data_quality_status,
-		       raw_source_payload, COALESCE(ST_GeometryType(geom::geometry), ''), commodities_supported
+		       raw_source_payload, COALESCE(ST_GeometryType(geom::geometry), ''), commodities_supported, last_verified_at
 		FROM assets WHERE id = $1
-	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status, &rawPayload, &geomType, &commodities)
+	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status, &rawPayload, &geomType, &commodities, &lastVerified)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -159,6 +161,7 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	attachAssetSignals(&resp, assetType, commodities)
 	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "asset", uid, 15)
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "asset", uid)
+	s.attachEntityEnvelope(r.Context(), &resp, uid, lastVerified, nil)
 	writeJSON(w, resp)
 }
 
@@ -172,10 +175,11 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	var name, country, status string
 	var commodities []string
 	var conf float64
+	var lastVerified *time.Time
 	err = s.pool.QueryRow(r.Context(), `
-		SELECT name, COALESCE(country_code,''), commodities, confidence_score, data_quality_status
+		SELECT name, COALESCE(country_code,''), commodities, confidence_score, data_quality_status, last_verified_at
 		FROM companies WHERE id = $1
-	`, id).Scan(&name, &country, &commodities, &conf, &status)
+	`, id).Scan(&name, &country, &commodities, &conf, &status, &lastVerified)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -193,42 +197,15 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	attachCompanySignals(&resp, commodities)
 	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "company", uid, 15)
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "company", uid)
+	s.attachEntityEnvelope(r.Context(), &resp, uid, lastVerified, nil)
 	writeJSON(w, resp)
 }
 
 func (s *Server) supplierSearch(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query().Get("q")
-	commodity := r.URL.Query().Get("commodity")
-	country := r.URL.Query().Get("country")
-	rows, err := s.pool.Query(r.Context(), `
-		SELECT id, name, country_code, commodities, confidence_score,
-		       data_quality_status, evidence_count, contact_count
-		FROM supplier_search
-		WHERE ($1 = '' OR name ILIKE '%' || $1 || '%')
-		  AND ($2 = '' OR $2 = ANY(commodities))
-		  AND ($3 = '' OR country_code ILIKE $3)
-		ORDER BY confidence_score DESC NULLS LAST, evidence_count DESC, contact_count DESC, name
-		LIMIT 30
-	`, q, commodity, country)
+	out, err := search.SearchSuppliers(r.Context(), s.pool, search.ParseSupplierSearchParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-	var out []SupplierSearchResult
-	for rows.Next() {
-		var sr SupplierSearchResult
-		var id uuid.UUID
-		var countryCode *string
-		var commodities []string
-		_ = rows.Scan(&id, &sr.Name, &countryCode, &commodities, &sr.ConfidenceScore,
-			&sr.DataQualityStatus, &sr.EvidenceCount, &sr.ContactCount)
-		sr.ID = id.String()
-		sr.CountryCode = deref(countryCode)
-		sr.Commodities = commodities
-		sr.Tier = intelligence.SupplierDiscoveryTier(sr.ConfidenceScore, sr.EvidenceCount)
-		sr.RankScore = sr.ConfidenceScore
-		out = append(out, sr)
 	}
 	writeJSON(w, out)
 }

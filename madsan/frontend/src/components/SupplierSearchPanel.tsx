@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { authFetchOpts } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
 
 type Supplier = {
@@ -10,6 +11,10 @@ type Supplier = {
   commodities?: string[];
   confidence_score?: number;
   rank_score?: number;
+  evidence_count?: number;
+  contact_count?: number;
+  tier?: string;
+  distance_km?: number;
 };
 
 type EvidenceClaim = {
@@ -24,56 +29,140 @@ type CompanyDetail = {
   evidence?: EvidenceClaim[];
 };
 
+type Preset = {
+  label: string;
+  commodity: string;
+  country_code: string;
+  near_lat?: number;
+  near_lon?: number;
+  radius_km?: number;
+};
+
+const PRESETS: Preset[] = [
+  { label: "VLSFO near Singapore", commodity: "vlsfo", country_code: "", near_lat: 1.3521, near_lon: 103.8198, radius_km: 250 },
+  { label: "Gold Ghana", commodity: "gold", country_code: "GH" },
+];
+
 export default function SupplierSearchPanel() {
   const [q, setQ] = useState("");
-  const [commodity, setCommodity] = useState("vlsfo");
+  const [commodity, setCommodity] = useState("");
   const [country, setCountry] = useState("");
+  const [nearLat, setNearLat] = useState<number | "">("");
+  const [nearLon, setNearLon] = useState<number | "">("");
+  const [radiusKm, setRadiusKm] = useState<number | "">("");
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [results, setResults] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
 
-  async function search() {
+  const search = useCallback(async (overrides?: Partial<Preset & { q: string }>) => {
     setLoading(true);
     const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (commodity) params.set("commodity", commodity);
-    if (country) params.set("country", country);
-    const res = await fetch(`${API_BASE}/api/energy/suppliers/search?${params}`);
+    const query = overrides?.q ?? q;
+    const comm = overrides?.commodity ?? commodity;
+    const cc = overrides?.country_code ?? country;
+    const lat = overrides?.near_lat ?? (nearLat === "" ? undefined : nearLat);
+    const lon = overrides?.near_lon ?? (nearLon === "" ? undefined : nearLon);
+    const radius = overrides?.radius_km ?? (radiusKm === "" ? undefined : radiusKm);
+    if (query) params.set("q", query);
+    if (comm) params.set("commodity", comm);
+    if (cc) params.set("country_code", cc);
+    if (lat != null) params.set("near_lat", String(lat));
+    if (lon != null) params.set("near_lon", String(lon));
+    if (radius != null) params.set("radius_km", String(radius));
+    const res = await fetch(`${API_BASE}/api/energy/suppliers/search?${params}`, authFetchOpts);
     setResults(res.ok ? await res.json() : []);
     setSelected(null);
     setLoading(false);
+  }, [q, commodity, country, nearLat, nearLon, radiusKm]);
+
+  function applyPreset(preset: Preset) {
+    setActivePreset(preset.label);
+    setCommodity(preset.commodity);
+    setCountry(preset.country_code);
+    setNearLat(preset.near_lat ?? "");
+    setNearLon(preset.near_lon ?? "");
+    setRadiusKm(preset.radius_km ?? "");
+    void search({
+      commodity: preset.commodity,
+      country_code: preset.country_code,
+      near_lat: preset.near_lat,
+      near_lon: preset.near_lon,
+      radius_km: preset.radius_km,
+    });
   }
 
   async function openSupplier(id: string) {
-    const res = await fetch(`${API_BASE}/api/energy/companies/${id}`);
+    const res = await fetch(`${API_BASE}/api/energy/companies/${id}`, authFetchOpts);
     setSelected(res.ok ? await res.json() : null);
   }
 
   return (
     <div style={{ fontSize: 13 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        {PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => applyPreset(p)}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              background: activePreset === p.label ? "var(--accent)" : "var(--panel)",
+              color: activePreset === p.label ? "#000" : "var(--text)",
+              cursor: "pointer",
+              fontWeight: activePreset === p.label ? 600 : 400,
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
       <input
         placeholder="Search suppliers…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ width: "100%", marginBottom: 6, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
       />
-      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
         <input
           placeholder="Commodity"
           value={commodity}
-          onChange={(e) => setCommodity(e.target.value)}
+          onChange={(e) => { setCommodity(e.target.value); setActivePreset(null); }}
           style={{ flex: 1, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
         />
         <input
           placeholder="Country"
           value={country}
-          onChange={(e) => setCountry(e.target.value)}
+          onChange={(e) => { setCountry(e.target.value); setActivePreset(null); }}
           style={{ width: 56, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, fontSize: 11 }}>
+        <input
+          placeholder="Lat"
+          value={nearLat}
+          onChange={(e) => { setNearLat(e.target.value === "" ? "" : Number(e.target.value)); setActivePreset(null); }}
+          style={{ flex: 1, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
+        />
+        <input
+          placeholder="Lon"
+          value={nearLon}
+          onChange={(e) => { setNearLon(e.target.value === "" ? "" : Number(e.target.value)); setActivePreset(null); }}
+          style={{ flex: 1, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
+        />
+        <input
+          placeholder="km"
+          value={radiusKm}
+          onChange={(e) => { setRadiusKm(e.target.value === "" ? "" : Number(e.target.value)); setActivePreset(null); }}
+          style={{ width: 48, padding: 6, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
         />
       </div>
       <button
         type="button"
-        onClick={search}
+        onClick={() => search()}
         disabled={loading}
         style={{ width: "100%", padding: 8, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600, marginBottom: 10 }}
       >
@@ -89,7 +178,11 @@ export default function SupplierSearchPanel() {
             >
               <strong>{s.name}</strong>
               <div style={{ color: "var(--muted)", fontSize: 11 }}>
-                {s.country_code} · {s.commodities?.join(", ")} · conf {s.confidence_score ?? "—"}
+                {s.country_code || "—"} · {s.commodities?.join(", ") || "—"} · rank {s.rank_score?.toFixed(1) ?? "—"}
+                {s.distance_km != null ? ` · ${s.distance_km.toFixed(0)} km` : ""}
+              </div>
+              <div style={{ color: "var(--muted)", fontSize: 10 }}>
+                conf {s.confidence_score ?? "—"} · ev {s.evidence_count ?? 0} · contacts {s.contact_count ?? 0} · {s.tier ?? "—"}
               </div>
             </button>
           </li>
