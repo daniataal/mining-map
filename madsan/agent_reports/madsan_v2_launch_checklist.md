@@ -107,10 +107,11 @@ Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass 
 ## 6. Legacy parity gate (Python retirement)
 
 - [x] **done** — `cmd/legacy-parity` CLI + admin Runtime health panel (5% threshold, 5m cache)
-- [ ] **blocked** — Last validation **failed** critical tables (`LEGACY_ETL_DEPRECATION.md` 2026-06-09):
-  - `oil_vessels` — pass (0% drift)
-  - `licenses` — **fail** (74.3% under-imported)
-  - `petroleum_osm_features` — **fail** (81.1% under-imported)
+- [x] **done** — `licenses` parity **green** — compare **dedup keys** (legacy importable rows: geolocated, non-empty `company`, key = `normalized_name` + `asset_type` + `country_code`; matches Go upsert). Fix `bcb0f2a` — prior ~74% “under-import” was stale raw-row mismatch, not missing data (~45,506 keys, ~0.01% drift; see `LEGACY_ETL_DEPRECATION.md`).
+- [~] **partial** — Last `legacy-parity` run still **fails gate** until petroleum OSM catches up (`LEGACY_ETL_DEPRECATION.md`, 2026-06-09):
+  - `oil_vessels` — **pass** (0% drift)
+  - `licenses` — **pass** (dedup-key parity; see above)
+  - `petroleum_osm_features` — **fail** (~70–81% under-imported; Go `legacy_import` job in progress)
 - [ ] **blocked** — Full Go **Legacy import (all)** with worker (no `max_rows` cap) not completed on prod-like snapshot
 - [ ] **blocked** — Admin parity panel green for 24h soak (prerequisite for `legacy_import.py` removal)
 

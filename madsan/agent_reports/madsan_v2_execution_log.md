@@ -65,7 +65,7 @@ Parallel agents landed dedup scoring, cross-name discovery, deals RBAC, DR backu
 
 ### Blockers (honest)
 
-- **Parity / legacy import still running** — `legacy-parity` last run **failed** critical tables (`licenses` ~74% under-imported, `petroleum_osm_features` ~81%); full Go **Legacy import (all)** with worker not finished — blocks Python `legacy_import.py` retirement
+- **Parity / legacy import still running** — `licenses` **green** after dedup-key parity fix (`bcb0f2a`; was false ~74% fail on raw rows). `legacy-parity` still **fails** on `petroleum_osm_features` (~70–81% under-imported); full Go **Legacy import (all)** with worker not finished — blocks Python `legacy_import.py` retirement
 - **GitHub PR** — evening ships **not committed** (~21 changed/untracked files on `new-refactor-eng-style`); no reviewable PR to `main`; `gh pr` / CI gate not opened (auth/workflow TBD)
 - **Go-live gaps** — prod volume seed, backup cron, TLS on Caddy, restore drill, k6 through Caddy `:80` — see launch checklist
 
