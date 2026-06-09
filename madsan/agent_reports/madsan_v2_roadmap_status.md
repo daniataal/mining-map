@@ -1,4 +1,4 @@
-# MadSan V2 — Roadmap Status (2026-06-09 evening, parallel UI batch)
+# MadSan V2 — Roadmap Status (2026-06-09 late evening, UI gap closure batch)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
@@ -58,21 +58,34 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 | `62015b65` | Supplier discovery (8) | Ranked supplier queries with geo + commodity filters over `supplier_search` |
 | `71fc3701` | Worker (3) | Targeted matview refresh per job type (not all views every job); **worker restart deferred** to pick up |
 
+### UI gap closure batch (2026-06-09 late evening)
+
+| Commit | Area | Shipped |
+|--------|------|---------|
+| `3c64a846` | Energy UI (7) | Bottom status bar, ticker trend bars, confidence-tier polish |
+| `28b35bda` | Energy UI (7) | TickerTrendBar SVG title fix |
+| `e99d9d62` | Deal monitoring (9b) | Deal watch toggle + changes panel wired to `/api/deals/{id}/watch` |
+| `099e7850` | Admin dedup (10) | Human merge review enqueue workflow from scored pairs |
+| `edcf40c1` | Admin dedup (10) | Admin page syntax restore after dedup merge edits |
+| `d80d3fe3` | Realtime WS (6b) | Client-side vessel dead-reckoning on live WS overlay (60fps interpolation) |
+| `5be9729e` | Metals UI (11) | Phase 11 metals vertical layer registry + UI parity |
+
 **Remaining UI gaps (non-blocker, next batch):**
 
-| Gap | Phase | Notes |
-|-----|-------|-------|
-| Bottom status bar | 7 | ENGINE.online-style timeline/status bar not shipped |
-| Deal monitoring / living packs | 9b | Watch scaffold (`72d2691`) only; no alert engine or map-pinned deal diffs |
-| Dedup merge UI | 10 | Admin pair_score + CSV export ✅; no human merge / review-queue promotion UI |
-| Dead-reckoning + binary WS | 6b | Hub + chevron rotation ✅; no 60fps interpolation or MessagePack frames |
-| Metals vertical polish | 11 | Shell + tile exclusion ✅; smelters/cadastre coverage + deal-pack parity gaps |
+| Gap | Phase | Status | Fix | Notes |
+|-----|-------|--------|-----|-------|
+| Bottom status bar + ticker sparklines | 7 | **FIXED** | `3c64a846`, `28b35bda` | ENGINE.online-style status bar + trend bars shipped |
+| Deal watch / changes panel | 9b | **FIXED** | `e99d9d62` | Watch toggle + changes panel; alert engine + map-pinned living packs still gap |
+| Dedup merge / review enqueue UI | 10 | **FIXED** | `099e7850`, `edcf40c1` | Human merge from scored pairs → `manual_review_queue` |
+| Client dead-reckoning | 6b | **FIXED** | `d80d3fe3` | 60fps interpolation on live overlay |
+| Binary MessagePack WS frames | 6b | **GAP** | — | JSON WS only; conflation/backpressure spec deferred |
+| Metals vertical UI layer registry | 11 | **FIXED** | `5be9729e` | Shell + layers shipped; smelters/cadastre data + deal-pack parity still gap |
 
 ### Partial
 
 | Item | Gap | Next step |
 |------|-----|-----------|
-| 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Human merge queue from scored pairs; Splink batch automation deferred |
+| 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Dedup merge UI shipped (`099e7850`); Splink batch automation deferred |
 | Python ETL | Fallback only | Licenses + vessels green; **petroleum_osm_features import** → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
 | RBAC | Cookie auth MVP | Admin ✅ · Deals ✅ · portal/billing routes next |
@@ -128,7 +141,7 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 1. **4e** — Full Go **Legacy import (all)** for `petroleum_osm_features` (no `max_rows` cap); re-run `legacy-parity` until exit 0 — **blocker for Python retirement**
 2. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
 3. **12d** — RLS role cutover (`madsan_rls` + `SET app.tenant_id`) after map/search tenant audit
-4. **Dedup merge** — Route `high_confidence` pairs into review queue; human merge workflow
+4. **9b alert engine** — Living deal packs pinned on map; diff linked entities (price, vessel, sanctions) → deal card alerts
 
 ## Risks
 
@@ -142,7 +155,7 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 
 ## Known gaps (2026-06-09 audit vs plan)
 
-Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `ingestion_jobs` table, git tip `4f61f66b`.
+Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `ingestion_jobs` table, evening batch doc `c2d6e244`, UI gap fixes `3c64a846`–`5be9729e`.
 
 ### Map UX gaps — audit vs shipped
 
@@ -153,7 +166,7 @@ Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `inges
 | Sparse vessel heading in tiles/WS | **FIXED** | `4f61f66b` | `cmd/backfill-vessel-heading` copies legacy `oil_ais_positions`; MVT exposes course/heading (`d1401a8b`) |
 | Pipeline click dossier thin | **FIXED** | `3610abe` | Asset summary shows geometry type, substance, OSM tags from `raw_payload` |
 
-**Remaining map UX (non-blocker):** bottom status bar (Phase 7); 6b dead-reckoning / binary WS frames; Gulf AIS coverage disclaimer; deal monitoring UI (9b); dedup merge UI (10); metals polish (11).
+**Remaining map UX (non-blocker):** 6b binary MessagePack WS frames; Gulf AIS coverage disclaimer; 9b alert engine + map-pinned living packs; metals cadastre/smelter data coverage (11).
 
 ### Ingestion pipeline — plan vs shipped
 
@@ -198,14 +211,14 @@ flowchart LR
 | 5 Go core + auth | **IN_PROGRESS** | Entity response shape partial; httpOnly cookie MVP |
 | 5b Entitlements | **FIXED** | Scaffold + deals gating shipped |
 | 6 Map + MVT | **FIXED** | Pipeline lines, vessel chevrons, pipeline dossier shipped (`be4a5fba`, `74eeab55`, `3610abe`, `4f61f66b`) |
-| 6b Realtime WS | **IN_PROGRESS** | Hub + chevron rotation ✅; no binary frames / dead-reckoning / 202 job queue |
-| 7 Energy UI | **IN_PROGRESS** | VLSFO/Gold ticker stub shipped (`9473721e`); bottom status bar + sparklines gap |
+| 6b Realtime WS | **IN_PROGRESS** | Dead-reckoning shipped (`d80d3fe3`); binary MessagePack frames + 202 job queue gap |
+| 7 Energy UI | **IN_PROGRESS** | Status bar + ticker trends shipped (`3c64a846`, `28b35bda`); real VLSFO feed + Gulf disclaimer gap |
 | 8 Supplier discovery | **IN_PROGRESS** | Ranked geo+commodity queries shipped (`62015b65`); activity/risk fusion gap |
 | 8b–8f Intelligence | **GAP/PENDING** | MCR v2, pgRouting, Splink runtime not started |
 | 9 Deal verification | **FIXED** | Pack v1.1 + RBAC |
-| 9b Deal monitoring | **IN_PROGRESS** | Watch scaffold (`72d2691`); no alert engine |
-| 10 Portal + admin | **IN_PROGRESS** | Admin ✅; portal scaffold shipped (`03ccc97c`); dedup merge UI + review promotion gap |
-| 11 Metals vertical | **IN_PROGRESS** | Petroleum excluded from metals tiles ✅; cadastre gaps |
+| 9b Deal monitoring | **IN_PROGRESS** | Watch toggle + changes panel shipped (`e99d9d62`); alert engine + map-pinned living packs gap |
+| 10 Portal + admin | **IN_PROGRESS** | Dedup merge UI shipped (`099e7850`, `edcf40c1`); portal review promotion + insights dashboards gap |
+| 11 Metals vertical | **IN_PROGRESS** | Metals UI layer registry shipped (`5be9729e`); smelters/cadastre data + deal-pack parity gap |
 | 12 Data gaps | **IN_PROGRESS** | Bunker prices, Gulf AIS labeling |
 | 12c Legal | **IN_PROGRESS** | Page shipped; external sign-off **BLOCKED** |
 | 12d Security/RLS | **IN_PROGRESS** | `014` scaffold + GUC stub; role cutover **BLOCKED** |
