@@ -8,6 +8,8 @@ export interface CanvasVesselLayerOptions extends L.LayerOptions {
   selectedId: string | null;
   /** When true, rasterize and hit-test only the selected vessel (if any). */
   focusMode?: boolean;
+  /** Let map-level infrastructure handlers receive clicks (maritime preview uses map events). */
+  passThroughClicks?: boolean;
   onVesselClick?: (vessel: MaritimeVessel) => void;
   formatTooltip?: (vessel: MaritimeVessel) => HTMLElement | string;
 }
@@ -76,6 +78,7 @@ export class CanvasVesselLayer extends L.Layer {
   private _mapZoom = 5;
   private _selectedId: string | null = null;
   private _focusMode = false;
+  private _passThroughClicks = false;
   private _selectedIndex = -1;
   private _onVesselClick?: (vessel: MaritimeVessel) => void;
   private _formatTooltip?: (vessel: MaritimeVessel) => HTMLElement | string;
@@ -102,6 +105,7 @@ export class CanvasVesselLayer extends L.Layer {
     this._mapZoom = options.mapZoom;
     this._selectedId = options.selectedId;
     this._focusMode = options.focusMode ?? false;
+    this._passThroughClicks = options.passThroughClicks ?? false;
     this._onVesselClick = options.onVesselClick;
     this._formatTooltip = options.formatTooltip;
   }
@@ -140,6 +144,14 @@ export class CanvasVesselLayer extends L.Layer {
     this._scheduleRedraw();
   }
 
+  setPassThroughClicks(passThrough: boolean): void {
+    if (this._passThroughClicks === passThrough) return;
+    this._passThroughClicks = passThrough;
+    if (this._canvas) {
+      this._canvas.style.pointerEvents = passThrough ? 'none' : 'auto';
+    }
+  }
+
   private _recomputeSelectedIndex(): void {
     const records = this._records;
     let idx = -1;
@@ -167,7 +179,7 @@ export class CanvasVesselLayer extends L.Layer {
     if (pane) pane.appendChild(this._canvas);
     this._ctx = this._canvas.getContext('2d', { alpha: true });
     L.DomUtil.addClass(this._canvas, 'leaflet-zoom-animated');
-    this._canvas.style.pointerEvents = 'auto';
+    this._canvas.style.pointerEvents = this._passThroughClicks ? 'none' : 'auto';
 
     map.on('move', this._scheduleRedraw, this);
     map.on('moveend', this._scheduleRedraw, this);

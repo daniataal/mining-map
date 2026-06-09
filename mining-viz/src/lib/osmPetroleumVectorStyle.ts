@@ -67,7 +67,7 @@ function sourceForLayer(
     type: 'vector' as const,
     tiles: [tileUrlForLayer(layerId, catalogLayer, origin)],
     minzoom: catalogLayer?.min_zoom ?? (layerId === 'pipelines' ? 4 : 0),
-    maxzoom: 14,
+    maxzoom: 18,
   };
 }
 
@@ -161,7 +161,7 @@ export function buildOsmPetroleumVectorStyle(
         paint: {
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 1.25, 7, 1.8, 10, 3.2, 12, 4.5],
           'circle-color': '#22d3ee',
-          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.2, 7, 0.3, 10, 0.48, 12, 0.62],
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.28, 7, 0.38, 10, 0.55, 12, 0.68],
           'circle-stroke-color': '#0e7490',
           'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 9, 0.8, 12, 1],
         },

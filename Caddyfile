@@ -123,6 +123,17 @@
 			}
 		}
 
+		# Bunker/fuel supplier registry read (Go canonical; Python sync remains transitional)
+		handle /api/suppliers/nearby* {
+			uri replace /api/suppliers/nearby /api/oil-live/suppliers/nearby
+			reverse_proxy oil-live-intel:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
 		@backend {
 			path /auth/* /activity/* /files/* /docs /openapi.json /api/*
 		}

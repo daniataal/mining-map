@@ -11,6 +11,7 @@ export type LiveDealFeatureKind =
   | 'tank_farm'
   | 'refinery'
   | 'oil_field'
+  | 'gem_plant'
   | 'infrastructure';
 
 export type LiveDealTier =

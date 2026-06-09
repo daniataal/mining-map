@@ -9,6 +9,7 @@ export type {
 export {
   formatInfrastructureCoverageBanner,
   infrastructureCoverageGapMessage,
+  tankFarmEmptyHintMessage,
 } from './infrastructureCoverageFormat';
 
 import type { InfrastructureCoverageReport } from './infrastructureCoverageFormat';

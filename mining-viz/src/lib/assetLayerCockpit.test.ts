@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ASSET_LAYER_VISIBILITY,
   applyAssetLayerPreset,
+  assetLayerIdsForPreset,
   assetLicenseMarkersEnabled,
   assetsPetroleumLayerPrefsFromVisibility,
   resolveAssetLicenseSector,
@@ -32,12 +33,35 @@ describe('assetLayerCockpit', () => {
 
     expect(oilLogistics.oil_fields).toBe(true);
     expect(oilLogistics.refineries).toBe(true);
+    expect(oilLogistics.plants).toBe(true);
     expect(oilLogistics.tank_farms).toBe(true);
+    expect(oilLogistics.mines).toBe(false);
     expect(oilLogistics.ports).toBe(false);
     expect(oilLogistics.pipelines).toBe(true);
     expect(oilLogistics.lng).toBe(false);
     expect(resolveAssetMapViewKey(oilLogistics)).toBe('oil_and_gas');
     expect(resolveAssetLicenseSector(oilLogistics)).toBe('oil_and_gas');
+  });
+
+  it('scopes layer chrome by preset', () => {
+    expect(assetLayerIdsForPreset('mining')).toEqual(['mines', 'country_borders', 'esg_zones']);
+    expect(assetLayerIdsForPreset('oil_logistics')).toContain('plants');
+    expect(assetLayerIdsForPreset('oil_logistics')).not.toContain('mines');
+  });
+
+  it('drives GEM plants from plants toggle not refineries', () => {
+    const refineriesOnly = {
+      ...applyAssetLayerPreset('oil_logistics'),
+      plants: false,
+      refineries: true,
+    };
+    const plantsOnly = {
+      ...applyAssetLayerPreset('oil_logistics'),
+      plants: true,
+      refineries: false,
+    };
+    expect(assetsPetroleumLayerPrefsFromVisibility(refineriesOnly).showGemPlants).toBe(false);
+    expect(assetsPetroleumLayerPrefsFromVisibility(plantsOnly).showGemPlants).toBe(true);
   });
 
   it('supports clean map without fetching license markers', () => {
@@ -61,5 +85,15 @@ describe('assetLayerCockpit', () => {
     expect(prefs.osmLayerIds).toEqual(['storage_terminals']);
     expect(prefs.showStorageTankFarms).toBe(true);
     expect(prefs.showGemPipelines).toBe(false);
+    expect(prefs.showBunkerSuppliers).toBe(false);
+  });
+
+  it('drives bunker supplier markers from bunker_suppliers toggle', () => {
+    const oilLogistics = applyAssetLayerPreset('oil_logistics');
+    expect(assetsPetroleumLayerPrefsFromVisibility(oilLogistics).showBunkerSuppliers).toBe(true);
+
+    const hidden = toggleAssetLayer(oilLogistics, 'bunker_suppliers');
+    expect(assetsPetroleumLayerPrefsFromVisibility(hidden).showBunkerSuppliers).toBe(false);
+    expect(assetLayerIdsForPreset('oil_logistics')).toContain('bunker_suppliers');
   });
 });

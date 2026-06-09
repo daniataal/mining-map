@@ -31,10 +31,18 @@ export default function GemGoitPipelineMapLayer({
 }: GemGoitPipelineMapLayerProps) {
   const { t } = useI18n();
   const { data } = useGemPipelineGeoJson(bbox, enabled, mapZoom);
-  const geojson = useMemo(
-    () => data ?? { type: 'FeatureCollection' as const, features: [] },
-    [data],
-  );
+  const geojson = useMemo(() => {
+    const features = (data?.features ?? []).filter((feature) => {
+      const props = (feature.properties ?? {}) as Record<string, unknown>;
+      const source = String(props.source || '');
+      const layerId = String(props.layer_id || '');
+      const fuel = String(props.fuel_group || '').toLowerCase();
+      if (layerId === 'gem_gas_pipelines' || source.includes('ggit_gas')) return false;
+      if (fuel === 'gas' && source.includes('ggit')) return false;
+      return true;
+    });
+    return { type: 'FeatureCollection' as const, features };
+  }, [data?.features]);
   const svgRenderer = useMemo(() => pipelineInteractiveRenderer(), []);
 
   if (!enabled) return null;

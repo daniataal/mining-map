@@ -5,10 +5,12 @@ export type AssetLayerId =
   | 'mines'
   | 'oil_fields'
   | 'refineries'
+  | 'plants'
   | 'tank_farms'
   | 'ports'
   | 'pipelines'
   | 'lng'
+  | 'bunker_suppliers'
   | 'ais_vessels'
   | 'country_borders'
   | 'esg_zones';
@@ -21,6 +23,7 @@ export const CORE_ASSET_LAYER_IDS: readonly AssetLayerId[] = [
   'mines',
   'oil_fields',
   'refineries',
+  'plants',
   'tank_farms',
   'ports',
 ] as const;
@@ -28,19 +31,52 @@ export const CORE_ASSET_LAYER_IDS: readonly AssetLayerId[] = [
 export const OPTIONAL_ASSET_LAYER_IDS: readonly AssetLayerId[] = [
   'pipelines',
   'lng',
+  'bunker_suppliers',
   'ais_vessels',
   'country_borders',
   'esg_zones',
 ] as const;
 
+export const ALL_ASSET_LAYER_IDS: readonly AssetLayerId[] = [
+  ...CORE_ASSET_LAYER_IDS,
+  ...OPTIONAL_ASSET_LAYER_IDS,
+];
+
+/** Layer toggle buttons shown per Assets cockpit preset (visibility still driven by ASSET_LAYER_PRESETS). */
+export const ASSET_LAYER_CHROME_BY_PRESET: Record<AssetLayerPresetId, readonly AssetLayerId[]> = {
+  overview: ALL_ASSET_LAYER_IDS,
+  mining: ['mines', 'country_borders', 'esg_zones'],
+  oil_logistics: [
+    'oil_fields',
+    'refineries',
+    'plants',
+    'tank_farms',
+    'pipelines',
+    'bunker_suppliers',
+    'country_borders',
+    'esg_zones',
+  ],
+  port_export: ['ports', 'tank_farms', 'lng', 'bunker_suppliers', 'ais_vessels', 'country_borders', 'esg_zones'],
+  clean: ['country_borders'],
+};
+
+export function assetLayerIdsForPreset(
+  presetId: AssetLayerPresetId | null | undefined,
+): readonly AssetLayerId[] {
+  if (!presetId) return ALL_ASSET_LAYER_IDS;
+  return ASSET_LAYER_CHROME_BY_PRESET[presetId];
+}
+
 export const DEFAULT_ASSET_LAYER_VISIBILITY: AssetLayerVisibility = {
   mines: true,
   oil_fields: true,
   refineries: true,
+  plants: true,
   tank_farms: true,
   ports: true,
   pipelines: true,
   lng: true,
+  bunker_suppliers: true,
   ais_vessels: false,
   country_borders: true,
   esg_zones: true,
@@ -55,10 +91,12 @@ export const ASSET_LAYER_PRESETS: Record<AssetLayerPresetId, AssetLayerVisibilit
     mines: true,
     oil_fields: false,
     refineries: false,
+    plants: false,
     tank_farms: false,
     ports: false,
     pipelines: false,
     lng: false,
+    bunker_suppliers: false,
     ais_vessels: false,
     esg_zones: true,
   },
@@ -67,10 +105,12 @@ export const ASSET_LAYER_PRESETS: Record<AssetLayerPresetId, AssetLayerVisibilit
     mines: false,
     oil_fields: true,
     refineries: true,
+    plants: true,
     tank_farms: true,
     ports: false,
     pipelines: true,
     lng: false,
+    bunker_suppliers: true,
     ais_vessels: false,
     esg_zones: true,
   },
@@ -79,10 +119,12 @@ export const ASSET_LAYER_PRESETS: Record<AssetLayerPresetId, AssetLayerVisibilit
     mines: false,
     oil_fields: false,
     refineries: false,
+    plants: false,
     tank_farms: true,
     ports: true,
     pipelines: false,
     lng: true,
+    bunker_suppliers: true,
     ais_vessels: true,
     esg_zones: true,
   },
@@ -91,10 +133,12 @@ export const ASSET_LAYER_PRESETS: Record<AssetLayerPresetId, AssetLayerVisibilit
     mines: false,
     oil_fields: false,
     refineries: false,
+    plants: false,
     tank_farms: false,
     ports: false,
     pipelines: false,
     lng: false,
+    bunker_suppliers: false,
     ais_vessels: false,
     country_borders: true,
     esg_zones: false,
@@ -111,6 +155,7 @@ export type AssetsPetroleumLayerPrefs = {
   showGemPlants: boolean;
   showGemLng: boolean;
   showStorageTankFarms: boolean;
+  showBunkerSuppliers: boolean;
 };
 
 export function toggleAssetLayer(
@@ -146,6 +191,7 @@ export function resolveAssetMapViewKey(visibility: AssetLayerVisibility): Legacy
   if (
     visibility.oil_fields ||
     visibility.refineries ||
+    visibility.plants ||
     visibility.tank_farms ||
     visibility.pipelines ||
     visibility.lng
@@ -188,8 +234,9 @@ export function assetsPetroleumLayerPrefsFromVisibility(
     osmForcedLayers,
     splitOilGasPipelineLayers: Boolean(v.pipelines),
     showGemPipelines: Boolean(v.pipelines),
-    showGemPlants: Boolean(v.refineries),
+    showGemPlants: Boolean(v.plants),
     showGemLng: Boolean(v.lng),
     showStorageTankFarms: Boolean(v.tank_farms),
+    showBunkerSuppliers: Boolean(v.bunker_suppliers),
   };
 }

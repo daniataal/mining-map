@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  findNearestStorageTerminal,
   formatStorageLocatorContext,
   formatStorageOperatorLabel,
   formatStorageOwnerLabel,
@@ -129,5 +130,21 @@ describe('storage terminal popup helpers', () => {
       }),
     ).toBe('OpenStreetMap via Overpass');
     expect(formatStorageSourceLabel({})).toBe('OpenStreetMap');
+  });
+});
+
+describe('findNearestStorageTerminal', () => {
+  it('returns the closest entity within fusion distance', () => {
+    const entities = [
+      { id: 'a', lat: 25.0, lng: 55.0, company: 'Near' } as const,
+      { id: 'b', lat: 25.5, lng: 55.5, company: 'Far' } as const,
+    ];
+    const nearest = findNearestStorageTerminal(entities as never, 25.01, 55.01, 5000);
+    expect(nearest?.id).toBe('a');
+  });
+
+  it('returns null when nothing is within max distance', () => {
+    const entities = [{ id: 'a', lat: 25.0, lng: 55.0, company: 'Hub' } as const];
+    expect(findNearestStorageTerminal(entities as never, 30, 60, 1000)).toBeNull();
   });
 });

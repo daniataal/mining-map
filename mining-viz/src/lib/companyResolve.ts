@@ -18,6 +18,8 @@ export function companyLeadSourceLabel(source?: string): string {
   switch (source) {
     case 'port_authority_curated':
       return 'Port authority';
+    case 'bunker_fuel_suppliers_curated':
+      return 'Bunker register';
     case 'gem_gogpt_plants_january_2026':
     case 'gem_gogpt':
       return 'GEM GOGPT';

@@ -22,6 +22,8 @@ import {
 import { openPetroleumFeaturePopupOnMap } from './bindPetroleumPopup';
 import { buildPipelineHoverSummary } from '../../lib/petroleumFeatureFields';
 import { escapeHtml } from '../../lib/htmlUtils';
+import type { MiningLicense } from '../../types';
+import { findNearestStorageTerminal } from '../../lib/storageTankFarmsLayer';
 
 export interface InfrastructureMapInteractionProps {
   bbox: PetroleumViewportBounds | null;
@@ -31,7 +33,9 @@ export interface InfrastructureMapInteractionProps {
   loadGemPipelines: boolean;
   loadOsmRefineries: boolean;
   loadOsmStorage: boolean;
+  storageEntities?: MiningLicense[];
   onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
+  onStorageTerminalSelect?: (item: MiningLicense) => void;
   /** Close the infrastructure drawer when opening a point popup. */
   onDismissInfrastructureFeature?: () => void;
 }
@@ -39,6 +43,8 @@ export interface InfrastructureMapInteractionProps {
 function escapeHtmlText(value: string): string {
   return escapeHtml(value);
 }
+
+const HOVER_THROTTLE_MS = 48;
 
 /**
  * Single map-level interaction owner for OSM MVT + GeoJSON + GEM infrastructure.
@@ -52,13 +58,16 @@ export default function InfrastructureMapInteraction({
   loadGemPipelines,
   loadOsmRefineries,
   loadOsmStorage,
+  storageEntities = [],
   onFeatureClick,
+  onStorageTerminalSelect,
   onDismissInfrastructureFeature,
 }: InfrastructureMapInteractionProps) {
   const map = useMap();
   const hoverPopupRef = useRef<L.Popup | null>(null);
   const pendingClickRef = useRef<AbortController | null>(null);
   const pointPopupRef = useRef<ReturnType<typeof openPetroleumFeaturePopupOnMap> | null>(null);
+  const lastHoverAtRef = useRef(0);
 
   const { data: osmCatalog } = useOsmPetroleumCatalog(enabled);
   const mvtMode = osmVectorTilesEnabled(osmCatalog);
@@ -114,6 +123,10 @@ export default function InfrastructureMapInteraction({
         map.getContainer().style.cursor = '';
         return;
       }
+
+      const now = performance.now();
+      if (now - lastHoverAtRef.current < HOVER_THROTTLE_MS) return;
+      lastHoverAtRef.current = now;
 
       const pick = pickInfrastructureAtClick({
         mvtMap: getRegisteredOsmMvtMaplibreMap(),
@@ -202,6 +215,24 @@ export default function InfrastructureMapInteraction({
       pendingClickRef.current = controller;
 
       if (infrastructureSelectionUsesPopup(selection)) {
+        if (
+          selection.popupLayerId === 'storage_terminals' &&
+          storageEntities.length > 0 &&
+          onStorageTerminalSelect
+        ) {
+          const nearest = findNearestStorageTerminal(
+            storageEntities,
+            e.latlng.lat,
+            e.latlng.lng,
+          );
+          if (nearest) {
+            onDismissInfrastructureFeature?.();
+            pointPopupRef.current?.close();
+            onStorageTerminalSelect(nearest);
+            return;
+          }
+        }
+
         onDismissInfrastructureFeature?.();
         pointPopupRef.current?.close();
         const latlng =

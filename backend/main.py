@@ -6499,6 +6499,11 @@ class GemGoitPipelinesIngestRequest(BaseModel):
     routes_dir: Optional[str] = None
 
 
+class GemGgitGasPipelinesIngestRequest(BaseModel):
+    path: Optional[str] = None
+    routes_dir: Optional[str] = None
+
+
 class GemGogptPlantsIngestRequest(BaseModel):
     path: Optional[str] = None
     include_sub_threshold: Optional[bool] = None
@@ -6633,6 +6638,107 @@ def admin_gem_goit_pipelines_ingest(
     except Exception as exc:
         conn.rollback()
         return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-ggit-gas-pipelines/ingest")
+def admin_gem_ggit_gas_pipelines_ingest(
+    request: GemGgitGasPipelinesIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Ingest GEM GGIT gas transmission pipelines (xlsx + gas route GeoJSON) into gem_pipeline_segments."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_ggit_gas_pipelines_import import ingest_gem_ggit_gas_pipelines
+        except ImportError:
+            from services.ingest.gem_ggit_gas_pipelines_import import ingest_gem_ggit_gas_pipelines
+        summary = ingest_gem_ggit_gas_pipelines(
+            conn,
+            workbook_path=request.path,
+            routes_dir=request.routes_dir,
+        )
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/bunker-fuel-suppliers/sync")
+def admin_bunker_fuel_suppliers_sync(x_admin_token: Optional[str] = Header(None)):
+    """Index curated bunker/fuel supplier registers into oil_companies."""
+    forbidden = _check_admin_token(x_admin_token)
+    if forbidden is not None:
+        return forbidden
+    try:
+        from backend.services.oil_live_graph_sync import _graph_sync_go_step_enabled
+    except ImportError:
+        from services.oil_live_graph_sync import _graph_sync_go_step_enabled  # type: ignore
+    if _graph_sync_go_step_enabled("bunker_fuel_suppliers"):
+        try:
+            from backend.services.supplier_enrichment import trigger_go_bunker_fuel_suppliers_sync
+        except ImportError:
+            from services.supplier_enrichment import trigger_go_bunker_fuel_suppliers_sync  # type: ignore
+        summary = trigger_go_bunker_fuel_suppliers_sync()
+        if summary.get("status") == "error":
+            return summary
+        return {"status": "success", **summary}
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies
+        except ImportError:
+            from services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies
+        with conn.cursor() as cur:
+            summary = sync_bunker_fuel_suppliers_to_companies(cur)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/suppliers/nearby")
+def get_nearby_suppliers(
+    locode: Optional[str] = None,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    limit: int = 40,
+):
+    """Licensed bunker/fuel suppliers indexed near a port LOCODE or map bbox."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.supplier_enrichment import query_nearby_suppliers
+        except ImportError:
+            from services.supplier_enrichment import query_nearby_suppliers
+        return {
+            "suppliers": query_nearby_suppliers(
+                conn,
+                locode=locode,
+                south=south,
+                west=west,
+                north=north,
+                east=east,
+                limit=limit,
+            ),
+            "limitations": [
+                "Curated regulator/port registers only — not a global ZoomInfo replacement.",
+                "Phones/emails only when published on official registers; no fabricated contacts.",
+            ],
+        }
     finally:
         conn.close()
 
