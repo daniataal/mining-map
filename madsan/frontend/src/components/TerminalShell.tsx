@@ -92,8 +92,8 @@ export default function TerminalShell() {
                 ? `${q.currency ?? "USD"} ${q.price.toLocaleString(undefined, { maximumFractionDigits: 1 })}${q.unit ?? ""}${q.change_pct != null ? ` (${q.change_pct > 0 ? "+" : ""}${q.change_pct}%)` : ""}`
                 : "—"}
             </strong>
-            {q.tier === "reference_stub" ? (
-              <span className="badge partial" style={{ marginLeft: 4, fontSize: 9, padding: "1px 4px" }}>STUB</span>
+            {q.tier === "reference_stub" && q.label.toLowerCase().includes("vlsfo") ? (
+              <span className="badge partial" style={{ marginLeft: 4, fontSize: 9, padding: "1px 4px" }} title="Bunker register — no price feed">STUB</span>
             ) : null}
           </span>
         ))}

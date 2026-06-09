@@ -114,12 +114,8 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 		}
 	}
 
+	quotes = append(quotes, bunkerVLSFOQuote(now))
 	quotes = append(quotes,
-		Quote{
-			Symbol: "VLSFO_SG", Label: "VLSFO SG", Price: 612.0, Currency: "USD", Unit: "/MT",
-			ChangePct: up(-0.2), Tier: tierReferenceStub,
-			Disclaimer: "Dev reference — bunker benchmark placeholder", ObservedAt: now,
-		},
 		Quote{
 			Symbol: "GOLD", Label: "Gold spot", Price: 2348.5, Currency: "USD", Unit: "/oz",
 			ChangePct: up(0.1), Tier: tierReferenceStub,
@@ -128,10 +124,10 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 	)
 
 	topTier := tierReferenceStub
-	disclaimer := "Reference placeholders — set EIA_API_KEY for EIA daily crude spot (WTI/Brent)"
+	disclaimer := "Reference placeholders — set EIA_API_KEY for EIA daily crude spot (WTI/Brent); VLSFO from bunker supplier register context (no price feed)"
 	if eiaUsed {
 		topTier = tierEIAOpenData
-		disclaimer = "Crude from EIA open data (daily spot, not exchange tick); VLSFO/Gold remain reference stubs"
+		disclaimer = "Crude from EIA open data (daily spot, not exchange tick); VLSFO/Gold remain reference stubs (bunker register has no prices)"
 	} else if h.eiaKey != "" {
 		disclaimer = "EIA fetch unavailable — showing reference placeholders; not live exchange prices"
 	}
