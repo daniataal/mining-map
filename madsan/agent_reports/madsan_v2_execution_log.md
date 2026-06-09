@@ -34,8 +34,20 @@
 | 10e EIA open-data ticker | done | EIA v2 WTI/Brent daily spot; 20m cache; tier badge in terminal |
 | 10f Deploy env + OpenSanctions | done | `start_api.sh` sources `deploy/.env`; `OPENSANCTIONS_API_KEY` wired in config/compose/sync |
 | 4d Splink prep export | done | pairwise CSV from SQL duplicate clusters; admin + CLI |
+| 4e Legacy parity CLI | done | `cmd/legacy-parity`; JSON report; exit 1 on critical drift |
+| 4f Petroleum type backfill cmd | done | `cmd/backfill-petroleum-types` with `--dry-run` / `--limit` |
+| 10g Admin auth middleware | done | `requireAuth` on all `/api/admin/*` routes |
+| 11a Admin runtime health | done | AIS sync stats + cached legacy parity on `/api/admin/health/runtime` + `/admin` UI |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+
+## 2026-06-09 Phase 11a — admin runtime health panel
+
+- `GET /api/admin/health/runtime` (auth): AIS sync enabled/interval, last batch, vessel freshness (24h/72h), coverage note
+- Legacy parity drift summary via `ingestion.RunLegacyParity` with 5-minute in-memory cache
+- `maritime.SyncStats` tracks per-batch success/error; wired into AIS syncer
+- Admin `/admin`: **Runtime health** section with parity table and drift badges
+- README: API highlight for health endpoint
 
 ## 2026-06-09 Phase 10f — deploy env loading + OpenSanctions key
 

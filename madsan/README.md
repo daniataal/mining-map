@@ -124,6 +124,7 @@ Refreshes `map_energy_assets` and `map_metals_assets` after a non–dry-run run.
 - `GET /api/admin/dedup/companies` — duplicate company clusters
 - `POST /api/admin/dedup/companies/scan` — enqueue duplicate clusters for review
 - `POST /api/admin/review-queue/{id}/resolve` — merge (`canonical_company_id`) or dismiss duplicate review items
+- `GET /api/admin/health/runtime` — AIS sync stats + cached legacy parity drift (auth required; also on `/admin` UI)
 
 ## Docs
 

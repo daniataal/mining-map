@@ -43,7 +43,8 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 | 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Splink dedup queue or keep SQL DISTINCT for MVP |
 | Python ETL | Fallback only | Parity test → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
-| RBAC | Cookie auth MVP | Middleware on admin/deals routes |
+| RBAC | Cookie auth MVP | Admin routes require auth ✅; deals routes next |
+| Runtime health | AIS + parity visibility | Admin `/admin` health panel + `/api/admin/health/runtime` ✅ |
 | Price ticker | EIA crude when keyed | VLSFO/Gold stub; ICE/exchange feed deferred |
 | `madsan/` in git | Untracked | User-approved initial commit |
 | Compose cutover | **Done (dev)** | `compose_up.sh` — db+api+worker+scheduler+frontend; optional Caddy `:9080` |
@@ -70,8 +71,9 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 
 1. **4d** — Splink batch dedup (**prep done**: SQL clusters → pairwise CSV export; Splink scoring next)
 2. **10d** — Git initial commit of `madsan/` (user approval)
-3. **4e** — Retire Python `legacy_import.py` after parity tests
-4. **10f** — Production compose tuning (resource limits, secrets, observability)
+3. **4e** — Retire Python `legacy_import.py` after parity tests (use admin parity panel + `legacy-parity` CLI)
+4. **10g** — Production compose tuning (`docker-compose.prod.yml` skeleton: memory limits, restart policies)
+5. **4f** — Petroleum asset type backfill against live DB (`backfill-petroleum-types` dry-run → apply)
 
 ## Risks
 

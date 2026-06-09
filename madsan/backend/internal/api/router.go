@@ -26,16 +26,18 @@ import (
 )
 
 type Server struct {
-	pool    *pgxpool.Pool
-	log     zerolog.Logger
-	cfg     config.Config
-	auth    *auth.Service
-	ent     *entitlements.Resolver
-	hub     *realtime.Hub
-	deals   *deals.Service
-	search  *search.Service
-	tiles   *tiles.Service
-	ingest  *ingestion.Service
+	pool     *pgxpool.Pool
+	log      zerolog.Logger
+	cfg      config.Config
+	auth     *auth.Service
+	ent      *entitlements.Resolver
+	hub      *realtime.Hub
+	deals    *deals.Service
+	search   *search.Service
+	tiles    *tiles.Service
+	ingest   *ingestion.Service
+	aisStats *maritime.SyncStats
+	parity   parityCache
 }
 
 func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Server {
@@ -59,16 +61,20 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 }
 
 func (s *Server) startAISSync() {
-	if !s.cfg.EnableAISSync || s.cfg.LegacyDBURL == "" {
+	legacyConfigured := s.cfg.LegacyDBURL != ""
+	s.aisStats = maritime.NewSyncStats(s.cfg.EnableAISSync, s.cfg.AISSyncInterval, legacyConfigured)
+	if !s.cfg.EnableAISSync || !legacyConfigured {
 		return
 	}
 	ctx := context.Background()
 	legacy, err := database.ConnectURL(ctx, s.cfg.LegacyDBURL)
 	if err != nil {
 		s.log.Warn().Err(err).Msg("ais sync: legacy db unavailable")
+		s.aisStats.RecordError(err)
 		return
 	}
 	syncer := maritime.NewSyncer(s.pool, legacy, s.log)
+	syncer.SetStats(s.aisStats)
 	syncer.OnDelta(func(d maritime.VesselDelta) {
 		s.hub.PublishVesselDelta(d)
 	})
@@ -133,6 +139,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/review-queue", s.listReviewQueue)
 		api.Post("/review-queue/{id}/resolve", s.resolveReviewQueueItem)
 		api.Get("/insights/summary", s.adminInsightsV2)
+		api.Get("/health/runtime", s.adminHealthRuntime)
 		api.Get("/dedup/companies", s.listCompanyDuplicates)
 		api.Get("/dedup/companies/pairs.csv", s.exportCompanyPairsCSV)
 		api.Post("/dedup/companies/scan", s.scanCompanyDuplicates)

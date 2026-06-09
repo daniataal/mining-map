@@ -12,6 +12,44 @@ type Insights = {
   config?: { legacy_python_enabled?: boolean };
 };
 
+type ParityTable = {
+  legacy_table: string;
+  madsan_target: string;
+  legacy_count: number;
+  madsan_count: number;
+  drift: number;
+  drift_pct: number;
+  critical: boolean;
+  ok: boolean;
+  note?: string;
+};
+
+type RuntimeHealth = {
+  ais_sync?: {
+    enabled?: boolean;
+    legacy_configured?: boolean;
+    interval_sec?: number;
+    last_sync_at?: string;
+    last_batch_updated?: number;
+    last_error?: string | null;
+    vessels_total?: number;
+    vessels_fresh_24h?: number;
+    vessels_fresh_72h?: number;
+    coverage_note?: string;
+  };
+  legacy_parity?: {
+    available?: boolean;
+    passed?: boolean;
+    checked_at?: string;
+    threshold_pct?: number;
+    cache_ttl_sec?: number;
+    failed_critical?: string[];
+    tables?: ParityTable[];
+    error?: string;
+  };
+  legacy_python?: boolean;
+};
+
 type DupCluster = {
   normalized_name: string;
   count: number;
@@ -83,6 +121,7 @@ export default function AdminPage() {
   const [msg, setMsg] = useState("");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
+  const [runtime, setRuntime] = useState<RuntimeHealth | null>(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
@@ -117,6 +156,10 @@ export default function AdminPage() {
     fetch(`${API_BASE}/api/admin/dedup/companies?limit=15`, fetchOpts)
       .then((r) => (r.ok ? r.json() : { clusters: [] }))
       .then((d) => setDupClusters(d.clusters ?? []))
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/health/runtime`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setRuntime(d))
       .catch(() => {});
   }, [authed]);
 
@@ -259,6 +302,78 @@ export default function AdminPage() {
             <div style={{ fontSize: 22, fontWeight: 600, color: "var(--accent)" }}>{val ?? "—"}</div>
           </div>
         ))}
+      </section>
+
+      <section style={{ ...card, marginBottom: "1.5rem" }}>
+        <h2 style={{ marginTop: 0, fontSize: 15 }}>Runtime health</h2>
+        <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
+          Live AIS sync status and legacy ETL parity drift (5m cache). Use before retiring Python legacy import.
+        </p>
+        {runtime ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
+              {[
+                ["AIS sync", runtime.ais_sync?.enabled ? "on" : "off"],
+                ["Legacy DB", runtime.ais_sync?.legacy_configured ? "connected" : "missing"],
+                ["Last batch", runtime.ais_sync?.last_batch_updated ?? "—"],
+                ["Vessels 24h", runtime.ais_sync?.vessels_fresh_24h ?? "—"],
+                ["Parity", runtime.legacy_parity?.passed === false ? "DRIFT" : runtime.legacy_parity?.passed ? "ok" : "—"],
+              ].map(([label, val]) => (
+                <div key={String(label)} style={{ padding: 8, border: "1px solid var(--border)", borderRadius: 4 }}>
+                  <div style={{ color: "var(--muted)", fontSize: 11 }}>{label}</div>
+                  <div style={{ fontWeight: 600, color: val === "DRIFT" ? "#f87171" : "var(--accent)" }}>{val}</div>
+                </div>
+              ))}
+            </div>
+            {runtime.ais_sync?.last_error && (
+              <p style={{ color: "#f87171", margin: "0 0 8px" }}>AIS sync error: {runtime.ais_sync.last_error}</p>
+            )}
+            {runtime.ais_sync?.coverage_note && (
+              <p style={{ color: "var(--muted)", fontSize: 11, margin: "0 0 12px" }}>{runtime.ais_sync.coverage_note}</p>
+            )}
+            {runtime.legacy_parity?.error ? (
+              <p style={{ color: "#f87171" }}>Parity check: {runtime.legacy_parity.error}</p>
+            ) : runtime.legacy_parity?.tables?.length ? (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "var(--muted)" }}>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Legacy table</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Madsan target</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Legacy</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Madsan</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Drift %</th>
+                    <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runtime.legacy_parity.tables.map((row) => (
+                    <tr key={row.legacy_table}>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.legacy_table}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{row.madsan_target}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.legacy_count}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.madsan_count}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.drift_pct}%</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+                        <span className={`badge ${row.ok ? "verified" : "warn"}`}>{row.ok ? "ok" : "drift"}</span>
+                        {row.note && <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 10 }}>{row.note}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ color: "var(--muted)" }}>Parity data unavailable.</p>
+            )}
+            {runtime.legacy_parity?.checked_at && (
+              <p style={{ color: "var(--muted)", fontSize: 11, marginTop: 8 }}>
+                Parity checked {new Date(runtime.legacy_parity.checked_at).toLocaleString()} · threshold {runtime.legacy_parity.threshold_pct}%
+                {runtime.legacy_parity.failed_critical?.length ? ` · failed: ${runtime.legacy_parity.failed_critical.join(", ")}` : ""}
+              </p>
+            )}
+          </>
+        ) : (
+          <p style={{ color: "var(--muted)" }}>Loading runtime health…</p>
+        )}
       </section>
 
       <section style={{ ...card, marginBottom: "1.5rem" }}>

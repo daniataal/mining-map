@@ -31,6 +31,7 @@ type Syncer struct {
 	legacy *pgxpool.Pool
 	log    zerolog.Logger
 	since  time.Time
+	stats  *SyncStats
 	onDelta func(VesselDelta)
 }
 
@@ -41,6 +42,10 @@ func NewSyncer(madsan, legacy *pgxpool.Pool, log zerolog.Logger) *Syncer {
 		log:    log,
 		since:  time.Now().Add(-2 * time.Hour),
 	}
+}
+
+func (s *Syncer) SetStats(stats *SyncStats) {
+	s.stats = stats
 }
 
 func (s *Syncer) OnDelta(fn func(VesselDelta)) {
@@ -58,6 +63,9 @@ func (s *Syncer) Run(ctx context.Context, interval time.Duration) {
 	for {
 		if err := s.SyncOnce(ctx); err != nil {
 			s.log.Warn().Err(err).Msg("ais sync batch failed")
+			if s.stats != nil {
+				s.stats.RecordError(err)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -127,6 +135,9 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	}
 	if !maxTS.IsZero() {
 		s.since = maxTS
+	}
+	if s.stats != nil {
+		s.stats.RecordSuccess(updated)
 	}
 	if updated > 0 {
 		s.log.Info().Int("updated", updated).Time("since", s.since).Msg("ais sync batch")
