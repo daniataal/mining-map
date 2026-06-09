@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -137,12 +136,11 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	var rawPayload []byte
 	var geomType string
 	var commodities []string
-	var lastVerified *time.Time
 	err = s.pool.QueryRow(r.Context(), `
 		SELECT name, asset_type, COALESCE(country_code,''), latitude, longitude, confidence_score, data_quality_status,
-		       raw_source_payload, COALESCE(ST_GeometryType(geom::geometry), ''), commodities_supported, last_verified_at
+		       raw_source_payload, COALESCE(ST_GeometryType(geom::geometry), ''), commodities_supported
 		FROM assets WHERE id = $1
-	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status, &rawPayload, &geomType, &commodities, &lastVerified)
+	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status, &rawPayload, &geomType, &commodities)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -161,7 +159,6 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	attachAssetSignals(&resp, assetType, commodities)
 	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "asset", uid, 15)
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "asset", uid)
-	s.attachEntityEnvelope(r.Context(), &resp, uid, lastVerified, nil)
 	writeJSON(w, resp)
 }
 
@@ -175,11 +172,10 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	var name, country, status string
 	var commodities []string
 	var conf float64
-	var lastVerified *time.Time
 	err = s.pool.QueryRow(r.Context(), `
-		SELECT name, COALESCE(country_code,''), commodities, confidence_score, data_quality_status, last_verified_at
+		SELECT name, COALESCE(country_code,''), commodities, confidence_score, data_quality_status
 		FROM companies WHERE id = $1
-	`, id).Scan(&name, &country, &commodities, &conf, &status, &lastVerified)
+	`, id).Scan(&name, &country, &commodities, &conf, &status)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -197,7 +193,6 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	attachCompanySignals(&resp, commodities)
 	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "company", uid, 15)
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "company", uid)
-	s.attachEntityEnvelope(r.Context(), &resp, uid, lastVerified, nil)
 	writeJSON(w, resp)
 }
 
