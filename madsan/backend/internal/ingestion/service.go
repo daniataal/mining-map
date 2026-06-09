@@ -120,7 +120,7 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if imported == 0 && lastErr != nil {
 		_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET error_message=$2 WHERE id=$1`, jobID, lastErr.Error())
 	}
-	_ = s.refreshServing(ctx)
+	_ = s.refreshServingMatviews(ctx, servingMatviewsForJob(jobType, records))
 	report, _ := json.Marshal(map[string]any{"imported": imported, "total": len(records), "evidence_claims": evidenceRows})
 	_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='completed', result_report=$2, finished_at=now() WHERE id=$1`, jobID, report)
 	return nil
@@ -394,16 +394,6 @@ func (s *Service) upsertMaster(ctx context.Context, rec NormalizedRecord) (uuid.
 		`, rec.Name, strings.ToLower(rec.Name), assetType, rec.Latitude, rec.Longitude, rec.CountryCode, rec.Commodities, score, status, rec.RawPayload, rec.SourceSlug, rec.ExternalID).Scan(&assetID)
 		return assetID, err
 	}
-}
-
-func (s *Service) refreshServing(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY map_energy_assets`)
-	if err != nil {
-		_, err = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW map_energy_assets`)
-	}
-	_, _ = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW map_metals_assets`)
-	_, _ = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW map_vessels`)
-	return err
 }
 
 func (s *Service) ScanRawDir(ctx context.Context) error {

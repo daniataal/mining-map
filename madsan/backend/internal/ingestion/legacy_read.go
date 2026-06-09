@@ -95,7 +95,7 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 		}
 	}
 
-	_ = s.refreshServing(ctx)
+	_ = s.refreshServingMatviews(ctx, matviewsForLegacyTableNames(tableNames(tables)))
 	report, _ := json.Marshal(map[string]any{
 		"engine":          "go",
 		"imported":        imported,
