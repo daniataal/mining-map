@@ -35,8 +35,8 @@ type Service struct {
 	screener  *compliance.Screener
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, screener: compliance.NewScreener()}
+func New(pool *pgxpool.Pool, openSanctionsAPIKey string) *Service {
+	return &Service{pool: pool, screener: compliance.NewScreener(openSanctionsAPIKey)}
 }
 
 func (s *Service) Verify(ctx context.Context, tenantID *uuid.UUID, in VerifyInput) (map[string]any, error) {

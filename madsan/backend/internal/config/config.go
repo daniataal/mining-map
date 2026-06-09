@@ -31,7 +31,8 @@ type Config struct {
 	LegacyImportPython bool
 	EnableAISSync      bool
 	AISSyncInterval    time.Duration
-	EIAAPIKey          string
+	EIAAPIKey            string
+	OpenSanctionsAPIKey  string
 }
 
 func defaultETLDir() string {
@@ -60,7 +61,8 @@ func Load() Config {
 		LegacyImportPython: envBool("MADSAN_LEGACY_PYTHON", false),
 		EnableAISSync:      envBool("MADSAN_AIS_SYNC", true),
 		AISSyncInterval:    time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
-		EIAAPIKey:          env("EIA_API_KEY", ""),
+		EIAAPIKey:           env("EIA_API_KEY", ""),
+		OpenSanctionsAPIKey: env("OPENSANCTIONS_API_KEY", ""),
 	}
 }
 

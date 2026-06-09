@@ -3,6 +3,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable}"
 
+DEPLOY_ENV="$ROOT/deploy/.env"
+if [[ -f "$DEPLOY_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEPLOY_ENV"
+  set +a
+fi
+
 echo "==> madsan-db"
 docker compose -f "$ROOT/deploy/docker-compose.yml" up -d madsan-db
 

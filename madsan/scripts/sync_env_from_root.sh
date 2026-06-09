@@ -90,6 +90,10 @@ if v := root.get("EIA_API_KEY"):
     deploy_updates["EIA_API_KEY"] = v
     set_if("EIA_API_KEY", v)
 
+if v := root.get("OPENSANCTIONS_API_KEY"):
+    deploy_updates["OPENSANCTIONS_API_KEY"] = v
+    set_if("OPENSANCTIONS_API_KEY", v)
+
 jwt = root.get("MADSAN_JWT_SECRET") or root.get("SECRET_KEY")
 if jwt:
     deploy_updates["MADSAN_JWT_SECRET"] = jwt
@@ -137,6 +141,7 @@ if frontend_updates:
 # Keys in root with no MadSan deploy mapping (informational)
 mapped_sources = {
     "EIA_API_KEY",
+    "OPENSANCTIONS_API_KEY",
     "MADSAN_JWT_SECRET",
     "SECRET_KEY",
     "MADSAN_DB_PASSWORD",

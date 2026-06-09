@@ -26,10 +26,14 @@ type Screener struct {
 	apiKey string
 }
 
-func NewScreener() *Screener {
+func NewScreener(apiKey string) *Screener {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("OPENSANCTIONS_API_KEY"))
+	}
 	return &Screener{
 		client: &http.Client{Timeout: 10 * time.Second},
-		apiKey: strings.TrimSpace(os.Getenv("OPENSANCTIONS_API_KEY")),
+		apiKey: apiKey,
 	}
 }
 

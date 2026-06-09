@@ -49,7 +49,7 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		auth:   auth.New(pool, cfg),
 		ent:    entitlements.New(pool),
 		hub:    hub,
-		deals:  deals.New(pool),
+		deals:  deals.New(pool, cfg.OpenSanctionsAPIKey),
 		search: search.New(pool),
 		tiles:  tiles.New(pool),
 		ingest: ingestion.New(pool, cfg),

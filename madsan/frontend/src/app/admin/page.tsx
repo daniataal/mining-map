@@ -169,7 +169,10 @@ export default function AdminPage() {
 
       <section style={{ ...card, marginBottom: "1.5rem" }}>
         <h2 style={{ marginTop: 0, fontSize: 15 }}>Enqueue ingestion</h2>
-        <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>Requires worker running: <code>go run ./cmd/worker</code></p>
+        <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
+          Requires worker running: <code>go run ./cmd/worker</code>. Legacy import uses Go by default; Python fallback is opt-in only via{" "}
+          <code>MADSAN_LEGACY_PYTHON=true</code> in deploy env.
+        </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={() => enqueue("bunker_seed", "bunker_fuel_suppliers")} style={{ padding: 8, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>
             Bunker seed

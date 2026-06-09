@@ -13,6 +13,7 @@ x-backend-env: &backend-env
   MADSAN_LEGACY_PYTHON: ${MADSAN_LEGACY_PYTHON:-false}
   MADSAN_RAW_DIR: /raw
   EIA_API_KEY: ${EIA_API_KEY:-}
+  OPENSANCTIONS_API_KEY: ${OPENSANCTIONS_API_KEY:-}
 
 x-host-gateway: &host-gateway
   extra_hosts:

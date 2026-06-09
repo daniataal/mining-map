@@ -32,9 +32,17 @@
 | 10b Compose cutover (dev) | done | `compose_up.sh`; legacy AIS via host.docker.internal; Caddy profile |
 | 10c Review queue merge resolve | done | `POST /api/admin/review-queue/{id}/resolve`; admin merge/dismiss UI |
 | 10e EIA open-data ticker | done | EIA v2 WTI/Brent daily spot; 20m cache; tier badge in terminal |
+| 10f Deploy env + OpenSanctions | done | `start_api.sh` sources `deploy/.env`; `OPENSANCTIONS_API_KEY` wired in config/compose/sync |
 | 4d Splink prep export | done | pairwise CSV from SQL duplicate clusters; admin + CLI |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+
+## 2026-06-09 Phase 10f — deploy env loading + OpenSanctions key
+
+- `scripts/start_api.sh` / `start_all.sh`: source `madsan/deploy/.env` when present (hybrid dev keys without manual export)
+- `OPENSANCTIONS_API_KEY` in `internal/config`, `deploy/.env.example`, `sync_env_from_root.sh`, `docker-compose.yml`
+- `compliance.NewScreener(apiKey)` + deals service wired from config; `Authorization: ApiKey` when set
+- Admin enqueue note: legacy Python import is opt-in only (`MADSAN_LEGACY_PYTHON=true`); Go import is default
 
 ## 2026-06-09 Phase 4d — Splink prep company pair export
 
