@@ -100,5 +100,6 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	}
 	resp.SignalHistory = history
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "vessel", uid)
+	s.attachEntityEnvelope(r.Context(), &resp, uid, nil, lastSeen)
 	writeJSON(w, resp)
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { authFetchOpts } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
 import type { MapSelection } from "./EntityDossierPanel";
 
@@ -45,7 +46,7 @@ export default function SearchPalette({ open, vertical, onClose, onSelect }: Pro
     }
     setLoading(true);
     const params = new URLSearchParams({ q: term, vertical });
-    const res = await fetch(`${API_BASE}/api/core/search?${params}`);
+    const res = await fetch(`${API_BASE}/api/core/search?${params}`, authFetchOpts);
     setResults(res.ok ? await res.json() : []);
     setLoading(false);
   }, [vertical]);
