@@ -61,6 +61,20 @@ func TestGraphSyncGoPetroleumOsmStorageEnabled(t *testing.T) {
 	}
 }
 
+func TestGraphSyncGoBunkerFuelSuppliersEnabled(t *testing.T) {
+	t.Setenv("OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS", "true")
+	if !graphSyncGoBunkerFuelSuppliersEnabled() {
+		t.Fatal("expected bunker_fuel_suppliers enabled for true")
+	}
+}
+
+func TestGraphSyncGoEurostatTradeEnabled(t *testing.T) {
+	t.Setenv("OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE", "true")
+	if !graphSyncGoEurostatTradeEnabled() {
+		t.Fatal("expected eurostat_trade enabled for true")
+	}
+}
+
 func TestAnyGraphSyncGoStepEnabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_LICENSES", "false")
@@ -68,7 +82,9 @@ func TestAnyGraphSyncGoStepEnabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_PORT_CALLS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_TED", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_GOV_AWARDS", "false")
+	t.Setenv("OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE", "false")
+	t.Setenv("OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS", "false")
 	if anyGraphSyncGoStepEnabled() {
 		t.Fatal("expected all disabled")
 	}
@@ -85,6 +101,7 @@ func TestGraphSyncGoStepsRunOnceDisabled(t *testing.T) {
 	t.Setenv("OIL_GRAPH_SYNC_GO_PORT_CALLS", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_TED", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_GOV_AWARDS", "false")
+	t.Setenv("OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE", "false")
 	t.Setenv("OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE", "false")
 	worker := &GraphSyncGoSteps{}
 	if err := worker.RunOnce(context.Background()); err != nil {

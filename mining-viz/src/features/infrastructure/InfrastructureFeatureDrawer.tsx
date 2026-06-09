@@ -1,10 +1,14 @@
 import { ExternalLink, MapPin, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
+import CompanyLeadButton from '../../components/popup/CompanyLeadButton';
 import {
   buildPetroleumFeatureViewModel,
+  collectGemCommercialDetails,
   formatCoordinates,
+  isGemPipelineFeature,
   petroleumLayerTypeLabel,
 } from '../../lib/petroleumFeatureFields';
+import type { MiningLicense } from '../../types';
 import {
   INFRASTRUCTURE_BOL_TIER,
   INFRASTRUCTURE_DISCLAIMER_EN,
@@ -25,6 +29,7 @@ export type InfrastructureFeatureSelection = {
 type Props = {
   selection: InfrastructureFeatureSelection;
   onClose: () => void;
+  onOpenDossier?: (item: MiningLicense) => void;
 };
 
 function DetailRow({ label, value }: { label: string; value: string }) {
@@ -38,32 +43,60 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function InfrastructureFeatureDrawer({ selection, onClose }: Props) {
+export default function InfrastructureFeatureDrawer({ selection, onClose, onOpenDossier }: Props) {
   const { t } = useI18n();
   const model = buildPetroleumFeatureViewModel(selection.properties, selection.popupLayerId);
+  const isGem = isGemPipelineFeature(selection.properties);
   const layerLabel = model.pipelineBadgeLabel ?? petroleumLayerTypeLabel(selection.popupLayerId);
-  const osmType =
-    selection.properties.man_made != null
+  const infrastructureType = isGem
+    ? model.sector
+      ? `${model.sector} pipeline`
+      : 'Oil/NGL pipeline (GEM GOIT)'
+    : selection.properties.man_made != null
       ? String(selection.properties.man_made).replace(/_/g, ' ')
       : selection.layerId.replace(/_/g, ' ');
 
   const tagRows: { label: string; value: string }[] = [];
+  const gemCommercial = collectGemCommercialDetails(selection.properties);
+  const operatorRow = gemCommercial.find((r) => r.label.toLowerCase() === 'operator') ?? (
+    model.operator ? { label: t('מפעיל', 'Operator'), value: model.operator } : null
+  );
+  const ownerRow = gemCommercial.find((r) => r.label.toLowerCase() === 'owner') ?? (
+    model.owner && model.owner !== model.operator
+      ? { label: t('בעלים', 'Owner'), value: model.owner }
+      : null
+  );
+
+  if (model.capacity) {
+    tagRows.push({ label: t('קיבולת', 'Capacity'), value: model.capacity });
+  }
+  for (const row of gemCommercial) {
+    if (onOpenDossier && (row.label.toLowerCase() === 'operator' || row.label.toLowerCase() === 'owner')) {
+      continue;
+    }
+    tagRows.push(row);
+  }
   if (model.facilityType && model.facilityType !== layerLabel) {
     tagRows.push({ label: t('סוג', 'Type'), value: model.facilityType });
   }
-  for (const row of model.pipelineDetails) tagRows.push(row);
-  if (model.operator) tagRows.push({ label: t('מפעיל', 'Operator'), value: model.operator });
-  if (model.owner && model.owner !== model.operator) {
-    tagRows.push({ label: t('בעלים', 'Owner'), value: model.owner });
+  for (const row of model.pipelineDetails) {
+    if (row.label.toLowerCase() === 'capacity' && model.capacity) continue;
+    if (row.label.toLowerCase() === 'operator' && operatorRow) continue;
+    if (row.label.toLowerCase() === 'owner' && ownerRow) continue;
+    tagRows.push(row);
   }
   if (model.country) tagRows.push({ label: t('מדינה', 'Country'), value: model.country });
-  if (model.capacity) tagRows.push({ label: t('קיבולת', 'Capacity'), value: model.capacity });
   for (const row of model.extraRows) tagRows.push(row);
+
+  const leadCountry = model.country || String(selection.properties.country || '');
+  const gemSource = isGem ? String(selection.properties.source || 'gem_goit') : undefined;
 
   const sourceLinkLabel =
     model.sourceLabel && model.sourceUrl && model.sourceLabel !== model.sourceUrl
       ? model.sourceLabel
-      : t('מקור OSM', 'View on OpenStreetMap');
+      : isGem
+        ? t('GEM wiki', 'GEM wiki')
+        : t('מקור OSM', 'View on OpenStreetMap');
 
   return (
     <div className="flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/95 sm:w-[min(400px,calc(100vw-2rem))]">
@@ -90,10 +123,13 @@ export default function InfrastructureFeatureDrawer({ selection, onClose }: Prop
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        <DetailRow label={t('סוג תשתית', 'Infrastructure type')} value={osmType} />
+        <DetailRow label={t('סוג תשתית', 'Infrastructure type')} value={infrastructureType} />
         <DetailRow
           label={t('מקור', 'Source')}
-          value={model.source ?? 'OpenStreetMap (community)'}
+          value={
+            model.source ??
+            (isGem ? 'Global Energy Monitor (CC BY 4.0)' : 'OpenStreetMap (community)')
+          }
         />
 
         {tagRows.length > 0 && (
@@ -101,6 +137,36 @@ export default function InfrastructureFeatureDrawer({ selection, onClose }: Prop
             {tagRows.map((row) => (
               <DetailRow key={`${row.label}-${row.value}`} label={row.label} value={row.value} />
             ))}
+          </div>
+        )}
+
+        {(operatorRow || ownerRow) && onOpenDossier && (
+          <div className="space-y-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-700 dark:text-cyan-300">
+              {t('זיהוי מפעיל', 'Operator identity')}
+            </p>
+            {operatorRow && (
+              <p className="text-[12px]">
+                <span className="text-slate-500">{operatorRow.label}: </span>
+                <CompanyLeadButton
+                  name={operatorRow.value}
+                  country={leadCountry}
+                  source={gemSource}
+                  onOpenDossier={onOpenDossier}
+                />
+              </p>
+            )}
+            {ownerRow && ownerRow.value !== operatorRow?.value && (
+              <p className="text-[12px]">
+                <span className="text-slate-500">{ownerRow.label}: </span>
+                <CompanyLeadButton
+                  name={ownerRow.value}
+                  country={leadCountry}
+                  source={gemSource}
+                  onOpenDossier={onOpenDossier}
+                />
+              </p>
+            )}
           </div>
         )}
 

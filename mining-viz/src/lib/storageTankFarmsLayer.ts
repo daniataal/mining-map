@@ -3,10 +3,62 @@ import { isUnknownLicenseName } from './licenseVisibility';
 import {
   formatStoragePopupTitle,
 } from './storageTerminalPopup';
+import type { LiveDealClientClusterData } from './liveDealMap/liveDealMapLod';
+
+import { haversineMeters } from './pipelineMapPick';
+
+/** Canvas cluster parse stops expanding individual tanks above this zoom. */
+export const STORAGE_CANVAS_CLUSTER_MAX_ZOOM = 14;
+
+export function storageClusterBoundsFromData(data: LiveDealClientClusterData): {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+} {
+  return { ...data.bounds };
+}
+
+export function storageClusterParseMaxZoom(): number {
+  return STORAGE_CANVAS_CLUSTER_MAX_ZOOM + 1;
+}
+
+/** Max distance to fuse an OSM storage click with a curated DB storage terminal. */
+export const STORAGE_TERMINAL_FUSION_MAX_M = 2500;
+
+export function findNearestStorageTerminal(
+  entities: MiningLicense[],
+  lat: number,
+  lng: number,
+  maxDistanceM = STORAGE_TERMINAL_FUSION_MAX_M,
+): MiningLicense | null {
+  let best: MiningLicense | null = null;
+  let bestDistance = maxDistanceM + 1;
+  for (const item of entities) {
+    const itemLat = item.lat;
+    const itemLng = item.lng;
+    if (!Number.isFinite(itemLat) || !Number.isFinite(itemLng)) continue;
+    const distance = haversineMeters(lat, lng, itemLat, itemLng);
+    if (distance <= maxDistanceM && distance < bestDistance) {
+      best = item;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
 
 /** Leaflet LayersControl only registers overlays present on first mount — never gate on entity count. */
 export function storageTankFarmsLayerShouldMount(enabled: boolean, _mapZoom?: number): boolean {
   return enabled;
+}
+
+/** Tank farms are extremely dense globally; keep low zoom as coarse hub aggregates. */
+export function storageTankFarmClusterGridMultiplier(mapZoom: number | undefined): number {
+  const z = mapZoom ?? 5;
+  if (z < 5) return 7;
+  if (z < 7) return 4.5;
+  if (z < 9) return 2.5;
+  return 1;
 }
 
 export const STORAGE_OPERATOR_UNTAGGED = 'Operator not tagged';

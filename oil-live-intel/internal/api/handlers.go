@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/mining-map/oil-live-intel/internal/config"
+	"github.com/mining-map/oil-live-intel/internal/services/sanctions"
 	"github.com/mining-map/oil-live-intel/internal/services/search"
 	"github.com/mining-map/oil-live-intel/internal/services/shipvault"
 	"github.com/mining-map/oil-live-intel/internal/services/supplier"
@@ -26,6 +27,8 @@ type Server struct {
 	Log    zerolog.Logger
 	Config config.Config
 	Hub    *Hub
+	// sanctionsCache lazily aggregates OpenSanctions screening rows from oil_companies.
+	sanctionsCache *sanctions.Store
 	// SearchClient is optional — when nil, /api/oil-live/search returns
 	// {"error":"search_unavailable"} so the UI degrades gracefully.
 	SearchClient search.Client
@@ -75,7 +78,7 @@ func (s *Server) Map(w http.ResponseWriter, r *http.Request) {
 	vesselResult, _ := s.listLiveVesselsWithMeta(r, bbox, bboxOK, limit)
 	events, _ := s.listRecentPortCalls(r, limit/2)
 	cards, _ := s.listIntelligence(r, limit/2)
-	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4, 0)
+	companies, _ := s.listCompanies(r, companyFilters{MinConfidence: 0.5}, limit/4, 0, companyListOpts{IncludeMap: true})
 	writeJSONCached(w, http.StatusOK, map[string]any{
 		"terminals": terminals,
 		"vessels":   vesselResult.Vessels,
@@ -259,12 +262,13 @@ func (s *Server) ListCompanies(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := queryInt(r, "limit", 100)
 	offset := queryOffset(r, "offset")
-	total, err := s.countCompanies(r, f)
+	listOpts := companyListOpts{IncludeMap: r.URL.Query().Get("include_map") != "false"}
+	total, err := s.countCompanies(r, f, companyListOpts{})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	items, err := s.listCompanies(r, f, limit, offset)
+	items, err := s.listCompanies(r, f, limit, offset, listOpts)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -370,7 +374,7 @@ func (s *Server) GetCompanyShipments(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) SupplierCandidates(w http.ResponseWriter, r *http.Request) {
 	f := companyFilters{SupplierStatus: "candidate", MinConfidence: 0.55}
-	items, err := s.listCompanies(r, f, 100, 0)
+	items, err := s.listCompanies(r, f, 100, 0, companyListOpts{IncludeMap: false})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

@@ -7,6 +7,7 @@ services:
       context: ./backend
     container_name: mining-backend
     restart: always
+    command: ["python", "main.py"]
     # Secrets: prefer backend.env (production) or repo-root .env (local). Do not pass empty
     # AISSTREAM_API_KEY=${AISSTREAM_API_KEY} here — that overrides env_file with a blank value.
     env_file:
@@ -233,7 +234,16 @@ services:
       - OIL_INTEL_API_URL=${OIL_INTEL_API_URL:-http://oil-live-intel:8095}
       - OIL_INTEL_INTERNAL_KEY=${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}
       - OIL_LIVE_DISABLE_DEMO_SEED=${OIL_LIVE_DISABLE_DEMO_SEED:-1}
+      # Python skips these steps when Go worker owns them (must match oil-live-intel-worker):
+      - OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS=${OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS:-true}
+      - OIL_GRAPH_SYNC_GO_LICENSES=${OIL_GRAPH_SYNC_GO_LICENSES:-true}
+      - OIL_GRAPH_SYNC_GO_TRADE_FLOWS=${OIL_GRAPH_SYNC_GO_TRADE_FLOWS:-true}
+      - OIL_GRAPH_SYNC_GO_PORT_CALLS=${OIL_GRAPH_SYNC_GO_PORT_CALLS:-true}
+      - OIL_GRAPH_SYNC_GO_TED=${OIL_GRAPH_SYNC_GO_TED:-true}
+      - OIL_GRAPH_SYNC_GO_GOV_AWARDS=${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-true}
+      - OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE=${OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE:-false}
       - OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE=${OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE:-true}
+      - OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS=${OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS:-true}
       - EIA_DOWNLOADS_DIR=/data/eia_downloads
       - EIA_HISTORIC_AUTO_INGEST=${EIA_HISTORIC_AUTO_INGEST:-true}
       - UK_MANIFEST_CSV_DIR=/data/uk_trade_manifests
@@ -371,6 +381,10 @@ services:
       # ShipVault registry enrichment — secrets (EMAIL/PASSWORD/FIREBASE_API_KEY/BEARER_TOKEN) via env_file only.
       SHIPVAULT_BASE_URL: ${SHIPVAULT_BASE_URL:-https://shipvaultapi-gjb8c.ondigitalocean.app}
       SHIPVAULT_CACHE_TTL_DAYS: ${SHIPVAULT_CACHE_TTL_DAYS:-7}
+      MERIDIAN_DATA_DIR: /data/meridian
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-meridian-bunker-geocode/1.0 (contact admin)}
+    volumes:
+      - ./data:/data/meridian:ro
     healthcheck:
       test:
         [
@@ -382,7 +396,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 45s
+      start_period: 120s
     depends_on:
       db:
         condition: service_healthy
@@ -409,17 +423,23 @@ services:
       OIL_INTEL_SEED_ON_STARTUP: "false"
       OIL_LIVE_DISABLE_DEMO_SEED: ${OIL_LIVE_DISABLE_DEMO_SEED:-1}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
-      # Go graph-sync cold steps (Python oil-live-graph-sync-worker remains orchestrator):
-      OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS: ${OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS:-false}
-      OIL_GRAPH_SYNC_GO_LICENSES: ${OIL_GRAPH_SYNC_GO_LICENSES:-false}
-      OIL_GRAPH_SYNC_GO_TRADE_FLOWS: ${OIL_GRAPH_SYNC_GO_TRADE_FLOWS:-false}
-      OIL_GRAPH_SYNC_GO_PORT_CALLS: ${OIL_GRAPH_SYNC_GO_PORT_CALLS:-false}
-      OIL_GRAPH_SYNC_GO_TED: ${OIL_GRAPH_SYNC_GO_TED:-false}
-      OIL_GRAPH_SYNC_GO_GOV_AWARDS: ${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-false}
+      # Go graph-sync cold steps (Python oil-live-graph-sync-worker skips when same flags true):
+      OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS: ${OIL_GRAPH_SYNC_GO_TERMINAL_OPERATORS:-true}
+      OIL_GRAPH_SYNC_GO_LICENSES: ${OIL_GRAPH_SYNC_GO_LICENSES:-true}
+      OIL_GRAPH_SYNC_GO_TRADE_FLOWS: ${OIL_GRAPH_SYNC_GO_TRADE_FLOWS:-true}
+      OIL_GRAPH_SYNC_GO_PORT_CALLS: ${OIL_GRAPH_SYNC_GO_PORT_CALLS:-true}
+      OIL_GRAPH_SYNC_GO_TED: ${OIL_GRAPH_SYNC_GO_TED:-true}
+      OIL_GRAPH_SYNC_GO_GOV_AWARDS: ${OIL_GRAPH_SYNC_GO_GOV_AWARDS:-true}
+      OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE: ${OIL_GRAPH_SYNC_GO_EUROSTAT_TRADE:-false}
       OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE: ${OIL_GRAPH_SYNC_GO_PETROLEUM_OSM_STORAGE:-false}
       OIL_GRAPH_SYNC_GO_PORT_CALL_MCR: ${OIL_GRAPH_SYNC_GO_PORT_CALL_MCR:-true}
+      OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS: ${OIL_GRAPH_SYNC_GO_BUNKER_FUEL_SUPPLIERS:-true}
+      MERIDIAN_DATA_DIR: /data/meridian
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-meridian-bunker-geocode/1.0 (contact admin)}
       OIL_GRAPH_SYNC_INTERVAL_SECONDS: ${OIL_GRAPH_SYNC_INTERVAL_SECONDS:-86400}
       OIL_GRAPH_SYNC_BACKOFF_SECONDS: ${OIL_GRAPH_SYNC_BACKOFF_SECONDS:-3600}
+    volumes:
+      - ./data:/data/meridian:ro
     depends_on:
       db:
         condition: service_healthy

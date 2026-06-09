@@ -43,6 +43,7 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     opportunities: true,
     tradeFlows: true,
     coverage: false,
+    stsEvents: false,
   },
   infrastructure: {
     terminals: true,
@@ -51,6 +52,7 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     opportunities: true,
     tradeFlows: false,
     coverage: false,
+    stsEvents: true,
   },
   raw: {
     terminals: true,
@@ -59,6 +61,7 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     opportunities: true,
     tradeFlows: true,
     coverage: true,
+    stsEvents: true,
   },
   crisis: {
     terminals: true,
@@ -67,6 +70,7 @@ export const LIVE_DATA_LENS_LAYERS: Record<LiveDataLensMode, OilLiveLayerVisibil
     opportunities: true,
     tradeFlows: true,
     coverage: true,
+    stsEvents: true,
   },
 };
 
@@ -137,6 +141,7 @@ export const LIVE_DATA_RAW_LAYERS: OilLiveLayerVisibility = {
   opportunities: true,
   tradeFlows: true,
   coverage: true,
+  stsEvents: true,
 };
 
 /** MAD-95: EIA historic arcs on Live Data map — off until user toggles Historic group. */

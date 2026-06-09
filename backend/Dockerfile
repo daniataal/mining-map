@@ -21,9 +21,11 @@ COPY tests/ ./tests/
 COPY *.py ./
 COPY route_service/ ./route_service/
 COPY licenses.json ./
+COPY start_prod.sh ./
+RUN chmod +x start_prod.sh
 
 # Expose backend port
 EXPOSE 8000
 
-# Start backend
-CMD ["python", "main.py"]
+# Production: multi-worker ASGI (override with `python main.py` for single-process dev).
+CMD ["./start_prod.sh"]

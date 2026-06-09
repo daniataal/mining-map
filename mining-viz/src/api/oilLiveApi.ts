@@ -377,6 +377,11 @@ export type OilCompany = {
   /** Wikidata QID + facts (optional — populated by Worker C). */
   wikidata_qid?: string | null;
   wikidata_facts?: Record<string, unknown> | null;
+  /** Resolved map point — terminal operator match or latest MCR corridor load. */
+  map_lat?: number;
+  map_lng?: number;
+  map_terminal_id?: string;
+  map_location_source?: 'terminal' | 'corridor' | string;
 };
 
 export type OilCompanyFilters = {
@@ -677,6 +682,24 @@ export async function getOilLiveCoverage(options: {
   if (options.sources?.length) params.set('sources', options.sources.join(','));
   const res = await fetch(oilUrl(`/api/oil-live/coverage?${params.toString()}`));
   if (!res.ok) throw new Error(`oil-live coverage ${res.status}`);
+  return res.json();
+}
+
+export type {
+  SanctionsCountrySummaryResponse,
+  SanctionsCountryRow,
+  SanctionsEntityHit,
+  SanctionsFlagLevel,
+} from '../lib/sanctionsCountryLayer';
+
+export async function getSanctionsCountrySummary(
+  country?: string,
+): Promise<import('../lib/sanctionsCountryLayer').SanctionsCountrySummaryResponse> {
+  const params = new URLSearchParams();
+  if (country?.trim()) params.set('country', country.trim());
+  const qs = params.toString();
+  const res = await fetch(oilUrl(`/api/oil-live/sanctions/country-summary${qs ? `?${qs}` : ''}`));
+  if (!res.ok) throw new Error(`oil-live sanctions country-summary ${res.status}`);
   return res.json();
 }
 
@@ -1214,7 +1237,11 @@ export async function getVesselDossier(
   );
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error((data as { error?: string }).error || `oil-live vessel dossier ${res.status}`);
+    const errMsg = (data as { error?: string }).error || `oil-live vessel dossier ${res.status}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7847/ingest/4a545e2b-07f1-4d20-ade6-14997117a3cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bea506'},body:JSON.stringify({sessionId:'bea506',location:'oilLiveApi.ts:getVesselDossier',message:'vessel_dossier_error',data:{mmsi:String(mmsi),status:res.status,error:errMsg},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    throw new Error(errMsg);
   }
   return res.json();
 }

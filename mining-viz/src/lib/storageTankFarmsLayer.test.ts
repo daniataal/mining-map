@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  findNearestStorageTerminal,
   formatStorageLocatorContext,
   formatStorageOperatorLabel,
   formatStorageOwnerLabel,
@@ -8,7 +9,11 @@ import {
   formatStorageSubstanceLabel,
   isGenericStorageTerminalTitle,
   shouldShowStorageSiteContextNear,
+  storageClusterBoundsFromData,
+  storageClusterParseMaxZoom,
+  storageTankFarmClusterGridMultiplier,
   storageTankFarmsLayerShouldMount,
+  STORAGE_CANVAS_CLUSTER_MAX_ZOOM,
   storageTerminalOsmTagSummary,
   STORAGE_OPERATOR_UNTAGGED,
 } from './storageTankFarmsLayer';
@@ -18,6 +23,33 @@ describe('storageTankFarmsLayerShouldMount', () => {
     expect(storageTankFarmsLayerShouldMount(true)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(true, 5)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(false)).toBe(false);
+  });
+});
+
+describe('storage cluster parse contract', () => {
+  it('flies into cluster bounds at detail zoom without list popup', () => {
+    expect(storageClusterParseMaxZoom()).toBe(STORAGE_CANVAS_CLUSTER_MAX_ZOOM + 1);
+    const bounds = storageClusterBoundsFromData({
+      clientCluster: true,
+      count: 231,
+      bounds: { south: 25.1, west: 56.2, north: 25.3, east: 56.5 },
+      sourceIds: ['a', 'b'],
+      sourceUids: ['storage:a', 'storage:b'],
+    });
+    expect(bounds.south).toBe(25.1);
+    expect(bounds.north).toBe(25.3);
+  });
+});
+
+describe('storageTankFarmClusterGridMultiplier', () => {
+  it('coarsens tank-farm clusters at world zoom and relaxes at detail zoom', () => {
+    expect(storageTankFarmClusterGridMultiplier(4)).toBeGreaterThan(
+      storageTankFarmClusterGridMultiplier(6),
+    );
+    expect(storageTankFarmClusterGridMultiplier(6)).toBeGreaterThan(
+      storageTankFarmClusterGridMultiplier(8),
+    );
+    expect(storageTankFarmClusterGridMultiplier(10)).toBe(1);
   });
 });
 
@@ -116,5 +148,21 @@ describe('storage terminal popup helpers', () => {
       }),
     ).toBe('OpenStreetMap via Overpass');
     expect(formatStorageSourceLabel({})).toBe('OpenStreetMap');
+  });
+});
+
+describe('findNearestStorageTerminal', () => {
+  it('returns the closest entity within fusion distance', () => {
+    const entities = [
+      { id: 'a', lat: 25.0, lng: 55.0, company: 'Near' } as const,
+      { id: 'b', lat: 25.5, lng: 55.5, company: 'Far' } as const,
+    ];
+    const nearest = findNearestStorageTerminal(entities as never, 25.01, 55.01, 5000);
+    expect(nearest?.id).toBe('a');
+  });
+
+  it('returns null when nothing is within max distance', () => {
+    const entities = [{ id: 'a', lat: 25.0, lng: 55.0, company: 'Hub' } as const];
+    expect(findNearestStorageTerminal(entities as never, 30, 60, 1000)).toBeNull();
   });
 });

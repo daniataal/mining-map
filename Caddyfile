@@ -62,12 +62,13 @@
 			}
 		}
 
-		# OSM petroleum GeoJSON catalog + layers (Postgres snapshot; Python until Go parity is default)
+		# OSM petroleum GeoJSON catalog + layers (Go parity; Python fallback on :8000 direct)
 		@petroleum_osm_layers {
 			path /api/petroleum/osm-layers /api/petroleum/osm-layers/*
 		}
 		handle @petroleum_osm_layers {
-			reverse_proxy backend:8000 {
+			uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+			reverse_proxy oil-live-intel:8095 {
 				transport http {
 					read_timeout 0
 					write_timeout 0
@@ -77,6 +78,16 @@
 
 		handle /api/petroleum/osm-tiles* {
 			uri replace /api/petroleum/osm-tiles /api/oil-live/map/petroleum-osm/tiles
+			reverse_proxy oil-live-intel:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		handle /api/petroleum/osm-features* {
+			uri replace /api/petroleum/osm-features /api/oil-live/map/petroleum-osm/features
 			reverse_proxy oil-live-intel:8095 {
 				transport http {
 					read_timeout 0
@@ -112,11 +123,40 @@
 			}
 		}
 
+		# Bunker/fuel supplier registry read (Go canonical; Python sync remains transitional)
+		handle /api/suppliers/nearby* {
+			uri replace /api/suppliers/nearby /api/oil-live/suppliers/nearby
+			reverse_proxy oil-live-intel:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
 		@backend {
 			path /auth/* /activity/* /files/* /docs /openapi.json /api/*
 		}
 		handle @backend {
 			reverse_proxy backend:8000
+		}
+
+		# CDN-origin cache headers for Vite static assets (see Caddyfile.edge)
+		@static_assets {
+			path /assets/*
+			path *.js *.css *.woff *.woff2 *.png *.jpg *.jpeg *.gif *.ico *.svg *.webp
+		}
+		handle @static_assets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			reverse_proxy frontend:5173
+		}
+
+		@spa_shell {
+			path / /index.html
+		}
+		handle @spa_shell {
+			header Cache-Control "no-cache, must-revalidate"
+			reverse_proxy frontend:5173
 		}
 
 		handle {

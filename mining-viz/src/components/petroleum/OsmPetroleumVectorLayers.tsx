@@ -3,113 +3,78 @@ import type { Layer } from 'leaflet';
 import L from 'leaflet';
 import '@maplibre/maplibre-gl-leaflet';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Map as MaplibreMap, MapLayerMouseEvent } from 'maplibre-gl';
-import type { OsmPetroleumLayerId } from '../../lib/osmPetroleumLayers';
+import type { Map as MaplibreMap } from 'maplibre-gl';
 import {
   applyOsmVectorVisibility,
   buildOsmPetroleumVectorStyle,
-  OSM_VECTOR_CLICK_LAYERS,
+  OSM_PETROLEUM_VECTOR_PANE,
   type OsmVectorVisibility,
 } from '../../lib/osmPetroleumVectorStyle';
 import type { OsmPetroleumCatalogLayer } from '../../lib/osmPetroleumLayers';
 import {
-  classifyPipelineSubstance,
-  pipelineSubstancePopupLayerId,
-} from '../../lib/pipelineSubstance';
-import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
-import type { PetroleumLayerId } from '../../lib/petroleumLayers';
+  registerOsmMvtMaplibreMap,
+  unregisterOsmMvtMaplibreMap,
+} from '../../lib/infrastructureMapInteraction';
 
 type MaplibreGLLayer = L.MaplibreGL & {
   options: L.LeafletMaplibreGLOptions & { interactive?: boolean };
 };
 
-function osmLayerFromProperties(props: Record<string, unknown>): OsmPetroleumLayerId {
-  const layerId = String(props.layer_id ?? '');
-  if (layerId === 'refineries' || layerId === 'storage_terminals' || layerId === 'pipelines') {
-    return layerId;
-  }
-  return 'pipelines';
-}
-
-function osmLayerToPopupLayerId(
-  layerId: OsmPetroleumLayerId,
-  props: Record<string, unknown>,
-): PetroleumLayerId {
-  if (layerId === 'pipelines') {
-    return pipelineSubstancePopupLayerId(classifyPipelineSubstance(props));
-  }
-  return 'refineries';
-}
-
-function featureSelectionFromMvt(
-  props: Record<string, unknown>,
-  lngLat: { lng: number; lat: number } | null,
-): InfrastructureFeatureSelection {
-  const layerId = osmLayerFromProperties(props);
-  return {
-    layerId,
-    popupLayerId: osmLayerToPopupLayerId(layerId, props),
-    properties: props,
-    geometry: lngLat
-      ? { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] }
-      : null,
-    coordinates: lngLat ? { lat: lngLat.lat, lng: lngLat.lng } : null,
-  };
-}
-
 export interface OsmPetroleumVectorMapProps {
   enabled: boolean;
   visibility: OsmVectorVisibility;
   catalogLayers?: OsmPetroleumCatalogLayer[];
-  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
+  isDark?: boolean;
+  splitOilGasPipelineLayers?: boolean;
 }
 
-function attachClickHandler(
-  map: MaplibreMap,
-  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void,
-) {
-  if (!onFeatureClick) return () => {};
-  const handler = (event: MapLayerMouseEvent) => {
-    const features = map.queryRenderedFeatures(event.point, {
-      layers: OSM_VECTOR_CLICK_LAYERS.filter((id) => map.getLayer(id)),
-    });
-    if (!features.length) return;
-    const top = features[0];
-    const props = (top.properties ?? {}) as Record<string, unknown>;
-    onFeatureClick(
-      featureSelectionFromMvt(props, event.lngLat ? { lng: event.lngLat.lng, lat: event.lngLat.lat } : null),
-    );
-  };
-  map.on('click', handler);
-  return () => {
-    map.off('click', handler);
-  };
+function ensurePetroleumVectorPane(map: L.Map): void {
+  if (!map.getPane(OSM_PETROLEUM_VECTOR_PANE)) {
+    map.createPane(OSM_PETROLEUM_VECTOR_PANE);
+  }
+  const pane = map.getPane(OSM_PETROLEUM_VECTOR_PANE);
+  if (pane) {
+    pane.style.zIndex = '380';
+    pane.style.pointerEvents = 'none';
+  }
+}
+
+function disableMaplibrePointerEvents(map: MaplibreMap): void {
+  map.getCanvas().style.pointerEvents = 'none';
 }
 
 function createOsmVectorLayer(
   props: OsmPetroleumVectorMapProps,
   context: Parameters<typeof createElementObject>[1],
 ) {
+  ensurePetroleumVectorPane(context.map);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const style = buildOsmPetroleumVectorStyle(props.visibility, props.catalogLayers, origin);
+  const style = buildOsmPetroleumVectorStyle(props.visibility, props.catalogLayers, origin, {
+    isDark: props.isDark,
+    splitOilGasPipelineLayers: props.splitOilGasPipelineLayers,
+  });
   const glLayer = L.maplibreGL({
     style,
     interactive: true,
     padding: 0,
+    pane: OSM_PETROLEUM_VECTOR_PANE,
   } as L.LeafletMaplibreGLOptions & { interactive?: boolean }) as MaplibreGLLayer;
 
   glLayer.on('add', () => {
     const map = glLayer.getMaplibreMap();
     const onLoad = () => {
+      disableMaplibrePointerEvents(map);
       applyOsmVectorVisibility(map, props.visibility);
-      const cleanupClick = attachClickHandler(map, props.onFeatureClick);
-      map.once('remove', cleanupClick);
+      registerOsmMvtMaplibreMap(map);
     };
     if (map.loaded()) {
       onLoad();
     } else {
       map.once('load', onLoad);
     }
+    glLayer.on('remove', () => {
+      unregisterOsmMvtMaplibreMap(map);
+    });
   });
 
   return createElementObject(glLayer, context);
@@ -125,7 +90,9 @@ function updateOsmVectorLayer(
 
   if (
     props.visibility !== prevProps.visibility ||
-    props.catalogLayers !== prevProps.catalogLayers
+    props.catalogLayers !== prevProps.catalogLayers ||
+    props.isDark !== prevProps.isDark ||
+    props.splitOilGasPipelineLayers !== prevProps.splitOilGasPipelineLayers
   ) {
     if (map.loaded()) {
       applyOsmVectorVisibility(map, props.visibility);

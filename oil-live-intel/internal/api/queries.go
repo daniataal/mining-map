@@ -21,6 +21,11 @@ type companyFilters struct {
 	MinEvents                              int
 }
 
+type companyListOpts struct {
+	CompanyID  *uuid.UUID
+	IncludeMap bool
+}
+
 func (s *Server) listTerminals(r *http.Request, bbox [4]float64, bboxOK bool, limit int) ([]map[string]any, error) {
 	q := `
 		SELECT id, name, terminal_type, operator_name, owner_name, country, port, city,
@@ -323,10 +328,15 @@ func (s *Server) getIntelligence(r *http.Request, id string) (map[string]any, er
 	return nil, fmt.Errorf("not found")
 }
 
-func (s *Server) companyListWhere(f companyFilters) (where string, args []any) {
+func (s *Server) companyListWhere(f companyFilters, opts companyListOpts) (where string, args []any) {
 	where = ` WHERE c.confidence >= $1`
 	args = []any{f.MinConfidence}
 	n := 2
+	if opts.CompanyID != nil {
+		where += fmt.Sprintf(` AND c.id = $%d`, n)
+		args = append(args, *opts.CompanyID)
+		n++
+	}
 	if f.Q != "" {
 		where += fmt.Sprintf(` AND (c.name ILIKE $%d OR c.normalized_name ILIKE $%d)`, n, n)
 		args = append(args, "%"+f.Q+"%")
@@ -396,15 +406,15 @@ func companySourcesFromMeta(sourceCol string, metaMap map[string]any) []string {
 	return out
 }
 
-func (s *Server) countCompanies(r *http.Request, f companyFilters) (int, error) {
-	where, args := s.companyListWhere(f)
+func (s *Server) countCompanies(r *http.Request, f companyFilters, opts companyListOpts) (int, error) {
+	where, args := s.companyListWhere(f, opts)
 	var total int
 	err := s.Pool.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM oil_companies c`+where, args...).Scan(&total)
 	return total, err
 }
 
-func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset int) ([]map[string]any, error) {
-	where, args := s.companyListWhere(f)
+func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset int, opts companyListOpts) ([]map[string]any, error) {
+	where, args := s.companyListWhere(f, opts)
 	q := `SELECT c.id, c.name, c.company_type, c.country, c.website, c.confidence, c.supplier_status, c.supplier_id, c.source, c.metadata,
 			COALESCE((SELECT COUNT(*)::int FROM meridian_cargo_records m WHERE m.shipper_company_id = c.id OR m.consignee_company_id = c.id), 0) AS mcr_count,
 			COALESCE((SELECT COUNT(*)::int FROM oil_commercial_events e WHERE e.company_id = c.id), 0) AS event_count,
@@ -439,28 +449,28 @@ func (s *Server) listCompanies(r *http.Request, f companyFilters, limit, offset 
 		if rolesList == nil {
 			rolesList = []any{ctype}
 		}
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id": id.String(), "name": name, "company_type": ctype, "country": country,
 			"website": website, "confidence": conf, "supplier_status": status,
 			"supplier_id": supplierID, "metadata": metaMap, "source": sourceCol,
 			"mcr_count": mcrCount, "event_count": eventCount, "contact_count": contactCount,
 			"roles": rolesList, "sources": companySourcesFromMeta(sourceCol, metaMap),
-		})
+		}
+		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if opts.IncludeMap {
+		if err := enrichCompanyMapLocations(r.Context(), s.Pool, out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) getCompany(r *http.Request, id string) (map[string]any, error) {
-	items, err := s.listCompanies(r, companyFilters{}, 1000, 0)
-	if err != nil {
-		return nil, err
-	}
-	for _, it := range items {
-		if it["id"] == id {
-			return it, nil
-		}
-	}
-	return nil, fmt.Errorf("not found")
+	return s.getCompanyByID(r, id)
 }
 
 func (s *Server) getCompanyRow(r *http.Request, id uuid.UUID) (supplier.Company, error) {

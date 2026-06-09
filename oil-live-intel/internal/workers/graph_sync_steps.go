@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mining-map/oil-live-intel/internal/services/graphsync"
+	"github.com/mining-map/oil-live-intel/internal/services/mapserving"
 	"github.com/mining-map/oil-live-intel/internal/services/syntheticbol"
 	"github.com/mining-map/oil-live-intel/internal/utils"
 	"github.com/rs/zerolog/log"
@@ -52,8 +53,16 @@ func graphSyncGoPetroleumOsmStorageEnabled() bool {
 	return graphSyncGoFlagEnabled("PETROLEUM_OSM_STORAGE")
 }
 
+func graphSyncGoEurostatTradeEnabled() bool {
+	return graphSyncGoFlagEnabled("EUROSTAT_TRADE")
+}
+
 func graphSyncGoPortCallMCREnabled() bool {
 	return graphSyncGoFlagEnabled("PORT_CALL_MCR")
+}
+
+func graphSyncGoBunkerFuelSuppliersEnabled() bool {
+	return graphSyncGoFlagEnabled("BUNKER_FUEL_SUPPLIERS")
 }
 
 func anyGraphSyncGoStepEnabled() bool {
@@ -63,8 +72,10 @@ func anyGraphSyncGoStepEnabled() bool {
 		graphSyncGoPortCallsEnabled() ||
 		graphSyncGoTEDEnabled() ||
 		graphSyncGoGovAwardsEnabled() ||
+		graphSyncGoEurostatTradeEnabled() ||
 		graphSyncGoPetroleumOsmStorageEnabled() ||
-		graphSyncGoPortCallMCREnabled()
+		graphSyncGoPortCallMCREnabled() ||
+		graphSyncGoBunkerFuelSuppliersEnabled()
 }
 
 func (g *GraphSyncGoSteps) runStep(
@@ -191,6 +202,40 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	if graphSyncGoEurostatTradeEnabled() {
+		log.Info().Msg("[graph-sync-go] running eurostat_trade step…")
+		err := g.runStep(ctx, "graphsync_eurostat_trade", func(ctx context.Context) (map[string]any, error) {
+			result, err := graphsync.SyncEurostatTrade(ctx, g.Pool)
+			if err != nil {
+				return nil, err
+			}
+			log.Info().
+				Str("status", result.Status).
+				Int("rows_upserted", result.RowsUpserted).
+				Msg("[graph-sync-go] eurostat_trade done")
+			payload := map[string]any{"status": result.Status}
+			if result.RowsUpserted > 0 {
+				payload["rows_upserted"] = result.RowsUpserted
+			}
+			if result.DataSource != "" {
+				payload["data_source"] = result.DataSource
+			}
+			if result.Reason != "" {
+				payload["reason"] = result.Reason
+			}
+			if result.Error != "" {
+				payload["error"] = result.Error
+			}
+			if result.Note != "" {
+				payload["note"] = result.Note
+			}
+			return payload, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
 	if graphSyncGoPortCallMCREnabled() {
 		log.Info().Msg("[graph-sync-go] running port_call_mcr step…")
 		err := g.runStep(ctx, "graphsync_port_call_mcr", func(ctx context.Context) (map[string]any, error) {
@@ -221,11 +266,51 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 				Str("status", result.Status).
 				Bool("cached", result.Cached).
 				Msg("[graph-sync-go] petroleum_osm_storage done")
+			popupRows, popupErr := mapserving.RebuildPopupPayloads(ctx, g.Pool)
+			if popupErr != nil {
+				log.Warn().Err(popupErr).Msg("[graph-sync-go] map_feature_popup_payload rebuild after OSM failed")
+			}
 			return map[string]any{
-				"status":   result.Status,
-				"reason":   result.Reason,
-				"layer_id": result.LayerID,
-				"cached":   result.Cached,
+				"status":                 result.Status,
+				"reason":                 result.Reason,
+				"layer_id":               result.LayerID,
+				"cached":                 result.Cached,
+				"popup_payloads_rebuilt": popupRows,
+			}, nil
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if graphSyncGoBunkerFuelSuppliersEnabled() {
+		log.Info().Msg("[graph-sync-go] running bunker_fuel_suppliers step…")
+		err := g.runStep(ctx, "graphsync_bunker_fuel_suppliers", func(ctx context.Context) (map[string]any, error) {
+			result, err := graphsync.IndexBunkerFuelSuppliers(ctx, g.Pool, "")
+			if err != nil {
+				return nil, err
+			}
+			log.Info().
+				Int("suppliers_indexed", result.SuppliersIndexed).
+				Int("contacts_written", result.ContactsWritten).
+				Int("geocoded", result.Geocoded).
+				Msg("[graph-sync-go] bunker_fuel_suppliers done")
+			hubRows, hubErr := mapserving.RebuildSupplierHubs(ctx, g.Pool)
+			if hubErr != nil {
+				log.Warn().Err(hubErr).Msg("[graph-sync-go] map_serving_supplier_hubs rebuild failed")
+			}
+			popupRows, popupErr := mapserving.RebuildPopupPayloads(ctx, g.Pool)
+			if popupErr != nil {
+				log.Warn().Err(popupErr).Msg("[graph-sync-go] map_feature_popup_payload rebuild failed")
+			}
+			return map[string]any{
+				"suppliers_indexed":      result.SuppliersIndexed,
+				"contacts_written":       result.ContactsWritten,
+				"records_skipped":        result.RecordsSkipped,
+				"seed_hubs":              result.SeedHubs,
+				"geocoded":               result.Geocoded,
+				"map_hubs_rebuilt":       hubRows,
+				"popup_payloads_rebuilt": popupRows,
 			}, nil
 		})
 		if err != nil && firstErr == nil {

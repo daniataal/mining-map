@@ -74,12 +74,12 @@ export default function MapOverlayStatusPanel({
       {showWorldCountrySummaryNotice && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] max-w-md bg-slate-950/90 text-slate-100 border border-cyan-500/25 rounded-2xl px-4 py-2 shadow-2xl backdrop-blur-xl">
           <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300 text-center">
-            {t('סיכום מדינות גלובלי', 'Global country summary')}
+            {t('מודיעין סחורות גלובלי', 'Global Commodity Intelligence')}
           </p>
           <p className="text-[10px] text-slate-300 text-center leading-relaxed mt-1">
             {t(
-              'תצוגה גלובלית לפי מדינה; התקרבו לזום 8+ לפרטי רישיון.',
-              'Global country summary; zoom to level 8+ for license detail.',
+              'התקרבו למדינה לרישיונות, נכסים, נמלים ופעילות כלי שיט.',
+              'Zoom into a country for licenses, assets, ports, and vessel activity.',
             )}
           </p>
         </div>

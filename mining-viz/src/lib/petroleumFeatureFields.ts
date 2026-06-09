@@ -204,6 +204,133 @@ export function isOsmInfrastructureFeature(props: Record<string, unknown>): bool
   return props.osm_id != null || props.osm_type != null;
 }
 
+export function isGemPipelineFeature(props: Record<string, unknown>): boolean {
+  const source = firstString(props, ['source', 'source_id', 'Source']);
+  if (source?.startsWith('gem_') || source?.includes('gem_goit')) return true;
+  return props.layer_id === 'gem_pipelines';
+}
+
+function formatRouteEndpoints(
+  start: string | null,
+  end: string | null,
+): string | null {
+  if (start && end) return `${start} → ${end}`;
+  return start ?? end;
+}
+
+/** GEM GOIT pipeline attributes for popups and drawers. */
+export function collectGemPipelineDetails(
+  props: Record<string, unknown>,
+): { label: string; value: string }[] {
+  if (!isGemPipelineFeature(props)) return [];
+
+  const rows: { label: string; value: string }[] = [];
+  const add = (label: string, value: string | null | undefined) => {
+    const text = value?.trim();
+    if (text) rows.push({ label, value: text });
+  };
+
+  add('Pipeline', firstString(props, ['pipeline_name', 'name']));
+  add('Segment', firstString(props, ['segment_name']));
+  add('Commodity', firstString(props, ['fuel', 'Fuel']));
+  add(
+    'Route',
+    formatRouteEndpoints(
+      firstString(props, ['start_location', 'StartLocation']),
+      firstString(props, ['end_location', 'EndLocation']),
+    ),
+  );
+  add(
+    'Countries',
+    firstString(props, ['countries', 'Countries']) ??
+      formatRouteEndpoints(
+        firstString(props, ['start_country', 'StartCountry']),
+        firstString(props, ['end_country', 'EndCountry']),
+      ),
+  );
+  add('Capacity', firstString(props, ['capacity_text', 'Capacity']));
+  add('Status', firstString(props, ['status', 'Status']));
+  add('Diameter', firstString(props, ['diameter', 'Diameter']));
+  add('Length (km)', firstString(props, ['length_km', 'LengthMergedKm']));
+  add('Route type', firstString(props, ['route_type', 'RouteType']));
+  add('Route accuracy', firstString(props, ['route_accuracy', 'RouteAccuracy']));
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.label}:${row.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function midpointFromLineGeometry(
+  geometry: GeoJSON.Geometry | null | undefined,
+): { lat: number; lng: number } | null {
+  if (!geometry) return null;
+  let coords: [number, number][] = [];
+  if (geometry.type === 'LineString') {
+    coords = geometry.coordinates as [number, number][];
+  } else if (geometry.type === 'MultiLineString') {
+    const lines = geometry.coordinates as [number, number][][];
+    coords = lines.reduce((longest, line) => (line.length > longest.length ? line : longest), lines[0] ?? []);
+  }
+  if (coords.length === 0) return null;
+  const mid = coords[Math.floor(coords.length / 2)];
+  if (!mid || mid.length < 2) return null;
+  const [lng, lat] = mid;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+/** Best map anchor for a pipeline feature (click point, line midpoint, or point geom). */
+export function pipelineClickCoordinates(
+  geometry: GeoJSON.Geometry | null | undefined,
+  clickLatLng?: { lat: number; lng: number },
+): { lat: number; lng: number } | null {
+  if (clickLatLng && Number.isFinite(clickLatLng.lat) && Number.isFinite(clickLatLng.lng)) {
+    return clickLatLng;
+  }
+  if (!geometry) return null;
+  if (geometry.type === 'Point') {
+    const [lng, lat] = geometry.coordinates as [number, number];
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    return null;
+  }
+  return midpointFromLineGeometry(geometry);
+}
+
+/** Short hover label for pipeline lines (OSM + GEM). */
+export function buildPipelineHoverSummary(props: Record<string, unknown>): {
+  title: string;
+  subtitle: string | null;
+} {
+  if (isGemPipelineFeature(props)) {
+    const title =
+      firstString(props, ['pipeline_name', 'name', 'segment_name', 'project_id']) ??
+      'GEM pipeline';
+    const route = formatRouteEndpoints(
+      firstString(props, ['start_location']),
+      firstString(props, ['end_location']),
+    );
+    const parts = [
+      firstString(props, ['fuel']),
+      firstString(props, ['capacity_text']),
+      route,
+    ].filter(Boolean);
+    return { title, subtitle: parts.length ? parts.join(' · ') : null };
+  }
+
+  const title =
+    firstString(props, ['name', 'operator', 'ref']) ??
+    (props.osm_id != null ? `OSM pipeline ${props.osm_id}` : 'OSM pipeline');
+  const substance = firstString(props, ['substance', 'pipeline_substance']);
+  const capacity = firstString(props, ['capacity', 'Capacity']);
+  const network = firstString(props, ['network', 'location']);
+  const parts = [substance, capacity, network].filter(Boolean);
+  return { title, subtitle: parts.length ? parts.join(' · ') : null };
+}
+
 export function buildOsmObjectUrl(
   osmType: string | null | undefined,
   osmId: string | number | null | undefined
@@ -451,12 +578,14 @@ export function buildPetroleumFeatureViewModel(
   layerId: PetroleumLayerId
 ): PetroleumFeatureViewModel {
   const isOsmFeature = isOsmInfrastructureFeature(props);
+  const isGemPipeline = isGemPipelineFeature(props);
   const isPipelineLayer = PIPELINE_LAYER_IDS.has(layerId);
   const isOsmPipeline =
     isOsmFeature &&
     (isPipelineLayer ||
       props.man_made === 'pipeline' ||
       props.layer_id === 'pipelines');
+  const isCompiledPipeline = isGemPipeline || isOsmPipeline;
   const pipelineSubstance = isOsmPipeline ? classifyPipelineSubstance(props) : null;
   const pipelineBadgeLabel = isOsmPipeline
     ? resolvePipelineBadgeLabel(props, layerId)
@@ -471,11 +600,13 @@ export function buildPetroleumFeatureViewModel(
     'Title',
     'plant_name',
     'unit_name',
+    'pipeline_name',
+    'segment_name',
   ]);
   const owner = firstString(props, ['owner', 'Owner', 'OWNER', 'Owner(s)']);
   const exploringCompanies = collectExploringCompanies(props);
   const operatorFromTags =
-    firstString(props, ['operator', 'Operator', 'OPERATOR']) ??
+    firstString(props, ['operator', 'Operator', 'OPERATOR', 'operatorName']) ??
     (exploringCompanies.length === 1 ? exploringCompanies[0] : null);
   const operator = operatorFromTags ?? owner ?? null;
   const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation', 'country']);
@@ -491,7 +622,7 @@ export function buildPetroleumFeatureViewModel(
     (isPipelineLayer ? petroleumLayerTypeLabel(layerId) : null);
   const status = firstString(props, ['STATUS', 'Status', 'status', 'State']);
   const sector =
-    firstString(props, ['Sector', 'sector', 'Commodity', 'commodity']) ??
+    firstString(props, ['Sector', 'sector', 'Commodity', 'commodity', 'fuel', 'Fuel']) ??
     (isPipelineLayer ? firstString(props, ['substance', 'Substance']) : null);
   const capacity = firstString(props, [
     'Capacity',
@@ -529,7 +660,11 @@ export function buildPetroleumFeatureViewModel(
     sourceText = null;
   }
 
-  const pipelineDetails = isOsmPipeline ? collectOsmPipelineDetails(props) : [];
+  const pipelineDetails = isOsmPipeline
+    ? collectOsmPipelineDetails(props)
+    : isGemPipeline
+      ? collectGemPipelineDetails(props)
+      : [];
   const gemCommercial = collectGemCommercialDetails(props);
 
   const operatorMissing =
@@ -554,6 +689,25 @@ export function buildPetroleumFeatureViewModel(
       'layer_id',
       'project_id',
       'segment_key',
+      'pipeline_name',
+      'segment_name',
+      'fuel',
+      'fuel_group',
+      'start_location',
+      'end_location',
+      'start_country',
+      'end_country',
+      'countries',
+      'capacity_text',
+      'capacity_boed',
+      'length_km',
+      'route_type',
+      'route_accuracy',
+      'diameter_units',
+      'wiki',
+      'parent',
+      'owner_entity_ids',
+      'last_updated',
     ]),
   );
   for (const [key, raw] of Object.entries(props)) {
@@ -590,12 +744,32 @@ export function buildPetroleumFeatureViewModel(
     facilityType ??
     'Unnamed feature';
 
+  const gemRoute = isGemPipeline
+    ? formatRouteEndpoints(
+        firstString(props, ['start_location']),
+        firstString(props, ['end_location']),
+      )
+    : null;
   const subtitle =
-    country && title !== country
+    gemRoute ??
+    (country && title !== country
       ? country
       : isOsmFeature && props.osm_id
         ? `OSM way ${props.osm_id}`
-        : null;
+        : null);
+
+  const gemWiki = firstString(props, ['wiki', 'Wiki']);
+  if (isGemPipeline && !sourceUrl && gemWiki && isUrl(gemWiki)) {
+    sourceUrl = gemWiki;
+    sourceLabel = 'GEM wiki';
+  }
+  if (isGemPipeline && !sourceUrl) {
+    const gemSourceUrl = firstString(props, ['source_url']);
+    if (gemSourceUrl && isUrl(gemSourceUrl)) {
+      sourceUrl = gemSourceUrl;
+      sourceLabel = firstString(props, ['source_name']) ?? 'Global Energy Monitor';
+    }
+  }
 
   return {
     title,
@@ -611,7 +785,11 @@ export function buildPetroleumFeatureViewModel(
     status,
     sector,
     capacity,
-    source: isOsmFeature ? 'OpenStreetMap (community)' : sourceText,
+    source: isGemPipeline
+      ? firstString(props, ['source_name']) ?? 'Global Energy Monitor (CC BY 4.0)'
+      : isOsmFeature
+        ? 'OpenStreetMap (community)'
+        : sourceText,
     sourceUrl,
     sourceLabel,
     description,
@@ -620,7 +798,10 @@ export function buildPetroleumFeatureViewModel(
     wikidataUrl,
     isOsmFeature,
     pipelineDetails,
-    extraRows: extraRows.slice(0, gemCommercial.length > 0 ? 10 : isOsmPipeline ? 2 : 4),
+    extraRows: extraRows.slice(
+      0,
+      gemCommercial.length > 0 ? 10 : isCompiledPipeline ? 4 : 4,
+    ),
   };
 }
 

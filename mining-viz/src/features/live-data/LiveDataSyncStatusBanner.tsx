@@ -13,6 +13,8 @@ export type LiveDataSyncStatusBannerProps = {
   unreachable?: boolean;
   pending?: boolean;
   className?: string;
+  /** warning = headline only (map broken-state banner); full = tier grid (default). */
+  variant?: 'full' | 'warning';
 };
 
 /**
@@ -23,11 +25,14 @@ export function LiveDataSyncStatusBanner({
   unreachable = false,
   pending = false,
   className = '',
+  variant = 'full',
 }: LiveDataSyncStatusBannerProps) {
   const { t } = useI18n();
   const kind = resolveLiveDataSyncBannerKind(syncStatus ?? undefined, { unreachable, pending });
   const headline = liveDataSyncBannerMessage(kind);
-  const tierLines = syncStatus ? buildLiveDataSyncTierLines(syncStatus) : [];
+  const tierLines =
+    variant === 'full' && syncStatus ? buildLiveDataSyncTierLines(syncStatus) : [];
+  const warningOnly = variant === 'warning';
   const demoNote =
     syncStatus &&
     ((syncStatus.demo_port_call_count ?? 0) > 0 || (syncStatus.demo_cargo_record_count ?? 0) > 0)
@@ -75,10 +80,10 @@ export function LiveDataSyncStatusBanner({
           ))}
         </ul>
       )}
-      {demoNote && kind !== 'demo_only' && (
+      {demoNote && kind !== 'demo_only' && !warningOnly && (
         <p className="mt-1 text-[9px] opacity-85 leading-snug">{demoNote}</p>
       )}
-      {(syncStatus?.graph_sync_steps?.length ?? 0) > 0 && (
+      {!warningOnly && (syncStatus?.graph_sync_steps?.length ?? 0) > 0 && (
         <p className="mt-1.5 text-[9px] opacity-90 leading-snug">
           {t('שלבי סנכרון אחרונים', 'Recent graph-sync steps')}:{' '}
           {syncStatus!.graph_sync_steps!
@@ -87,7 +92,7 @@ export function LiveDataSyncStatusBanner({
             .join(' · ')}
         </p>
       )}
-      {syncStatus?.disclaimer && kind === 'ok' && (
+      {!warningOnly && syncStatus?.disclaimer && kind === 'ok' && (
         <p className="mt-1 text-[9px] opacity-70 leading-snug">{syncStatus.disclaimer}</p>
       )}
     </div>

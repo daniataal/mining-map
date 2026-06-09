@@ -103,6 +103,27 @@ export function useOsmPetroleumCatalog(enabled = true) {
   });
 }
 
+export interface OsmInfrastructureFeatureResponse {
+  layer_id: OsmPetroleumLayerId;
+  osm_type: string;
+  osm_id: number;
+  properties: Record<string, unknown>;
+}
+
+/** Load full OSM tags for a map click (MVT tiles only carry a subset of fields). */
+export async function fetchOsmInfrastructureFeature(
+  layerId: OsmPetroleumLayerId,
+  osmType: string,
+  osmId: number,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await apiClient.get<OsmInfrastructureFeatureResponse>(
+    `/api/petroleum/osm-features/${layerId}/${encodeURIComponent(osmType)}/${osmId}`,
+    { signal },
+  );
+  return data?.properties ?? null;
+}
+
 export function useOsmPetroleumLayerGeoJson(
   layerId: OsmPetroleumLayerId,
   bbox: PetroleumViewportBounds | null,

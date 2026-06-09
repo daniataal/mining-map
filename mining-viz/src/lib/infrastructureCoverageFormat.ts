@@ -47,3 +47,18 @@ export function infrastructureCoverageGapMessage(
     'Pan to a known corridor (e.g. Gulf) or run GEM/OSM ingest on the server.'
   );
 }
+
+export function tankFarmEmptyHintMessage(opts: {
+  tankFarmsEnabled: boolean;
+  storageInView?: number | null;
+  catalogTotal?: number | null;
+}): string | null {
+  if (!opts.tankFarmsEnabled) return null;
+  const inView = opts.storageInView ?? 0;
+  const catalog = opts.catalogTotal ?? 0;
+  if (inView > 0 || catalog > 0) return null;
+  return (
+    'Tank farms layer is on but no curated terminals loaded for this view. ' +
+    'OSM cyan dots may still appear after zoom ≥10; run storage ingest or pan to a known hub.'
+  );
+}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mining-map/oil-live-intel/internal/models"
+	"github.com/mining-map/oil-live-intel/internal/services/contacts"
 )
 
 // CreateLicense handles POST /licenses
@@ -43,8 +44,10 @@ func (s *Server) CreateLicense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Python did sync_license_contacts here. We will log it as deferred or handle it separately if ported.
-	s.Log.Info().Str("license_id", newID).Msg("license created (contact sync deferred to python/sync)")
+	// Sync open-data contact rows when license has attributable source metadata.
+	if _, syncErr := contacts.SyncLicenseContacts(r.Context(), s.Pool, newID); syncErr != nil {
+		s.Log.Warn().Err(syncErr).Str("license_id", newID).Msg("license contact sync failed")
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":      newID,
@@ -136,7 +139,7 @@ func (s *Server) UpdateLicense(w http.ResponseWriter, r *http.Request) {
 
 	args = append(args, id)
 	updateSQL := fmt.Sprintf("UPDATE licenses SET %s WHERE id = $%d", strings.Join(updates, ", "), argId)
-	
+
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -187,6 +190,10 @@ func (s *Server) UpdateLicense(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+
+	if _, syncErr := contacts.SyncLicenseContacts(r.Context(), s.Pool, id); syncErr != nil {
+		s.Log.Warn().Err(syncErr).Str("license_id", id).Msg("license contact sync failed")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

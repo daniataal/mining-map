@@ -41,6 +41,12 @@ const SWATCHES: { key: string; color: string; dash?: string; labelEn: string; la
     labelHe: 'יבוא היסטורי EIA',
   },
   {
+    key: 'sts',
+    color: '#7c3aed',
+    labelEn: 'Inferred STS proximity',
+    labelHe: 'קרבת STS מסקנית',
+  },
+  {
     key: 'terminal',
     color: '#2563eb',
     labelEn: 'Terminals',
@@ -65,6 +71,7 @@ export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn 
     if (s.key === 'eia') return eiaHistoricOn;
     if (s.key === 'terminal') return layers.terminals;
     if (s.key === 'coverage') return layers.coverage;
+    if (s.key === 'sts') return layers.stsEvents;
     return false;
   });
 
@@ -78,19 +85,34 @@ export default function LiveDataMapLegend({ layers, eiaHistoricOn, macroTradeOn 
       <ul className="space-y-1">
         {active.map((s) => (
           <li key={s.key} className="flex items-center gap-2">
-            <span
-              className="shrink-0 w-6 h-0.5 rounded-full"
-              style={{
-                backgroundColor: s.dash ? 'transparent' : s.color,
-                borderTop: s.dash ? `2px dashed ${s.color}` : undefined,
-              }}
-            />
+            {s.key === 'sts' ? (
+              <span
+                className="shrink-0 w-3 h-3 rounded-full border-2"
+                style={{ borderColor: s.color, backgroundColor: `${s.color}99` }}
+              />
+            ) : (
+              <span
+                className="shrink-0 w-6 h-0.5 rounded-full"
+                style={{
+                  backgroundColor: s.dash ? 'transparent' : s.color,
+                  borderTop: s.dash ? `2px dashed ${s.color}` : undefined,
+                }}
+              />
+            )}
             <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
               {t(s.labelHe, s.labelEn)}
             </span>
           </li>
         ))}
       </ul>
+      {layers.stsEvents && (
+        <p className="mt-2 border-t border-slate-200/80 pt-2 text-[9px] leading-snug text-amber-800 dark:text-amber-200">
+          {t(
+            'אין אירועי STS? העיגולים המלאים מופיעים רק כשהמנוע מזהה זוגות AIS קרובים — לא סימני משולש של כלי שיט.',
+            'No STS circles yet? Filled dots are inferred pair centroids — not the orange/yellow vessel chevrons.',
+          )}
+        </p>
+      )}
       {eiaHistoricOn && (
         <p className="mt-2 border-t border-slate-200/80 pt-2 text-[9px] leading-snug text-violet-800 dark:text-violet-200">
           {t(EIA_HISTORIC_DISCLAIMER_HE, EIA_HISTORIC_DISCLAIMER_EN)}

@@ -1,15 +1,23 @@
 import L from 'leaflet';
+import { clusterIconSizeForTier, clusterTierForCount } from './clusterTier';
 
 export type ClusterIconFactory = (cluster: { getChildCount: () => number }) => L.DivIcon;
 
+function clusterClassName(count: number, isDark: boolean, server = false): string {
+  const tier = clusterTierForCount(count);
+  const base = isDark ? 'custom-cluster-icon' : 'custom-cluster-icon custom-cluster-icon--light';
+  const tierClass = `custom-cluster-icon--${tier}`;
+  const serverClass = server ? ' custom-cluster-icon--server' : '';
+  return `${base} ${tierClass}${serverClass}`;
+}
+
 /** Pre-aggregated grid cell from GET /licenses?zoom&lt;8 (server cluster). */
 export function createServerLicenseClusterIcon(count: number, isDark: boolean): L.DivIcon {
-  const size = count < 5 ? 32 : count < 25 ? 38 : count < 100 ? 46 : 54;
-  const base = isDark ? 'custom-cluster-icon' : 'custom-cluster-icon custom-cluster-icon--light';
-  const className = `${base} custom-cluster-icon--server`;
+  const tier = clusterTierForCount(count);
+  const size = clusterIconSizeForTier(tier);
   return L.divIcon({
     html: `<span>${count}</span>`,
-    className,
+    className: clusterClassName(count, isDark, true),
     iconSize: L.point(size, size),
   });
 }
@@ -18,11 +26,11 @@ export function createServerLicenseClusterIcon(count: number, isDark: boolean): 
 export function createLicenseClusterIconFactory(isDark: boolean): ClusterIconFactory {
   return (cluster) => {
     const count = cluster.getChildCount();
-    const size = count < 10 ? 36 : count < 100 ? 44 : 52;
-    const className = isDark ? 'custom-cluster-icon' : 'custom-cluster-icon custom-cluster-icon--light';
+    const tier = clusterTierForCount(count);
+    const size = clusterIconSizeForTier(tier);
     return L.divIcon({
       html: `<span>${count}</span>`,
-      className,
+      className: clusterClassName(count, isDark),
       iconSize: L.point(size, size),
     });
   };

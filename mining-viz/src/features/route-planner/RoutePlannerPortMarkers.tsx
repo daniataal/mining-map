@@ -5,12 +5,17 @@ import { useI18n } from '../../lib/i18n';
 import type { RoutePlannerHubMarker } from './locationPresets';
 import type { RoutePickRole } from './useRoutePlanner';
 
-const PORT_ICON_IDLE = createPortMapIcon(false);
-const PORT_ICON_PICK = createPortMapIcon(true);
+const PORT_ICON_IDLE = createPortMapIcon(false, false);
+const PORT_ICON_PICK = createPortMapIcon(true, false);
+const PORT_ICON_EMPHASIZED = createPortMapIcon(false, true);
+const PORT_ICON_EMPHASIZED_PICK = createPortMapIcon(true, true);
 
-function createPortMapIcon(active = false): L.DivIcon {
-  const size = active ? 30 : 26;
+function createPortMapIcon(active = false, emphasized = false): L.DivIcon {
+  const size = active ? (emphasized ? 36 : 30) : emphasized ? 32 : 26;
   const border = active ? '2.5px solid #fbbf24' : '2px solid rgba(255,255,255,0.95)';
+  const shadow = emphasized
+    ? '0 3px 14px rgba(14,165,233,0.65)'
+    : '0 2px 10px rgba(14,165,233,0.45)';
   return new L.DivIcon({
     className: 'route-port-marker',
     html: `<span role="img" aria-label="Port" style="
@@ -20,7 +25,7 @@ function createPortMapIcon(active = false): L.DivIcon {
       background:rgba(14,116,144,0.92);
       border:${border};
       border-radius:50%;
-      box-shadow:0 2px 10px rgba(14,165,233,0.45);
+      box-shadow:${shadow};
       cursor:pointer;
     ">⚓</span>`,
     iconSize: [size, size],
@@ -32,12 +37,24 @@ interface RoutePlannerPortMarkersProps {
   ports: RoutePlannerHubMarker[];
   pickRole: RoutePickRole | null;
   onPortPick: (port: RoutePlannerHubMarker, role: RoutePickRole) => void;
+  emphasized?: boolean;
 }
 
-function RoutePlannerPortMarkers({ ports, pickRole, onPortPick }: RoutePlannerPortMarkersProps) {
+function RoutePlannerPortMarkers({
+  ports,
+  pickRole,
+  onPortPick,
+  emphasized = false,
+}: RoutePlannerPortMarkersProps) {
   const { t } = useI18n();
-  const icon = pickRole ? PORT_ICON_PICK : PORT_ICON_IDLE;
-  const zIndex = pickRole ? 2500 : 400;
+  const icon = pickRole
+    ? emphasized
+      ? PORT_ICON_EMPHASIZED_PICK
+      : PORT_ICON_PICK
+    : emphasized
+      ? PORT_ICON_EMPHASIZED
+      : PORT_ICON_IDLE;
+  const zIndex = pickRole ? (emphasized ? 3200 : 2500) : emphasized ? 900 : 400;
   const interactive = Boolean(pickRole);
 
   const markers = useMemo(

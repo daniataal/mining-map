@@ -98,6 +98,7 @@ func allSyntheticRecipes() []recipeFn {
 		{RecipeGovOfftake, recipeGovOfftake},
 		{RecipeRepeatDealer, recipeRepeatDealer},
 		{RecipeRefineryDriven, recipeRefineryDriven},
+		{RecipePortManifestMatch, recipePortManifestMatch},
 	}
 }
 
@@ -160,11 +161,13 @@ const tankerVesselJoin = `
 func recipeLikelyLoad(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT pc.id, pc.mmsi, pc.vessel_name, pc.terminal_id, pc.draft_delta, pc.arrival_ts, pc.confidence,
-			t.name, t.operator_name, t.country, t.products,
-			ST_Y(t.geom::geometry) AS lat, ST_X(t.geom::geometry) AS lon,
+			a.name, COALESCE(o.name, 'Unknown') AS operator_name, a.country, ARRAY[a.asset_type] AS products,
+			ST_Y(a.geom::geometry) AS lat, ST_X(a.geom::geometry) AS lon,
 			v.crude_capable, v.product_tanker, v.deadweight_tons, v.max_draft_m, v.imo, v.name AS vname
 		FROM oil_port_calls pc
-		JOIN oil_terminals t ON t.id = pc.terminal_id`+tankerVesselJoin+`
+		JOIN core_assets a ON a.legacy_id = pc.terminal_id::text
+		LEFT JOIN core_asset_relationships r ON a.id = r.asset_id AND r.relationship_role = 'operator'
+		LEFT JOIN core_organizations o ON r.organization_id = o.id`+tankerVesselJoin+`
 		WHERE pc.status = 'closed'
 		  AND pc.event_type = 'possible_loading'
 		  AND pc.draft_delta >= 1
@@ -1180,4 +1183,58 @@ func clampConf(v float64) float64 {
 		return 0.35
 	}
 	return v
+}
+
+const RecipePortManifestMatch = "A_port_manifest_match"
+
+func recipePortManifestMatch(ctx context.Context, pool *pgxpool.Pool) ([]mcrDraft, error) {
+	if !tableExists(ctx, pool, "port_manifests") {
+		return nil, nil
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT vessel_imo, vessel_name, load_port, discharge_port, cargo_type, quantity_tons, created_at
+		FROM port_manifests
+		WHERE created_at > NOW() - INTERVAL '30 days'
+		LIMIT 1000
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var drafts []mcrDraft
+	for rows.Next() {
+		var imo string
+		var name, loadPort, dischargePort, cargoType *string
+		var quantity *float64
+		var createdAt time.Time
+		if err := rows.Scan(&imo, &name, &loadPort, &dischargePort, &cargoType, &quantity, &createdAt); err != nil {
+			continue
+		}
+
+		desc := "Unknown Cargo"
+		if cargoType != nil {
+			desc = *cargoType
+		}
+
+		d := mcrDraft{
+			Fingerprint:          fingerprint("manifest", imo, desc, createdAt.Format(time.RFC3339)),
+			Recipe:               RecipePortManifestMatch,
+			CommodityFamily:      "petroleum", // Assume petroleum for now, could be derived from cargoType
+			Confidence:           0.95, // High confidence since it's a direct manifest
+			TriangulationScore:   10,
+			VesselName:           name,
+			IMO:                  &imo,
+			LoadPortName:         loadPort,
+			DischargeHint:        dischargePort,
+			CommodityDescription: &desc,
+			VolumeLow:            quantity,
+			VolumeHigh:           quantity,
+			VolumeUnit:           "tons",
+			EventDate:            &createdAt,
+		}
+		drafts = append(drafts, d)
+	}
+	return drafts, nil
 }

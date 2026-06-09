@@ -8,6 +8,7 @@ export interface CanvasVesselMarkersProps {
   mapZoom: number;
   selectedId: string | null;
   focusMode?: boolean;
+  passThroughClicks?: boolean;
   onVesselClick: (vessel: MaritimeVessel) => void;
   formatTooltip: (vessel: MaritimeVessel) => HTMLElement | string;
   /** Filled when the Leaflet layer is constructed; parent pushes AIS rows via `setVessels` to avoid React diffing huge arrays. */
@@ -24,6 +25,7 @@ function createCanvasVesselLayer(
     mapZoom: props.mapZoom,
     selectedId: props.selectedId,
     focusMode: props.focusMode ?? false,
+    passThroughClicks: props.passThroughClicks ?? false,
     onVesselClick: props.onVesselClick,
     formatTooltip: props.formatTooltip,
   });
@@ -56,6 +58,9 @@ function updateCanvasVesselLayer(
   }
   if ((props.focusMode ?? false) !== (prevProps.focusMode ?? false)) {
     layer.setFocusMode(props.focusMode ?? false);
+  }
+  if ((props.passThroughClicks ?? false) !== (prevProps.passThroughClicks ?? false)) {
+    layer.setPassThroughClicks(props.passThroughClicks ?? false);
   }
 }
 

@@ -85,7 +85,8 @@ def get_gem_pipelines_geojson(
         from services.license_map_perf import simplify_tolerance_for_zoom
 
     tolerance = simplify_tolerance_for_zoom(zoom)
-    params: list[Any] = []
+    select_params: list[Any] = []
+    where_params: list[Any] = []
     bbox_clause = ""
     if bbox is not None:
         south, west, north, east = bbox
@@ -95,15 +96,15 @@ def get_gem_pipelines_geojson(
                 ST_MakeEnvelope(%s, %s, %s, %s, 4326)
             )
         """
-        params.extend([west, south, east, north])
+        where_params.extend([west, south, east, north])
 
     if tolerance > 0:
         geom_sql = "ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom::geometry, %s))::json"
-        params.append(tolerance)
+        select_params.append(tolerance)
     else:
         geom_sql = "ST_AsGeoJSON(geom)::json"
 
-    params.append(max(1, min(limit, 20000)))
+    row_limit = max(1, min(limit, 20000))
 
     with conn.cursor() as cur:
         cur.execute(
@@ -115,7 +116,7 @@ def get_gem_pipelines_geojson(
             ORDER BY project_id, segment_key
             LIMIT %s;
             """,
-            tuple(params),
+            tuple([*select_params, *where_params, row_limit]),
         )
         rows = cur.fetchall()
 

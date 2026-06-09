@@ -512,30 +512,6 @@ export interface DealChecklist {
   updatedAt: string;
 }
 
-export interface MeetingPoint {
-  id: string;
-  name: string;
-  lat: number;
-  lng: number;
-  address?: string;
-  status: 'ACTIVE' | 'INACTIVE';
-}
-
-export interface MinerListing {
-  id: string;
-  miner_id: string;
-  product: string;
-  shape: string;
-  quantity: number;
-  price_per_kg: number;
-  lat: number;
-  lng: number;
-  photo_url?: string;
-  meeting_point_id?: string;
-  meeting_date?: string;
-  status: 'PENDING' | 'CONTACTED' | 'MEETING' | 'ASSAY' | 'OFFER' | 'ACCEPTED' | 'REJECTED' | 'PURCHASED' | 'TRANSFERRED';
-}
-
 // ─── Oil / Petroleum Types ────────────────────────────────────────────────────
 
 export type OilHsCategory = 'crude' | 'refined' | 'gas' | 'other';

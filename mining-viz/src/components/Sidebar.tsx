@@ -19,12 +19,15 @@ import {
   Radio as LucideRadio,
   Archive as LucideArchive,
   List as LucideList,
+  Network as LucideNetwork,
+  Search as LucideSearch,
 } from 'lucide-react';
 import type { MapSidebarTab } from './WorkspaceSidebarLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLicenseRenderKey } from '../lib/licenseRenderKey';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 import { licenseCardSubtitle, licenseCardTitle } from '../lib/licenseSidebarCard';
+import BrandMark from './BrandMark';
 
 interface SidebarProps {
   processedData: MiningLicense[];
@@ -39,6 +42,9 @@ interface SidebarProps {
   setViewMode: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
+  settingsTitle?: string;
+  onToggleWorkspace?: () => void;
+  onToggleSearch?: () => void;
   isFilterOpen: boolean;
   isPinned: boolean;
   setIsPinned: (val: boolean) => void;
@@ -96,6 +102,9 @@ export default function Sidebar({
   setViewMode,
   onToggleFilter,
   onToggleAdmin,
+  settingsTitle,
+  onToggleWorkspace,
+  onToggleSearch,
   isFilterOpen,
   isPinned,
   setIsPinned,
@@ -138,7 +147,10 @@ export default function Sidebar({
     <div className="flex h-full min-h-0 flex-1 bg-transparent text-slate-800 dark:text-slate-100 select-none">
       {/* Icon Rail (MarineTraffic style) */}
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-6 bg-white dark:bg-slate-950">
-        <button 
+        <div className="mb-2 flex shrink-0 items-center justify-center">
+          <BrandMark size="rail" framed />
+        </div>
+        <button
           onClick={() => {
             onSelectWorkspaceTab?.('licenses');
             setViewMode('map');
@@ -179,7 +191,7 @@ export default function Sidebar({
             </button>
           </>
         )}
-        <button 
+        <button
           onClick={() => setViewMode('dashboard')}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${viewMode === 'dashboard' 
@@ -188,7 +200,7 @@ export default function Sidebar({
         >
           <LucidePieChart className="w-5 h-5" />
         </button>
-        <button 
+        <button
           onClick={onToggleFilter}
           className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 border
           ${isFilterOpen 
@@ -197,8 +209,21 @@ export default function Sidebar({
         >
           <LucideLayers className="w-5 h-5" />
         </button>
+        <button
+          onClick={onToggleSearch}
+          className="w-10 h-10 rounded-xl hover:bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-transparent transition-all cursor-pointer"
+        >
+          <LucideSearch className="w-5 h-5" />
+        </button>
+        <button
+          onClick={onToggleWorkspace}
+          className="w-10 h-10 rounded-xl hover:bg-amber-500/10 flex items-center justify-center text-amber-500 border border-transparent transition-all cursor-pointer"
+        >
+          <LucideNetwork className="w-5 h-5" />
+        </button>
         <button 
           onClick={onToggleAdmin}
+          title={settingsTitle}
           className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 border border-transparent transition-all cursor-pointer"
         >
           <LucideSettings className="w-5 h-5" />

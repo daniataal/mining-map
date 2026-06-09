@@ -32,6 +32,11 @@ try:
 except ImportError:
     from api.routing import router as routing_router, is_route_planner_enabled
 
+try:
+    from backend.services.rate_limit import RateLimitMiddleware
+except ImportError:
+    from services.rate_limit import RateLimitMiddleware
+
 app = FastAPI()
 
 # Routing platform (supplier -> buyer product routing). The router itself
@@ -711,6 +716,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=800)
+app.add_middleware(RateLimitMiddleware)
 
 # Database connection parameters
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -938,13 +944,31 @@ def _admin_payload_from_authorization(authorization: Optional[str]):
     return payload, None
 
 
+def _check_admin_token(
+    x_admin_token: Optional[str] = None,
+    authorization: Optional[str] = None,
+) -> Optional[Response]:
+    """Allow X-Admin-Token (when ADMIN_TOKEN is set) or JWT role=admin."""
+    expected = (os.getenv("ADMIN_TOKEN") or "").strip()
+    if expected and x_admin_token and x_admin_token == expected:
+        return None
+    if authorization:
+        _payload, err = _admin_payload_from_authorization(authorization)
+        if err is None:
+            return None
+    if expected:
+        return Response("Forbidden", status_code=403)
+    print("[admin] WARNING: ADMIN_TOKEN env not set — admin endpoint is unauthenticated.")
+    return None
+
+
 def _require_authenticated_or_admin(
     authorization: Optional[str] = None,
     x_admin_token: Optional[str] = None,
 ):
     """Allow X-Admin-Token (when configured) or any valid Bearer JWT."""
     if (os.getenv("ADMIN_TOKEN") or "").strip() and x_admin_token:
-        err = _check_admin_token(x_admin_token)
+        err = _check_admin_token(x_admin_token, authorization)
         if err is not None:
             return None, err
         return {"role": "admin", "sub": "admin-token"}, None
@@ -965,44 +989,6 @@ class LogCreate(BaseModel):
     username: str
     action: str
     details: Optional[str] = None
-
-class MeetingPointCreate(BaseModel):
-    name: str
-    lat: float
-    lng: float
-    address: Optional[str] = None
-    status: str = 'ACTIVE'
-
-class MinerListingCreate(BaseModel):
-    miner_id: str
-    lat: float
-    lng: float
-    price_per_kg: float
-    quantity: float
-    shape: str
-    product: str
-    meeting_point_id: str
-    meeting_date: Optional[str] = None
-
-class MinerListingVerify(BaseModel):
-    status: str
-    meeting_outcome: Optional[str] = None
-    communication_log: Optional[str] = None
-
-class MinerListingAssay(BaseModel):
-    tested_weight: float
-    tested_purity: float
-    final_offer: float
-
-class MinerListingUpdate(BaseModel):
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    price_per_kg: Optional[float] = None
-    quantity: Optional[float] = None
-    shape: Optional[str] = None
-    product: Optional[str] = None
-    meeting_point_id: Optional[str] = None
-    meeting_date: Optional[str] = None
 
 # DB Init Update
 def init_db(*, raise_on_error: bool = False) -> bool:
@@ -1602,56 +1588,6 @@ def init_db(*, raise_on_error: bool = False) -> bool:
             );
         """)
 
-        # Meeting Points Table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS meeting_points (
-                id VARCHAR(255) PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                lat FLOAT NOT NULL,
-                lng FLOAT NOT NULL,
-                address TEXT,
-                status VARCHAR(50) DEFAULT 'ACTIVE',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-
-        # Miner Listings Table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS miner_listings (
-                id VARCHAR(255) PRIMARY KEY,
-                miner_id VARCHAR(255),
-                lat FLOAT NOT NULL,
-                lng FLOAT NOT NULL,
-                photo_url TEXT,
-                price_per_kg FLOAT,
-                quantity FLOAT,
-                shape VARCHAR(100),
-                product VARCHAR(100),
-                status VARCHAR(50) DEFAULT 'PENDING',
-                meeting_point_id VARCHAR(255),
-                meeting_date VARCHAR(255),
-                meeting_outcome VARCHAR(50),
-                communication_log TEXT,
-                tested_weight FLOAT,
-                tested_purity FLOAT,
-                final_offer FLOAT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (meeting_point_id) REFERENCES meeting_points(id) ON DELETE SET NULL,
-                FOREIGN KEY (miner_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-        """)
-        
-        # Add new columns to existing tables
-        try:
-            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS meeting_date VARCHAR(255);")
-            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS tested_weight FLOAT;")
-            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS tested_purity FLOAT;")
-            cur.execute("ALTER TABLE miner_listings ADD COLUMN IF NOT EXISTS final_offer FLOAT;")
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(100);")
-            conn.commit()
-        except:
-            conn.rollback()
-
         # Oil Trade Flows Table (petroleum / energy context)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS oil_trade_flows (
@@ -2189,10 +2125,10 @@ def login(user: UserLogin):
         conn.close()
 
 @app.post("/auth/register")
-def register(user: UserCreate):
-    # In a real app, check for Admin token here. For MVP, we'll assume the frontend enforces 'Admin Panel' access.
-    # ideally verify jwt token from header.
-    
+def register(user: UserCreate, authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2218,7 +2154,10 @@ def register(user: UserCreate):
         conn.close()
 
 @app.get("/auth/users")
-def get_users():
+def get_users(authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2266,7 +2205,10 @@ def delete_user(user_id: str, authorization: Optional[str] = Header(None)):
         conn.close()
 
 @app.put("/auth/users/{user_id}")
-def update_user(user_id: str, user: UserUpdate):
+def update_user(user_id: str, user: UserUpdate, authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2941,8 +2883,9 @@ def read_gov_procurement_companies(
 
 
 @app.post("/api/admin/gov-procurement/sync")
-def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None)):
-    forbidden = _check_admin_token(x_admin_token)
+def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     if not ensure_schema_initialized():
@@ -4830,239 +4773,6 @@ Execution Engine v1.0
 """
     return {"status": "success", "loi": loi_text}
 
-# --- Community Miner Endpoints ---
-
-@app.get("/meeting-points")
-def get_meeting_points():
-    conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        c.execute("SELECT * FROM meeting_points ORDER BY created_at DESC")
-        return c.fetchall()
-    finally:
-        conn.close()
-
-@app.post("/meeting-points")
-def create_meeting_point(item: MeetingPointCreate):
-    conn = get_db_connection()
-    c = conn.cursor()
-    new_id = str(uuid.uuid4())
-    try:
-        c.execute('''
-            INSERT INTO meeting_points (id, name, lat, lng, address, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (new_id, item.name, item.lat, item.lng, item.address, item.status))
-        conn.commit()
-        return {**item.dict(), "id": new_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.get("/miner-listings")
-def get_miner_listings(miner_id: Optional[str] = None):
-    conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        if miner_id:
-            c.execute("SELECT * FROM miner_listings WHERE miner_id = %s ORDER BY created_at DESC", (miner_id,))
-        else:
-            c.execute("SELECT * FROM miner_listings ORDER BY created_at DESC")
-        return c.fetchall()
-    finally:
-        conn.close()
-
-@app.post("/miner-listings")
-def create_miner_listing(item: MinerListingCreate):
-    conn = get_db_connection()
-    c = conn.cursor()
-    new_id = str(uuid.uuid4())
-    try:
-        c.execute('''
-            INSERT INTO miner_listings (id, miner_id, lat, lng, price_per_kg, quantity, shape, product, meeting_point_id, meeting_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (new_id, item.miner_id, item.lat, item.lng, item.price_per_kg, item.quantity, item.shape, item.product, item.meeting_point_id, item.meeting_date))
-        conn.commit()
-        return {**item.dict(), "id": new_id, "status": "PENDING"}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.put("/miner-listings/{listing_id}/verify")
-def verify_miner_listing(listing_id: str, item: MinerListingVerify):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute('''
-            UPDATE miner_listings 
-            SET status = %s, meeting_outcome = %s, communication_log = %s
-            WHERE id = %s
-        ''', (item.status, item.meeting_outcome, item.communication_log, listing_id))
-        
-        # If the status is being updated to PURCHASED, let's auto-transfer it to DoreMarket
-        if item.status == "PURCHASED":
-            c.execute("SELECT * FROM miner_listings WHERE id = %s", (listing_id,))
-            listing = c.fetchone()
-            if listing:
-                try:
-                    payload = {
-                        "listing_id": listing[0],
-                        "miner_id": listing[1],
-                        "lat": listing[2],
-                        "lng": listing[3],
-                        "price_per_kg": listing[5],
-                        "quantity": listing[6],
-                        "shape": listing[7],
-                        "product": listing[8],
-                        "tested_weight": listing[14],
-                        "tested_purity": listing[15],
-                        "final_offer": listing[16],
-                    }
-                    import requests
-                    requests.post("http://localhost:3000/api/webhooks/mining-map", json=payload, timeout=5)
-                except Exception as ex:
-                    print(f"Failed to post to DoreMarket Webhook: {ex}")
-                
-        conn.commit()
-        return {"status": "success", "id": listing_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.post("/miner-listings/{listing_id}/assay")
-def assay_miner_listing(listing_id: str, item: MinerListingAssay):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("""
-            UPDATE miner_listings 
-            SET tested_weight = %s, tested_purity = %s, final_offer = %s, status = 'OFFER' 
-            WHERE id = %s
-        """, (item.tested_weight, item.tested_purity, item.final_offer, listing_id))
-        conn.commit()
-
-        if c.rowcount == 0:
-            return Response("Listing not found", status_code=404)
-
-        return {"status": "Assayed and Offer Made", "id": listing_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.post("/miner-listings/{listing_id}/accept-offer")
-def accept_miner_offer(listing_id: str):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("UPDATE miner_listings SET status = 'ACCEPTED' WHERE id = %s AND status = 'OFFER'", (listing_id,))
-        if c.rowcount == 0:
-             return Response("Listing not found or not in OFFER state", status_code=400)
-        conn.commit()
-        return {"status": "Offer Accepted", "id": listing_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.post("/miner-listings/{listing_id}/photo")
-async def upload_listing_photo(listing_id: str, file: UploadFile = File(...)):
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    try:
-        c.execute("SELECT id FROM miner_listings WHERE id = %s", (listing_id,))
-        if not c.fetchone():
-            return Response("Listing not found", status_code=404)
-
-        file_id = str(uuid.uuid4())
-        safe_filename = file.filename.replace(" ", "_")
-        safe_filename = "".join(x for x in safe_filename if x.isalnum() or x in "._-")
-        if not safe_filename: safe_filename = "unnamed_file"
-        
-        final_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_filename}")
-        file_url = f"/files/{file_id}_{safe_filename}"
-        
-        with open(final_path, "wb") as buffer:
-            import shutil
-            shutil.copyfileobj(file.file, buffer)
-                
-        c.execute("UPDATE miner_listings SET photo_url = %s WHERE id = %s", (file_url, listing_id))
-        conn.commit()
-        return {"id": file_id, "url": file_url}
-    except Exception as e:
-        conn.rollback()
-        return {"error": str(e)}
-    finally:
-        conn.close()
-
-@app.put("/miner-listings/{listing_id}")
-def update_miner_listing(listing_id: str, item: MinerListingUpdate):
-    conn = get_db_connection()
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    try:
-        c.execute("SELECT * FROM miner_listings WHERE id = %s", (listing_id,))
-        existing = c.fetchone()
-        if not existing:
-            return Response("Listing not found", status_code=404)
-
-        updates = []
-        values = []
-        
-        if item.lat is not None:
-            updates.append("lat = %s"); values.append(item.lat)
-        if item.lng is not None:
-             updates.append("lng = %s"); values.append(item.lng)
-        if item.price_per_kg is not None:
-             updates.append("price_per_kg = %s"); values.append(item.price_per_kg)
-        if item.quantity is not None:
-             updates.append("quantity = %s"); values.append(item.quantity)
-        if item.shape is not None:
-             updates.append("shape = %s"); values.append(item.shape)
-        if item.product is not None:
-             updates.append("product = %s"); values.append(item.product)
-        if item.meeting_point_id is not None:
-             updates.append("meeting_point_id = %s"); values.append(item.meeting_point_id)
-        if item.meeting_date is not None:
-             updates.append("meeting_date = %s"); values.append(item.meeting_date)
-
-        if not updates:
-            return {"status": "no changes"}
-            
-        values.append(listing_id)
-        sql = f"UPDATE miner_listings SET {', '.join(updates)} WHERE id = %s"
-        c.execute(sql, tuple(values))
-        conn.commit()
-        return {"status": "updated", "id": listing_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
-@app.delete("/miner-listings/{listing_id}")
-def delete_miner_listing(listing_id: str):
-    conn = get_db_connection()
-    c = conn.cursor()
-    try:
-        c.execute("DELETE FROM miner_listings WHERE id = %s", (listing_id,))
-        if c.rowcount == 0:
-             return Response("Listing not found", status_code=404)
-        conn.commit()
-        return {"status": "deleted", "id": listing_id}
-    except Exception as e:
-        conn.rollback()
-        return Response(str(e), status_code=500)
-    finally:
-        conn.close()
-
 # --- Live Market Prices (Entrepreneur Desk) ---
 # Using requests (already available) against a public free API — no extra libraries needed.
 import requests as _requests
@@ -5847,15 +5557,12 @@ def get_maritime_stats_endpoint(
 @app.get("/api/maritime/vessels")
 def get_maritime_vessels(
     max_vessels: int = 15000,
-    capture_window_seconds: int = 10,
-    scope: str = "all_vessels",
-    offset: int = 0,
     south: Optional[float] = None,
     west: Optional[float] = None,
     north: Optional[float] = None,
     east: Optional[float] = None,
 ):
-    """Deprecated — canonical: GET /api/oil-live/vessels/live (param limit, not max_vessels)."""
+    """Deprecated shim — canonical: GET /api/oil-live/vessels/live (Caddy/Vite route there directly)."""
     try:
         from backend.services.maritime_go_proxy import proxy_oil_live_get
     except ImportError:
@@ -5869,19 +5576,13 @@ def get_maritime_vessels(
             "vessels": [],
             "source": "oil_live_proxy_error",
             "limitations": [str(payload.get("error") or "Go vessel feed unavailable")],
-            "scope": scope,
-            "max_vessels": max_vessels,
+            "deprecated_route": "/api/maritime/vessels",
+            "canonical_route": "/api/oil-live/vessels/live",
         }
-    vessels = payload.get("vessels") if isinstance(payload.get("vessels"), list) else []
     return {
         **payload,
-        "vessels": vessels,
-        "source": "oil-live-intel",
         "deprecated_route": "/api/maritime/vessels",
         "canonical_route": "/api/oil-live/vessels/live",
-        "scope": scope,
-        "offset": offset,
-        "returned_count": len(vessels),
     }
 
 
@@ -6002,9 +5703,10 @@ def get_storage_coverage_report(
 
 
 @app.post("/api/admin/storage/coverage-audit")
-def admin_storage_coverage_audit(x_admin_token: Optional[str] = Header(None)):
+def admin_storage_coverage_audit(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Regenerate storage coverage audit JSON and gap queue (admin)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -6136,6 +5838,39 @@ def get_petroleum_osm_layers_catalog():
             "source_labels": ["OpenStreetMap"],
             "limitations": [f"OSM petroleum catalog failed: {exc}"],
         }
+
+
+@app.get("/api/petroleum/osm-features/{layer_id}/{osm_type}/{osm_id}")
+def get_petroleum_osm_feature(layer_id: str, osm_type: str, osm_id: int):
+    """Full OSM tags for one persisted petroleum_osm_features row (map click enrichment)."""
+    try:
+        try:
+            from backend.services.petroleum_osm_store import get_osm_feature_properties
+        except ImportError:
+            from services.petroleum_osm_store import get_osm_feature_properties
+
+        conn = get_db_connection()
+        try:
+            props = get_osm_feature_properties(conn, layer_id, osm_type, osm_id)
+        finally:
+            conn.close()
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown OSM petroleum layer: {layer_id}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"OSM feature lookup failed: {exc}") from exc
+
+    if not props:
+        raise HTTPException(status_code=404, detail="OSM feature not found")
+    return _licenses_json_response(
+        {
+            "layer_id": layer_id,
+            "osm_type": osm_type,
+            "osm_id": osm_id,
+            "properties": props,
+            "attribution": "© OpenStreetMap contributors (ODbL)",
+        },
+        max_age=3600,
+    )
 
 
 @app.get("/api/petroleum/osm-layers/{layer_id}")
@@ -6540,7 +6275,7 @@ def admin_open_data_sync(
     x_admin_token: Optional[str] = Header(None),
     source_id: Optional[str] = None,
 ):
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6729,7 +6464,7 @@ def admin_comtrade_sync(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Refresh oil_trade_flows from UN Comtrade HS27 (requires COMTRADE_API_KEY)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6757,7 +6492,7 @@ def admin_data_health(
     refresh_probes: bool = False,
 ):
     """Operational snapshot: sync runs, drift alerts, license counts, OSM cache stats."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6786,6 +6521,11 @@ class GemExtractionTrackerIngestRequest(BaseModel):
 
 
 class GemGoitPipelinesIngestRequest(BaseModel):
+    path: Optional[str] = None
+    routes_dir: Optional[str] = None
+
+
+class GemGgitGasPipelinesIngestRequest(BaseModel):
     path: Optional[str] = None
     routes_dir: Optional[str] = None
 
@@ -6877,7 +6617,7 @@ def admin_gem_extraction_tracker_ingest(
     Ingest GEM Global Oil and Gas Extraction Tracker xlsx into ``licenses``
     (``sector=oil_and_gas``). Defaults to repo-root workbook or ``GEM_TRACKER_XLSX_PATH``.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6904,7 +6644,7 @@ def admin_gem_goit_pipelines_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GOIT Oil/NGL pipelines (xlsx + per-ProjectID route GeoJSON) into gem_pipeline_segments."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6924,6 +6664,108 @@ def admin_gem_goit_pipelines_ingest(
     except Exception as exc:
         conn.rollback()
         return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/gem-ggit-gas-pipelines/ingest")
+def admin_gem_ggit_gas_pipelines_ingest(
+    request: GemGgitGasPipelinesIngestRequest,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """Ingest GEM GGIT gas transmission pipelines (xlsx + gas route GeoJSON) into gem_pipeline_segments."""
+    forbidden = _check_admin_token(x_admin_token, authorization)
+    if forbidden is not None:
+        return forbidden
+
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.ingest.gem_ggit_gas_pipelines_import import ingest_gem_ggit_gas_pipelines
+        except ImportError:
+            from services.ingest.gem_ggit_gas_pipelines_import import ingest_gem_ggit_gas_pipelines
+        summary = ingest_gem_ggit_gas_pipelines(
+            conn,
+            workbook_path=request.path,
+            routes_dir=request.routes_dir,
+        )
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/bunker-fuel-suppliers/sync")
+def admin_bunker_fuel_suppliers_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
+    """Index curated bunker/fuel supplier registers into oil_companies."""
+    forbidden = _check_admin_token(x_admin_token, authorization)
+    if forbidden is not None:
+        return forbidden
+    try:
+        from backend.services.oil_live_graph_sync import _graph_sync_go_step_enabled
+    except ImportError:
+        from services.oil_live_graph_sync import _graph_sync_go_step_enabled  # type: ignore
+    if _graph_sync_go_step_enabled("bunker_fuel_suppliers"):
+        try:
+            from backend.services.supplier_enrichment import trigger_go_bunker_fuel_suppliers_sync
+        except ImportError:
+            from services.supplier_enrichment import trigger_go_bunker_fuel_suppliers_sync  # type: ignore
+        summary = trigger_go_bunker_fuel_suppliers_sync()
+        if summary.get("status") == "error":
+            return summary
+        return {"status": "success", **summary}
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies
+        except ImportError:
+            from services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies
+        with conn.cursor() as cur:
+            summary = sync_bunker_fuel_suppliers_to_companies(cur)
+        conn.commit()
+        return {"status": "success", **summary}
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/suppliers/nearby")
+def get_nearby_suppliers(
+    locode: Optional[str] = None,
+    south: Optional[float] = None,
+    west: Optional[float] = None,
+    north: Optional[float] = None,
+    east: Optional[float] = None,
+    limit: int = 40,
+):
+    """Licensed bunker/fuel suppliers indexed near a port LOCODE or map bbox."""
+    conn = get_db_connection()
+    try:
+        try:
+            from backend.services.supplier_enrichment import query_nearby_suppliers
+        except ImportError:
+            from services.supplier_enrichment import query_nearby_suppliers
+        return {
+            "suppliers": query_nearby_suppliers(
+                conn,
+                locode=locode,
+                south=south,
+                west=west,
+                north=north,
+                east=east,
+                limit=limit,
+            ),
+            "limitations": [
+                "Curated regulator/port registers only — not a global ZoomInfo replacement.",
+                "Phones/emails only when published on official registers; no fabricated contacts.",
+            ],
+        }
     finally:
         conn.close()
 
@@ -7043,7 +6885,7 @@ def admin_gem_gogpt_plants_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GOGPT plant units (xlsx) into gem_plant_units."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7073,7 +6915,7 @@ def admin_gem_ggit_lng_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GGIT LNG terminals (xlsx) into gem_lng_terminals."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7175,7 +7017,7 @@ def admin_eia_historic_imports_ingest(
     Ingest EIA ``impa*.xls(x)`` from ``EIA_DOWNLOADS_DIR`` or ``folder`` query/body path.
     User-provided files only — does not scrape eia.gov.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7210,7 +7052,7 @@ def admin_petroleum_osm_sync(
     from_gap_queue: bool = False,
 ):
     """Refresh petroleum_osm_features from Overpass world tiles (optional tile filter)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7251,7 +7093,7 @@ def admin_comtrade_sync_runs(
     limit: int = 50,
 ):
     """Recent scheduled Comtrade HS27 sync runs."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7326,7 +7168,7 @@ def admin_oil_live_enrich_contacts(
     limit: int = 50,
 ):
     """Batch-run contact enrichment for top oil companies missing contacts (requires supplier_id)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7346,9 +7188,10 @@ def admin_oil_live_enrich_contacts(
 
 
 @app.post("/api/admin/oil-live/purge-demo-seed")
-def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
+def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Delete demo opportunities and seed/demo port calls (MT DEMO STAR, seed_port_calls)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7416,7 +7259,7 @@ def admin_trade_manifest_upload(
     consent: bool = True,
 ):
     """Ingest user-provided manifest CSV into trade_manifest_rows (tier=user_upload)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     if not file_path.strip():
@@ -7502,7 +7345,7 @@ def admin_oil_live_graph_sync(
     rebuild_synthetic_bol: bool = True,
 ):
     """Merge free sources into oil commercial graph + trigger synthetic BOL rebuild."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7523,9 +7366,10 @@ def admin_oil_live_graph_sync(
 
 
 @app.post("/api/admin/eu-procurement/sync")
-def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Refresh eu_procurement_notices from TED Search API (free, no API key)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7804,9 +7648,10 @@ def read_entity_eu_procurement(
 
 
 @app.post("/api/admin/poland-mining/sync")
-def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Pull Poland PGI MIDAS mining areas via ArcGIS MapServer into licenses."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7831,9 +7676,10 @@ def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
 
 
 @app.post("/api/admin/sweden-mining/sync")
-def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Pull Sweden SGU mineral permits via OGC API Features into licenses."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7863,7 +7709,7 @@ def admin_kazakhstan_mining_sync(
     max_rows: int = 5000,
 ):
     """Pull Kazakhstan egov mining register when KZ_EGOV_API_KEY is configured."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7894,7 +7740,7 @@ def admin_oil_products_licenses_sync(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Upsert curated downstream fuel / petroleum products marketing licensees from seed JSON."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8142,7 +7988,7 @@ def admin_export_licenses(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Export licenses from Postgres for backup and re-import (source of truth)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8223,7 +8069,7 @@ async def admin_import_licenses(
     Upsert licenses from admin CSV (same columns as GET /api/admin/licenses/export).
     Rows with manually_edited=TRUE are not updated on conflict.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8354,7 +8200,7 @@ async def admin_import_extracted_csv(
     sector: str = "mining",
     x_admin_token: Optional[str] = Header(None),
 ):
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8430,24 +8276,9 @@ class GeocodeRevertRequest(BaseModel):
     country: Optional[str] = None
 
 
-def _check_admin_token(x_admin_token: Optional[str]) -> Optional[Response]:
-    expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        # Match the rest of the codebase: log but allow in local dev. The
-        # frontend Admin Panel is gated client-side; this endpoint should
-        # additionally be reverse-proxy gated in prod.
-        print("[admin] WARNING: ADMIN_TOKEN env not set — admin endpoint is unauthenticated.")
-        return None
-    if x_admin_token != expected:
-        return Response("Forbidden", status_code=403)
-    return None
-
-
-from fastapi import Header
-
-
 @app.post("/api/admin/geocode-licenses")
-def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Run a backfill batch.
 
     Example
@@ -8463,7 +8294,7 @@ def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optio
     calls are idempotent thanks to the ``geo_cache`` table and the
     ``geo_source`` filter.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -8507,12 +8338,13 @@ def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optio
 
 
 @app.post("/api/admin/geocode-licenses/revert")
-def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Restore ``original_lat`` / ``original_lng`` for any row touched by a
     backfill run. ``geo_source='user'`` rows are never reverted because they
     have no recorded prior value to restore.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -8533,11 +8365,12 @@ class ArcGISIngestRequest(BaseModel):
     batch_size: Optional[int] = 1000
 
 @app.post("/api/admin/ingest/arcgis")
-def ingest_arcgis_cadastre(request: ArcGISIngestRequest, x_admin_token: Optional[str] = Header(None)):
+def ingest_arcgis_cadastre(request: ArcGISIngestRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """
     Scrapes an ArcGIS REST feature layer and ingests licenses into the database.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 

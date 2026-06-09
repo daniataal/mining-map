@@ -1,0 +1,140 @@
+# Tier-3 scale Caddy — load-balance oil-live-intel-a/b and backend-a/b.
+# Mounted by docker-compose.prod.scale.yml instead of Caddyfile.
+:80 {
+	encode gzip zstd
+
+	route {
+		handle /api/oil-live/* {
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		handle /api/licenses/annotations {
+			reverse_proxy backend-a:8000 backend-b:8000
+		}
+		handle /api/licenses/*/annotations {
+			reverse_proxy backend-a:8000 backend-b:8000
+		}
+
+		handle_path /api/licenses* {
+			rewrite * /api/oil-live/licenses{path}
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+		handle_path /licenses* {
+			rewrite * /api/oil-live/licenses{path}
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		handle_path /entities* {
+			rewrite * /entities{path}
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		handle /api/map/country-borders* {
+			uri replace /api/map/country-borders /api/oil-live/map/country-borders
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		@petroleum_osm_layers {
+			path /api/petroleum/osm-layers /api/petroleum/osm-layers/*
+		}
+		handle @petroleum_osm_layers {
+			uri replace /api/petroleum/osm-layers /api/oil-live/map/petroleum-osm/layers
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		handle /api/petroleum/osm-tiles* {
+			uri replace /api/petroleum/osm-tiles /api/oil-live/map/petroleum-osm/tiles
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+		handle /api/maritime/stats* {
+			uri replace /api/maritime/stats /api/oil-live/maritime/stats
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+		handle /api/maritime/context* {
+			uri replace /api/maritime/context /api/oil-live/maritime/context
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+		handle /api/maritime/vessels* {
+			uri replace /api/maritime/vessels /api/oil-live/vessels/live
+			reverse_proxy oil-live-intel-a:8095 oil-live-intel-b:8095 {
+				transport http {
+					read_timeout 0
+					write_timeout 0
+				}
+			}
+		}
+
+		@backend {
+			path /auth/* /activity/* /files/* /docs /openapi.json /api/*
+		}
+		handle @backend {
+			reverse_proxy backend-a:8000 backend-b:8000
+		}
+
+		@static_assets {
+			path /assets/*
+			path *.js *.css *.woff *.woff2 *.png *.jpg *.jpeg *.gif *.ico *.svg *.webp
+		}
+		handle @static_assets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			reverse_proxy frontend:5173
+		}
+
+		@spa_shell {
+			path / /index.html
+		}
+		handle @spa_shell {
+			header Cache-Control "no-cache, must-revalidate"
+			reverse_proxy frontend:5173
+		}
+
+		handle {
+			reverse_proxy frontend:5173
+		}
+	}
+}

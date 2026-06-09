@@ -5,12 +5,17 @@ import { useI18n } from '../../lib/i18n';
 import type { RoutePlannerHubMarker } from './locationPresets';
 import type { RoutePickRole } from './useRoutePlanner';
 
-const AIRPORT_ICON_IDLE = createAirportMapIcon(false);
-const AIRPORT_ICON_PICK = createAirportMapIcon(true);
+const AIRPORT_ICON_IDLE = createAirportMapIcon(false, false);
+const AIRPORT_ICON_PICK = createAirportMapIcon(true, false);
+const AIRPORT_ICON_EMPHASIZED = createAirportMapIcon(false, true);
+const AIRPORT_ICON_EMPHASIZED_PICK = createAirportMapIcon(true, true);
 
-function createAirportMapIcon(active = false): L.DivIcon {
-  const size = active ? 30 : 26;
+function createAirportMapIcon(active = false, emphasized = false): L.DivIcon {
+  const size = active ? (emphasized ? 36 : 30) : emphasized ? 32 : 26;
   const border = active ? '2.5px solid #fbbf24' : '2px solid rgba(255,255,255,0.95)';
+  const shadow = emphasized
+    ? '0 3px 14px rgba(99,102,241,0.65)'
+    : '0 2px 10px rgba(99,102,241,0.45)';
   return new L.DivIcon({
     className: 'route-airport-marker',
     html: `<span role="img" aria-label="Airport" style="
@@ -20,7 +25,7 @@ function createAirportMapIcon(active = false): L.DivIcon {
       background:rgba(79,70,229,0.92);
       border:${border};
       border-radius:50%;
-      box-shadow:0 2px 10px rgba(99,102,241,0.45);
+      box-shadow:${shadow};
       cursor:pointer;
     ">✈</span>`,
     iconSize: [size, size],
@@ -32,16 +37,24 @@ interface RoutePlannerAirportMarkersProps {
   airports: RoutePlannerHubMarker[];
   pickRole: RoutePickRole | null;
   onAirportPick: (airport: RoutePlannerHubMarker, role: RoutePickRole) => void;
+  emphasized?: boolean;
 }
 
 function RoutePlannerAirportMarkers({
   airports,
   pickRole,
   onAirportPick,
+  emphasized = false,
 }: RoutePlannerAirportMarkersProps) {
   const { t } = useI18n();
-  const icon = pickRole ? AIRPORT_ICON_PICK : AIRPORT_ICON_IDLE;
-  const zIndex = pickRole ? 2510 : 410;
+  const icon = pickRole
+    ? emphasized
+      ? AIRPORT_ICON_EMPHASIZED_PICK
+      : AIRPORT_ICON_PICK
+    : emphasized
+      ? AIRPORT_ICON_EMPHASIZED
+      : AIRPORT_ICON_IDLE;
+  const zIndex = pickRole ? (emphasized ? 3210 : 2510) : emphasized ? 910 : 410;
   const interactive = Boolean(pickRole);
 
   const markers = useMemo(

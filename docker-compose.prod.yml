@@ -8,9 +8,10 @@
 #   sudo sysctl -w vm.max_map_count=262144
 #   echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
 #
-# Ports: backend :8000, frontend :5173, oil-live-intel :8095, Caddy :8080/:8443 (override via
-# MINING_MAP_CADDY_HTTP / MINING_MAP_CADDY_HTTPS). With Caddy, browser can use :8080 for same-origin
-# /api/oil-live/* proxy; direct access remains :8000 / :5173 / :8095.
+# Ports: backend :8000, frontend :5173 (nginx static), oil-live-intel :8095, Caddy :8080/:8443
+# (override via MINING_MAP_CADDY_HTTP / MINING_MAP_CADDY_HTTPS). With Caddy, browser uses :8080 for
+# same-origin /api/* proxy; direct access remains :8000 / :5173 / :8095. Frontend image is built with
+# mining-viz/Dockerfile.prod (VITE_API_BASE compile-time; leave empty for Caddy same-origin).
 
 services:
   backend:
@@ -42,6 +43,12 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - ROUTE_SERVICE_URL=http://route-service:8001
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_TIMEOUT_SECONDS=${STORAGE_OVERPASS_TIMEOUT_SECONDS:-120}
+      - STORAGE_OVERPASS_RETRY_ATTEMPTS=${STORAGE_OVERPASS_RETRY_ATTEMPTS:-3}
+      - STORAGE_OVERPASS_TILE_WORKERS=${STORAGE_OVERPASS_TILE_WORKERS:-3}
+      - STORAGE_SKIP_LIVE_OVERPASS=${STORAGE_SKIP_LIVE_OVERPASS:-true}
       - OIL_INTEL_API_URL=http://oil-live-intel:8095
       - OIL_INTEL_INTERNAL_KEY
       - OIL_GRAPH_SYNC_ENABLED=true
@@ -216,6 +223,12 @@ services:
       - OIL_GRAPH_SYNC_INTERVAL_SECONDS=43200
       - OIL_GRAPH_SYNC_BACKOFF_SECONDS=3600
       - OIL_GRAPH_STORAGE_IMPORT_CAP=5000
+      - OVERPASS_URL=${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_URL=${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+      - STORAGE_OVERPASS_TIMEOUT_SECONDS=${STORAGE_OVERPASS_TIMEOUT_SECONDS:-120}
+      - STORAGE_OVERPASS_RETRY_ATTEMPTS=${STORAGE_OVERPASS_RETRY_ATTEMPTS:-3}
+      - STORAGE_OVERPASS_TILE_WORKERS=${STORAGE_OVERPASS_TILE_WORKERS:-3}
+      - STORAGE_SKIP_LIVE_OVERPASS=${STORAGE_SKIP_LIVE_OVERPASS:-true}
       - OIL_INTEL_API_URL=http://oil-live-intel:8095
       - OIL_INTEL_INTERNAL_KEY
       - OIL_LIVE_DISABLE_DEMO_SEED=1
@@ -365,11 +378,6 @@ services:
     restart: always
     ports:
       - "5173:5173"
-    environment:
-      - VITE_API_BASE=${VITE_API_BASE:-}
-      - OIL_INTEL_PROXY_TARGET=http://oil-live-intel:8095
-      # Vite dev proxy must reach Docker service names, not 127.0.0.1 inside the container.
-      - BACKEND_PROXY_TARGET=http://backend:8000
     depends_on:
       backend:
         condition: service_healthy

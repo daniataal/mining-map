@@ -3,11 +3,13 @@ import { useI18n } from '../lib/i18n';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from './ui/card';
-import { LucideLock, LucideUser, LucideShieldAlert } from 'lucide-react';
+import { Eye, EyeOff, Loader2, LucideLock, LucideUser, LucideShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
+import BrandMark from './BrandMark';
+import { BRAND_COPYRIGHT, BRAND_NAME } from '../lib/brand';
 
 interface AuthOverlayProps {
-  onLogin: (user: string, pass: string) => void;
+  onLogin: (user: string, pass: string) => void | Promise<void>;
   error: string | null;
 }
 
@@ -15,10 +17,20 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
     const { t } = useI18n();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [isSigningIn, setIsSigningIn] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        onLogin(username.trim(), password);
+        if (isSigningIn) return;
+        setIsSigningIn(true);
+        try {
+            await onLogin(username.trim(), password);
+        } catch {
+            // Parent handleLogin surfaces authError; keep spinner recovery here.
+        } finally {
+            setIsSigningIn(false);
+        }
     };
 
     return (
@@ -31,11 +43,11 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
             >
                 <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800">
                     <CardHeader className="space-y-2 text-center pb-8">
-                        <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
-                            <LucideLock className="w-6 h-6 text-amber-500" />
+                        <div className="mx-auto mb-4 flex items-center justify-center">
+                            <BrandMark size="lg" />
                         </div>
                         <CardTitle className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {t("גישה למערכת", "MadSan Global Intelligence")}
+                            {t("גישה למערכת", BRAND_NAME)}
                         </CardTitle>
                         <p className="text-sm text-slate-500 dark:text-slate-400">
                             {t("אנא התחבר כדי לצפות ולנהל נתוני רישיונות", "Please sign in to view and manage license data.")}
@@ -52,6 +64,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                                         className="pl-10 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-amber-500 text-slate-900 dark:text-white"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
+                                        disabled={isSigningIn}
                                         required
                                     />
                                 </div>
@@ -60,13 +73,24 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                                 <div className="relative">
                                     <LucideLock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                                     <Input 
-                                        type="password" 
+                                        type={showPassword ? 'text' : 'password'}
                                         placeholder={t("סיסמה", "Password")}
-                                        className="pl-10 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-amber-500 text-slate-900 dark:text-white"
+                                        className="pl-10 pr-10 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus:ring-amber-500 text-slate-900 dark:text-white"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
+                                        disabled={isSigningIn}
                                         required
                                     />
+                                    <button
+                                        type="button"
+                                        tabIndex={-1}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors disabled:opacity-50"
+                                        onClick={() => setShowPassword((prev) => !prev)}
+                                        disabled={isSigningIn}
+                                        aria-label={showPassword ? t("הסתר סיסמה", "Hide password") : t("הצג סיסמה", "Show password")}
+                                    >
+                                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    </button>
                                 </div>
                             </div>
 
@@ -82,10 +106,18 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                             )}
 
                             <Button 
-                                type="submit" 
-                                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold h-11 text-base mt-2 transition-all active:scale-[0.98]"
+                                type="submit"
+                                disabled={isSigningIn}
+                                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold h-11 text-base mt-2 transition-all active:scale-[0.98] disabled:opacity-80"
                             >
-                                {t("התחבר", "Sign In")}
+                                {isSigningIn ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        {t("מתחבר...", "Signing in...")}
+                                    </>
+                                ) : (
+                                    t("התחבר", "Sign In")
+                                )}
                             </Button>
                         </form>
                     </CardContent>
@@ -96,7 +128,7 @@ export default function AuthOverlay({ onLogin, error }: AuthOverlayProps) {
                             <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
                         </div>
                         <p className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">
-                            {t("צוות מורשה בלבד • 2026 MadSan Global Intelligence", "Authorized Personnel Only • 2026 MadSan Global Intelligence")}
+                            {t(`צוות מורשה בלבד • ${BRAND_COPYRIGHT}`, `Authorized Personnel Only • ${BRAND_COPYRIGHT}`)}
                         </p>
                     </CardFooter>
                 </Card>

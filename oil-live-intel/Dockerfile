@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # CI uses dannyatalla/oil-live-intel-base:latest (pre-downloaded modules). Local default: stock Go image.
-ARG BASE_IMAGE=golang:1.23-alpine
+# GOTOOLCHAIN=auto: stale base images on Docker Hub may ship Go 1.23 while go.mod requires 1.24+.
+ARG BASE_IMAGE=golang:1.24-alpine
 FROM ${BASE_IMAGE} AS build
+ENV GOTOOLCHAIN=auto
 WORKDIR /src
 RUN apk add --no-cache git
 

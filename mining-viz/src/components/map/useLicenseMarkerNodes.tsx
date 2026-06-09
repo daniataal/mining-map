@@ -39,6 +39,11 @@ export function useLicenseMarkerNodes({
       const markerIcon = licenseMarkerIcons.get(item.id);
       if (!markerIcon) continue;
       const isServerCluster = isServerLicenseCluster(item);
+      const hideCountrySummaryHub =
+        isCountryLicenseSummary(item) &&
+        licenseMapZoom != null &&
+        licenseMapZoom >= SERVER_CLUSTER_MIN_DRILL_ZOOM;
+      if (hideCountrySummaryHub) continue;
       const hidePointsForServerClusters =
         serverClusterMode &&
         (licenseMapZoom == null || licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM);
@@ -48,6 +53,7 @@ export function useLicenseMarkerNodes({
           key={item.id}
           position={[item._displayLat, item._displayLng]}
           icon={markerIcon}
+          zIndexOffset={isServerCluster ? 1200 : 0}
           ref={(el) => {
             if (!el) {
               delete markerRefs.current[item.id];
@@ -57,6 +63,8 @@ export function useLicenseMarkerNodes({
           }}
           eventHandlers={{
             click: (e) => {
+              const oe = e.originalEvent as MouseEvent & { __mapFeatureClickHandled?: boolean };
+              if (oe) oe.__mapFeatureClickHandled = true;
               L.DomEvent.stopPropagation(e);
               onMarkerClick(item, isServerCluster);
             },

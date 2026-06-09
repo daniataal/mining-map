@@ -49,13 +49,14 @@ jobs:
           - service: frontend
             context: ./mining-viz
             image: dannyatalla/mining-frontend
-            dockerfile: Dockerfile
-            build_args: ""
+            dockerfile: Dockerfile.prod
+            build_args: VITE_API_BASE=
           - service: oil-live-intel
             context: ./oil-live-intel
             image: dannyatalla/oil-live-intel
             dockerfile: Dockerfile
-            build_args: BASE_IMAGE=dannyatalla/oil-live-intel-base:latest
+            # Use stock Go 1.24 until oil-live-intel-base:latest is rebuilt (workflow build-base).
+            build_args: BASE_IMAGE=golang:1.24-alpine
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +98,11 @@ jobs:
           export VERSION_TAG=v${{ needs.meta.outputs.build_number }}
           docker compose -f docker-compose.prod.yml config --quiet
 
+      - name: Validate production env render
+        run: |
+          chmod +x scripts/render_backend_env.sh scripts/render_backend_env_test.sh
+          ./scripts/render_backend_env_test.sh
+
   # Deploy job — required GitHub secrets (repository Settings → Secrets):
   #   DOCKER_USERNAME, DOCKER_PASSWORD — registry push (build job)
   #   REMOTE_HOST, REMOTE_USER, REMOTE_SSH_KEY — SSH to production VM
@@ -107,8 +113,15 @@ jobs:
   #   EIA_API_KEY, CENSUS_API_KEY, USITC_DATAWEB_API_KEY — trade / graph sync
   #   OIL_INTEL_INTERNAL_KEY — shared auth between backend and oil-live-intel (required in prod)
   #   SECRET_KEY — JWT/session signing for backend (required in prod)
+  #   SHIPVAULT_REFRESH_TOKEN — optional long-lived vessel registry enrichment token
+  #   SHIPVAULT_SESSION_JSON / SHIPVAULT_BEARER_TOKEN — optional emergency bootstrap fallbacks
+  #   SHIPVAULT_FIREBASE_API_KEY / SHIPVAULT_CACHE_TTL_DAYS — optional ShipVault tuning
+  #   SHIPVAULT_BACKFILL_ENABLED / LIMIT / INTERVAL_HOURS — optional bounded registry cache backfill tuning
+  #   BARENTSWATCH_CLIENT_ID, BARENTSWATCH_CLIENT_SECRET — optional Norway AIS ingest
+  #   GOOGLE_CSE_API_KEY, GOOGLE_CSE_CX (or GOOGLE_CSE_ID), SERPAPI_API_KEY — contact web discovery
   #   KZ_EGOV_API_KEY, OPENSANCTIONS_API_KEY, COURTLISTENER_API_KEY — optional ingest
   #   SYNC_ALERT_WEBHOOK_URL — optional drift alerts
+  # Feature flags (no secrets): config/production.env — deployed automatically each release
   # VM: full stack ~4–6 GB RAM. One-time host sysctl for Elasticsearch:
   #   sudo sysctl -w vm.max_map_count=262144
   deploy:
@@ -152,14 +165,14 @@ jobs:
         source: ${{ steps.csv_import.outputs.csv_path }}
         target: /tmp/
 
-    - name: Upload production compose and Caddyfile to remote VM
+    - name: Upload production compose, env profile, and Caddyfile to remote VM
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        source: docker-compose.prod.yml,Caddyfile
+        source: docker-compose.prod.yml,config/production.env,scripts/render_backend_env.sh,Caddyfile
         target: /tmp/mining-map-deploy/
 
     - name: Deploy to remote server
@@ -188,65 +201,58 @@ jobs:
         SYNC_ALERT_WEBHOOK_URL: ${{ secrets.SYNC_ALERT_WEBHOOK_URL }}
         OIL_INTEL_INTERNAL_KEY: ${{ secrets.OIL_INTEL_INTERNAL_KEY }}
         SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        SHIPVAULT_REFRESH_TOKEN: ${{ secrets.SHIPVAULT_REFRESH_TOKEN }}
+        SHIPVAULT_SESSION_JSON: ${{ secrets.SHIPVAULT_SESSION_JSON }}
+        SHIPVAULT_BEARER_TOKEN: ${{ secrets.SHIPVAULT_BEARER_TOKEN }}
+        SHIPVAULT_FIREBASE_API_KEY: ${{ secrets.SHIPVAULT_FIREBASE_API_KEY }}
+        SHIPVAULT_CACHE_TTL_DAYS: ${{ vars.SHIPVAULT_CACHE_TTL_DAYS }}
+        SHIPVAULT_BACKFILL_ENABLED: ${{ vars.SHIPVAULT_BACKFILL_ENABLED }}
+        SHIPVAULT_BACKFILL_LIMIT: ${{ vars.SHIPVAULT_BACKFILL_LIMIT }}
+        SHIPVAULT_BACKFILL_INTERVAL_HOURS: ${{ vars.SHIPVAULT_BACKFILL_INTERVAL_HOURS }}
+        BARENTSWATCH_CLIENT_ID: ${{ secrets.BARENTSWATCH_CLIENT_ID }}
+        BARENTSWATCH_CLIENT_SECRET: ${{ secrets.BARENTSWATCH_CLIENT_SECRET }}
+        GOOGLE_CSE_API_KEY: ${{ secrets.GOOGLE_CSE_API_KEY }}
+        GOOGLE_CSE_CX: ${{ secrets.GOOGLE_CSE_CX }}
+        GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+        SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
         VERSION_TAG: v${{ needs.meta.outputs.build_number }}
       with:
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USER }}
         port: 22
         key: ${{ secrets.REMOTE_SSH_KEY }}
-        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,CENSUS_API_KEY,USITC_DATAWEB_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL,OIL_INTEL_INTERNAL_KEY,SECRET_KEY
+        envs: GROQ_AI_API_KEY,GROQ_API_KEY,OPENROUTER_AI_API_KEY,OPENROUTER_API_KEY,AISSTREAM_API_KEY,ADMIN_TOKEN,AUTO_IMPORT_LICENSES_CSV,CSV_UPLOADED,REMOTE_HOST,VERSION_TAG,MAPBOX_ACCESS_TOKEN,MAPBOX_TOKEN,COMTRADE_API_KEY,COMTRADE_API_KEY_SECONDARY,EIA_API_KEY,CENSUS_API_KEY,USITC_DATAWEB_API_KEY,KZ_EGOV_API_KEY,OPENSANCTIONS_API_KEY,COURTLISTENER_API_KEY,SYNC_ALERT_WEBHOOK_URL,OIL_INTEL_INTERNAL_KEY,SECRET_KEY,SHIPVAULT_REFRESH_TOKEN,SHIPVAULT_SESSION_JSON,SHIPVAULT_BEARER_TOKEN,SHIPVAULT_FIREBASE_API_KEY,SHIPVAULT_CACHE_TTL_DAYS,SHIPVAULT_BACKFILL_ENABLED,SHIPVAULT_BACKFILL_LIMIT,SHIPVAULT_BACKFILL_INTERVAL_HOURS,BARENTSWATCH_CLIENT_ID,BARENTSWATCH_CLIENT_SECRET,GOOGLE_CSE_API_KEY,GOOGLE_CSE_CX,GOOGLE_CSE_ID,SERPAPI_API_KEY
         script: |
           # Ensure directory exists and navigate
           sudo mkdir -p /opt/mining-map
           sudo mkdir -p /opt/mining-map/data
           cd /opt/mining-map
 
-          # Map GitHub secret names to container/runtime env names (see .env.example).
-          GROQ_EFFECTIVE="${GROQ_AI_API_KEY:-${GROQ_API_KEY:-}}"
-          OPENROUTER_EFFECTIVE="${OPENROUTER_AI_API_KEY:-${OPENROUTER_API_KEY:-}}"
-          MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
-          COMTRADE_EFFECTIVE="${COMTRADE_API_KEY:-}"
-
-          # Install checked-in production compose + Caddyfile (replaces inline heredoc).
+          # Install checked-in production compose, feature-flag profile, and Caddyfile.
           if [ -f /tmp/mining-map-deploy/docker-compose.prod.yml ]; then
             sudo mv /tmp/mining-map-deploy/docker-compose.prod.yml /opt/mining-map/docker-compose.prod.yml
           fi
           if [ -f /tmp/mining-map-deploy/Caddyfile ]; then
             sudo mv /tmp/mining-map-deploy/Caddyfile /opt/mining-map/Caddyfile
           fi
+          sudo mkdir -p /opt/mining-map/config /opt/mining-map/scripts
+          if [ -f /tmp/mining-map-deploy/config/production.env ]; then
+            sudo mv /tmp/mining-map-deploy/config/production.env /opt/mining-map/config/production.env
+          elif [ -f /tmp/mining-map-deploy/production.env ]; then
+            sudo mv /tmp/mining-map-deploy/production.env /opt/mining-map/config/production.env
+          fi
+          if [ -f /tmp/mining-map-deploy/scripts/render_backend_env.sh ]; then
+            sudo mv /tmp/mining-map-deploy/scripts/render_backend_env.sh /opt/mining-map/scripts/render_backend_env.sh
+            sudo chmod +x /opt/mining-map/scripts/render_backend_env.sh
+          elif [ -f /tmp/mining-map-deploy/render_backend_env.sh ]; then
+            sudo mv /tmp/mining-map-deploy/render_backend_env.sh /opt/mining-map/scripts/render_backend_env.sh
+            sudo chmod +x /opt/mining-map/scripts/render_backend_env.sh
+          fi
 
-          # Persist runtime env for backend + workers + oil-live (env_file: backend.env).
-          {
-            printf 'AISSTREAM_API_KEY=%s\n' "$AISSTREAM_API_KEY"
-            printf 'ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
-            printf 'MAPBOX_ACCESS_TOKEN=%s\n' "$MAPBOX_EFFECTIVE"
-            printf 'GROQ_API_KEY=%s\n' "$GROQ_EFFECTIVE"
-            printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_EFFECTIVE"
-            printf 'DISABLE_POLLINATIONS_FALLBACK=1\n'
-            printf 'COMTRADE_API_KEY=%s\n' "$COMTRADE_EFFECTIVE"
-            if [ -n "${COMTRADE_API_KEY_SECONDARY:-}" ]; then
-              printf 'COMTRADE_API_KEY_SECONDARY=%s\n' "$COMTRADE_API_KEY_SECONDARY"
-            fi
-            printf 'COMTRADE_SYNC_ENABLED=true\n'
-            printf 'EIA_API_KEY=%s\n' "${EIA_API_KEY:-}"
-            printf 'CENSUS_API_KEY=%s\n' "${CENSUS_API_KEY:-}"
-            printf 'USITC_DATAWEB_API_KEY=%s\n' "${USITC_DATAWEB_API_KEY:-}"
-            printf 'KZ_EGOV_API_KEY=%s\n' "${KZ_EGOV_API_KEY:-}"
-            printf 'OPENSANCTIONS_API_KEY=%s\n' "${OPENSANCTIONS_API_KEY:-}"
-            printf 'COURTLISTENER_API_KEY=%s\n' "${COURTLISTENER_API_KEY:-}"
-            if [ -n "${SYNC_ALERT_WEBHOOK_URL:-}" ]; then
-              printf 'SYNC_ALERT_WEBHOOK_URL=%s\n' "$SYNC_ALERT_WEBHOOK_URL"
-            fi
-            printf 'OIL_INTEL_INTERNAL_KEY=%s\n' "${OIL_INTEL_INTERNAL_KEY:-oil-intel-dev}"
-            printf 'SECRET_KEY=%s\n' "${SECRET_KEY:-}"
-            printf 'OIL_LIVE_DISABLE_DEMO_SEED=1\n'
-            printf 'OIL_INTEL_SEED_ON_STARTUP=false\n'
-            printf 'ELASTICSEARCH_URL=http://elasticsearch:9200\n'
-            printf 'MARITIME_GULF_DEMO_SEED=0\n'
-            printf 'MARITIME_COASTAL_DEMO_SEED=0\n'
-            printf 'SEC_EDGAR_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
-            printf 'GLEIF_USER_AGENT=MeridianMiningMap/1.0 (deploy)\n'
-          } | sudo tee backend.env >/dev/null
+          # Merge committed feature flags + GitHub secrets → backend.env (no manual VM edits).
+          PRODUCTION_ENV=/opt/mining-map/config/production.env \
+            /opt/mining-map/scripts/render_backend_env.sh /tmp/backend.env.rendered
+          sudo mv /tmp/backend.env.rendered /opt/mining-map/backend.env
 
           # Move uploaded CSV (if present) into a stable, writable location.
           if [ "$CSV_UPLOADED" = "true" ]; then
@@ -263,9 +269,11 @@ jobs:
 
           # Pull and restart full production stack (docker-compose.prod.yml from repo).
           export VERSION_TAG="${VERSION_TAG}"
-          # Empty base → browser uses :5173 same-origin; Vite proxies /api/oil-live → Go (see vite.config.ts).
-          # Backend :8000 also proxies /api/oil-live/* to oil-live-intel when clients still target :8000.
-          export VITE_API_BASE="${VITE_API_BASE:-}"
+          # Compose passthrough keys (see docker-compose.prod.yml) — align with backend.env aliases.
+          GROQ_EFFECTIVE="${GROQ_AI_API_KEY:-${GROQ_API_KEY:-}}"
+          OPENROUTER_EFFECTIVE="${OPENROUTER_AI_API_KEY:-${OPENROUTER_API_KEY:-}}"
+          MAPBOX_EFFECTIVE="${MAPBOX_ACCESS_TOKEN:-${MAPBOX_TOKEN:-}}"
+          COMTRADE_EFFECTIVE="${COMTRADE_API_KEY:-}"
           export GROQ_API_KEY="${GROQ_EFFECTIVE}"
           export OPENROUTER_API_KEY="${OPENROUTER_EFFECTIVE}"
           export AISSTREAM_API_KEY="${AISSTREAM_API_KEY}"

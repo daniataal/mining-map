@@ -11,6 +11,7 @@ export type LiveDealFeatureKind =
   | 'tank_farm'
   | 'refinery'
   | 'oil_field'
+  | 'gem_plant'
   | 'infrastructure';
 
 export type LiveDealTier =
@@ -58,7 +59,18 @@ export type LiveDealArcFeature = LiveDealBaseFeature & {
   popupLng: number;
 };
 
-export type LiveDealMapFeature = LiveDealPointFeature | LiveDealArcFeature;
+export type LiveDealPolylineFeature = LiveDealBaseFeature & {
+  shape: 'polyline';
+  positions: LiveDealLatLng[];
+  color?: string;
+  weight?: number;
+  opacity?: number;
+  dashArray?: string;
+  popupLat: number;
+  popupLng: number;
+};
+
+export type LiveDealMapFeature = LiveDealPointFeature | LiveDealArcFeature | LiveDealPolylineFeature;
 
 export type LiveDealViewport = {
   south: number;

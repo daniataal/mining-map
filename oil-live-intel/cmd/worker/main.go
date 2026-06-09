@@ -33,9 +33,10 @@ func main() {
 
 	go workers.RunPortCallMaintainer(ctx, pool, log)
 	go workers.RunPositionCleanup(ctx, pool, cfg.AISPositionRetainHours, log)
+	go workers.RunSTSDetector(ctx, pool, cfg.AISPositionRetainHours, cfg.GFWArchiveBackfillDays, log)
 	go workers.RunTradeSync(ctx, pool, cfg, log)
 	go workers.RunOpportunityScanner(ctx, pool, cfg, log)
-	go workers.RunSyntheticBolBuilder(ctx, pool, log)
+	go workers.RunInferredTradeBuilder(ctx, pool, log)
 	if cfg.EnableAIS {
 		go workers.RunAISIngestor(ctx, pool, cfg, log)
 	}
@@ -44,11 +45,19 @@ func main() {
 	go workers.StartKazakhstanEgovSyncLoop(ctx, pool)
 	go workers.StartArcGISProbesSyncLoop(ctx, pool)
 	go workers.StartGraphSyncGoStepsLoop(ctx, pool)
+	go workers.StartShipVaultBackfillLoop(ctx, pool, cfg, log)
+	go workers.RunGFWArchiveIngest(ctx, pool, cfg, log)
+	go workers.StartGleifSyncLoop(ctx, pool, cfg, log)
+	go workers.StartEIARefineryCapacitySyncLoop(ctx, pool, cfg, log)
+	go workers.RunAlertEngineLoop(ctx, pool, log)
+	go workers.RunPortManifestScraper(ctx, pool, log)
 
 	log.Info().
 		Bool("ais", cfg.EnableAIS).
 		Bool("eia", cfg.EnableEIA).
 		Bool("comtrade", cfg.EnableComtrade).
+		Bool("shipvault_backfill", cfg.ShipVaultBackfillEnabled).
+		Bool("gfw_archive_ingest", cfg.GFWArchiveIngestEnabled).
 		Msg("oil-live-intel worker started")
 
 	stop := make(chan os.Signal, 1)

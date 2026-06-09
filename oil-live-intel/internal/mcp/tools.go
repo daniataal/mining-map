@@ -101,14 +101,14 @@ func (h *ToolHandler) explainEvent(ctx context.Context, args map[string]any) (st
 		return "", err
 	}
 	breakdown := map[string]any{
-		"event_type":       eventType,
-		"confidence":       conf,
-		"duration_hours":   dur,
-		"draft_in":         din,
-		"draft_out":        dout,
-		"terminal":         tname,
-		"vessel":           vessel,
-		"scoring_note":     "Weights: inside terminal +0.25, duration +0.15/+0.10, draft +0.25, tanker +0.10, destination +0.10, product match +0.05; short stay -0.15",
+		"event_type":     eventType,
+		"confidence":     conf,
+		"duration_hours": dur,
+		"draft_in":       din,
+		"draft_out":      dout,
+		"terminal":       tname,
+		"vessel":         vessel,
+		"scoring_note":   "Weights: inside terminal +0.25, duration +0.15/+0.10, draft +0.25, tanker +0.10, destination +0.10, product match +0.05; short stay -0.15",
 		"example_max_score": confidence.ScorePortCall(confidence.Input{
 			InsideTerminal: true, DurationHours: 24, DraftDeltaAbs: 2,
 			KnownTanker: true, DestinationKnown: true, MatchingProductTerminal: true,
@@ -220,7 +220,7 @@ func (h *ToolHandler) logisticsHint(ctx context.Context, args map[string]any) (s
 		"nearest_pipeline_km": nil,
 		"note":                "Pipeline distance requires OSM segment import (Phase 16 full). Use Route Planner for sea/inland corridor.",
 		"route_planner_prefill": map[string]any{
-			"origin": map[string]any{"name": name, "lat": lat, "lng": lon, "kind": "terminal"},
+			"origin":            map[string]any{"name": name, "lat": lat, "lng": lon, "kind": "terminal"},
 			"preferred_methods": []string{"sea", "pipeline"},
 		},
 		"disclaimer": "Indicative logistics hint — validate tie-in and tariffs with terminal operator.",
@@ -313,7 +313,7 @@ func (h *ToolHandler) listCargoRecords(ctx context.Context, args map[string]any)
 			"shipper_name": shipper, "consignee_name": consignee, "vessel_name": vessel,
 			"mmsi": mmsiVal, "load_port_name": loadPort, "load_country": loadCountry,
 			"discharge_hint": discharge, "volume_best_estimate": vol, "volume_unit": volUnit,
-			"event_date": formatTimePtr(eventDate),
+			"event_date":        formatTimePtr(eventDate),
 			"corridor_load_lat": loadLat, "corridor_load_lng": loadLng,
 			"corridor_discharge_lat": discLat, "corridor_discharge_lng": discLng,
 		})
@@ -371,7 +371,7 @@ func (h *ToolHandler) getCargoRecord(ctx context.Context, args map[string]any) (
 		"load_port_name": loadPort, "load_country": loadCountry,
 		"discharge_hint": discharge, "discharge_country": dischargeCountry,
 		"commodity_description": desc,
-		"volume_low": volLo, "volume_high": volHi, "volume_best_estimate": volBest,
+		"volume_low":            volLo, "volume_high": volHi, "volume_best_estimate": volBest,
 		"volume_method": volMethod, "volume_unit": volUnit, "event_date": formatTimePtr(eventDate),
 		"evidence_chain": evChain, "sources": srcList,
 		"disclaimer": "Synthetic cargo record — inferred from public sources, not a legal Bill of Lading.",
@@ -406,7 +406,7 @@ func (h *ToolHandler) getSyncStatus(ctx context.Context, _ map[string]any) (stri
 		"port_call_count":    portCallCount,
 		"last_graph_sync_at": formatTime(lastGraphSync),
 		"last_cargo_at":      formatTime(lastCargoAt),
-		"disclaimer":         "Counts from Meridian DB — inferred tiers where noted.",
+		"disclaimer":         "Counts from MadSan Intelligence DB — inferred tiers where noted.",
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return string(b), nil
@@ -429,9 +429,9 @@ func ListToolDefs() []map[string]any {
 		{"oil_live_company_contacts", "Contacts + TED procurement matches (company_id)"},
 		{"oil_live_draft_outreach", "Draft outreach email from public facts (company_id)"},
 		{"oil_live_logistics_hint", "Logistics / route planner prefill for terminal (terminal_id)"},
-		{"oil_live_list_cargo_records", "Synthetic Meridian cargo records (commodity, country, min_confidence, limit)"},
+		{"oil_live_list_cargo_records", "Synthetic MadSan cargo records (commodity, country, min_confidence, limit)"},
 		{"oil_live_get_cargo_record", "Full synthetic cargo record with evidence (id or cargo_record_id)"},
-		{"oil_live_get_sync_status", "Meridian DB coverage counts and last graph-sync timestamp"},
+		{"oil_live_get_sync_status", "MadSan Intelligence DB coverage counts and last graph-sync timestamp"},
 		{"oil_live_save_to_suppliers", "Save company to Suppliers map via license+annotation (company_id, auth_token)"},
 	}
 	var tools []map[string]any

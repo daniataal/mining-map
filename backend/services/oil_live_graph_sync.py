@@ -1277,6 +1277,33 @@ def _sync_gem_ggit_lng(conn: Any) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
+def _sync_gem_ggit_gas_pipelines(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.ingest.gem_ggit_gas_pipelines_import import (
+            try_auto_ingest_gem_ggit_gas_pipelines,
+        )
+    except ImportError:
+        from services.ingest.gem_ggit_gas_pipelines_import import (  # type: ignore
+            try_auto_ingest_gem_ggit_gas_pipelines,
+        )
+    try:
+        return try_auto_ingest_gem_ggit_gas_pipelines(conn)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _sync_bunker_fuel_suppliers(conn: Any) -> dict[str, Any]:
+    try:
+        from backend.services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies
+    except ImportError:
+        from services.supplier_enrichment import sync_bunker_fuel_suppliers_to_companies  # type: ignore
+    try:
+        with conn.cursor() as cur:
+            return sync_bunker_fuel_suppliers_to_companies(cur)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _sync_eurostat_trade_flows(conn: Any) -> dict[str, Any]:
     try:
         from backend.services.eurostat_trade import sync_eurostat_hs27
@@ -1474,7 +1501,17 @@ def run_full_graph_sync(conn: Any, *, rebuild_synthetic_bol: bool = True) -> dic
         summary["steps"]["gem_goit_pipelines"] = _sync_gem_goit_pipelines(conn)
         summary["steps"]["gem_gogpt_plants"] = _sync_gem_gogpt_plants(conn)
         summary["steps"]["gem_ggit_lng"] = _sync_gem_ggit_lng(conn)
-        summary["steps"]["eurostat_trade"] = _sync_eurostat_trade_flows(conn)
+        summary["steps"]["gem_ggit_gas_pipelines"] = _sync_gem_ggit_gas_pipelines(conn)
+        summary["steps"]["bunker_fuel_suppliers"] = (
+            _graph_sync_go_skip_payload("bunker_fuel_suppliers")
+            if _graph_sync_go_step_enabled("bunker_fuel_suppliers")
+            else _sync_bunker_fuel_suppliers(conn)
+        )
+        summary["steps"]["eurostat_trade"] = (
+            _graph_sync_go_skip_payload("eurostat_trade")
+            if _graph_sync_go_step_enabled("eurostat_trade")
+            else _sync_eurostat_trade_flows(conn)
+        )
         summary["steps"]["jodi_oil"] = _sync_jodi_validation(conn)
         summary["steps"]["commodity_trade_flows"] = _sync_commodity_trade_comtrade(conn)
         summary["steps"]["trade_manifest_uk"] = _sync_uk_trade_manifests(conn)

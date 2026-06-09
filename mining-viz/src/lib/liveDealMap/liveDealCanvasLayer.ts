@@ -9,6 +9,7 @@ import type {
   LiveDealArcFeature,
   LiveDealMapFeature,
   LiveDealPointFeature,
+  LiveDealPolylineFeature,
   LiveDealViewport,
 } from './liveDealMapTypes';
 
@@ -16,10 +17,13 @@ export interface CanvasLiveDealLayerOptions extends L.LayerOptions {
   mapZoom: number;
   selectedUid: string | null;
   onFeatureClick?: (feature: LiveDealMapFeature) => void;
+  /** Visual-only: do not capture clicks/hover — map-level handlers own interaction. */
+  passThroughClicks?: boolean;
   clusterPoints?: boolean;
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMaxZoom?: number;
   clusterMinCount?: number;
+  clusterGridMultiplier?: number;
   isDark?: boolean;
 }
 
@@ -35,7 +39,7 @@ function colorForFeature(feature: LiveDealMapFeature): string {
   if (feature.kind === 'opportunity') return '#10b981';
   if (feature.kind === 'terminal') return '#38bdf8';
   if (feature.kind === 'storage_terminal') return '#06b6d4';
-  if (feature.kind === 'storage_tank') return '#94a3b8';
+  if (feature.kind === 'storage_tank') return '#67e8f9';
   if (feature.kind === 'tank_farm') return '#f97316';
   if (feature.kind === 'refinery') return '#fb923c';
   if (feature.kind === 'oil_field') return '#1e40af';
@@ -43,7 +47,14 @@ function colorForFeature(feature: LiveDealMapFeature): string {
     if (feature.styleKey?.startsWith('#')) return feature.styleKey;
     return feature.styleKey === 'gold' ? '#facc15' : '#64748b';
   }
-  if (feature.kind === 'server_cluster') return '#2563eb';
+  if (feature.kind === 'server_cluster') {
+    const clusterKind = (feature.data as any)?.clusterKind;
+    if (clusterKind === 'storage_terminal') return '#06b6d4';
+    if (clusterKind === 'tank_farm') return '#f97316';
+    if (clusterKind === 'refinery') return '#fb923c';
+    if (clusterKind === 'storage_tank') return '#67e8f9';
+    return '#2563eb';
+  }
   if (feature.kind === 'vessel') return '#f59e0b';
   if (feature.kind === 'trade_flow') return '#a855f7';
   return '#fb923c';
@@ -65,7 +76,7 @@ function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: b
         : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
           ? 6.5
           : feature.kind === 'storage_tank'
-            ? 5
+            ? zoom >= 12 ? 7 : 5.5
           : feature.kind === 'refinery' || feature.kind === 'oil_field'
             ? 6
         : feature.kind === 'cargo'
@@ -194,6 +205,37 @@ function drawArrowHead(
   ctx.restore();
 }
 
+function drawPolyline(
+  ctx: CanvasRenderingContext2D,
+  map: L.Map,
+  feature: LiveDealPolylineFeature,
+  selected: boolean,
+): void {
+  if (feature.positions.length < 2) return;
+  const points = feature.positions.map(([lat, lng]) => map.latLngToContainerPoint([lat, lng]));
+  const color = feature.color ?? '#fbbf24';
+  const weight = (feature.weight ?? 3.5) + (selected ? 1.5 : 0);
+  const opacity = Math.max(0.35, Math.min(1, feature.opacity ?? 0.92));
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = opacity;
+  ctx.lineWidth = weight;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash(parseDashArray(feature.dashArray));
+  ctx.shadowColor = selected ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = selected ? 14 : 6;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
 function drawArc(
   ctx: CanvasRenderingContext2D,
   map: L.Map,
@@ -257,8 +299,10 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _features: LiveDealMapFeature[] = [];
   private _mapZoom = 5;
   private _selectedUid: string | null = null;
-  private _hoveredUid: string | null = null;
+  private _externalHoveredUid: string | null = null;
+  private _mouseHoveredUid: string | null = null;
   private _onFeatureClick?: (feature: LiveDealMapFeature) => void;
+  private _passThroughClicks = false;
   private _raf = 0;
   private _lastPaintKey = '';
   private _dataEpoch = 0;
@@ -271,6 +315,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   private _clusterKinds: readonly LiveDealFeatureKind[] | undefined;
   private _clusterMaxZoom = 13;
   private _clusterMinCount = 2;
+  private _clusterGridMultiplier = 1;
   private _isDark = true;
 
   constructor(options: CanvasLiveDealLayerOptions) {
@@ -278,10 +323,12 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._mapZoom = options.mapZoom;
     this._selectedUid = options.selectedUid;
     this._onFeatureClick = options.onFeatureClick;
+    this._passThroughClicks = Boolean(options.passThroughClicks);
     this._clusterPoints = Boolean(options.clusterPoints);
     this._clusterKinds = options.clusterKinds;
     this._clusterMaxZoom = options.clusterMaxZoom ?? 13;
     this._clusterMinCount = options.clusterMinCount ?? 2;
+    this._clusterGridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
     this._isDark = options.isDark !== false;
   }
 
@@ -306,8 +353,23 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._scheduleRedraw();
   }
 
+  setHoveredUid(uid: string | null): void {
+    if (this._externalHoveredUid === uid) return;
+    this._externalHoveredUid = uid;
+    this._lastPaintKey = '';
+    this._scheduleRedraw();
+  }
+
+  private _effectiveHoveredUid(): string | null {
+    return this._externalHoveredUid ?? this._mouseHoveredUid;
+  }
+
   setOnFeatureClick(handler: ((feature: LiveDealMapFeature) => void) | undefined): void {
     this._onFeatureClick = handler;
+  }
+
+  setPassThroughClicks(passThrough: boolean): void {
+    this._passThroughClicks = passThrough;
   }
 
   setClusterOptions(options: {
@@ -315,18 +377,21 @@ export class CanvasLiveDealLayer extends L.Layer {
     clusterKinds?: readonly LiveDealFeatureKind[];
     clusterMaxZoom?: number;
     clusterMinCount?: number;
+    clusterGridMultiplier?: number;
     isDark?: boolean;
   }): void {
     const nextClusterPoints = Boolean(options.clusterPoints);
     const nextClusterKinds = options.clusterKinds;
     const nextClusterMaxZoom = options.clusterMaxZoom ?? 13;
     const nextClusterMinCount = options.clusterMinCount ?? 2;
+    const nextClusterGridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
     const nextIsDark = options.isDark !== false;
     if (
       this._clusterPoints === nextClusterPoints &&
       this._clusterKinds === nextClusterKinds &&
       this._clusterMaxZoom === nextClusterMaxZoom &&
       this._clusterMinCount === nextClusterMinCount &&
+      this._clusterGridMultiplier === nextClusterGridMultiplier &&
       this._isDark === nextIsDark
     ) {
       return;
@@ -335,6 +400,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     this._clusterKinds = nextClusterKinds;
     this._clusterMaxZoom = nextClusterMaxZoom;
     this._clusterMinCount = nextClusterMinCount;
+    this._clusterGridMultiplier = nextClusterGridMultiplier;
     this._isDark = nextIsDark;
     this._lastPaintKey = '';
     this._scheduleRedraw();
@@ -406,7 +472,8 @@ export class CanvasLiveDealLayer extends L.Layer {
       this._mapZoom,
       this._dataEpoch,
       this._selectedUid ?? '',
-      this._hoveredUid ?? '',
+      this._externalHoveredUid ?? '',
+      this._mouseHoveredUid ?? '',
     ].join('|');
   }
 
@@ -415,6 +482,8 @@ export class CanvasLiveDealLayer extends L.Layer {
     const canvas = this._canvas;
     const ctx = this._ctx;
     if (!map || !canvas || !ctx) return;
+
+    const hoveredUid = this._effectiveHoveredUid();
 
     const size = map.getSize();
     const dpr = effectiveDpr();
@@ -442,6 +511,7 @@ export class CanvasLiveDealLayer extends L.Layer {
       clusterKinds: this._clusterKinds,
       clusterMaxZoom: this._clusterMaxZoom,
       clusterMinCount: this._clusterMinCount,
+      clusterGridMultiplier: this._clusterGridMultiplier,
     });
     this._lodSubsampling = pointPlan.lodSubsampling;
 
@@ -449,22 +519,22 @@ export class CanvasLiveDealLayer extends L.Layer {
     const hovered: LiveDealMapFeature[] = [];
     const normal: LiveDealMapFeature[] = [];
     for (const feature of this._features) {
-      if (feature.shape === 'arc') {
+      if (feature.shape === 'arc' || feature.shape === 'polyline') {
         if (feature.uid === this._selectedUid) selected.push(feature);
-        else if (feature.uid === this._hoveredUid) hovered.push(feature);
+        else if (feature.uid === hoveredUid) hovered.push(feature);
         else normal.push(feature);
       }
     }
     for (const feature of pointPlan.drawFeatures) {
       if (feature.uid === this._selectedUid) selected.push(feature);
-      else if (feature.uid === this._hoveredUid) hovered.push(feature);
+      else if (feature.uid === hoveredUid) hovered.push(feature);
       else normal.push(feature);
     }
 
     const drawn = [...normal, ...hovered, ...selected];
     for (const feature of normal) this._drawFeature(ctx, map, feature, false, false);
     for (const feature of hovered) this._drawFeature(ctx, map, feature, false, true);
-    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === this._hoveredUid);
+    for (const feature of selected) this._drawFeature(ctx, map, feature, true, feature.uid === hoveredUid);
     this._drawnFeatures = drawn;
     this._lastPaintKey = paintKey;
   }
@@ -478,6 +548,10 @@ export class CanvasLiveDealLayer extends L.Layer {
   ): void {
     if (feature.shape === 'arc') {
       drawArc(ctx, map, feature, selected);
+      return;
+    }
+    if (feature.shape === 'polyline') {
+      drawPolyline(ctx, map, feature, selected);
       return;
     }
     const point = map.latLngToContainerPoint([feature.lat, feature.lng]);
@@ -527,6 +601,7 @@ export class CanvasLiveDealLayer extends L.Layer {
   }
 
   private _onMapClick = (event: L.LeafletMouseEvent): void => {
+    if (this._passThroughClicks) return;
     const hit = this._findAtPoint(event.containerPoint);
     if (!hit) return;
     if (event.originalEvent) {
@@ -537,14 +612,15 @@ export class CanvasLiveDealLayer extends L.Layer {
   };
 
   private _onMapMouseMove = (event: L.LeafletMouseEvent): void => {
+    if (this._passThroughClicks) return;
     const map = this._map;
     if (!map) return;
     const hit = this._findAtPoint(event.containerPoint);
     map.getContainer().style.cursor = hit ? 'pointer' : '';
 
     const nextHoveredUid = hit ? hit.uid : null;
-    if (this._hoveredUid !== nextHoveredUid) {
-      this._hoveredUid = nextHoveredUid;
+    if (this._mouseHoveredUid !== nextHoveredUid) {
+      this._mouseHoveredUid = nextHoveredUid;
       this._lastPaintKey = '';
       this._scheduleRedraw();
     }
@@ -552,8 +628,8 @@ export class CanvasLiveDealLayer extends L.Layer {
 
   private _onMapMouseOut = (): void => {
     this._map?.getContainer().style.removeProperty('cursor');
-    if (this._hoveredUid !== null) {
-      this._hoveredUid = null;
+    if (this._mouseHoveredUid !== null) {
+      this._mouseHoveredUid = null;
       this._lastPaintKey = '';
       this._scheduleRedraw();
     }

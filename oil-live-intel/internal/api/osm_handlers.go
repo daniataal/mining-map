@@ -347,7 +347,7 @@ func elementToFeatureMap(layerID string, el overpass.Element) map[string]interfa
 func (s *Server) getLayerGeoJSONFromDB(ctx context.Context, layerID string, bbox []float64, zoom float64) (map[string]interface{}, error) {
 	tolerance := simplifyToleranceForZoom(zoom)
 	args := []interface{}{layerID}
-	
+
 	bboxClause := ""
 	if bbox != nil {
 		bboxClause = `AND ST_Intersects(geom, ST_MakeEnvelope($2, $3, $4, $5, 4326))`
@@ -421,17 +421,86 @@ func (s *Server) getLayerGeoJSONFromDB(ctx context.Context, layerID string, bbox
 	s.Pool.QueryRow(ctx, "SELECT COUNT(*)::int, MAX(fetched_at) FROM petroleum_osm_features WHERE layer_id = $1", layerID).Scan(&count, &fetchedAt)
 
 	return map[string]interface{}{
-		"type":              "FeatureCollection",
-		"features":          features,
-		"layer_id":          layerID,
-		"label":             OSMLayers[layerID]["label"],
-		"bbox":              bbox,
-		"feature_count":     len(features),
-		"data_as_of":        fetchedAt.UTC().Format(time.RFC3339),
-		"attribution":       "© OpenStreetMap contributors (ODbL)",
-		"license_note":      "Community OSM — persisted snapshot; not official cadastre.",
-		"source":            "database",
-		"cached":            true,
-		"db_feature_total":  count,
+		"type":             "FeatureCollection",
+		"features":         features,
+		"layer_id":         layerID,
+		"label":            OSMLayers[layerID]["label"],
+		"bbox":             bbox,
+		"feature_count":    len(features),
+		"data_as_of":       fetchedAt.UTC().Format(time.RFC3339),
+		"attribution":      "© OpenStreetMap contributors (ODbL)",
+		"license_note":     "Community OSM — persisted snapshot; not official cadastre.",
+		"source":           "database",
+		"cached":           true,
+		"db_feature_total": count,
 	}, nil
+}
+
+// OSMFeatureProperties returns full OSM tags for one persisted petroleum_osm_features row.
+func (s *Server) OSMFeatureProperties(w http.ResponseWriter, r *http.Request) {
+	layerID := chi.URLParam(r, "layer_id")
+	if _, ok := OSMLayers[layerID]; !ok {
+		http.Error(w, fmt.Sprintf("Unknown OSM petroleum layer: %s", layerID), http.StatusNotFound)
+		return
+	}
+	osmType := strings.TrimSpace(chi.URLParam(r, "osm_type"))
+	osmIDStr := chi.URLParam(r, "osm_id")
+	osmID, err := strconv.ParseInt(osmIDStr, 10, 64)
+	if err != nil || osmType == "" {
+		http.Error(w, "invalid osm feature id", http.StatusBadRequest)
+		return
+	}
+	if s.Pool == nil {
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	var tagsRaw []byte
+	var rowOsmType string
+	var rowOsmID int64
+	var rowLayerID string
+	var lat, lng float64
+	err = s.Pool.QueryRow(r.Context(), `
+		SELECT tags, osm_type, osm_id, layer_id,
+		       ST_Y(ST_Centroid(geom::geometry)), ST_X(ST_Centroid(geom::geometry))
+		FROM petroleum_osm_features
+		WHERE layer_id = $1 AND osm_type = $2 AND osm_id = $3
+		LIMIT 1
+	`, layerID, osmType, osmID).Scan(&tagsRaw, &rowOsmType, &rowOsmID, &rowLayerID, &lat, &lng)
+	if err != nil {
+		http.Error(w, "OSM feature not found", http.StatusNotFound)
+		return
+	}
+
+	tagsMap := map[string]interface{}{}
+	if len(tagsRaw) > 0 {
+		_ = json.Unmarshal(tagsRaw, &tagsMap)
+	}
+	if tagsMap == nil {
+		tagsMap = map[string]interface{}{}
+	}
+
+	name, _ := tagsMap["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		name, _ = tagsMap["operator"].(string)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = fmt.Sprintf("OSM %s %d", rowOsmType, rowOsmID)
+	}
+	tagsMap["name"] = name
+	tagsMap["layer_id"] = rowLayerID
+	tagsMap["osm_type"] = rowOsmType
+	tagsMap["osm_id"] = rowOsmID
+	tagsMap["source"] = "openstreetmap"
+	tagsMap["persisted"] = true
+	tagsMap["lat"] = lat
+	tagsMap["lng"] = lng
+
+	writeJSONCached(w, http.StatusOK, map[string]interface{}{
+		"layer_id":    rowLayerID,
+		"osm_type":    rowOsmType,
+		"osm_id":      rowOsmID,
+		"properties":  tagsMap,
+		"attribution": "© OpenStreetMap contributors (ODbL)",
+	}, 3600)
 }

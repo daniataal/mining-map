@@ -99,10 +99,12 @@ export default defineConfig({
           path.replace(/^\/api\/petroleum\/osm-tiles/, '/api/oil-live/map/petroleum-osm/tiles'),
       },
       '/api/petroleum/osm-layers': {
-        target: backendProxyTarget,
+        target: oilIntelProxyTarget,
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
+        rewrite: (path) =>
+          path.replace(/^\/api\/petroleum\/osm-layers/, '/api/oil-live/map/petroleum-osm/layers'),
       },
       '/licenses': {
         target: oilIntelProxyTarget,

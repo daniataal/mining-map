@@ -3,7 +3,10 @@ import {
   buildLiveDataSyncTierLines,
   fmtLedgerCount,
   liveDataSyncBannerMessage,
+  liveDataSyncKindChipLabel,
+  liveDataSyncKindTone,
   resolveLiveDataSyncBannerKind,
+  shouldShowLiveDataWarningBanner,
 } from './liveDataSyncStatusBanner';
 import type { OilLiveSyncStatus } from '../../api/oilLiveApi';
 
@@ -70,5 +73,24 @@ describe('liveDataSyncStatusBanner', () => {
   it('liveDataSyncBannerMessage returns unreachable copy', () => {
     const msg = liveDataSyncBannerMessage('unreachable');
     expect(msg?.en).toMatch(/sync-status/i);
+  });
+
+  it('shouldShowLiveDataWarningBanner is true only for broken ledger states', () => {
+    expect(shouldShowLiveDataWarningBanner('unreachable')).toBe(true);
+    expect(shouldShowLiveDataWarningBanner('demo_only')).toBe(true);
+    expect(shouldShowLiveDataWarningBanner('empty')).toBe(true);
+    expect(shouldShowLiveDataWarningBanner('degraded')).toBe(false);
+    expect(shouldShowLiveDataWarningBanner('ok')).toBe(false);
+  });
+
+  it('liveDataSyncKindTone maps kinds to chip colors', () => {
+    expect(liveDataSyncKindTone('ok')).toBe('ok');
+    expect(liveDataSyncKindTone('degraded')).toBe('warn');
+    expect(liveDataSyncKindTone('unreachable')).toBe('bad');
+  });
+
+  it('liveDataSyncKindChipLabel returns short labels', () => {
+    expect(liveDataSyncKindChipLabel('ok').en).toBe('Data healthy');
+    expect(liveDataSyncKindChipLabel('empty').en).toBe('Ledger empty');
   });
 });

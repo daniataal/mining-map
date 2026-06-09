@@ -526,10 +526,12 @@ async function fetchLicensesViewportFromApi(
     collapseBounds?: LicenseViewportBounds | null;
     countries?: string[];
     mapZoom?: number;
+    /** Global › Licenses lens — skip low-zoom country-summary hubs. */
+    skipCountrySummary?: boolean;
     signal?: AbortSignal;
   },
 ): Promise<MiningLicense[]> {
-  const { sector, bounds, collapseBounds, countries, mapZoom, signal } = options;
+  const { sector, bounds, collapseBounds, countries, mapZoom, skipCountrySummary, signal } = options;
   const fetchBounds = quantizeLicenseViewportBounds(bounds);
   const displayBounds = collapseBounds
     ? quantizeLicenseViewportBounds(collapseBounds)
@@ -550,6 +552,7 @@ async function fetchLicensesViewportFromApi(
   if (zoomRounded != null) params.zoom = zoomRounded;
 
   const useCountrySummaryPath =
+    !skipCountrySummary &&
     LICENSE_MAP_GO_ENABLED &&
     zoomRounded != null &&
     zoomRounded < SERVER_CLUSTER_MIN_DRILL_ZOOM;
@@ -679,9 +682,19 @@ export function useLicensesForMap(options: {
   mapZoom?: number;
   /** Expanded bbox after cluster drill — unioned with viewport for fetch/display until cleared. */
   drillExpandBounds?: LicenseViewportBounds | null;
+  /** Global › Licenses lens — prefer grid clusters over country-summary hubs. */
+  skipCountrySummary?: boolean;
   enabled: boolean;
 }): UseLicensesResult {
-  const { sector, bounds, filterCountries = [], mapZoom, drillExpandBounds, enabled } = options;
+  const {
+    sector,
+    bounds,
+    filterCountries = [],
+    mapZoom,
+    drillExpandBounds,
+    skipCountrySummary,
+    enabled,
+  } = options;
   const viewportBounds = useMemo(
     () => (bounds ? quantizeLicenseViewportBounds(bounds) : null),
     [bounds],
@@ -750,6 +763,7 @@ export function useLicensesForMap(options: {
         collapseBounds: effectiveViewportBounds ?? fetchBounds,
         countries: filterCountries.length ? filterCountries : undefined,
         mapZoom,
+        skipCountrySummary,
         signal,
       });
     },
@@ -1270,8 +1284,12 @@ export const useLogActivity = () => {
 };
 
 // --- Auth ---
+const AUTH_LOGIN_TIMEOUT_MS = 20_000;
+
 export const login = async (username: string, password: string) => {
-  const { data } = await apiClient.post('/auth/login', { username, password });
+  const { data } = await apiClient.post('/auth/login', { username, password }, {
+    timeout: AUTH_LOGIN_TIMEOUT_MS,
+  });
   return data;
 };
 

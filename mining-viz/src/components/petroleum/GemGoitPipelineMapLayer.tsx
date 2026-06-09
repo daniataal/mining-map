@@ -1,7 +1,5 @@
-import { useMemo } from 'react';
-import L from 'leaflet';
-import { GeoJSON, LayerGroup, LayersControl } from 'react-leaflet';
-import type { Layer } from 'leaflet';
+import { useEffect, useMemo } from 'react';
+import { GeoJSON, LayerGroup, LayersControl, useMap } from 'react-leaflet';
 import { useI18n } from '../../lib/i18n';
 import {
   gemFuelGroupToPopupLayerId,
@@ -9,13 +7,21 @@ import {
   useGemPipelineGeoJson,
 } from '../../lib/gemPipelines';
 import type { PetroleumViewportBounds } from '../../lib/petroleumViewportBounds';
-import { bindPetroleumFeaturePopup } from './bindPetroleumPopup';
+import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
+import {
+  bindPipelineMapInteraction,
+  ensurePipelineInteractionPane,
+  ensurePipelineVisiblePane,
+  pipelineInteractiveRenderer,
+  pipelineVisibleStyle,
+} from '../../lib/pipelineMapInteraction';
 
 interface GemGoitPipelineMapLayerProps {
   bbox: PetroleumViewportBounds | null;
   enabled: boolean;
   mapZoom?: number;
   isDark?: boolean;
+  onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
 }
 
 export default function GemGoitPipelineMapLayer({
@@ -23,14 +29,29 @@ export default function GemGoitPipelineMapLayer({
   enabled,
   mapZoom,
   isDark = true,
+  onFeatureClick,
 }: GemGoitPipelineMapLayerProps) {
   const { t } = useI18n();
+  const map = useMap();
   const { data } = useGemPipelineGeoJson(bbox, enabled, mapZoom);
-  const geojson = useMemo(
-    () => data ?? { type: 'FeatureCollection' as const, features: [] },
-    [data],
-  );
-  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.3 }), []);
+
+  useEffect(() => {
+    ensurePipelineVisiblePane(map);
+    ensurePipelineInteractionPane(map);
+  }, [map]);
+  const geojson = useMemo(() => {
+    const features = (data?.features ?? []).filter((feature) => {
+      const props = (feature.properties ?? {}) as Record<string, unknown>;
+      const source = String(props.source || '');
+      const layerId = String(props.layer_id || '');
+      const fuel = String(props.fuel_group || '').toLowerCase();
+      if (layerId === 'gem_gas_pipelines' || source.includes('ggit_gas')) return false;
+      if (fuel === 'gas' && source.includes('ggit')) return false;
+      return true;
+    });
+    return { type: 'FeatureCollection' as const, features };
+  }, [data?.features]);
+  const svgRenderer = useMemo(() => pipelineInteractiveRenderer(), []);
 
   if (!enabled) return null;
 
@@ -47,23 +68,37 @@ export default function GemGoitPipelineMapLayer({
           data={geojson}
           style={(feature) => {
             const props = (feature?.properties || {}) as Record<string, unknown>;
-            return gemPipelineStyle(
-              String(props.fuel_group || ''),
-              String(props.status || ''),
-              isDark,
+            return pipelineVisibleStyle(
+              gemPipelineStyle(
+                String(props.fuel_group || ''),
+                String(props.status || ''),
+                isDark,
+              ),
             );
           }}
-          renderer={canvasRenderer}
-          onEachFeature={(feature, layer: Layer) => {
-            const props = (feature.properties || {}) as Record<string, unknown>;
-            const popupLayerId = gemFuelGroupToPopupLayerId(String(props.fuel_group || ''));
-            bindPetroleumFeaturePopup(
-              layer,
-              popupLayerId,
-              props,
-              feature.geometry ?? null,
-            );
-          }}
+          renderer={svgRenderer}
+          onEachFeature={
+            onFeatureClick
+              ? (feature, layer) => {
+                  const props = (feature.properties || {}) as Record<string, unknown>;
+                  const popupLayerId = gemFuelGroupToPopupLayerId(String(props.fuel_group || ''));
+                  const lineStyle = gemPipelineStyle(
+                    String(props.fuel_group || ''),
+                    String(props.status || ''),
+                    isDark,
+                  );
+                  bindPipelineMapInteraction({
+                    layer,
+                    popupLayerId,
+                    properties: props,
+                    geometry: feature.geometry ?? null,
+                    onFeatureClick,
+                    visibleWeight: lineStyle.weight,
+                    visibleOpacity: lineStyle.opacity,
+                  });
+                }
+              : undefined
+          }
         />
       </LayerGroup>
     </LayersControl.Overlay>

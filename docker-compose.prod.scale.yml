@@ -1,0 +1,295 @@
+# Tier-3 horizontal scale overlay — larger app host or prep for multi-host.
+#
+# - oil-live-intel-a / oil-live-intel-b behind Caddy round-robin (Caddyfile.scale)
+# - backend-a / backend-b behind Caddy round-robin
+# - Tier 4: PgBouncer enabled by default (transaction pool to db:5432)
+#
+# App VM:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.app.yml \
+#     -f docker-compose.prod.scale.yml up -d
+#
+# Disable pooler (direct Postgres — rollback):
+#   export SCALE_DATABASE_URL=postgresql://postgres:password@db:5432/mining_db?sslmode=disable
+#   export SCALE_DB_HOST=db
+#
+# Rollback: omit this file from the compose command.
+# Validate: docker compose -f docker-compose.prod.yml -f docker-compose.prod.scale.yml config >/dev/null
+
+x-scale-oil-intel-env: &scale-oil-intel-env
+  OIL_INTEL_PORT: "8095"
+  DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@pgbouncer:5432/mining_db?sslmode=disable}
+  EXISTING_BACKEND_URL: http://backend-a:8000
+  OIL_INTEL_SEED_ON_STARTUP: "false"
+  OIL_LIVE_DISABLE_DEMO_SEED: "1"
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  ENABLE_AIS: ${OIL_INTEL_ENABLE_AIS:-true}
+  ENABLE_EIA: ${OIL_INTEL_ENABLE_EIA:-true}
+  ENABLE_COMTRADE: ${OIL_INTEL_ENABLE_COMTRADE:-true}
+  ENABLE_OSM_IMPORT: "false"
+  OIL_INTEL_AIS_INSECURE_TLS: ${OIL_INTEL_AIS_INSECURE_TLS:-false}
+  MARITIME_SSL_AUTO_FALLBACK: ${MARITIME_SSL_AUTO_FALLBACK:-1}
+  OIL_INTEL_DB_MAX_CONNS: ${OIL_INTEL_DB_MAX_CONNS:-8}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+
+x-scale-backend-env: &scale-backend-env
+  DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+  DB_PORT: ${SCALE_DB_PORT:-5432}
+  DB_NAME: mining_db
+  DB_USER: postgres
+  DB_PASSWORD: password
+  UVICORN_WORKERS: ${UVICORN_WORKERS:-3}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-1}
+  RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-60}
+  RATE_LIMIT_ROUTE_RPM: ${RATE_LIMIT_ROUTE_RPM:-120}
+  ROUTE_SERVICE_URL: http://route-service:8001
+  OIL_INTEL_API_URL: http://oil-live-intel-a:8095
+  COMTRADE_SYNC_ENABLED: "true"
+  OIL_GRAPH_SYNC_ENABLED: "true"
+  OIL_GRAPH_SYNC_ON_STARTUP: "false"
+  EIA_DOWNLOADS_DIR: /data/eia_downloads
+  EIA_HISTORIC_AUTO_INGEST: "true"
+  MARITIME_GULF_DEMO_SEED: "0"
+  MARITIME_COASTAL_DEMO_SEED: "0"
+  OIL_LIVE_DISABLE_DEMO_SEED: "1"
+  OVERPASS_URL: ${OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+  STORAGE_OVERPASS_URL: ${STORAGE_OVERPASS_URL:-https://overpass.kumi.systems/api/interpreter}
+  STORAGE_OVERPASS_TIMEOUT_SECONDS: ${STORAGE_OVERPASS_TIMEOUT_SECONDS:-120}
+  STORAGE_OVERPASS_RETRY_ATTEMPTS: ${STORAGE_OVERPASS_RETRY_ATTEMPTS:-3}
+  STORAGE_OVERPASS_TILE_WORKERS: ${STORAGE_OVERPASS_TILE_WORKERS:-3}
+  STORAGE_SKIP_LIVE_OVERPASS: ${STORAGE_SKIP_LIVE_OVERPASS:-true}
+
+services:
+  backend:
+    profiles: ["scale-excluded"]
+
+  oil-live-intel:
+    profiles: ["scale-excluded"]
+
+  oil-live-intel-a:
+    image: dannyatalla/oil-live-intel:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: oil-live-intel-a
+    restart: unless-stopped
+    expose:
+      - "8095"
+    env_file:
+      - backend.env
+    environment:
+      <<: *scale-oil-intel-env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/api/oil-live/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  oil-live-intel-b:
+    image: dannyatalla/oil-live-intel:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: oil-live-intel-b
+    restart: unless-stopped
+    expose:
+      - "8095"
+    env_file:
+      - backend.env
+    environment:
+      <<: *scale-oil-intel-env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8095/api/oil-live/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+
+  backend-a:
+    image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: mining-backend-a
+    restart: always
+    env_file:
+      - backend.env
+    expose:
+      - "8000"
+    environment:
+      <<: *scale-backend-env
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/meridian/gem:/data/meridian/gem:ro
+      - ./data/gem/goit-pipeline-routes:/data/gem/goit-pipeline-routes:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 180s
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      route-service:
+        condition: service_healthy
+      oil-live-intel-a:
+        condition: service_healthy
+
+  backend-b:
+    image: dannyatalla/mining-backend:${VERSION_TAG:-latest}
+    platform: linux/arm64
+    container_name: mining-backend-b
+    restart: always
+    env_file:
+      - backend.env
+    expose:
+      - "8000"
+    environment:
+      <<: *scale-backend-env
+    volumes:
+      - ./data/eia_downloads:/data/eia_downloads:ro
+      - ./data/meridian/gem:/data/meridian/gem:ro
+      - ./data/gem/goit-pipeline-routes:/data/gem/goit-pipeline-routes:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs', timeout=5).read(1)",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 180s
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      route-service:
+        condition: service_healthy
+      oil-live-intel-a:
+        condition: service_healthy
+
+  oil-live-intel-worker:
+    environment:
+      DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@pgbouncer:5432/mining_db?sslmode=disable}
+      OIL_INTEL_API_URL: http://oil-live-intel-a:8095
+      OIL_INTEL_DB_MAX_CONNS: ${OIL_INTEL_DB_MAX_CONNS:-8}
+    depends_on: !reset
+      pgbouncer:
+        condition: service_healthy
+      oil-live-intel-a:
+        condition: service_healthy
+
+  license-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  comtrade-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  ted-procurement-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  gov-procurement-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  oil-live-graph-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+      OIL_INTEL_API_URL: http://oil-live-intel-a:8095
+    depends_on: !reset
+      pgbouncer:
+        condition: service_healthy
+      oil-live-intel-a:
+        condition: service_healthy
+
+  uk-trade-manifest-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  eia-historic-sync-worker:
+    environment:
+      DB_HOST: ${SCALE_DB_HOST:-pgbouncer}
+      DB_PORT: ${SCALE_DB_PORT:-5432}
+
+  oil-live-search-indexer:
+    environment:
+      DATABASE_URL: ${SCALE_DATABASE_URL:-postgresql://postgres:password@pgbouncer:5432/mining_db?sslmode=disable}
+
+  frontend:
+    depends_on: !reset
+      backend-a:
+        condition: service_healthy
+      route-service:
+        condition: service_healthy
+
+  caddy:
+    volumes: !reset
+      - ./Caddyfile.scale:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: !reset
+      frontend:
+        condition: service_started
+      backend-a:
+        condition: service_healthy
+      backend-b:
+        condition: service_healthy
+      oil-live-intel-a:
+        condition: service_healthy
+      oil-live-intel-b:
+        condition: service_healthy
+
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1-p0
+    platform: linux/arm64
+    container_name: mining-pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:password@db:5432/mining_db
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-200}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-25}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
+    expose:
+      - "5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

@@ -431,7 +431,7 @@ func (s *Server) ListMcrTradeFlows(w http.ResponseWriter, r *http.Request) {
 		"count":      len(arcs),
 		"group":      group,
 		"zoom":       zoom,
-		"disclaimer": "Aggregated from synthetic Meridian Cargo Records — inferred from public sources, not legal BOLs.",
+		"disclaimer": "Aggregated from synthetic MadSan Cargo Records — inferred from public sources, not legal BOLs.",
 	}, 120)
 }
 
@@ -478,7 +478,7 @@ func (s *Server) ListCommercialEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
-func (s *Server) TriggerSyntheticBolRebuild(w http.ResponseWriter, r *http.Request) {
+func (s *Server) TriggerInferredTradeRebuild(w http.ResponseWriter, r *http.Request) {
 	if s.Config.InternalBroadcastKey == "" || r.Header.Get("X-Oil-Intel-Internal") != s.Config.InternalBroadcastKey {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return

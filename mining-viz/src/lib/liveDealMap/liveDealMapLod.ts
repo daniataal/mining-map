@@ -68,6 +68,7 @@ export type LiveDealClientClusterData = {
   bounds: LiveDealViewport;
   sourceIds: string[];
   sourceUids: string[];
+  clusterKind?: LiveDealFeatureKind;
 };
 
 export interface LiveDealPointFeatureDrawOptions {
@@ -75,6 +76,7 @@ export interface LiveDealPointFeatureDrawOptions {
   clusterKinds?: readonly LiveDealFeatureKind[];
   clusterMinCount?: number;
   clusterMaxZoom?: number;
+  clusterGridMultiplier?: number;
 }
 
 export function isLiveDealClientClusterData(value: unknown): value is LiveDealClientClusterData {
@@ -144,8 +146,9 @@ export function planLiveDealPointFeatureDraw(
   }
 
   const clusterMaxZoom = options.clusterMaxZoom ?? 13;
+  const gridMultiplier = Math.max(1, options.clusterGridMultiplier ?? 1);
   const clusterGrid = options.clusterPoints && zoom < clusterMaxZoom
-    ? clientClusterGridDegreesForZoom(zoom)
+    ? clientClusterGridDegreesForZoom(zoom) * gridMultiplier
     : 0;
 
   if (!options.clusterPoints || clusterGrid <= 0) {
@@ -239,6 +242,7 @@ export function planLiveDealPointFeatureDraw(
         bounds: { south, west, north, east },
         sourceIds,
         sourceUids,
+        clusterKind: first.kind,
       } satisfies LiveDealClientClusterData,
     });
   }

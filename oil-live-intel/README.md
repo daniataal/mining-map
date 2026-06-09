@@ -48,7 +48,7 @@ curl -s http://localhost:8095/api/oil-live/health
 
 ### CI / faster Docker builds
 
-Production images use a pre-built module cache image (`dannyatalla/oil-live-intel-base:latest`), same pattern as `mining-map-base` for Python. Rebuild the base when `go.mod` / `go.sum` change:
+Production images use a pre-built module cache image (`dannyatalla/oil-live-intel-base:latest`), same pattern as `mining-map-base` for Python. Rebuild the base when `go.mod` / `go.sum` change **or when the `go` version directive bumps** (e.g. `go 1.24.0` requires `golang:1.24-alpine` in `Dockerfile.base`):
 
 - GitHub Actions: workflow **Build Base Images** (`.github/workflows/build-base.yml`) — also runs on `main` when those files change.
 - One-time after merge: run that workflow (or `workflow_dispatch`) so `docker-image.yml` can `FROM` the base.

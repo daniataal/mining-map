@@ -41,6 +41,7 @@ import {
   AlertTriangle as LucideAlertTriangle,
   CheckCircle2 as LucideCheckCircle2,
   Ship as LucideShip,
+  Pin as LucidePin,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AiIntelligenceReport } from './AiIntelligenceReport';
@@ -48,6 +49,7 @@ import TradeContext from './TradeContext';
 import OilTradeContext from './OilTradeContext';
 import ExecutionChecklist from './ExecutionChecklist';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
+import { GraphExplorer } from './GraphExplorer';
 import {
   LIFECYCLE_STEPS,
   normalizeDealStage,
@@ -73,6 +75,7 @@ import EntityRelationshipPanel from './EntityRelationshipPanel';
 import OperationsTab from './OperationsTab';
 import SecFilingsLink from './dossier/SecFilingsLink';
 import GleifLeiLink from './dossier/GleifLeiLink';
+import CompanyContactEnvelope from './dossier/CompanyContactEnvelope';
 import CompanyRegistryLinks from './dossier/CompanyRegistryLinks';
 import EntityTradeFlowsPanel from './dossier/EntityTradeFlowsPanel';
 import { CountryCoveragePanel } from './dossier/CountryCoveragePanel';
@@ -1059,7 +1062,19 @@ Output requirements:
             </div>
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
               {onAddToDueDiligence && onRemoveFromDueDiligence && (
-                <div className="hidden sm:block w-52">
+                <div className="hidden sm:flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-500/20 text-amber-500 hover:bg-amber-500/10"
+                    onClick={() => {
+                      // Stub functionality for the UX demo
+                      window.alert(`Pinned ${item.name} to Workspace!`);
+                    }}
+                  >
+                    <LucidePin className="w-4 h-4 mr-2" />
+                    Workspace
+                  </Button>
                   <AddToDueDiligenceButton
                     compact
                     isInQueue={isInDdQueue}
@@ -1116,7 +1131,17 @@ Output requirements:
               </div>
             )}
             {onAddToDueDiligence && onRemoveFromDueDiligence && (
-              <div className="sm:hidden mb-6">
+              <div className="sm:hidden mb-6 flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  className="w-full justify-center border-amber-500/20 text-amber-500 hover:bg-amber-500/10"
+                  onClick={() => {
+                    window.alert(`Pinned ${item.name} to Workspace!`);
+                  }}
+                >
+                  <LucidePin className="w-4 h-4 mr-2" />
+                  Pin to Workspace
+                </Button>
                 <AddToDueDiligenceButton
                   isInQueue={isInDdQueue}
                   onAdd={onAddToDueDiligence}
@@ -1198,9 +1223,10 @@ Output requirements:
 
             {/* Tabs */}
             <nav className="flex gap-0.5 sm:gap-1 border-b border-black/5 dark:border-white/5 mb-6 md:mb-10 overflow-x-auto no-scrollbar pointer-events-auto">
-              {['overview', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'trade-evidence', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
+              {['overview', 'network-graph', 'deal-room', 'operations', 'exports-imports', 'gov-tenders', 'supply-chain', 'trade-evidence', 'news', 'satellite', 'owners', 'counterparties', 'vessel-alerts', 'intelligence', 'raw-evidence', 'document-ai', 'human-notes', 'execution', 'logs'].map(tab => {
                 const tabLabels: Record<string, string> = {
                   'overview': 'Overview',
+                  'network-graph': 'Network Graph',
                   'deal-room': 'Deal Room',
                   'operations': 'Operations',
                   'exports-imports': 'Exports and Imports',
@@ -1236,6 +1262,14 @@ Output requirements:
                 </button>
               )})}
             </nav>
+
+            {/* NETWORK GRAPH TAB */}
+            {activeTab === 'network-graph' && (
+              <GraphExplorer
+                nodeId={item.legacy_id || item.id}
+                nodeType={item.type === 'company' || item.type === 'vessel' ? 'organization' : 'asset'} // Adjust based on item model
+              />
+            )}
 
             {/* DEAL ROOM TAB */}
             {activeTab === 'deal-room' && (
@@ -2592,6 +2626,14 @@ Output requirements:
                       entityKind={item.entityKind || 'license'}
                       variant="full"
                       onViewPartners={() => setActiveTab('trade-evidence')}
+                    />
+                  )}
+
+                  {(item.company || item.operatorName) && (
+                    <CompanyContactEnvelope
+                      companyName={item.company || item.operatorName || ''}
+                      country={item.country || ''}
+                      operatorName={item.operatorName}
                     />
                   )}
 

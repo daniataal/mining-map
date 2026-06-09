@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
-import { Archive, Layers, List, LogOut, PieChart, Radio, Settings } from 'lucide-react';
+import { Archive, Activity, Layers, List, LogOut, PieChart, Radio, Settings, Network, Search as LucideSearch } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
 import Sidebar from './Sidebar';
 import type { MiningLicense, UserAnnotation, WorldCoverageResponse } from '../types';
 import type { LicenseCoverageSector } from '../lib/licenseCoverage';
+import BrandMark from './BrandMark';
 
-export type MapSidebarTab = 'licenses' | 'live_data' | 'historic';
+export type MapSidebarTab = 'licenses' | 'live_data' | 'historic' | 'data_health';
 
 export type WorkspaceSidebarLayoutProps = {
   tab: MapSidebarTab;
@@ -19,6 +20,9 @@ export type WorkspaceSidebarLayoutProps = {
   onSidebarViewModeChange: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
+  settingsTitle?: string;
+  onToggleWorkspace: () => void;
+  onToggleSearch: () => void;
   isFilterOpen: boolean;
   onLogout: () => void;
   /** License list sidebar props */
@@ -36,6 +40,7 @@ export type WorkspaceSidebarLayoutProps = {
   getDealRoomForLicense?: Parameters<typeof Sidebar>[0]['getDealRoomForLicense'];
   liveDataPanel: ReactNode;
   historicPanel: ReactNode;
+  dataHealthPanel: ReactNode;
   worldCoverage?: WorldCoverageResponse | null;
   licenseCoverageSector?: LicenseCoverageSector | null;
   licenseCoverageAlsoShowSector?: LicenseCoverageSector | null;
@@ -54,6 +59,9 @@ export default function WorkspaceSidebarLayout({
   onSidebarViewModeChange,
   onToggleFilter,
   onToggleAdmin,
+  settingsTitle,
+  onToggleWorkspace,
+  onToggleSearch,
   isFilterOpen,
   onLogout,
   processedData,
@@ -70,6 +78,7 @@ export default function WorkspaceSidebarLayout({
   getDealRoomForLicense,
   liveDataPanel,
   historicPanel,
+  dataHealthPanel,
   worldCoverage,
   licenseCoverageSector,
   licenseCoverageAlsoShowSector,
@@ -111,6 +120,9 @@ export default function WorkspaceSidebarLayout({
           setViewMode={onSidebarViewModeChange}
           onToggleFilter={onToggleFilter}
           onToggleAdmin={onToggleAdmin}
+          settingsTitle={settingsTitle}
+          onToggleWorkspace={onToggleWorkspace}
+          onToggleSearch={onToggleSearch}
           isFilterOpen={isFilterOpen}
           isPinned={isPinned}
           setIsPinned={setIsPinned}
@@ -138,6 +150,9 @@ export default function WorkspaceSidebarLayout({
       className="flex h-full min-h-0 flex-1 bg-transparent text-slate-800 dark:text-slate-100 select-none"
     >
       <div className="w-16 flex-shrink-0 border-r border-black/5 dark:border-white/5 flex flex-col items-center py-6 gap-4 bg-white dark:bg-slate-950">
+        <div className="mb-2 flex shrink-0 items-center justify-center">
+          <BrandMark size="rail" framed />
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -160,6 +175,18 @@ export default function WorkspaceSidebarLayout({
           title={t('נתונים חיים', 'Live Data')}
         >
           <Radio className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange('data_health')}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${
+            tab === 'data_health'
+              ? 'bg-amber-500/20 text-amber-600 border-amber-500/40'
+              : 'text-slate-400 border-transparent hover:bg-black/5 dark:hover:bg-white/5'
+          }`}
+          title={t('בריאות נתונים', 'Data health')}
+        >
+          <Activity className="w-5 h-5" />
         </button>
         <button
           type="button"
@@ -198,9 +225,24 @@ export default function WorkspaceSidebarLayout({
         <button
           type="button"
           onClick={onToggleAdmin}
+          title={settingsTitle}
           className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 border border-transparent"
         >
           <Settings className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleSearch}
+          className="w-10 h-10 rounded-xl hover:bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-transparent"
+        >
+          <LucideSearch className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleWorkspace}
+          className="w-10 h-10 rounded-xl hover:bg-amber-500/10 flex items-center justify-center text-amber-500 border border-transparent"
+        >
+          <Network className="w-5 h-5" />
         </button>
         <button
           type="button"
@@ -216,11 +258,15 @@ export default function WorkspaceSidebarLayout({
           <div className="flex shrink-0 border-b border-black/5 dark:border-white/5 bg-stone-50/80 dark:bg-slate-900/50">
             {tabBtn('licenses', 'רישיונות', 'Licenses', List)}
             {tabBtn('live_data', 'חי', 'Live', Radio)}
+            {tabBtn('data_health', 'בריאות', 'Health', Activity)}
             {tabBtn('historic', 'היסטורי', 'Historic', Archive)}
           </div>
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
             {tab === 'live_data' && (
               <div className="flex-1 min-h-0 overflow-hidden">{liveDataPanel}</div>
+            )}
+            {tab === 'data_health' && (
+              <div className="flex-1 min-h-0 overflow-hidden">{dataHealthPanel}</div>
             )}
             {tab === 'historic' && (
               <div className="flex-1 min-h-0 overflow-y-auto p-3">{historicPanel}</div>

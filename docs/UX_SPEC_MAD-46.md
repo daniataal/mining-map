@@ -27,7 +27,23 @@ Shared constraints: **map stays interactive** at Gulf hub zoom; drawer is depth,
 
 ---
 
-## 3. Information architecture (tabs → surfaces)
+## 3. Information architecture (Intelligence Cockpit — implemented)
+
+When `VITE_INTELLIGENCE_COCKPIT_ENABLED` is on (default), top navigation uses **5 modes**:
+
+| Mode | Sublayers | Map behavior |
+|------|-----------|--------------|
+| **Global** | Countries, Licenses, Trade flows, Risk | Country-summary clusters; right **Intelligence rail** on country click |
+| **Assets** | Mines, Oil fields, Refineries, Tank farms, Ports | Sector infrastructure + license markers |
+| **Supply Chain** | Suppliers, Buyers, Deal packs | Broker workspace map canvas (replaces legacy Suppliers tab) |
+| **Routes** | Vessels, Pipelines, Hubs | Route planner + maritime layer (collapsed **Layer drawer** default) |
+| **Investigations** | — | Existing investigations panel |
+
+**Rollback:** `VITE_INTELLIGENCE_COCKPIT_ENABLED=false` restores legacy Global / Mining / Oil & Gas / Ports / Route / Investigations tabs.
+
+---
+
+## 3b. Information architecture (legacy tabs → surfaces)
 
 ```mermaid
 flowchart LR

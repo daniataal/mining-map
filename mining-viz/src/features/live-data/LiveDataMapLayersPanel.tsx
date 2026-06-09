@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Anchor,
   Archive,
+  ArrowLeftRight,
   ArrowRightLeft,
   Building2,
   Globe2,
@@ -54,6 +55,9 @@ export type LiveDataMapLayersPanelProps = {
   eiaHistoricRowCount?: number | null;
   /** Map zoom for infrastructure gate (pipelines z≥9 per UX_SPEC_MAD-46). */
   mapZoom?: number | null;
+  /** Viewport STS count from GET /sts-events/summary (shown on toggle). */
+  stsEventsCount?: number | null;
+  stsEventsSummaryPending?: boolean;
 };
 
 /** MAD-4x-e — unified Historic / Live / Macro / Infrastructure groups. */
@@ -97,6 +101,14 @@ const LAYER_META = [
     hintHe: 'שכבת חוסרים ודלילות למקורות AIS פתוחים',
   },
   {
+    key: 'stsEvents' as const,
+    icon: ArrowLeftRight,
+    labelEn: 'STS proximity',
+    labelHe: 'קרבת STS',
+    hintEn: 'Inferred STS pairs as filled circles on map — not vessel chevrons',
+    hintHe: 'זוגות STS מסקניים כעיגולים מלאים — לא סימני כלי שיט',
+  },
+  {
     key: 'corridors' as const,
     icon: Route,
     labelEn: 'Shipment routes (MCR)',
@@ -134,6 +146,8 @@ export default function LiveDataMapLayersPanel({
   onEiaHistoricChange,
   eiaHistoricRowCount,
   mapZoom,
+  stsEventsCount,
+  stsEventsSummaryPending = false,
 }: LiveDataMapLayersPanelProps) {
   const { t } = useI18n();
   const [layerFamily, setLayerFamily] = useState<LayerDataFamily>('live');
@@ -370,6 +384,12 @@ export default function LiveDataMapLayersPanel({
           {LAYER_META.map(({ key, icon: Icon, labelEn, labelHe, hintEn, hintHe }) => {
             const on = layers[key];
             const coverageHighlight = key === 'coverage' && coverageNeedsAttention && !on;
+            const stsCountLabel =
+              key === 'stsEvents' && stsEventsCount != null
+                ? stsEventsSummaryPending
+                  ? t('…', '…')
+                  : `${stsEventsCount.toLocaleString()} ${t('בתצוגה', 'in view')}`
+                : null;
             return (
               <button
                 key={key}
@@ -383,9 +403,14 @@ export default function LiveDataMapLayersPanel({
                       : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-400'
                 }`}
               >
-                <span className="flex items-center gap-1.5 text-sm font-black uppercase tracking-wide">
+                <span className="flex w-full items-center gap-1.5 text-sm font-black uppercase tracking-wide">
                   <Icon className="h-4 w-4 shrink-0" />
-                  {t(labelHe, labelEn)}
+                  <span className="min-w-0 flex-1">{t(labelHe, labelEn)}</span>
+                  {stsCountLabel && (
+                    <span className="shrink-0 rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-bold tabular-nums normal-case tracking-normal text-violet-800 dark:text-violet-200">
+                      {stsCountLabel}
+                    </span>
+                  )}
                 </span>
                 <span className="mt-0.5 text-xs leading-snug opacity-80">{t(hintHe, hintEn)}</span>
               </button>

@@ -182,6 +182,38 @@ export function resolveLiveDataSyncBannerKind(
   return 'ok';
 }
 
+export function liveDataSyncKindChipLabel(
+  kind: LiveDataSyncBannerKind,
+): { en: string; he: string } {
+  switch (kind) {
+    case 'loading':
+      return { en: 'Loading…', he: 'טוען…' };
+    case 'unreachable':
+      return { en: 'Unreachable', he: 'לא נגיש' };
+    case 'demo_only':
+      return { en: 'Demo only', he: 'דמו בלבד' };
+    case 'empty':
+      return { en: 'Ledger empty', he: 'מאגר ריק' };
+    case 'degraded':
+      return { en: 'Sparse coverage', he: 'כיסוי דליל' };
+    default:
+      return { en: 'Data healthy', he: 'נתונים תקינים' };
+  }
+}
+
+export type LiveDataSyncKindTone = 'ok' | 'warn' | 'bad' | 'neutral';
+
+export function liveDataSyncKindTone(kind: LiveDataSyncBannerKind): LiveDataSyncKindTone {
+  if (kind === 'unreachable' || kind === 'demo_only') return 'bad';
+  if (kind === 'empty' || kind === 'degraded') return 'warn';
+  if (kind === 'loading') return 'neutral';
+  return 'ok';
+}
+
+export function shouldShowLiveDataWarningBanner(kind: LiveDataSyncBannerKind): boolean {
+  return kind === 'unreachable' || kind === 'demo_only' || kind === 'empty';
+}
+
 export function liveDataSyncBannerMessage(
   kind: LiveDataSyncBannerKind,
 ): { en: string; he: string } | null {

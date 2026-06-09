@@ -23,7 +23,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import AddToDueDiligenceButton from './AddToDueDiligenceButton';
 import CountryCommoditySnapshotCard from './CountryCommoditySnapshotCard';
-import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2, AlertTriangle as LucideAlertTriangle } from 'lucide-react';
+import { MapPin as LucideMapPin, Phone as LucidePhone, Trash2 as LucideTrash2, AlertTriangle as LucideAlertTriangle, PlusCircle as LucidePlusCircle } from 'lucide-react';
 
 interface PopupFormProps {
   item: MiningLicense;
@@ -40,6 +40,9 @@ interface PopupFormProps {
   dealRoomTitle?: string;
   /** When true, UN/LOCODE port popups show port-authority tank operators on the Oil & Gas map. */
   oilAndGasMap?: boolean;
+  onAddToBrokerWorkspace?: (
+    body: { entity_type: string; ref_kind: string; ref_id: string; display_name: string; lat: number; lng: number; deal_signal?: string },
+  ) => void;
 }
 
 function PopupForm({
@@ -55,6 +58,7 @@ function PopupForm({
   esgZoneName,
   dealRoomTitle,
   oilAndGasMap = false,
+  onAddToBrokerWorkspace,
 }: PopupFormProps) {
     const { t } = useI18n();
     const commodity = (item.commodity || annotation.commodity || '').toLowerCase();
@@ -65,7 +69,12 @@ function PopupForm({
       () => (useOilGasPopup ? buildOilGasLicensePopupModel(item) : null),
       [useOilGasPopup, item]
     );
-    const isStorageTerminal = item.entityKind === 'storage_terminal';
+    const isStorageTerminal =
+      item.entityKind === 'storage_terminal' ||
+      item.entityKind === 'storage_tank' ||
+      item.entityKind === 'tank_farm' ||
+      item.entitySubtype === 'storage_tank' ||
+      item.entitySubtype === 'tank_farm';
     const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
     const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
     const entityAccent = getEntityAccent(item.entityKind);
@@ -265,7 +274,31 @@ function PopupForm({
                   />
                 )}
 
-                <div className="grid grid-cols-2 gap-2 mt-5">
+                {onAddToBrokerWorkspace && (
+                  <div className="mt-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full h-9 text-[9px] font-black uppercase tracking-widest border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400 flex items-center justify-center gap-2"
+                      onClick={() => {
+                        onAddToBrokerWorkspace({
+                          entity_type: 'supplier',
+                          ref_kind: 'license',
+                          ref_id: item.id,
+                          display_name: item.company || item.id,
+                          lat: item.lat ?? 0,
+                          lng: item.lng ?? 0,
+                          deal_signal: annotation.status === 'good' ? 'good' : 'maybe',
+                        });
+                      }}
+                    >
+                      <LucidePlusCircle className="w-3.5 h-3.5 shrink-0" />
+                      {t('הוסף ל-Workspace', 'Add to Workspace')}
+                    </Button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
                    <Button 
                      size="sm" 
                      className={`h-9 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg transition-all
