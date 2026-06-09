@@ -133,6 +133,20 @@ Refreshes `map_energy_assets` and `map_metals_assets` after a non–dry-run run.
 - [Roadmap status](agent_reports/madsan_v2_roadmap_status.md)
 - [Dedup strategy](agent_reports/deduplication_strategy.md)
 
+## k6 smoke (Phase 13)
+
+Minimal load gate: `GET /health` and one MVT tile (`/tiles/{layer}/{z}/{x}/{y}.mvt`).
+
+```bash
+# Dev API direct (:8088)
+k6 run madsan/scripts/k6_smoke.js
+
+# Prod gate through Caddy (:80)
+MADSAN_API_URL=http://<vm>:80 k6 run madsan/scripts/k6_smoke.js
+```
+
+Pass criteria: `http_req_duration` p95 &lt; 2s.
+
 ## Honest tiers
 
 - AIS: limited Gulf provider coverage

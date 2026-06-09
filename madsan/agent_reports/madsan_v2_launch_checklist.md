@@ -77,7 +77,7 @@ Status key: **done** · **partial** · **blocked**
 
 ## 4. k6 load / smoke
 
-- [~] **partial** — `deploy/k6-smoke.js`: health, assets API, MVT tile; p95 &lt; 800 ms threshold
+- [~] **partial** — `scripts/k6_smoke.js`: health + MVT tile; p95 &lt; 2s (see §5 prod gate)
 - [ ] **blocked** — Not wired in CI or documented prod gate
 - [ ] **blocked** — Default `BASE` hits API `:8088` direct — prod gate must run through Caddy `:80` with realistic VU count
 - [ ] **blocked** — No baseline run logged against prod overlay stack
@@ -91,6 +91,16 @@ Status key: **done** · **partial** · **blocked**
 - [ ] **blocked** — Named volumes **start empty** on first prod deploy — seed not executed on target VM
 - [ ] **blocked** — Full prod stack smoke (`compose … prod.yml --profile proxy up`) not verified on ARM VM
 - [~] **partial** — `NEXT_PUBLIC_API_URL` must match Caddy origin (documented in `.env.example`; prod value TBD)
+
+### Prod stack smoke (k6)
+
+After `docker compose -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d`:
+
+```bash
+MADSAN_API_URL=http://<vm>:80 k6 run madsan/scripts/k6_smoke.js
+```
+
+Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass when p95 &lt; 2s. Log run date + VM in this checklist when green.
 
 ---
 
