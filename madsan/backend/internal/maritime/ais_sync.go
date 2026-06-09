@@ -14,24 +14,25 @@ import (
 
 // VesselDelta is a live AIS position update broadcast to map clients.
 type VesselDelta struct {
-	MMSI       string     `json:"mmsi"`
-	Name       string     `json:"name,omitempty"`
-	VesselType string     `json:"vessel_type,omitempty"`
-	Lat        float64    `json:"lat"`
-	Lon        float64    `json:"lon"`
-	Course     *float64   `json:"course,omitempty"`
-	SpeedKnots *float64   `json:"speed_knots,omitempty"`
+	MMSI        string    `json:"mmsi"`
+	Name        string    `json:"name,omitempty"`
+	VesselType  string    `json:"vessel_type,omitempty"`
+	Lat         float64   `json:"lat"`
+	Lon         float64   `json:"lon"`
+	Course      *float64  `json:"course,omitempty"`
+	Heading     *float64  `json:"heading,omitempty"`
+	SpeedKnots  *float64  `json:"speed_knots,omitempty"`
 	Destination string    `json:"destination,omitempty"`
-	LastSeenAt time.Time  `json:"last_seen_at"`
-	Source     string     `json:"source"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	Source      string    `json:"source"`
 }
 
 type Syncer struct {
-	madsan *pgxpool.Pool
-	legacy *pgxpool.Pool
-	log    zerolog.Logger
-	since  time.Time
-	stats  *SyncStats
+	madsan  *pgxpool.Pool
+	legacy  *pgxpool.Pool
+	log     zerolog.Logger
+	since   time.Time
+	stats   *SyncStats
 	onDelta func(VesselDelta)
 }
 
@@ -85,6 +86,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			p.lon,
 			p.speed,
 			p.course,
+			p.heading,
 			COALESCE(p.destination, ''),
 			p.ts
 		FROM oil_ais_positions p
@@ -103,12 +105,13 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	updated := 0
 	for rows.Next() {
 		var d VesselDelta
-		var speed, course *float64
-		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &speed, &course, &d.Destination, &d.LastSeenAt); err != nil {
+		var speed, course, heading *float64
+		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &speed, &course, &heading, &d.Destination, &d.LastSeenAt); err != nil {
 			return err
 		}
 		d.SpeedKnots = speed
 		d.Course = course
+		d.Heading = heading
 		d.Source = "legacy_oil_ais_positions"
 		if d.LastSeenAt.After(maxTS) {
 			maxTS = d.LastSeenAt
@@ -149,8 +152,8 @@ func (s *Syncer) upsertVessel(ctx context.Context, d VesselDelta) (uuid.UUID, bo
 	var id uuid.UUID
 	var positionFresh bool
 	err := s.madsan.QueryRow(ctx, `
-		INSERT INTO vessels (name, mmsi, vessel_type, latitude, longitude, geom, course, speed_knots, destination, last_seen_at, confidence_score, data_quality_status)
-		VALUES ($1,$2,$3,$4,$5, ST_SetSRID(ST_MakePoint($5,$4),4326)::geography, $6,$7,$8,$9, 65, 'observed')
+		INSERT INTO vessels (name, mmsi, vessel_type, latitude, longitude, geom, course, heading, speed_knots, destination, last_seen_at, confidence_score, data_quality_status)
+		VALUES ($1,$2,$3,$4,$5, ST_SetSRID(ST_MakePoint($5,$4),4326)::geography, $6,$7,$8,$9,$10, 65, 'observed')
 		ON CONFLICT (mmsi) DO UPDATE SET
 			name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE vessels.name END,
 			vessel_type = COALESCE(NULLIF(EXCLUDED.vessel_type,''), vessels.vessel_type),
@@ -158,12 +161,13 @@ func (s *Syncer) upsertVessel(ctx context.Context, d VesselDelta) (uuid.UUID, bo
 			longitude = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.longitude ELSE vessels.longitude END,
 			geom = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.geom ELSE vessels.geom END,
 			course = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.course ELSE vessels.course END,
+			heading = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.heading ELSE vessels.heading END,
 			speed_knots = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.speed_knots ELSE vessels.speed_knots END,
 			destination = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.destination ELSE vessels.destination END,
 			last_seen_at = GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at),
 			updated_at = now()
-		RETURNING id, (last_seen_at = $9::timestamptz) AS position_fresh
-	`, d.Name, d.MMSI, d.VesselType, d.Lat, d.Lon, d.Course, d.SpeedKnots, d.Destination, d.LastSeenAt).Scan(&id, &positionFresh)
+		RETURNING id, (last_seen_at = $10::timestamptz) AS position_fresh
+	`, d.Name, d.MMSI, d.VesselType, d.Lat, d.Lon, d.Course, d.Heading, d.SpeedKnots, d.Destination, d.LastSeenAt).Scan(&id, &positionFresh)
 	return id, positionFresh, err
 }
 
@@ -174,7 +178,7 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 	}
 	west, south, east, north := bbox[0], bbox[1], bbox[2], bbox[3]
 	rows, err := pool.Query(ctx, `
-		SELECT mmsi, COALESCE(name,''), COALESCE(vessel_type,''), latitude, longitude, course, speed_knots,
+		SELECT mmsi, COALESCE(name,''), COALESCE(vessel_type,''), latitude, longitude, course, heading, speed_knots,
 		       COALESCE(destination,''), COALESCE(last_seen_at, now())
 		FROM vessels
 		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
@@ -191,11 +195,12 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 	var out []VesselDelta
 	for rows.Next() {
 		var d VesselDelta
-		var speed, course *float64
-		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &course, &speed, &d.Destination, &d.LastSeenAt); err != nil {
+		var speed, course, heading *float64
+		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &course, &heading, &speed, &d.Destination, &d.LastSeenAt); err != nil {
 			return nil, err
 		}
 		d.Course = course
+		d.Heading = heading
 		d.SpeedKnots = speed
 		d.Source = "madsan_vessels"
 		out = append(out, d)

@@ -54,7 +54,15 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 		query = `
 			SELECT ST_AsMVT(mvt.*, $4) FROM (
 				SELECT ` + mvtGeom + ` AS geom,
-					id::text, name, mmsi, vessel_type AS asset_type, flag_country_code AS country_code, confidence_score
+					id::text, name, mmsi,
+					vessel_type,
+					vessel_type AS ship_type,
+					vessel_type AS asset_type,
+					flag_country_code AS country_code,
+					confidence_score,
+					course,
+					heading,
+					speed_knots
 				FROM vessels
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL
 				  AND geom IS NOT NULL AND ` + tileFilter + `
