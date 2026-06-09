@@ -42,6 +42,7 @@ Open http://localhost:3000 — terminal map, ⌘K search, `/deals`, `/admin`.
 | `LEGACY_DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable` |
 | `MADSAN_AIS_SYNC` | `true` |
 | `MADSAN_LEGACY_PYTHON` | `false` (Go import default) |
+| `EIA_API_KEY` | optional — EIA v2 daily WTI/Brent spot for ticker; omit for honest `reference_stub` fallback |
 
 ## Backfill commands
 
@@ -56,7 +57,7 @@ go run ./cmd/scan-company-duplicates
 
 ## API highlights
 
-- `GET /api/core/ticker` — reference benchmark quotes (stub tier)
+- `GET /api/core/ticker` — benchmark quotes (`eia_open_data` when `EIA_API_KEY` set; else `reference_stub`)
 - `GET /api/core/search?q=` — global search
 - `GET /api/core/entities/{type}/{id}` — dossier
 - `POST /api/deals/verify` — deal DD + sanctions
@@ -74,5 +75,5 @@ go run ./cmd/scan-company-duplicates
 
 - AIS: limited Gulf provider coverage
 - Vessel–terminal links: inferred from destination/proximity
-- Ticker: `reference_stub` until EIA/ICE wired
+- Ticker: EIA daily crude spot when `EIA_API_KEY` set; VLSFO/Gold remain reference stubs
 - OpenSanctions: review leads, not confirmed designations

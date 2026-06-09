@@ -30,11 +30,17 @@ export default function TerminalShell() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [metalsSummary, setMetalsSummary] = useState<{ mines?: number; countries?: number } | null>(null);
   const [quotes, setQuotes] = useState<TickerQuote[]>([]);
+  const [tickerTier, setTickerTier] = useState<string>("reference_stub");
+  const [tickerDisclaimer, setTickerDisclaimer] = useState("Reference stub — not live exchange");
 
   useEffect(() => {
     fetch(`${API_BASE}/api/core/ticker`)
       .then((r) => r.json())
-      .then((d: { quotes?: TickerQuote[] }) => setQuotes(d.quotes ?? []))
+      .then((d: { quotes?: TickerQuote[]; tier?: string; disclaimer?: string }) => {
+        setQuotes(d.quotes ?? []);
+        if (d.tier) setTickerTier(d.tier);
+        if (d.disclaimer) setTickerDisclaimer(d.disclaimer);
+      })
       .catch(() => {});
   }, []);
 
@@ -87,7 +93,11 @@ export default function TerminalShell() {
             </strong>
           </span>
         ))}
-        <span className="badge partial" title="Reference stub — not live exchange">REF PRICES</span>
+        {tickerTier === "eia_open_data" ? (
+          <span className="badge verified" title={tickerDisclaimer}>EIA OPEN DATA</span>
+        ) : (
+          <span className="badge partial" title={tickerDisclaimer}>REF PRICES</span>
+        )}
         <span className="badge partial">LIVE AIS — limited Gulf coverage</span>
         <button type="button" className="ticker-search" onClick={() => setSearchOpen(true)}>
           Search ⌘K

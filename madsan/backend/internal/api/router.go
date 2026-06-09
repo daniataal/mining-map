@@ -138,7 +138,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/tiles/{layer}/{z}/{x}/{y}.mvt", s.tiles.ServeMVT)
 	r.Get("/api/core/search", s.search.Handle)
-	r.Get("/api/core/ticker", markets.NewHandler().ServeHTTP)
+	r.Get("/api/core/ticker", markets.NewHandler(s.cfg.EIAAPIKey).ServeHTTP)
 	r.Get("/api/billing/plans", s.listPlans)
 
 	return r

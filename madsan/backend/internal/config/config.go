@@ -17,20 +17,21 @@ func defaultRawDir() string {
 }
 
 type Config struct {
-	Addr            string
-	DatabaseURL     string
-	JWTSecret       string
-	CookieSecure    bool
-	CookieDomain    string
-	AccessTokenTTL  time.Duration
-	RefreshTokenTTL time.Duration
-	RawDataDir      string
-	LegacyDBURL     string
-	ETLDir              string
-	ETLPython           string
-	LegacyImportPython  bool
-	EnableAISSync       bool
-	AISSyncInterval time.Duration
+	Addr               string
+	DatabaseURL        string
+	JWTSecret          string
+	CookieSecure       bool
+	CookieDomain       string
+	AccessTokenTTL     time.Duration
+	RefreshTokenTTL    time.Duration
+	RawDataDir         string
+	LegacyDBURL        string
+	ETLDir             string
+	ETLPython          string
+	LegacyImportPython bool
+	EnableAISSync      bool
+	AISSyncInterval    time.Duration
+	EIAAPIKey          string
 }
 
 func defaultETLDir() string {
@@ -45,20 +46,21 @@ func defaultETLDir() string {
 func Load() Config {
 	etlDir := defaultETLDir()
 	return Config{
-		Addr:            env("MADSAN_API_ADDR", ":8088"),
-		DatabaseURL:     env("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable"),
-		JWTSecret:       env("MADSAN_JWT_SECRET", "dev-change-me-in-production"),
-		CookieSecure:    envBool("MADSAN_COOKIE_SECURE", false),
-		CookieDomain:    env("MADSAN_COOKIE_DOMAIN", ""),
-		AccessTokenTTL:  time.Duration(envInt("MADSAN_ACCESS_TTL_MIN", 15)) * time.Minute,
-		RefreshTokenTTL: time.Duration(envInt("MADSAN_REFRESH_TTL_DAYS", 7)) * 24 * time.Hour,
-		RawDataDir:      env("MADSAN_RAW_DIR", defaultRawDir()),
-		LegacyDBURL:     env("LEGACY_DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable"),
-		ETLDir:          env("MADSAN_ETL_DIR", etlDir),
+		Addr:               env("MADSAN_API_ADDR", ":8088"),
+		DatabaseURL:        env("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable"),
+		JWTSecret:          env("MADSAN_JWT_SECRET", "dev-change-me-in-production"),
+		CookieSecure:       envBool("MADSAN_COOKIE_SECURE", false),
+		CookieDomain:       env("MADSAN_COOKIE_DOMAIN", ""),
+		AccessTokenTTL:     time.Duration(envInt("MADSAN_ACCESS_TTL_MIN", 15)) * time.Minute,
+		RefreshTokenTTL:    time.Duration(envInt("MADSAN_REFRESH_TTL_DAYS", 7)) * 24 * time.Hour,
+		RawDataDir:         env("MADSAN_RAW_DIR", defaultRawDir()),
+		LegacyDBURL:        env("LEGACY_DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable"),
+		ETLDir:             env("MADSAN_ETL_DIR", etlDir),
 		ETLPython:          env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
 		LegacyImportPython: envBool("MADSAN_LEGACY_PYTHON", false),
 		EnableAISSync:      envBool("MADSAN_AIS_SYNC", true),
-		AISSyncInterval: time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
+		AISSyncInterval:    time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
+		EIAAPIKey:          env("EIA_API_KEY", ""),
 	}
 }
 

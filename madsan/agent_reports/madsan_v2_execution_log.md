@@ -31,8 +31,17 @@
 | 10a Ticker stub + company dedup | done | `/api/core/ticker`; dedup clusters + admin scan; `madsan/README.md` |
 | 10b Compose cutover (dev) | done | `compose_up.sh`; legacy AIS via host.docker.internal; Caddy profile |
 | 10c Review queue merge resolve | done | `POST /api/admin/review-queue/{id}/resolve`; admin merge/dismiss UI |
+| 10e EIA open-data ticker | done | EIA v2 WTI/Brent daily spot; 20m cache; tier badge in terminal |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+
+## 2026-06-09 Phase 10e — EIA open-data ticker
+
+- `GET /api/core/ticker`: fetches EIA v2 daily spot (`RWTC` WTI, `RBRTE` Brent) when `EIA_API_KEY` set
+- 20-minute in-memory cache; per-quote and top-level `tier` (`eia_open_data` vs `reference_stub`)
+- VLSFO SG + Gold remain honest reference stubs; no fake live exchange tier
+- Terminal ticker badge: **EIA OPEN DATA** (green) or **REF PRICES** (blue) with disclaimer tooltip
+- Config: `EIA_API_KEY` in `deploy/.env.example`, compose backend env, `internal/config`
 
 ## 2026-06-09 Phase 10c — review queue merge resolve
 

@@ -8,7 +8,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 |--------|--------|--------|----------|
 | Discover | Global search, map layers, suppliers | **On track** | ⌘K search, energy/metals MVT, live AIS overlay, 76k assets |
 | Verify | Dossiers, deals, sanctions, packs | **On track** | Entity dossier + evidence, DD rules, OpenSanctions, pack v1.1 + relationship graph |
-| Price | Signals, opportunity score, freshness | **Partial** | Reference ticker stub (`/api/core/ticker`); no EIA/Comtrade yet |
+| Price | Signals, opportunity score, freshness | **Partial** | EIA daily crude spot when keyed; VLSFO/Gold stub |
 | Execute | Portal, billing, compliance gates | **Not started** | Supplier portal scaffold only; no billing/KYC cutover |
 
 **Verdict:** MVP intelligence loop (discover → verify) is **shippable for internal DD**. Price feeds and execute path remain Phase 10+.
@@ -44,7 +44,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 | Python ETL | Fallback only | Parity test → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
 | RBAC | Cookie auth MVP | Middleware on admin/deals routes |
-| Price ticker | Placeholder dashes | Wire free-tier EIA/benchmark stub |
+| Price ticker | EIA crude when keyed | VLSFO/Gold stub; ICE/exchange feed deferred |
 | `madsan/` in git | Untracked | User-approved initial commit |
 | Compose cutover | **Done (dev)** | `compose_up.sh` — db+api+worker+scheduler+frontend; optional Caddy `:9080` |
 
@@ -70,9 +70,8 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 
 1. **4d** — Splink batch dedup (current: SQL clusters + `manual_review_queue`)
 2. **10d** — Git initial commit of `madsan/` (user approval)
-3. **10e** — Wire free-tier EIA/benchmark API to replace ticker stub
-4. **4e** — Retire Python `legacy_import.py` after parity tests
-5. **10f** — Production compose tuning (resource limits, secrets, observability)
+3. **4e** — Retire Python `legacy_import.py` after parity tests
+4. **10f** — Production compose tuning (resource limits, secrets, observability)
 
 ## Risks
 
