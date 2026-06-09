@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import type { Feature, FeatureCollection, Point } from "geojson";
+import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   API_BASE,
@@ -19,42 +19,8 @@ import {
   vesselIconRotate,
   vesselNoRotationFilter,
 } from "@/lib/vesselMapIcon";
+import { VesselDeadReckoning, type VesselMsg } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
-
-type VesselMsg = {
-  mmsi: string;
-  name?: string;
-  vessel_type?: string;
-  lat: number;
-  lon: number;
-  course?: number;
-  heading?: number;
-  speed_knots?: number;
-  destination?: string;
-  last_seen_at?: string;
-  source?: string;
-};
-
-function vesselFeatures(vessels: VesselMsg[]): FeatureCollection<Point> {
-  return {
-    type: "FeatureCollection",
-    features: vessels.map((v) => ({
-      type: "Feature",
-      id: v.mmsi,
-      geometry: { type: "Point", coordinates: [v.lon, v.lat] },
-      properties: {
-        mmsi: v.mmsi,
-        name: v.name ?? "",
-        vessel_type: v.vessel_type ?? "",
-        course: v.course ?? null,
-        heading: v.heading ?? null,
-        speed_knots: v.speed_knots ?? null,
-        last_seen_at: v.last_seen_at ?? "",
-        source: v.source ?? "live",
-      },
-    })),
-  };
-}
 
 type Props = {
   vertical: "energy" | "metals";
@@ -304,6 +270,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
 
     let ws: WebSocket | null = null;
     let moveEndHandler: (() => void) | null = null;
+    let vesselMotion: VesselDeadReckoning | null = null;
     let cancelled = false;
 
     const setupMap = () => {
@@ -391,11 +358,17 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
 
-        const liveByMMSI = new Map<string, Feature<Point>>();
-        const applyLive = () => {
-          const src = map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
-          if (src) src.setData({ type: "FeatureCollection", features: [...liveByMMSI.values()] });
-        };
+        const liveSrc = () => map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
+        vesselMotion = new VesselDeadReckoning({
+          getBbox: () => {
+            const b = map.getBounds();
+            return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+          },
+          onFeatures: (features) => {
+            const src = liveSrc();
+            if (src) src.setData({ type: "FeatureCollection", features });
+          },
+        });
 
         const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
         try {
@@ -410,16 +383,9 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
                 entity?: string;
               };
               if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
-                liveByMMSI.clear();
-                for (const v of msg.vessels) {
-                  const f = vesselFeatures([v]).features[0] as Feature<Point>;
-                  liveByMMSI.set(v.mmsi, f);
-                }
-                applyLive();
+                vesselMotion?.replaceAll(msg.vessels);
               } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
-                const f = vesselFeatures([msg.data]).features[0] as Feature<Point>;
-                liveByMMSI.set(msg.data.mmsi, f);
-                applyLive();
+                vesselMotion?.upsert(msg.data);
               }
             } catch {
               /* ignore malformed ws payloads */
@@ -435,6 +401,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
                 zoom: map.getZoom(),
                 layers: Object.keys(layers).filter((k) => layers[k]),
               }));
+              vesselMotion?.viewportChanged();
             };
             moveEndHandler = sendSub;
             map.on("moveend", sendSub);
@@ -458,6 +425,8 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     return () => {
       cancelled = true;
       if (moveEndHandler) map.off("moveend", moveEndHandler);
+      vesselMotion?.dispose();
+      vesselMotion = null;
       ws?.close();
       map.remove();
       mapRef.current = null;
