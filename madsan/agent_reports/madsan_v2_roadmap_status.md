@@ -1,4 +1,4 @@
-# MadSan V2 — Roadmap Status (2026-06-09, tip `9bbce7c`)
+# MadSan V2 — Roadmap Status (2026-06-09, tip `4f61f66b`)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
@@ -6,7 +6,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 
 | Pillar | Target | Status | Evidence |
 |--------|--------|--------|----------|
-| Discover | Global search, map layers, suppliers | **On track** | ⌘K search, energy/metals MVT, live AIS overlay, 76k assets |
+| Discover | Global search, map layers, suppliers | **On track** | ⌘K search, energy/metals MVT, pipeline lines + vessel chevrons, live AIS overlay, 76k assets |
 | Verify | Dossiers, deals, sanctions, packs | **On track** | Entity dossier + evidence, DD rules, OpenSanctions, pack v1.1 + relationship graph |
 | Price | Signals, opportunity score, freshness | **Partial** | EIA daily crude spot when keyed; VLSFO/Gold stub |
 | Execute | Portal, billing, compliance gates | **Not started** | Supplier portal scaffold only; no billing/KYC cutover |
@@ -32,6 +32,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - Ingestion: bunker seed, watch folder, Postgres job queue, worker/scheduler
 - Legacy bridge: Go-native import (default), Python fallback
 - Map: MapLibre terminal, vector tiles, WS live vessels, corridor lines
+- **Map UX fixes:** pipeline LineString MVT + line layers (`be4a5fba`); vessel ship chevrons with heading rotation (`74eeab55`); legacy AIS heading backfill (`4f61f66b`); pipeline dossier OSM metadata (`3610abe`)
 - Dossiers: company/asset/vessel, signals, signal history, relationships
 - Deals: verify, sanctions, pack export (json/md/html), relationship graph in pack
 - Admin console, metals vertical, global search
@@ -93,7 +94,7 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 | Legacy Python transitional | AIS via Go; legacy read Go-default ✅ |
 | Honest coverage disclaimers | Gulf AIS, inferred vessel-terminal links ✅ |
 | Postgres + PostGIS source of truth | All intelligence in madsan_db ✅ |
-| Map not tables-only | Tiles + dossier + corridors ✅ |
+| Map not tables-only | Pipeline lines, vessel chevrons, dossier click-through ✅ |
 
 ## Next priorities (ordered)
 
@@ -114,7 +115,18 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 
 ## Known gaps (2026-06-09 audit vs plan)
 
-Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `ingestion_jobs` table, git tip `9bbce7c`.
+Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `ingestion_jobs` table, git tip `4f61f66b`.
+
+### Map UX gaps — audit vs shipped
+
+| Gap | Status | Fix | Notes |
+|-----|--------|-----|-------|
+| Pipelines render as point dots | **FIXED** | `be4a5fba` | Legacy LineString MVT + frontend line layers (z≥4); import geom preserved (`a2549bfd`) |
+| Vessels render as dots, no heading | **FIXED** | `74eeab55` | Ship symbol layers rotate on AIS course/heading; dim dot tier when no bearing |
+| Sparse vessel heading in tiles/WS | **FIXED** | `4f61f66b` | `cmd/backfill-vessel-heading` copies legacy `oil_ais_positions`; MVT exposes course/heading (`d1401a8b`) |
+| Pipeline click dossier thin | **FIXED** | `3610abe` | Asset summary shows geometry type, substance, OSM tags from `raw_payload` |
+
+**Remaining map UX (non-blocker):** 6b dead-reckoning / binary WS frames; Gulf AIS coverage disclaimer; VLSFO ticker stub.
 
 ### Ingestion pipeline — plan vs shipped
 
@@ -158,8 +170,8 @@ flowchart LR
 | 4 Legacy ETL | **IN_PROGRESS** | Petroleum OSM ~70% under-imported (**BLOCKED** on import finish) |
 | 5 Go core + auth | **IN_PROGRESS** | Entity response shape partial; httpOnly cookie MVP |
 | 5b Entitlements | **FIXED** | Scaffold + deals gating shipped |
-| 6 Map + MVT | **FIXED** | — |
-| 6b Realtime WS | **IN_PROGRESS** | Hub exists; no binary frames / dead-reckoning / 202 job queue |
+| 6 Map + MVT | **FIXED** | Pipeline lines, vessel chevrons, pipeline dossier shipped (`be4a5fba`, `74eeab55`, `3610abe`, `4f61f66b`) |
+| 6b Realtime WS | **IN_PROGRESS** | Hub + chevron rotation ✅; no binary frames / dead-reckoning / 202 job queue |
 | 7 Energy UI | **IN_PROGRESS** | VLSFO ticker stub |
 | 8 Supplier discovery | **IN_PROGRESS** | Ranked search partial |
 | 8b–8f Intelligence | **GAP/PENDING** | MCR v2, pgRouting, Splink runtime not started |
