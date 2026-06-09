@@ -37,14 +37,17 @@ Python runner: `madsan/etl/legacy_import.py` via `legacy_runner.go`.
 
 **Drift semantics:** `drift = madsan_count - legacy_count`. Negative drift (madsan lower) usually means an **incomplete Go import** — enqueue **Legacy import (all)** with worker running, or wait for the daily scheduler job. Positive drift on vessels is expected when AIS sync is active.
 
-**Licenses — expected vs bug (honest tier):**
+**Licenses — expected vs bug (honest tiers):**
 
-| Signal | Expected? | Explanation |
-|--------|-----------|-------------|
-| Madsan ≈ **62%** of raw geolocated legacy rows (~73k → ~45k) after full import | **yes** | Go upserts one asset per `(company, sector→asset_type, country)`; many legacy license parcels share the same operator. Parity compares against **distinct importable keys**, not raw row count. |
-| Go skips rows where `company` normalizes to empty (`legacy_read.go`) | **yes** | Assets require a name; vessels are exempt. Current snapshot has **0** geolocated licenses with blank `company`. |
-| Madsan ≪ distinct importable count after **Legacy import (all)** | **bug** | Incomplete import, worker down, or upsert errors — not dedupe. |
-| Raw legacy count used as parity denominator | **misleading** | Treat ~38% “drift” vs raw rows as dedupe, not under-import, once madsan ≈ distinct importable count. |
+CLI JSON includes `license_tiers` on the licenses row. Use `under_import_gap` as the bug signal, not raw row ratio.
+
+| Tier / signal | Field | Expected? | Explanation |
+|---------------|-------|-----------|-------------|
+| No coordinates | `not_importable_no_coords` | **yes** | SQL filter in `legacy_read.go`; never imported (~2.6k) |
+| Empty `company` after trim | `expected_skip_empty_name` | **yes** | Go `continue` when `rec.Name == ""` (non-vessel); 0 on current snapshot |
+| Dedup collapse | `expected_dedup_keys` | **yes** | One asset per `(company, sector→asset_type, country)` via `upsertMaster`; ~73k geocoded rows → ~45.5k keys (~62% row ratio) |
+| Madsan ≪ dedup keys after full import | `under_import_gap` | **bug** | Incomplete import, worker down, or upsert errors |
+| Raw geocoded count as denominator | `import_pool_geocoded` | **informational** | Do not fail parity on ~38% “drift” vs this alone |
 
 CLI exits **0** when all critical tables pass; **1** when any critical table exceeds threshold.
 
@@ -63,10 +66,21 @@ go run ./cmd/legacy-parity
 |-------|--------|--------|---------|--------|
 | `oil_vessels` | 9,595 | 9,595 | 0% | **pass** |
 | `oil_companies` | 5,074 | 18,680 | 268% | informational |
-| `licenses` | ~45,506 importable | ~45,503 | ~0% | **pass** after full import (raw geolocated rows ~73,112 dedupe to ~45k; ~62% row ratio is expected) |
-| `petroleum_osm_features` | 303,745 | 57,318 | 81.1% | **fail** (under-imported) |
+| `licenses` | 45,506 dedup keys | 45,503 | 0.01% | **pass** (`license_tiers.under_import_gap`: 3) |
+| `petroleum_osm_features` | 303,745 | 70,526 | 76.8% | **fail** (under-imported) |
 
-**Result:** `passed: false`, `failed_critical: ["petroleum_osm_features"]` (licenses fail only when using raw row denominator or import incomplete). Vessels at parity; petroleum OSM assets need full Go import before Python retirement.
+**Result:** `passed: false`, `failed_critical: ["petroleum_osm_features"]`. Vessels and licenses at dedup-key parity; petroleum OSM needs full Go import before Python retirement.
+
+License tiers on this snapshot:
+
+| Field | Count |
+|-------|-------|
+| `legacy_total` | 75,671 |
+| `not_importable_no_coords` | 2,559 |
+| `import_pool_geocoded` | 73,112 |
+| `expected_skip_empty_name` | 0 |
+| `expected_dedup_keys` | 45,506 |
+| `under_import_gap` | 3 |
 
 ### `backfill-petroleum-types` (dry-run)
 

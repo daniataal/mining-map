@@ -147,7 +147,31 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 		note = "madsan may exceed legacy when live AIS sync is enabled"
 	}
 	if spec.LegacyTable == "licenses" {
-		note = "legacy count is distinct importable assets (company+sector+country); Go skips rows with empty company; raw geolocated rows (~73k) dedupe to ~45k"
+		tiers, terr := fetchLicenseImportTiers(ctx, legacy)
+		if terr != nil {
+			return ParityTableResult{}, terr
+		}
+		tiers.UnderImportGap = tiers.ExpectedDedupKeys - madsanCount
+		if tiers.UnderImportGap < 0 {
+			tiers.UnderImportGap = 0
+		}
+		note = fmt.Sprintf(
+			"legacy_count is expected_dedup_keys (%d); raw geocoded=%d; empty-name skip=%d; no-coords=%d; under_import_gap=%d",
+			tiers.ExpectedDedupKeys, tiers.ImportPoolGeocoded, tiers.ExpectedSkipEmptyName,
+			tiers.NotImportableNoCoords, tiers.UnderImportGap,
+		)
+		return ParityTableResult{
+			LegacyTable:  spec.LegacyTable,
+			MadsanTarget: spec.MadsanTarget,
+			LegacyCount:  legacyCount,
+			MadsanCount:  madsanCount,
+			Drift:        drift,
+			DriftPct:     round2(driftPct),
+			Critical:     spec.Critical,
+			OK:           ok,
+			Note:         note,
+			LicenseTiers: &tiers,
+		}, nil
 	}
 	return ParityTableResult{
 		LegacyTable:  spec.LegacyTable,
@@ -164,6 +188,36 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 
 func round2(v float64) float64 {
 	return math.Round(v*100) / 100
+}
+
+const licenseTierSQL = `
+SELECT
+  (SELECT COUNT(*)::bigint FROM licenses) AS legacy_total,
+  (SELECT COUNT(*)::bigint FROM licenses WHERE lat IS NULL OR lng IS NULL) AS not_importable_no_coords,
+  (SELECT COUNT(*)::bigint FROM licenses WHERE lat IS NOT NULL AND lng IS NOT NULL) AS import_pool_geocoded,
+  (SELECT COUNT(*)::bigint FROM licenses
+     WHERE lat IS NOT NULL AND lng IS NOT NULL AND NULLIF(trim(company), '') IS NULL) AS expected_skip_empty_name,
+  (SELECT COUNT(*)::bigint FROM (
+     SELECT DISTINCT
+       lower(trim(company)),
+       CASE WHEN lower(COALESCE(sector, 'mining')) = 'mining' THEN 'mine' ELSE 'processing_plant' END,
+       COALESCE(upper(trim(country)), '')
+     FROM licenses
+     WHERE lat IS NOT NULL AND lng IS NOT NULL
+       AND NULLIF(trim(company), '') IS NOT NULL
+   ) importable) AS expected_dedup_keys
+`
+
+func fetchLicenseImportTiers(ctx context.Context, legacy *pgxpool.Pool) (LicenseImportTiers, error) {
+	var t LicenseImportTiers
+	err := legacy.QueryRow(ctx, licenseTierSQL).Scan(
+		&t.LegacyTotal,
+		&t.NotImportableNoCoords,
+		&t.ImportPoolGeocoded,
+		&t.ExpectedSkipEmptyName,
+		&t.ExpectedDedupKeys,
+	)
+	return t, err
 }
 
 // ParityReportJSON marshals the report for stdout.
