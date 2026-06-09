@@ -133,6 +133,7 @@ func (s *Server) Router() http.Handler {
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
 		api.With(s.requireAuth, s.withTenantGUC).Post("/{id}/watch", s.watchDeal)
+		api.With(s.requireAuth, s.withTenantGUC).Delete("/{id}/watch", s.unwatchDeal)
 		api.With(s.requireAuth, s.withTenantGUC).Get("/{id}/changes", s.dealChanges)
 	})
 
@@ -154,6 +155,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/dedup/companies", s.listCompanyDuplicates)
 		api.Get("/dedup/companies/pairs.csv", s.exportCompanyPairsCSV)
 		api.Post("/dedup/companies/scan", s.scanCompanyDuplicates)
+		api.Post("/dedup/clusters/{id}/enqueue-review", s.enqueueClusterMergeReview)
 	})
 
 	r.Get("/tiles/{layer}/{z}/{x}/{y}.mvt", s.tiles.ServeMVT)

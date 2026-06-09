@@ -1,9 +1,13 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/madsan/intelligence/internal/dedup"
 )
@@ -74,4 +78,44 @@ func (s *Server) exportCompanyPairsCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Madsan-Pair-Count", strconv.Itoa(pairCount))
+}
+
+func (s *Server) enqueueClusterMergeReview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	clusterID, err := url.PathUnescape(chi.URLParam(r, "id"))
+	if err != nil || clusterID == "" {
+		http.Error(w, "cluster id required", http.StatusBadRequest)
+		return
+	}
+	result, err := dedup.EnqueueCompanyClusterMergeReview(r.Context(), s.pool, clusterID)
+	if err != nil {
+		switch {
+		case errors.Is(err, dedup.ErrClusterNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, dedup.ErrTierNotEligible):
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]any{
+				"status":      "rejected",
+				"review_tier": result.ReviewTier,
+				"error":       err.Error(),
+			})
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	status := "enqueued"
+	if !result.Enqueued {
+		status = "deduped"
+	}
+	writeJSON(w, map[string]any{
+		"status":      status,
+		"enqueued":    result.Enqueued,
+		"queue_id":    result.QueueID,
+		"review_tier": result.ReviewTier,
+		"message":     result.Message,
+	})
 }

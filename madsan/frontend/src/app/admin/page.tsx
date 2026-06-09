@@ -114,7 +114,36 @@ type ReviewQueueItem = {
   };
 };
 
-function suggestedCanonical(members?: Array<{ id: string; confidence_score?: number }>) {
+function tierBadgeClass(tier?: string) {
+  switch (tier) {
+    case "high_confidence":
+      return "verified";
+    case "manual_review":
+      return "partial";
+    case "skip":
+      return "warn";
+    default:
+      return "partial";
+  }
+}
+
+function tierBadgeLabel(tier?: string) {
+  switch (tier) {
+    case "high_confidence":
+      return "high confidence — human merge required";
+    case "manual_review":
+      return "manual review";
+    case "skip":
+      return "skip tier";
+    default:
+      return tier ?? "unknown tier";
+  }
+}
+
+function isDedupMergeItem(item: ReviewQueueItem) {
+  return item.entity_type === "dedup_merge" || item.reason === "dedup_merge" || item.reason === "duplicate_company";
+}
+
   if (!members?.length) return "";
   let best = members[0];
   for (const m of members.slice(1)) {
@@ -225,7 +254,44 @@ export default function AdminPage() {
     setAuthed(true);
   }
 
+  async function enqueueClusterMergeReview(normalizedName: string) {
+    setDedupMsg("");
+    const res = await fetch(
+      `${API_BASE}/api/admin/dedup/clusters/${encodeURIComponent(normalizedName)}/enqueue-review`,
+      { ...fetchOpts, method: "POST" }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setDedupMsg(typeof data === "string" ? data : data?.error ?? `Enqueue failed (${res.status})`);
+      return;
+    }
+    if (data.status === "deduped") {
+      setDedupMsg(`Already queued for merge review (${data.review_tier ?? "high_confidence"})`);
+    } else {
+      setDedupMsg(`Enqueued merge review · ${data.review_tier ?? "high_confidence"} · queue ${data.queue_id ?? "—"}`);
+    }
+    refresh();
+  }
+
   async function scanDuplicates() {
+    setDedupMsg("");
+    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setDedupMsg(typeof data === "string" ? data : data?.error ?? JSON.stringify(data));
+      return;
+    }
+    const total = data.enqueued ?? 0;
+    const exact = data.exact_name_enqueued;
+    const cross = data.cross_name_enqueued;
+    const breakdown =
+      exact != null || cross != null
+        ? ` (${exact ?? 0} exact-name · ${cross ?? 0} cross-name)`
+        : "";
+    setDedupMsg(`Dedup scan: ${total} queued for review${breakdown}`);
+    refresh();
+  }
+
     setDedupMsg("");
     const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
     const data = await res.json().catch(() => ({}));
@@ -627,6 +693,7 @@ export default function AdminPage() {
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>score</th>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>tier</th>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>countries</th>
+              <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>action</th>
             </tr>
           </thead>
           <tbody>
@@ -636,10 +703,29 @@ export default function AdminPage() {
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{c.count}</td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{Math.round(c.match_score)}</td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
-                  {c.review_tier ?? "—"}
+                  {c.review_tier ? (
+                    <span className={`badge ${tierBadgeClass(c.review_tier)}`} title={tierBadgeLabel(c.review_tier)}>
+                      {c.review_tier}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>
                   {[...new Set(c.members.map((m) => m.country_code).filter(Boolean))].join(", ") || "—"}
+                </td>
+                <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+                  {c.review_tier === "high_confidence" ? (
+                    <button
+                      type="button"
+                      onClick={() => enqueueClusterMergeReview(c.normalized_name)}
+                      style={{ padding: "4px 8px", background: "var(--accent)", color: "#000", border: 0, fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}
+                    >
+                      Enqueue merge review
+                    </button>
+                  ) : (
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -654,16 +740,29 @@ export default function AdminPage() {
         ) : (
           queue.map((item) => {
             const members = item.raw_payload?.members ?? item.candidate_matches ?? [];
-            const isDup = item.reason === "duplicate_company";
+            const isDup = isDedupMergeItem(item);
+            const tier = item.raw_payload?.review_tier;
             const hint = isDup ? suggestedCanonical(item.raw_payload?.members) : "";
             return (
               <div key={item.id} style={{ ...card, marginBottom: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
                   <div>
-                    <strong>{item.reason}</strong>
-                    <span style={{ color: "var(--muted)", marginLeft: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {item.entity_type === "dedup_merge" && (
+                        <span className="badge verified" title="Human merge review — no auto-merge">
+                          dedup_merge
+                        </span>
+                      )}
+                      <strong>{item.reason}</strong>
+                      {tier && (
+                        <span className={`badge ${tierBadgeClass(tier)}`} title={tierBadgeLabel(tier)}>
+                          {tier}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ color: "var(--muted)", marginLeft: 0, display: "block", marginTop: 4 }}>
                       score {item.confidence_score != null ? Math.round(item.confidence_score) : "—"}
-                      {item.raw_payload?.review_tier ? ` · ${item.raw_payload.review_tier}` : ""}
+                      {item.entity_type === "dedup_merge" ? " · analyst merge required" : ""}
                     </span>
                     {item.raw_payload?.normalized_name && (
                       <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>

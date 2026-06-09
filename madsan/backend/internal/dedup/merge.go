@@ -241,7 +241,7 @@ func ResolveReviewQueue(ctx context.Context, pool *pgxpool.Pool, queueID uuid.UU
 		return dismissQueueItem(ctx, pool, queueID)
 	}
 
-	if item.Reason != "duplicate_company" {
+	if !IsMergeReviewReason(item.Reason) {
 		return nil, ErrUnsupportedReason
 	}
 	if in.CanonicalCompanyID == "" {
@@ -301,7 +301,8 @@ func ResolveReviewQueue(ctx context.Context, pool *pgxpool.Pool, queueID uuid.UU
 			UPDATE manual_review_queue
 			SET status = 'resolved', reviewed_at = now(),
 			    raw_payload = COALESCE(raw_payload, '{}') || '{"resolution":{"action":"superseded"}}'::jsonb
-			WHERE reason = 'duplicate_company' AND status = 'pending'
+			WHERE status = 'pending'
+			  AND (reason = 'duplicate_company' OR reason = 'dedup_merge')
 			  AND id != $1 AND raw_payload->>'normalized_name' = $2
 		`, queueID, normName)
 	}
