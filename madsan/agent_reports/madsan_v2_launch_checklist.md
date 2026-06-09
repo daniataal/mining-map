@@ -10,7 +10,7 @@ Status key: **done** · **partial** · **blocked**
 
 ## 1. Legal & compliance
 
-- [~] **partial** — `/legal` page: intelligence disclaimer, data tiers, GDPR principles, risk wording (`frontend/src/app/legal/page.tsx`)
+- [~] **partial** — `/legal` page (Phase 12c): intelligence-not-advice, data tiers & evidence, sanctions screening limits, corrections via admin review queue, explicit no-counsel sign-off (`frontend/src/app/legal/page.tsx`)
 - [~] **partial** — Deal pack + `/deals` UI carry “not legal/trading advice” disclaimers
 - [~] **partial** — OpenSanctions screening labeled review-tier (not confirmation) in pack + verify flow
 - [ ] **blocked** — External legal/compliance sign-off on prod copy (disclaimer, privacy, sanctions use)
