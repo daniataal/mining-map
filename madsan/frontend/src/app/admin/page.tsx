@@ -40,6 +40,30 @@ type SourceRow = {
   imported_at?: string;
 };
 
+type ReviewQueueItem = {
+  id: string;
+  entity_type?: string;
+  reason: string;
+  confidence_score?: number;
+  status: string;
+  created_at?: string;
+  candidate_matches?: Array<{ id: string; name: string; country_code?: string; confidence_score?: number }>;
+  raw_payload?: {
+    normalized_name?: string;
+    member_count?: number;
+    members?: Array<{ id: string; name: string; country_code?: string; confidence_score?: number }>;
+  };
+};
+
+function suggestedCanonical(members?: Array<{ id: string; confidence_score?: number }>) {
+  if (!members?.length) return "";
+  let best = members[0];
+  for (const m of members.slice(1)) {
+    if ((m.confidence_score ?? 0) > (best.confidence_score ?? 0)) best = m;
+  }
+  return best.id;
+}
+
 const card: React.CSSProperties = {
   background: "var(--panel)",
   border: "1px solid var(--border)",
@@ -51,7 +75,7 @@ export default function AdminPage() {
   const [insights, setInsights] = useState<Insights | null>(null);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
   const [sources, setSources] = useState<SourceRow[]>([]);
-  const [queue, setQueue] = useState<unknown[]>([]);
+  const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
   const [dupClusters, setDupClusters] = useState<DupCluster[]>([]);
   const [msg, setMsg] = useState("");
 
@@ -74,6 +98,27 @@ export default function AdminPage() {
     const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { method: "POST" });
     const data = await res.json();
     setMsg(res.ok ? `Dedup scan: ${data.enqueued} queued for review` : JSON.stringify(data));
+    refresh();
+  }
+
+  async function resolveQueueItem(queueId: string, action: "merge" | "dismiss", canonicalCompanyId?: string) {
+    setMsg("");
+    const res = await fetch(`${API_BASE}/api/admin/review-queue/${queueId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, canonical_company_id: canonicalCompanyId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg(typeof data === "string" ? data : data?.error ?? `Resolve failed (${res.status})`);
+      return;
+    }
+    const mergeStats = data.merge as { merged_company_ids?: string[]; assets_updated?: number } | undefined;
+    setMsg(
+      action === "merge"
+        ? `Merged ${mergeStats?.merged_company_ids?.length ?? 0} duplicates → ${canonicalCompanyId} (${mergeStats?.assets_updated ?? 0} asset FK updates)`
+        : "Review item dismissed"
+    );
     refresh();
   }
 
@@ -236,7 +281,76 @@ export default function AdminPage() {
 
       <section>
         <h2 style={{ fontSize: 15 }}>Review queue ({insights?.review_queue_pending ?? 0} pending)</h2>
-        <pre style={{ ...card, overflow: "auto", fontSize: 11 }}>{JSON.stringify(queue, null, 2)}</pre>
+        {queue.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>No pending items. Run dedup scan to enqueue duplicate clusters.</p>
+        ) : (
+          queue.map((item) => {
+            const members = item.raw_payload?.members ?? item.candidate_matches ?? [];
+            const isDup = item.reason === "duplicate_company";
+            const hint = isDup ? suggestedCanonical(item.raw_payload?.members) : "";
+            return (
+              <div key={item.id} style={{ ...card, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                  <div>
+                    <strong>{item.reason}</strong>
+                    <span style={{ color: "var(--muted)", marginLeft: 8 }}>
+                      score {item.confidence_score != null ? Math.round(item.confidence_score) : "—"}
+                    </span>
+                    {item.raw_payload?.normalized_name && (
+                      <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
+                        {item.raw_payload.normalized_name} · {item.raw_payload.member_count ?? members.length} members
+                      </div>
+                    )}
+                  </div>
+                  {isDup && (
+                    <button
+                      type="button"
+                      onClick={() => resolveQueueItem(item.id, "dismiss")}
+                      style={{ padding: "6px 10px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--muted)", whiteSpace: "nowrap" }}
+                    >
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+                {isDup && members.length > 0 ? (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "var(--muted)" }}>
+                        <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>Company</th>
+                        <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>Country</th>
+                        <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>Conf</th>
+                        <th style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.id}>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>
+                            {m.name}
+                            {m.id === hint && <span style={{ color: "var(--accent)", marginLeft: 6, fontSize: 10 }}>suggested</span>}
+                          </td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{m.country_code || "—"}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>{m.confidence_score != null ? Math.round(m.confidence_score) : "—"}</td>
+                          <td style={{ padding: 6, borderBottom: "1px solid var(--border)" }}>
+                            <button
+                              type="button"
+                              onClick={() => resolveQueueItem(item.id, "merge", m.id)}
+                              style={{ padding: "4px 8px", background: "var(--accent)", color: "#000", border: 0, fontWeight: 600, fontSize: 11 }}
+                            >
+                              Merge as canonical
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <pre style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "auto" }}>{JSON.stringify(item.raw_payload ?? item, null, 2)}</pre>
+                )}
+              </div>
+            );
+          })
+        )}
       </section>
     </main>
   );

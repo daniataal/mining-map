@@ -81,130 +81,146 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
 
-    LAYER_REGISTRY.filter((l) => l.tileLayer).forEach((layer) => {
-      const src = `src-${layer.id}`;
-      map.addSource(src, {
-        type: "vector",
-        tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
-        minzoom: 0,
-        maxzoom: 14,
+    let ws: WebSocket | null = null;
+    let moveEndHandler: (() => void) | null = null;
+    let cancelled = false;
+
+    const setupMap = () => {
+      if (cancelled) return;
+
+      LAYER_REGISTRY.filter((l) => l.tileLayer).forEach((layer) => {
+        const src = `src-${layer.id}`;
+        map.addSource(src, {
+          type: "vector",
+          tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
+          minzoom: 0,
+          maxzoom: 14,
+        });
+        map.addLayer({
+          id: layer.id,
+          type: "circle",
+          source: src,
+          "source-layer": layer.tileLayer === "vessels" ? "vessels" : layer.tileLayer === "metals-assets" ? "metals_assets" : "energy_assets",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
+            "circle-color": layer.id === "vessels" ? "#5eb3ff" : layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
+            "circle-opacity": 0.85,
+            "circle-stroke-width": 1,
+            "circle-stroke-color": "#0a0e14",
+          },
+          layout: { visibility: layers[layer.id] ? "visible" : "none" },
+        });
       });
+
+      map.on("click", (e) => {
+        const feats = map.queryRenderedFeatures(e.point);
+        const hit = feats.find((f) => LAYER_REGISTRY.some((l) => l.id === f.layer.id) || f.layer.id === "live-vessels");
+        if (!hit) {
+          onSelect(null);
+          return;
+        }
+        const props = hit.properties as MapSelection;
+        onSelect({
+          ...props,
+          id: props.id != null ? String(props.id) : undefined,
+          mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
+          name: props.name != null ? String(props.name) : undefined,
+          _layer: hit.layer.id,
+          _entityType: entityTypeForLayer(hit.layer.id),
+        });
+      });
+
+      const liveFC: FeatureCollection<Point> = { type: "FeatureCollection", features: [] };
+      map.addSource("live-vessels", { type: "geojson", data: liveFC });
+      const relData = relationshipLines ?? { type: "FeatureCollection" as const, features: [] };
+      map.addSource("rel-lines", { type: "geojson", data: relData });
       map.addLayer({
-        id: layer.id,
-        type: "circle",
-        source: src,
-        "source-layer": layer.tileLayer === "vessels" ? "vessels" : layer.tileLayer === "metals-assets" ? "metals_assets" : "energy_assets",
+        id: "rel-lines",
+        type: "line",
+        source: "rel-lines",
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
-          "circle-color": layer.id === "vessels" ? "#5eb3ff" : layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
-          "circle-opacity": 0.85,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#0a0e14",
+          "line-color": "#5eb3ff",
+          "line-width": 2,
+          "line-opacity": 0.65,
+          "line-dasharray": [2, 2],
         },
-        layout: { visibility: layers[layer.id] ? "visible" : "none" },
       });
-    });
 
-    map.on("click", (e) => {
-      const feats = map.queryRenderedFeatures(e.point);
-      const hit = feats.find((f) => LAYER_REGISTRY.some((l) => l.id === f.layer.id) || f.layer.id === "live-vessels");
-      if (!hit) {
-        onSelect(null);
-        return;
+      map.addLayer({
+        id: "live-vessels",
+        type: "circle",
+        source: "live-vessels",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 10],
+          "circle-color": "#7ec8ff",
+          "circle-opacity": 0.95,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#ffffff",
+        },
+        layout: { visibility: layers.vessels ? "visible" : "none" },
+      });
+
+      const liveByMMSI = new Map<string, Feature<Point>>();
+      const applyLive = () => {
+        const src = map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
+        if (src) src.setData({ type: "FeatureCollection", features: [...liveByMMSI.values()] });
+      };
+
+      const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data as string) as {
+              type?: string;
+              vessels?: VesselMsg[];
+              data?: VesselMsg;
+              entity?: string;
+            };
+            if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
+              liveByMMSI.clear();
+              for (const v of msg.vessels) {
+                const f = vesselFeatures([v]).features[0] as Feature<Point>;
+                liveByMMSI.set(v.mmsi, f);
+              }
+              applyLive();
+            } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
+              const f = vesselFeatures([msg.data]).features[0] as Feature<Point>;
+              liveByMMSI.set(msg.data.mmsi, f);
+              applyLive();
+            }
+          } catch {
+            /* ignore malformed ws payloads */
+          }
+        };
+        ws.onopen = () => {
+          const sendSub = () => {
+            if (ws?.readyState !== WebSocket.OPEN) return;
+            const b = map.getBounds();
+            ws.send(JSON.stringify({
+              bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+              zoom: map.getZoom(),
+              layers: Object.keys(layers).filter((k) => layers[k]),
+            }));
+          };
+          moveEndHandler = sendSub;
+          map.on("moveend", sendSub);
+          sendSub();
+        };
+      } catch {
+        /* WS optional in dev */
       }
-      const props = hit.properties as MapSelection;
-      onSelect({
-        ...props,
-        id: props.id != null ? String(props.id) : undefined,
-        mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
-        name: props.name != null ? String(props.name) : undefined,
-        _layer: hit.layer.id,
-        _entityType: entityTypeForLayer(hit.layer.id),
-      });
-    });
-
-    const liveFC: FeatureCollection<Point> = { type: "FeatureCollection", features: [] };
-    map.addSource("live-vessels", { type: "geojson", data: liveFC });
-    const emptyLines: FeatureCollection = { type: "FeatureCollection", features: [] };
-    map.addSource("rel-lines", { type: "geojson", data: emptyLines });
-    map.addLayer({
-      id: "rel-lines",
-      type: "line",
-      source: "rel-lines",
-      paint: {
-        "line-color": "#5eb3ff",
-        "line-width": 2,
-        "line-opacity": 0.65,
-        "line-dasharray": [2, 2],
-      },
-    });
-
-    map.addLayer({
-      id: "live-vessels",
-      type: "circle",
-      source: "live-vessels",
-      paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 10],
-        "circle-color": "#7ec8ff",
-        "circle-opacity": 0.95,
-        "circle-stroke-width": 1.5,
-        "circle-stroke-color": "#ffffff",
-      },
-      layout: { visibility: layers.vessels ? "visible" : "none" },
-    });
-
-    const liveByMMSI = new Map<string, Feature<Point>>();
-    const applyLive = () => {
-      const src = map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
-      if (src) src.setData({ type: "FeatureCollection", features: [...liveByMMSI.values()] });
     };
 
-    const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
-    let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            type?: string;
-            vessels?: VesselMsg[];
-            data?: VesselMsg;
-            entity?: string;
-          };
-          if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
-            liveByMMSI.clear();
-            for (const v of msg.vessels) {
-              const f = vesselFeatures([v]).features[0] as Feature<Point>;
-              liveByMMSI.set(v.mmsi, f);
-            }
-            applyLive();
-          } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
-            const f = vesselFeatures([msg.data]).features[0] as Feature<Point>;
-            liveByMMSI.set(msg.data.mmsi, f);
-            applyLive();
-          }
-        } catch {
-          /* ignore malformed ws payloads */
-        }
-      };
-      ws.onopen = () => {
-        const sendSub = () => {
-          if (ws?.readyState !== WebSocket.OPEN) return;
-          const b = map.getBounds();
-          ws.send(JSON.stringify({
-            bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
-            zoom: map.getZoom(),
-            layers: Object.keys(layers).filter((k) => layers[k]),
-          }));
-        };
-        map.on("moveend", sendSub);
-        sendSub();
-      };
-    } catch {
-      /* WS optional in dev */
+    if (map.loaded()) {
+      setupMap();
+    } else {
+      map.once("load", setupMap);
     }
 
     return () => {
+      cancelled = true;
+      if (moveEndHandler) map.off("moveend", moveEndHandler);
       ws?.close();
       map.remove();
       mapRef.current = null;

@@ -343,7 +343,8 @@ func (s *Server) listIngestionJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listReviewQueue(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT id, entity_type, reason, confidence_score, status, created_at
+		SELECT id, entity_type, reason, confidence_score, status, created_at,
+		       candidate_matches, raw_payload
 		FROM manual_review_queue WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100
 	`)
 	if err != nil {
@@ -357,11 +358,25 @@ func (s *Server) listReviewQueue(w http.ResponseWriter, r *http.Request) {
 		var entityType, reason, status string
 		var conf *float64
 		var created any
-		_ = rows.Scan(&id, &entityType, &reason, &conf, &status, &created)
-		out = append(out, map[string]any{
+		var candidates, raw []byte
+		_ = rows.Scan(&id, &entityType, &reason, &conf, &status, &created, &candidates, &raw)
+		item := map[string]any{
 			"id": id.String(), "entity_type": entityType, "reason": reason,
 			"confidence_score": conf, "status": status, "created_at": created,
-		})
+		}
+		if len(candidates) > 0 {
+			var c any
+			if json.Unmarshal(candidates, &c) == nil {
+				item["candidate_matches"] = c
+			}
+		}
+		if len(raw) > 0 {
+			var p any
+			if json.Unmarshal(raw, &p) == nil {
+				item["raw_payload"] = p
+			}
+		}
+		out = append(out, item)
 	}
 	writeJSON(w, out)
 }

@@ -61,6 +61,8 @@ go run ./cmd/scan-company-duplicates
 - `GET /api/core/entities/{type}/{id}` — dossier
 - `POST /api/deals/verify` — deal DD + sanctions
 - `GET /api/admin/dedup/companies` — duplicate company clusters
+- `POST /api/admin/dedup/companies/scan` — enqueue duplicate clusters for review
+- `POST /api/admin/review-queue/{id}/resolve` — merge (`canonical_company_id`) or dismiss duplicate review items
 
 ## Docs
 

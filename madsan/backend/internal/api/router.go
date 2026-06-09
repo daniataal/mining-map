@@ -130,6 +130,7 @@ func (s *Server) Router() http.Handler {
 		api.Post("/ingestion/enqueue", s.enqueueIngestionJob)
 		api.Get("/sources", s.listSources)
 		api.Get("/review-queue", s.listReviewQueue)
+		api.Post("/review-queue/{id}/resolve", s.resolveReviewQueueItem)
 		api.Get("/insights/summary", s.adminInsightsV2)
 		api.Get("/dedup/companies", s.listCompanyDuplicates)
 		api.Post("/dedup/companies/scan", s.scanCompanyDuplicates)

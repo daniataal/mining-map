@@ -30,8 +30,16 @@
 | 9c Deal graph UI + roadmap audit | done | `/deals` graph preview; `madsan_v2_roadmap_status.md` |
 | 10a Ticker stub + company dedup | done | `/api/core/ticker`; dedup clusters + admin scan; `madsan/README.md` |
 | 10b Compose cutover (dev) | done | `compose_up.sh`; legacy AIS via host.docker.internal; Caddy profile |
+| 10c Review queue merge resolve | done | `POST /api/admin/review-queue/{id}/resolve`; admin merge/dismiss UI |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+
+## 2026-06-09 Phase 10c — review queue merge resolve
+
+- `POST /api/admin/review-queue/{id}/resolve` with `action`: `merge` | `dismiss`
+- Merge: pick `canonical_company_id`; repoint assets (operator/owner), contacts, relationships, evidence, risk_flags, signals, documents, feedback; delete duplicate companies; mark queue resolved
+- Admin `/admin`: per-member **Merge as canonical** + **Dismiss** on `duplicate_company` items; suggested canonical by confidence
+- `internal/dedup/merge.go` transactional merge; supersede sibling pending rows for same `normalized_name`
 
 ## 2026-06-09 Phase 10b — compose cutover (dev)
 
