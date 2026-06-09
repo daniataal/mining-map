@@ -135,25 +135,36 @@ func (s *Service) createRefresh(ctx context.Context, userID uuid.UUID) (string, 
 	return token, err
 }
 
+func (s *Service) authCookie(name, value, path string, maxAge int, sameSite http.SameSite) *http.Cookie {
+	c := &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     path,
+		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure,
+		SameSite: sameSite,
+		MaxAge:   maxAge,
+	}
+	if s.cfg.CookieDomain != "" {
+		c.Domain = s.cfg.CookieDomain
+	}
+	return c
+}
+
 func (s *Service) SetAuthCookies(w http.ResponseWriter, access, refresh string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "madsan_access",
-		Value:    access,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   s.cfg.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(s.cfg.AccessTokenTTL.Seconds()),
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     "madsan_refresh",
-		Value:    refresh,
-		Path:     "/api/core/auth",
-		HttpOnly: true,
-		Secure:   s.cfg.CookieSecure,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(s.cfg.RefreshTokenTTL.Seconds()),
-	})
+	refreshSameSite := http.SameSiteStrictMode
+	if !s.cfg.CookieSecure {
+		refreshSameSite = http.SameSiteLaxMode
+	}
+	http.SetCookie(w, s.authCookie("madsan_access", access, "/", int(s.cfg.AccessTokenTTL.Seconds()), http.SameSiteLaxMode))
+	if refresh != "" {
+		http.SetCookie(w, s.authCookie("madsan_refresh", refresh, "/api/core/auth", int(s.cfg.RefreshTokenTTL.Seconds()), refreshSameSite))
+	}
+}
+
+func (s *Service) ClearAuthCookies(w http.ResponseWriter) {
+	http.SetCookie(w, s.authCookie("madsan_access", "", "/", -1, http.SameSiteLaxMode))
+	http.SetCookie(w, s.authCookie("madsan_refresh", "", "/api/core/auth", -1, http.SameSiteLaxMode))
 }
 
 func (s *Service) ParseRequest(r *http.Request) (*Claims, error) {

@@ -59,6 +59,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, claims)
 }
 
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	s.auth.ClearAuthCookies(w)
+	writeJSON(w, map[string]string{"status": "logged_out"})
+}
+
 func (s *Server) listEnergyAssets(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 200)
 	minLat := queryFloat(r, "min_lat")

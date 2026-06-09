@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
+import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
 
-const fetchOpts: RequestInit = { credentials: "include" };
+const fetchOpts = authFetchOpts;
 
 type DealVertical = "energy" | "metals";
 
@@ -125,6 +126,7 @@ export default function DealsPage() {
   }, []);
 
   useEffect(() => {
+    clearLegacyAuthTokens();
     fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
       .then((r) => setAuthed(r.ok))
       .catch(() => setAuthed(false));

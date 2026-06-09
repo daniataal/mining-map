@@ -59,6 +59,35 @@ func TestRequireAuthUnauthorized(t *testing.T) {
 	}
 }
 
+func TestRequireAuthBearerHeaderFallback(t *testing.T) {
+	secret := "test-secret"
+	srv := &Server{
+		auth: auth.New(nil, config.Config{JWTSecret: secret}),
+		log:  zerolog.Nop(),
+	}
+	var gotClaims *auth.Claims
+	handler := srv.requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+		gotClaims, ok = authClaims(r)
+		if !ok {
+			t.Fatal("expected claims in context")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+testAccessToken(t, secret))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotClaims == nil || gotClaims.Role != "broker" {
+		t.Fatalf("unexpected claims: %+v", gotClaims)
+	}
+}
+
 func TestRequireAuthStoresClaims(t *testing.T) {
 	secret := "test-secret"
 	srv := &Server{
@@ -154,6 +183,71 @@ func TestDealsChangesRouteRequiresAuth(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("GET /api/deals/{id}/changes status = %d, want 401", rec.Code)
+	}
+}
+
+func TestAuthMeReadsCookie(t *testing.T) {
+	secret := "test-secret"
+	srv := &Server{
+		auth: auth.New(nil, config.Config{JWTSecret: secret}),
+		log:  zerolog.Nop(),
+		cfg:  config.Config{JWTSecret: secret},
+	}
+	handler := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/auth/me", nil)
+	req.AddCookie(&http.Cookie{Name: "madsan_access", Value: testAccessToken(t, secret)})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/core/auth/me status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAuthMeReadsBearerHeader(t *testing.T) {
+	secret := "test-secret"
+	srv := &Server{
+		auth: auth.New(nil, config.Config{JWTSecret: secret}),
+		log:  zerolog.Nop(),
+		cfg:  config.Config{JWTSecret: secret},
+	}
+	handler := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+testAccessToken(t, secret))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/core/auth/me status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAuthLogoutClearsCookies(t *testing.T) {
+	secret := "test-secret"
+	srv := &Server{
+		auth: auth.New(nil, config.Config{JWTSecret: secret}),
+		log:  zerolog.Nop(),
+		cfg:  config.Config{JWTSecret: secret},
+	}
+	handler := srv.Router()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/auth/logout", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/core/auth/logout status = %d, want 200", rec.Code)
+	}
+	cleared := 0
+	for _, c := range rec.Result().Cookies() {
+		if c.MaxAge < 0 {
+			cleared++
+		}
+	}
+	if cleared < 2 {
+		t.Fatalf("expected cleared auth cookies, got %d", cleared)
 	}
 }
 

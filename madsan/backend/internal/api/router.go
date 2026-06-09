@@ -109,6 +109,7 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api/core", func(api chi.Router) {
 		api.Post("/auth/register", s.register)
 		api.Post("/auth/login", s.login)
+		api.Post("/auth/logout", s.logout)
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
@@ -138,6 +139,11 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Post("/api/feedback", s.submitProductFeedback)
+
+	r.Route("/api/legal", func(api chi.Router) {
+		api.Post("/dispute", s.submitLegalDispute)
+		api.Post("/privacy/erasure", s.submitGDPRErasure)
+	})
 
 	r.Route("/api/portal", func(api chi.Router) {
 		api.Post("/offers", s.submitSupplierOffer)

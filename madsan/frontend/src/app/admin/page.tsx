@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
 
 type Insights = {
@@ -160,7 +161,7 @@ const card: React.CSSProperties = {
   borderRadius: 4,
 };
 
-const fetchOpts: RequestInit = { credentials: "include" };
+const fetchOpts = authFetchOpts;
 
 export default function AdminPage() {
   const [insights, setInsights] = useState<Insights | null>(null);
@@ -176,6 +177,7 @@ export default function AdminPage() {
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null);
 
   useEffect(() => {
+    clearLegacyAuthTokens();
     fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
       .then((r) => setAuthed(r.ok))
       .catch(() => setAuthed(false));
