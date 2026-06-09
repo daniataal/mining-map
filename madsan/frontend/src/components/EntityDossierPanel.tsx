@@ -37,6 +37,14 @@ type EntitySignal = {
   detail?: string;
 };
 
+type STSScoreFactor = {
+  name: string;
+  weight: number;
+  score: number;
+  weighted: number;
+  detail: string;
+};
+
 type SignalHistoryEntry = {
   signal_type: string;
   label: string;
@@ -45,6 +53,8 @@ type SignalHistoryEntry = {
   opportunity_score?: number;
   observed_at: string;
   source?: string;
+  detail?: string;
+  sts_factors?: STSScoreFactor[];
 };
 
 type Dossier = {
@@ -242,9 +252,20 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
                 <span className="signal-timeline-label">{h.label}</span>
                 <span className="signal-timeline-meta">
                   {h.tier}
+                  {h.signal_type === "sts" ? ` · score ${Math.round(h.confidence_score)}` : ""}
                   {h.opportunity_score != null ? ` · opp ${Math.round(h.opportunity_score)}` : ""}
                   {h.source ? ` · ${h.source}` : ""}
+                  {h.detail ? ` · ${h.detail}` : ""}
                 </span>
+                {h.signal_type === "sts" && h.sts_factors && h.sts_factors.length > 0 && (
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 11, color: "var(--muted)" }}>
+                    {h.sts_factors.map((f) => (
+                      <li key={`${h.observed_at}-${f.name}`}>
+                        {f.name.replace(/_/g, " ")} {(f.weighted * 100).toFixed(0)}% — {f.detail}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

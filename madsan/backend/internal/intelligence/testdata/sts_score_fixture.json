@@ -1,0 +1,53 @@
+[
+  {
+    "name": "very_high_tankers_in_zone",
+    "input": {
+      "min_distance_m": 120,
+      "duration_hours": 5,
+      "avg_sog": 0.3,
+      "both_tankers": true,
+      "in_sts_zone": true,
+      "outside_terminal": true,
+      "zone_name": "Fujairah STS anchorage (approx)"
+    },
+    "want_tier": "very_high",
+    "min_score": 80
+  },
+  {
+    "name": "gated_terminal_overlap",
+    "input": {
+      "min_distance_m": 100,
+      "duration_hours": 6,
+      "avg_sog": 0.2,
+      "both_tankers": true,
+      "in_sts_zone": true,
+      "outside_terminal": false
+    },
+    "want_tier": "low",
+    "want_score": 15
+  },
+  {
+    "name": "short_duration_low",
+    "input": {
+      "min_distance_m": 180,
+      "duration_hours": 1,
+      "avg_sog": 0.4,
+      "both_tankers": true,
+      "outside_terminal": true
+    },
+    "want_tier": "low",
+    "want_score": 15
+  },
+  {
+    "name": "medium_open_water",
+    "input": {
+      "min_distance_m": 280,
+      "duration_hours": 3,
+      "avg_sog": 0.9,
+      "both_tankers": true,
+      "outside_terminal": true
+    },
+    "want_tier": "medium",
+    "min_score": 45
+  }
+]

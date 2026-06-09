@@ -26,8 +26,9 @@ import (
 )
 
 type Server struct {
-	pool     *pgxpool.Pool
-	log      zerolog.Logger
+	pool       *pgxpool.Pool
+	legacyPool *pgxpool.Pool
+	log        zerolog.Logger
 	cfg      config.Config
 	auth     *auth.Service
 	ent      *entitlements.Resolver
@@ -53,8 +54,9 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		}
 	}
 	srv := &Server{
-		pool:   pool,
-		log:    log,
+		pool:       pool,
+		legacyPool: legacyPool,
+		log:        log,
 		cfg:    cfg,
 		auth:   auth.New(pool, cfg),
 		ent:    entitlements.New(pool),
