@@ -19,6 +19,7 @@ type CompanyCluster struct {
 	NormalizedName string          `json:"normalized_name"`
 	Count          int             `json:"count"`
 	MatchScore     float64         `json:"match_score"`
+	ReviewTier     string          `json:"review_tier"`
 	Members        []CompanyMember `json:"members"`
 }
 
@@ -55,41 +56,34 @@ func ListCompanyDuplicateClusters(ctx context.Context, pool *pgxpool.Pool, limit
 		}
 		var members []CompanyMember
 		_ = json.Unmarshal(membersJSON, &members)
+		score := scoreCluster(members)
 		out = append(out, CompanyCluster{
 			NormalizedName: norm,
 			Count:          count,
 			Members:        members,
-			MatchScore:     scoreCluster(members),
+			MatchScore:     score,
+			ReviewTier:     PairTierLabel(score),
 		})
 	}
 	return out, rows.Err()
 }
 
-func scoreCluster(members []CompanyMember) float64 {
-	if len(members) < 2 {
-		return 0
-	}
-	countries := map[string]bool{}
-	for _, m := range members {
-		if m.CountryCode != "" {
-			countries[m.CountryCode] = true
-		}
-	}
-	score := 88.0
-	if len(countries) > 1 {
-		score = 72.0
-	}
-	if len(members) > 5 {
-		score -= 5
-	}
-	return score
+// CompanyEnqueueResult counts review-queue rows added by a dedup scan run.
+type CompanyEnqueueResult struct {
+	ExactNameEnqueued int `json:"exact_name_enqueued"`
+	CrossNameEnqueued int `json:"cross_name_enqueued"`
 }
 
-// EnqueueCompanyDuplicates adds high-confidence duplicate clusters to manual_review_queue.
-func EnqueueCompanyDuplicates(ctx context.Context, pool *pgxpool.Pool, limit int) (enqueued int, err error) {
+func (r CompanyEnqueueResult) Total() int {
+	return r.ExactNameEnqueued + r.CrossNameEnqueued
+}
+
+// EnqueueCompanyDuplicates adds duplicate clusters scoring >= 60 (manual_review or high_confidence) to manual_review_queue.
+func EnqueueCompanyDuplicates(ctx context.Context, pool *pgxpool.Pool, limit int) (CompanyEnqueueResult, error) {
+	var result CompanyEnqueueResult
 	clusters, err := ListCompanyDuplicateClusters(ctx, pool, limit)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	for _, c := range clusters {
 		if c.MatchScore < 60 {
@@ -99,6 +93,8 @@ func EnqueueCompanyDuplicates(ctx context.Context, pool *pgxpool.Pool, limit int
 			"normalized_name": c.NormalizedName,
 			"member_count":    c.Count,
 			"members":         c.Members,
+			"review_tier":     c.ReviewTier,
+			"scoring_method":  "pairwise_trigram_v1",
 		})
 		matches, _ := json.Marshal(c.Members)
 		tag, err := pool.Exec(ctx, `
@@ -111,11 +107,15 @@ func EnqueueCompanyDuplicates(ctx context.Context, pool *pgxpool.Pool, limit int
 			)
 		`, c.MatchScore, matches, payload, c.NormalizedName)
 		if err != nil {
-			return enqueued, err
+			return result, err
 		}
-		enqueued += int(tag.RowsAffected())
+		result.ExactNameEnqueued += int(tag.RowsAffected())
 	}
-	return enqueued, nil
+	result.CrossNameEnqueued, err = EnqueueCrossNameDuplicatePairs(ctx, pool, DefaultCrossNameEnqueueCap)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // ClusterSummary returns counts for admin dashboard.

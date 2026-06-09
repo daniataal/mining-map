@@ -35,8 +35,24 @@ Copy `deploy/.env.example` → `deploy/.env` for secrets and `LEGACY_DATABASE_UR
 - `madsan_postgres_data` — separate from `mining-map_postgres_data`
 - **Never** `docker compose down -v` in production
 
+## Production overlay
+
+```bash
+docker compose -f madsan/deploy/docker-compose.yml \
+  -f madsan/deploy/docker-compose.prod.yml \
+  --profile proxy up -d --build
+```
+
+`docker-compose.prod.yml`: memory limits (~7 GiB stack budget on 23 GiB VM), `restart: always`, frontend healthcheck, named volumes (no host bind mounts), internal-only DB/API/frontend, Caddy on `:80`.
+
+Seed once if ingestion needs host files:
+
+```bash
+docker run --rm -v madsan_raw_data:/dest -v "$PWD/madsan/raw":/src:ro alpine cp -a /src/. /dest/
+docker run --rm -v madsan_etl_data:/dest -v "$PWD/madsan/etl":/src:ro alpine cp -a /src/. /dest/
+```
+
 ## Remaining (prod)
 
-- Resource limits / `docker-compose.prod.yml`
-- Observability sidecar
+- Phase 14 launch checklist (TLS, backup cron, observability)
 - River queue worker (optional replacement for Postgres poll)

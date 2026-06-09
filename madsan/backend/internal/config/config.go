@@ -8,12 +8,29 @@ import (
 )
 
 func defaultRawDir() string {
-	if wd, err := os.Getwd(); err == nil {
-		if filepath.Base(wd) == "backend" {
-			return filepath.Join(filepath.Dir(wd), "raw")
+	return resolveRawDir("")
+}
+
+// resolveRawDir normalizes MADSAN_RAW_DIR for hybrid dev (cwd madsan/backend).
+// Repo-relative values like "madsan/raw" must not resolve to madsan/backend/madsan/raw.
+func resolveRawDir(raw string) string {
+	if raw == "" {
+		if wd, err := os.Getwd(); err == nil && filepath.Base(wd) == "backend" {
+			raw = filepath.Join(filepath.Dir(wd), "raw")
+		} else {
+			raw = "../raw"
+		}
+	} else if !filepath.IsAbs(raw) {
+		if wd, err := os.Getwd(); err == nil && filepath.Base(wd) == "backend" {
+			if filepath.Base(filepath.Clean(raw)) == "raw" {
+				raw = filepath.Join(filepath.Dir(wd), "raw")
+			}
 		}
 	}
-	return "../raw"
+	if ap, err := filepath.Abs(raw); err == nil {
+		return ap
+	}
+	return raw
 }
 
 type Config struct {
@@ -54,7 +71,7 @@ func Load() Config {
 		CookieDomain:       env("MADSAN_COOKIE_DOMAIN", ""),
 		AccessTokenTTL:     time.Duration(envInt("MADSAN_ACCESS_TTL_MIN", 15)) * time.Minute,
 		RefreshTokenTTL:    time.Duration(envInt("MADSAN_REFRESH_TTL_DAYS", 7)) * 24 * time.Hour,
-		RawDataDir:         env("MADSAN_RAW_DIR", defaultRawDir()),
+		RawDataDir:         resolveRawDir(env("MADSAN_RAW_DIR", "")),
 		LegacyDBURL:        env("LEGACY_DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable"),
 		ETLDir:             env("MADSAN_ETL_DIR", etlDir),
 		ETLPython:          env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),

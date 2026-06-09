@@ -14,6 +14,7 @@ import (
 type CompanyPair struct {
 	NormalizedName string
 	MatchScore     float64
+	ReviewTier     string
 	Left           CompanyMember
 	Right          CompanyMember
 }
@@ -28,7 +29,8 @@ var splinkPairCSVHeader = []string{
 	"confidence_score_l",
 	"confidence_score_r",
 	"normalized_name",
-	"sql_match_score",
+	"pair_match_score",
+	"review_tier",
 }
 
 // PairsFromClusters expands duplicate clusters into unique unordered member pairs.
@@ -38,9 +40,11 @@ func PairsFromClusters(clusters []CompanyCluster) []CompanyPair {
 		members := c.Members
 		for i := 0; i < len(members); i++ {
 			for j := i + 1; j < len(members); j++ {
+				pairScore := ScoreCompanyPair(members[i], members[j])
 				out = append(out, CompanyPair{
 					NormalizedName: c.NormalizedName,
-					MatchScore:     c.MatchScore,
+					MatchScore:     pairScore,
+					ReviewTier:     PairTierLabel(pairScore),
 					Left:           members[i],
 					Right:          members[j],
 				})
@@ -75,6 +79,7 @@ func WriteCompanyPairsCSV(w io.Writer, pairs []CompanyPair) error {
 			formatConfidence(p.Right.ConfidenceScore),
 			p.NormalizedName,
 			strconv.FormatFloat(p.MatchScore, 'f', -1, 64),
+			p.ReviewTier,
 		}); err != nil {
 			return err
 		}
@@ -83,13 +88,24 @@ func WriteCompanyPairsCSV(w io.Writer, pairs []CompanyPair) error {
 	return cw.Error()
 }
 
-// ExportCompanyPairs loads duplicate clusters and expands them to pairwise rows.
+// ExportCompanyPairs loads exact-name clusters and cross-name pg_trgm pairs for Splink prep.
 func ExportCompanyPairs(ctx context.Context, pool *pgxpool.Pool, clusterLimit int) ([]CompanyPair, error) {
 	clusters, err := ListCompanyDuplicateClusters(ctx, pool, clusterLimit)
 	if err != nil {
 		return nil, err
 	}
-	return PairsFromClusters(clusters), nil
+	pairs := PairsFromClusters(clusters)
+
+	crossLimit := clusterLimit
+	if crossLimit < 200 {
+		crossLimit = 200
+	}
+	crossPairs, err := ListCrossNameDuplicatePairs(ctx, pool, DefaultTrgmSimilarityThreshold, crossLimit)
+	if err != nil {
+		return nil, err
+	}
+	pairs = append(pairs, crossPairs...)
+	return pairs, nil
 }
 
 // ExportCompanyPairsCSV loads clusters and writes Splink-ready CSV to w.
@@ -111,5 +127,5 @@ func PairExportFilename() string {
 
 // PairExportSummary describes an export for JSON admin responses.
 func PairExportSummary(pairCount, clusterLimit int) string {
-	return fmt.Sprintf("%d pairs from up to %d duplicate name clusters (Splink prep)", pairCount, clusterLimit)
+	return fmt.Sprintf("%d pairs from up to %d exact-name clusters plus cross-name pg_trgm pairs (threshold %.2f, Go tier scoring)", pairCount, clusterLimit, DefaultTrgmSimilarityThreshold)
 }

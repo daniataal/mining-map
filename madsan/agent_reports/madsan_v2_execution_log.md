@@ -40,6 +40,34 @@
 | 11a Admin runtime health | done | AIS sync stats + cached legacy parity on `/api/admin/health/runtime` + `/admin` UI |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+| 4d+ Pairwise dedup scoring | done | `pair_score.go`; tiers `high_confidence` / `manual_review` / `skip`; cluster list + CSV |
+| 4d++ Cross-name dedup (pg_trgm) | done | `cross_name_pairs.go`; migration `013_companies_trgm_index`; pairs CSV auto-enqueue |
+| RBAC deals routes | done | `auth_middleware.go`; verify/pack/watch JWT + entitlements |
+| 13 Prod compose overlay | done | `docker-compose.prod.yml` committed (`bc05055`); ARM64, limits, Caddy :80 |
+| 14 Launch checklist | in progress | `madsan_v2_launch_checklist.md`; go-live blockers catalogued |
+| DR backup fix | done | `backup_db.sh` via compose `madsan-db`; pre-cutover dump in `backups/` |
+
+## 2026-06-09 evening — parallel session ships
+
+Parallel agents landed dedup scoring, cross-name discovery, deals RBAC, DR backup, prod overlay docs, and launch checklist. **All uncommitted on branch** except prod compose (pushed `bc05055`).
+
+### Shipped (local / branch)
+
+- **Dedup review tiers** — `pair_score.go`: trigram + country agreement → `high_confidence` (≥85) / `manual_review` (60–84) / `skip` (<60); cluster API + Splink CSV export include `match_score` + `review_tier`
+- **Cross-name discovery (pg_trgm)** — `cross_name_pairs.go` finds similar `normalized_name` pairs across differing names; migration `013_companies_trgm_index.up.sql` (`gin_trgm_ops` on `companies.normalized_name`)
+- **Scan enqueue** — `POST /api/admin/dedup/companies/scan` enqueues same-name clusters to `manual_review_queue`; pairs CSV export also enqueues cross-name candidates (`X-Madsan-Cross-Name-Enqueued` header); admin dedup UI wired
+- **Deals RBAC** — `auth_middleware.go` + router: `/api/deals/verify` + `deal_verification`, `/{id}/pack` + `deal_pack_export`, `/{id}/watch` require JWT; `/deals` UI gates on `/api/core/auth/me`
+- **Backup fix** — `backup_db.sh` targets compose `madsan-db` (`localhost:5433`); `LEGACY=1` / `--legacy` for `mining-db`; verified dump `backups/madsan_v2_pre_20260609_221939.dump`
+- **Prod compose** — `docker-compose.prod.yml`: ARM64, memory limits/reservations, healthchecks, named volumes, Caddy `:80`, no dev bind mounts (committed + pushed)
+- **Launch checklist** — `madsan_v2_launch_checklist.md`: Phase 14 go-live blockers (legal, RLS, DR cron, k6, parity, TLS, PR hygiene)
+- **Migration 013** — `013_companies_trgm_index.up.sql` (uncommitted; apply before cross-name scan at scale)
+- **Tests** — `go test ./internal/dedup/... ./internal/api/...` pass (pair_score, cross_name_pairs, auth_middleware, splink_export)
+
+### Blockers (honest)
+
+- **Parity / legacy import still running** — `legacy-parity` last run **failed** critical tables (`licenses` ~74% under-imported, `petroleum_osm_features` ~81%); full Go **Legacy import (all)** with worker not finished — blocks Python `legacy_import.py` retirement
+- **GitHub PR** — evening ships **not committed** (~21 changed/untracked files on `new-refactor-eng-style`); no reviewable PR to `main`; `gh pr` / CI gate not opened (auth/workflow TBD)
+- **Go-live gaps** — prod volume seed, backup cron, TLS on Caddy, restore drill, k6 through Caddy `:80` — see launch checklist
 
 ## 2026-06-09 Phase 11a — admin runtime health panel
 

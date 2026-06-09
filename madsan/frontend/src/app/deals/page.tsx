@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import DealGraphPanel from "@/components/DealGraphPanel";
 import { API_BASE } from "@/lib/layers";
 
+const fetchOpts: RequestInit = { credentials: "include" };
+
 type VerifyResult = {
   deal_id?: string;
   confidence_score?: number;
@@ -47,7 +49,7 @@ export default function DealsPage() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/core/auth/me`, { credentials: "include" })
+    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
       .then((r) => setAuthed(r.ok))
       .catch(() => setAuthed(false));
   }, []);
@@ -59,8 +61,8 @@ export default function DealsPage() {
     const email = String(fd.get("email") ?? "");
     const password = String(fd.get("password") ?? "");
     const reg = await fetch(`${API_BASE}/api/core/auth/register`, {
+      ...fetchOpts,
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, display_name: "Deals user", tenant_slug: "default" }),
     });
@@ -69,8 +71,8 @@ export default function DealsPage() {
       return;
     }
     const login = await fetch(`${API_BASE}/api/core/auth/login`, {
+      ...fetchOpts,
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
@@ -88,8 +90,8 @@ export default function DealsPage() {
     const fd = new FormData(e.currentTarget);
     const body = Object.fromEntries(fd.entries());
     const res = await fetch(`${API_BASE}/api/deals/verify`, {
+      ...fetchOpts,
       method: "POST",
-      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         commodity: body.commodity,
@@ -104,6 +106,17 @@ export default function DealsPage() {
         claimed_vessel_mmsi: body.claimed_vessel_mmsi || undefined,
       }),
     });
+    if (res.status === 401) {
+      setAuthed(false);
+      setResult({ error: "Session expired — sign in again." });
+      setLoading(false);
+      return;
+    }
+    if (res.status === 403) {
+      setResult({ error: "Your plan does not include deal verification." });
+      setLoading(false);
+      return;
+    }
     if (!res.ok) {
       setResult({ error: await res.text() });
       setLoading(false);
@@ -112,15 +125,26 @@ export default function DealsPage() {
     const data = (await res.json()) as VerifyResult;
     setResult(data);
     if (data.deal_id) {
-      const packRes = await fetch(`${API_BASE}/api/deals/${data.deal_id}/pack?format=json`, {
-        credentials: "include",
-      });
-      if (packRes.ok) {
+      const packRes = await fetch(`${API_BASE}/api/deals/${data.deal_id}/pack?format=json`, fetchOpts);
+      if (packRes.status === 401) {
+        setAuthed(false);
+        setResult({ ...data, error: "Session expired — sign in again." });
+      } else if (packRes.status === 403) {
+        setResult({ ...data, error: "Your plan does not include deal pack export." });
+      } else if (packRes.ok) {
         const pack = await packRes.json();
         setPackGraph(pack.relationship_graph ?? null);
       }
     }
     setLoading(false);
+  }
+
+  if (authed === null) {
+    return (
+      <main style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
+        <p style={{ color: "var(--muted)" }}>Checking session…</p>
+      </main>
+    );
   }
 
   return (

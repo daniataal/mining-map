@@ -160,6 +160,8 @@ func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, s
 		}
 		for i, row := range batch {
 			rec := normalizeLegacyRow(spec, row)
+			// Skip non-vessels with no operator name after normalizeName (licenses use company).
+			// Parity tiers treat this as expected_skip_empty_name; it is not under-import.
 			if rec.Name == "" && rec.EntityType != "vessel" {
 				continue
 			}

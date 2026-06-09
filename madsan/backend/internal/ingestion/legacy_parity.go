@@ -19,17 +19,28 @@ type ParityTableSpec struct {
 	Critical       bool   `json:"critical"`
 }
 
+// LicenseImportTiers breaks license parity into honest import tiers (legacy mining_db).
+type LicenseImportTiers struct {
+	LegacyTotal            int64 `json:"legacy_total"`
+	NotImportableNoCoords  int64 `json:"not_importable_no_coords"`
+	ImportPoolGeocoded     int64 `json:"import_pool_geocoded"`
+	ExpectedSkipEmptyName  int64 `json:"expected_skip_empty_name"`
+	ExpectedDedupKeys      int64 `json:"expected_dedup_keys"`
+	UnderImportGap         int64 `json:"under_import_gap"`
+}
+
 // ParityTableResult is one table comparison in the parity report.
 type ParityTableResult struct {
-	LegacyTable string  `json:"legacy_table"`
-	MadsanTarget string `json:"madsan_target"`
-	LegacyCount int64   `json:"legacy_count"`
-	MadsanCount int64   `json:"madsan_count"`
-	Drift       int64   `json:"drift"`
-	DriftPct    float64 `json:"drift_pct"`
-	Critical    bool    `json:"critical"`
-	OK          bool    `json:"ok"`
-	Note        string  `json:"note,omitempty"`
+	LegacyTable  string              `json:"legacy_table"`
+	MadsanTarget string              `json:"madsan_target"`
+	LegacyCount  int64               `json:"legacy_count"`
+	MadsanCount  int64               `json:"madsan_count"`
+	Drift        int64               `json:"drift"`
+	DriftPct     float64             `json:"drift_pct"`
+	Critical     bool                `json:"critical"`
+	OK           bool                `json:"ok"`
+	Note         string              `json:"note,omitempty"`
+	LicenseTiers *LicenseImportTiers `json:"license_tiers,omitempty"`
 }
 
 // ParityReport is printed as JSON by cmd/legacy-parity.
@@ -59,8 +70,18 @@ func LegacyParityCatalog() []ParityTableSpec {
 			Critical:       false,
 		},
 		{
-			LegacyTable:    "licenses",
-			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM licenses WHERE lat IS NOT NULL AND lng IS NOT NULL`,
+			LegacyTable: "licenses",
+			// Import upserts assets by normalized company + asset_type + country; raw license rows dedupe.
+			LegacyCountSQL: `
+				SELECT COUNT(*)::bigint FROM (
+					SELECT DISTINCT
+						lower(trim(company)),
+						CASE WHEN lower(COALESCE(sector, 'mining')) = 'mining' THEN 'mine' ELSE 'processing_plant' END,
+						COALESCE(upper(trim(country)), '')
+					FROM licenses
+					WHERE lat IS NOT NULL AND lng IS NOT NULL
+					  AND NULLIF(trim(company), '') IS NOT NULL
+				) importable`,
 			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM assets WHERE legacy_table = 'legacy_licenses'`,
 			MadsanTarget:   "assets(legacy_licenses)",
 			Critical:       true,
@@ -124,6 +145,9 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 	if spec.LegacyTable == "oil_vessels" && madsanCount >= legacyCount {
 		ok = true // AIS sync may add vessels beyond legacy snapshot
 		note = "madsan may exceed legacy when live AIS sync is enabled"
+	}
+	if spec.LegacyTable == "licenses" {
+		note = "legacy count is distinct importable assets (company+sector+country); Go skips rows with empty company; raw geolocated rows (~73k) dedupe to ~45k"
 	}
 	return ParityTableResult{
 		LegacyTable:  spec.LegacyTable,

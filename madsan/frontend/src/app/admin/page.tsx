@@ -72,6 +72,7 @@ type DupCluster = {
   normalized_name: string;
   count: number;
   match_score: number;
+  review_tier?: string;
   members: Array<{ id: string; name: string; country_code?: string }>;
 };
 
@@ -108,6 +109,7 @@ type ReviewQueueItem = {
   raw_payload?: {
     normalized_name?: string;
     member_count?: number;
+    review_tier?: string;
     members?: Array<{ id: string; name: string; country_code?: string; confidence_score?: number }>;
   };
 };
@@ -137,6 +139,7 @@ export default function AdminPage() {
   const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
   const [dupClusters, setDupClusters] = useState<DupCluster[]>([]);
   const [msg, setMsg] = useState("");
+  const [dedupMsg, setDedupMsg] = useState("");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
   const [platform, setPlatform] = useState<PlatformHealth | null>(null);
@@ -223,10 +226,52 @@ export default function AdminPage() {
   }
 
   async function scanDuplicates() {
-    setMsg("");
+    setDedupMsg("");
     const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
-    const data = await res.json();
-    setMsg(res.ok ? `Dedup scan: ${data.enqueued} queued for review` : JSON.stringify(data));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setDedupMsg(typeof data === "string" ? data : data?.error ?? JSON.stringify(data));
+      return;
+    }
+    const total = data.enqueued ?? 0;
+    const exact = data.exact_name_enqueued;
+    const cross = data.cross_name_enqueued;
+    const breakdown =
+      exact != null || cross != null
+        ? ` (${exact ?? 0} exact-name · ${cross ?? 0} cross-name)`
+        : "";
+    setDedupMsg(`Dedup scan: ${total} queued for review${breakdown}`);
+    refresh();
+  }
+
+  async function exportPairsCSV() {
+    setDedupMsg("");
+    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/pairs.csv?limit=200`, fetchOpts);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      setDedupMsg(errText || `CSV export failed (${res.status})`);
+      return;
+    }
+    const crossRaw = res.headers.get("X-Madsan-Cross-Name-Enqueued");
+    const pairCountRaw = res.headers.get("X-Madsan-Pair-Count");
+    const crossEnqueued = crossRaw != null && crossRaw !== "" ? Number(crossRaw) : null;
+    const pairCount = pairCountRaw != null && pairCountRaw !== "" ? Number(pairCountRaw) : null;
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    const filename = filenameMatch?.[1] ?? "company_pairs.csv";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    const parts = ["Pairs CSV downloaded"];
+    if (pairCount != null && !Number.isNaN(pairCount)) parts.push(`${pairCount} rows`);
+    if (crossEnqueued != null && !Number.isNaN(crossEnqueued)) {
+      parts.push(`${crossEnqueued} cross-name enqueued for review`);
+    }
+    setDedupMsg(parts.join(" · "));
     refresh();
   }
 
@@ -310,7 +355,8 @@ export default function AdminPage() {
       <section style={{ ...card, marginBottom: "1.5rem" }}>
         <h2 style={{ marginTop: 0, fontSize: 15 }}>Platform health</h2>
         <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
-          Core ops checks: API, database, legacy ETL source, AIS sync, and cached parity drift.
+          Core ops checks: API, database, legacy ETL source, AIS sync, and cached legacy row-count parity (5% threshold).
+          Red Parity usually means madsan is under-imported — run <strong>Legacy import (all)</strong> with the worker, not Python fallback.
         </p>
         {platform ? (
           <>
@@ -386,7 +432,8 @@ export default function AdminPage() {
       <section style={{ ...card, marginBottom: "1.5rem" }}>
         <h2 style={{ marginTop: 0, fontSize: 15 }}>Runtime health</h2>
         <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
-          Live AIS sync status and legacy ETL parity drift (5m cache). Use before retiring Python legacy import.
+          Live AIS sync and legacy-vs-madsan row counts (5m cache, 5% drift threshold). Negative drift = fewer rows in madsan than legacy;
+          enqueue full Go import before retiring Python. <code>oil_companies</code> is informational only.
         </p>
         {runtime ? (
           <>
@@ -431,10 +478,17 @@ export default function AdminPage() {
                       <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>{row.madsan_target}</td>
                       <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.legacy_count}</td>
                       <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.madsan_count}</td>
-                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{row.drift_pct}%</td>
                       <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
-                        <span className={`badge ${row.ok ? "verified" : "warn"}`}>{row.ok ? "ok" : "drift"}</span>
+                        {row.drift >= 0 ? "+" : ""}{row.drift} ({row.drift_pct}%)
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
+                        <span className={`badge ${row.ok ? "verified" : "warn"}`}>
+                          {row.ok ? "ok" : row.critical ? "critical drift" : "drift"}
+                        </span>
                         {row.note && <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 10 }}>{row.note}</span>}
+                        {!row.ok && row.critical && row.drift < 0 && (
+                          <span style={{ color: "var(--muted)", marginLeft: 6, fontSize: 10 }}>under-imported</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -548,7 +602,7 @@ export default function AdminPage() {
       </section>
 
       <section style={{ ...card, marginBottom: "1.5rem" }}>
-        <h2 style={{ marginTop: 0, fontSize: 15 }}>Company dedup (SQL pass — Splink next)</h2>
+        <h2 style={{ marginTop: 0, fontSize: 15 }}>Company dedup (pairwise SQL clusters + Go scoring)</h2>
         <p style={{ color: "var(--muted)", margin: "0 0 10px" }}>
           {insights?.dedup?.company_clusters ?? 0} name clusters · {insights?.dedup?.extra_rows ?? 0} extra rows beyond canonical
         </p>
@@ -556,19 +610,22 @@ export default function AdminPage() {
           <button type="button" onClick={scanDuplicates} style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
             Scan → review queue
           </button>
-          <a
-            href={`${API_BASE}/api/admin/dedup/companies/pairs.csv?limit=200`}
-            style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", textDecoration: "none" }}
-          >
+          <button type="button" onClick={exportPairsCSV} style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
             Export pairs CSV (Splink)
-          </a>
+          </button>
         </div>
+        {dedupMsg && (
+          <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 12 }}>
+            {dedupMsg}
+          </p>
+        )}
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "var(--muted)" }}>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>normalized_name</th>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>count</th>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>score</th>
+              <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>tier</th>
               <th style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>countries</th>
             </tr>
           </thead>
@@ -578,6 +635,9 @@ export default function AdminPage() {
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{c.normalized_name}</td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{c.count}</td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>{Math.round(c.match_score)}</td>
+                <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+                  {c.review_tier ?? "—"}
+                </td>
                 <td style={{ padding: 8, borderBottom: "1px solid var(--border)", color: "var(--muted)" }}>
                   {[...new Set(c.members.map((m) => m.country_code).filter(Boolean))].join(", ") || "—"}
                 </td>
@@ -603,6 +663,7 @@ export default function AdminPage() {
                     <strong>{item.reason}</strong>
                     <span style={{ color: "var(--muted)", marginLeft: 8 }}>
                       score {item.confidence_score != null ? Math.round(item.confidence_score) : "—"}
+                      {item.raw_payload?.review_tier ? ` · ${item.raw_payload.review_tier}` : ""}
                     </span>
                     {item.raw_payload?.normalized_name && (
                       <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>

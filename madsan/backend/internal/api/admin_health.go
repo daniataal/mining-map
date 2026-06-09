@@ -69,11 +69,11 @@ func (s *Server) adminHealthPlatform(w http.ResponseWriter, r *http.Request) {
 			paritySummary["failed_critical"] = parity.FailedCritical
 			paritySummary["table_count"] = len(parity.Tables)
 			if parity.Passed {
-				paritySummary["summary"] = "all tables within threshold"
+				paritySummary["summary"] = "all critical tables within 5% threshold"
 			} else if len(parity.FailedCritical) > 0 {
-				paritySummary["summary"] = "critical drift: " + strings.Join(parity.FailedCritical, ", ")
+				paritySummary["summary"] = "under-imported (run Legacy import all): " + strings.Join(parity.FailedCritical, ", ")
 			} else {
-				paritySummary["summary"] = "non-critical drift detected"
+				paritySummary["summary"] = "non-critical drift only (see Runtime health table)"
 			}
 		}
 	} else if s.cfg.LegacyDBURL == "" {

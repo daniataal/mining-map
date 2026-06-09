@@ -220,18 +220,13 @@ func (s *Server) supplierSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) verifyDeal(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.auth.ParseRequest(r)
-	if err != nil {
+	claims, ok := authClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	tid, _ := uuid.Parse(claims.TenantID)
 	uid, _ := uuid.Parse(claims.UserID)
-	ok, _ := s.ent.Can(r.Context(), &tid, &uid, "deal_verification")
-	if !ok {
-		http.Error(w, "feature not entitled", http.StatusForbidden)
-		return
-	}
 	var input deals.VerifyInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -242,7 +237,7 @@ func (s *Server) verifyDeal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = s.ent.RecordUsage(r.Context(), &tid, &uid, "deal_verification", 1)
+	_ = s.ent.RecordUsage(r.Context(), &tid, &uid, featureDealVerification, 1)
 	writeJSON(w, result)
 }
 
@@ -257,6 +252,13 @@ func (s *Server) getDeal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dealPack(w http.ResponseWriter, r *http.Request) {
+	claims, ok := authClaims(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	tid, _ := uuid.Parse(claims.TenantID)
+	uid, _ := uuid.Parse(claims.UserID)
 	id := chi.URLParam(r, "id")
 	format := r.URL.Query().Get("format")
 	pack, contentType, err := s.deals.ExportPack(r.Context(), id, format)
@@ -277,17 +279,18 @@ func (s *Server) dealPack(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=madsan-deal-pack-%s.%s", short, ext))
 	_, _ = w.Write(pack)
+	_ = s.ent.RecordUsage(r.Context(), &tid, &uid, featureDealPackExport, 1)
 }
 
 func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	claims, err := s.auth.ParseRequest(r)
-	if err != nil {
+	claims, ok := authClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	id := chi.URLParam(r, "id")
 	uid, _ := uuid.Parse(claims.UserID)
-	_, err = s.pool.Exec(r.Context(), `
+	_, err := s.pool.Exec(r.Context(), `
 		INSERT INTO deal_watch_subscriptions (deal_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING
 	`, id, uid)
 	if err != nil {

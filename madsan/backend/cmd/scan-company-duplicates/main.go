@@ -28,13 +28,15 @@ func main() {
 		}
 	}
 	names, rows, _ := dedup.ClusterSummary(ctx, pool)
-	enqueued, err := dedup.EnqueueCompanyDuplicates(ctx, pool, limit)
+	result, err := dedup.EnqueueCompanyDuplicates(ctx, pool, limit)
 	if err != nil {
 		log.Fatal().Err(err).Msg("enqueue failed")
 	}
 	log.Info().
 		Int("duplicate_name_clusters", names).
 		Int("extra_company_rows", rows).
-		Int("review_queue_enqueued", enqueued).
+		Int("review_queue_enqueued", result.Total()).
+		Int("exact_name_enqueued", result.ExactNameEnqueued).
+		Int("cross_name_enqueued", result.CrossNameEnqueued).
 		Msg("company duplicate scan complete")
 }

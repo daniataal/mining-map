@@ -39,12 +39,17 @@ func (s *Server) scanCompanyDuplicates(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	n, err := dedup.EnqueueCompanyDuplicates(r.Context(), s.pool, limit)
+	result, err := dedup.EnqueueCompanyDuplicates(r.Context(), s.pool, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"enqueued": n, "status": "ok"})
+	writeJSON(w, map[string]any{
+		"enqueued":              result.Total(),
+		"exact_name_enqueued":   result.ExactNameEnqueued,
+		"cross_name_enqueued":   result.CrossNameEnqueued,
+		"status":                "ok",
+	})
 }
 
 func (s *Server) exportCompanyPairsCSV(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +59,15 @@ func (s *Server) exportCompanyPairsCSV(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	enqueued, err := dedup.EnqueueCrossNameDuplicatePairs(r.Context(), s.pool, dedup.DefaultCrossNameEnqueueCap)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	filename := dedup.PairExportFilename()
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("X-Madsan-Cross-Name-Enqueued", strconv.Itoa(enqueued))
 	pairCount, err := dedup.ExportCompanyPairsCSV(r.Context(), s.pool, limit, w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -120,10 +120,10 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Route("/api/deals", func(api chi.Router) {
-		api.Post("/verify", s.verifyDeal)
 		api.Get("/{id}", s.getDeal)
-		api.Get("/{id}/pack", s.dealPack)
-		api.Post("/{id}/watch", s.watchDeal)
+		api.With(s.requireAuth, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
+		api.With(s.requireAuth, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
+		api.With(s.requireAuth).Post("/{id}/watch", s.watchDeal)
 	})
 
 	r.Route("/api/portal", func(api chi.Router) {
@@ -152,16 +152,6 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/billing/plans", s.listPlans)
 
 	return r
-}
-
-func (s *Server) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := s.auth.ParseRequest(r); err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {
