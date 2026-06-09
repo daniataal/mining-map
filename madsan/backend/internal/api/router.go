@@ -115,6 +115,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
+		api.Get("/trust/{entityType}/{id}", s.getTrustScore)
 	})
 
 	r.Route("/api/energy", func(api chi.Router) {
@@ -124,6 +125,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/vessels/by-mmsi/{mmsi}", s.getVesselByMMSI)
 		api.Get("/vessels/{id}", s.getVessel)
 		api.Get("/suppliers/search", s.supplierSearch)
+		api.Get("/pipelines/{id}/connectivity", s.getPipelineConnectivity)
 	})
 
 	r.Route("/api/metals", func(api chi.Router) {

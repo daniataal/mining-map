@@ -409,6 +409,25 @@ export default function AdminPage() {
         </div>
       </div>
 
+      <section
+        style={{
+          ...card,
+          marginBottom: "1.5rem",
+          borderColor: "var(--warn, #b8860b)",
+          background: "rgba(184, 134, 11, 0.06)",
+        }}
+      >
+        <h2 style={{ marginTop: 0, fontSize: 15 }}>Satellite intel deferred</h2>
+        <p style={{ color: "var(--muted)", margin: "0 0 8px" }}>
+          Phase 12b (Copernicus Sentinel-1/2 tank volume + dark-STS SAR) is intentionally deferred until core revenue is stable.
+          No satellite-derived claims in production; AIS + registry evidence only. Policy:{" "}
+          <code>madsan/agent_reports/satellite_intel_deferred.md</code>
+        </p>
+        <p style={{ color: "var(--muted)", margin: 0, fontSize: 11 }}>
+          When enabled: tier <strong>satellite-derived</strong> (purple), separate disclaimer, feature flag default off.
+        </p>
+      </section>
+
       <section style={{ ...card, marginBottom: "1.5rem" }}>
         <h2 style={{ marginTop: 0, fontSize: 15 }}>Platform health</h2>
         <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
