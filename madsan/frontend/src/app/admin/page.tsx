@@ -72,6 +72,8 @@ const card: React.CSSProperties = {
   borderRadius: 4,
 };
 
+const fetchOpts: RequestInit = { credentials: "include" };
+
 export default function AdminPage() {
   const [insights, setInsights] = useState<Insights | null>(null);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
@@ -79,24 +81,84 @@ export default function AdminPage() {
   const [queue, setQueue] = useState<ReviewQueueItem[]>([]);
   const [dupClusters, setDupClusters] = useState<DupCluster[]>([]);
   const [msg, setMsg] = useState("");
-
-  const refresh = useCallback(() => {
-    fetch(`${API_BASE}/api/admin/insights/summary`).then((r) => r.json()).then(setInsights).catch(() => {});
-    fetch(`${API_BASE}/api/admin/ingestion/jobs`).then((r) => r.json()).then(setJobs).catch(() => {});
-    fetch(`${API_BASE}/api/admin/sources`).then((r) => r.json()).then(setSources).catch(() => {});
-    fetch(`${API_BASE}/api/admin/review-queue`).then((r) => r.json()).then(setQueue).catch(() => {});
-    fetch(`${API_BASE}/api/admin/dedup/companies?limit=15`).then((r) => r.json()).then((d) => setDupClusters(d.clusters ?? [])).catch(() => {});
-  }, []);
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
+    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
+      .then((r) => setAuthed(r.ok))
+      .catch(() => setAuthed(false));
+  }, []);
+
+  const refresh = useCallback(() => {
+    if (!authed) return;
+    fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
+      .then((r) => {
+        if (r.status === 401) {
+          setAuthed(false);
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
+      .then((d) => d && setInsights(d))
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/ingestion/jobs`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setJobs)
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/sources`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setSources)
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/review-queue`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setQueue)
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/dedup/companies?limit=15`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : { clusters: [] }))
+      .then((d) => setDupClusters(d.clusters ?? []))
+      .catch(() => {});
+  }, [authed]);
+
+  useEffect(() => {
+    if (!authed) return;
     refresh();
     const t = setInterval(refresh, 15000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [authed, refresh]);
+
+  async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setAuthError("");
+    const fd = new FormData(e.currentTarget);
+    const email = String(fd.get("email") ?? "");
+    const password = String(fd.get("password") ?? "");
+    const reg = await fetch(`${API_BASE}/api/core/auth/register`, {
+      ...fetchOpts,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, display_name: "Admin user", tenant_slug: "default" }),
+    });
+    if (!reg.ok && reg.status !== 400) {
+      setAuthError(await reg.text());
+      return;
+    }
+    const login = await fetch(`${API_BASE}/api/core/auth/login`, {
+      ...fetchOpts,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!login.ok) {
+      setAuthError(await login.text());
+      return;
+    }
+    setAuthed(true);
+  }
 
   async function scanDuplicates() {
     setMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
     const data = await res.json();
     setMsg(res.ok ? `Dedup scan: ${data.enqueued} queued for review` : JSON.stringify(data));
     refresh();
@@ -105,6 +167,7 @@ export default function AdminPage() {
   async function resolveQueueItem(queueId: string, action: "merge" | "dismiss", canonicalCompanyId?: string) {
     setMsg("");
     const res = await fetch(`${API_BASE}/api/admin/review-queue/${queueId}/resolve`, {
+      ...fetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, canonical_company_id: canonicalCompanyId }),
@@ -126,6 +189,7 @@ export default function AdminPage() {
   async function enqueue(jobType: string, sourceSlug: string, payload?: Record<string, unknown>) {
     setMsg("");
     const res = await fetch(`${API_BASE}/api/admin/ingestion/enqueue`, {
+      ...fetchOpts,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_type: jobType, source_slug: sourceSlug, payload: payload ?? { trigger: "admin" } }),
@@ -138,6 +202,35 @@ export default function AdminPage() {
   const ent = insights?.entities ?? {};
   const prov = insights?.provenance ?? {};
   const ing = insights?.ingestion ?? {};
+
+  if (authed === false) {
+    return (
+      <main style={{ maxWidth: 480, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+        <h1 style={{ marginTop: 0 }}>Admin console</h1>
+        <p style={{ color: "var(--muted)" }}>Sign in to access ingestion, dedup, and review queue tools.</p>
+        <form onSubmit={ensureAuth} style={{ display: "grid", gap: "0.75rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)" }}>
+          <label style={{ display: "grid", gap: 4 }}>
+            email
+            <input name="email" type="email" required defaultValue="admin@madsan.dev" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            password
+            <input name="password" type="password" required defaultValue="devpass123" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
+          </label>
+          <button type="submit" style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>Register / sign in</button>
+          {authError && <p style={{ color: "#f87171", margin: 0 }}>{authError}</p>}
+        </form>
+      </main>
+    );
+  }
+
+  if (authed === null) {
+    return (
+      <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+        <p style={{ color: "var(--muted)" }}>Checking session…</p>
+      </main>
+    );
+  }
 
   return (
     <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
