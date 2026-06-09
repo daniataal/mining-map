@@ -1,4 +1,4 @@
-# MadSan V2 — Roadmap Status (2026-06-09, tip `1f745a6`)
+# MadSan V2 — Roadmap Status (2026-06-09, tip `9bbce7c`)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
@@ -45,7 +45,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - **Deals RBAC:** `/api/deals/verify`, `/{id}/pack`, `/{id}/watch` require JWT + entitlements (`deal_verification`, `deal_pack_export`); deals UI gates on `/api/core/auth/me`
 - **RLS scaffold (dev):** migration `014_rls_scaffold` applied on dev — `usage_events` RLS + `madsan_rls` deny stub; `app_current_tenant_id()` helper; API still connects as owner (no behavior change until role cutover)
 - **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
-- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`); tier breakdown in report. **Petroleum OSM still fail** (~77% under-imported) — blocks Python retirement
+- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`). **Petroleum OSM fail** (~70.6% under-imported, 89.5k/303.7k as of 19:44Z) — **Go `legacy_import` job running** (~37 min elapsed); blocks Python retirement until exit 0
 
 ### Partial
 
@@ -109,7 +109,70 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 - **Inferred links:** vessel-terminal and operator links are intelligence hints, not facts
 - **OpenSanctions:** screening is review-tier, not confirmation
 - **Prod volumes:** `madsan_raw_data` / `madsan_etl_data` named volumes start empty — seed before legacy import jobs
-- **Parity drift:** licenses + vessels pass; **petroleum_osm_features ~77% under-imported** blocks Python retirement — enqueue Legacy import (all) with worker up
+- **Parity drift:** licenses + vessels pass; **petroleum_osm_features ~70% under-imported** blocks Python retirement — full Go Legacy import (all) must finish with worker up
+- **Watch folder:** 2 failed jobs — bad `RawDataDir` when worker runs from `madsan/backend` (`…/backend/madsan/raw` missing); fix path or run worker from repo root / compose
+
+## Known gaps (2026-06-09 audit vs plan)
+
+Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `ingestion_jobs` table, git tip `9bbce7c`.
+
+### Ingestion pipeline — plan vs shipped
+
+**Plan (Phase 2–3):** `scheduler (cron) → ingestion_jobs (River) → worker 16-step pipeline` with hash-skip, raw snapshots, staging → normalize → dedup thresholds → evidence → targeted matview refresh.
+
+**Shipped:**
+
+```mermaid
+flowchart LR
+  sched["scheduler\n(daily cron enqueue)"] --> jobs["ingestion_jobs\n(Postgres poll 5s\nNOT River)"]
+  jobs --> wrk["worker\ngo run ./cmd/worker"]
+  wrk --> pathA["legacy_import Go\nbatch 500 OFFSET/LIMIT"]
+  wrk --> pathB["bunker_seed / legacy_etl\nstage → upsertMaster → evidence"]
+  wrk --> pathC["watch_folder\nBROKEN path"]
+  pathA --> master["master tables\nassets / vessels / companies"]
+  pathB --> master
+  master --> mv["REFRESH MATERIALIZED VIEW\n(all map_* views)"]
+```
+
+| Plan step | Status | Notes |
+|-----------|--------|-------|
+| River queue | **GAP** | Postgres `FOR UPDATE SKIP LOCKED` poll only |
+| 16-step worker flow | **GAP** | ~8 steps: no API ETag, no per-row checksum skip, no Splink dedup tiers in pipeline |
+| Hash / skip unchanged | **PARTIAL** | SHA256 in `watch_folder` only; legacy Go import always re-reads |
+| Raw snapshot on disk | **PARTIAL** | `SnapshotRaw` exists; not wired for all adapters |
+| manual_review_queue in pipeline | **PARTIAL** | Dedup admin enqueue only; not post-import uncertain routing |
+| Targeted matview refresh | **GAP** | `refreshServing` refreshes all energy/metals/vessel matviews every job |
+| Splink batch dedup | **GAP** | CSV export + Go `pair_score` only; no Splink runtime |
+| watch_folder cron path | **BLOCKED** | Fails: `open …/backend/madsan/raw: no such file or directory` |
+
+**Import job status (live):** 1× `legacy_import` **running** (started 19:07Z); 3× completed; petroleum count climbing (~89.5k → target 303.7k). Worker on host (`go run ./cmd/worker`); compose stack currently DB-only.
+
+### Phase gap summary
+
+| Phase | Status | Top gap |
+|-------|--------|---------|
+| 0 Reports + scaffold | **FIXED** | — |
+| 1 Schema + matviews | **FIXED** | Serving matviews may lag during long imports |
+| 2 Ingestion pipeline | **GAP** | Simplified path; no Splink / NormalizedRecord adapters for APIs |
+| 3 Scheduler + worker | **IN_PROGRESS** | No River; watch_folder broken; not full 16-step |
+| 4 Legacy ETL | **IN_PROGRESS** | Petroleum OSM ~70% under-imported (**BLOCKED** on import finish) |
+| 5 Go core + auth | **IN_PROGRESS** | Entity response shape partial; httpOnly cookie MVP |
+| 5b Entitlements | **FIXED** | Scaffold + deals gating shipped |
+| 6 Map + MVT | **FIXED** | — |
+| 6b Realtime WS | **IN_PROGRESS** | Hub exists; no binary frames / dead-reckoning / 202 job queue |
+| 7 Energy UI | **IN_PROGRESS** | VLSFO ticker stub |
+| 8 Supplier discovery | **IN_PROGRESS** | Ranked search partial |
+| 8b–8f Intelligence | **GAP/PENDING** | MCR v2, pgRouting, Splink runtime not started |
+| 9 Deal verification | **FIXED** | Pack v1.1 + RBAC |
+| 9b Deal monitoring | **IN_PROGRESS** | Watch scaffold (`72d2691`); no alert engine |
+| 10 Portal + admin | **IN_PROGRESS** | Admin ✅; supplier workflow incomplete |
+| 11 Metals vertical | **IN_PROGRESS** | Petroleum excluded from metals tiles ✅; cadastre gaps |
+| 12 Data gaps | **IN_PROGRESS** | Bunker prices, Gulf AIS labeling |
+| 12c Legal | **IN_PROGRESS** | Page shipped; external sign-off **BLOCKED** |
+| 12d Security/RLS | **IN_PROGRESS** | `014` scaffold + GUC stub; role cutover **BLOCKED** |
+| 12e Notifications | **GAP** | Not started |
+| 13 Perf + deploy | **IN_PROGRESS** | Prod overlay ✅; TLS/k6/observability **BLOCKED** |
+| 14 Advanced intel | **PENDING** | Optional backlog |
 
 ## Runtime
 
