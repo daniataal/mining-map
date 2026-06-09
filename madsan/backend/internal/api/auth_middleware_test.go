@@ -138,3 +138,21 @@ func TestDealsPackRouteRequiresAuth(t *testing.T) {
 		t.Fatalf("GET /api/deals/{id}/pack status = %d, want 401", rec.Code)
 	}
 }
+
+func TestDealsChangesRouteRequiresAuth(t *testing.T) {
+	secret := "test-secret"
+	srv := &Server{
+		auth: auth.New(nil, config.Config{JWTSecret: secret}),
+		log:  zerolog.Nop(),
+		cfg:  config.Config{JWTSecret: secret},
+	}
+	handler := srv.Router()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/deals/00000000-0000-0000-0000-000000000001/changes", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /api/deals/{id}/changes status = %d, want 401", rec.Code)
+	}
+}

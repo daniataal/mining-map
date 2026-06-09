@@ -124,6 +124,7 @@ func (s *Server) Router() http.Handler {
 		api.With(s.requireAuth, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
 		api.With(s.requireAuth, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
 		api.With(s.requireAuth).Post("/{id}/watch", s.watchDeal)
+		api.With(s.requireAuth).Get("/{id}/changes", s.dealChanges)
 	})
 
 	r.Route("/api/portal", func(api chi.Router) {

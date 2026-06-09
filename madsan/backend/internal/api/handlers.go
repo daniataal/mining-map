@@ -300,6 +300,14 @@ func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "watching"})
 }
 
+func (s *Server) dealChanges(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authClaims(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, deals.ChangesScaffold(chi.URLParam(r, "id")))
+}
+
 func (s *Server) metalsLicenseSummary(w http.ResponseWriter, r *http.Request) {
 	var mines, plants, countries int
 	_ = s.pool.QueryRow(r.Context(), `
