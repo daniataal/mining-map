@@ -11,6 +11,7 @@ import (
 var rulesFS embed.FS
 
 type Rules struct {
+	Version             string             `json:"_version"`
 	SanctionedCountries []string           `json:"sanctioned_countries"`
 	HighRiskCountries   []string           `json:"high_risk_countries"`
 	EmbargoedCorridors  []EmbargoCorridor  `json:"embargoed_corridors"`
@@ -25,6 +26,15 @@ type EmbargoCorridor struct {
 	BuyerCountry    string   `json:"buyer_country"`
 	Products        []string `json:"products"`
 	Reason          string   `json:"reason"`
+}
+
+type CommodityRule struct {
+	ConflictMinerals                   []string `json:"conflict_minerals"`
+	ConflictMineralHighRiskCountries   []string `json:"conflict_mineral_high_risk_countries"`
+	CertificationsAdvisory             []string `json:"certifications_advisory"`
+	RequiredLicenseStatuses            []string `json:"required_license_statuses"`
+	OffshoreExtraCheck                 bool     `json:"offshore_extra_check"`
+	PipelineCheck                      bool     `json:"pipeline_check"`
 }
 
 type ScoringRules struct {
@@ -86,6 +96,30 @@ func corridorMatches(country, pattern string) bool {
 }
 
 // CommodityFamily maps deal commodities to dd_rules product families.
+func CommodityRuleForFamily(rules Rules, family string) CommodityRule {
+	raw, ok := rules.CommodityRules[family]
+	if !ok {
+		return CommodityRule{}
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return CommodityRule{}
+	}
+	var cr CommodityRule
+	_ = json.Unmarshal(b, &cr)
+	return cr
+}
+
+func isConflictMineral(commodity string, minerals []string) bool {
+	c := strings.ToLower(strings.TrimSpace(commodity))
+	for _, m := range minerals {
+		if strings.Contains(c, strings.ToLower(strings.TrimSpace(m))) {
+			return true
+		}
+	}
+	return false
+}
+
 func CommodityFamily(commodity string) string {
 	c := strings.ToLower(strings.TrimSpace(commodity))
 	switch {

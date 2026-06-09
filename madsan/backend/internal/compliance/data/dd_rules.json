@@ -1,6 +1,6 @@
 {
   "_version": "1.0.0",
-  "_comment": "Ported from backend/data/dd_rules.json — edit for risk classifications without Go changes.",
+  "_comment": "Due-diligence rules config. Edit this file to change risk classifications without touching Python code. See backend/services/due_diligence.py for extension guide.",
 
   "sanctioned_countries": [
     "Iran", "North Korea", "Syria", "Cuba", "Venezuela",
@@ -54,16 +54,34 @@
 
   "commodity_rules": {
     "mining": {
-      "certifications_advisory": ["ICGLR", "EITI", "OECD-DDG"]
+      "conflict_minerals": [
+        "coltan", "tantalum", "tin", "tungsten", "gold", "cassiterite",
+        "wolframite", "cobalt", "diamonds"
+      ],
+      "conflict_mineral_high_risk_countries": [
+        "Democratic Republic of Congo", "Central African Republic",
+        "South Sudan", "Rwanda", "Uganda", "Burundi"
+      ],
+      "certifications_advisory": ["ICGLR", "EITI", "OECD-DDG"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "Granted"],
+      "note": "Conflict minerals from high-risk regions trigger enhanced provenance check"
     },
     "oil": {
-      "certifications_advisory": ["API", "IADC"]
+      "certifications_advisory": ["API", "IADC"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "offshore_extra_check": true,
+      "note": "Offshore fields require additional environmental and sovereign risk assessment"
     },
     "gas": {
-      "certifications_advisory": ["GIIGNL", "IADC"]
+      "certifications_advisory": ["GIIGNL", "IADC"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "pipeline_check": true,
+      "note": "Cross-border pipeline gas triggers transit-country corridor checks"
     },
     "petroleum": {
-      "certifications_advisory": ["API"]
+      "certifications_advisory": ["API"],
+      "required_license_statuses": ["active", "Active", "ACTIVE", "granted", "production"],
+      "note": "Treated as oil for compliance purposes"
     }
   },
 

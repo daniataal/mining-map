@@ -12,7 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/madsan/intelligence/internal/audit"
 	"github.com/madsan/intelligence/internal/auth"
+	"github.com/madsan/intelligence/internal/compliance"
 	"github.com/madsan/intelligence/internal/config"
 	"github.com/madsan/intelligence/internal/database"
 	"github.com/madsan/intelligence/internal/deals"
@@ -39,6 +41,8 @@ type Server struct {
 	tiles    *tiles.Service
 	ingest   *ingestion.Service
 	aisStats *maritime.SyncStats
+	ledger   *compliance.SourceLedger
+	auditor  *audit.Writer
 	notifier notify.Sender
 	parity   parityCache
 }
@@ -67,6 +71,8 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		search: search.New(pool),
 		tiles:  tiles.New(pool, legacyPool),
 		ingest:   ingestion.New(pool, cfg),
+		ledger:   compliance.NewSourceLedger(pool),
+		auditor:  audit.NewWriter(pool),
 		notifier: notify.NewLogSender(log),
 	}
 	srv.deals.SetNotifier(srv.notifier)
@@ -105,7 +111,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:9080", "http://127.0.0.1:9080"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Madsan-Source-Keys"},
 		AllowCredentials: true,
 	}))
 
@@ -113,9 +119,9 @@ func (s *Server) Router() http.Handler {
 	r.Get("/health", s.healthLive)
 
 	r.Route("/api/core", func(api chi.Router) {
-		api.Post("/auth/register", s.register)
-		api.Post("/auth/login", s.login)
-		api.Post("/auth/logout", s.logout)
+		api.With(s.withAudit("auth.register", "user")).Post("/auth/register", s.register)
+		api.With(s.withAudit("auth.login", "session")).Post("/auth/login", s.login)
+		api.With(s.withAudit("auth.logout", "session")).Post("/auth/logout", s.logout)
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
@@ -142,8 +148,8 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/deals", func(api chi.Router) {
 		api.Get("/{id}", s.getDeal)
-		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
-		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification), s.requireCommercialSources).Post("/verify", s.verifyDeal)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport), s.requireCommercialSources).Get("/{id}/pack", s.dealPack)
 		api.With(s.requireAuth, s.withTenantGUC).Post("/{id}/watch", s.watchDeal)
 		api.With(s.requireAuth, s.withTenantGUC).Delete("/{id}/watch", s.unwatchDeal)
 		api.With(s.requireAuth, s.withTenantGUC).Get("/{id}/changes", s.dealChanges)
@@ -164,17 +170,18 @@ func (s *Server) Router() http.Handler {
 	r.Route("/api/admin", func(api chi.Router) {
 		api.Use(s.requireAuth, s.withTenantGUC)
 		api.Get("/ingestion/jobs", s.listIngestionJobs)
-		api.Post("/ingestion/enqueue", s.enqueueIngestionJob)
+		api.With(s.withAudit("admin.ingestion.enqueue", "ingestion_job")).Post("/ingestion/enqueue", s.enqueueIngestionJob)
 		api.Get("/sources", s.listSources)
 		api.Get("/review-queue", s.listReviewQueue)
-		api.Post("/review-queue/{id}/resolve", s.resolveReviewQueueItem)
+		api.With(s.withAudit("admin.review.resolve", "manual_review_queue")).Post("/review-queue/{id}/resolve", s.resolveReviewQueueItem)
 		api.Get("/insights/summary", s.adminInsightsV2)
 		api.Get("/health", s.adminHealthPlatform)
 		api.Get("/health/runtime", s.adminHealthRuntime)
+		api.Get("/health/observability", s.adminHealthObservability)
 		api.Get("/dedup/companies", s.listCompanyDuplicates)
 		api.Get("/dedup/companies/pairs.csv", s.exportCompanyPairsCSV)
-		api.Post("/dedup/companies/scan", s.scanCompanyDuplicates)
-		api.Post("/dedup/clusters/{id}/enqueue-review", s.enqueueClusterMergeReview)
+		api.With(s.withAudit("admin.dedup.scan", "dedup")).Post("/dedup/companies/scan", s.scanCompanyDuplicates)
+		api.With(s.withAudit("admin.dedup.enqueue_review", "dedup_cluster")).Post("/dedup/clusters/{id}/enqueue-review", s.enqueueClusterMergeReview)
 	})
 
 	r.Get("/tiles/{layer}/{z}/{x}/{y}.mvt", s.tiles.ServeMVT)

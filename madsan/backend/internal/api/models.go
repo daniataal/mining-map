@@ -55,6 +55,16 @@ type SignalHistoryEntry struct {
 	STSFactors       []STSScoreFactor `json:"sts_factors,omitempty"`
 }
 
+type EntityEnvelope struct {
+	ID            string     `json:"id"`
+	EntityType    string     `json:"entity_type"`
+	Confidence    float64    `json:"confidence"`
+	Tier          string     `json:"tier"`
+	EvidenceCount int        `json:"evidence_count"`
+	ObservedAt    *time.Time `json:"observed_at,omitempty"`
+	Limitations   []string   `json:"limitations,omitempty"`
+}
+
 type CoreEntityResponse struct {
 	ID               string             `json:"id"`
 	EntityType       string             `json:"entity_type"`
