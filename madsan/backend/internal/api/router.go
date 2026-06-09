@@ -121,10 +121,10 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/api/deals", func(api chi.Router) {
 		api.Get("/{id}", s.getDeal)
-		api.With(s.requireAuth, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
-		api.With(s.requireAuth, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
-		api.With(s.requireAuth).Post("/{id}/watch", s.watchDeal)
-		api.With(s.requireAuth).Get("/{id}/changes", s.dealChanges)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification)).Post("/verify", s.verifyDeal)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport)).Get("/{id}/pack", s.dealPack)
+		api.With(s.requireAuth, s.withTenantGUC).Post("/{id}/watch", s.watchDeal)
+		api.With(s.requireAuth, s.withTenantGUC).Get("/{id}/changes", s.dealChanges)
 	})
 
 	r.Route("/api/portal", func(api chi.Router) {
@@ -133,7 +133,7 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Route("/api/admin", func(api chi.Router) {
-		api.Use(s.requireAuth)
+		api.Use(s.requireAuth, s.withTenantGUC)
 		api.Get("/ingestion/jobs", s.listIngestionJobs)
 		api.Post("/ingestion/enqueue", s.enqueueIngestionJob)
 		api.Get("/sources", s.listSources)

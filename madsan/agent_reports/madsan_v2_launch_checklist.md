@@ -24,18 +24,20 @@ Status key: **done** · **partial** · **blocked**
 - [x] **done** — Admin routes gated (`requireAuth` on `/api/admin/*`)
 - [~] **partial** — Deals RBAC: `/api/deals/verify`, `/{id}/pack`, `/{id}/watch` require JWT + entitlements (**uncommitted** on branch)
 - [~] **partial** — App-layer `tenant_id` FKs on companies/deals/documents; no query-level enforcement on public map/search APIs
-- [~] **partial** — Postgres RLS scaffold (`014_rls_scaffold.up.sql`): `usage_events` RLS + deny stub for `madsan_rls` role; `app_current_tenant_id()` helper; table COMMENT policy sketches. **Not applied until migrate runs**; owner (`postgres`) bypasses — no prod behavior change yet
-- [ ] **blocked** — RLS cutover: grant `madsan_rls` to API pool, `SET app.tenant_id` per request, replace deny policy, extend to deals/documents/memberships; **defer `companies` until map/search audit**
+- [~] **partial** — Postgres RLS scaffold (`014_rls_scaffold.up.sql`): `usage_events` RLS + deny stub for `madsan_rls` role; `app_current_tenant_id()` helper; table COMMENT policy sketches. **Applied on dev** (2026-06-09); owner (`postgres`) bypasses — no API behavior change yet
+- [~] **partial** — Go tenant GUC stub: `withTenantGUC` middleware after JWT on `/api/admin/*` and authenticated `/api/deals/*`; `database.BindRequestTenantRLS` runs `SET LOCAL app.tenant_id` on a request-scoped tx when claims carry `tid`. Handlers still use shared pool until `madsan_rls` cutover
+- [ ] **blocked** — RLS cutover: grant `madsan_rls` to API pool, route tenant queries through request tx / `madsan_rls` role, replace deny policy, extend to deals/documents/memberships; **defer `companies` until map/search audit**
 - [ ] **blocked** — Portal/billing route auth (execute pillar not started)
 
-### RLS verify steps (after `014` migrate)
+### RLS verify steps (`014` on dev)
 
-1. **Apply:** `go run ./cmd/migrate` from `madsan/backend` (or API startup auto-migrate).
+1. **Apply:** `go run ./cmd/migrate` from `madsan/backend` (or API startup auto-migrate). **Done on dev** 2026-06-09.
 2. **Confirm scaffold:**  
    `psql -d madsan_db -c "SELECT relrowsecurity FROM pg_class WHERE relname = 'usage_events';"` → `t`.  
    `psql -d madsan_db -c "\dRp+ usage_events"` → `usage_events_deny_default` for `madsan_rls` only.
 3. **No regression:** existing API INSERT to `usage_events` (entitlements) still works as `postgres` owner.
-4. **Future cutover:** create `madsan_rls` LOGIN, `GRANT` on tenant tables, middleware `SET LOCAL app.tenant_id`, swap deny policy for `tenant_id = app_current_tenant_id()`.
+4. **Middleware stub (shipped):** authenticated routes chain `requireAuth` → `withTenantGUC` → handler. With a live DB, `BindRequestTenantRLS` sets `app.tenant_id` via `set_config(..., true)` on a request-scoped tx; verify with logged-in request + `SELECT current_setting('app.tenant_id', true)` inside handler when wired to request tx.
+5. **Future cutover:** create `madsan_rls` LOGIN, `GRANT` on tenant tables, point API pool at `madsan_rls`, migrate handlers to `database.RequestTxFromContext` (or equivalent), swap deny policy for `tenant_id = app_current_tenant_id()`.
 
 ---
 
