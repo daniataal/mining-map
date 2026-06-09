@@ -22,6 +22,7 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 	r.Route("/api/oil-live", func(api chi.Router) {
 		// Full bunker register geocodes ~1s/row via Nominatim; keep outside the 60s API timeout.
 		api.With(middleware.Timeout(15*time.Minute)).Post("/internal/bunker-fuel-suppliers/sync", s.TriggerBunkerFuelSuppliersSync)
+		api.With(middleware.Timeout(15*time.Minute)).Post("/internal/map-serving/rebuild", s.RebuildMapServing)
 
 		api.Group(func(api chi.Router) {
 			api.Use(middleware.Timeout(60 * time.Second))
@@ -150,6 +151,9 @@ func NewRouter(s *Server, responseCache *cache.Cache) http.Handler {
 			api.Post("/companies/{id}/save-to-suppliers", s.SaveToSuppliers)
 			api.Get("/suppliers/candidates", s.SupplierCandidates)
 			api.Get("/suppliers/nearby", s.NearbySuppliers)
+			api.Get("/map/suppliers/hubs", s.ListSupplierHubs)
+			api.Get("/map/features/popup-at", s.GetMapFeaturePopupAt)
+			api.Get("/map/features/{feature_key}/popup", s.GetMapFeaturePopup)
 			api.Get("/search", s.Search)
 			api.Get("/search/health", s.SearchHealthHandler)
 			api.Get("/ws", s.WebSocket)

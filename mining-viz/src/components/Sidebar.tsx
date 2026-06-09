@@ -42,6 +42,7 @@ interface SidebarProps {
   setViewMode: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
+  settingsTitle?: string;
   onToggleWorkspace?: () => void;
   onToggleSearch?: () => void;
   isFilterOpen: boolean;
@@ -101,6 +102,7 @@ export default function Sidebar({
   setViewMode,
   onToggleFilter,
   onToggleAdmin,
+  settingsTitle,
   onToggleWorkspace,
   onToggleSearch,
   isFilterOpen,
@@ -221,6 +223,7 @@ export default function Sidebar({
         </button>
         <button 
           onClick={onToggleAdmin}
+          title={settingsTitle}
           className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 border border-transparent transition-all cursor-pointer"
         >
           <LucideSettings className="w-5 h-5" />

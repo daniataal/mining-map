@@ -10,11 +10,23 @@ export const MINING_AUTH_STORAGE_KEYS = [
 /** Skip further GET /api/licenses/annotations after a 401 until logout or fresh login. */
 let annotationsServerHydrationBlocked = false;
 
+export type MiningUserRole = 'admin' | 'user';
+
 export function getStoredMiningToken(): string | null {
   if (typeof localStorage === 'undefined') return null;
   const token =
     localStorage.getItem('mining_token')?.trim() || localStorage.getItem('token')?.trim();
   return token || null;
+}
+
+export function getStoredMiningRole(): MiningUserRole | null {
+  if (typeof localStorage === 'undefined') return null;
+  const role = localStorage.getItem('mining_role')?.trim();
+  return role === 'admin' || role === 'user' ? role : null;
+}
+
+export function isMiningAdmin(role: MiningUserRole | null | undefined): boolean {
+  return role === 'admin';
 }
 
 /** Client-side exp check only — invalid signature still requires server 401 handling. */

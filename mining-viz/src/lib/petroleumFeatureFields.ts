@@ -606,7 +606,7 @@ export function buildPetroleumFeatureViewModel(
   const owner = firstString(props, ['owner', 'Owner', 'OWNER', 'Owner(s)']);
   const exploringCompanies = collectExploringCompanies(props);
   const operatorFromTags =
-    firstString(props, ['operator', 'Operator', 'OPERATOR']) ??
+    firstString(props, ['operator', 'Operator', 'OPERATOR', 'operatorName']) ??
     (exploringCompanies.length === 1 ? exploringCompanies[0] : null);
   const operator = operatorFromTags ?? owner ?? null;
   const countryRaw = firstString(props, ['Country', 'COUNTRY', 'country', 'Nation', 'country']);

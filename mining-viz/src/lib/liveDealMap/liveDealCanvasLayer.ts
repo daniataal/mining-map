@@ -9,6 +9,7 @@ import type {
   LiveDealArcFeature,
   LiveDealMapFeature,
   LiveDealPointFeature,
+  LiveDealPolylineFeature,
   LiveDealViewport,
 } from './liveDealMapTypes';
 
@@ -36,7 +37,7 @@ function colorForFeature(feature: LiveDealMapFeature): string {
   if (feature.kind === 'opportunity') return '#10b981';
   if (feature.kind === 'terminal') return '#38bdf8';
   if (feature.kind === 'storage_terminal') return '#06b6d4';
-  if (feature.kind === 'storage_tank') return '#94a3b8';
+  if (feature.kind === 'storage_tank') return '#67e8f9';
   if (feature.kind === 'tank_farm') return '#f97316';
   if (feature.kind === 'refinery') return '#fb923c';
   if (feature.kind === 'oil_field') return '#1e40af';
@@ -49,7 +50,7 @@ function colorForFeature(feature: LiveDealMapFeature): string {
     if (clusterKind === 'storage_terminal') return '#06b6d4';
     if (clusterKind === 'tank_farm') return '#f97316';
     if (clusterKind === 'refinery') return '#fb923c';
-    if (clusterKind === 'storage_tank') return '#94a3b8';
+    if (clusterKind === 'storage_tank') return '#67e8f9';
     return '#2563eb';
   }
   if (feature.kind === 'vessel') return '#f59e0b';
@@ -73,7 +74,7 @@ function radiusForPoint(feature: LiveDealPointFeature, zoom: number, selected: b
         : feature.kind === 'storage_terminal' || feature.kind === 'tank_farm'
           ? 6.5
           : feature.kind === 'storage_tank'
-            ? 5
+            ? zoom >= 12 ? 7 : 5.5
           : feature.kind === 'refinery' || feature.kind === 'oil_field'
             ? 6
         : feature.kind === 'cargo'
@@ -199,6 +200,37 @@ function drawArrowHead(
   ctx.lineWidth = Math.max(2, size / 4);
   ctx.lineCap = 'round';
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawPolyline(
+  ctx: CanvasRenderingContext2D,
+  map: L.Map,
+  feature: LiveDealPolylineFeature,
+  selected: boolean,
+): void {
+  if (feature.positions.length < 2) return;
+  const points = feature.positions.map(([lat, lng]) => map.latLngToContainerPoint([lat, lng]));
+  const color = feature.color ?? '#fbbf24';
+  const weight = (feature.weight ?? 3.5) + (selected ? 1.5 : 0);
+  const opacity = Math.max(0.35, Math.min(1, feature.opacity ?? 0.92));
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = opacity;
+  ctx.lineWidth = weight;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash(parseDashArray(feature.dashArray));
+  ctx.shadowColor = selected ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = selected ? 14 : 6;
+  ctx.stroke();
+  ctx.setLineDash([]);
   ctx.restore();
 }
 
@@ -479,7 +511,7 @@ export class CanvasLiveDealLayer extends L.Layer {
     const hovered: LiveDealMapFeature[] = [];
     const normal: LiveDealMapFeature[] = [];
     for (const feature of this._features) {
-      if (feature.shape === 'arc') {
+      if (feature.shape === 'arc' || feature.shape === 'polyline') {
         if (feature.uid === this._selectedUid) selected.push(feature);
         else if (feature.uid === hoveredUid) hovered.push(feature);
         else normal.push(feature);
@@ -508,6 +540,10 @@ export class CanvasLiveDealLayer extends L.Layer {
   ): void {
     if (feature.shape === 'arc') {
       drawArc(ctx, map, feature, selected);
+      return;
+    }
+    if (feature.shape === 'polyline') {
+      drawPolyline(ctx, map, feature, selected);
       return;
     }
     const point = map.latLngToContainerPoint([feature.lat, feature.lng]);

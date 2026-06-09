@@ -9,8 +9,11 @@ import {
   formatStorageSubstanceLabel,
   isGenericStorageTerminalTitle,
   shouldShowStorageSiteContextNear,
+  storageClusterBoundsFromData,
+  storageClusterParseMaxZoom,
   storageTankFarmClusterGridMultiplier,
   storageTankFarmsLayerShouldMount,
+  STORAGE_CANVAS_CLUSTER_MAX_ZOOM,
   storageTerminalOsmTagSummary,
   STORAGE_OPERATOR_UNTAGGED,
 } from './storageTankFarmsLayer';
@@ -20,6 +23,21 @@ describe('storageTankFarmsLayerShouldMount', () => {
     expect(storageTankFarmsLayerShouldMount(true)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(true, 5)).toBe(true);
     expect(storageTankFarmsLayerShouldMount(false)).toBe(false);
+  });
+});
+
+describe('storage cluster parse contract', () => {
+  it('flies into cluster bounds at detail zoom without list popup', () => {
+    expect(storageClusterParseMaxZoom()).toBe(STORAGE_CANVAS_CLUSTER_MAX_ZOOM + 1);
+    const bounds = storageClusterBoundsFromData({
+      clientCluster: true,
+      count: 231,
+      bounds: { south: 25.1, west: 56.2, north: 25.3, east: 56.5 },
+      sourceIds: ['a', 'b'],
+      sourceUids: ['storage:a', 'storage:b'],
+    });
+    expect(bounds.south).toBe(25.1);
+    expect(bounds.north).toBe(25.3);
   });
 });
 

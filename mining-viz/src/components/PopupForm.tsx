@@ -69,7 +69,12 @@ function PopupForm({
       () => (useOilGasPopup ? buildOilGasLicensePopupModel(item) : null),
       [useOilGasPopup, item]
     );
-    const isStorageTerminal = item.entityKind === 'storage_terminal';
+    const isStorageTerminal =
+      item.entityKind === 'storage_terminal' ||
+      item.entityKind === 'storage_tank' ||
+      item.entityKind === 'tank_farm' ||
+      item.entitySubtype === 'storage_tank' ||
+      item.entitySubtype === 'tank_farm';
     const sourceKindLabel = formatSourceKindLabel(item.sourceKind);
     const isManagedInfrastructureEntity = Boolean(item.entityKind && item.entityKind !== 'license');
     const entityAccent = getEntityAccent(item.entityKind);

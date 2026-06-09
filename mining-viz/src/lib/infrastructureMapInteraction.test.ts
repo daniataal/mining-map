@@ -50,6 +50,59 @@ describe('infrastructureMapInteraction', () => {
     expect(selection.properties.name).toBe('Ras Tanura');
   });
 
+  it('prefers GEM pipeline geom over MVT OSM pipeline at the same click', () => {
+    const mvtMap = {
+      loaded: () => true,
+      getLayer: (id: string) => (id ? {} : undefined),
+      queryRenderedFeatures: vi.fn(() => [
+        {
+          layer: { id: STYLE_LAYER_IDS.pipelinesOilGas },
+          properties: { layer_id: 'pipelines', name: 'OSM MVT pipe' },
+        },
+      ]),
+      getContainer: () => ({
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+      }),
+    } as unknown as MaplibreMap;
+
+    const pipelineFeatures: GeoJSON.Feature[] = [
+      {
+        type: 'Feature',
+        properties: {
+          name: 'Trans-Arabian',
+          fuel_group: 'oil',
+          layer_id: 'gem_pipelines',
+          source: 'gem_goit_oil_ngl_pipelines_march_2025',
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [41.6, 38.0],
+            [41.7, 38.1],
+          ],
+        },
+      },
+    ];
+
+    const pick = pickInfrastructureAtClick({
+      mvtMap,
+      leafletEvent: leafletEvent(38.05, 41.65),
+      mvtMode: true,
+      pipelineFeatures,
+      refineryFeatures: [],
+      storageFeatures: [],
+      mapZoom: 7,
+      loadPipelines: true,
+      loadRefineries: false,
+      loadStorage: false,
+    });
+
+    expect(pick?.kind).toBe('pipeline');
+    expect((pick as { pick: { feature: GeoJSON.Feature } }).pick.feature.properties?.name).toBe(
+      'Trans-Arabian',
+    );
+  });
+
   it('falls back to pipeline geom pick when MVT query returns nothing', () => {
     const mvtMap = {
       loaded: () => true,

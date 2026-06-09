@@ -140,10 +140,12 @@ export default function PetroleumFeaturePopup({
   const companiesUnknownHint = model.sourceUrl
     ? t('לא ידוע — ראה מקור', 'Unknown — see source')
     : t('לא ידוע', 'Unknown');
-  const operatorMissingHint = t(
-    'מפעיל לא מתויג ב-OSM',
-    'Operator not tagged in OSM'
-  );
+  const operatorMissingHint = isOsmPoint
+    ? t(
+        'מפעיל לא מתויג ב-OSM — נתוני קהילה בלבד',
+        'Operator not tagged in OpenStreetMap — community data only',
+      )
+    : t('מפעיל לא מתויג ב-OSM', 'Operator not tagged in OSM');
 
   const { data: nearestGem } = useQuery({
     queryKey: ['nearest-gem-pipeline', coordinates?.lat, coordinates?.lng],

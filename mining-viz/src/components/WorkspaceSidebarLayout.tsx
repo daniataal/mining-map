@@ -20,6 +20,7 @@ export type WorkspaceSidebarLayoutProps = {
   onSidebarViewModeChange: (mode: 'map' | 'admin' | 'dashboard') => void;
   onToggleFilter: () => void;
   onToggleAdmin: () => void;
+  settingsTitle?: string;
   onToggleWorkspace: () => void;
   onToggleSearch: () => void;
   isFilterOpen: boolean;
@@ -58,6 +59,7 @@ export default function WorkspaceSidebarLayout({
   onSidebarViewModeChange,
   onToggleFilter,
   onToggleAdmin,
+  settingsTitle,
   onToggleWorkspace,
   onToggleSearch,
   isFilterOpen,
@@ -118,6 +120,7 @@ export default function WorkspaceSidebarLayout({
           setViewMode={onSidebarViewModeChange}
           onToggleFilter={onToggleFilter}
           onToggleAdmin={onToggleAdmin}
+          settingsTitle={settingsTitle}
           onToggleWorkspace={onToggleWorkspace}
           onToggleSearch={onToggleSearch}
           isFilterOpen={isFilterOpen}
@@ -222,6 +225,7 @@ export default function WorkspaceSidebarLayout({
         <button
           type="button"
           onClick={onToggleAdmin}
+          title={settingsTitle}
           className="w-10 h-10 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 flex items-center justify-center text-slate-400 border border-transparent"
         >
           <Settings className="w-5 h-5" />

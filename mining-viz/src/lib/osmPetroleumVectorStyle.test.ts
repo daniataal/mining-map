@@ -33,6 +33,8 @@ describe('osmPetroleumVectorStyle', () => {
     const layerIds = style.layers?.map((layer) => layer.id) ?? [];
     expect(layerIds.at(-2)).toBe('osm-pipelines-oil-gas-hit');
     expect(layerIds.at(-1)).toBe('osm-pipelines-water-hit');
+    const oilHit = style.layers?.find((layer) => layer.id === 'osm-pipelines-oil-gas-hit');
+    expect((oilHit?.paint as Record<string, unknown>)?.['line-opacity']).toBe(0);
   });
 
   it('applyOsmVectorVisibility is safe when map has no layers', () => {

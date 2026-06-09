@@ -43,6 +43,8 @@ type Props = {
   assetLayerCounts?: Partial<Record<AssetLayerId, number | null | undefined>>;
   onAssetLayerToggle?: (layerId: AssetLayerId) => void;
   onAssetPreset?: (presetId: AssetLayerPresetId) => void;
+  showBunkerRegister?: boolean;
+  onOpenBunkerRegister?: () => void;
 };
 
 const ASSET_LAYER_LABELS: Record<AssetLayerId, string> = {
@@ -93,6 +95,8 @@ export function IntelligenceModeNav({
   assetLayerCounts,
   onAssetLayerToggle,
   onAssetPreset,
+  showBunkerRegister = false,
+  onOpenBunkerRegister,
 }: Props) {
   const { t } = useI18n();
   const sublayers = SUBLAYERS_FOR_MODE[mode];
@@ -156,6 +160,16 @@ export function IntelligenceModeNav({
           </button>
         ))}
       </div>
+      {showBunkerRegister && onOpenBunkerRegister && (
+        <button
+          type="button"
+          onClick={onOpenBunkerRegister}
+          className="flex min-h-[34px] items-center gap-1.5 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-cyan-100 shadow-lg transition hover:bg-cyan-500/20"
+        >
+          <Fuel className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {t('רשם בונקר', 'Bunker register')}
+        </button>
+      )}
       {mode === 'assets' && assetLayerVisibility && onAssetLayerToggle ? (
         <div className="flex max-w-[min(100vw-1.5rem,44rem)] flex-col items-end gap-1.5 rounded-2xl border border-white/10 bg-slate-950/55 p-2 shadow-2xl backdrop-blur-2xl">
           <div className="flex w-full flex-wrap justify-end gap-1">

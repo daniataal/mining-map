@@ -944,13 +944,31 @@ def _admin_payload_from_authorization(authorization: Optional[str]):
     return payload, None
 
 
+def _check_admin_token(
+    x_admin_token: Optional[str] = None,
+    authorization: Optional[str] = None,
+) -> Optional[Response]:
+    """Allow X-Admin-Token (when ADMIN_TOKEN is set) or JWT role=admin."""
+    expected = (os.getenv("ADMIN_TOKEN") or "").strip()
+    if expected and x_admin_token and x_admin_token == expected:
+        return None
+    if authorization:
+        _payload, err = _admin_payload_from_authorization(authorization)
+        if err is None:
+            return None
+    if expected:
+        return Response("Forbidden", status_code=403)
+    print("[admin] WARNING: ADMIN_TOKEN env not set — admin endpoint is unauthenticated.")
+    return None
+
+
 def _require_authenticated_or_admin(
     authorization: Optional[str] = None,
     x_admin_token: Optional[str] = None,
 ):
     """Allow X-Admin-Token (when configured) or any valid Bearer JWT."""
     if (os.getenv("ADMIN_TOKEN") or "").strip() and x_admin_token:
-        err = _check_admin_token(x_admin_token)
+        err = _check_admin_token(x_admin_token, authorization)
         if err is not None:
             return None, err
         return {"role": "admin", "sub": "admin-token"}, None
@@ -2107,10 +2125,10 @@ def login(user: UserLogin):
         conn.close()
 
 @app.post("/auth/register")
-def register(user: UserCreate):
-    # In a real app, check for Admin token here. For MVP, we'll assume the frontend enforces 'Admin Panel' access.
-    # ideally verify jwt token from header.
-    
+def register(user: UserCreate, authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2136,7 +2154,10 @@ def register(user: UserCreate):
         conn.close()
 
 @app.get("/auth/users")
-def get_users():
+def get_users(authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2184,7 +2205,10 @@ def delete_user(user_id: str, authorization: Optional[str] = Header(None)):
         conn.close()
 
 @app.put("/auth/users/{user_id}")
-def update_user(user_id: str, user: UserUpdate):
+def update_user(user_id: str, user: UserUpdate, authorization: Optional[str] = Header(None)):
+    payload, err = _admin_payload_from_authorization(authorization)
+    if err is not None:
+        return err
     if not ensure_schema_initialized():
         return _schema_unavailable_response("initializing auth schema")
     conn = get_db_connection()
@@ -2859,8 +2883,9 @@ def read_gov_procurement_companies(
 
 
 @app.post("/api/admin/gov-procurement/sync")
-def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None)):
-    forbidden = _check_admin_token(x_admin_token)
+def admin_gov_procurement_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     if not ensure_schema_initialized():
@@ -5678,9 +5703,10 @@ def get_storage_coverage_report(
 
 
 @app.post("/api/admin/storage/coverage-audit")
-def admin_storage_coverage_audit(x_admin_token: Optional[str] = Header(None)):
+def admin_storage_coverage_audit(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Regenerate storage coverage audit JSON and gap queue (admin)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -6249,7 +6275,7 @@ def admin_open_data_sync(
     x_admin_token: Optional[str] = Header(None),
     source_id: Optional[str] = None,
 ):
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6438,7 +6464,7 @@ def admin_comtrade_sync(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Refresh oil_trade_flows from UN Comtrade HS27 (requires COMTRADE_API_KEY)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6466,7 +6492,7 @@ def admin_data_health(
     refresh_probes: bool = False,
 ):
     """Operational snapshot: sync runs, drift alerts, license counts, OSM cache stats."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6591,7 +6617,7 @@ def admin_gem_extraction_tracker_ingest(
     Ingest GEM Global Oil and Gas Extraction Tracker xlsx into ``licenses``
     (``sector=oil_and_gas``). Defaults to repo-root workbook or ``GEM_TRACKER_XLSX_PATH``.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6618,7 +6644,7 @@ def admin_gem_goit_pipelines_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GOIT Oil/NGL pipelines (xlsx + per-ProjectID route GeoJSON) into gem_pipeline_segments."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6648,7 +6674,7 @@ def admin_gem_ggit_gas_pipelines_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GGIT gas transmission pipelines (xlsx + gas route GeoJSON) into gem_pipeline_segments."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6673,9 +6699,10 @@ def admin_gem_ggit_gas_pipelines_ingest(
 
 
 @app.post("/api/admin/bunker-fuel-suppliers/sync")
-def admin_bunker_fuel_suppliers_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_bunker_fuel_suppliers_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Index curated bunker/fuel supplier registers into oil_companies."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -6858,7 +6885,7 @@ def admin_gem_gogpt_plants_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GOGPT plant units (xlsx) into gem_plant_units."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6888,7 +6915,7 @@ def admin_gem_ggit_lng_ingest(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Ingest GEM GGIT LNG terminals (xlsx) into gem_lng_terminals."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -6990,7 +7017,7 @@ def admin_eia_historic_imports_ingest(
     Ingest EIA ``impa*.xls(x)`` from ``EIA_DOWNLOADS_DIR`` or ``folder`` query/body path.
     User-provided files only — does not scrape eia.gov.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7025,7 +7052,7 @@ def admin_petroleum_osm_sync(
     from_gap_queue: bool = False,
 ):
     """Refresh petroleum_osm_features from Overpass world tiles (optional tile filter)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7066,7 +7093,7 @@ def admin_comtrade_sync_runs(
     limit: int = 50,
 ):
     """Recent scheduled Comtrade HS27 sync runs."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7141,7 +7168,7 @@ def admin_oil_live_enrich_contacts(
     limit: int = 50,
 ):
     """Batch-run contact enrichment for top oil companies missing contacts (requires supplier_id)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7161,9 +7188,10 @@ def admin_oil_live_enrich_contacts(
 
 
 @app.post("/api/admin/oil-live/purge-demo-seed")
-def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None)):
+def admin_oil_live_purge_demo_seed(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Delete demo opportunities and seed/demo port calls (MT DEMO STAR, seed_port_calls)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7231,7 +7259,7 @@ def admin_trade_manifest_upload(
     consent: bool = True,
 ):
     """Ingest user-provided manifest CSV into trade_manifest_rows (tier=user_upload)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     if not file_path.strip():
@@ -7317,7 +7345,7 @@ def admin_oil_live_graph_sync(
     rebuild_synthetic_bol: bool = True,
 ):
     """Merge free sources into oil commercial graph + trigger synthetic BOL rebuild."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     ensure_schema_initialized()
@@ -7338,9 +7366,10 @@ def admin_oil_live_graph_sync(
 
 
 @app.post("/api/admin/eu-procurement/sync")
-def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_eu_procurement_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Refresh eu_procurement_notices from TED Search API (free, no API key)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7619,9 +7648,10 @@ def read_entity_eu_procurement(
 
 
 @app.post("/api/admin/poland-mining/sync")
-def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Pull Poland PGI MIDAS mining areas via ArcGIS MapServer into licenses."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7646,9 +7676,10 @@ def admin_poland_mining_sync(x_admin_token: Optional[str] = Header(None)):
 
 
 @app.post("/api/admin/sweden-mining/sync")
-def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None)):
+def admin_sweden_mining_sync(x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Pull Sweden SGU mineral permits via OGC API Features into licenses."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7678,7 +7709,7 @@ def admin_kazakhstan_mining_sync(
     max_rows: int = 5000,
 ):
     """Pull Kazakhstan egov mining register when KZ_EGOV_API_KEY is configured."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7709,7 +7740,7 @@ def admin_oil_products_licenses_sync(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Upsert curated downstream fuel / petroleum products marketing licensees from seed JSON."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -7957,7 +7988,7 @@ def admin_export_licenses(
     x_admin_token: Optional[str] = Header(None),
 ):
     """Export licenses from Postgres for backup and re-import (source of truth)."""
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8038,7 +8069,7 @@ async def admin_import_licenses(
     Upsert licenses from admin CSV (same columns as GET /api/admin/licenses/export).
     Rows with manually_edited=TRUE are not updated on conflict.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8169,7 +8200,7 @@ async def admin_import_extracted_csv(
     sector: str = "mining",
     x_admin_token: Optional[str] = Header(None),
 ):
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 
@@ -8245,24 +8276,9 @@ class GeocodeRevertRequest(BaseModel):
     country: Optional[str] = None
 
 
-def _check_admin_token(x_admin_token: Optional[str]) -> Optional[Response]:
-    expected = os.getenv("ADMIN_TOKEN")
-    if not expected:
-        # Match the rest of the codebase: log but allow in local dev. The
-        # frontend Admin Panel is gated client-side; this endpoint should
-        # additionally be reverse-proxy gated in prod.
-        print("[admin] WARNING: ADMIN_TOKEN env not set — admin endpoint is unauthenticated.")
-        return None
-    if x_admin_token != expected:
-        return Response("Forbidden", status_code=403)
-    return None
-
-
-from fastapi import Header
-
-
 @app.post("/api/admin/geocode-licenses")
-def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Run a backfill batch.
 
     Example
@@ -8278,7 +8294,7 @@ def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optio
     calls are idempotent thanks to the ``geo_cache`` table and the
     ``geo_source`` filter.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -8322,12 +8338,13 @@ def admin_geocode_licenses(request: GeocodeBackfillRequest, x_admin_token: Optio
 
 
 @app.post("/api/admin/geocode-licenses/revert")
-def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[str] = Header(None)):
+def admin_geocode_revert(request: GeocodeRevertRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """Restore ``original_lat`` / ``original_lng`` for any row touched by a
     backfill run. ``geo_source='user'`` rows are never reverted because they
     have no recorded prior value to restore.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
     try:
@@ -8348,11 +8365,12 @@ class ArcGISIngestRequest(BaseModel):
     batch_size: Optional[int] = 1000
 
 @app.post("/api/admin/ingest/arcgis")
-def ingest_arcgis_cadastre(request: ArcGISIngestRequest, x_admin_token: Optional[str] = Header(None)):
+def ingest_arcgis_cadastre(request: ArcGISIngestRequest, x_admin_token: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None)):
     """
     Scrapes an ArcGIS REST feature layer and ingests licenses into the database.
     """
-    forbidden = _check_admin_token(x_admin_token)
+    forbidden = _check_admin_token(x_admin_token, authorization)
     if forbidden is not None:
         return forbidden
 

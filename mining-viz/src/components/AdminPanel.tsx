@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { LucideUsers, LucideHistory, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip } from 'lucide-react';
+import { LucideUsers, LucideHistory, LucidePlus, LucideEdit, LucideChartBar, LucideTrash2, LucideDatabase, LucideActivity, LucideShip, LucideMap } from 'lucide-react';
+import AdminLiveMapDataPanel from './admin/AdminLiveMapDataPanel';
 import { toast } from 'sonner';
 import { API_BASE, deleteAuthUser } from '../lib/api';
 import EuProcurementFacets from './EuProcurementFacets';
@@ -429,6 +430,9 @@ export default function AdminPanel({
                         </TabsTrigger>
                         <TabsTrigger value="data-health" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
                             <LucideActivity className="w-4 h-4" /> {t('בריאות נתונים', 'Data health')}
+                        </TabsTrigger>
+                        <TabsTrigger value="live-map" className="text-slate-500 dark:text-slate-400 data-[state=active]:bg-transparent data-[state=active]:text-amber-500 data-[state=active]:border-b-2 border-amber-500 rounded-none h-full px-3 sm:px-4 gap-1.5 sm:gap-2 font-black uppercase text-[10px] tracking-widest hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap">
+                            <LucideMap className="w-4 h-4" /> {t('Live & Map', 'Live & Map')}
                         </TabsTrigger>
                     </TabsList>
                 </div>
@@ -856,6 +860,13 @@ export default function AdminPanel({
                                 )}
                             </CardContent>
                         </Card>
+                    </TabsContent>
+
+                    <TabsContent value="live-map" className="h-full m-0 overflow-hidden">
+                        <AdminLiveMapDataPanel
+                            resolvedAdminToken={resolvedAdminToken}
+                            adminHeaders={adminHeaders}
+                        />
                     </TabsContent>
 
                     <TabsContent value="logs" className="h-full m-0 p-6 overflow-y-auto">

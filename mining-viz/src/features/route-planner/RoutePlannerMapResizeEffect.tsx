@@ -20,20 +20,22 @@ export default function RoutePlannerMapResizeEffect({
     };
 
     invalidate();
-    const t0 = window.setTimeout(invalidate, 80);
-    const t1 = window.setTimeout(invalidate, 350);
+    const timers = [0, 80, 350, 800, 1500].map((ms) => window.setTimeout(invalidate, ms));
 
     const onResize = () => {
       window.requestAnimationFrame(invalidate);
     };
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
     observer?.observe(container);
-    const parent = container.parentElement;
-    if (parent) observer?.observe(parent);
+    let ancestor: HTMLElement | null = container.parentElement;
+    for (let depth = 0; ancestor && depth < 5; depth += 1) {
+      observer?.observe(ancestor);
+      if (ancestor.classList.contains('map-wrapper')) break;
+      ancestor = ancestor.parentElement;
+    }
 
     return () => {
-      window.clearTimeout(t0);
-      window.clearTimeout(t1);
+      for (const id of timers) window.clearTimeout(id);
       observer?.disconnect();
     };
   }, [map, active, resizeKey]);

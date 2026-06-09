@@ -194,7 +194,8 @@ export function buildOsmPetroleumVectorStyle(
         paint: {
           'line-color': '#000000',
           'line-width': 22,
-          'line-opacity': 0.05,
+          /** Fully transparent — 5% opacity stacked at junctions into visible black smudges. */
+          'line-opacity': 0,
         },
       },
       {
@@ -211,7 +212,7 @@ export function buildOsmPetroleumVectorStyle(
         paint: {
           'line-color': '#000000',
           'line-width': 20,
-          'line-opacity': 0.05,
+          'line-opacity': 0,
         },
       },
     ],

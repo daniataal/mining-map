@@ -187,18 +187,24 @@ export function resolveAssetLicenseSector(
   return undefined;
 }
 
-export function resolveAssetMapViewKey(visibility: AssetLayerVisibility): LegacyViewMode {
-  if (
+export function petroleumCockpitLayersActive(visibility: AssetLayerVisibility): boolean {
+  return (
     visibility.oil_fields ||
     visibility.refineries ||
     visibility.plants ||
     visibility.tank_farms ||
     visibility.pipelines ||
-    visibility.lng
-  ) {
+    visibility.lng ||
+    visibility.bunker_suppliers
+  );
+}
+
+export function resolveAssetMapViewKey(visibility: AssetLayerVisibility): LegacyViewMode {
+  if (petroleumCockpitLayersActive(visibility)) {
     return 'oil_and_gas';
   }
   if (visibility.ports && !visibility.mines) return 'ports';
+  if (!visibility.mines && !visibility.ports) return 'oil_and_gas';
   return 'mining';
 }
 
@@ -212,26 +218,21 @@ export function assetsPetroleumLayerPrefsFromVisibility(
     refineries: Boolean(v.refineries),
     storage_terminals: Boolean(v.tank_farms),
   };
-  const osmForcedLayers: Partial<Record<OsmPetroleumLayerId, boolean>> = {};
-
   if (v.pipelines) {
     osmLayerIds.push('pipelines');
-    osmForcedLayers.pipelines = true;
   }
   if (v.refineries) {
     osmLayerIds.push('refineries');
-    osmForcedLayers.refineries = true;
   }
   if (v.tank_farms) {
     osmLayerIds.push('storage_terminals');
-    osmForcedLayers.storage_terminals = true;
   }
 
   return {
     showOsmPetroleum: osmLayerIds.length > 0,
     osmLayerIds,
     osmLayerVisibility,
-    osmForcedLayers,
+    osmForcedLayers: {},
     splitOilGasPipelineLayers: Boolean(v.pipelines),
     showGemPipelines: Boolean(v.pipelines),
     showGemPlants: Boolean(v.plants),

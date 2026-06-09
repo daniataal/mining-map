@@ -1,10 +1,10 @@
-import { CircleMarker, LayerGroup, Popup } from 'react-leaflet';
+import { useCallback, useRef } from 'react';
+import { CircleMarker, LayerGroup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { PathOptions } from 'leaflet';
-import { ExternalLink } from 'lucide-react';
 import type { NearbySupplier } from '../../lib/nearbySuppliers';
-import { useI18n } from '../../lib/i18n';
 import { markMapFeatureClickHandled } from '../../lib/mapInteractionController';
+import { openBunkerSupplierPopup } from '../../lib/openBunkerSupplierPopup';
 
 /** SVG renderer — MapContainer preferCanvas breaks CircleMarker hit testing. */
 const bunkerPointRenderer = L.svg({ padding: 0.5 });
@@ -12,7 +12,10 @@ const bunkerPointRenderer = L.svg({ padding: 0.5 });
 type Props = {
   suppliers: NearbySupplier[];
   enabled?: boolean;
+  selectedSupplierId?: string | null;
   onOpenDossier?: (supplier: NearbySupplier) => void;
+  onViewInRegistry?: (supplier: NearbySupplier) => void;
+  onSupplierSelect?: (supplier: NearbySupplier) => void;
 };
 
 function markerStyle(tier?: string): PathOptions {
@@ -28,8 +31,33 @@ function markerStyle(tier?: string): PathOptions {
   }
 }
 
-export default function NearbySuppliersMapLayer({ suppliers, enabled = true, onOpenDossier }: Props) {
-  const { t } = useI18n();
+export default function NearbySuppliersMapLayer({
+  suppliers,
+  enabled = true,
+  selectedSupplierId,
+  onOpenDossier,
+  onViewInRegistry,
+  onSupplierSelect,
+}: Props) {
+  const map = useMap();
+  const popupRef = useRef<ReturnType<typeof openBunkerSupplierPopup> | null>(null);
+
+  const handleSupplierClick = useCallback(
+    (supplier: NearbySupplier, e: L.LeafletMouseEvent) => {
+      L.DomEvent.stopPropagation(e);
+      markMapFeatureClickHandled(e);
+      onSupplierSelect?.(supplier);
+      popupRef.current?.close();
+      const lat = supplier.lat as number;
+      const lng = supplier.lng as number;
+      popupRef.current = openBunkerSupplierPopup(map, lat, lng, supplier, {
+        onOpenDossier: onOpenDossier ? () => onOpenDossier(supplier) : undefined,
+        onViewInRegistry: onViewInRegistry ? () => onViewInRegistry(supplier) : undefined,
+      });
+    },
+    [map, onOpenDossier, onViewInRegistry, onSupplierSelect],
+  );
+
   if (!enabled) return null;
 
   const mappable = suppliers.filter((s) => s.lat != null && s.lng != null);
@@ -41,60 +69,19 @@ export default function NearbySuppliersMapLayer({ suppliers, enabled = true, onO
         <CircleMarker
           key={supplier.id}
           center={[supplier.lat as number, supplier.lng as number]}
-          pathOptions={{ ...markerStyle(supplier.geocode_tier), interactive: true }}
+          pathOptions={{
+            ...markerStyle(supplier.geocode_tier),
+            interactive: true,
+            ...(selectedSupplierId === supplier.id
+              ? { weight: 3, color: '#67e8f9', fillOpacity: 1 }
+              : {}),
+          }}
           renderer={bunkerPointRenderer}
           zIndexOffset={900}
           eventHandlers={{
-            click: (e) => {
-              L.DomEvent.stopPropagation(e);
-              markMapFeatureClickHandled(e);
-              (e.target as L.CircleMarker).openPopup();
-            },
+            click: (e) => handleSupplierClick(supplier, e),
           }}
-        >
-          <Popup maxWidth={280}>
-            <div className="space-y-1 text-xs text-slate-800">
-              <p className="font-semibold">{supplier.name}</p>
-              {supplier.geocode_tier && (
-                <p className="text-[10px] uppercase tracking-wide text-slate-500">{supplier.geocode_tier.replace(/_/g, ' ')}</p>
-              )}
-              {supplier.fuels_supplied && (
-                <p>
-                  {t('דלקים', 'Fuels')}: {supplier.fuels_supplied}
-                </p>
-              )}
-              {supplier.contact_person && (
-                <p>
-                  {t('איש קשר', 'Contact')}: {supplier.contact_person}
-                </p>
-              )}
-              {supplier.address && <p className="leading-snug">{supplier.address}</p>}
-              {supplier.geocode_disclaimer && (
-                <p className="text-[10px] leading-snug text-slate-500">{supplier.geocode_disclaimer}</p>
-              )}
-              {onOpenDossier && (
-                <button
-                  type="button"
-                  className="mt-1 text-cyan-700 underline"
-                  onClick={() => onOpenDossier(supplier)}
-                >
-                  {t('פתח תיק', 'Open dossier')}
-                </button>
-              )}
-              {supplier.source_url && (
-                <a
-                  href={supplier.source_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 text-amber-700"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {t('מקור', 'Source')}
-                </a>
-              )}
-            </div>
-          </Popup>
-        </CircleMarker>
+        />
       ))}
     </LayerGroup>
   );
