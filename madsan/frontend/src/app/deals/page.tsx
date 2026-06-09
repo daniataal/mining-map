@@ -8,6 +8,18 @@ import { API_BASE } from "@/lib/layers";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
+const SAMPLE_DEAL: Record<string, string> = {
+  commodity: "VLSFO",
+  quantity: "5000",
+  location: "Fujairah, UAE",
+  seller: "Peninsula Fuel Supply LLC",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "FOB",
+  price: "612",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+};
+
 type VerifyResult = {
   deal_id?: string;
   confidence_score?: number;
@@ -45,6 +57,7 @@ export default function DealsPage() {
   const [loading, setLoading] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
+  const [formSeed, setFormSeed] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -188,14 +201,26 @@ export default function DealsPage() {
           {authError && <p style={{ color: "#f87171" }}>{authError}</p>}
         </form>
       )}
+      {authed && !result && (
+        <div style={{ marginBottom: "1rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)", fontSize: 13 }}>
+          <p style={{ color: "var(--muted)", margin: "0 0 8px" }}>No deal verified yet — load a sample or fill the form below.</p>
+          <button
+            type="button"
+            onClick={() => setFormSeed(SAMPLE_DEAL)}
+            style={{ padding: "8px 12px", background: "var(--bg)", border: "1px solid var(--border)", color: "var(--accent)", fontWeight: 600, cursor: "pointer" }}
+          >
+            Sample VLSFO · Fujairah
+          </button>
+        </div>
+      )}
       {authed && (
-        <form onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
+        <form key={formSeed ? "sample" : sellerDefault || "default"} onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
           {["commodity", "quantity", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi"].map((f) => (
             <label key={f} style={{ display: "grid", gap: 4, fontSize: 13 }}>
               {f}
               <input
                 name={f}
-                defaultValue={f === "seller" ? sellerDefault : undefined}
+                defaultValue={formSeed?.[f] ?? (f === "seller" ? sellerDefault : undefined)}
                 required={f !== "buyer" && f !== "incoterm" && f !== "price" && f !== "currency" && f !== "claimed_vessel_mmsi"}
                 style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
               />

@@ -19,6 +19,7 @@ type TickerQuote = {
   unit: string;
   change_pct?: number;
   tier?: string;
+  disclaimer?: string;
 };
 
 export default function TerminalShell() {
@@ -83,14 +84,17 @@ export default function TerminalShell() {
     <div className="terminal">
       <div className="ticker">
         <strong>MADSAN</strong>
-        {(quotes.length ? quotes : [{ label: "Brent" }, { label: "VLSFO SG" }, { label: "Gold spot" }] as TickerQuote[]).map((q) => (
-          <span key={q.label}>
+        {(quotes.length ? quotes : [{ label: "Brent" }, { label: "VLSFO Singapore" }, { label: "Gold spot" }] as TickerQuote[]).map((q) => (
+          <span key={q.label} title={q.disclaimer ?? tickerDisclaimer}>
             {q.label}{" "}
             <strong>
               {q.price != null
                 ? `${q.currency ?? "USD"} ${q.price.toLocaleString(undefined, { maximumFractionDigits: 1 })}${q.unit ?? ""}${q.change_pct != null ? ` (${q.change_pct > 0 ? "+" : ""}${q.change_pct}%)` : ""}`
                 : "—"}
             </strong>
+            {q.tier === "reference_stub" ? (
+              <span className="badge partial" style={{ marginLeft: 4, fontSize: 9, padding: "1px 4px" }}>STUB</span>
+            ) : null}
           </span>
         ))}
         {tickerTier === "eia_open_data" ? (
@@ -114,6 +118,7 @@ export default function TerminalShell() {
           <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("intel"); }}>⚡</button>
           <button className={vertical === "metals" ? "active" : ""} title="Metals" onClick={() => { setVertical("metals"); setPanel("intel"); }}>⛏</button>
           <Link href="/deals" className="rail-link" title="Deals">📋</Link>
+          <Link href="/portal" className="rail-link" title="Supplier portal">📤</Link>
           <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>🏭</button>
           <Link href="/admin" className="rail-link" title="Admin">⚙</Link>
         </nav>
@@ -130,6 +135,12 @@ export default function TerminalShell() {
           {vertical === "metals" && metalsSummary && (
             <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--muted)", borderBottom: "1px solid var(--border)" }}>
               {metalsSummary.mines ?? 0} mines · {metalsSummary.countries ?? 0} countries (license cadastre)
+            </div>
+          )}
+          {panel === "intel" && !selected && vertical === "energy" && (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--muted)", borderBottom: "1px solid var(--border)", lineHeight: 1.4 }}>
+              Toggle <strong style={{ color: "var(--text)", fontWeight: 600 }}>Pipelines</strong> (z≥4).{" "}
+              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Vessels</strong> — Gulf AIS coverage is limited by provider.
             </div>
           )}
           <div className="body">
