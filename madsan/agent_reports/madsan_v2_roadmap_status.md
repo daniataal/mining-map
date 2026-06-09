@@ -1,6 +1,67 @@
-# MadSan V2 — Roadmap Status (2026-06-09 late evening, UI gap closure batch)
+# MadSan V2 — Roadmap Status (2026-06-10, build batch 1+2 in flight)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
+
+## Plan phase completion (effective)
+
+Based on prior commits on `new-refactor-eng-style` (not plan file edits):
+
+| Phase | Status | Evidence |
+|-------|--------|----------|
+| **0** Reports + scaffold | **COMPLETE** | `agent_reports/`, `madsan/` tree, dev bootstrap |
+| **1** Schema + matviews | **COMPLETE** | 11+ migrations, PostGIS `madsan_db` :5433 |
+| **5b** Entitlements | **COMPLETE** | Plans, feature flags, deals RBAC (`e934964`) |
+| **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons (`be4a5fba`, `74eeab55`, `e917ecf6`) |
+| **9** Deal verification | **COMPLETE** | DD rules, OpenSanctions, pack v1.1 + relationship graph |
+
+**Partial (shipped slices; batch agents may close gaps):**
+
+| Phase | Status | Shipped | Remaining gap |
+|-------|--------|---------|---------------|
+| 2–3 Ingestion + worker | **PARTIAL** | Targeted matview refresh (`71fc3701`); RawDataDir fix (`9a84ec7f`); import report + dry-run + dedup auto-enqueue (`ef359e38`) | 16-step pipeline, River queue, watch_folder worker restart |
+| 4 Legacy ETL | **PARTIAL** | Go-default import; licenses + vessels parity green (`bcb0f2a`) | `petroleum_osm_features` import ~47% → 100%; `legacy-parity` exit 0 |
+| 5 Go core + auth | **PARTIAL** | JWT + httpOnly cookie cutover (`a68eb37d`) | S21 entity envelope (batch 1) |
+| 6b Realtime WS | **PARTIAL** | Dead-reckoning (`d80d3fe3`) | MessagePack frames (batch 1); alert job queue |
+| 7 Energy UI | **PARTIAL** | Status bar + ticker trends (`3c64a846`) | Gulf AIS disclaimer (batch 1); real VLSFO feed |
+| 8 Supplier discovery | **PARTIAL** | Ranked geo+commodity search (`62015b65`) | Activity/risk fusion (batch 1) |
+| 8b Intelligence signals | **PARTIAL** | Signal history, corridors | 6-factor STS model (batch 1) |
+| 9b Deal monitoring | **PARTIAL** | Watch toggle + changes panel (`e99d9d62`); alert diff scaffold (`465e1f81`) | Scheduled watch worker, map-pinned living packs |
+| 10 Portal + admin | **PARTIAL** | Portal scaffold (`03ccc97c`); dedup merge UI (`099e7850`) | Data-quality dashboard (batch 1); review promotion |
+| 11 Metals vertical | **PARTIAL** | Layer registry (`5be9729e`) | Smelters/cadastre data; metals deal-pack parity (batch 1) |
+| 12c Legal | **PARTIAL** | Legal page + dispute/GDPR APIs (`8ff57533`, `696cc53d`) | External counsel sign-off; commercial_use_ok gate (batch 1) |
+| 12d Security/RLS | **PARTIAL** | `014_rls_scaffold`; GUC middleware stub (`9bbce7c8`) | Audit log + role cutover (batch 1) |
+| 12e Notifications | **PARTIAL** | Onboarding (`9269409f`); feedback flywheel (`100e4844`) | Email notification scaffold (batch 1) |
+| 13 Perf + deploy | **PARTIAL** | Prod overlay (`bc050552`); launch checklist ops (`8978bb7c`); k6 smoke (`48daef66`) | TLS, backup cron, observability endpoint (batch 1) |
+
+**Not started / deferred:** 8c–8f (pgRouting, MCR, predictive, leads — batch 2 scaffolds), 12b satellite intel (batch 2 defer doc), 14 Trust Score (batch 2 scaffold), River queue, Splink runtime, billing.
+
+## Build in progress (2026-06-10)
+
+**12 parallel agents** on `new-refactor-eng-style`. Petroleum import worker (`53774b3f`) **untouched** — do not restart mid-job.
+
+### Batch 1 (in flight)
+
+| Agent | Plan phases | Scope |
+|-------|-------------|-------|
+| Phase 2-3 ingestion gaps | 2–3 | ~~Import result JSON, dry-run, post-import dedup auto-enqueue~~ **landed** (`ef359e38`) |
+| Phase 5 entity response shape | 5 | S21 EntityEnvelope on core entity GETs; authFetch on remaining pages |
+| Phase 6b-7-12 map UX | 6b, 7, 12 | MessagePack WS + JSON fallback; Gulf/Hormuz coverage banners |
+| Phase 8 supplier fusion search | 8 | Commodity/country/geo fusion on supplier search + UI presets |
+| Phase 8b STS scoring | 8b | 6-factor STS model in Go; dossier signal history |
+| Phase 9b-10-11 deals admin | 9b, 10, 11 | Deal watch worker + `deal_change_events`; data-quality admin; metals pack parity |
+| Phase 12c-12d-12e-13 ops | 12c–12e, 13 | Audit log, email stub, observability endpoint, backup cron example |
+
+### Batch 2 (just launched)
+
+| Agent | Plan phases | Scope |
+|-------|-------------|-------|
+| Phase 4 ETL dd_rules port | 4 | Go `dd_rules.json` loader; `wait_legacy_import.sh`; storage reconcile report |
+| Phase 8c pipeline graph API | 8c | Pipeline connectivity from `pipeline_graph_edges` |
+| Phase 8d-8e-8f intel stubs | 8d–8f | MCR/predictive/leads scaffolds (honest not_implemented tiers) |
+| Phase 12b-14 deferred stubs | 12b, 14 | Satellite defer doc; Trust Score scaffold API |
+| Mark shipped phases complete | — | This roadmap update (agent_reports only) |
+
+**Critical path after batches land:** `legacy_import` job completes → `go run ./cmd/legacy-parity` exit 0 → worker restart (targeted matview `71fc3701`, watch_folder `9a84ec7f`) → prod volume seed + TLS checklist.
 
 ## On-track assessment
 
@@ -203,28 +264,28 @@ flowchart LR
 
 | Phase | Status | Top gap |
 |-------|--------|---------|
-| 0 Reports + scaffold | **FIXED** | — |
-| 1 Schema + matviews | **FIXED** | Serving matviews may lag during long imports |
-| 2 Ingestion pipeline | **GAP** | Simplified path; no Splink / NormalizedRecord adapters for APIs |
-| 3 Scheduler + worker | **IN_PROGRESS** | Targeted matview refresh shipped (`71fc3701`); worker restart deferred; watch_folder broken; not full 16-step |
-| 4 Legacy ETL | **IN_PROGRESS** | Petroleum OSM ~70% under-imported (**BLOCKED** on import finish) |
-| 5 Go core + auth | **IN_PROGRESS** | Entity response shape partial; httpOnly cookie MVP |
-| 5b Entitlements | **FIXED** | Scaffold + deals gating shipped |
-| 6 Map + MVT | **FIXED** | Pipeline lines, vessel chevrons, pipeline dossier shipped (`be4a5fba`, `74eeab55`, `3610abe`, `4f61f66b`) |
-| 6b Realtime WS | **IN_PROGRESS** | Dead-reckoning shipped (`d80d3fe3`); binary MessagePack frames + 202 job queue gap |
-| 7 Energy UI | **IN_PROGRESS** | Status bar + ticker trends shipped (`3c64a846`, `28b35bda`); real VLSFO feed + Gulf disclaimer gap |
-| 8 Supplier discovery | **IN_PROGRESS** | Ranked geo+commodity queries shipped (`62015b65`); activity/risk fusion gap |
-| 8b–8f Intelligence | **GAP/PENDING** | MCR v2, pgRouting, Splink runtime not started |
-| 9 Deal verification | **FIXED** | Pack v1.1 + RBAC |
-| 9b Deal monitoring | **IN_PROGRESS** | Watch toggle + changes panel shipped (`e99d9d62`); alert engine + map-pinned living packs gap |
-| 10 Portal + admin | **IN_PROGRESS** | Dedup merge UI shipped (`099e7850`, `edcf40c1`); portal review promotion + insights dashboards gap |
-| 11 Metals vertical | **IN_PROGRESS** | Metals UI layer registry shipped (`5be9729e`); smelters/cadastre data + deal-pack parity gap |
-| 12 Data gaps | **IN_PROGRESS** | Bunker prices, Gulf AIS labeling |
-| 12c Legal | **IN_PROGRESS** | Page shipped; external sign-off **BLOCKED** |
-| 12d Security/RLS | **IN_PROGRESS** | `014` scaffold + GUC stub; role cutover **BLOCKED** |
-| 12e Notifications | **IN_PROGRESS** | Onboarding shipped (`9269409f`); email/push/feedback flywheel gap |
-| 13 Perf + deploy | **IN_PROGRESS** | Prod overlay ✅; TLS/k6/observability **BLOCKED** |
-| 14 Advanced intel | **PENDING** | Optional backlog |
+| 0 Reports + scaffold | **COMPLETE** | — |
+| 1 Schema + matviews | **COMPLETE** | Serving matviews may lag during long imports |
+| 2 Ingestion pipeline | **PARTIAL** | Batch 1: import reports, dry-run, dedup auto-enqueue; no Splink / full 16-step |
+| 3 Scheduler + worker | **PARTIAL** | Targeted matview refresh shipped (`71fc3701`); worker restart deferred; watch_folder path fix shipped (`9a84ec7f`) |
+| 4 Legacy ETL | **PARTIAL** | Petroleum OSM import in progress (~47% as of 2026-06-10); batch 2: dd_rules port + parity wait script |
+| 5 Go core + auth | **PARTIAL** | httpOnly cookie cutover shipped (`a68eb37d`); batch 1: S21 entity envelope |
+| 5b Entitlements | **COMPLETE** | Scaffold + deals gating shipped |
+| 6 Map + MVT | **COMPLETE** | Pipeline lines, vessel chevrons, pipeline dossier shipped |
+| 6b Realtime WS | **PARTIAL** | Dead-reckoning shipped (`d80d3fe3`); batch 1: MessagePack WS frames |
+| 7 Energy UI | **PARTIAL** | Status bar + ticker trends shipped; batch 1: Gulf AIS disclaimer |
+| 8 Supplier discovery | **PARTIAL** | Ranked geo+commodity queries shipped (`62015b65`); batch 1: fusion search |
+| 8b Intelligence | **PARTIAL** | Signal history + corridors; batch 1: STS 6-factor; batch 2: 8c–8f scaffolds |
+| 9 Deal verification | **COMPLETE** | Pack v1.1 + RBAC |
+| 9b Deal monitoring | **PARTIAL** | Watch UI + alert diff scaffold (`465e1f81`); batch 1: watch worker |
+| 10 Portal + admin | **PARTIAL** | Portal + dedup merge UI shipped; batch 1: data-quality dashboard |
+| 11 Metals vertical | **PARTIAL** | Layer registry shipped (`5be9729e`); batch 1: metals deal-pack parity |
+| 12 Data gaps | **PARTIAL** | Batch 1: Gulf AIS coverage labeling |
+| 12c Legal | **PARTIAL** | Legal + GDPR APIs shipped; batch 1: commercial_use_ok gate |
+| 12d Security/RLS | **PARTIAL** | `014` scaffold + GUC stub; batch 1: audit log + backup cron |
+| 12e Notifications | **PARTIAL** | Onboarding + feedback flywheel shipped; batch 1: email stub |
+| 13 Perf + deploy | **PARTIAL** | Prod overlay ✅; batch 1: observability endpoint; TLS/backup cron pending |
+| 14 Advanced intel | **PARTIAL** | Batch 2: Trust Score scaffold (optional) |
 
 ## Runtime
 
