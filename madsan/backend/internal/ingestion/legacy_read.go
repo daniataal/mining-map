@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/madsan/intelligence/internal/confidence"
 	"github.com/madsan/intelligence/internal/database"
+	"github.com/madsan/intelligence/internal/dedup"
 )
 
 const legacyBatchSize = 500
@@ -68,6 +70,7 @@ var legacyTableCatalog = []legacyTableSpec{
 }
 
 func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, payload []byte) error {
+	started := time.Now()
 	opts := parseLegacyImportOpts(payload)
 	if s.cfg.LegacyDBURL == "" {
 		return fmt.Errorf("LEGACY_DATABASE_URL not configured")
@@ -79,14 +82,17 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 	defer legacy.Close()
 
 	tables := filterLegacyTables(opts.Tables)
-	sourceID, _ := s.ensureSource(ctx, "legacy_mining_db")
+	var sourceID uuid.UUID
+	if !opts.DryRun {
+		sourceID, _ = s.ensureSource(ctx, "legacy_mining_db")
+	}
 	imported := 0
 	evidenceRows := 0
 	counts := map[string]int{}
 	var lastErr error
 
 	for _, spec := range tables {
-		n, ev, err := s.importLegacyTable(ctx, legacy, spec, sourceID, opts.MaxRows)
+		n, ev, err := s.importLegacyTable(ctx, legacy, spec, sourceID, opts.MaxRows, opts.DryRun)
 		counts[spec.Table] = n
 		imported += n
 		evidenceRows += ev
@@ -95,14 +101,25 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 		}
 	}
 
-	_ = s.refreshServingMatviews(ctx, matviewsForLegacyTableNames(tableNames(tables)))
-	report, _ := json.Marshal(map[string]any{
+	var dedupEnqueue dedup.CompanyEnqueueResult
+	if !opts.DryRun {
+		_ = s.refreshServingMatviews(ctx, matviewsForLegacyTableNames(tableNames(tables)))
+		dedupEnqueue, _ = dedup.EnqueueHighConfidenceAfterImport(ctx, s.pool, dedup.PostImportEnqueueCap)
+	}
+
+	report := buildLegacyImportReport(map[string]any{
 		"engine":          "go",
 		"imported":        imported,
 		"evidence_claims": evidenceRows,
 		"legacy_counts":   counts,
 		"tables":          tableNames(tables),
-	})
+		"dry_run":         opts.DryRun,
+		"dedup_enqueued": map[string]int{
+			"exact_name": dedupEnqueue.ExactNameEnqueued,
+			"cross_name": dedupEnqueue.CrossNameEnqueued,
+			"total":      dedupEnqueue.Total(),
+		},
+	}, started)
 	status := "completed"
 	errMsg := ""
 	if imported == 0 && lastErr != nil {
@@ -113,6 +130,13 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 		WHERE id=$1
 	`, jobID, status, report, errMsg)
 	return err
+}
+
+func buildLegacyImportReport(fields map[string]any, started time.Time) []byte {
+	fields["duration_ms"] = time.Since(started).Milliseconds()
+	fields["completed_at"] = time.Now().UTC().Format(time.RFC3339)
+	b, _ := json.Marshal(fields)
+	return b
 }
 
 func filterLegacyTables(requested []string) []legacyTableSpec {
@@ -140,7 +164,7 @@ func tableNames(specs []legacyTableSpec) []string {
 	return out
 }
 
-func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, spec legacyTableSpec, sourceID uuid.UUID, maxRows int) (imported, evidence int, err error) {
+func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, spec legacyTableSpec, sourceID uuid.UUID, maxRows int, dryRun bool) (imported, evidence int, err error) {
 	offset := 0
 	for {
 		if maxRows > 0 && imported >= maxRows {
@@ -166,6 +190,10 @@ func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, s
 			// Skip non-vessels with no operator name after normalizeName (licenses use company).
 			// Parity tiers treat this as expected_skip_empty_name; it is not under-import.
 			if rec.Name == "" && rec.EntityType != "vessel" {
+				continue
+			}
+			if dryRun {
+				imported++
 				continue
 			}
 			if sourceID != uuid.Nil {

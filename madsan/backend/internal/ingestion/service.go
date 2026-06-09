@@ -17,6 +17,7 @@ import (
 
 	"github.com/madsan/intelligence/internal/config"
 	"github.com/madsan/intelligence/internal/confidence"
+	"github.com/madsan/intelligence/internal/deals"
 )
 
 type Service struct {
@@ -65,10 +66,16 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	_, _ = s.pool.Exec(ctx, `
 		UPDATE ingestion_jobs SET status='running', started_at=now(), attempts = attempts + 1 WHERE id=$1
 	`, jobID)
+	started := time.Now()
 
 	if jobType == "legacy_import" {
 		return s.processLegacyImport(ctx, jobID, payload)
 	}
+	if jobType == "deal_watch_scan" {
+		return s.processDealWatchScan(ctx, jobID)
+	}
+
+	jobDryRun := dryRun || dryRunFromPayload(payload)
 
 	var records []NormalizedRecord
 	switch jobType {
@@ -86,8 +93,11 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 		return err
 	}
 
-	if dryRun {
-		report, _ := json.Marshal(map[string]any{"records": len(records), "dry_run": true})
+	if jobDryRun {
+		report := buildLegacyImportReport(map[string]any{
+			"records": len(records),
+			"dry_run": true,
+		}, started)
 		_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='completed', result_report=$2, finished_at=now() WHERE id=$1`, jobID, report)
 		return nil
 	}
@@ -121,9 +131,25 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 		_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET error_message=$2 WHERE id=$1`, jobID, lastErr.Error())
 	}
 	_ = s.refreshServingMatviews(ctx, servingMatviewsForJob(jobType, records))
-	report, _ := json.Marshal(map[string]any{"imported": imported, "total": len(records), "evidence_claims": evidenceRows})
+	report := buildLegacyImportReport(map[string]any{
+		"imported":        imported,
+		"total":           len(records),
+		"evidence_claims": evidenceRows,
+	}, started)
 	_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='completed', result_report=$2, finished_at=now() WHERE id=$1`, jobID, report)
 	return nil
+}
+
+func dryRunFromPayload(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var m map[string]any
+	if json.Unmarshal(payload, &m) != nil {
+		return false
+	}
+	b, ok := m["dry_run"].(bool)
+	return ok && b
 }
 
 func (s *Service) ingestWatchFolder(sourceSlug string) ([]NormalizedRecord, error) {
@@ -399,6 +425,23 @@ func (s *Service) upsertMaster(ctx context.Context, rec NormalizedRecord) (uuid.
 func (s *Service) ScanRawDir(ctx context.Context) error {
 	_, err := s.Enqueue(ctx, "watch_folder", "raw_watch", map[string]any{"dir": s.cfg.RawDataDir})
 	return err
+}
+
+func (s *Service) processDealWatchScan(ctx context.Context, jobID uuid.UUID) error {
+	dealSvc := deals.New(s.pool, s.cfg.OpenSanctionsAPIKey, s.cfg.EIAAPIKey)
+	report, err := dealSvc.ScanAllWatchSubscriptions(ctx)
+	reportJSON, _ := json.Marshal(map[string]any{
+		"subscriptions_scanned": report.Subscriptions,
+		"events_inserted":       report.EventsInserted,
+		"skipped_no_snapshot":   report.Skipped,
+		"errors":                report.Errors,
+	})
+	if err != nil {
+		_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='failed', error_message=$2, result_report=$3, finished_at=now() WHERE id=$1`, jobID, err.Error(), reportJSON)
+		return err
+	}
+	_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='completed', result_report=$2, finished_at=now() WHERE id=$1`, jobID, reportJSON)
+	return nil
 }
 
 func normalizeName(s string) string {

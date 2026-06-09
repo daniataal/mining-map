@@ -58,6 +58,7 @@ func (s *Service) processLegacyImport(ctx context.Context, jobID uuid.UUID, payl
 	if !opts.UsePython && !s.cfg.LegacyImportPython {
 		return s.processLegacyImportGo(ctx, jobID, payload)
 	}
+	started := time.Now()
 	if s.cfg.LegacyDBURL == "" {
 		return fmt.Errorf("LEGACY_DATABASE_URL not configured")
 	}
@@ -78,7 +79,8 @@ func (s *Service) processLegacyImport(ctx context.Context, jobID uuid.UUID, payl
 	if report["child_jobs_enqueued"].(int) < 0 {
 		report["child_jobs_enqueued"] = 0
 	}
-	b, _ := json.Marshal(report)
+	report["dry_run"] = opts.DryRun
+	b := buildLegacyImportReport(report, started)
 	_, _ = s.pool.Exec(ctx, `UPDATE ingestion_jobs SET status='completed', result_report=$2, finished_at=now() WHERE id=$1`, jobID, b)
 	return nil
 }
