@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # Pre-download Go modules. Rebuild and push when go.mod/go.sum change (workflow build-base).
 FROM golang:1.24-alpine
+ENV GOTOOLCHAIN=auto
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 COPY go.mod go.sum ./
