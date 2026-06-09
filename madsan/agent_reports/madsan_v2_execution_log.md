@@ -32,8 +32,16 @@
 | 10b Compose cutover (dev) | done | `compose_up.sh`; legacy AIS via host.docker.internal; Caddy profile |
 | 10c Review queue merge resolve | done | `POST /api/admin/review-queue/{id}/resolve`; admin merge/dismiss UI |
 | 10e EIA open-data ticker | done | EIA v2 WTI/Brent daily spot; 20m cache; tier badge in terminal |
+| 4d Splink prep export | done | pairwise CSV from SQL duplicate clusters; admin + CLI |
 | Data seed | done | 209 bunker suppliers + legacy ETL (5282 cos, 9595 vessels, 75955 assets) |
 | Legacy ETL | done | mining-db via :5434 bridge; petroleum/licenses/vessels/companies |
+
+## 2026-06-09 Phase 4d — Splink prep company pair export
+
+- `GET /api/admin/dedup/companies/pairs.csv?limit=200`: Splink-ready pairwise CSV from SQL duplicate clusters
+- Columns: `unique_id_l/r`, names, countries, confidence, `normalized_name`, `sql_match_score`
+- `cmd/export-company-pairs`: batch export via `MADSAN_DEDUP_CLUSTER_LIMIT`, `MADSAN_DEDUP_OUTPUT`
+- Admin dedup section: **Export pairs CSV (Splink)** download link; no Python Splink install required
 
 ## 2026-06-09 Phase 10e — EIA open-data ticker
 
@@ -119,6 +127,13 @@
 - Metals MVT tiles query live `assets` (mines/smelters)
 - `/api/metals/licenses/summary` with country breakdown
 - Metals mode shows mine/country counts in panel header
+
+## 2026-06-09 — metals vertical petroleum leak fix
+
+- Root cause: metals MVT/summary/search included `processing_plant`/`refinery`/`port`, so misclassified `legacy_petroleum_osm_features` rows (e.g. Shaybah Oil Field) appeared in metals mode.
+- Query filters in `internal/assets/filters.go` exclude petroleum OSM + petroleum commodities from metals tiles/search; summary scoped to `legacy_licenses` only.
+- Frontend resets layer state on vertical switch; energy layers + live AIS WS disabled in metals mode.
+- Optional data cleanup: re-run Go `legacy_import` for `petroleum_osm_features` to rewrite `asset_type` to energy types (`terminal`, `tank_farm`, etc.) — not required for correct UI after query filters.
 
 ## 2026-06-09 Phase 7b — map dossier panel
 

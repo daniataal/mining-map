@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, LAYER_REGISTRY } from "@/lib/layers";
+import { API_BASE, LAYER_REGISTRY, defaultLayerState, layersForVertical } from "@/lib/layers";
 import type { MapSelection } from "./EntityDossierPanel";
 
 type VesselMsg = {
@@ -54,9 +54,11 @@ function entityTypeForLayer(layerId: string): string {
 export default function IntelligenceMap({ vertical, onSelect, mapFocus, relationshipLines }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const [layers, setLayers] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(LAYER_REGISTRY.map((l) => [l.id, l.defaultOn && (l.vertical === vertical || l.vertical === "shared")]))
-  );
+  const [layers, setLayers] = useState<Record<string, boolean>>(() => defaultLayerState(vertical));
+
+  useEffect(() => {
+    setLayers(defaultLayerState(vertical));
+  }, [vertical]);
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
@@ -88,7 +90,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     const setupMap = () => {
       if (cancelled) return;
 
-      LAYER_REGISTRY.filter((l) => l.tileLayer).forEach((layer) => {
+      layersForVertical(vertical).filter((l) => l.tileLayer).forEach((layer) => {
         const src = `src-${layer.id}`;
         map.addSource(src, {
           type: "vector",
@@ -114,7 +116,10 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
 
       map.on("click", (e) => {
         const feats = map.queryRenderedFeatures(e.point);
-        const hit = feats.find((f) => LAYER_REGISTRY.some((l) => l.id === f.layer.id) || f.layer.id === "live-vessels");
+        const activeIds = new Set(layersForVertical(vertical).map((l) => l.id));
+        const hit = feats.find(
+          (f) => activeIds.has(f.layer.id) || (vertical === "energy" && f.layer.id === "live-vessels")
+        );
         if (!hit) {
           onSelect(null);
           return;
@@ -146,69 +151,71 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
         },
       });
 
-      map.addLayer({
-        id: "live-vessels",
-        type: "circle",
-        source: "live-vessels",
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 10],
-          "circle-color": "#7ec8ff",
-          "circle-opacity": 0.95,
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": "#ffffff",
-        },
-        layout: { visibility: layers.vessels ? "visible" : "none" },
-      });
+      if (vertical === "energy") {
+        map.addLayer({
+          id: "live-vessels",
+          type: "circle",
+          source: "live-vessels",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 10],
+            "circle-color": "#7ec8ff",
+            "circle-opacity": 0.95,
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": "#ffffff",
+          },
+          layout: { visibility: layers.vessels ? "visible" : "none" },
+        });
 
-      const liveByMMSI = new Map<string, Feature<Point>>();
-      const applyLive = () => {
-        const src = map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
-        if (src) src.setData({ type: "FeatureCollection", features: [...liveByMMSI.values()] });
-      };
+        const liveByMMSI = new Map<string, Feature<Point>>();
+        const applyLive = () => {
+          const src = map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
+          if (src) src.setData({ type: "FeatureCollection", features: [...liveByMMSI.values()] });
+        };
 
-      const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
-      try {
-        ws = new WebSocket(wsUrl);
-        ws.onmessage = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data as string) as {
-              type?: string;
-              vessels?: VesselMsg[];
-              data?: VesselMsg;
-              entity?: string;
-            };
-            if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
-              liveByMMSI.clear();
-              for (const v of msg.vessels) {
-                const f = vesselFeatures([v]).features[0] as Feature<Point>;
-                liveByMMSI.set(v.mmsi, f);
+        const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
+        try {
+          ws = new WebSocket(wsUrl);
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data as string) as {
+                type?: string;
+                vessels?: VesselMsg[];
+                data?: VesselMsg;
+                entity?: string;
+              };
+              if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
+                liveByMMSI.clear();
+                for (const v of msg.vessels) {
+                  const f = vesselFeatures([v]).features[0] as Feature<Point>;
+                  liveByMMSI.set(v.mmsi, f);
+                }
+                applyLive();
+              } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
+                const f = vesselFeatures([msg.data]).features[0] as Feature<Point>;
+                liveByMMSI.set(msg.data.mmsi, f);
+                applyLive();
               }
-              applyLive();
-            } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
-              const f = vesselFeatures([msg.data]).features[0] as Feature<Point>;
-              liveByMMSI.set(msg.data.mmsi, f);
-              applyLive();
+            } catch {
+              /* ignore malformed ws payloads */
             }
-          } catch {
-            /* ignore malformed ws payloads */
-          }
-        };
-        ws.onopen = () => {
-          const sendSub = () => {
-            if (ws?.readyState !== WebSocket.OPEN) return;
-            const b = map.getBounds();
-            ws.send(JSON.stringify({
-              bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
-              zoom: map.getZoom(),
-              layers: Object.keys(layers).filter((k) => layers[k]),
-            }));
           };
-          moveEndHandler = sendSub;
-          map.on("moveend", sendSub);
-          sendSub();
-        };
-      } catch {
-        /* WS optional in dev */
+          ws.onopen = () => {
+            const sendSub = () => {
+              if (ws?.readyState !== WebSocket.OPEN) return;
+              const b = map.getBounds();
+              ws.send(JSON.stringify({
+                bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+                zoom: map.getZoom(),
+                layers: Object.keys(layers).filter((k) => layers[k]),
+              }));
+            };
+            moveEndHandler = sendSub;
+            map.on("moveend", sendSub);
+            sendSub();
+          };
+        } catch {
+          /* WS optional in dev */
+        }
       }
     };
 
@@ -245,21 +252,21 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    LAYER_REGISTRY.forEach((l) => {
+    layersForVertical(vertical).forEach((l) => {
       if (map.getLayer(l.id)) {
         map.setLayoutProperty(l.id, "visibility", layers[l.id] ? "visible" : "none");
       }
     });
-    if (map.getLayer("live-vessels")) {
+    if (vertical === "energy" && map.getLayer("live-vessels")) {
       map.setLayoutProperty("live-vessels", "visibility", layers.vessels ? "visible" : "none");
     }
-  }, [layers]);
+  }, [layers, vertical]);
 
   return (
     <div className="map-wrap">
       <div className="layer-drawer">
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>LAYERS</div>
-        {LAYER_REGISTRY.filter((l) => l.vertical === vertical || l.vertical === "shared").map((l) => (
+        {layersForVertical(vertical).map((l) => (
           <label key={l.id}>
             <input
               type="checkbox"

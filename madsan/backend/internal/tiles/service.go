@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/madsan/intelligence/internal/assets"
 )
 
 type Service struct {
@@ -61,7 +63,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 					id::text, name, asset_type, country_code, confidence_score
 				FROM assets
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND geom IS NOT NULL
-				  AND asset_type IN ('mine','smelter','refinery','processing_plant','port')
+				  AND (` + assets.MetalsMapWhereSQL + `)
 				  AND ` + tileFilter + `
 			) mvt`
 	case "energy-assets":

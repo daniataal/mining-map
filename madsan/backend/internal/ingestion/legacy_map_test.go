@@ -9,6 +9,21 @@ func TestVesselMMSI(t *testing.T) {
 	}
 }
 
+func TestLayerToAssetTypePetroleum(t *testing.T) {
+	cases := map[string]string{
+		"storage_terminals": "tank_farm",
+		"refineries":        "refinery",
+		"pipelines":         "pipeline",
+		"oilfields":         "terminal",
+		"unknown_layer":     "terminal",
+	}
+	for layer, want := range cases {
+		if got := layerToAssetType(layer); got != want {
+			t.Fatalf("%s: got %q want %q", layer, got, want)
+		}
+	}
+}
+
 func TestMapLegacyRecordVessel(t *testing.T) {
 	m := map[string]any{
 		"entity_type": "vessel",

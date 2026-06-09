@@ -98,6 +98,8 @@ func layerToAssetType(layer string) string {
 		return "refinery"
 	case "pipelines":
 		return "pipeline"
+	case "oilfields", "oil_fields", "petroleum_wells", "wells":
+		return "terminal"
 	default:
 		return "terminal"
 	}

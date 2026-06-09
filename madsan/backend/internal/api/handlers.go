@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/madsan/intelligence/internal/assets"
 	"github.com/madsan/intelligence/internal/deals"
 )
 
@@ -299,19 +300,24 @@ func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
 func (s *Server) metalsLicenseSummary(w http.ResponseWriter, r *http.Request) {
 	var mines, plants, countries int
 	_ = s.pool.QueryRow(r.Context(), `
-		SELECT COUNT(*)::int FROM assets WHERE asset_type = 'mine'
+		SELECT COUNT(*)::int FROM assets
+		WHERE `+assets.MetalsLicenseWhereSQL+` AND asset_type = 'mine'
 	`).Scan(&mines)
 	_ = s.pool.QueryRow(r.Context(), `
-		SELECT COUNT(*)::int FROM assets WHERE asset_type IN ('processing_plant','smelter')
+		SELECT COUNT(*)::int FROM assets
+		WHERE `+assets.MetalsLicenseWhereSQL+` AND asset_type IN ('processing_plant','smelter')
 	`).Scan(&plants)
 	_ = s.pool.QueryRow(r.Context(), `
 		SELECT COUNT(DISTINCT country_code)::int FROM assets
-		WHERE asset_type IN ('mine','processing_plant','smelter') AND country_code IS NOT NULL
+		WHERE `+assets.MetalsLicenseWhereSQL+`
+		  AND asset_type IN ('mine','processing_plant','smelter')
+		  AND country_code IS NOT NULL
 	`).Scan(&countries)
 
 	rows, _ := s.pool.Query(r.Context(), `
 		SELECT COALESCE(country_code,'—') AS country, COUNT(*)::int AS mines
-		FROM assets WHERE asset_type = 'mine'
+		FROM assets
+		WHERE `+assets.MetalsLicenseWhereSQL+` AND asset_type = 'mine'
 		GROUP BY country_code ORDER BY mines DESC LIMIT 12
 	`)
 	var top []map[string]any

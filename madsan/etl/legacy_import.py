@@ -30,6 +30,10 @@ LAYER_ASSET_TYPE = {
     "storage_terminals": "tank_farm",
     "refineries": "refinery",
     "pipelines": "pipeline",
+    "oilfields": "terminal",
+    "oil_fields": "terminal",
+    "petroleum_wells": "terminal",
+    "wells": "terminal",
 }
 
 QUERIES: dict[str, str] = {

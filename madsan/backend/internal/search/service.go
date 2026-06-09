@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/madsan/intelligence/internal/assets"
 )
 
 type Service struct {
@@ -48,7 +50,7 @@ func (s *Service) Handle(w http.ResponseWriter, r *http.Request) {
 	if types["asset"] {
 		out = append(out, s.searchAssets(r, q, vertical, limit)...)
 	}
-	if types["vessel"] {
+	if types["vessel"] && vertical != "metals" {
 		out = append(out, s.searchVessels(r, q, limit)...)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -121,19 +123,33 @@ func collectCompanyRows(rows interface {
 }
 
 func (s *Service) searchAssets(r *http.Request, q, vertical string, limit int) []Result {
-	typeFilter := energyAssetTypes()
-	if vertical == "metals" {
-		typeFilter = metalsAssetTypes()
+	var rows interface {
+		Close()
+		Next() bool
+		Scan(dest ...any) error
 	}
-	rows, err := s.pool.Query(r.Context(), `
-		SELECT DISTINCT ON (normalized_name, asset_type) id, name, COALESCE(country_code,''), asset_type, confidence_score, latitude, longitude
-		FROM assets
-		WHERE (name ILIKE '%' || $1 || '%' OR normalized_name ILIKE '%' || lower($1) || '%')
-		  AND asset_type = ANY($2)
-		  AND latitude IS NOT NULL
-		ORDER BY normalized_name, asset_type, confidence_score DESC NULLS LAST
-		LIMIT $3
-	`, q, typeFilter, limit)
+	var err error
+	if vertical == "metals" {
+		rows, err = s.pool.Query(r.Context(), `
+			SELECT DISTINCT ON (normalized_name, asset_type) id, name, COALESCE(country_code,''), asset_type, confidence_score, latitude, longitude
+			FROM assets
+			WHERE (name ILIKE '%' || $1 || '%' OR normalized_name ILIKE '%' || lower($1) || '%')
+			  AND (`+assets.MetalsMapWhereSQL+`)
+			  AND latitude IS NOT NULL
+			ORDER BY normalized_name, asset_type, confidence_score DESC NULLS LAST
+			LIMIT $2
+		`, q, limit)
+	} else {
+		rows, err = s.pool.Query(r.Context(), `
+			SELECT DISTINCT ON (normalized_name, asset_type) id, name, COALESCE(country_code,''), asset_type, confidence_score, latitude, longitude
+			FROM assets
+			WHERE (name ILIKE '%' || $1 || '%' OR normalized_name ILIKE '%' || lower($1) || '%')
+			  AND asset_type = ANY($2)
+			  AND latitude IS NOT NULL
+			ORDER BY normalized_name, asset_type, confidence_score DESC NULLS LAST
+			LIMIT $3
+		`, q, energyAssetTypes(), limit)
+	}
 	if err != nil {
 		return nil
 	}
@@ -191,10 +207,6 @@ func (s *Service) searchVessels(r *http.Request, q string, limit int) []Result {
 
 func energyAssetTypes() []string {
 	return []string{"tank_farm", "terminal", "refinery", "pipeline", "port", "sts_zone", "storage", "berth"}
-}
-
-func metalsAssetTypes() []string {
-	return []string{"mine", "smelter", "refinery", "processing_plant", "port"}
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
