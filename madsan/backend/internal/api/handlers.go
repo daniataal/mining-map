@@ -127,23 +127,27 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	var name, assetType, country, status string
 	var lat, lng, conf float64
+	var rawPayload []byte
+	var geomType string
+	var commodities []string
 	err = s.pool.QueryRow(r.Context(), `
-		SELECT name, asset_type, COALESCE(country_code,''), latitude, longitude, confidence_score, data_quality_status
+		SELECT name, asset_type, COALESCE(country_code,''), latitude, longitude, confidence_score, data_quality_status,
+		       raw_source_payload, COALESCE(ST_GeometryType(geom::geometry), ''), commodities_supported
 		FROM assets WHERE id = $1
-	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status)
+	`, id).Scan(&name, &assetType, &country, &lat, &lng, &conf, &status, &rawPayload, &geomType, &commodities)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	evidence, _ := loadEvidence(r.Context(), s.pool, "asset", uid)
-	var commodities []string
-	_ = s.pool.QueryRow(r.Context(), `SELECT commodities_supported FROM assets WHERE id = $1`, uid).Scan(&commodities)
+	summary := map[string]any{"asset_type": assetType, "country": country}
+	enrichAssetSummary(summary, assetType, commodities, rawPayload, geomType)
 	resp := CoreEntityResponse{
 		ID: id, EntityType: "asset", Name: name,
-		Summary: map[string]any{"asset_type": assetType, "country": country},
-		Location: map[string]any{"latitude": lat, "longitude": lng},
-		Confidence: ConfidenceBlock{Score: conf, Status: status},
-		Evidence: evidence,
+		Summary:     summary,
+		Location:    map[string]any{"latitude": lat, "longitude": lng},
+		Confidence:  ConfidenceBlock{Score: conf, Status: status},
+		Evidence:    evidence,
 		Limitations: []string{"Verify against source evidence before deal execution"},
 	}
 	attachAssetSignals(&resp, assetType, commodities)
@@ -174,10 +178,10 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	loc := companyCentroid(r.Context(), s.pool, uid)
 	resp := CoreEntityResponse{
 		ID: id, EntityType: "company", Name: name,
-		Summary: map[string]any{"country": country, "commodities": commodities},
-		Location: loc,
-		Confidence: ConfidenceBlock{Score: conf, Status: status},
-		Evidence: evidence,
+		Summary:     map[string]any{"country": country, "commodities": commodities},
+		Location:    loc,
+		Confidence:  ConfidenceBlock{Score: conf, Status: status},
+		Evidence:    evidence,
 		Limitations: []string{"Supplier intelligence — verify register tier and contact channels independently"},
 	}
 	attachCompanySignals(&resp, commodities)
@@ -345,7 +349,7 @@ func (s *Server) metalsLicenseSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"mines": mines, "processing_plants": plants, "countries": countries,
 		"top_countries": top,
-		"source": "madsan_db.assets (legacy licenses ETL)",
+		"source":        "madsan_db.assets (legacy licenses ETL)",
 	})
 }
 
