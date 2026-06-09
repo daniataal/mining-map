@@ -1,6 +1,8 @@
 import { LucidePanelRightClose, LucideSparkles } from 'lucide-react';
 import type { MiningLicense } from '../../types';
 import { useI18n } from '../../lib/i18n';
+import type { NearbySupplier } from '../../lib/nearbySuppliers';
+import BunkerSupplierDetailCard from '../../components/popup/BunkerSupplierDetailCard';
 import { CountryIntelligencePanel } from './CountryIntelligencePanel';
 import { CountrySanctionsSection } from './CountrySanctionsSection';
 
@@ -8,6 +10,7 @@ export type IntelligenceSelection =
   | { type: 'country'; country: string }
   | { type: 'cluster'; label: string; count: number }
   | { type: 'license'; item: MiningLicense }
+  | { type: 'bunker_supplier'; supplier: NearbySupplier }
   | { type: 'workspace_entity'; entityId: string; displayName: string }
   | null;
 
@@ -112,6 +115,10 @@ export function IntelligenceRail({
                 {t('פתח תיק מלא לפרטי DD', 'Open full dossier for DD detail')}
               </p>
             </div>
+          )}
+
+          {selection?.type === 'bunker_supplier' && (
+            <BunkerSupplierDetailCard supplier={selection.supplier} />
           )}
 
           {selection?.type === 'workspace_entity' && (

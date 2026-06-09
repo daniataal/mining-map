@@ -38,6 +38,20 @@ func TestShapeNearbyRow(t *testing.T) {
 	}
 }
 
+func TestShapeNearbyRowPhoneEmail(t *testing.T) {
+	row := shapeNearbyRow("id", "Bunker B Pte Ltd", "Singapore", "bunker_supplier", nil, 0.88, nil, map[string]any{
+		"phone":            "+65 6509 1811",
+		"email":            "kevin.ng@bunkerb.com.sg",
+		"register_address": "8 Ubi Road 2 #08-24 Zervex, Singapore 408538",
+	})
+	if row.Phone != "+65 6509 1811" {
+		t.Fatalf("phone: %q", row.Phone)
+	}
+	if row.Email != "kevin.ng@bunkerb.com.sg" {
+		t.Fatalf("email: %q", row.Email)
+	}
+}
+
 func TestShapeNearbyRowRegisterSourceFallback(t *testing.T) {
 	row := shapeNearbyRow("id", "Test", "UAE", "bunker_supplier", nil, 0.8, nil, map[string]any{
 		"register_source_url": "https://fujairahport.ae/bunker",

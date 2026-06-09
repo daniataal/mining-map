@@ -46,12 +46,25 @@ export function featureKeyFromSelection(
   return null;
 }
 
+const POPUP_FETCH_MS = 4000;
+
+function popupFetchSignal(parent?: AbortSignal): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') {
+    return parent
+      ? AbortSignal.any([parent, AbortSignal.timeout(POPUP_FETCH_MS)])
+      : AbortSignal.timeout(POPUP_FETCH_MS);
+  }
+  return parent ?? new AbortController().signal;
+}
+
 export async function fetchMapFeaturePopup(
   featureKey: string,
   signal?: AbortSignal,
 ): Promise<MapFeaturePopupPayload | null> {
   const key = encodeURIComponent(featureKey);
-  const res = await fetch(`${oilLiveBase()}/api/oil-live/map/features/${key}/popup`, { signal });
+  const res = await fetch(`${oilLiveBase()}/api/oil-live/map/features/${key}/popup`, {
+    signal: popupFetchSignal(signal),
+  });
   if (res.status === 404) return null;
   if (!res.ok) return null;
   return (await res.json()) as MapFeaturePopupPayload;
@@ -71,7 +84,7 @@ export async function fetchMapFeaturePopupAt(
   });
   if (featureKey) params.set('feature_key', featureKey);
   const res = await fetch(`${oilLiveBase()}/api/oil-live/map/features/popup-at?${params}`, {
-    signal,
+    signal: popupFetchSignal(signal),
   });
   if (res.status === 404) return null;
   if (!res.ok) return null;

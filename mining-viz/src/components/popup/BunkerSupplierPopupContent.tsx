@@ -1,7 +1,7 @@
-import { ExternalLink } from 'lucide-react';
 import { useI18n } from '../../lib/i18n';
 import type { NearbySupplier } from '../../lib/nearbySuppliers';
 import PetroleumMapPopup from './PetroleumMapPopup';
+import BunkerSupplierDetailCard from './BunkerSupplierDetailCard';
 
 type Props = {
   supplier: NearbySupplier;
@@ -61,37 +61,16 @@ export default function BunkerSupplierPopupContent({
   return (
     <PetroleumMapPopup
       title={supplier.name}
-      subtitle={supplier.port_locode ? `${supplier.port_locode}${supplier.country ? ` · ${supplier.country}` : ''}` : supplier.country}
+      subtitle={
+        supplier.port_locode
+          ? `${supplier.port_locode}${supplier.country ? ` · ${supplier.country}` : ''}`
+          : supplier.country
+      }
       badges={badges}
       actions={actions}
       coverageFooter={coverageFooter || null}
     >
-      <div className="space-y-1 text-[11px] text-slate-300">
-        {supplier.fuels_supplied && (
-          <p>
-            <span className="text-slate-500">{t('דלקים', 'Fuels')}: </span>
-            {supplier.fuels_supplied}
-          </p>
-        )}
-        {supplier.contact_person && (
-          <p>
-            <span className="text-slate-500">{t('איש קשר', 'Contact')}: </span>
-            {supplier.contact_person}
-          </p>
-        )}
-        {supplier.address && <p className="leading-snug">{supplier.address}</p>}
-        {supplier.source_url && (
-          <a
-            href={supplier.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-0.5 text-cyan-400 hover:text-cyan-300"
-          >
-            <ExternalLink className="h-3 w-3" />
-            {t('מקור', 'Source')}
-          </a>
-        )}
-      </div>
+      <BunkerSupplierDetailCard supplier={supplier} compact />
     </PetroleumMapPopup>
   );
 }
