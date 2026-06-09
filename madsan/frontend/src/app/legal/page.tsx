@@ -77,16 +77,21 @@ export default function LegalPage() {
         limits, erasure on request, and no sale of personal data. Tenant-scoped data isolation is in
         progress — do not treat the platform as multi-tenant production-hardened until RLS cutover is complete.
       </p>
+      <p style={{ fontSize: 14 }}>
+        See the <Link href="/legal/privacy">privacy page</Link> for data categories and{" "}
+        <Link href="/legal/privacy#gdpr">GDPR rights</Link> (access, erasure, portability).
+      </p>
 
       <h2>Corrections &amp; disputes</h2>
       <p>
-        If entity data, map geometry, or a risk flag is wrong, submit a correction for operator review:
+        If entity data, map geometry, or a review-tier flag is wrong, submit a correction for operator review.
+        Disputes cite evidence — they are not findings of fraud or illegality.
       </p>
-      <ol style={{ fontSize: 14, paddingLeft: "1.25rem" }}>
-        <li>Sign in and open the <Link href="/admin">Admin</Link> review queue.</li>
-        <li>Include entity name or ID, what is incorrect, and a source link or document if available.</li>
-        <li>For deal-pack disputes, reference the deal ID and the specific field in question.</li>
-      </ol>
+      <p style={{ fontSize: 14 }}>
+        Use the <Link href="/legal/dispute">corrections &amp; disputes form</Link> or sign in and open the{" "}
+        <Link href="/admin">Admin</Link> review queue. For deal-pack disputes, reference the deal ID and the
+        specific field in question.
+      </p>
       <p>
         Corrections are triaged manually; turnaround depends on operator capacity. We do not guarantee
         immediate removal or amendment of third-party open-data records.
@@ -107,6 +112,23 @@ export default function LegalPage() {
       <p className="disclaimer" style={{ borderTop: 0, paddingTop: 0, marginTop: "0.5rem" }}>
         Last updated: June 2026 · MadSan Intelligence V2 greenfield
       </p>
+
+      <nav
+        style={{
+          marginTop: "1.5rem",
+          paddingTop: "1rem",
+          borderTop: "1px solid var(--border)",
+          fontSize: 12,
+          display: "flex",
+          gap: "1.25rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <Link href="/legal/dispute">Corrections &amp; disputes</Link>
+        <Link href="/legal/privacy">Privacy</Link>
+        <Link href="/legal/privacy#gdpr">GDPR rights</Link>
+        <Link href="/">Terminal</Link>
+      </nav>
     </main>
   );
 }
