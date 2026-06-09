@@ -45,7 +45,7 @@ Status key: **done** · **partial** · **blocked**
 - [x] **done** — `scripts/restore_madsan_db.sh`: dry-run by default; drill target `madsan_db_restore_test`; prod `madsan_db` requires `FORCE=1`
 - [~] **partial** — Cron example: `scripts/backup_cron.example` (daily `backup_db.sh`); **not installed** on prod VM yet
 - [~] **partial** — `deploy/rollback.md` (stop V2, restore from `backups/`; never `down -v`)
-- [~] **partial** — Restore drill script ready; **recorded drill run pending** (see verify steps below)
+- [x] **done** — Restore drill executed on dev (2026-06-09); see drill log below
 
 ### DR verify steps (restore drill)
 
@@ -62,6 +62,8 @@ Status key: **done** · **partial** · **blocked**
    `DRY_RUN=0 FORCE=1 TARGET_DB=madsan_db ./madsan/scripts/restore_madsan_db.sh <dump>`  
    — overwrites production; log timestamp + operator in runbook.
 7. **Record:** note dump file, restore duration, row-count parity, and date in this checklist or ops log (closes RTO/RPO item).
+
+**Drill log (2026-06-09):** Executed `DRY_RUN=0 ./madsan/scripts/restore_madsan_db.sh` against `backups/madsan_v2_pre_20260609_221939.dump` (79 MB) → `madsan_db_restore_test` in ~17 s; `pg_restore` completed with no fatal errors. Spot-check vs live `madsan_db`: `companies` 37,190 (restore) vs 48,668 (live), `assets` 94,564 vs 124,888, `deals` 1/1, `documents` 0/0 — drift expected because live DB continued ingesting after the 22:19 backup; restore faithfully reproduced backup snapshot. RTO drill target met on dev; RPO bounded by backup cadence (cron not yet on prod VM).
 
 ### Backup cron (prod VM)
 
