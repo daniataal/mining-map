@@ -10,15 +10,13 @@ import (
 //go:embed data/dd_rules.json
 var rulesFS embed.FS
 
-// Rules mirrors backend/data/dd_rules.json — single source for deal verification DD checks.
 type Rules struct {
-	Version             string                   `json:"_version"`
-	SanctionedCountries []string                 `json:"sanctioned_countries"`
-	HighRiskCountries   []string                 `json:"high_risk_countries"`
-	EmbargoedCorridors  []EmbargoCorridor        `json:"embargoed_corridors"`
-	CommodityRules      map[string]CommodityRule `json:"commodity_rules"`
-	KYCThresholds       map[string]float64       `json:"kyc_thresholds"`
-	Scoring             ScoringRules             `json:"scoring"`
+	SanctionedCountries []string           `json:"sanctioned_countries"`
+	HighRiskCountries   []string           `json:"high_risk_countries"`
+	EmbargoedCorridors  []EmbargoCorridor  `json:"embargoed_corridors"`
+	CommodityRules      map[string]any     `json:"commodity_rules"`
+	KYCThresholds       map[string]float64 `json:"kyc_thresholds"`
+	Scoring             ScoringRules       `json:"scoring"`
 }
 
 type EmbargoCorridor struct {
@@ -27,16 +25,6 @@ type EmbargoCorridor struct {
 	BuyerCountry    string   `json:"buyer_country"`
 	Products        []string `json:"products"`
 	Reason          string   `json:"reason"`
-}
-
-type CommodityRule struct {
-	ConflictMinerals                 []string `json:"conflict_minerals"`
-	ConflictMineralHighRiskCountries []string `json:"conflict_mineral_high_risk_countries"`
-	CertificationsAdvisory           []string `json:"certifications_advisory"`
-	RequiredLicenseStatuses          []string `json:"required_license_statuses"`
-	OffshoreExtraCheck               bool     `json:"offshore_extra_check"`
-	PipelineCheck                    bool     `json:"pipeline_check"`
-	Note                             string   `json:"note"`
 }
 
 type ScoringRules struct {
@@ -52,7 +40,6 @@ var (
 	rulesErr  error
 )
 
-// LoadRules reads the embedded dd_rules.json once (parity with Python _load_rules).
 func LoadRules() (Rules, error) {
 	rulesOnce.Do(func() {
 		b, err := rulesFS.ReadFile("data/dd_rules.json")
@@ -63,17 +50,6 @@ func LoadRules() (Rules, error) {
 		rulesErr = json.Unmarshal(b, &rules)
 	})
 	return rules, rulesErr
-}
-
-// CommodityRuleForFamily returns typed commodity rules for a product family key.
-func CommodityRuleForFamily(rules Rules, family string) CommodityRule {
-	if rules.CommodityRules == nil {
-		return CommodityRule{}
-	}
-	if r, ok := rules.CommodityRules[family]; ok {
-		return r
-	}
-	return CommodityRule{}
 }
 
 func normCountry(s string) string {
@@ -109,22 +85,11 @@ func corridorMatches(country, pattern string) bool {
 	return normCountry(country) == normCountry(pattern)
 }
 
-func isConflictMineral(commodity string, minerals []string) bool {
-	c := strings.TrimSpace(strings.ToLower(commodity))
-	for _, m := range minerals {
-		if strings.TrimSpace(strings.ToLower(m)) == c {
-			return true
-		}
-	}
-	return false
-}
-
 // CommodityFamily maps deal commodities to dd_rules product families.
 func CommodityFamily(commodity string) string {
 	c := strings.ToLower(strings.TrimSpace(commodity))
 	switch {
-	case strings.Contains(c, "gold"), strings.Contains(c, "copper"), strings.Contains(c, "mine"),
-		strings.Contains(c, "coltan"), strings.Contains(c, "cobalt"), strings.Contains(c, "diamond"):
+	case strings.Contains(c, "gold"), strings.Contains(c, "copper"), strings.Contains(c, "mine"):
 		return "mining"
 	case strings.Contains(c, "gas"), strings.Contains(c, "lng"):
 		return "gas"

@@ -126,6 +126,9 @@ func (s *Server) Router() http.Handler {
 		api.Get("/vessels/{id}", s.getVessel)
 		api.Get("/suppliers/search", s.supplierSearch)
 		api.Get("/pipelines/{id}/connectivity", s.getPipelineConnectivity)
+		api.Get("/mcr/scaffold/status", s.mcrScaffoldStatus)
+		api.Get("/predictive/status", s.predictiveStatus)
+		api.Get("/leads/unknown-suppliers", s.unknownSupplierLeads)
 	})
 
 	r.Route("/api/metals", func(api chi.Router) {
