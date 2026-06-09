@@ -69,17 +69,35 @@ Status key: **done** · **partial** · **blocked**
 
 ### Backup cron (prod VM)
 
-1. Copy/adapt `scripts/backup_cron.example` — set `REPO_ROOT` (e.g. `/opt/mining-map`).
-2. `crontab -e` — paste the daily line (`30 2 * * * … backup_db.sh >> backups/backup_cron.log`).
-3. Confirm `madsan-db` is up before first scheduled run; check `backups/backup_cron.log` and latest `madsan_v2_pre_*.dump`.
+1. Verify manually from repo root (replace path):
+
+```bash
+cd /opt/mining-map && ./madsan/scripts/backup_db.sh
+ls -lh backups/madsan_v2_pre_*.dump
+```
+
+2. `crontab -e` — paste (adjust `REPO_ROOT`; see also `scripts/backup_cron.example`):
+
+```cron
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Daily 02:30 local — madsan_db via compose madsan-db
+30 2 * * * cd /opt/mining-map && ./madsan/scripts/backup_db.sh >> backups/backup_cron.log 2>&1
+```
+
+3. Prerequisites: cron user can run `docker` + `docker compose`; `madsan-db` up before first run.
+4. After first scheduled run: check `backups/backup_cron.log` and newest `madsan_v2_pre_*.dump`.
+5. Optional retention (example — 14 days):  
+   `find /opt/mining-map/backups -name 'madsan_v2_pre_*.dump' -mtime +14 -delete`
 
 ---
 
 ## 4. k6 load / smoke
 
-- [~] **partial** — `scripts/k6_smoke.js`: health + MVT tile; p95 &lt; 2s (see §5 prod gate)
-- [ ] **blocked** — Not wired in CI or documented prod gate
-- [ ] **blocked** — Default `BASE` hits API `:8088` direct — prod gate must run through Caddy `:80` with realistic VU count
+- [x] **done** — `scripts/k6_smoke.js`: health + MVT tile; p95 &lt; 2s; header documents prod gate via Caddy `:80`
+- [~] **partial** — Prod command documented; not wired in CI yet
+- [ ] **blocked** — Default `BASE` is dev (`localhost:8088`) — prod gate **must** set `MADSAN_API_URL=http://<vm>:80`
 - [ ] **blocked** — No baseline run logged against prod overlay stack
 
 ---
@@ -87,20 +105,39 @@ Status key: **done** · **partial** · **blocked**
 ## 5. Prod compose & volume seed
 
 - [x] **done** — `docker-compose.prod.yml`: ARM64, memory limits, healthchecks, internal DB/API/frontend, Caddy `:80`, named volumes
-- [~] **partial** — Seed commands documented for `madsan_raw_data` / `madsan_etl_data` (roadmap + compose plan)
-- [ ] **blocked** — Named volumes **start empty** on first prod deploy — seed not executed on target VM
+- [x] **done** — `scripts/seed_prod_volumes.sh` copies `madsan/raw` → `madsan_raw_data`, `madsan/etl` → `madsan_etl_data`
+- [ ] **blocked** — Named volumes **start empty** on first prod deploy — seed not executed on target VM yet
 - [ ] **blocked** — Full prod stack smoke (`compose … prod.yml --profile proxy up`) not verified on ARM VM
 - [~] **partial** — `NEXT_PUBLIC_API_URL` must match Caddy origin (documented in `.env.example`; prod value TBD)
 
-### Prod stack smoke (k6)
+### Volume seed (once per VM, before legacy import)
 
-After `docker compose -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d`:
+From repo root on the prod VM (after checkout; stack may be down — volumes are Docker-managed):
 
 ```bash
-MADSAN_API_URL=http://<vm>:80 k6 run madsan/scripts/k6_smoke.js
+chmod +x madsan/scripts/seed_prod_volumes.sh
+./madsan/scripts/seed_prod_volumes.sh          # copy host trees into named volumes
+./madsan/scripts/seed_prod_volumes.sh --dry-run # preview only
 ```
 
-Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass when p95 &lt; 2s. Log run date + VM in this checklist when green.
+Manual equivalent (same volumes):
+
+```bash
+docker run --rm -v madsan_raw_data:/dest -v "$PWD/madsan/raw":/src:ro alpine cp -a /src/. /dest/
+docker run --rm -v madsan_etl_data:/dest -v "$PWD/madsan/etl":/src:ro alpine cp -a /src/. /dest/
+```
+
+Verify: `docker run --rm -v madsan_raw_data:/v alpine ls /v | head` (expect `bunker_fuel_suppliers_seed.json` symlink target or seed files).
+
+### Prod stack smoke (k6 via Caddy :80)
+
+After `docker compose -f madsan/deploy/docker-compose.yml -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d`:
+
+```bash
+MADSAN_API_URL=http://<vm-ip-or-hostname>:80 k6 run madsan/scripts/k6_smoke.js
+```
+
+Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` **through Caddy** (not `:8088` direct); pass when p95 &lt; 2s. Log run date + VM in this checklist when green.
 
 ---
 
@@ -128,10 +165,40 @@ Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass 
 
 ## 8. TLS & edge (Caddy)
 
-- [~] **partial** — Dev Caddy reverse proxy + WS (`deploy/Caddyfile`, profile `:9080` dev / `:80` prod)
-- [ ] **blocked** — Prod Caddyfile is **HTTP-only** (`:80`) — no TLS / Let's Encrypt / `:443`
+- [~] **partial** — Dev Caddy reverse proxy + WS (`deploy/Caddyfile`, profile `:9080` dev / `:80` prod HTTP)
+- [x] **done** — TLS template: `deploy/Caddyfile.prod.tls.example` (Let's Encrypt site block + mount/volume notes)
+- [ ] **blocked** — TLS **not applied** on prod VM yet (still HTTP-only `deploy/Caddyfile`)
 - [ ] **blocked** — Browser smoke via `http://<vm>:80/health` through Caddy not logged
 - [~] **partial** — Prod secrets: `MADSAN_JWT_SECRET=change-me-in-production` in `.env.example` — must rotate before expose
+
+### TLS cutover steps (Caddy + Let's Encrypt)
+
+1. **DNS:** `A`/`AAAA` for prod hostname → VM public IP.
+2. **Firewall:** allow inbound TCP **80** (ACME HTTP-01 + redirect) and **443** (HTTPS).
+3. **Env:** in `madsan/deploy/.env` set `NEXT_PUBLIC_API_URL=https://<your-hostname>` (matches browser origin).
+4. **Caddyfile:** copy/adapt `deploy/Caddyfile.prod.tls.example` — replace `madsan.example.com` with prod hostname.
+5. **Compose mount:** in `docker-compose.prod.yml` `caddy` service, swap volume to TLS file and persist cert state:
+
+```yaml
+    volumes:
+      - ./Caddyfile.prod.tls.example:/etc/caddy/Caddyfile:ro
+      - madsan_caddy_data:/data
+      - madsan_caddy_config:/config
+```
+
+Add under top-level `volumes:` if missing: `madsan_caddy_data`, `madsan_caddy_config` (named).
+
+6. **Redeploy Caddy only** (no worker restart required for TLS-only change):
+
+```bash
+docker compose -f madsan/deploy/docker-compose.yml \
+  -f madsan/deploy/docker-compose.prod.yml \
+  --profile proxy up -d caddy
+```
+
+7. **Verify:** `curl -sS https://<hostname>/health` → 200; `docker compose … logs caddy | tail` shows cert obtain/renew.
+8. **k6 post-TLS:** `MADSAN_API_URL=https://<hostname> k6 run madsan/scripts/k6_smoke.js`
+9. **Rollback:** remount `deploy/Caddyfile` (HTTP `:80` only); remove TLS volume mounts; redeploy `caddy`.
 
 ---
 
@@ -146,11 +213,11 @@ Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass 
 ## Go-live sequence (when unblocked)
 
 1. Commit + open PR (`new-refactor-eng-style` → main); CI runs `go test`, `legacy-parity`, k6 smoke.
-2. Install backup cron from `scripts/backup_cron.example`; run restore drill (`DRY_RUN=0 ./madsan/scripts/restore_madsan_db.sh`); record in §3.
-3. Deploy prod overlay on ARM VM; seed volumes; set prod `.env` secrets.
+2. Install backup cron (§3); run restore drill (`DRY_RUN=0 ./madsan/scripts/restore_madsan_db.sh`); record in §3.
+3. Deploy prod overlay on ARM VM; `./madsan/scripts/seed_prod_volumes.sh`; set prod `.env` secrets.
 4. Enqueue Legacy import (all); re-run parity until exit 0.
-5. k6 through Caddy `:80`; manual smoke (map, dossier, deals auth, admin health).
-6. TLS on Caddy; legal sign-off; run RLS migrate (`014`) then staged cutover to `madsan_rls` if multi-tenant prod.
+5. k6 through Caddy `:80` (§5); manual smoke (map, dossier, deals auth, admin health).
+6. TLS cutover (§8); legal sign-off; run RLS migrate (`014`) then staged cutover to `madsan_rls` if multi-tenant prod.
 
 ---
 
@@ -162,3 +229,6 @@ Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` through Caddy; pass 
 | `madsan_v2_compose_rebuild_plan.md` | Stack topology, prod overlay |
 | `docs/LEGACY_ETL_DEPRECATION.md` | Parity thresholds + cutover checklist |
 | `deploy/rollback.md` | Rollback without volume destroy |
+| `deploy/Caddyfile.prod.tls.example` | Let's Encrypt Caddy site block + mount notes |
+| `scripts/seed_prod_volumes.sh` | One-shot prod volume seed from `madsan/raw` + `madsan/etl` |
+| `scripts/backup_cron.example` | Cron template for daily `backup_db.sh` |
