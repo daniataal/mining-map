@@ -68,7 +68,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 
 ## Next priorities (ordered)
 
-1. **4d** — Splink batch dedup (current: SQL clusters + `manual_review_queue`)
+1. **4d** — Splink batch dedup (**prep done**: SQL clusters → pairwise CSV export; Splink scoring next)
 2. **10d** — Git initial commit of `madsan/` (user approval)
 3. **4e** — Retire Python `legacy_import.py` after parity tests
 4. **10f** — Production compose tuning (resource limits, secrets, observability)

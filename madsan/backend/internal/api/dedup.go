@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -44,4 +45,22 @@ func (s *Server) scanCompanyDuplicates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"enqueued": n, "status": "ok"})
+}
+
+func (s *Server) exportCompanyPairsCSV(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	filename := dedup.PairExportFilename()
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	pairCount, err := dedup.ExportCompanyPairsCSV(r.Context(), s.pool, limit, w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("X-Madsan-Pair-Count", strconv.Itoa(pairCount))
 }

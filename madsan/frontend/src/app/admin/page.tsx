@@ -252,9 +252,17 @@ export default function AdminPage() {
         <p style={{ color: "var(--muted)", margin: "0 0 10px" }}>
           {insights?.dedup?.company_clusters ?? 0} name clusters · {insights?.dedup?.extra_rows ?? 0} extra rows beyond canonical
         </p>
-        <button type="button" onClick={scanDuplicates} style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", marginBottom: 12 }}>
-          Scan → review queue
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <button type="button" onClick={scanDuplicates} style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
+            Scan → review queue
+          </button>
+          <a
+            href={`${API_BASE}/api/admin/dedup/companies/pairs.csv?limit=200`}
+            style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)", textDecoration: "none" }}
+          >
+            Export pairs CSV (Splink)
+          </a>
+        </div>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
           <thead>
             <tr style={{ textAlign: "left", color: "var(--muted)" }}>

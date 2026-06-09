@@ -133,6 +133,7 @@ func (s *Server) Router() http.Handler {
 		api.Post("/review-queue/{id}/resolve", s.resolveReviewQueueItem)
 		api.Get("/insights/summary", s.adminInsightsV2)
 		api.Get("/dedup/companies", s.listCompanyDuplicates)
+		api.Get("/dedup/companies/pairs.csv", s.exportCompanyPairsCSV)
 		api.Post("/dedup/companies/scan", s.scanCompanyDuplicates)
 	})
 
