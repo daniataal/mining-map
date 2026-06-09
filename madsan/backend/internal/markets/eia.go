@@ -67,6 +67,31 @@ func (c *eiaCache) get(apiKey string, client *http.Client) (map[string]eiaSpot, 
 	return spots, err
 }
 
+// eiaValue unmarshals EIA v2 "value" fields that may be JSON numbers or strings.
+type eiaValue float64
+
+func (v *eiaValue) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*v = 0
+		return nil
+	}
+	var f float64
+	if err := json.Unmarshal(data, &f); err == nil {
+		*v = eiaValue(f)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parsed, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return err
+	}
+	*v = eiaValue(parsed)
+	return nil
+}
+
 func fetchEIADailySpots(client *http.Client, apiKey string) (map[string]eiaSpot, error) {
 	if apiKey == "" {
 		return nil, nil
@@ -99,9 +124,9 @@ func fetchEIADailySpots(client *http.Client, apiKey string) (map[string]eiaSpot,
 	var payload struct {
 		Response struct {
 			Data []struct {
-				Series string  `json:"series"`
-				Period string  `json:"period"`
-				Value  float64 `json:"value"`
+				Series string   `json:"series"`
+				Period string   `json:"period"`
+				Value  eiaValue `json:"value"`
 			} `json:"data"`
 		} `json:"response"`
 	}
@@ -114,7 +139,8 @@ func fetchEIADailySpots(client *http.Client, apiKey string) (map[string]eiaSpot,
 		value  float64
 	}{}
 	for _, row := range payload.Response.Data {
-		if row.Series == "" || row.Value <= 0 {
+		value := float64(row.Value)
+		if row.Series == "" || value <= 0 {
 			continue
 		}
 		period, err := parseEIAPeriod(row.Period)
@@ -124,7 +150,7 @@ func fetchEIADailySpots(client *http.Client, apiKey string) (map[string]eiaSpot,
 		bySeries[row.Series] = append(bySeries[row.Series], struct {
 			period time.Time
 			value  float64
-		}{period, row.Value})
+		}{period, value})
 	}
 
 	out := make(map[string]eiaSpot, len(bySeries))

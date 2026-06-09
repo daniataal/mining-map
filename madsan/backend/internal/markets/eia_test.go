@@ -1,11 +1,33 @@
 package markets
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+func TestEIAValueUnmarshalJSON(t *testing.T) {
+	t.Run("number", func(t *testing.T) {
+		var v eiaValue
+		if err := json.Unmarshal([]byte(`95.96`), &v); err != nil {
+			t.Fatal(err)
+		}
+		if float64(v) != 95.96 {
+			t.Fatalf("got %v", v)
+		}
+	})
+	t.Run("string", func(t *testing.T) {
+		var v eiaValue
+		if err := json.Unmarshal([]byte(`"98.29"`), &v); err != nil {
+			t.Fatal(err)
+		}
+		if float64(v) != 98.29 {
+			t.Fatalf("got %v", v)
+		}
+	})
+}
 
 func TestFetchEIADailySpots(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -16,10 +38,10 @@ func TestFetchEIADailySpots(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"response": {
 				"data": [
-					{"series":"RWTC","period":"2026-06-01","value":95.96},
-					{"series":"RWTC","period":"2026-05-29","value":91.16},
-					{"series":"RBRTE","period":"2026-06-01","value":98.29},
-					{"series":"RBRTE","period":"2026-05-29","value":92.88}
+					{"series":"RWTC","period":"2026-06-01","value":"95.96"},
+					{"series":"RWTC","period":"2026-05-29","value":"91.16"},
+					{"series":"RBRTE","period":"2026-06-01","value":"98.29"},
+					{"series":"RBRTE","period":"2026-05-29","value":"92.88"}
 				]
 			}
 		}`))
@@ -52,8 +74,8 @@ func TestHandlerEIAOpenData(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"response": {
 				"data": [
-					{"series":"RWTC","period":"2026-06-01","value":95.96},
-					{"series":"RWTC","period":"2026-05-29","value":91.16}
+					{"series":"RWTC","period":"2026-06-01","value":"95.96"},
+					{"series":"RWTC","period":"2026-05-29","value":"91.16"}
 				]
 			}
 		}`))
