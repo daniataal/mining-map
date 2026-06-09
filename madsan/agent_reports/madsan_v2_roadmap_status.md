@@ -1,4 +1,4 @@
-# MadSan V2 — Roadmap Status (2026-06-09, tip `4f61f66b`)
+# MadSan V2 — Roadmap Status (2026-06-09 evening, parallel UI batch)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
@@ -8,8 +8,8 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 |--------|--------|--------|----------|
 | Discover | Global search, map layers, suppliers | **On track** | ⌘K search, energy/metals MVT, pipeline lines + vessel chevrons, live AIS overlay, 76k assets |
 | Verify | Dossiers, deals, sanctions, packs | **On track** | Entity dossier + evidence, DD rules, OpenSanctions, pack v1.1 + relationship graph |
-| Price | Signals, opportunity score, freshness | **Partial** | EIA daily crude spot when keyed; VLSFO/Gold stub |
-| Execute | Portal, billing, compliance gates | **Not started** | Supplier portal scaffold only; no billing/KYC cutover |
+| Price | Signals, opportunity score, freshness | **Partial** | EIA daily crude spot when keyed; VLSFO/Gold ticker stub row shipped (`9473721e`) |
+| Execute | Portal, billing, compliance gates | **Partial** | Supplier portal scaffold shipped (`03ccc97c`); no billing/KYC cutover |
 
 **Verdict:** MVP intelligence loop (discover → verify) is **shippable for internal DD**. Price feeds and execute path remain Phase 10+.
 
@@ -48,6 +48,26 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
 - **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`). **Petroleum OSM fail** (~70.6% under-imported, 89.5k/303.7k as of 19:44Z) — **Go `legacy_import` job running** (~37 min elapsed); blocks Python retirement until exit 0
 
+### Evening parallel UI batch (2026-06-09)
+
+| Commit | Area | Shipped |
+|--------|------|---------|
+| `9269409f` | Onboarding (12e) | Guided onboarding flow, empty states, sample-deal path (<3 min to value) |
+| `03ccc97c` | Supplier portal (10) | Portal scaffold — offers/assets/docs submission UI → `manual_review_queue` |
+| `9473721e` | Energy UI (7) | VLSFO/Gold ticker stub row in market ticker (honest stub tier) |
+| `62015b65` | Supplier discovery (8) | Ranked supplier queries with geo + commodity filters over `supplier_search` |
+| `71fc3701` | Worker (3) | Targeted matview refresh per job type (not all views every job); **worker restart deferred** to pick up |
+
+**Remaining UI gaps (non-blocker, next batch):**
+
+| Gap | Phase | Notes |
+|-----|-------|-------|
+| Bottom status bar | 7 | ENGINE.online-style timeline/status bar not shipped |
+| Deal monitoring / living packs | 9b | Watch scaffold (`72d2691`) only; no alert engine or map-pinned deal diffs |
+| Dedup merge UI | 10 | Admin pair_score + CSV export ✅; no human merge / review-queue promotion UI |
+| Dead-reckoning + binary WS | 6b | Hub + chevron rotation ✅; no 60fps interpolation or MessagePack frames |
+| Metals vertical polish | 11 | Shell + tile exclusion ✅; smelters/cadastre coverage + deal-pack parity gaps |
+
 ### Partial
 
 | Item | Gap | Next step |
@@ -56,7 +76,11 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 | Python ETL | Fallback only | Licenses + vessels green; **petroleum_osm_features import** → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
 | RBAC | Cookie auth MVP | Admin ✅ · Deals ✅ · portal/billing routes next |
-| Price ticker | EIA crude when keyed | VLSFO/Gold stub; ICE/exchange feed deferred |
+| Price ticker | EIA crude when keyed | VLSFO/Gold stub row shipped (`9473721e`); real feed deferred |
+| Supplier portal | Admin ✅ | Portal scaffold shipped (`03ccc97c`); review promotion + polish next |
+| Onboarding | — | Guided flow shipped (`9269409f`); email/notifications deferred |
+| Ranked search | Global search ✅ | Geo + commodity ranked queries shipped (`62015b65`); activity/risk fusion next |
+| Matview refresh | All views every job | Targeted refresh shipped (`71fc3701`); worker restart deferred |
 | Compose cutover | Prod overlay ready | Seed named volumes + Caddy deploy on ARM VM |
 | Production launch | Checklist not run | Phase 14 — observability, backup cron, TLS |
 
@@ -66,7 +90,7 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - Splink entity resolution (automated merge from scored pairs)
 - MCR v2, Comtrade ingest
 - Billing, full observability stack
-- Full supplier portal workflow
+- Full supplier portal workflow (scaffold shipped `03ccc97c`; review promotion pending)
 
 ## Execution plan sync
 
@@ -74,9 +98,10 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 
 | Phase | Item | Status |
 |-------|------|--------|
-| **3** | Scheduler + worker + job queue | **Done** |
+| **3** | Scheduler + worker + job queue | **Partial** — targeted matview refresh (`71fc3701`); worker restart deferred |
 | 10b | Dev compose (`compose_up.sh`) | Done |
 | 10e | EIA open-data ticker | Done |
+| 10f | Supplier portal scaffold | **Done** (`03ccc97c`) |
 | 4d | Splink prep export | Done |
 | **4d+** | Pairwise dedup scoring (clusters + CSV) | **Done** (`e934964`) |
 | 11a | Admin runtime health | Done |
@@ -84,6 +109,8 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 | **RBAC** | Deals route auth + entitlements | **Done** (`e934964`) |
 | **12d** | RLS scaffold (`014_rls_scaffold`) | **Partial** — applied on dev; API role cutover deferred |
 | **13** | Prod compose overlay (`docker-compose.prod.yml`) | **Done** — limits, reservations, healthchecks, `linux/arm64`, named volumes, Caddy :80, no dev bind mounts |
+| **12e** | Onboarding + empty states | **Partial** — guided flow shipped (`9269409f`); email/notifications deferred |
+| **8** | Ranked supplier search | **Partial** — geo + commodity filters (`62015b65`); activity/risk fusion next |
 | **14** | Production launch checklist | **In progress** (observability, TLS, volume seed, backup) |
 
 ## Architecture alignment
@@ -126,7 +153,7 @@ Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `inges
 | Sparse vessel heading in tiles/WS | **FIXED** | `4f61f66b` | `cmd/backfill-vessel-heading` copies legacy `oil_ais_positions`; MVT exposes course/heading (`d1401a8b`) |
 | Pipeline click dossier thin | **FIXED** | `3610abe` | Asset summary shows geometry type, substance, OSM tags from `raw_payload` |
 
-**Remaining map UX (non-blocker):** 6b dead-reckoning / binary WS frames; Gulf AIS coverage disclaimer; VLSFO ticker stub.
+**Remaining map UX (non-blocker):** bottom status bar (Phase 7); 6b dead-reckoning / binary WS frames; Gulf AIS coverage disclaimer; deal monitoring UI (9b); dedup merge UI (10); metals polish (11).
 
 ### Ingestion pipeline — plan vs shipped
 
@@ -153,7 +180,7 @@ flowchart LR
 | Hash / skip unchanged | **PARTIAL** | SHA256 in `watch_folder` only; legacy Go import always re-reads |
 | Raw snapshot on disk | **PARTIAL** | `SnapshotRaw` exists; not wired for all adapters |
 | manual_review_queue in pipeline | **PARTIAL** | Dedup admin enqueue only; not post-import uncertain routing |
-| Targeted matview refresh | **GAP** | `refreshServing` refreshes all energy/metals/vessel matviews every job |
+| Targeted matview refresh | **PARTIAL** | Per-job-type refresh shipped (`71fc3701`); worker restart deferred to pick up |
 | Splink batch dedup | **GAP** | CSV export + Go `pair_score` only; no Splink runtime |
 | watch_folder cron path | **BLOCKED** | Fails: `open …/backend/madsan/raw: no such file or directory` |
 
@@ -166,23 +193,23 @@ flowchart LR
 | 0 Reports + scaffold | **FIXED** | — |
 | 1 Schema + matviews | **FIXED** | Serving matviews may lag during long imports |
 | 2 Ingestion pipeline | **GAP** | Simplified path; no Splink / NormalizedRecord adapters for APIs |
-| 3 Scheduler + worker | **IN_PROGRESS** | No River; watch_folder broken; not full 16-step |
+| 3 Scheduler + worker | **IN_PROGRESS** | Targeted matview refresh shipped (`71fc3701`); worker restart deferred; watch_folder broken; not full 16-step |
 | 4 Legacy ETL | **IN_PROGRESS** | Petroleum OSM ~70% under-imported (**BLOCKED** on import finish) |
 | 5 Go core + auth | **IN_PROGRESS** | Entity response shape partial; httpOnly cookie MVP |
 | 5b Entitlements | **FIXED** | Scaffold + deals gating shipped |
 | 6 Map + MVT | **FIXED** | Pipeline lines, vessel chevrons, pipeline dossier shipped (`be4a5fba`, `74eeab55`, `3610abe`, `4f61f66b`) |
 | 6b Realtime WS | **IN_PROGRESS** | Hub + chevron rotation ✅; no binary frames / dead-reckoning / 202 job queue |
-| 7 Energy UI | **IN_PROGRESS** | VLSFO ticker stub |
-| 8 Supplier discovery | **IN_PROGRESS** | Ranked search partial |
+| 7 Energy UI | **IN_PROGRESS** | VLSFO/Gold ticker stub shipped (`9473721e`); bottom status bar + sparklines gap |
+| 8 Supplier discovery | **IN_PROGRESS** | Ranked geo+commodity queries shipped (`62015b65`); activity/risk fusion gap |
 | 8b–8f Intelligence | **GAP/PENDING** | MCR v2, pgRouting, Splink runtime not started |
 | 9 Deal verification | **FIXED** | Pack v1.1 + RBAC |
 | 9b Deal monitoring | **IN_PROGRESS** | Watch scaffold (`72d2691`); no alert engine |
-| 10 Portal + admin | **IN_PROGRESS** | Admin ✅; supplier workflow incomplete |
+| 10 Portal + admin | **IN_PROGRESS** | Admin ✅; portal scaffold shipped (`03ccc97c`); dedup merge UI + review promotion gap |
 | 11 Metals vertical | **IN_PROGRESS** | Petroleum excluded from metals tiles ✅; cadastre gaps |
 | 12 Data gaps | **IN_PROGRESS** | Bunker prices, Gulf AIS labeling |
 | 12c Legal | **IN_PROGRESS** | Page shipped; external sign-off **BLOCKED** |
 | 12d Security/RLS | **IN_PROGRESS** | `014` scaffold + GUC stub; role cutover **BLOCKED** |
-| 12e Notifications | **GAP** | Not started |
+| 12e Notifications | **IN_PROGRESS** | Onboarding shipped (`9269409f`); email/push/feedback flywheel gap |
 | 13 Perf + deploy | **IN_PROGRESS** | Prod overlay ✅; TLS/k6/observability **BLOCKED** |
 | 14 Advanced intel | **PENDING** | Optional backlog |
 
