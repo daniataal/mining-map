@@ -179,7 +179,7 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	err = s.pool.QueryRow(r.Context(), `
 		SELECT name, COALESCE(country_code,''), commodities, confidence_score, data_quality_status, last_verified_at
 		FROM companies WHERE id = $1
-	`, id).Scan(&name, &country, &commodities, &conf, &status)
+	`, id).Scan(&name, &country, &commodities, &conf, &status, &lastVerified)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
