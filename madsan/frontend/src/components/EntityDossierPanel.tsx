@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
+import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import { API_BASE } from "@/lib/layers";
 
@@ -328,6 +329,13 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
           {dossier.limitations[0]}
         </p>
       )}
+
+      <FeedbackFlywheel
+        mode="data"
+        entityType={dossier.entity_type}
+        entityId={dossier.id || undefined}
+        entityName={dossier.name}
+      />
     </div>
   );
 }

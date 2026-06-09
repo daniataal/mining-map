@@ -85,6 +85,14 @@ a { color: var(--accent); text-decoration: none; }
 
 .disclaimer { font-size: 11px; color: var(--muted); margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 
+.feedback-flywheel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.feedback-flywheel button:disabled { opacity: 0.55; cursor: not-allowed; }
+.feedback-flywheel button:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+
 .search-overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(6, 9, 13, 0.72);

@@ -137,6 +137,8 @@ func (s *Server) Router() http.Handler {
 		api.With(s.requireAuth, s.withTenantGUC).Get("/{id}/changes", s.dealChanges)
 	})
 
+	r.Post("/api/feedback", s.submitProductFeedback)
+
 	r.Route("/api/portal", func(api chi.Router) {
 		api.Post("/offers", s.submitSupplierOffer)
 		api.Post("/feedback", s.submitFeedback)

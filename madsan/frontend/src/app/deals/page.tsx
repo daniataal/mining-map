@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
+import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { API_BASE } from "@/lib/layers";
 
 const fetchOpts: RequestInit = { credentials: "include" };
@@ -331,18 +332,21 @@ export default function DealsPage() {
           <DealGraphPanel graph={packGraph} />
           <DealChangesPanel changes={dealChanges} error={changesError || undefined} />
           {result.deal_id && (
-            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {(["json", "markdown", "html"] as const).map((fmt) => (
-                <a
-                  key={fmt}
-                  href={`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`}
-                  download
-                  style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--accent)", fontSize: 12, textDecoration: "none" }}
-                >
-                  Download {fmt.toUpperCase()} pack
-                </a>
-              ))}
-            </div>
+            <>
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                {(["json", "markdown", "html"] as const).map((fmt) => (
+                  <a
+                    key={fmt}
+                    href={`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`}
+                    download
+                    style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--accent)", fontSize: 12, textDecoration: "none" }}
+                  >
+                    Download {fmt.toUpperCase()} pack
+                  </a>
+                ))}
+              </div>
+              <FeedbackFlywheel mode="deal" dealId={result.deal_id} />
+            </>
           )}
         </div>
       )}
