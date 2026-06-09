@@ -35,14 +35,24 @@ type EntitySignal struct {
 	Detail     string  `json:"detail,omitempty"`
 }
 
+type STSScoreFactor struct {
+	Name     string  `json:"name"`
+	Weight   float64 `json:"weight"`
+	Score    float64 `json:"score"`
+	Weighted float64 `json:"weighted"`
+	Detail   string  `json:"detail"`
+}
+
 type SignalHistoryEntry struct {
-	SignalType       string    `json:"signal_type"`
-	Label            string    `json:"label"`
-	Tier             string    `json:"tier"`
-	ConfidenceScore  float64   `json:"confidence_score"`
-	OpportunityScore *float64  `json:"opportunity_score,omitempty"`
-	ObservedAt       time.Time `json:"observed_at"`
-	Source           string    `json:"source,omitempty"`
+	SignalType       string           `json:"signal_type"`
+	Label            string           `json:"label"`
+	Tier             string           `json:"tier"`
+	ConfidenceScore  float64          `json:"confidence_score"`
+	OpportunityScore *float64         `json:"opportunity_score,omitempty"`
+	ObservedAt       time.Time        `json:"observed_at"`
+	Source           string           `json:"source,omitempty"`
+	Detail           string           `json:"detail,omitempty"`
+	STSFactors       []STSScoreFactor `json:"sts_factors,omitempty"`
 }
 
 type CoreEntityResponse struct {

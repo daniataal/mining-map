@@ -94,7 +94,11 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	signals, opp := intelligence.VesselSignals(lastSeen, speed, score)
 	resp.Signals = toAPISignals(signals)
 	resp.OpportunityScore = &opp
-	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "vessel", uid, 15)
+	history := loadSignalHistory(r.Context(), s.pool, "vessel", uid, 15)
+	if mmsi != "" {
+		history = mergeSignalHistory(history, loadVesselSTSSignalHistory(r.Context(), s.legacyPool, mmsi, 10), 15)
+	}
+	resp.SignalHistory = history
 	resp.Relationships = loadRelationships(r.Context(), s.pool, "vessel", uid)
 	writeJSON(w, resp)
 }
