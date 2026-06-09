@@ -25,11 +25,28 @@ Grow from ~14 Fujairah companies to **500–2,000 registry-attributed bunker/fue
 | P1 | **New Zealand** (NZ) | [Trading Standards MARPOL Reg 18.9.1 register](https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/) | Web | **Yes** (phone only; no email/address) | **Done — 62 port-level register rows, 8 companies (Jun 2026)** |
 | P2 | **Antwerp-Bruges** (BEANR) | [Port licensed bunker companies PDFs](https://www.portofantwerpbruges.com/en/shipping/regulations-and-procedures/dangerous-goods/recognised-organisations-dangerous-goods) | PDF (Dec 2025) | **No** (address + email only) | **Done — 37 register rows (20 maritime + 4 inland + 13 lube oil); Zeebrugge list not online** |
 | P2 | **Rotterdam** bunkering | Port of Rotterdam bunker directory + ILT | Web | Rare | Pending |
-| P2 | **Gibraltar** (GIGIB) | Gibraltar Port Authority | Web | Sometimes | Pending |
+| P2 | **Gibraltar** (GIGIB) | [GPA Maritime Directory — BUNKERING OPERATORS](https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4) + [LNG](https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=28) | Web | **Yes** (tel+email on directory) | **Done — 6 licensed (5 conventional + 1 LNG)** |
 | P2 | **Houston** (USHOU) | Port Houston + Texas petroleum licensing | Web | Varies | Pending |
-| P2 | **Malta** (MTMLA) | Transport Malta | Web | Varies | Pending |
-| P2 | **Piraeus** (GRPIR) | Piraeus Port Authority | Web | Varies | Pending |
-| P2 | **Istanbul** (TRIST) | Turkish bunkering licence lists | Web | Varies | Pending |
+| P2 | **Malta** (MTMLA) | [REWS authorised bunkering providers](https://www.rews.org.mt/mt/services/fornituri-awtorizzati-settur-tal-fjuwil-bejgh-bl-ingrossa-bejgh-bl-imnut-bunkering-u-lpg/) (barge + road tanker PDFs, May 2026) | PDF | **Email on barge list; address only on road list** | **Done — 17 REWS-authorised providers** |
+| P2 | **Piraeus** (GRPIR) | [YPEN B1 marine fuels register](https://ypen.gov.gr/energeia/ydrogonanthrakes/mitroa/adeies-eborias-petrelaioeidon/) | PDF | Varies | **Blocked — register PDF HTTP 403; OLP has no bunker roster** |
+| P2 | **Istanbul** (TRIST) | [EPDK EPVYS ihrakiye teslimi licences](https://lisans.epdk.gov.tr/epvys-web/faces/pages/lisans/lisansGenelOzetSorgula.xhtml) | Portal query | Varies | **Blocked — no bulk official list; interactive EPVYS only** |
+| P1 | **Sohar** (OMSLL) | [SOHAR Port marine services brochure](https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf) | PDF | **Yes** (tel+email) | **Done — 4 active bunker suppliers** |
+| P1 | **Jebel Ali / Dubai** (AEJEA) | [DMCA bunkering provider registration](https://eservices.dmca.ae/en/Services/ServiceDetails/313a8859-0a52-e811-844b-000d3a25638a) | e-services permits | **No public list** | **Pending — hub stub only** |
+| P1 | **Khalifa / Abu Dhabi** (AEKHL) | [AD Ports licensing](https://www.adports.ae/port-users/port-documents/licensing/) → [mLMS valid providers PDF](https://pcs.maqta.ae/Web/m09NITZ7E0OqOt3jhOeB9w) | Portal PDF | Behind login / timeout | **Pending — click-here PDF unreachable (timeout); stub only** |
+| P2 | **Khor Fakkan** (AEKLF) | Fujairah offshore anchorage jurisdiction | — | Use AEFJR register | **Pending — no separate list** |
+
+### UAE multi-port reality (2026-06-09)
+
+| Port / LOCODE | Bunkering role | Official supplier list? | Our seed |
+|---------------|----------------|-------------------------|----------|
+| **Fujairah** AEFJR | World's #3 bunkering hub; offshore anchorage | ✅ Public HTML table + PDF | **14 suppliers (complete)** |
+| **Jebel Ali** AEJEA | Dubai container hub; DMCA-permitted suppliers | ❌ Permits only, no published roster | Stub pending |
+| **Khalifa** AEKHL | Deep-water Abu Dhabi; LNG + conventional | ⚠️ AD Ports mLMS list behind portal | Stub pending |
+| **Khor Fakkan** AEKLF | East-coast anchorage | ⚠️ Served by Fujairah-licensed cos | Stub (cross-ref AEFJR) |
+| **Sharjah / Hamriyah** | Smaller UAE ports | ❌ No single public register found | Not stubbed yet |
+| **Mina Saqr / RAK** | Northern emirates | ❌ No public register found | Not stubbed yet |
+
+Several Fujairah-licensed suppliers already list **Dubai (+971 4)** phones on the Port register (Vitol, PetroChina, Peninsula, Montfort, Pearl Marine, Sinopec) — they trade multi-emirate but the **licence attribution stays Fujairah**.
 
 ### Secondary sources (Phase 2+)
 
@@ -86,8 +103,8 @@ Execute in this order (highest deal density / best registers):
 | `bunker-sg-mpa` | Transcribe MPA licensed bunker suppliers PDF (~39 cos) | Data | **Done** — 39 in seed; sync then `SGSIN` nearby ≥35 |
 | `bunker-nl-ilt` | ILT marine fuel oil suppliers → seed | Data | **Done** — 35 in seed; sync then `NLRTM` nearby ≥30 |
 | `bunker-uk-marpol` | UK local fuel oil suppliers CSV → seed | Data | **Done** — 53 in seed; sync then `GB` nearby ≥50 |
-| `bunker-gib-malta` | Gibraltar + Malta port bunker lists | Data | Each hub ≥5 suppliers |
-| `bunker-med-gr-tr` | Piraeus + Istanbul registers | Data | Each hub ≥5 suppliers |
+| `bunker-gib-malta` | Gibraltar + Malta port bunker lists | Data | **Done** — GIGIB 6, MTMLA 17 |
+| `bunker-med-gr-tr` | Piraeus + Istanbul registers | Data | **Blocked** — YPEN B1 PDF 403; EPDK EPVYS query-only |
 | `bunker-nz-marpol` | NZ Trading Standards MARPOL Reg 18.9.1 → seed | Data | **Done** — 62 port-level rows in seed (8 companies); sync then `NZ` nearby ≥8 |
 | `bunker-be-antwerp` | Port of Antwerp-Bruges licensed bunker PDFs → seed | Data | **Done** — 37 in seed; sync then `BEANR` nearby ≥25 |
 | `bunker-us-hou` | Houston / US Gulf bunker dealers | Data | `USHOU` nearby ≥10 |
@@ -119,7 +136,12 @@ Execute in this order (highest deal density / best registers):
 | Rotterdam (NLRTM) | 35 | 35 ILT-registered names only; **no phone/email/address on register** |
 | New Zealand (NZ) | 62 | 62 port-level rows (8 companies); phone on register; **no email/address**; sync dedupes to 8 `oil_companies` |
 | Antwerp-Bruges (BEANR) | 37 | 37 register rows (3 PDF lists); address + email on register; **no phone**; Zeebrugge not published online |
-| Gibraltar, Houston, Malta, Piraeus, Istanbul | 0 (hub stubs) | — |
+| Sohar (OMSLL) | 4 | 4 from Port marine services brochure; tel+email where listed |
+| Gibraltar (GIGIB) | 6 | 6 with tel+email from GPA Maritime Directory (5 BUNKERING OPERATORS + 1 LNG) |
+| Malta (MTMLA) | 17 | 8 with email (barge list); 9 road-tanker rows names+address only |
+| Jebel Ali (AEJEA), Khalifa (AEKHL), Khor Fakkan (AEKLF) | 0 (hub stubs) | DMCA permits only; AD Ports mLMS PDF timed out |
+| Piraeus (GRPIR), Istanbul (TRIST) | 0 (blocked stubs) | YPEN B1 PDF 403; EPDK EPVYS no bulk list |
+| Houston (USHOU) | 0 (hub stub) | — |
 
 **After sync:** Pan to hub → `NearbySuppliersPanel` lists register-attributed suppliers; dossier contacts via `oil_company_contacts` where phone/email exist.
 

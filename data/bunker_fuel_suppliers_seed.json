@@ -19,7 +19,18 @@
       "https://www.portofantwerpbruges.com/en/shipping/regulations-and-procedures/dangerous-goods/recognised-organisations-dangerous-goods",
       "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
       "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
-      "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf"
+      "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+      "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+      "https://www.adports.ae/port-users/port-documents/licensing/",
+      "https://eservices.dmca.ae/en/Services/ServiceDetails/313a8859-0a52-e811-844b-000d3a25638a",
+      "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+      "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=28",
+      "https://www.rews.org.mt/mt/services/fornituri-awtorizzati-settur-tal-fjuwil-bejgh-bl-ingrossa-bejgh-bl-imnut-bunkering-u-lpg/",
+      "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+      "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+      "https://pcs.maqta.ae/Web/m09NITZ7E0OqOt3jhOeB9w",
+      "https://ypen.gov.gr/energeia/ydrogonanthrakes/mitroa/adeies-eborias-petrelaioeidon/",
+      "https://lisans.epdk.gov.tr/epvys-web/faces/pages/lisans/lisansGenelOzetSorgula.xhtml"
     ]
   },
   "hubs": [
@@ -3149,6 +3160,118 @@
       "register_as_of": "2026-06-09"
     },
     {
+      "hub_key": "sohar",
+      "locode": "OMSLL",
+      "port_name": "Sohar",
+      "country": "Oman",
+      "lat": 24.47,
+      "lng": 56.67,
+      "license_authority": "SOHAR Port and Freezone",
+      "register_source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+      "register_tier": "official_port_register",
+      "register_as_of": "2024-01-01",
+      "ingest_notes": "Active bunker suppliers from Port marine services brochure; port mandates MFM for all bunker deliveries.",
+      "suppliers": [
+        {
+          "company_name": "Oman Oil Marketing Company LLC (OOMCO)",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo",
+            "marine_gas_oil"
+          ],
+          "phone": "+968 24571207",
+          "email": "bunkers@oomco.com",
+          "website": "https://www.oomco.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "VLSFO, MGO, HSFO (Port-licensed barge MT ALPHA)"
+        },
+        {
+          "company_name": "TFG Marine",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo",
+            "marine_gas_oil"
+          ],
+          "email": "Oman.sales@tfgmarine.com",
+          "website": "https://www.tfgmarine.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.84,
+          "notes": "Port brochure lists contact email; no phone on register page."
+        },
+        {
+          "company_name": "Hormuz Marine LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "phone": "+968 92318123",
+          "email": "sa@hormuzmarine.om",
+          "website": "https://www.hormuzmarine.om",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86
+        },
+        {
+          "company_name": "Global Oil Resources LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 55 805 1348",
+          "email": "bunk_mgr@globaloilresources.com",
+          "website": "https://globaloilresources.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86,
+          "notes": "Listed on Sohar Port marine services brochure; UAE mobile on register."
+        }
+      ]
+    },
+    {
+      "hub_key": "jebel_ali",
+      "locode": "AEJEA",
+      "port_name": "Jebel Ali / Dubai",
+      "country": "United Arab Emirates",
+      "lat": 25.01,
+      "lng": 55.06,
+      "license_authority": "Dubai Maritime Authority (DMCA)",
+      "register_source_url": "https://eservices.dmca.ae/en/Services/ServiceDetails/313a8859-0a52-e811-844b-000d3a25638a",
+      "register_tier": "official_regulator",
+      "ingest_status": "pending",
+      "ingest_notes": "DMCA issues bunker provider permits via e-services only; no published licensed-company table found. Checked eservices.dmca.ae service details page — permit verification only.",
+      "suppliers": []
+    },
+    {
+      "hub_key": "khalifa",
+      "locode": "AEKHL",
+      "port_name": "Khalifa Port / Abu Dhabi",
+      "country": "United Arab Emirates",
+      "lat": 24.82,
+      "lng": 54.65,
+      "license_authority": "AD Ports Group (Marine Bunker Supplies Licence)",
+      "register_source_url": "https://www.adports.ae/port-users/port-documents/licensing/",
+      "register_tier": "official_port_register",
+      "ingest_status": "pending",
+      "ingest_notes": "AD Ports licensing page links to mLMS valid-providers PDF at https://pcs.maqta.ae/Web/m09NITZ7E0OqOt3jhOeB9w but fetch timed out (>90s) from this environment — likely portal/session gated. Marine Bunker Supplies licence type documented; no attributable supplier rows ingested.",
+      "suppliers": []
+    },
+    {
+      "hub_key": "khor_fakkan",
+      "locode": "AEKLF",
+      "port_name": "Khor Fakkan",
+      "country": "United Arab Emirates",
+      "lat": 25.33,
+      "lng": 56.35,
+      "license_authority": "Port of Fujairah (offshore anchorage jurisdiction)",
+      "register_source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+      "register_tier": "official_port_register",
+      "ingest_status": "pending",
+      "ingest_notes": "No separate Khor Fakkan bunker register found. Anchorage bunkering typically served by Port of Fujairah-licensed suppliers (see AEFJR hub). Avoid duplicating Fujairah rows until port publishes Khor Fakkan-specific list.",
+      "suppliers": []
+    },
+    {
       "hub_key": "gibraltar",
       "locode": "GIGIB",
       "port_name": "Gibraltar",
@@ -3156,10 +3279,103 @@
       "lat": 36.14,
       "lng": -5.35,
       "license_authority": "Gibraltar Port Authority",
-      "register_source_url": "https://www.gibraltarport.com/",
-      "register_tier": "port_directory",
-      "ingest_status": "pending",
-      "suppliers": []
+      "register_source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+      "register_tier": "official_port_register",
+      "ingest_status": "complete",
+      "suppliers": [
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Cepsa (Gibraltar) Ltd",
+          "phone": "+350 200 76170",
+          "email": "fwpitto@gibunco.com",
+          "address": "Europort, Building 7, 2nd Floor, PO Box 51, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+          "notes": "After-hours on duty +350 200 46909 on GPA directory"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Gib Oil",
+          "phone": "+350 200 03400",
+          "email": "info@giboil.com",
+          "address": "Western Arm, North Mole, PO Box 231, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Minerva Bunkering (Gibraltar) Ltd",
+          "phone": "+350 200 50246",
+          "email": "opsgib@minervabunkering.com",
+          "address": "Suite 2, Block 4 Watergardens, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+          "notes": "Mobile +350 58360 000 on GPA directory"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Orim Energy (Gibraltar) Limited",
+          "phone": "+350 200 42070",
+          "email": "info@orim-energy.com",
+          "address": "Level 1, 1-7 Crutchett's Ramp, Gibraltar",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Peninsula Petroleum Ltd",
+          "phone": "+350 200 52641",
+          "email": "gibraltar@peninsula360.com",
+          "address": "Suite 921, Second Floor, Building 9, Europort, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "lng"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "LNG bunkering (GPA LNG BUNKERING OPERATOR category)",
+          "company_name": "Shell LNG Bunkering BV (SLB)",
+          "phone": "+350 200 79000",
+          "email": "SLB-Info-GibraltarLNG@shell.com",
+          "address": "c/o Line Group, Madison Building, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=28"
+        }
+      ],
+      "register_as_of": "2026-06-09",
+      "ingest_notes": "GPA Maritime Directory BUNKERING OPERATORS (categories[]=4) returns 5 licensed operators; LNG operator from categories[]=28. URL category filter requires categories[] param — category=18 alone does not filter server-side."
     },
     {
       "hub_key": "houston",
@@ -3182,11 +3398,226 @@
       "country": "Malta",
       "lat": 35.89,
       "lng": 14.51,
-      "license_authority": "Transport Malta",
-      "register_source_url": "https://www.transport.gov.mt/",
-      "register_tier": "port_directory",
-      "ingest_status": "pending",
-      "suppliers": []
+      "license_authority": "Regulator for Energy and Water Services (REWS)",
+      "register_source_url": "https://www.rews.org.mt/mt/services/fornituri-awtorizzati-settur-tal-fjuwil-bejgh-bl-ingrossa-bejgh-bl-imnut-bunkering-u-lpg/",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "complete",
+      "suppliers": [
+        {
+          "company_name": "International Fuel Suppliers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal; also sheldonP@cnbunkerfuels.com on register",
+          "email": "operations@ifs.com.mt"
+        },
+        {
+          "company_name": "Valletta Bunkers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "admin@vallettabunkers.com"
+        },
+        {
+          "company_name": "Peninsula Petroleum Malta Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Authorised provider row: Pierre Sciberras c/o Peninsula Petroleum Malta Ltd",
+          "email": "legal@peninsulapetroleum.com"
+        },
+        {
+          "company_name": "Cornflower Shipping Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "johann@medsea.com.mt"
+        },
+        {
+          "company_name": "Zeta Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "operations@zetaen.com"
+        },
+        {
+          "company_name": "Orim Energy International Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "edwin.coppens@orim-energy.com"
+        },
+        {
+          "company_name": "CN Bunker Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "nick@cnbunkerfuels.com"
+        },
+        {
+          "company_name": "FG Ship Bunkers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "corporate@falzongroup.com"
+        },
+        {
+          "company_name": "PH Borg Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Cassar Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Falzon Fuel Services Limited",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Premier Transport Services",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Mediterranean Bunker & Brokerage Services Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Star Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Fritz Energy and Engineering Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "MZ Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Petroleum Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        }
+      ],
+      "register_as_of": "2026-05-22",
+      "ingest_notes": "REWS authorised bunkering providers — barge/marine terminal (May 2026) + road tanker (May 2026). Transport Malta BOP required but company roster published by REWS."
     },
     {
       "hub_key": "piraeus",
@@ -3195,11 +3626,12 @@
       "country": "Greece",
       "lat": 37.94,
       "lng": 23.64,
-      "license_authority": "Piraeus Port Authority",
-      "register_source_url": "https://www.olp.gr/",
-      "register_tier": "port_directory",
-      "ingest_status": "pending",
-      "suppliers": []
+      "license_authority": "Ministry of Environment and Energy (YPEN) — B1 tax-free marine fuels register",
+      "register_source_url": "https://ypen.gov.gr/energeia/ydrogonanthrakes/mitroa/adeies-eborias-petrelaioeidon/",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "blocked",
+      "suppliers": [],
+      "ingest_notes": "Official B1 wholesale marine fuels register exists on ypen.gov.gr but PDF downloads return HTTP 403 from automated fetch (Dec 2023–2025 URLs tested). Piraeus Port Authority (OLP) publishes no separate bunker supplier roster. Retry with manual download or EMSA DONA Greece profile."
     },
     {
       "hub_key": "istanbul",
@@ -3208,11 +3640,12 @@
       "country": "Turkey",
       "lat": 41.01,
       "lng": 28.97,
-      "license_authority": "Turkish Ministry of Transport / port bunkering licences",
-      "register_source_url": "https://www.tuik.gov.tr/",
-      "register_tier": "national_regulator",
-      "ingest_status": "pending",
-      "suppliers": []
+      "license_authority": "EPDK (Energy Market Regulatory Authority)",
+      "register_source_url": "https://lisans.epdk.gov.tr/epvys-web/faces/pages/lisans/lisansGenelOzetSorgula.xhtml",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "blocked",
+      "suppliers": [],
+      "ingest_notes": "Turkish bunker suppliers hold EPDK ihrakiye teslimi (bunker delivery) licences queryable via EPVYS portal only — no bulk downloadable official list without interactive session. Resmi Gazete grants individual decisions, not a maintained hub roster."
     }
   ]
 }
