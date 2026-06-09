@@ -11,15 +11,17 @@ export default function TickerTrendBar({ changePct }: Props) {
       ? [0.55, 0.55, 0.55, 0.55, 0.55]
       : [0.95, 0.72, 0.55, 0.45, 0.35];
 
+  const label = `${changePct > 0 ? "+" : ""}${changePct}%`;
+
   return (
     <svg
       className="ticker-trend"
       width="28"
       height="12"
       viewBox="0 0 28 12"
-      aria-hidden
-      title={`${changePct > 0 ? "+" : ""}${changePct}%`}
+      aria-hidden="true"
     >
+      <title>{label}</title>
       {heights.map((h, i) => (
         <rect
           key={i}
