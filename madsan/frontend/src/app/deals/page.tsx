@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
 import { API_BASE } from "@/lib/layers";
 
@@ -39,6 +40,8 @@ export default function DealsPage() {
   const [sellerDefault, setSellerDefault] = useState("");
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [packGraph, setPackGraph] = useState<PackGraph | null>(null);
+  const [dealChanges, setDealChanges] = useState<DealChanges | null>(null);
+  const [changesError, setChangesError] = useState("");
   const [loading, setLoading] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
@@ -87,6 +90,8 @@ export default function DealsPage() {
     e.preventDefault();
     setLoading(true);
     setPackGraph(null);
+    setDealChanges(null);
+    setChangesError("");
     const fd = new FormData(e.currentTarget);
     const body = Object.fromEntries(fd.entries());
     const res = await fetch(`${API_BASE}/api/deals/verify`, {
@@ -125,15 +130,27 @@ export default function DealsPage() {
     const data = (await res.json()) as VerifyResult;
     setResult(data);
     if (data.deal_id) {
-      const packRes = await fetch(`${API_BASE}/api/deals/${data.deal_id}/pack?format=json`, fetchOpts);
-      if (packRes.status === 401) {
+      const [packRes, changesRes] = await Promise.all([
+        fetch(`${API_BASE}/api/deals/${data.deal_id}/pack?format=json`, fetchOpts),
+        fetch(`${API_BASE}/api/deals/${data.deal_id}/changes`, fetchOpts),
+      ]);
+      if (packRes.status === 401 || changesRes.status === 401) {
         setAuthed(false);
         setResult({ ...data, error: "Session expired — sign in again." });
-      } else if (packRes.status === 403) {
-        setResult({ ...data, error: "Your plan does not include deal pack export." });
-      } else if (packRes.ok) {
-        const pack = await packRes.json();
-        setPackGraph(pack.relationship_graph ?? null);
+      } else {
+        if (packRes.status === 403) {
+          setResult({ ...data, error: "Your plan does not include deal pack export." });
+        } else if (packRes.ok) {
+          const pack = await packRes.json();
+          setPackGraph(pack.relationship_graph ?? null);
+        }
+        if (changesRes.status === 403) {
+          setChangesError("Your plan does not include deal change monitoring.");
+        } else if (changesRes.ok) {
+          setDealChanges((await changesRes.json()) as DealChanges);
+        } else if (!changesRes.ok) {
+          setChangesError(await changesRes.text());
+        }
       }
     }
     setLoading(false);
@@ -218,6 +235,7 @@ export default function DealsPage() {
             </div>
           )}
           <DealGraphPanel graph={packGraph} />
+          <DealChangesPanel changes={dealChanges} error={changesError || undefined} />
           {result.deal_id && (
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               {(["json", "markdown", "html"] as const).map((fmt) => (
