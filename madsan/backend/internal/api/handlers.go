@@ -303,11 +303,13 @@ func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	uid, _ := uuid.Parse(claims.UserID)
-	_, err := s.pool.Exec(r.Context(), `
-		INSERT INTO deal_watch_subscriptions (deal_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING
-	`, id, uid)
+	dealID, err := uuid.Parse(id)
 	if err != nil {
+		http.Error(w, "invalid deal id", http.StatusBadRequest)
+		return
+	}
+	uid, _ := uuid.Parse(claims.UserID)
+	if err := s.deals.CaptureWatchSnapshot(r.Context(), dealID, uid); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -339,15 +341,17 @@ func (s *Server) dealChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	dealID, err := uuid.Parse(id)
+	if err != nil {
+		http.Error(w, "invalid deal id", http.StatusBadRequest)
+		return
+	}
 	uid, _ := uuid.Parse(claims.UserID)
-	resp := deals.ChangesScaffold(id)
-	var watching bool
-	_ = s.pool.QueryRow(r.Context(), `
-		SELECT EXISTS(
-			SELECT 1 FROM deal_watch_subscriptions WHERE deal_id = $1 AND user_id = $2
-		)
-	`, id, uid).Scan(&watching)
-	resp["watching"] = watching
+	resp, err := s.deals.GetChanges(r.Context(), dealID, uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, resp)
 }
 

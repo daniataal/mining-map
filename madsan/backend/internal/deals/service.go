@@ -31,12 +31,17 @@ type VerifyInput struct {
 }
 
 type Service struct {
-	pool      *pgxpool.Pool
-	screener  *compliance.Screener
+	pool     *pgxpool.Pool
+	screener *compliance.Screener
+	eiaKey   string
 }
 
-func New(pool *pgxpool.Pool, openSanctionsAPIKey string) *Service {
-	return &Service{pool: pool, screener: compliance.NewScreener(openSanctionsAPIKey)}
+func New(pool *pgxpool.Pool, openSanctionsAPIKey, eiaAPIKey string) *Service {
+	return &Service{
+		pool:     pool,
+		screener: compliance.NewScreener(openSanctionsAPIKey),
+		eiaKey:   eiaAPIKey,
+	}
 }
 
 func (s *Service) Verify(ctx context.Context, tenantID *uuid.UUID, in VerifyInput) (map[string]any, error) {
@@ -269,17 +274,3 @@ func (s *Service) ExportPack(ctx context.Context, id, format string) ([]byte, st
 	}
 }
 
-func (s *Service) MonitorDealChanges(ctx context.Context, dealID uuid.UUID) error {
-	var seller, commodity string
-	var score *float64
-	err := s.pool.QueryRow(ctx, `SELECT seller_name, commodity, verification_score FROM deals WHERE id=$1`, dealID).Scan(&seller, &commodity, &score)
-	if err != nil {
-		return err
-	}
-	snapshot := map[string]any{"seller": seller, "commodity": commodity, "score": score, "at": time.Now().UTC()}
-	b, _ := json.Marshal(snapshot)
-	_, err = s.pool.Exec(ctx, `
-		UPDATE deal_watch_subscriptions SET last_snapshot = $2 WHERE deal_id = $1
-	`, dealID, b)
-	return err
-}

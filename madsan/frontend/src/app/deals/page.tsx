@@ -114,6 +114,7 @@ export default function DealsPage() {
   const [packGraph, setPackGraph] = useState<PackGraph | null>(null);
   const [dealChanges, setDealChanges] = useState<DealChanges | null>(null);
   const [changesError, setChangesError] = useState("");
+  const [watchBusy, setWatchBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
@@ -159,6 +160,41 @@ export default function DealsPage() {
       return;
     }
     setAuthed(true);
+  }
+
+  async function refreshChanges(dealId: string) {
+    setChangesError("");
+    const res = await fetch(`${API_BASE}/api/deals/${dealId}/changes`, fetchOpts);
+    if (res.status === 401) {
+      setAuthed(false);
+      return;
+    }
+    if (res.status === 403) {
+      setChangesError("Your plan does not include deal change monitoring.");
+      return;
+    }
+    if (!res.ok) {
+      setChangesError(await res.text());
+      return;
+    }
+    setDealChanges((await res.json()) as DealChanges);
+  }
+
+  async function toggleWatch(watch: boolean) {
+    if (!result?.deal_id) return;
+    setWatchBusy(true);
+    setChangesError("");
+    const res = await fetch(`${API_BASE}/api/deals/${result.deal_id}/watch`, {
+      ...fetchOpts,
+      method: watch ? "POST" : "DELETE",
+    });
+    if (!res.ok) {
+      setChangesError(await res.text());
+      setWatchBusy(false);
+      return;
+    }
+    await refreshChanges(result.deal_id);
+    setWatchBusy(false);
   }
 
   async function verify(e: React.FormEvent<HTMLFormElement>) {
@@ -332,7 +368,13 @@ export default function DealsPage() {
             </div>
           )}
           <DealGraphPanel graph={packGraph} />
-          <DealChangesPanel changes={dealChanges} error={changesError || undefined} />
+          <DealChangesPanel
+            changes={dealChanges}
+            error={changesError || undefined}
+            watchBusy={watchBusy}
+            onWatch={result.deal_id ? () => toggleWatch(true) : undefined}
+            onUnwatch={result.deal_id ? () => toggleWatch(false) : undefined}
+          />
           {result.deal_id && (
             <>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
