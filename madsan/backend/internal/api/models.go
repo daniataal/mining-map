@@ -72,11 +72,15 @@ type DealVerificationResult struct {
 }
 
 type SupplierSearchResult struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	CountryCode     string  `json:"country_code,omitempty"`
-	Commodities     []string `json:"commodities"`
-	ConfidenceScore float64 `json:"confidence_score"`
-	RankScore       float64 `json:"rank_score"`
-	DistanceKm      *float64 `json:"distance_km,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	CountryCode        string   `json:"country_code,omitempty"`
+	Commodities        []string `json:"commodities"`
+	ConfidenceScore    float64  `json:"confidence_score"`
+	EvidenceCount      int      `json:"evidence_count"`
+	ContactCount       int      `json:"contact_count,omitempty"`
+	DataQualityStatus  string   `json:"data_quality_status,omitempty"`
+	Tier               string   `json:"tier"`
+	RankScore          float64  `json:"rank_score"`
+	DistanceKm         *float64 `json:"distance_km,omitempty"`
 }

@@ -68,6 +68,7 @@ WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_map_vessels_id ON map_vessels(id);
 
+-- Supplier discovery: expose evidence depth for honest ranking (confidence + evidence_count).
 CREATE OR REPLACE VIEW supplier_search AS
 SELECT
     c.id,
@@ -76,7 +77,10 @@ SELECT
     c.commodities,
     c.confidence_score,
     c.data_quality_status,
-    COUNT(ct.id) AS contact_count
+    COUNT(ct.id) AS contact_count,
+    (SELECT COUNT(*)::int
+     FROM evidence e
+     WHERE e.entity_type = 'company' AND e.entity_id = c.id) AS evidence_count
 FROM companies c
 LEFT JOIN contacts ct ON ct.company_id = c.id
 WHERE c.company_type = 'supplier' OR 'supplier' = ANY(c.commodities)

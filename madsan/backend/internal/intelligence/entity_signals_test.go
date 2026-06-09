@@ -13,6 +13,24 @@ func TestVesselSignalsFresh(t *testing.T) {
 	}
 }
 
+func TestSupplierDiscoveryTier(t *testing.T) {
+	cases := []struct {
+		conf float64
+		ev   int
+		want string
+	}{
+		{80, 6, "observed"},
+		{40, 2, "inferred"},
+		{60, 0, "inferred"},
+		{10, 0, "missing"},
+	}
+	for _, tc := range cases {
+		if got := SupplierDiscoveryTier(tc.conf, tc.ev); got != tc.want {
+			t.Fatalf("SupplierDiscoveryTier(%v,%d)=%q want %q", tc.conf, tc.ev, got, tc.want)
+		}
+	}
+}
+
 func TestCompanySignalsRegister(t *testing.T) {
 	signals, opp := CompanySignals(50, []EvidenceInput{
 		{ClaimType: "register_tier", ClaimValue: "official_register", Tier: "observed"},

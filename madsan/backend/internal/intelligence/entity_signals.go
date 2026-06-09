@@ -88,6 +88,18 @@ func AssetSignals(assetType string, confidence float64, evidenceCount int, commo
 	return signals, clampScore(opp)
 }
 
+// SupplierDiscoveryTier is an honest evidence tier for supplier search ranking (not deal verification).
+func SupplierDiscoveryTier(confidence float64, evidenceCount int) string {
+	switch {
+	case evidenceCount >= 5:
+		return "observed"
+	case evidenceCount >= 1 || confidence >= 50:
+		return "inferred"
+	default:
+		return "missing"
+	}
+}
+
 func CompanySignals(confidence float64, evidence []EvidenceInput, commodities []string) ([]EntitySignal, float64) {
 	opp := confidence
 	var signals []EntitySignal

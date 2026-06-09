@@ -11,6 +11,7 @@ import (
 
 	"github.com/madsan/intelligence/internal/assets"
 	"github.com/madsan/intelligence/internal/deals"
+	"github.com/madsan/intelligence/internal/intelligence"
 )
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -195,12 +196,14 @@ func (s *Server) supplierSearch(w http.ResponseWriter, r *http.Request) {
 	commodity := r.URL.Query().Get("commodity")
 	country := r.URL.Query().Get("country")
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT id, name, country_code, commodities, confidence_score
+		SELECT id, name, country_code, commodities, confidence_score,
+		       data_quality_status, evidence_count, contact_count
 		FROM supplier_search
 		WHERE ($1 = '' OR name ILIKE '%' || $1 || '%')
 		  AND ($2 = '' OR $2 = ANY(commodities))
 		  AND ($3 = '' OR country_code ILIKE $3)
-		ORDER BY confidence_score DESC NULLS LAST LIMIT 30
+		ORDER BY confidence_score DESC NULLS LAST, evidence_count DESC, contact_count DESC, name
+		LIMIT 30
 	`, q, commodity, country)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -213,10 +216,12 @@ func (s *Server) supplierSearch(w http.ResponseWriter, r *http.Request) {
 		var id uuid.UUID
 		var countryCode *string
 		var commodities []string
-		_ = rows.Scan(&id, &sr.Name, &countryCode, &commodities, &sr.ConfidenceScore)
+		_ = rows.Scan(&id, &sr.Name, &countryCode, &commodities, &sr.ConfidenceScore,
+			&sr.DataQualityStatus, &sr.EvidenceCount, &sr.ContactCount)
 		sr.ID = id.String()
 		sr.CountryCode = deref(countryCode)
 		sr.Commodities = commodities
+		sr.Tier = intelligence.SupplierDiscoveryTier(sr.ConfidenceScore, sr.EvidenceCount)
 		sr.RankScore = sr.ConfidenceScore
 		out = append(out, sr)
 	}
