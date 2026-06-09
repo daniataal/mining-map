@@ -9,6 +9,7 @@ type Insights = {
   ingestion?: { pending?: number; running?: number; completed?: number; failed?: number };
   review_queue_pending?: number;
   dedup?: { company_clusters?: number; extra_rows?: number };
+  config?: { legacy_python_enabled?: boolean };
 };
 
 type DupCluster = {
@@ -189,6 +190,15 @@ export default function AdminPage() {
           <button type="button" onClick={() => enqueue("legacy_import", "legacy_mining_db", { tables: ["licenses"], max_rows: 5000 })} style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
             Metals licenses (Go)
           </button>
+          {insights?.config?.legacy_python_enabled && (
+            <button
+              type="button"
+              onClick={() => enqueue("legacy_import", "legacy_mining_db", { use_python: true, tables: ["oil_vessels"], max_rows: 2000 })}
+              style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--warn, #b8860b)", color: "var(--text)" }}
+            >
+              Legacy import (Python)
+            </button>
+          )}
         </div>
         {msg && <p style={{ marginTop: 10, color: "var(--muted)" }}>{msg}</p>}
         <p style={{ marginTop: 8, color: "var(--muted)", fontSize: 11 }}>

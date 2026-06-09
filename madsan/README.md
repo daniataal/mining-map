@@ -32,14 +32,27 @@ cd madsan/frontend && npm run dev    # :3000
 
 Open http://localhost:3000 — terminal map, ⌘K search, `/deals`, `/admin`.
 
-**Requires** legacy `mining-db` on `:5434` for AIS sync and legacy import (`host.docker.internal:5434` from containers).
+**Requires** legacy `mining-db` on host port `:5434` for AIS sync and legacy import.
+
+Sync secrets from repo root: `./madsan/scripts/sync_env_from_root.sh` (never prints values).
+
+### `LEGACY_DATABASE_URL` — hybrid vs Compose
+
+| Mode | Where API runs | `deploy/.env` value | Compose override |
+|------|----------------|---------------------|------------------|
+| **Hybrid dev** | Host (`start_api.sh`, `go run ./cmd/worker`) | `127.0.0.1:5434` | — |
+| **Full Docker stack** | `madsan-api` container | same file; compose substitutes | `host.docker.internal:5434` in `docker-compose.yml` |
+
+Hybrid default: `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable`
+
+If root `.env` still points at Docker hostname `db`, re-run `sync_env_from_root.sh` — it rewrites to `127.0.0.1` for `deploy/.env`.
 
 ## Environment
 
 | Variable | Default |
 |----------|---------|
 | `DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable` |
-| `LEGACY_DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable` |
+| `LEGACY_DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable` (hybrid) |
 | `MADSAN_AIS_SYNC` | `true` |
 | `MADSAN_LEGACY_PYTHON` | `false` (Go import default) |
 | `EIA_API_KEY` | optional — EIA v2 daily WTI/Brent spot for ticker; omit for honest `reference_stub` fallback |
@@ -67,6 +80,7 @@ go run ./cmd/scan-company-duplicates
 
 ## Docs
 
+- [Legacy ETL deprecation](docs/LEGACY_ETL_DEPRECATION.md)
 - [Execution log](agent_reports/madsan_v2_execution_log.md)
 - [Roadmap status](agent_reports/madsan_v2_roadmap_status.md)
 - [Dedup strategy](agent_reports/deduplication_strategy.md)

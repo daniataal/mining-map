@@ -110,5 +110,8 @@ func (s *Server) adminInsightsV2(w http.ResponseWriter, r *http.Request) {
 			"company_clusters": dupClusters,
 			"extra_rows":       dupExtra,
 		},
+		"config": map[string]any{
+			"legacy_python_enabled": s.cfg.LegacyImportPython,
+		},
 	})
 }
