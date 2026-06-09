@@ -12,6 +12,7 @@ export type DealChanges = {
   deal_id: string;
   tier: string;
   changes: ChangeEntry[];
+  watching?: boolean;
 };
 
 type Props = {
@@ -44,13 +45,13 @@ export default function DealChangesPanel({ changes, error }: Props) {
         </span>
         {isNotImplemented && (
           <span style={{ display: "block", marginTop: 6 }}>
-            Living pack diff monitoring is not shipped yet — re-verify for a fresh intelligence snapshot.
+            Monitoring scaffold — diffs will populate when the living pack worker ships. Re-verify for a fresh snapshot today.
           </span>
         )}
       </p>
       {changes.changes.length === 0 ? (
         <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
-          No changes recorded for deal {changes.deal_id.slice(0, 8)}…
+          No changes yet — monitoring scaffold
         </p>
       ) : (
         <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>

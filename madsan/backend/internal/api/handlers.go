@@ -309,12 +309,41 @@ func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "watching"})
 }
 
-func (s *Server) dealChanges(w http.ResponseWriter, r *http.Request) {
-	if _, ok := authClaims(r); !ok {
+func (s *Server) unwatchDeal(w http.ResponseWriter, r *http.Request) {
+	claims, ok := authClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, deals.ChangesScaffold(chi.URLParam(r, "id")))
+	id := chi.URLParam(r, "id")
+	uid, _ := uuid.Parse(claims.UserID)
+	_, err := s.pool.Exec(r.Context(), `
+		DELETE FROM deal_watch_subscriptions WHERE deal_id = $1 AND user_id = $2
+	`, id, uid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "unwatched"})
+}
+
+func (s *Server) dealChanges(w http.ResponseWriter, r *http.Request) {
+	claims, ok := authClaims(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	uid, _ := uuid.Parse(claims.UserID)
+	resp := deals.ChangesScaffold(id)
+	var watching bool
+	_ = s.pool.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM deal_watch_subscriptions WHERE deal_id = $1 AND user_id = $2
+		)
+	`, id, uid).Scan(&watching)
+	resp["watching"] = watching
+	writeJSON(w, resp)
 }
 
 func (s *Server) metalsLicenseSummary(w http.ResponseWriter, r *http.Request) {

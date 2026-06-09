@@ -26,6 +26,7 @@ type Graph = {
 
 type Props = {
   graph: Graph | null;
+  watchActive?: boolean;
 };
 
 function nodeLabel(n: GraphNode) {
@@ -35,12 +36,19 @@ function nodeLabel(n: GraphNode) {
   return parts.join(" · ");
 }
 
-export default function DealGraphPanel({ graph }: Props) {
+export default function DealGraphPanel({ graph, watchActive }: Props) {
   if (!graph?.nodes?.length) {
     return (
-      <p style={{ color: "var(--muted)", fontSize: 12, marginTop: 12 }}>
-        No relationship graph — add seller registry match or claimed vessel MMSI to populate links.
-      </p>
+      <div style={{ marginTop: 12 }}>
+        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>
+          No relationship graph — add seller registry match or claimed vessel MMSI to populate links.
+        </p>
+        {watchActive && (
+          <p style={{ fontSize: 11, color: "var(--accent)", margin: "8px 0 0" }}>
+            Watching — pack entities will pin on the terminal map when map highlight ships.
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -52,6 +60,11 @@ export default function DealGraphPanel({ graph }: Props) {
       <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 10px" }}>
         {graph.summary?.node_count ?? graph.nodes.length} entities · {graph.summary?.edge_count ?? graph.edges?.length ?? 0} links
         <span style={{ display: "block", marginTop: 4 }}>Inferred from registry + AIS — not cargo confirmation</span>
+        {watchActive && (
+          <span style={{ display: "block", marginTop: 6, color: "var(--accent)" }}>
+            Watching — pack entities will pin on the terminal map when map highlight ships.
+          </span>
+        )}
       </p>
       <ul className="rel-list">
         {graph.nodes.map((n) => (

@@ -8,9 +8,12 @@ import { API_BASE } from "@/lib/layers";
 
 const fetchOpts: RequestInit = { credentials: "include" };
 
-const SAMPLE_DEAL: Record<string, string> = {
+type DealVertical = "energy" | "metals";
+
+const SAMPLE_ENERGY_DEAL: Record<string, string> = {
   commodity: "VLSFO",
   quantity: "5000",
+  quantity_unit: "MT",
   location: "Fujairah, UAE",
   seller: "Peninsula Fuel Supply LLC",
   buyer: "Sample Buyer Ltd",
@@ -19,6 +22,51 @@ const SAMPLE_DEAL: Record<string, string> = {
   currency: "USD",
   claimed_vessel_mmsi: "",
 };
+
+const SAMPLE_METAL_GOLD: Record<string, string> = {
+  commodity: "Gold (AU)",
+  quantity: "500",
+  quantity_unit: "kg",
+  location: "Dubai, UAE",
+  seller: "Sample Refinery DMCC",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "CIF",
+  price: "68500",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+};
+
+const SAMPLE_METAL_COPPER: Record<string, string> = {
+  commodity: "Copper cathode",
+  quantity: "1000",
+  quantity_unit: "MT",
+  location: "Lusaka, Zambia",
+  seller: "Sample Copper Traders Ltd",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "FOB",
+  price: "9850",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+};
+
+const SAMPLE_METAL_SILVER: Record<string, string> = {
+  commodity: "Silver (Ag)",
+  quantity: "10000",
+  quantity_unit: "oz",
+  location: "London, UK",
+  seller: "Sample Bullion Desk Ltd",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "DAP",
+  price: "31.5",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+};
+
+const METAL_SAMPLES = [
+  { label: "Sample gold · Dubai", seed: SAMPLE_METAL_GOLD },
+  { label: "Sample copper · Zambia", seed: SAMPLE_METAL_COPPER },
+  { label: "Sample silver · London", seed: SAMPLE_METAL_SILVER },
+] as const;
 
 type VerifyResult = {
   deal_id?: string;
@@ -48,8 +96,18 @@ type PackGraph = {
   summary?: { node_count?: number; edge_count?: number };
 };
 
+const sampleButtonStyle = {
+  padding: "8px 12px",
+  background: "var(--bg)",
+  border: "1px solid var(--border)",
+  color: "var(--accent)",
+  fontWeight: 600,
+  cursor: "pointer",
+} as const;
+
 export default function DealsPage() {
   const [sellerDefault, setSellerDefault] = useState("");
+  const [dealVertical, setDealVertical] = useState<DealVertical>("energy");
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [packGraph, setPackGraph] = useState<PackGraph | null>(null);
   const [dealChanges, setDealChanges] = useState<DealChanges | null>(null);
@@ -62,6 +120,7 @@ export default function DealsPage() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     setSellerDefault(p.get("seller") ?? "");
+    if (p.get("vertical") === "metals") setDealVertical("metals");
   }, []);
 
   useEffect(() => {
@@ -177,6 +236,8 @@ export default function DealsPage() {
     );
   }
 
+  const isMetals = dealVertical === "metals";
+
   return (
     <main style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
       <p style={{ marginBottom: 8 }}>
@@ -184,7 +245,9 @@ export default function DealsPage() {
       </p>
       <h1>Deal verification</h1>
       <p style={{ color: "var(--muted)" }}>
-        Energy commodities — EN590, VLSFO, fuel oil, crude, jet. DD rules, corridor checks, OpenSanctions, relationship graph.
+        {isMetals
+          ? "Metals commodities — gold, copper, silver, concentrates. DD rules, sanctions, relationship graph."
+          : "Energy commodities — EN590, VLSFO, fuel oil, crude, jet. DD rules, corridor checks, OpenSanctions, relationship graph."}
       </p>
       {authed === false && (
         <form onSubmit={ensureAuth} style={{ display: "grid", gap: "0.75rem", marginBottom: "1.5rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)" }}>
@@ -204,23 +267,29 @@ export default function DealsPage() {
       {authed && !result && (
         <div style={{ marginBottom: "1rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)", fontSize: 13 }}>
           <p style={{ color: "var(--muted)", margin: "0 0 8px" }}>No deal verified yet — load a sample or fill the form below.</p>
-          <button
-            type="button"
-            onClick={() => setFormSeed(SAMPLE_DEAL)}
-            style={{ padding: "8px 12px", background: "var(--bg)", border: "1px solid var(--border)", color: "var(--accent)", fontWeight: 600, cursor: "pointer" }}
-          >
-            Sample VLSFO · Fujairah
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {isMetals ? (
+              METAL_SAMPLES.map(({ label, seed }) => (
+                <button key={label} type="button" onClick={() => setFormSeed({ ...seed })} style={sampleButtonStyle}>
+                  {label}
+                </button>
+              ))
+            ) : (
+              <button type="button" onClick={() => setFormSeed(SAMPLE_ENERGY_DEAL)} style={sampleButtonStyle}>
+                Sample VLSFO · Fujairah
+              </button>
+            )}
+          </div>
         </div>
       )}
       {authed && (
-        <form key={formSeed ? "sample" : sellerDefault || "default"} onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
-          {["commodity", "quantity", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi"].map((f) => (
+        <form key={formSeed ? JSON.stringify(formSeed) : sellerDefault || "default"} onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
+          {["commodity", "quantity", "quantity_unit", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi"].map((f) => (
             <label key={f} style={{ display: "grid", gap: 4, fontSize: 13 }}>
               {f}
               <input
                 name={f}
-                defaultValue={formSeed?.[f] ?? (f === "seller" ? sellerDefault : undefined)}
+                defaultValue={formSeed?.[f] ?? (f === "seller" ? sellerDefault : f === "quantity_unit" && !formSeed ? "MT" : undefined)}
                 required={f !== "buyer" && f !== "incoterm" && f !== "price" && f !== "currency" && f !== "claimed_vessel_mmsi"}
                 style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
               />
