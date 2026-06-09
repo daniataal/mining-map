@@ -1,4 +1,4 @@
-# MadSan V2 — Roadmap Status (2026-06-09)
+# MadSan V2 — Roadmap Status (2026-06-09, tip `1f745a6`)
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
@@ -40,18 +40,19 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - **Metals fix:** petroleum OSM rows excluded from metals tiles/search/summary; vertical switch resets layers
 - **EIA ticker:** WTI/Brent daily spot via EIA v2 when `EIA_API_KEY` set; honest stub tier otherwise
 - **Splink prep:** SQL duplicate clusters → pairwise CSV export (`/api/admin/dedup/companies/pairs.csv`, CLI)
-- **Pairwise dedup scoring:** `pair_score.go` — trigram + country agreement; tiers `high_confidence` / `manual_review` / `skip`; cluster list + CSV export include `match_score` + `review_tier`
-- **Cross-name dedup discovery:** `cross_name_pairs.go` + migration `013_companies_trgm_index` — pg_trgm similarity pairs across differing `normalized_name` (uncommitted)
+- **Pairwise dedup scoring:** `pair_score.go` — trigram + country agreement; tiers `high_confidence` / `manual_review` / `skip`; cluster list + CSV export include `match_score` + `review_tier` (`e934964`)
+- **Cross-name dedup discovery:** `cross_name_pairs.go` + migration `013_companies_trgm_index` — pg_trgm similarity pairs across differing `normalized_name`
 - **Deals RBAC:** `/api/deals/verify`, `/{id}/pack`, `/{id}/watch` require JWT + entitlements (`deal_verification`, `deal_pack_export`); deals UI gates on `/api/core/auth/me`
+- **RLS scaffold (dev):** migration `014_rls_scaffold` applied on dev — `usage_events` RLS + `madsan_rls` deny stub; `app_current_tenant_id()` helper; API still connects as owner (no behavior change until role cutover)
 - **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
-- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`)
+- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`); tier breakdown in report. **Petroleum OSM still fail** (~77% under-imported) — blocks Python retirement
 
 ### Partial
 
 | Item | Gap | Next step |
 |------|-----|-----------|
 | 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Human merge queue from scored pairs; Splink batch automation deferred |
-| Python ETL | Fallback only | Parity gate green in staging → retire `legacy_import.py` |
+| Python ETL | Fallback only | Licenses + vessels green; **petroleum_osm_features import** → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
 | RBAC | Cookie auth MVP | Admin ✅ · Deals ✅ · portal/billing routes next |
 | Price ticker | EIA crude when keyed | VLSFO/Gold stub; ICE/exchange feed deferred |
@@ -76,10 +77,11 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 | 10b | Dev compose (`compose_up.sh`) | Done |
 | 10e | EIA open-data ticker | Done |
 | 4d | Splink prep export | Done |
-| **4d+** | Pairwise dedup scoring (clusters + CSV) | **Done** (uncommitted on branch) |
+| **4d+** | Pairwise dedup scoring (clusters + CSV) | **Done** (`e934964`) |
 | 11a | Admin runtime health | Done |
-| **4e** | Legacy parity gate (CLI + admin panel) | **Done** (gate; Python retirement pending green run) |
-| **RBAC** | Deals route auth + entitlements | **Done** (uncommitted on branch) |
+| **4e** | Legacy parity gate (CLI + admin panel) | **Partial** — licenses + vessels pass; petroleum OSM import pending |
+| **RBAC** | Deals route auth + entitlements | **Done** (`e934964`) |
+| **12d** | RLS scaffold (`014_rls_scaffold`) | **Partial** — applied on dev; API role cutover deferred |
 | **13** | Prod compose overlay (`docker-compose.prod.yml`) | **Done** — limits, reservations, healthchecks, `linux/arm64`, named volumes, Caddy :80, no dev bind mounts |
 | **14** | Production launch checklist | **In progress** (observability, TLS, volume seed, backup) |
 
@@ -95,9 +97,9 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 
 ## Next priorities (ordered)
 
-1. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
-2. **4e** — Retire Python `legacy_import.py` after parity gate green in staging (admin panel + `legacy-parity` CLI)
-3. **4f** — Petroleum asset type backfill against live DB (`backfill-petroleum-types` dry-run → apply)
+1. **4e** — Full Go **Legacy import (all)** for `petroleum_osm_features` (no `max_rows` cap); re-run `legacy-parity` until exit 0 — **blocker for Python retirement**
+2. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
+3. **12d** — RLS role cutover (`madsan_rls` + `SET app.tenant_id`) after map/search tenant audit
 4. **Dedup merge** — Route `high_confidence` pairs into review queue; human merge workflow
 
 ## Risks
@@ -107,7 +109,7 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 - **Inferred links:** vessel-terminal and operator links are intelligence hints, not facts
 - **OpenSanctions:** screening is review-tier, not confirmation
 - **Prod volumes:** `madsan_raw_data` / `madsan_etl_data` named volumes start empty — seed before legacy import jobs
-- **Parity drift:** negative drift on critical tables blocks Python retirement; run Legacy import (all) with worker up
+- **Parity drift:** licenses + vessels pass; **petroleum_osm_features ~77% under-imported** blocks Python retirement — enqueue Legacy import (all) with worker up
 
 ## Runtime
 
