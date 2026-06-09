@@ -20,6 +20,7 @@ import (
 	"github.com/madsan/intelligence/internal/ingestion"
 	"github.com/madsan/intelligence/internal/markets"
 	"github.com/madsan/intelligence/internal/maritime"
+	"github.com/madsan/intelligence/internal/notify"
 	"github.com/madsan/intelligence/internal/realtime"
 	"github.com/madsan/intelligence/internal/search"
 	"github.com/madsan/intelligence/internal/tiles"
@@ -38,6 +39,7 @@ type Server struct {
 	tiles    *tiles.Service
 	ingest   *ingestion.Service
 	aisStats *maritime.SyncStats
+	notifier notify.Sender
 	parity   parityCache
 }
 
@@ -64,8 +66,10 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		deals:  deals.New(pool, cfg.OpenSanctionsAPIKey, cfg.EIAAPIKey),
 		search: search.New(pool),
 		tiles:  tiles.New(pool, legacyPool),
-		ingest: ingestion.New(pool, cfg),
+		ingest:   ingestion.New(pool, cfg),
+		notifier: notify.NewLogSender(log),
 	}
+	srv.deals.SetNotifier(srv.notifier)
 	srv.startAISSync()
 	return srv
 }
