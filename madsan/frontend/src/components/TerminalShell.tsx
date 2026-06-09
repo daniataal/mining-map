@@ -160,7 +160,7 @@ export default function TerminalShell() {
         <nav className="rail">
           <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("intel"); }}>⚡</button>
           <button className={vertical === "metals" ? "active" : ""} title="Metals" onClick={() => { setVertical("metals"); setPanel("intel"); }}>⛏</button>
-          <Link href="/deals" className="rail-link" title="Deals">📋</Link>
+          <Link href={vertical === "metals" ? "/deals?vertical=metals" : "/deals"} className="rail-link" title="Deals">📋</Link>
           <Link href="/portal" className="rail-link" title="Supplier portal">📤</Link>
           <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>🏭</button>
           <Link href="/admin" className="rail-link" title="Admin">⚙</Link>
@@ -222,6 +222,7 @@ export default function TerminalShell() {
             ) : (
               <EntityDossierPanel
                 selection={selected}
+                vertical={vertical}
                 onRelationshipLines={setRelationshipLines}
                 onNavigate={(feat, focus) => {
                   setSelected(feat);
