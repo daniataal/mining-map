@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -68,12 +69,9 @@ func (s *Server) adminHealthPlatform(w http.ResponseWriter, r *http.Request) {
 			paritySummary["checked_at"] = parity.CheckedAt
 			paritySummary["failed_critical"] = parity.FailedCritical
 			paritySummary["table_count"] = len(parity.Tables)
-			if parity.Passed {
-				paritySummary["summary"] = "all critical tables within 5% threshold"
-			} else if len(parity.FailedCritical) > 0 {
-				paritySummary["summary"] = "under-imported (run Legacy import all): " + strings.Join(parity.FailedCritical, ", ")
-			} else {
-				paritySummary["summary"] = "non-critical drift only (see Runtime health table)"
+			paritySummary["summary"] = s.paritySummaryText(ctx, parity)
+			if running := s.legacyImportRunning(ctx); running {
+				paritySummary["legacy_import_running"] = true
 			}
 		}
 	} else if s.cfg.LegacyDBURL == "" {
@@ -162,6 +160,57 @@ func (s *Server) cachedLegacyParity(ctx context.Context) (ingestion.ParityReport
 	s.parity.mu.Unlock()
 
 	return report, err
+}
+
+func (s *Server) legacyImportRunning(ctx context.Context) bool {
+	var running bool
+	_ = s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM ingestion_jobs
+			WHERE job_type = 'legacy_import' AND status = 'running'
+		)
+	`).Scan(&running)
+	return running
+}
+
+func (s *Server) paritySummaryText(ctx context.Context, parity ingestion.ParityReport) string {
+	if parity.Passed {
+		return "all critical tables within 5% threshold"
+	}
+	if len(parity.FailedCritical) == 0 {
+		return "non-critical drift only (see Runtime health table)"
+	}
+
+	legacyImportRunning := s.legacyImportRunning(ctx)
+	var parts []string
+	for _, tbl := range parity.FailedCritical {
+		if tbl == "petroleum_osm_features" {
+			for _, row := range parity.Tables {
+				if row.LegacyTable != tbl {
+					continue
+				}
+				importPct := 0.0
+				if row.LegacyCount > 0 {
+					importPct = float64(row.MadsanCount) / float64(row.LegacyCount) * 100
+				}
+				if legacyImportRunning {
+					parts = append(parts, fmt.Sprintf(
+						"petroleum_osm_features importing (%d/%d, %.0f%%); Go legacy_import job running",
+						row.MadsanCount, row.LegacyCount, importPct,
+					))
+				} else {
+					parts = append(parts, fmt.Sprintf(
+						"petroleum_osm_features under-imported (%d/%d, %.1f%% drift); run Legacy import (all)",
+						row.MadsanCount, row.LegacyCount, row.DriftPct,
+					))
+				}
+				break
+			}
+			continue
+		}
+		parts = append(parts, tbl+" under-imported (run Legacy import all)")
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (s *Server) refreshLegacyParity(ctx context.Context) (ingestion.ParityReport, error) {
