@@ -36,6 +36,7 @@ type NormalizedRecord struct {
 	Longitude    *float64       `json:"longitude,omitempty"`
 	Commodities  []string       `json:"commodities,omitempty"`
 	AssetType    string         `json:"asset_type,omitempty"`
+	GeomEWKB     []byte         `json:"-"` // pipeline LineString from legacy petroleum_osm_features
 	RawPayload   map[string]any `json:"raw_payload,omitempty"`
 	Unmapped     map[string]any `json:"unmapped_fields,omitempty"`
 	SourceSlug   string         `json:"source_slug"`

@@ -57,7 +57,10 @@ var legacyTableCatalog = []legacyTableSpec{
 		Query: `
 			SELECT id, layer_id, tags,
 			       ST_Y(ST_PointOnSurface(geom)) AS latitude,
-			       ST_X(ST_PointOnSurface(geom)) AS longitude
+			       ST_X(ST_PointOnSurface(geom)) AS longitude,
+			       CASE WHEN layer_id = 'pipelines'
+			            THEN ST_AsEWKB(geom)
+			       END AS geom_wkb
 			FROM petroleum_osm_features
 			WHERE geom IS NOT NULL
 			ORDER BY id OFFSET $1 LIMIT $2`,
@@ -172,6 +175,9 @@ func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, s
 			if uerr != nil {
 				continue
 			}
+			if rec.AssetType == "pipeline" && len(rec.GeomEWKB) > 0 {
+				_ = s.upsertPipelineEdge(ctx, rec)
+			}
 			if rec.EntityType == "asset" {
 				_ = s.linkAssetOperator(ctx, entityID, rec, sourceID)
 			}
@@ -248,6 +254,9 @@ func normalizeLegacyRow(spec legacyTableSpec, row map[string]any) NormalizedReco
 		rec.EntityType = "asset"
 		rec.AssetType = LayerToAssetType(fmt.Sprint(row["layer_id"]))
 		rec.Commodities = []string{"petroleum"}
+		if wkb, ok := row["geom_wkb"].([]byte); ok && len(wkb) > 0 {
+			rec.GeomEWKB = wkb
+		}
 		tags := parseTags(row["tags"])
 		rec.RawPayload["tags"] = tags
 		if name, ok := tags["name"].(string); ok && name != "" {
