@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, LAYER_REGISTRY, defaultLayerState, layersForVertical } from "@/lib/layers";
+import { API_BASE, defaultLayerState, layersForVertical } from "@/lib/layers";
+import {
+  ensureVesselImages,
+  isVesselLayerId,
+  vesselHasRotationFilter,
+  vesselIconRotate,
+  vesselNoRotationFilter,
+} from "@/lib/vesselMapIcon";
 import type { MapSelection } from "./EntityDossierPanel";
 
 type VesselMsg = {
@@ -14,6 +21,7 @@ type VesselMsg = {
   lat: number;
   lon: number;
   course?: number;
+  heading?: number;
   speed_knots?: number;
   destination?: string;
   last_seen_at?: string;
@@ -31,6 +39,8 @@ function vesselFeatures(vessels: VesselMsg[]): FeatureCollection<Point> {
         mmsi: v.mmsi,
         name: v.name ?? "",
         vessel_type: v.vessel_type ?? "",
+        course: v.course ?? null,
+        heading: v.heading ?? null,
         speed_knots: v.speed_knots ?? null,
         last_seen_at: v.last_seen_at ?? "",
         source: v.source ?? "live",
@@ -47,8 +57,88 @@ type Props = {
 };
 
 function entityTypeForLayer(layerId: string): string {
-  if (layerId === "vessels" || layerId === "live-vessels") return "vessel";
+  if (isVesselLayerId(layerId)) return "vessel";
   return "asset";
+}
+
+const VESSEL_TILE_LAYERS = ["vessels-no-heading", "vessels-ship"] as const;
+const VESSEL_LIVE_LAYERS = ["live-vessels-no-heading", "live-vessels-ship"] as const;
+
+function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: string, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  map.addLayer({
+    id: "vessels-no-heading",
+    type: "circle",
+    source: src,
+    "source-layer": sourceLayer,
+    filter: vesselNoRotationFilter,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2, 10, 5],
+      "circle-color": "#5eb3ff",
+      "circle-opacity": 0.5,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#5eb3ff",
+      "circle-stroke-opacity": 0.35,
+    },
+    layout: { visibility },
+  });
+  map.addLayer({
+    id: "vessels-ship",
+    type: "symbol",
+    source: src,
+    "source-layer": sourceLayer,
+    filter: vesselHasRotationFilter,
+    layout: {
+      visibility,
+      "icon-image": "vessel-ship",
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.55, 8, 0.75, 12, 1],
+      "icon-rotate": vesselIconRotate,
+      "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+}
+
+function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  map.addLayer({
+    id: "live-vessels-no-heading",
+    type: "circle",
+    source: "live-vessels",
+    filter: vesselNoRotationFilter,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 10, 6],
+      "circle-color": "#7ec8ff",
+      "circle-opacity": 0.55,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#7ec8ff",
+      "circle-stroke-opacity": 0.4,
+    },
+    layout: { visibility },
+  });
+  map.addLayer({
+    id: "live-vessels-ship",
+    type: "symbol",
+    source: "live-vessels",
+    filter: vesselHasRotationFilter,
+    layout: {
+      visibility,
+      "icon-image": "vessel-ship-live",
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.55, 8, 0.75, 12, 1],
+      "icon-rotate": vesselIconRotate,
+      "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+}
+
+function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  for (const lid of [...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS]) {
+    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", visibility);
+  }
 }
 
 function mvtSourceLayer(tileLayer: string): string {
@@ -159,6 +249,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
 
     const setupMap = () => {
       if (cancelled) return;
+      ensureVesselImages(map);
 
       layersForVertical(vertical).filter((l) => l.tileLayer).forEach((layer) => {
         const src = `src-${layer.id}`;
@@ -172,6 +263,10 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           addPipelineLayers(map, src, !!layers[layer.id]);
           return;
         }
+        if (layer.id === "vessels") {
+          addVesselTileLayers(map, src, mvtSourceLayer(layer.tileLayer!), !!layers[layer.id]);
+          return;
+        }
         map.addLayer({
           id: layer.id,
           type: "circle",
@@ -179,7 +274,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           "source-layer": mvtSourceLayer(layer.tileLayer!),
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
-            "circle-color": layer.id === "vessels" ? "#5eb3ff" : layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
+            "circle-color": layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
             "circle-opacity": 0.85,
             "circle-stroke-width": 1,
             "circle-stroke-color": "#0a0e14",
@@ -195,14 +290,20 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           (f) =>
             activeIds.has(f.layer.id) ||
             isPipelineLayer(f.layer.id) ||
-            (vertical === "energy" && f.layer.id === "live-vessels")
+            (vertical === "energy" && isVesselLayerId(f.layer.id))
         );
         if (!hit) {
           onSelect(null);
           return;
         }
         const props = hit.properties as MapSelection;
-        const layerId = isPipelineLayer(hit.layer.id) ? "pipelines" : hit.layer.id;
+        const layerId = isPipelineLayer(hit.layer.id)
+          ? "pipelines"
+          : isVesselLayerId(hit.layer.id)
+            ? hit.layer.id.startsWith("live-vessels")
+              ? "live-vessels"
+              : "vessels"
+            : hit.layer.id;
         onSelect({
           ...props,
           id: props.id != null ? String(props.id) : undefined,
@@ -234,19 +335,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
       });
 
       if (vertical === "energy") {
-        map.addLayer({
-          id: "live-vessels",
-          type: "circle",
-          source: "live-vessels",
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 10],
-            "circle-color": "#7ec8ff",
-            "circle-opacity": 0.95,
-            "circle-stroke-width": 1.5,
-            "circle-stroke-color": "#ffffff",
-          },
-          layout: { visibility: layers.vessels ? "visible" : "none" },
-        });
+        addLiveVesselLayers(map, !!layers.vessels);
 
         const liveByMMSI = new Map<string, Feature<Point>>();
         const applyLive = () => {
@@ -346,8 +435,8 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
         map.setLayoutProperty(l.id, "visibility", layers[l.id] ? "visible" : "none");
       }
     });
-    if (vertical === "energy" && map.getLayer("live-vessels")) {
-      map.setLayoutProperty("live-vessels", "visibility", layers.vessels ? "visible" : "none");
+    if (vertical === "energy") {
+      setVesselLayerVisibility(map, !!layers.vessels);
     }
   }, [layers, vertical]);
 
@@ -355,16 +444,32 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     <div className="map-wrap">
       <div className="layer-drawer">
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>LAYERS</div>
-        {layersForVertical(vertical).map((l) => (
-          <label key={l.id}>
-            <input
-              type="checkbox"
-              checked={!!layers[l.id]}
-              onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
-            />
-            {l.label}
-          </label>
-        ))}
+        {layersForVertical(vertical).map((l) =>
+          l.id === "vessels" && vertical === "energy" ? (
+            <div key={l.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!layers[l.id]}
+                  onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+                />
+                {l.label}
+              </label>
+              <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
+                Chevron = AIS course/heading · dot = position only
+              </div>
+            </div>
+          ) : (
+            <label key={l.id}>
+              <input
+                type="checkbox"
+                checked={!!layers[l.id]}
+                onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+              />
+              {l.label}
+            </label>
+          )
+        )}
       </div>
       <div id="map" ref={container} />
     </div>
