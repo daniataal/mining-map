@@ -144,6 +144,7 @@ function isDedupMergeItem(item: ReviewQueueItem) {
   return item.entity_type === "dedup_merge" || item.reason === "dedup_merge" || item.reason === "duplicate_company";
 }
 
+function suggestedCanonical(members?: Array<{ id: string; confidence_score?: number }>) {
   if (!members?.length) return "";
   let best = members[0];
   for (const m of members.slice(1)) {
@@ -274,24 +275,6 @@ export default function AdminPage() {
   }
 
   async function scanDuplicates() {
-    setDedupMsg("");
-    const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setDedupMsg(typeof data === "string" ? data : data?.error ?? JSON.stringify(data));
-      return;
-    }
-    const total = data.enqueued ?? 0;
-    const exact = data.exact_name_enqueued;
-    const cross = data.cross_name_enqueued;
-    const breakdown =
-      exact != null || cross != null
-        ? ` (${exact ?? 0} exact-name · ${cross ?? 0} cross-name)`
-        : "";
-    setDedupMsg(`Dedup scan: ${total} queued for review${breakdown}`);
-    refresh();
-  }
-
     setDedupMsg("");
     const res = await fetch(`${API_BASE}/api/admin/dedup/companies/scan?limit=100`, { ...fetchOpts, method: "POST" });
     const data = await res.json().catch(() => ({}));
