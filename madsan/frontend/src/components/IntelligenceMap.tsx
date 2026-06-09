@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, defaultLayerState, layersForVertical } from "@/lib/layers";
+import {
+  API_BASE,
+  defaultLayerState,
+  layersForVertical,
+  mapSourceKey,
+  metalsMapLayersActive,
+  type LayerDef,
+} from "@/lib/layers";
 import {
   ensureVesselImages,
   isVesselLayerId,
@@ -54,6 +61,13 @@ type Props = {
   onSelect: (feature: MapSelection | null) => void;
   mapFocus?: { lat: number; lng: number } | null;
   relationshipLines?: FeatureCollection;
+  onRuntimeStatus?: (status: MapRuntimeStatus) => void;
+};
+
+export type MapRuntimeStatus = {
+  wsState: "connecting" | "connected" | "disconnected" | "unavailable";
+  activeLayerCount: number;
+  lastWsAt?: string;
 };
 
 function entityTypeForLayer(layerId: string): string {
@@ -154,6 +168,35 @@ function mvtSourceLayer(tileLayer: string): string {
   }
 }
 
+function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | undefined {
+  if (layerId === "metals-mines") {
+    return ["==", ["get", "asset_type"], "mine"];
+  }
+  if (layerId === "metals-smelters") {
+    return ["in", ["get", "asset_type"], ["literal", ["smelter", "processing_plant"]]];
+  }
+  return undefined;
+}
+
+function addPointTileLayer(map: maplibregl.Map, layer: LayerDef, src: string, visible: boolean) {
+  const filter = metalsAssetFilter(layer.id);
+  map.addLayer({
+    id: layer.id,
+    type: "circle",
+    source: src,
+    "source-layer": mvtSourceLayer(layer.tileLayer!),
+    ...(filter ? { filter } : {}),
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
+      "circle-color": layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
+      "circle-opacity": 0.85,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#0a0e14",
+    },
+    layout: { visibility: visible ? "visible" : "none" },
+  });
+}
+
 const PIPELINE_LAYER_IDS = ["pipelines-hit", "pipelines", "pipelines-water"] as const;
 
 function isPipelineLayer(layerId: string): boolean {
@@ -211,14 +254,30 @@ function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
   });
 }
 
-export default function IntelligenceMap({ vertical, onSelect, mapFocus, relationshipLines }: Props) {
+export default function IntelligenceMap({ vertical, onSelect, mapFocus, relationshipLines, onRuntimeStatus }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [layers, setLayers] = useState<Record<string, boolean>>(() => defaultLayerState(vertical));
+  const [wsState, setWsState] = useState<MapRuntimeStatus["wsState"]>(() =>
+    vertical === "energy" ? "connecting" : "unavailable"
+  );
+  const [lastWsAt, setLastWsAt] = useState<string | undefined>();
 
   useEffect(() => {
     setLayers(defaultLayerState(vertical));
+    setWsState(vertical === "energy" ? "connecting" : "unavailable");
+    setLastWsAt(undefined);
   }, [vertical]);
+
+  const activeLayerCount = Object.values(layers).filter(Boolean).length;
+
+  useEffect(() => {
+    onRuntimeStatus?.({
+      wsState: vertical === "energy" ? wsState : "unavailable",
+      activeLayerCount,
+      lastWsAt,
+    });
+  }, [wsState, activeLayerCount, lastWsAt, vertical, onRuntimeStatus]);
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
@@ -251,37 +310,32 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
       if (cancelled) return;
       ensureVesselImages(map);
 
-      layersForVertical(vertical).filter((l) => l.tileLayer).forEach((layer) => {
-        const src = `src-${layer.id}`;
-        map.addSource(src, {
-          type: "vector",
-          tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
-          minzoom: layer.id === "pipelines" ? 4 : 0,
-          maxzoom: 14,
+      const sourcesAdded = new Set<string>();
+      layersForVertical(vertical)
+        .filter((l) => l.tileLayer && (vertical === "energy" || l.vertical !== "energy"))
+        .forEach((layer) => {
+          const src = mapSourceKey(layer);
+          if (!sourcesAdded.has(src)) {
+            map.addSource(src, {
+              type: "vector",
+              tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
+              minzoom: layer.tileLayer === "pipelines" ? 4 : 0,
+              maxzoom: 14,
+            });
+            sourcesAdded.add(src);
+          }
+          if (layer.id === "pipelines") {
+            if (vertical === "energy") {
+              addPipelineLayers(map, src, !!layers[layer.id]);
+            }
+            return;
+          }
+          if (layer.id === "vessels") {
+            addVesselTileLayers(map, src, mvtSourceLayer(layer.tileLayer!), !!layers[layer.id]);
+            return;
+          }
+          addPointTileLayer(map, layer, src, !!layers[layer.id]);
         });
-        if (layer.id === "pipelines") {
-          addPipelineLayers(map, src, !!layers[layer.id]);
-          return;
-        }
-        if (layer.id === "vessels") {
-          addVesselTileLayers(map, src, mvtSourceLayer(layer.tileLayer!), !!layers[layer.id]);
-          return;
-        }
-        map.addLayer({
-          id: layer.id,
-          type: "circle",
-          source: src,
-          "source-layer": mvtSourceLayer(layer.tileLayer!),
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
-            "circle-color": layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
-            "circle-opacity": 0.85,
-            "circle-stroke-width": 1,
-            "circle-stroke-color": "#0a0e14",
-          },
-          layout: { visibility: layers[layer.id] ? "visible" : "none" },
-        });
-      });
 
       map.on("click", (e) => {
         const feats = map.queryRenderedFeatures(e.point);
@@ -347,6 +401,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
         try {
           ws = new WebSocket(wsUrl);
           ws.onmessage = (ev) => {
+            setLastWsAt(new Date().toISOString());
             try {
               const msg = JSON.parse(ev.data as string) as {
                 type?: string;
@@ -371,6 +426,7 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
             }
           };
           ws.onopen = () => {
+            setWsState("connected");
             const sendSub = () => {
               if (ws?.readyState !== WebSocket.OPEN) return;
               const b = map.getBounds();
@@ -384,7 +440,10 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
             map.on("moveend", sendSub);
             sendSub();
           };
+          ws.onclose = () => setWsState("disconnected");
+          ws.onerror = () => setWsState("disconnected");
         } catch {
+          setWsState("unavailable");
           /* WS optional in dev */
         }
       }
@@ -440,12 +499,28 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     }
   }, [layers, vertical]);
 
+  const showMetalsEmpty = vertical === "metals" && !metalsMapLayersActive(layers);
+
   return (
     <div className="map-wrap">
       <div className="layer-drawer">
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>LAYERS</div>
         {layersForVertical(vertical).map((l) =>
-          l.id === "vessels" && vertical === "energy" ? (
+          l.drawerHint ? (
+            <div key={l.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!layers[l.id]}
+                  onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+                />
+                {l.label}
+              </label>
+              <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
+                {l.drawerHint}
+              </div>
+            </div>
+          ) : l.id === "vessels" && vertical === "energy" ? (
             <div key={l.id}>
               <label>
                 <input
@@ -471,6 +546,16 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           )
         )}
       </div>
+      {showMetalsEmpty && (
+        <div className="map-empty-state" role="status">
+          <strong>No metals layers visible</strong>
+          <p>
+            Toggle <span>Mining licenses</span> or <span>Smelters &amp; plants</span> above.
+            License cadastre coverage is partial — many jurisdictions are not ingested yet.
+            Petroleum OSM infrastructure stays on the energy vertical only.
+          </p>
+        </div>
+      )}
       <div id="map" ref={container} />
     </div>
   );

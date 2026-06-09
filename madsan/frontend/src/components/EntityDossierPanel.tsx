@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
+import { confidenceTierClass } from "@/lib/confidenceTier";
 import { API_BASE } from "@/lib/layers";
 
 export type MapSelection = {
@@ -79,6 +80,7 @@ type RelationshipEdge = {
 
 type Props = {
   selection: MapSelection | null;
+  vertical?: "energy" | "metals";
   onNavigate?: (selection: MapSelection, focus?: { lat: number; lng: number }) => void;
   onRelationshipLines?: (lines: FeatureCollection) => void;
 };
@@ -108,14 +110,7 @@ function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-function badgeClass(score?: number, status?: string) {
-  if (score != null && score >= 80) return "verified";
-  if (status === "verified") return "verified";
-  if (status === "partial") return "partial";
-  return "warn";
-}
-
-export default function EntityDossierPanel({ selection, onNavigate, onRelationshipLines }: Props) {
+export default function EntityDossierPanel({ selection, vertical = "energy", onNavigate, onRelationshipLines }: Props) {
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -179,11 +174,22 @@ export default function EntityDossierPanel({ selection, onNavigate, onRelationsh
   }, [dossier, onRelationshipLines]);
 
   if (!selection) {
+    if (vertical === "metals") {
+      return (
+        <>
+          <p>Click a mine, license polygon, or smelter to inspect cadastre-backed intelligence.</p>
+          <p>Layers: mining licenses (partial global coverage), smelters &amp; processing plants.</p>
+          <p className="disclaimer">
+            License cadastre is incomplete — missing jurisdictions are not shown as empty confirmation.
+            Petroleum OSM assets appear on the energy vertical only.
+          </p>
+        </>
+      );
+    }
     return (
       <>
         <p>Click a map feature to inspect evidence-backed intelligence.</p>
-        <p>Energy layers: tank farms, terminals, refineries, vessels, prices.</p>
-        <p>Metals layers: mines, smelters, licenses, trade routes.</p>
+        <p>Energy layers: tank farms, terminals, refineries, vessels, pipelines.</p>
         <p className="disclaimer">Provider coverage varies by region. Missing data is shown honestly.</p>
       </>
     );
@@ -201,12 +207,12 @@ export default function EntityDossierPanel({ selection, onNavigate, onRelationsh
     <div style={{ fontSize: 13 }}>
       <h3 style={{ margin: "0 0 0.5rem" }}>{dossier.name}</h3>
       <div style={{ marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <span className={`badge ${badgeClass(score, dossier.confidence?.status)}`}>
-          {dossier.entity_type} · conf {score ?? "—"} {dossier.confidence?.status ? `(${dossier.confidence.status})` : ""}
+        <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
+          {dossier.entity_type} · {score ?? "—"}
         </span>
         {dossier.opportunity_score != null && (
-          <span className={`badge ${badgeClass(dossier.opportunity_score)}`}>
-            opportunity {Math.round(dossier.opportunity_score)}
+          <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
+            opp {Math.round(dossier.opportunity_score)}
           </span>
         )}
       </div>
@@ -309,7 +315,10 @@ export default function EntityDossierPanel({ selection, onNavigate, onRelationsh
       )}
 
       {dossier.entity_type === "company" && (
-        <Link href={`/deals?seller=${encodeURIComponent(dossier.name)}`} style={{ fontSize: 12 }}>
+        <Link
+          href={`/deals?seller=${encodeURIComponent(dossier.name)}${vertical === "metals" ? "&vertical=metals" : ""}`}
+          style={{ fontSize: 12 }}
+        >
           Verify deal with this seller →
         </Link>
       )}
