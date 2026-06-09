@@ -1,6 +1,9 @@
 package ingestion
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLegacyParityCatalog(t *testing.T) {
 	catalog := LegacyParityCatalog()
@@ -18,6 +21,50 @@ func TestLegacyParityCatalog(t *testing.T) {
 		if spec.LegacyCountSQL == "" || spec.MadsanCountSQL == "" {
 			t.Fatalf("missing SQL for %q", spec.LegacyTable)
 		}
+	}
+	for _, spec := range catalog {
+		if spec.LegacyTable == "licenses" && !strings.Contains(spec.LegacyCountSQL, "DISTINCT") {
+			t.Fatal("licenses parity must use distinct importable keys, not raw row count")
+		}
+	}
+}
+
+func TestLicenseTierSQLDefined(t *testing.T) {
+	if licenseTierSQL == "" {
+		t.Fatal("licenseTierSQL must be defined")
+	}
+	for _, col := range []string{
+		"legacy_total", "not_importable_no_coords", "import_pool_geocoded",
+		"expected_skip_empty_name", "expected_dedup_keys",
+	} {
+		if !strings.Contains(licenseTierSQL, col) {
+			t.Fatalf("licenseTierSQL missing %q", col)
+		}
+	}
+}
+
+func TestLicenseImportTiersJSON(t *testing.T) {
+	tiers := LicenseImportTiers{
+		LegacyTotal: 75671, NotImportableNoCoords: 2559, ImportPoolGeocoded: 73112,
+		ExpectedSkipEmptyName: 0, ExpectedDedupKeys: 45506, UnderImportGap: 3,
+	}
+	report := ParityReport{
+		Passed: true, ThresholdPct: 5,
+		Tables: []ParityTableResult{{
+			LegacyTable: "licenses", MadsanTarget: "assets(legacy_licenses)",
+			LegacyCount: 45506, MadsanCount: 45503, Drift: -3, DriftPct: 0.01,
+			Critical: true, OK: true, LicenseTiers: &tiers,
+		}},
+	}
+	out, err := ParityReportJSON(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "license_tiers") {
+		t.Fatal("expected license_tiers in JSON")
+	}
+	if !strings.Contains(string(out), "under_import_gap") {
+		t.Fatal("expected under_import_gap in JSON")
 	}
 }
 
