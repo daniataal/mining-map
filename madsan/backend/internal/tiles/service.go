@@ -88,20 +88,31 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 				  AND ` + tileFilter + `
 			) mvt`
 	case "pipelines":
-		if s.legacyPool == nil || z < pipelineMinZoom {
+		if z < pipelineMinZoom {
 			w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		err := s.legacyPool.QueryRow(r.Context(), pipelineMVTQuery, z, x, y, layerName).Scan(&tile)
-		if err != nil || len(tile) == 0 {
-			w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
-			w.WriteHeader(http.StatusOK)
-			return
+		if s.pool != nil {
+			err := s.pool.QueryRow(r.Context(), pipelineGraphMVTQuery, z, x, y, layerName).Scan(&tile)
+			if err == nil && len(tile) > 0 {
+				w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+				w.Header().Set("Cache-Control", "public, max-age=120")
+				_, _ = w.Write(tile)
+				return
+			}
+		}
+		if s.legacyPool != nil {
+			err := s.legacyPool.QueryRow(r.Context(), pipelineLegacyMVTQuery, z, x, y, layerName).Scan(&tile)
+			if err == nil && len(tile) > 0 {
+				w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+				w.Header().Set("Cache-Control", "public, max-age=120")
+				_, _ = w.Write(tile)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		_, _ = w.Write(tile)
+		w.WriteHeader(http.StatusOK)
 		return
 	default:
 		query = `

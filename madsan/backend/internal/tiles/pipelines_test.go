@@ -11,9 +11,25 @@ func TestPipelineMinZoom(t *testing.T) {
 	}
 }
 
-func TestPipelineMVTQueryPresent(t *testing.T) {
-	if pipelineMVTQuery == "" {
-		t.Fatal("pipelineMVTQuery must be defined")
+func TestPipelineGraphMVTQueryPresent(t *testing.T) {
+	if pipelineGraphMVTQuery == "" {
+		t.Fatal("pipelineGraphMVTQuery must be defined")
+	}
+	for _, needle := range []string{
+		"pipeline_graph_edges",
+		"metadata->'tags'",
+		"pipeline_substance",
+		"ST_AsMVTGeom",
+	} {
+		if !strings.Contains(pipelineGraphMVTQuery, needle) {
+			t.Fatalf("pipelineGraphMVTQuery missing %q", needle)
+		}
+	}
+}
+
+func TestPipelineLegacyMVTQueryPresent(t *testing.T) {
+	if pipelineLegacyMVTQuery == "" {
+		t.Fatal("pipelineLegacyMVTQuery must be defined")
 	}
 	for _, needle := range []string{
 		"petroleum_osm_features",
@@ -21,8 +37,21 @@ func TestPipelineMVTQueryPresent(t *testing.T) {
 		"pipeline_substance",
 		"ST_AsMVTGeom",
 	} {
-		if !strings.Contains(pipelineMVTQuery, needle) {
-			t.Fatalf("pipelineMVTQuery missing %q", needle)
+		if !strings.Contains(pipelineLegacyMVTQuery, needle) {
+			t.Fatalf("pipelineLegacyMVTQuery missing %q", needle)
+		}
+	}
+}
+
+func TestPipelineSubstanceCaseShared(t *testing.T) {
+	graph := pipelineSubstanceCase("e.metadata->'tags'")
+	legacy := pipelineSubstanceCase("f.tags")
+	for _, substance := range []string{"water", "oil", "gas", "unknown"} {
+		if !strings.Contains(graph, "'"+substance+"'") {
+			t.Fatalf("graph substance case missing %q", substance)
+		}
+		if !strings.Contains(legacy, "'"+substance+"'") {
+			t.Fatalf("legacy substance case missing %q", substance)
 		}
 	}
 }
