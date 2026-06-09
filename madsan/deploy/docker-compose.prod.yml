@@ -1,0 +1,166 @@
+# MadSan V2 — production overlay for a ~23 GiB linux/arm64 VM.
+#
+# Stack memory budget (limits): ~7.2 GiB — leaves headroom for OS, journald, and
+# host-side legacy mining-db. Tune via MADSAN_*_MEM_LIMIT in deploy/.env.
+#
+# Usage (from repo root):
+#   cp madsan/deploy/.env.example madsan/deploy/.env   # secrets + LEGACY_DATABASE_URL
+#   docker compose -f madsan/deploy/docker-compose.yml \
+#     -f madsan/deploy/docker-compose.prod.yml \
+#     --profile proxy up -d --build
+#
+# Rollback: drop the prod overlay file from the command (reverts to dev compose).
+#
+# Notes:
+# - No host bind mounts for ../raw or ../etl; seed named volumes once if ingestion needs them.
+# - DB/API/frontend are internal-only; Caddy terminates HTTP on :80.
+# - Legacy mining-db stays on host or remote — set LEGACY_DATABASE_URL in deploy/.env.
+
+x-prod-resources-db: &prod-resources-db
+  mem_limit: ${MADSAN_DB_MEM_LIMIT:-4g}
+  mem_reservation: ${MADSAN_DB_MEM_RESERVATION:-3g}
+  cpus: ${MADSAN_DB_CPUS:-2.0}
+
+x-prod-resources-api: &prod-resources-api
+  mem_limit: ${MADSAN_API_MEM_LIMIT:-1536m}
+  mem_reservation: ${MADSAN_API_MEM_RESERVATION:-1g}
+  cpus: ${MADSAN_API_CPUS:-1.5}
+
+x-prod-resources-worker: &prod-resources-worker
+  mem_limit: ${MADSAN_WORKER_MEM_LIMIT:-768m}
+  mem_reservation: ${MADSAN_WORKER_MEM_RESERVATION:-512m}
+  cpus: ${MADSAN_WORKER_CPUS:-1.0}
+
+x-prod-resources-scheduler: &prod-resources-scheduler
+  mem_limit: ${MADSAN_SCHEDULER_MEM_LIMIT:-256m}
+  mem_reservation: ${MADSAN_SCHEDULER_MEM_RESERVATION:-128m}
+  cpus: ${MADSAN_SCHEDULER_CPUS:-0.5}
+
+x-prod-resources-frontend: &prod-resources-frontend
+  mem_limit: ${MADSAN_FRONTEND_MEM_LIMIT:-512m}
+  mem_reservation: ${MADSAN_FRONTEND_MEM_RESERVATION:-384m}
+  cpus: ${MADSAN_FRONTEND_CPUS:-1.0}
+
+x-prod-resources-caddy: &prod-resources-caddy
+  mem_limit: ${MADSAN_CADDY_MEM_LIMIT:-128m}
+  mem_reservation: ${MADSAN_CADDY_MEM_RESERVATION:-64m}
+  cpus: ${MADSAN_CADDY_CPUS:-0.5}
+
+x-prod-health-db: &prod-health-db
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d madsan_db"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+x-prod-health-api: &prod-health-api
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+    interval: 20s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+x-prod-health-worker: &prod-health-worker
+  healthcheck:
+    test: ["CMD-SHELL", "kill -0 1 2>/dev/null || exit 1"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 20s
+
+x-prod-health-frontend: &prod-health-frontend
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 45s
+
+x-prod-health-caddy: &prod-health-caddy
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:80/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 15s
+
+services:
+  madsan-db:
+    <<: [*prod-resources-db, *prod-health-db]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 30s
+    ports: !reset []
+
+  madsan-api:
+    <<: [*prod-resources-api, *prod-health-api]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 20s
+    ports: !reset []
+    environment:
+      MADSAN_RUN_MIGRATIONS: ${MADSAN_RUN_MIGRATIONS:-true}
+
+  madsan-worker:
+    <<: [*prod-resources-worker, *prod-health-worker]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 30s
+    volumes: !override
+      - madsan_raw_data:/raw:ro
+      - madsan_etl_data:/etl:ro
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+      madsan-api:
+        condition: service_healthy
+
+  madsan-scheduler:
+    <<: [*prod-resources-scheduler, *prod-health-worker]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 15s
+    volumes: !override
+      - madsan_raw_data:/raw:ro
+    depends_on:
+      madsan-db:
+        condition: service_healthy
+      madsan-api:
+        condition: service_healthy
+
+  madsan-frontend:
+    <<: [*prod-resources-frontend, *prod-health-frontend]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 15s
+    ports: !reset []
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost}
+    depends_on:
+      madsan-api:
+        condition: service_healthy
+
+  caddy:
+    <<: [*prod-resources-caddy, *prod-health-caddy]
+    restart: always
+    stop_grace_period: 10s
+    ports: !reset
+      - "${MADSAN_CADDY_HTTP:-80}:80"
+    depends_on:
+      madsan-api:
+        condition: service_healthy
+      madsan-frontend:
+        condition: service_healthy
+
+volumes:
+  madsan_raw_data:
+    name: madsan_raw_data
+  madsan_etl_data:
+    name: madsan_etl_data

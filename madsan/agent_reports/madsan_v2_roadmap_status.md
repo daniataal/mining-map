@@ -35,27 +35,53 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 - Dossiers: company/asset/vessel, signals, signal history, relationships
 - Deals: verify, sanctions, pack export (json/md/html), relationship graph in pack
 - Admin console, metals vertical, global search
+- **Git:** `madsan/` committed on branch `new-refactor-eng-style` (~159 tracked files)
+- **Admin health:** `/admin` runtime panel + `GET /api/admin/health/runtime` (AIS sync, legacy parity drift)
+- **Metals fix:** petroleum OSM rows excluded from metals tiles/search/summary; vertical switch resets layers
+- **EIA ticker:** WTI/Brent daily spot via EIA v2 when `EIA_API_KEY` set; honest stub tier otherwise
+- **Splink prep:** SQL duplicate clusters → pairwise CSV export (`/api/admin/dedup/companies/pairs.csv`, CLI)
+- **Pairwise dedup scoring:** `pair_score.go` — trigram + country agreement; tiers `high_confidence` / `manual_review` / `skip`; cluster list + CSV export include `match_score` + `review_tier`
+- **Cross-name dedup discovery:** `cross_name_pairs.go` + migration `013_companies_trgm_index` — pg_trgm similarity pairs across differing `normalized_name` (uncommitted)
+- **Deals RBAC:** `/api/deals/verify`, `/{id}/pack`, `/{id}/watch` require JWT + entitlements (`deal_verification`, `deal_pack_export`); deals UI gates on `/api/core/auth/me`
+- **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
+- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`)
 
 ### Partial
 
 | Item | Gap | Next step |
 |------|-----|-----------|
-| 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Splink dedup queue or keep SQL DISTINCT for MVP |
-| Python ETL | Fallback only | Parity test → retire `legacy_import.py` |
+| 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Human merge queue from scored pairs; Splink batch automation deferred |
+| Python ETL | Fallback only | Parity gate green in staging → retire `legacy_import.py` |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
-| RBAC | Cookie auth MVP | Admin routes require auth ✅; deals routes next |
-| Runtime health | AIS + parity visibility | Admin `/admin` health panel + `/api/admin/health/runtime` ✅ |
+| RBAC | Cookie auth MVP | Admin ✅ · Deals ✅ · portal/billing routes next |
 | Price ticker | EIA crude when keyed | VLSFO/Gold stub; ICE/exchange feed deferred |
-| `madsan/` in git | Untracked | User-approved initial commit |
-| Compose cutover | **Done (dev)** | `compose_up.sh` — db+api+worker+scheduler+frontend; optional Caddy `:9080` |
+| Compose cutover | Prod overlay ready | Seed named volumes + Caddy deploy on ARM VM |
+| Production launch | Checklist not run | Phase 14 — observability, backup cron, TLS |
 
 ### Not started (original plan)
 
 - River job queue
-- Splink entity resolution
-- MCR v2, Comtrade/EIA ingest
-- Billing, observability, production launch checklist
+- Splink entity resolution (automated merge from scored pairs)
+- MCR v2, Comtrade ingest
+- Billing, full observability stack
 - Full supplier portal workflow
+
+## Execution plan sync
+
+Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md`:
+
+| Phase | Item | Status |
+|-------|------|--------|
+| **3** | Scheduler + worker + job queue | **Done** |
+| 10b | Dev compose (`compose_up.sh`) | Done |
+| 10e | EIA open-data ticker | Done |
+| 4d | Splink prep export | Done |
+| **4d+** | Pairwise dedup scoring (clusters + CSV) | **Done** (uncommitted on branch) |
+| 11a | Admin runtime health | Done |
+| **4e** | Legacy parity gate (CLI + admin panel) | **Done** (gate; Python retirement pending green run) |
+| **RBAC** | Deals route auth + entitlements | **Done** (uncommitted on branch) |
+| **13** | Prod compose overlay (`docker-compose.prod.yml`) | **Done** — limits, reservations, healthchecks, `linux/arm64`, named volumes, Caddy :80, no dev bind mounts |
+| **14** | Production launch checklist | **In progress** (observability, TLS, volume seed, backup) |
 
 ## Architecture alignment
 
@@ -69,25 +95,51 @@ North star: **discover → verify → price → execute** (honest tiers, evidenc
 
 ## Next priorities (ordered)
 
-1. **4d** — Splink batch dedup (**prep done**: SQL clusters → pairwise CSV export; Splink scoring next)
-2. **10d** — Git initial commit of `madsan/` (user approval)
-3. **4e** — Retire Python `legacy_import.py` after parity tests (use admin parity panel + `legacy-parity` CLI)
-4. **10g** — Production compose tuning (`docker-compose.prod.yml` skeleton: memory limits, restart policies)
-5. **4f** — Petroleum asset type backfill against live DB (`backfill-petroleum-types` dry-run → apply)
+1. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
+2. **4e** — Retire Python `legacy_import.py` after parity gate green in staging (admin panel + `legacy-parity` CLI)
+3. **4f** — Petroleum asset type backfill against live DB (`backfill-petroleum-types` dry-run → apply)
+4. **Dedup merge** — Route `high_confidence` pairs into review queue; human merge workflow
 
 ## Risks
 
-- **API OOM (exit 137):** restart via `start_api.sh`; consider limiting AIS batch size
-- **Duplicate companies:** 18.7k rows with ETL duplicates; search deduped, DB not merged
+- **API OOM (exit 137):** prod overlay caps API at 1536m; monitor AIS batch size via admin health
+- **Duplicate companies:** 18.7k rows with ETL duplicates; search deduped, DB not merged until review queue actions
 - **Inferred links:** vessel-terminal and operator links are intelligence hints, not facts
 - **OpenSanctions:** screening is review-tier, not confirmation
+- **Prod volumes:** `madsan_raw_data` / `madsan_etl_data` named volumes start empty — seed before legacy import jobs
+- **Parity drift:** negative drift on critical tables blocks Python retirement; run Legacy import (all) with worker up
 
-## Runtime (dev)
+## Runtime
+
+**Dev (hybrid or full Docker):**
 
 ```bash
-./madsan/scripts/start_api.sh          # :8088
-cd madsan/backend && go run ./cmd/worker
-cd madsan/frontend && npm run dev      # :3000
+./madsan/scripts/compose_up.sh              # dev stack :8088 / :3001
+./madsan/scripts/start_api.sh               # API only on host
+cd madsan/frontend && npm run dev           # :3000
 ```
 
-DB: `deploy-madsan-db-1` :5433 · Legacy: `mining-db` :5434
+**Prod overlay (~23 GiB ARM VM):**
+
+```bash
+cp madsan/deploy/.env.example madsan/deploy/.env   # secrets + LEGACY_DATABASE_URL
+docker compose -f madsan/deploy/docker-compose.yml \
+  -f madsan/deploy/docker-compose.prod.yml \
+  --profile proxy up -d --build
+# Browser → http://<vm>:80  (Caddy); set NEXT_PUBLIC_API_URL to same origin
+```
+
+Seed named volumes once (if ingestion needs host files):
+
+```bash
+docker run --rm -v madsan_raw_data:/dest -v "$PWD/madsan/raw":/src:ro alpine cp -a /src/. /dest/
+docker run --rm -v madsan_etl_data:/dest -v "$PWD/madsan/etl":/src:ro alpine cp -a /src/. /dest/
+```
+
+**Parity check (before Python retirement):**
+
+```bash
+cd madsan/backend && go run ./cmd/legacy-parity   # exit 0 = gate pass
+```
+
+DB (dev): `deploy-madsan-db-1` :5433 · Legacy: `mining-db` :5434
