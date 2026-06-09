@@ -61,9 +61,10 @@ import CanvasLiveDealLayer from './petroleum/CanvasLiveDealLayer';
 import OsmPetroleumMapLayers from './petroleum/OsmPetroleumMapLayers';
 import StorageTankFarmsMapLayer from './petroleum/StorageTankFarmsMapLayer';
 import GemGoitPipelineMapLayer from './petroleum/GemGoitPipelineMapLayer';
+import GemPipelineCanvasMapLayer from './petroleum/GemPipelineCanvasMapLayer';
 import GemGgitGasPipelineMapLayer from './petroleum/GemGgitGasPipelineMapLayer';
-import NearbySuppliersPanel from './petroleum/NearbySuppliersPanel';
 import NearbySuppliersMapLayer from './petroleum/NearbySuppliersMapLayer';
+import { isStorageMapEntity } from '../lib/storageEntityKinds';
 import { useNearbySuppliers } from '../lib/nearbySuppliers';
 import GemPointMarkerLayer from './petroleum/GemPointMarkerLayer';
 import GemPetroleumCanvasOverviewLayer from './petroleum/GemPetroleumCanvasOverviewLayer';
@@ -172,6 +173,7 @@ import { useQuery } from '@tanstack/react-query';
 import MaritimeAdvancedControls from './map/MaritimeAdvancedControls';
 import { useCountryBordersLayer } from './map/useCountryBordersLayer';
 import { resolvePetroleumViewportBounds } from '../lib/petroleumLayers';
+import { quantizePetroleumViewportBounds } from '../lib/petroleumViewportBounds';
 import { useLicenseDisplayData } from './map/useLicenseDisplayData';
 import { useLicenseInteractions } from './map/useLicenseInteractions';
 import { useLicenseMarkerVisuals } from './map/useLicenseMarkerVisuals';
@@ -451,6 +453,11 @@ interface MapComponentProps {
     selection: import('../features/infrastructure/InfrastructureFeatureDrawer').InfrastructureFeatureSelection,
   ) => void;
   onDismissInfrastructureFeature?: () => void;
+  shouldFetchBunkerSuppliers?: boolean;
+  bunkerRegistryLayout?: 'closed' | 'full' | 'split';
+  bunkerRegistrySelectedId?: string | null;
+  onBunkerMarkerSelect?: (supplier: import('../lib/nearbySuppliers').NearbySupplier) => void;
+  onViewBunkerInRegistry?: (supplier: import('../lib/nearbySuppliers').NearbySupplier) => void;
   /** Comtrade/Census macro country-pair arcs (gray). */
   macroTradeFlowsEnabled?: boolean;
   macroTradeFlows?: MacroTradeFlow[];
@@ -1180,6 +1187,11 @@ export default function MapComponent({
   onInfrastructureLayerChange,
   onInfrastructureFeatureClick,
   onDismissInfrastructureFeature,
+  shouldFetchBunkerSuppliers = true,
+  bunkerRegistryLayout = 'closed',
+  bunkerRegistrySelectedId,
+  onBunkerMarkerSelect,
+  onViewBunkerInRegistry,
   macroTradeFlowsEnabled = false,
   macroTradeFlows = [],
   globalMacroTradeOn = true,
@@ -1277,7 +1289,6 @@ export default function MapComponent({
     const [oilAndGasDisplayMode, setOilAndGasDisplayMode] = useState<OilAndGasDisplayMode>('combined');
     const [petroleumMapZoom, setPetroleumMapZoom] = useState(5);
     const [maritimeMapZoom, setMaritimeMapZoom] = useState(5);
-    const [petroleumDetailZoom, setPetroleumDetailZoom] = useState(5);
     const [overlayMapZoom, setOverlayMapZoom] = useState(5);
     const [maritimeTankerView, setMaritimeTankerView] = useState<MaritimeTankerView>('worldwide');
     const [maritimeAdvancedOpen, setMaritimeAdvancedOpen] = useState(false);
@@ -1472,19 +1483,18 @@ export default function MapComponent({
         oilGasLayersEnabled && assetsPetroleumPrefs.showBunkerSuppliers;
     const oilGasOsmLayerVisibility = assetsPetroleumPrefs.osmLayerVisibility;
     const esgZonesVisible = !assetLayerVisibility || assetLayerVisibility.esg_zones;
-    const oilGasBbox = useMemo(
-        () => resolvePetroleumViewportBounds(oilGasMapViewport),
-        [oilGasMapViewport],
-    );
+    const oilGasBbox = useMemo(() => {
+        const raw = resolvePetroleumViewportBounds(oilGasMapViewport);
+        return raw ? quantizePetroleumViewportBounds(raw) : null;
+    }, [oilGasMapViewport]);
     const infrastructureLayersTrackViewport =
         showInfrastructureLayers && !isLiveDataView && !isOilAndGasView;
-    const effectiveInfrastructureBbox = useMemo(
-        () =>
-            resolvePetroleumViewportBounds(
-                infrastructureMapBbox ?? localInfrastructureViewport,
-            ),
-        [infrastructureMapBbox, localInfrastructureViewport],
-    );
+    const effectiveInfrastructureBbox = useMemo(() => {
+        const raw = resolvePetroleumViewportBounds(
+            infrastructureMapBbox ?? localInfrastructureViewport,
+        );
+        return raw ? quantizePetroleumViewportBounds(raw) : null;
+    }, [infrastructureMapBbox, localInfrastructureViewport]);
     const infrastructurePipelinesOn = Boolean(
         showInfrastructureLayers && infrastructureLayerVisibility?.pipelines,
     );
@@ -1521,8 +1531,8 @@ export default function MapComponent({
     const pipelineInteractionBbox = isOilAndGasView ? oilGasBbox : effectiveInfrastructureBbox;
     const pipelineInteractionZoom = isOilAndGasView ? petroleumMapZoom : infrastructureMapZoom;
     // Unconditional hook calls — must not be inside conditional JSX (Rules of Hooks).
-    const gemPlantQueryResult = useGemPlantGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumDetailZoom);
-    const gemLngQueryResult = useGemLngGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumDetailZoom);
+    const gemPlantQueryResult = useGemPlantGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumMapZoom);
+    const gemLngQueryResult = useGemLngGeoJson(oilGasBbox, oilGasLayersEnabled, petroleumMapZoom);
     const storageInViewCount = useMemo(
         () =>
             isOilAndGasView
@@ -1532,7 +1542,7 @@ export default function MapComponent({
     );
     const nearbySuppliersQuery = useNearbySuppliers(
         oilGasBbox,
-        bunkerSuppliersEnabled,
+        bunkerSuppliersEnabled && shouldFetchBunkerSuppliers,
     );
 
     const maritimeDrawRecords = useMemo(
@@ -1581,11 +1591,6 @@ export default function MapComponent({
         setMaritimeViewport(null);
         setMaritimeAdvancedOpen(false);
     }, [isMaritimeMapView]);
-
-    useEffect(() => {
-        const timer = window.setTimeout(() => setPetroleumDetailZoom(petroleumMapZoom), 400);
-        return () => window.clearTimeout(timer);
-    }, [petroleumMapZoom]);
 
     useEffect(() => {
         if (!isMaritimeLayerEnabled) setMaritimeAdvancedOpen(false);
@@ -1896,6 +1901,7 @@ export default function MapComponent({
 
     return (
         <div className="w-full h-full relative bg-slate-100 dark:bg-slate-900">
+            {/* Z-index ladder: map tiles 0; overlays 900; status 955; drawers 1150; registry 1160 */}
             <MapOverlayStatusPanel
                 t={t}
                 licensesFetchPending={licensesFetchPending}
@@ -1903,13 +1909,7 @@ export default function MapComponent({
                 licensesSecondaryStatus={licensesSecondaryStatus}
                 licenseMarkersCapped={licenseMarkersCapped}
                 licenseMapDomMarkerCap={LICENSE_MAP_DOM_MARKER_CAP}
-                showWorldCountrySummaryNotice={
-                    countriesLensActive &&
-                    licenseServerClusterMode &&
-                    licenseMapZoom != null &&
-                    licenseMapZoom < SERVER_CLUSTER_MIN_DRILL_ZOOM &&
-                    displayData.some(isCountryLicenseSummary)
-                }
+                showWorldCountrySummaryNotice={false}
                 borderCountriesCapped={borderCountriesCapped}
                 borderGeoJsonMatchesMarkers={borderGeoJsonMatchesMarkers}
                 borderCountryCap={LICENSE_MAP_BORDER_COUNTRY_CAP}
@@ -1974,23 +1974,14 @@ export default function MapComponent({
                 </div>
               </div>
             )}
-            {isOilAndGasView && onGroundVisible && bunkerSuppliersEnabled && (
-                <div className="absolute left-1/2 -translate-x-1/2 top-3 z-[955] pointer-events-none px-2 w-full max-w-[540px] flex flex-col items-center gap-2">
+            {isOilAndGasView && onGroundVisible && oilGasLayersEnabled && (
+                <div className="pointer-events-none absolute right-3 top-[7.5rem] z-[900] max-w-[280px] px-0">
                     <InfrastructureCoverageBanner
                         bbox={oilGasBbox}
                         enabled={oilGasLayersEnabled}
                         storageInView={storageInViewCount}
                         tankFarmsEnabled={assetsPetroleumPrefs.showStorageTankFarms}
                         tankFarmCatalogTotal={storageEntities.length}
-                    />
-                    <NearbySuppliersPanel
-                        suppliers={nearbySuppliersQuery.data?.suppliers ?? []}
-                        loading={nearbySuppliersQuery.isLoading}
-                        onOpenDossier={(item) => {
-                            onSelectMaritimeVessel(null);
-                            onDismissInfrastructureFeature?.();
-                            setSelectedItem(item);
-                        }}
                     />
                 </div>
             )}
@@ -2424,11 +2415,13 @@ export default function MapComponent({
                   trigger={isRoutePlannerView ? routePlannerFlyTrigger : 0}
                 />
                 <RoutePlannerMapResizeEffect
-                  active={isRoutePlannerView}
+                  active={isRoutePlannerView || bunkerRegistryLayout !== 'closed'}
                   resizeKey={
                     isRoutePlannerView
                       ? `${routePlannerOverlay?.legs.length ?? 0}:${routePlannerOverlay?.waypoints.length ?? 0}`
-                      : 0
+                      : bunkerRegistryLayout !== 'closed'
+                        ? `bunker:${bunkerRegistryLayout}`
+                        : 0
                   }
                 />
                 <CountryFocusBoundsFly
@@ -2674,12 +2667,20 @@ export default function MapComponent({
                             mapZoom={infrastructureMapZoom}
                         />
                         {infrastructureLayerVisibility?.pipelines && (
+                            <>
+                            <GemPipelineCanvasMapLayer
+                                bbox={effectiveInfrastructureBbox}
+                                enabled
+                                mapZoom={infrastructureMapZoom ?? 6}
+                                isDark={isDark}
+                            />
                             <GemGoitPipelineMapLayer
                                 bbox={effectiveInfrastructureBbox}
                                 enabled
                                 mapZoom={infrastructureMapZoom}
                                 isDark={isDark}
                             />
+                            </>
                         )}
                         </>
                     )}
@@ -2694,11 +2695,18 @@ export default function MapComponent({
                                 layerVisibility={oilGasOsmLayerVisibility}
                                 forcedLayers={assetsPetroleumPrefs.osmForcedLayers}
                                 splitOilGasPipelineLayers={assetsPetroleumPrefs.splitOilGasPipelineLayers}
+                                storageCanvasInView={storageInViewCount}
                                 isDark={isDark}
                             />
                             )}
                             {assetsPetroleumPrefs.showGemPipelines && (
                             <>
+                            <GemPipelineCanvasMapLayer
+                                bbox={oilGasBbox}
+                                enabled={oilGasLayersEnabled}
+                                mapZoom={petroleumMapZoom}
+                                isDark={isDark}
+                            />
                             <GemGoitPipelineMapLayer
                                 bbox={oilGasBbox}
                                 enabled={oilGasLayersEnabled}
@@ -2750,7 +2758,7 @@ export default function MapComponent({
                                 entities={storageEntities}
                                 enabled={oilGasLayersEnabled}
                                 mapZoom={petroleumMapZoom}
-                                selectedId={selectedItem?.entityKind === 'storage_terminal' ? selectedItem.id : null}
+                                selectedId={selectedItem && isStorageMapEntity(selectedItem) ? selectedItem.id : null}
                                 onSelect={(item) => {
                                     onSelectMaritimeVessel(null);
                                     onDismissInfrastructureFeature?.();
@@ -2858,6 +2866,8 @@ export default function MapComponent({
                     <NearbySuppliersMapLayer
                         suppliers={nearbySuppliersQuery.data?.suppliers ?? []}
                         enabled={bunkerSuppliersEnabled}
+                        selectedSupplierId={bunkerRegistrySelectedId}
+                        onSupplierSelect={onBunkerMarkerSelect}
                         onOpenDossier={(supplier) => {
                             onSelectMaritimeVessel(null);
                             onDismissInfrastructureFeature?.();
@@ -2873,6 +2883,7 @@ export default function MapComponent({
                                 source: 'bunker_fuel_suppliers_curated',
                             });
                         }}
+                        onViewInRegistry={onViewBunkerInRegistry}
                     />
                 )}
             </MapContainer>

@@ -9,6 +9,7 @@ import { getEsgZoneIntersection } from '../../lib/esgConservationZones';
 import type { LicenseMarkerClusterGroup } from '../../lib/markerClusterTypes';
 import type { MiningLicense, UserAnnotation } from '../../types';
 import PopupForm from '../PopupForm';
+import { isStorageMapEntity } from '../../lib/storageEntityKinds';
 
 const LICENSE_POPUP_OPTIONS: L.PopupOptions = {
   className: 'custom-popup custom-popup--license',
@@ -29,7 +30,7 @@ const STORAGE_POPUP_OPTIONS: L.PopupOptions = {
 };
 
 function applyLicensePopupShell(popup: L.Popup, item: MiningLicense) {
-  const isStorage = item.entityKind === 'storage_terminal';
+  const isStorage = isStorageMapEntity(item);
   const next = isStorage ? STORAGE_POPUP_OPTIONS : LICENSE_POPUP_OPTIONS;
   popup.options.className = next.className;
   popup.options.minWidth = next.minWidth;

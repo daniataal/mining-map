@@ -1891,3 +1891,8 @@
   font-size: 9px;
   color: #94a3b8;
 }
+
+/* GEM / OSM pipeline strokes — visible before hover (SVG fallback path). */
+.leaflet-pane .pipeline-visible-line {
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+}

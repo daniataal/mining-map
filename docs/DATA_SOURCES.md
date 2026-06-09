@@ -589,3 +589,28 @@ PETROLEUM_DISABLE_MAPBOX=1 curl -s "http://localhost:8000/api/petroleum/layers" 
 | `oil-live-intel/internal/services/search/` | Elasticsearch indexer + query builder for MCRs, companies, terminals, vessels |
 | `oil-live-intel/cmd/oil-live-search-indexer/` | Worker syncing Postgres → ES on a ticker (default 300s) |
 | `docs/LIVE_DATA.md` | Live Data onboarding, env keys, trader workflows |
+
+---
+
+## 9. Ingest-once / serve-many contract (map platform)
+
+**Rule:** External sources are pulled on **worker schedule or admin trigger**, normalized into Postgres, then served via bbox/tile APIs. Map pan must not call Overpass, Nominatim, or CSV parsers.
+
+| Layer | Raw evidence | Canonical store | Map serving | Refresh |
+|-------|--------------|-----------------|-------------|---------|
+| Bunker registers | `data/bunker_fuel_suppliers_seed.json` + MCA/ILT CSVs | `oil_companies` + `core_source_records` (target) | `map_serving_supplier_hubs`, markers via `/api/suppliers/nearby` | Manual seed + graph-sync |
+| OSM petroleum | Overpass worker | `petroleum_osm_features` | MVT `/api/petroleum/osm-tiles/{layer}/{z}/{x}/{y}.pbf` | ~30d snapshot |
+| GEM pipelines | xlsx + GeoJSON in `data/gem/` | `gem_pipeline_segments` | MVT / bbox GeoJSON (migrate to tiles) | Manual file refresh |
+| Storage tanks | OSM + curated seed | `oil_terminals`, `storage_terminal_display` | `/api/storage/terminals`, `map_feature_popup_payload` | Graph-sync |
+| OSM refineries / storage popups | `petroleum_osm_features` fused with `oil_terminals` (≤2.5 km) | `map_feature_popup_payload` | `GET /api/oil-live/map/features/{feature_key}/popup` | `RebuildPopupPayloads` after `petroleum_osm_storage` |
+| GEM / OSM pipelines popups | `gem_pipeline_segments` + OSM `pipelines` layer (≤2 km fuse) | `map_feature_popup_payload` | same popup API + `GET .../popup-at?lat=&lng=&layer_id=` | `RebuildPopupPayloads` after OSM + bunker sync |
+| Licenses | ArcGIS / national APIs | `licenses` | `/licenses` viewport clusters | Per `source_id` cadence |
+| AIS live | AISStream / BarentsWatch | `oil_ais_positions` | `/api/oil-live/vessels/live?bbox` | Continuous worker |
+
+**Ledger:** `core_source_ledger` (migration 024) documents each source. New ingests must register `source_key`, write `core_import_batches` + `core_source_records`, then materialize map serving tables.
+
+**Map serving migration:** `oil-live-intel/migrations/030_map_serving.sql` — `map_feature_popup_payload`, `map_serving_point_clusters`, `map_serving_supplier_hubs`.
+
+**Rebuild hubs after bunker sync:** Go worker step `graphsync_bunker_fuel_suppliers` calls `mapserving.RebuildSupplierHubs`. Admin: `POST /api/oil-live/internal/map-serving/rebuild`.
+
+**Popup fusion keys:** `osm:{layer_id}:{osm_type}:{osm_id}` (e.g. `osm:storage_terminals:way:567978818`), `osm:pipelines:{osm_type}:{osm_id}`, `gem:pipeline:{segment_key}`, `storage:{uuid}`, `bunker:{id}`. Operator/owner on OSM storage/refineries is taken from the nearest curated `oil_terminals` row within **2500 m**; OSM pipeline tags are enriched from nearest **GEM GOIT** segment within **2000 m** when `gem_pipeline_segments` is loaded. Map clicks fetch materialized payloads first (`mining-viz/src/lib/mapFeaturePopup.ts`), then fall back to live OSM tag enrichment.

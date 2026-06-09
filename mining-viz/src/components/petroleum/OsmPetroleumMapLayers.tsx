@@ -12,6 +12,7 @@ import { isPetroleumMapboxDisabled, usePetroleumLayerCatalog } from '../../lib/p
 import {
   infrastructureLayerShouldRender,
   osmPointMvtOverviewShouldRender,
+  storageOsmMvtShouldRender,
 } from '../../lib/infrastructureLayer';
 import { useI18n } from '../../lib/i18n';
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
@@ -33,6 +34,8 @@ interface OsmPetroleumMapLayersProps {
   onFeatureClick?: (selection: InfrastructureFeatureSelection) => void;
   splitOilGasPipelineLayers?: boolean;
   isDark?: boolean;
+  /** Curated canvas storage count in viewport — gates OSM MVT handoff at high zoom. */
+  storageCanvasInView?: number;
 }
 
 function mergeVisibility(
@@ -57,6 +60,7 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
     bbox,
     splitOilGasPipelineLayers = false,
     isDark = true,
+    storageCanvasInView = 0,
   } = props;
   const { t } = useI18n();
   const { data: catalog } = usePetroleumLayerCatalog(enabled);
@@ -111,7 +115,14 @@ export default function OsmPetroleumMapLayers(props: OsmPetroleumMapLayersProps)
     const toggled = effectiveVisibility[layerId];
     if (!toggled) return false;
     if (layerVisibility != null) {
-      if (layerId === 'storage_terminals' || layerId === 'refineries') {
+      if (layerId === 'storage_terminals') {
+        return storageOsmMvtShouldRender(
+          mapZoom,
+          Boolean(layerVisibility[layerId]),
+          storageCanvasInView,
+        );
+      }
+      if (layerId === 'refineries') {
         return osmPointMvtOverviewShouldRender(mapZoom, Boolean(layerVisibility[layerId]));
       }
       return infrastructureLayerShouldRender(layerId, mapZoom, layerVisibility, forcedLayers ?? {});

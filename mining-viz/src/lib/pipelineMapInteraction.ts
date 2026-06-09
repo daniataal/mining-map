@@ -11,12 +11,23 @@ import {
 } from './petroleumFeatureFields';
 import { escapeHtml } from './htmlUtils';
 
+/** Visible pipeline strokes — above OSM MVT, below hit targets. */
+export const PIPELINE_VISIBLE_PANE = 'pipelineVisiblePane';
+
 /** Above license canvas + OSM MVT so pipeline hits win pointer events. */
 export const PIPELINE_INTERACTION_PANE = 'pipelineInteractionPane';
 
 const PIPELINE_HIT_WEIGHT = 20;
 
+export function ensurePipelineVisiblePane(map: LeafletMap): void {
+  if (map.getPane(PIPELINE_VISIBLE_PANE)) return;
+  map.createPane(PIPELINE_VISIBLE_PANE);
+  const pane = map.getPane(PIPELINE_VISIBLE_PANE);
+  if (pane) pane.style.zIndex = '520';
+}
+
 export function ensurePipelineInteractionPane(map: LeafletMap): void {
+  ensurePipelineVisiblePane(map);
   if (map.getPane(PIPELINE_INTERACTION_PANE)) return;
   map.createPane(PIPELINE_INTERACTION_PANE);
   const pane = map.getPane(PIPELINE_INTERACTION_PANE);
@@ -48,11 +59,14 @@ function bindOnePipelinePolyline(
   options: PipelineMapInteractionOptions,
 ): void {
   const map = (polyline as Polyline & { _map?: LeafletMap })._map;
-  if (map) ensurePipelineInteractionPane(map);
+  if (map) {
+    ensurePipelineVisiblePane(map);
+    ensurePipelineInteractionPane(map);
+  }
 
   const hit = L.polyline(polyline.getLatLngs() as L.LatLngExpression[], {
     weight: PIPELINE_HIT_WEIGHT,
-    opacity: 0.15,
+    opacity: 0,
     color: '#000000',
     interactive: true,
     bubblingMouseEvents: false,
@@ -168,6 +182,9 @@ export function pipelineVisibleStyle(style: PathOptions): PathOptions {
   return {
     ...style,
     interactive: false,
-    pane: PIPELINE_INTERACTION_PANE,
+    pane: PIPELINE_VISIBLE_PANE,
+    className: 'pipeline-visible-line',
+    weight: typeof style.weight === 'number' ? style.weight + 1 : 4,
+    opacity: typeof style.opacity === 'number' ? Math.min(1, style.opacity + 0.04) : 0.95,
   };
 }

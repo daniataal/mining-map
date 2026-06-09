@@ -15,6 +15,8 @@ import {
   portMarkersShouldRender,
   refineryMvtOverviewShouldRender,
   storageMvtOverviewShouldRender,
+  storageOsmMvtShouldRender,
+  STORAGE_MVT_HIDE_MIN_ZOOM,
 } from './infrastructureLayer';
 
 const off = { pipelines: false, refineries: false, storage_terminals: false };
@@ -73,6 +75,15 @@ describe('infrastructureLayer', () => {
   it('allows lightweight MVT storage overview at low zoom', () => {
     expect(storageMvtOverviewShouldRender(STORAGE_OVERVIEW_MIN_ZOOM, true)).toBe(true);
     expect(storageMvtOverviewShouldRender(STORAGE_OVERVIEW_MIN_ZOOM - 1, true)).toBe(false);
+  });
+
+  it('keeps OSM MVT storage when canvas has no entities in view', () => {
+    expect(storageOsmMvtShouldRender(STORAGE_MVT_HIDE_MIN_ZOOM + 2, true, 0)).toBe(true);
+  });
+
+  it('hides OSM MVT storage at detail zoom when canvas covers the viewport', () => {
+    expect(storageOsmMvtShouldRender(STORAGE_MVT_HIDE_MIN_ZOOM, true, 12)).toBe(false);
+    expect(storageOsmMvtShouldRender(STORAGE_MVT_HIDE_MIN_ZOOM - 1, true, 12)).toBe(true);
   });
 
   it('allows lightweight MVT refinery overview at the same regional zoom as storage', () => {

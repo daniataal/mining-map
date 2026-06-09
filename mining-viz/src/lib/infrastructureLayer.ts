@@ -71,6 +71,21 @@ export function storageMvtOverviewShouldRender(
   return osmPointMvtOverviewShouldRender(mapZoom, visible);
 }
 
+/**
+ * Keep OSM MVT storage dots when canvas has no replacement entities in view.
+ * Hide MVT overview only once interactive canvas markers cover the same viewport.
+ */
+export function storageOsmMvtShouldRender(
+  mapZoom: number | undefined,
+  visible: boolean,
+  canvasEntitiesInView: number,
+): boolean {
+  if (!storageMvtOverviewShouldRender(mapZoom, visible)) return false;
+  if (canvasEntitiesInView <= 0) return true;
+  if (mapZoom == null || mapZoom < STORAGE_MVT_HIDE_MIN_ZOOM) return true;
+  return false;
+}
+
 /** Lightweight MVT circles for refineries and storage — visible at regional zoom without dense dots. */
 export function osmPointMvtOverviewShouldRender(
   mapZoom: number | undefined,

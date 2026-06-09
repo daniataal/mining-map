@@ -16,7 +16,7 @@ const MAP_POPUP_OPTIONS: PopupOptions = {
   maxWidth: 380,
   minWidth: 320,
   autoPanPadding: [16, 16],
-  autoClose: true,
+  autoClose: false,
   closeOnClick: false,
 };
 
@@ -46,6 +46,7 @@ export function openPetroleumFeaturePopupOnMap(
   layerId: PetroleumLayerId,
   properties: Record<string, unknown>,
   coordinates?: { lat: number; lng: number } | null,
+  onClose?: () => void,
 ): PetroleumMapPopupHandle {
   const host = document.createElement('div');
   host.className = 'petroleum-map-popup-mount';
@@ -71,6 +72,7 @@ export function openPetroleumFeaturePopupOnMap(
   popup.on('remove', () => {
     mounted = false;
     scheduleRootUnmount(root);
+    onClose?.();
   });
 
   return {

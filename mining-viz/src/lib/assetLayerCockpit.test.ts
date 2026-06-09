@@ -88,6 +88,12 @@ describe('assetLayerCockpit', () => {
     expect(prefs.showBunkerSuppliers).toBe(false);
   });
 
+  it('all-off clean preset stays on oil_and_gas view key (no mining infrastructure flip)', () => {
+    const clean = applyAssetLayerPreset('clean');
+    expect(resolveAssetMapViewKey(clean)).toBe('oil_and_gas');
+    expect(assetsPetroleumLayerPrefsFromVisibility(clean).showOsmPetroleum).toBe(false);
+  });
+
   it('drives bunker supplier markers from bunker_suppliers toggle', () => {
     const oilLogistics = applyAssetLayerPreset('oil_logistics');
     expect(assetsPetroleumLayerPrefsFromVisibility(oilLogistics).showBunkerSuppliers).toBe(true);

@@ -16,7 +16,12 @@ import {
   classifyPipelineSubstance,
   pipelineSubstancePopupLayerId,
 } from './pipelineSubstance';
-import { buildPipelineHoverSummary } from './petroleumFeatureFields';
+import {
+  buildPipelineHoverSummary,
+  isGemPipelineFeature,
+} from './petroleumFeatureFields';
+import { fetchNearestGemPipeline } from './infrastructureCoverage';
+import { gemFuelGroupToPopupLayerId } from './gemPipelineMapStyle';
 import { getFeatureCoordinates } from './geojsonUtils';
 import {
   pickNearestPipelineFeature,
@@ -31,7 +36,12 @@ const POINT_LAYER_IDS = new Set([
   STYLE_LAYER_IDS.storage,
 ]);
 
-const PIPELINE_QUERY_PAD_PX = 24;
+function mvtQueryPadPx(mapZoom: number | undefined): number {
+  const z = mapZoom ?? 8;
+  if (z >= 14) return 36;
+  if (z >= 11) return 30;
+  return 24;
+}
 const OSM_VECTOR_LAYER_ID_SET = new Set<string>(OSM_VECTOR_CLICK_LAYERS);
 
 let registeredMvtMap: MaplibreMap | null = null;
@@ -67,8 +77,9 @@ export function queryOsmFeaturesAtPoint(
   map: MaplibreMap,
   point: { x: number; y: number },
   layers: string[],
+  mapZoom?: number,
 ): GeoJSONFeature[] {
-  const pad = PIPELINE_QUERY_PAD_PX;
+  const pad = mvtQueryPadPx(mapZoom);
   const box: [[number, number], [number, number]] = [
     [point.x - pad, point.y - pad],
     [point.x + pad, point.y + pad],
@@ -157,9 +168,11 @@ export function markMapFeatureClickHandled(e: LeafletMapClickEvent): void {
 
 export function pointPickToleranceM(mapZoom: number | undefined): number {
   const z = mapZoom ?? 8;
-  if (z >= 12) return 400;
-  if (z >= 9) return 800;
-  return 2000;
+  if (z >= 14) return 900;
+  if (z >= 12) return 1200;
+  if (z >= 9) return 1800;
+  if (z >= 6) return 2800;
+  return 4500;
 }
 
 function pointCoordsFromGeometry(geometry: GeoJSON.Geometry): { lat: number; lng: number } | null {
@@ -221,6 +234,46 @@ export type InfrastructurePickResult =
   | { kind: 'point'; pick: PointPickCandidate }
   | { kind: 'pipeline'; pick: ReturnType<typeof pickNearestPipelineFeature> & object };
 
+function pickMvtPointFeature(
+  mvtMap: MaplibreMap,
+  leafletEvent: LeafletMapClickEvent,
+  mapZoom?: number,
+): InfrastructurePickResult | null {
+  const pointLayers = OSM_VECTOR_CLICK_LAYERS.filter(
+    (id) => POINT_LAYER_IDS.has(id) && mvtMap.getLayer(id),
+  );
+  if (!pointLayers.length) return null;
+  const point = leafletPointToMaplibre(leafletEvent, mvtMap);
+  const mvtFeatures = queryOsmFeaturesAtPoint(mvtMap, point, pointLayers, mapZoom);
+  const top = pickTopOsmMvtFeature(mvtFeatures);
+  if (!top) return null;
+  const props = (top.properties ?? {}) as Record<string, unknown>;
+  const layerId = osmLayerFromProperties(props);
+  if (layerId !== 'refineries' && layerId !== 'storage_terminals') return null;
+  return { kind: 'mvt', feature: top, layerId };
+}
+
+function pickMvtPipelineFeature(
+  mvtMap: MaplibreMap,
+  leafletEvent: LeafletMapClickEvent,
+  mapZoom?: number,
+): InfrastructurePickResult | null {
+  const pipelineLayers = OSM_VECTOR_CLICK_LAYERS.filter(
+    (id) => !POINT_LAYER_IDS.has(id) && mvtMap.getLayer(id),
+  );
+  if (!pipelineLayers.length) return null;
+  const point = leafletPointToMaplibre(leafletEvent, mvtMap);
+  const mvtFeatures = queryOsmFeaturesAtPoint(mvtMap, point, pipelineLayers, mapZoom);
+  const top = pickTopOsmMvtFeature(mvtFeatures);
+  if (!top) return null;
+  const props = (top.properties ?? {}) as Record<string, unknown>;
+  return {
+    kind: 'mvt',
+    feature: top,
+    layerId: osmLayerFromProperties(props),
+  };
+}
+
 export function pickInfrastructureAtClick(opts: {
   mvtMap: MaplibreMap | null;
   leafletEvent: LeafletMapClickEvent;
@@ -234,25 +287,22 @@ export function pickInfrastructureAtClick(opts: {
   loadStorage: boolean;
 }): InfrastructurePickResult | null {
   const { lat, lng } = opts.leafletEvent.latlng;
+  const pointTol = pointPickToleranceM(opts.mapZoom);
+  const pipelineTol = pipelinePickToleranceM(opts.mapZoom);
 
-  if (opts.mvtMode && opts.mvtMap?.loaded()) {
-    const layers = OSM_VECTOR_CLICK_LAYERS.filter((id) => opts.mvtMap!.getLayer(id));
-    if (layers.length) {
-      const point = leafletPointToMaplibre(opts.leafletEvent, opts.mvtMap);
-      const mvtFeatures = queryOsmFeaturesAtPoint(opts.mvtMap, point, layers);
-      const top = pickTopOsmMvtFeature(mvtFeatures);
-      if (top) {
-        const props = (top.properties ?? {}) as Record<string, unknown>;
-        return {
-          kind: 'mvt',
-          feature: top,
-          layerId: osmLayerFromProperties(props),
-        };
-      }
-    }
+  const gemPipelineFeatures = opts.pipelineFeatures.filter((feature) =>
+    isGemPipelineFeature((feature.properties ?? {}) as Record<string, unknown>),
+  );
+  if (opts.loadPipelines && gemPipelineFeatures.length) {
+    const gemPick = pickNearestPipelineFeature(gemPipelineFeatures, lat, lng, pipelineTol);
+    if (gemPick) return { kind: 'pipeline', pick: gemPick };
   }
 
-  const pointTol = pointPickToleranceM(opts.mapZoom);
+  if (opts.mvtMode && opts.mvtMap?.loaded()) {
+    const pointPick = pickMvtPointFeature(opts.mvtMap, opts.leafletEvent, opts.mapZoom);
+    if (pointPick) return pointPick;
+  }
+
   if (opts.loadRefineries && opts.refineryFeatures.length) {
     const refineryPick = pickNearestPointFeature(
       opts.refineryFeatures,
@@ -275,12 +325,46 @@ export function pickInfrastructureAtClick(opts: {
   }
 
   if (opts.loadPipelines && opts.pipelineFeatures.length) {
-    const tol = pipelinePickToleranceM(opts.mapZoom);
-    const pipelinePick = pickNearestPipelineFeature(opts.pipelineFeatures, lat, lng, tol);
+    const pipelinePick = pickNearestPipelineFeature(opts.pipelineFeatures, lat, lng, pipelineTol);
     if (pipelinePick) return { kind: 'pipeline', pick: pipelinePick };
   }
 
+  if (opts.loadPipelines && opts.mvtMode && opts.mvtMap?.loaded()) {
+    const mvtPipeline = pickMvtPipelineFeature(opts.mvtMap, opts.leafletEvent, opts.mapZoom);
+    if (mvtPipeline) return mvtPipeline;
+  }
+
   return null;
+}
+
+/** When an OSM pipeline was picked, fuse nearby GEM commercial fields for the rich drawer. */
+export async function enrichPipelineSelectionWithNearestGem(
+  selection: InfrastructureFeatureSelection,
+  signal?: AbortSignal,
+): Promise<InfrastructureFeatureSelection> {
+  if (selection.layerId !== 'pipelines') return selection;
+  if (isGemPipelineFeature(selection.properties)) return selection;
+  const coords = selection.coordinates;
+  if (!coords) return selection;
+  try {
+    const nearest = await fetchNearestGemPipeline(coords.lat, coords.lng, signal);
+    if (!nearest.found || !nearest.tags) return selection;
+    const tags = nearest.tags;
+    return {
+      ...selection,
+      popupLayerId: gemFuelGroupToPopupLayerId(String(tags.fuel_group || tags.Fuel || '')),
+      properties: {
+        ...tags,
+        ...selection.properties,
+        layer_id: 'gem_pipelines',
+        source: tags.source ?? 'gem_goit_oil_ngl_pipelines_march_2025',
+        gem_fused_from_osm: true,
+        gem_match_distance_m: nearest.distance_m,
+      },
+    };
+  } catch {
+    return selection;
+  }
 }
 
 export function selectionFromInfrastructurePick(

@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { GeoJSON, LayerGroup, LayersControl } from 'react-leaflet';
+import { useEffect, useMemo } from 'react';
+import { GeoJSON, LayerGroup, LayersControl, useMap } from 'react-leaflet';
 import { useI18n } from '../../lib/i18n';
 import {
   gemFuelGroupToPopupLayerId,
@@ -10,6 +10,8 @@ import type { PetroleumViewportBounds } from '../../lib/petroleumViewportBounds'
 import type { InfrastructureFeatureSelection } from '../../features/infrastructure/InfrastructureFeatureDrawer';
 import {
   bindPipelineMapInteraction,
+  ensurePipelineInteractionPane,
+  ensurePipelineVisiblePane,
   pipelineInteractiveRenderer,
   pipelineVisibleStyle,
 } from '../../lib/pipelineMapInteraction';
@@ -30,7 +32,13 @@ export default function GemGoitPipelineMapLayer({
   onFeatureClick,
 }: GemGoitPipelineMapLayerProps) {
   const { t } = useI18n();
+  const map = useMap();
   const { data } = useGemPipelineGeoJson(bbox, enabled, mapZoom);
+
+  useEffect(() => {
+    ensurePipelineVisiblePane(map);
+    ensurePipelineInteractionPane(map);
+  }, [map]);
   const geojson = useMemo(() => {
     const features = (data?.features ?? []).filter((feature) => {
       const props = (feature.properties ?? {}) as Record<string, unknown>;

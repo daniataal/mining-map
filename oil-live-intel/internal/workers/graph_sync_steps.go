@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mining-map/oil-live-intel/internal/services/graphsync"
+	"github.com/mining-map/oil-live-intel/internal/services/mapserving"
 	"github.com/mining-map/oil-live-intel/internal/services/syntheticbol"
 	"github.com/mining-map/oil-live-intel/internal/utils"
 	"github.com/rs/zerolog/log"
@@ -265,11 +266,16 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 				Str("status", result.Status).
 				Bool("cached", result.Cached).
 				Msg("[graph-sync-go] petroleum_osm_storage done")
+			popupRows, popupErr := mapserving.RebuildPopupPayloads(ctx, g.Pool)
+			if popupErr != nil {
+				log.Warn().Err(popupErr).Msg("[graph-sync-go] map_feature_popup_payload rebuild after OSM failed")
+			}
 			return map[string]any{
-				"status":   result.Status,
-				"reason":   result.Reason,
-				"layer_id": result.LayerID,
-				"cached":   result.Cached,
+				"status":                 result.Status,
+				"reason":                 result.Reason,
+				"layer_id":               result.LayerID,
+				"cached":                 result.Cached,
+				"popup_payloads_rebuilt": popupRows,
 			}, nil
 		})
 		if err != nil && firstErr == nil {
@@ -289,12 +295,22 @@ func (g *GraphSyncGoSteps) RunOnce(ctx context.Context) error {
 				Int("contacts_written", result.ContactsWritten).
 				Int("geocoded", result.Geocoded).
 				Msg("[graph-sync-go] bunker_fuel_suppliers done")
+			hubRows, hubErr := mapserving.RebuildSupplierHubs(ctx, g.Pool)
+			if hubErr != nil {
+				log.Warn().Err(hubErr).Msg("[graph-sync-go] map_serving_supplier_hubs rebuild failed")
+			}
+			popupRows, popupErr := mapserving.RebuildPopupPayloads(ctx, g.Pool)
+			if popupErr != nil {
+				log.Warn().Err(popupErr).Msg("[graph-sync-go] map_feature_popup_payload rebuild failed")
+			}
 			return map[string]any{
-				"suppliers_indexed": result.SuppliersIndexed,
-				"contacts_written":  result.ContactsWritten,
-				"records_skipped":   result.RecordsSkipped,
-				"seed_hubs":         result.SeedHubs,
-				"geocoded":          result.Geocoded,
+				"suppliers_indexed":      result.SuppliersIndexed,
+				"contacts_written":       result.ContactsWritten,
+				"records_skipped":        result.RecordsSkipped,
+				"seed_hubs":              result.SeedHubs,
+				"geocoded":               result.Geocoded,
+				"map_hubs_rebuilt":       hubRows,
+				"popup_payloads_rebuilt": popupRows,
 			}, nil
 		})
 		if err != nil && firstErr == nil {

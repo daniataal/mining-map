@@ -1,6 +1,6 @@
 import type { InfrastructureFeatureSelection } from '../features/infrastructure/InfrastructureFeatureDrawer';
 import type { PetroleumLayerId } from './petroleumLayers';
-import { pipelineClickCoordinates } from './petroleumFeatureFields';
+import { isGemPipelineFeature, pipelineClickCoordinates } from './petroleumFeatureFields';
 import { classifyPipelineSubstance, pipelineSubstancePopupLayerId } from './pipelineSubstance';
 
 export type PipelinePickCandidate = {
@@ -102,13 +102,31 @@ export function pickNearestPipelineFeature(
       }
     }
 
-    if (featureBest <= maxDistanceM && (!best || featureBest < best.distanceM)) {
-      best = {
-        feature,
-        popupLayerId,
-        osmLayerId: 'pipelines',
-        distanceM: featureBest,
-      };
+    if (featureBest > maxDistanceM) continue;
+
+    const candidate: PipelinePickCandidate = {
+      feature,
+      popupLayerId,
+      osmLayerId: 'pipelines',
+      distanceM: featureBest,
+    };
+
+    if (!best) {
+      best = candidate;
+      continue;
+    }
+
+    const candidateGem = isGemPipelineFeature(props);
+    const bestGem = isGemPipelineFeature((best.feature.properties || {}) as Record<string, unknown>);
+    if (candidateGem && !bestGem) {
+      best = candidate;
+      continue;
+    }
+    if (!candidateGem && bestGem) {
+      continue;
+    }
+    if (featureBest < best.distanceM) {
+      best = candidate;
     }
   }
 
@@ -132,8 +150,9 @@ export function pipelineSelectionFromPick(
 /** Zoom-aware click tolerance — wider when zoomed out. */
 export function pipelinePickToleranceM(mapZoom: number | undefined): number {
   const z = mapZoom ?? 8;
-  if (z >= 12) return 800;
-  if (z >= 9) return 1500;
-  if (z >= 6) return 3000;
-  return 6000;
+  if (z >= 14) return 1200;
+  if (z >= 12) return 1800;
+  if (z >= 9) return 2500;
+  if (z >= 6) return 4000;
+  return 7000;
 }

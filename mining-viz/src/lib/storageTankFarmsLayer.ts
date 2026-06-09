@@ -3,8 +3,25 @@ import { isUnknownLicenseName } from './licenseVisibility';
 import {
   formatStoragePopupTitle,
 } from './storageTerminalPopup';
+import type { LiveDealClientClusterData } from './liveDealMap/liveDealMapLod';
 
 import { haversineMeters } from './pipelineMapPick';
+
+/** Canvas cluster parse stops expanding individual tanks above this zoom. */
+export const STORAGE_CANVAS_CLUSTER_MAX_ZOOM = 14;
+
+export function storageClusterBoundsFromData(data: LiveDealClientClusterData): {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+} {
+  return { ...data.bounds };
+}
+
+export function storageClusterParseMaxZoom(): number {
+  return STORAGE_CANVAS_CLUSTER_MAX_ZOOM + 1;
+}
 
 /** Max distance to fuse an OSM storage click with a curated DB storage terminal. */
 export const STORAGE_TERMINAL_FUSION_MAX_M = 2500;

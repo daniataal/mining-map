@@ -28,31 +28,32 @@ export function useNearbySuppliers(
   bbox: PetroleumViewportBounds | null,
   enabled: boolean,
   locode?: string | null,
+  limit = 30,
 ) {
   return useQuery<{ suppliers: NearbySupplier[]; limitations?: string[] }>({
-    queryKey: ['suppliers-nearby', bbox, locode],
+    queryKey: ['suppliers-nearby', bbox, locode, limit],
     queryFn: async ({ signal }) => {
       const { data } = await apiClient.get<{ suppliers: NearbySupplier[]; limitations?: string[] }>(
         '/api/suppliers/nearby',
         {
           signal,
           params: locode
-            ? { locode, limit: 30 }
+            ? { locode, limit }
             : bbox
               ? {
                   south: bbox.south,
                   west: bbox.west,
                   north: bbox.north,
                   east: bbox.east,
-                  limit: 30,
+                  limit,
                 }
-              : { limit: 30 },
+              : { limit },
         },
       );
       return data;
     },
     enabled: enabled && Boolean(locode || bbox),
-    staleTime: 120_000,
+    staleTime: locode ? 3_600_000 : 120_000,
     refetchOnWindowFocus: false,
   });
 }

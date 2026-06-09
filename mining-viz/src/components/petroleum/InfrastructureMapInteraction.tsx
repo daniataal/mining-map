@@ -12,6 +12,7 @@ import type { InfrastructureFeatureSelection } from '../../features/infrastructu
 import { osmVectorTilesEnabled } from '../../lib/osmPetroleumVectorTiles';
 import {
   enrichOsmSelectionProperties,
+  enrichPipelineSelectionWithNearestGem,
   getRegisteredOsmMvtMaplibreMap,
   hoverHtmlForOsmFeature,
   infrastructureSelectionUsesPopup,
@@ -24,6 +25,7 @@ import { buildPipelineHoverSummary } from '../../lib/petroleumFeatureFields';
 import { escapeHtml } from '../../lib/htmlUtils';
 import type { MiningLicense } from '../../types';
 import { findNearestStorageTerminal } from '../../lib/storageTankFarmsLayer';
+import { enrichSelectionWithMaterializedPopup } from '../../lib/mapFeaturePopup';
 
 export interface InfrastructureMapInteractionProps {
   bbox: PetroleumViewportBounds | null;
@@ -64,49 +66,51 @@ export default function InfrastructureMapInteraction({
   onDismissInfrastructureFeature,
 }: InfrastructureMapInteractionProps) {
   const map = useMap();
-  const hoverPopupRef = useRef<L.Popup | null>(null);
+  const hoverTooltipRef = useRef<L.Tooltip | null>(null);
   const pendingClickRef = useRef<AbortController | null>(null);
   const pointPopupRef = useRef<ReturnType<typeof openPetroleumFeaturePopupOnMap> | null>(null);
+  const stickyPopupOpenRef = useRef(false);
   const lastHoverAtRef = useRef(0);
 
   const { data: osmCatalog } = useOsmPetroleumCatalog(enabled);
   const mvtMode = osmVectorTilesEnabled(osmCatalog);
 
   const { data: gemData } = useGemPipelineGeoJson(bbox, enabled && loadGemPipelines, mapZoom);
+  const pickFallbackEnabled = enabled && Boolean(bbox);
   const { data: osmPipelineData } = useOsmPetroleumLayerGeoJson(
     'pipelines',
     bbox,
-    enabled && loadOsmPipelines && !mvtMode,
+    pickFallbackEnabled && loadOsmPipelines,
     mapZoom,
   );
   const { data: osmRefineryData } = useOsmPetroleumLayerGeoJson(
     'refineries',
     bbox,
-    enabled && loadOsmRefineries && !mvtMode,
+    pickFallbackEnabled && loadOsmRefineries,
     mapZoom,
   );
   const { data: osmStorageData } = useOsmPetroleumLayerGeoJson(
     'storage_terminals',
     bbox,
-    enabled && loadOsmStorage && !mvtMode,
+    pickFallbackEnabled && loadOsmStorage,
     mapZoom,
   );
 
   const pipelineFeatures = useMemo(() => {
     const out: GeoJSON.Feature[] = [];
     if (loadGemPipelines) out.push(...(gemData?.features ?? []));
-    if (loadOsmPipelines && !mvtMode) out.push(...(osmPipelineData?.features ?? []));
+    if (loadOsmPipelines) out.push(...(osmPipelineData?.features ?? []));
     return out;
-  }, [gemData, loadGemPipelines, loadOsmPipelines, mvtMode, osmPipelineData]);
+  }, [gemData, loadGemPipelines, loadOsmPipelines, osmPipelineData]);
 
   const refineryFeatures = useMemo(
-    () => (loadOsmRefineries && !mvtMode ? (osmRefineryData?.features ?? []) : []),
-    [loadOsmRefineries, mvtMode, osmRefineryData],
+    () => (loadOsmRefineries ? (osmRefineryData?.features ?? []) : []),
+    [loadOsmRefineries, osmRefineryData],
   );
 
   const storageFeatures = useMemo(
-    () => (loadOsmStorage && !mvtMode ? (osmStorageData?.features ?? []) : []),
-    [loadOsmStorage, mvtMode, osmStorageData],
+    () => (loadOsmStorage ? (osmStorageData?.features ?? []) : []),
+    [loadOsmStorage, osmStorageData],
   );
 
   const hasAnyTarget =
@@ -117,10 +121,10 @@ export default function InfrastructureMapInteraction({
 
   useMapEvents({
     mousemove(e) {
-      if (!enabled || !hasAnyTarget) {
-        hoverPopupRef.current?.remove();
-        hoverPopupRef.current = null;
-        map.getContainer().style.cursor = '';
+      if (!enabled || !hasAnyTarget || stickyPopupOpenRef.current) {
+        hoverTooltipRef.current?.remove();
+        hoverTooltipRef.current = null;
+        if (!stickyPopupOpenRef.current) map.getContainer().style.cursor = '';
         return;
       }
 
@@ -142,8 +146,8 @@ export default function InfrastructureMapInteraction({
       });
 
       if (!pick) {
-        hoverPopupRef.current?.remove();
-        hoverPopupRef.current = null;
+        hoverTooltipRef.current?.remove();
+        hoverTooltipRef.current = null;
         map.getContainer().style.cursor = '';
         return;
       }
@@ -167,22 +171,24 @@ export default function InfrastructureMapInteraction({
         }`;
       }
 
-      if (!hoverPopupRef.current) {
-        hoverPopupRef.current = L.popup({
-          closeButton: false,
-          autoPan: false,
+      if (!hoverTooltipRef.current) {
+        hoverTooltipRef.current = L.tooltip({
+          sticky: true,
+          opacity: 1,
           className: 'osm-pipeline-hover-tip pipeline-map-hover-tooltip',
+          direction: 'top',
           offset: [0, -6],
         });
       }
-      hoverPopupRef.current
+      hoverTooltipRef.current
         .setLatLng(e.latlng)
         .setContent(`<div class="text-xs leading-snug">${labelHtml}</div>`)
-        .openOn(map);
+        .addTo(map);
     },
     mouseout() {
-      hoverPopupRef.current?.remove();
-      hoverPopupRef.current = null;
+      if (stickyPopupOpenRef.current) return;
+      hoverTooltipRef.current?.remove();
+      hoverTooltipRef.current = null;
       map.getContainer().style.cursor = '';
     },
     click(e) {
@@ -202,7 +208,12 @@ export default function InfrastructureMapInteraction({
         loadStorage: loadOsmStorage,
       });
 
-      if (!pick) return;
+      if (!pick) {
+        onDismissInfrastructureFeature?.();
+        pointPopupRef.current?.close();
+        pointPopupRef.current = null;
+        return;
+      }
 
       L.DomEvent.stopPropagation(e);
       markMapFeatureClickHandled(e);
@@ -235,6 +246,9 @@ export default function InfrastructureMapInteraction({
 
         onDismissInfrastructureFeature?.();
         pointPopupRef.current?.close();
+        hoverTooltipRef.current?.remove();
+        hoverTooltipRef.current = null;
+        stickyPopupOpenRef.current = true;
         const latlng =
           selection.coordinates != null
             ? L.latLng(selection.coordinates.lat, selection.coordinates.lng)
@@ -245,11 +259,40 @@ export default function InfrastructureMapInteraction({
           selection.popupLayerId,
           selection.properties,
           selection.coordinates,
+          () => {
+            stickyPopupOpenRef.current = false;
+            pointPopupRef.current = null;
+          },
         );
 
         void (async () => {
-          const enriched = await enrichOsmSelectionProperties(selection, controller.signal);
+          let enriched = await enrichSelectionWithMaterializedPopup(selection, controller.signal);
           if (controller.signal.aborted) return;
+          enriched = await enrichOsmSelectionProperties(
+            { ...selection, properties: enriched },
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          if (
+            selection.popupLayerId === 'storage_terminals' &&
+            storageEntities.length > 0 &&
+            !String(enriched.operator ?? enriched.Operator ?? '').trim()
+          ) {
+            const nearest = findNearestStorageTerminal(
+              storageEntities,
+              e.latlng.lat,
+              e.latlng.lng,
+            );
+            const fusedOperator = nearest?.operatorName?.trim();
+            if (fusedOperator) {
+              enriched = {
+                ...enriched,
+                operator: fusedOperator,
+                operatorName: fusedOperator,
+                fused_from_curated: nearest?.id,
+              };
+            }
+          }
           if (enriched !== selection.properties) {
             pointPopupRef.current?.updateProperties(enriched);
           }
@@ -259,20 +302,31 @@ export default function InfrastructureMapInteraction({
 
       if (!onFeatureClick) return;
 
-      onFeatureClick(selection);
-
-      const layerId = selection.layerId as OsmPetroleumLayerId;
-      const needsEnrich =
-        pick.kind === 'mvt' ||
-        (layerId === 'pipelines' || layerId === 'refineries' || layerId === 'storage_terminals');
-
-      if (!needsEnrich) return;
+      hoverTooltipRef.current?.remove();
+      hoverTooltipRef.current = null;
 
       void (async () => {
-        const enriched = await enrichOsmSelectionProperties(selection, controller.signal);
+        let props = await enrichSelectionWithMaterializedPopup(selection, controller.signal);
         if (controller.signal.aborted) return;
-        if (enriched !== selection.properties) {
-          onFeatureClick({ ...selection, properties: enriched });
+        let resolved = { ...selection, properties: props };
+        if (selection.layerId === 'pipelines' && !props.materialized_popup) {
+          resolved = await enrichPipelineSelectionWithNearestGem(resolved, controller.signal);
+          props = resolved.properties;
+        }
+        if (controller.signal.aborted) return;
+        onFeatureClick(resolved);
+
+        const layerId = resolved.layerId as OsmPetroleumLayerId;
+        const needsEnrich =
+          pick.kind === 'mvt' ||
+          (layerId === 'pipelines' || layerId === 'refineries' || layerId === 'storage_terminals');
+
+        if (!needsEnrich) return;
+
+        const enriched = await enrichOsmSelectionProperties(resolved, controller.signal);
+        if (controller.signal.aborted) return;
+        if (enriched !== resolved.properties) {
+          onFeatureClick({ ...resolved, properties: enriched });
         }
       })();
     },
