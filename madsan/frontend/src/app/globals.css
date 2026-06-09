@@ -79,6 +79,34 @@ a { color: var(--accent); text-decoration: none; }
   padding: 2rem 3rem; text-align: center;
   background: rgba(10, 14, 20, 0.55);
 }
+.map-coverage-banner {
+  position: absolute;
+  left: 280px;
+  right: 48px;
+  top: 12px;
+  z-index: 3;
+  pointer-events: none;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 179, 71, 0.35);
+  background: rgba(255, 179, 71, 0.1);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.map-coverage-banner strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.map-coverage-banner p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
 .map-empty-state strong { font-size: 14px; color: var(--text); margin-bottom: 0.5rem; }
 .map-empty-state p { margin: 0; max-width: 420px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .map-empty-state span { color: #c9a227; font-weight: 600; }

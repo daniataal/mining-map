@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
+import { authFetchOpts } from "@/lib/auth";
 import { API_BASE } from "@/lib/layers";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
@@ -76,7 +77,7 @@ export default function TerminalShell() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/core/ticker`)
+    fetch(`${API_BASE}/api/core/ticker`, authFetchOpts)
       .then((r) => r.json())
       .then((d: { quotes?: TickerQuote[]; tier?: string; disclaimer?: string; observed_at?: string }) => {
         setQuotes(d.quotes ?? []);
@@ -89,7 +90,7 @@ export default function TerminalShell() {
 
   useEffect(() => {
     if (vertical !== "metals") return;
-    fetch(`${API_BASE}/api/metals/licenses/summary`)
+    fetch(`${API_BASE}/api/metals/licenses/summary`, authFetchOpts)
       .then((r) => r.json())
       .then(setMetalsSummary)
       .catch(() => {});

@@ -8,8 +8,11 @@ import {
   API_BASE,
   defaultLayerState,
   layersForVertical,
+  LIMITED_AIS_COVERAGE_DETAIL,
+  LIMITED_AIS_COVERAGE_LABEL,
   mapSourceKey,
   metalsMapLayersActive,
+  viewportOverlapsPersianGulf,
   type LayerDef,
 } from "@/lib/layers";
 import {
@@ -19,7 +22,7 @@ import {
   vesselIconRotate,
   vesselNoRotationFilter,
 } from "@/lib/vesselMapIcon";
-import { VesselDeadReckoning, type VesselMsg } from "@/lib/vesselDeadReckoning";
+import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
 
 type Props = {
@@ -34,6 +37,7 @@ export type MapRuntimeStatus = {
   wsState: "connecting" | "connected" | "disconnected" | "unavailable";
   activeLayerCount: number;
   lastWsAt?: string;
+  gulfAisLimited?: boolean;
 };
 
 function entityTypeForLayer(layerId: string): string {
@@ -228,11 +232,13 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
     vertical === "energy" ? "connecting" : "unavailable"
   );
   const [lastWsAt, setLastWsAt] = useState<string | undefined>();
+  const [gulfAisLimited, setGulfAisLimited] = useState(false);
 
   useEffect(() => {
     setLayers(defaultLayerState(vertical));
     setWsState(vertical === "energy" ? "connecting" : "unavailable");
     setLastWsAt(undefined);
+    setGulfAisLimited(false);
   }, [vertical]);
 
   const activeLayerCount = Object.values(layers).filter(Boolean).length;
@@ -242,8 +248,9 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
       wsState: vertical === "energy" ? wsState : "unavailable",
       activeLayerCount,
       lastWsAt,
+      gulfAisLimited: vertical === "energy" && gulfAisLimited,
     });
-  }, [wsState, activeLayerCount, lastWsAt, vertical, onRuntimeStatus]);
+  }, [wsState, activeLayerCount, lastWsAt, gulfAisLimited, vertical, onRuntimeStatus]);
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
@@ -358,6 +365,18 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
 
+        const updateGulfCoverage = () => {
+          const b = map.getBounds();
+          setGulfAisLimited(viewportOverlapsPersianGulf({
+            west: b.getWest(),
+            south: b.getSouth(),
+            east: b.getEast(),
+            north: b.getNorth(),
+          }));
+        };
+        map.on("moveend", updateGulfCoverage);
+        updateGulfCoverage();
+
         const liveSrc = () => map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
         vesselMotion = new VesselDeadReckoning({
           getBbox: () => {
@@ -370,25 +389,19 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           },
         });
 
-        const wsUrl = API_BASE.replace("http", "ws") + "/api/core/ws";
+        const wsUrl = `${API_BASE.replace("http", "ws")}/api/core/ws?format=msgpack`;
         try {
           ws = new WebSocket(wsUrl);
+          ws.binaryType = "arraybuffer";
           ws.onmessage = (ev) => {
             setLastWsAt(new Date().toISOString());
-            try {
-              const msg = JSON.parse(ev.data as string) as {
-                type?: string;
-                vessels?: VesselMsg[];
-                data?: VesselMsg;
-                entity?: string;
-              };
-              if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
-                vesselMotion?.replaceAll(msg.vessels);
-              } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
-                vesselMotion?.upsert(msg.data);
-              }
-            } catch {
-              /* ignore malformed ws payloads */
+            const payload = ev.data instanceof ArrayBuffer ? ev.data : (ev.data as string);
+            const msg = parseWsFrame(payload);
+            if (!msg) return;
+            if (msg.type === "snapshot" && Array.isArray(msg.vessels)) {
+              vesselMotion?.replaceAll(msg.vessels);
+            } else if (msg.type === "delta" && msg.entity === "vessel" && msg.data?.mmsi) {
+              vesselMotion?.upsert(msg.data);
             }
           };
           ws.onopen = () => {
@@ -489,20 +502,6 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
                 {l.drawerHint}
               </div>
             </div>
-          ) : l.id === "vessels" && vertical === "energy" ? (
-            <div key={l.id}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={!!layers[l.id]}
-                  onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
-                />
-                {l.label}
-              </label>
-              <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
-                Chevron = AIS course/heading · dot = position only
-              </div>
-            </div>
           ) : (
             <label key={l.id}>
               <input
@@ -515,6 +514,13 @@ export default function IntelligenceMap({ vertical, onSelect, mapFocus, relation
           )
         )}
       </div>
+      {vertical === "energy" && gulfAisLimited && (
+        <div className="map-coverage-banner" role="status">
+          <span className="badge warn compact">{LIMITED_AIS_COVERAGE_LABEL}</span>
+          <strong>Gulf / Hormuz AIS</strong>
+          <p>{LIMITED_AIS_COVERAGE_DETAIL}</p>
+        </div>
+      )}
       {showMetalsEmpty && (
         <div className="map-empty-state" role="status">
           <strong>No metals layers visible</strong>

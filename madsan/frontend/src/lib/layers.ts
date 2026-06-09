@@ -12,7 +12,7 @@ export type LayerDef = {
 
 export const LAYER_REGISTRY: LayerDef[] = [
   { id: "energy-assets", label: "Tank farms & terminals", vertical: "energy", tileLayer: "energy-assets", defaultOn: true },
-  { id: "vessels", label: "Vessels / AIS", vertical: "energy", tileLayer: "vessels", defaultOn: true },
+  { id: "vessels", label: "Vessels / AIS", vertical: "energy", tileLayer: "vessels", drawerHint: "Chevron = AIS course/heading · Gulf/Hormuz: limited provider coverage", defaultOn: true },
   {
     id: "metals-mines",
     label: "Mining licenses (cadastre)",
@@ -56,3 +56,36 @@ export function mapSourceKey(layer: LayerDef): string {
 }
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8088";
+
+/** Persian Gulf / Hormuz / Gulf of Oman — sparse open AIS provider coverage. */
+export const PERSIAN_GULF_AIS_BBOX = {
+  west: 47,
+  south: 22,
+  east: 60,
+  north: 30.5,
+} as const;
+
+export const LIMITED_AIS_COVERAGE_LABEL = "Limited provider coverage";
+
+export const LIMITED_AIS_COVERAGE_DETAIL =
+  "Open AIS (AISStream) is sparse in the Persian Gulf, Strait of Hormuz, and Gulf of Oman. An empty map is not proof of no traffic.";
+
+export function viewportOverlapsPersianGulf(viewport: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}): boolean {
+  const h = PERSIAN_GULF_AIS_BBOX;
+  return !(
+    viewport.north < h.south ||
+    viewport.south > h.north ||
+    viewport.east < h.west ||
+    viewport.west > h.east
+  );
+}
+
+export function isPointInPersianGulf(lat: number, lng: number): boolean {
+  const h = PERSIAN_GULF_AIS_BBOX;
+  return lat >= h.south && lat <= h.north && lng >= h.west && lng <= h.east;
+}

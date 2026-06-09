@@ -1,4 +1,5 @@
 import type { Feature, Point } from "geojson";
+import { decode } from "@msgpack/msgpack";
 
 export type VesselMsg = {
   mmsi: string;
@@ -205,5 +206,43 @@ export class VesselDeadReckoning {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+  }
+}
+
+export type WsFrame = {
+  type?: string;
+  vessels?: VesselMsg[];
+  data?: VesselMsg;
+  entity?: string;
+};
+
+function normalizeLastSeen(value: unknown): string | undefined {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return undefined;
+}
+
+function normalizeVessel(raw: VesselMsg & { last_seen_at?: unknown }): VesselMsg {
+  return {
+    ...raw,
+    last_seen_at: normalizeLastSeen(raw.last_seen_at),
+  };
+}
+
+export function parseWsFrame(data: string | ArrayBuffer): WsFrame | null {
+  try {
+    if (typeof data === "string") {
+      return JSON.parse(data) as WsFrame;
+    }
+    const msg = decode(new Uint8Array(data)) as WsFrame;
+    if (Array.isArray(msg.vessels)) {
+      msg.vessels = msg.vessels.map((v) => normalizeVessel(v as VesselMsg & { last_seen_at?: unknown }));
+    }
+    if (msg.data) {
+      msg.data = normalizeVessel(msg.data as VesselMsg & { last_seen_at?: unknown });
+    }
+    return msg;
+  } catch {
+    return null;
   }
 }

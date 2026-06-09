@@ -5,7 +5,12 @@ import { useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { confidenceTierClass } from "@/lib/confidenceTier";
-import { API_BASE } from "@/lib/layers";
+import {
+  isPointInPersianGulf,
+  LIMITED_AIS_COVERAGE_DETAIL,
+  LIMITED_AIS_COVERAGE_LABEL,
+  API_BASE,
+} from "@/lib/layers";
 
 export type MapSelection = {
   id?: string;
@@ -167,7 +172,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
     setLoading(true);
     setError("");
-    fetch(url)
+    fetch(url, authFetchOpts)
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
         return r.json() as Promise<Dossier>;
@@ -213,6 +218,11 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
   const score = dossier.confidence?.score;
   const summary = dossier.summary ?? {};
   const loc = dossier.location ?? {};
+  const lat = loc.latitude != null ? Number(loc.latitude) : NaN;
+  const lng = loc.longitude != null ? Number(loc.longitude) : NaN;
+  const showAisCoverageBadge =
+    dossier.entity_type === "vessel" &&
+    (Number.isFinite(lat) && Number.isFinite(lng) ? isPointInPersianGulf(lat, lng) : true);
 
   return (
     <div style={{ fontSize: 13 }}>
@@ -221,6 +231,11 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
         <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
           {dossier.entity_type} · {score ?? "—"}
         </span>
+        {showAisCoverageBadge && (
+          <span className="badge warn compact" title={LIMITED_AIS_COVERAGE_DETAIL}>
+            {LIMITED_AIS_COVERAGE_LABEL}
+          </span>
+        )}
         {dossier.opportunity_score != null && (
           <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
             opp {Math.round(dossier.opportunity_score)}
