@@ -81,7 +81,8 @@ func (s *Server) startAISSync() {
 		s.aisStats.RecordError(err)
 		return
 	}
-	syncer := maritime.NewSyncer(s.pool, legacy, s.log)
+	lookback := time.Duration(s.cfg.AISSyncLookbackHours) * time.Hour
+	syncer := maritime.NewSyncer(s.pool, legacy, s.log, lookback)
 	syncer.SetStats(s.aisStats)
 	syncer.OnDelta(func(d maritime.VesselDelta) {
 		s.hub.PublishVesselDelta(d)

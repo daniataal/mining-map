@@ -46,8 +46,9 @@ type Config struct {
 	ETLDir             string
 	ETLPython          string
 	LegacyImportPython bool
-	EnableAISSync      bool
-	AISSyncInterval    time.Duration
+	EnableAISSync         bool
+	AISSyncInterval       time.Duration
+	AISSyncLookbackHours  int
 	EIAAPIKey            string
 	OpenSanctionsAPIKey  string
 }
@@ -76,8 +77,9 @@ func Load() Config {
 		ETLDir:             env("MADSAN_ETL_DIR", etlDir),
 		ETLPython:          env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
 		LegacyImportPython: envBool("MADSAN_LEGACY_PYTHON", false),
-		EnableAISSync:      envBool("MADSAN_AIS_SYNC", true),
-		AISSyncInterval:    time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
+		EnableAISSync:        envBool("MADSAN_AIS_SYNC", true),
+		AISSyncInterval:      time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
+		AISSyncLookbackHours: envInt("MADSAN_AIS_SYNC_LOOKBACK_HOURS", 168),
 		EIAAPIKey:           env("EIA_API_KEY", ""),
 		OpenSanctionsAPIKey: env("OPENSANCTIONS_API_KEY", ""),
 	}

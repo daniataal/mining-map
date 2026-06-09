@@ -36,13 +36,22 @@ type Syncer struct {
 	onDelta func(VesselDelta)
 }
 
-func NewSyncer(madsan, legacy *pgxpool.Pool, log zerolog.Logger) *Syncer {
+func NewSyncer(madsan, legacy *pgxpool.Pool, log zerolog.Logger, lookback time.Duration) *Syncer {
 	return &Syncer{
 		madsan: madsan,
 		legacy: legacy,
 		log:    log,
-		since:  time.Now().Add(-2 * time.Hour),
+		since:  initialAISSince(time.Now(), lookback),
 	}
+}
+
+// initialAISSince is the first SyncOnce watermark: legacy rows with ts > since are imported.
+// Default lookback is 7d so stale legacy AIS is not skipped on cold start.
+func initialAISSince(now time.Time, lookback time.Duration) time.Time {
+	if lookback <= 0 {
+		lookback = 168 * time.Hour
+	}
+	return now.Add(-lookback)
 }
 
 func (s *Syncer) SetStats(stats *SyncStats) {
@@ -160,8 +169,16 @@ func (s *Syncer) upsertVessel(ctx context.Context, d VesselDelta) (uuid.UUID, bo
 			latitude = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.latitude ELSE vessels.latitude END,
 			longitude = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.longitude ELSE vessels.longitude END,
 			geom = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.geom ELSE vessels.geom END,
-			course = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.course ELSE vessels.course END,
-			heading = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.heading ELSE vessels.heading END,
+			course = CASE
+				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.course
+				WHEN vessels.course IS NULL AND EXCLUDED.course IS NOT NULL THEN EXCLUDED.course
+				ELSE vessels.course
+			END,
+			heading = CASE
+				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.heading
+				WHEN vessels.heading IS NULL AND EXCLUDED.heading IS NOT NULL THEN EXCLUDED.heading
+				ELSE vessels.heading
+			END,
 			speed_knots = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.speed_knots ELSE vessels.speed_knots END,
 			destination = CASE WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz) THEN EXCLUDED.destination ELSE vessels.destination END,
 			last_seen_at = GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at),
