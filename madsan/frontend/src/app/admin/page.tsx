@@ -24,6 +24,24 @@ type ParityTable = {
   note?: string;
 };
 
+type PlatformHealth = {
+  api_ok?: boolean;
+  db_ok?: boolean;
+  legacy_db_reachable?: boolean;
+  legacy_db_error?: string;
+  ais_sync_enabled?: boolean;
+  vessels_ais_24h?: number;
+  legacy_parity_summary?: {
+    available?: boolean;
+    passed?: boolean;
+    checked_at?: string;
+    failed_critical?: string[];
+    table_count?: number;
+    summary?: string;
+    error?: string;
+  };
+};
+
 type RuntimeHealth = {
   ais_sync?: {
     enabled?: boolean;
@@ -121,6 +139,7 @@ export default function AdminPage() {
   const [msg, setMsg] = useState("");
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [authError, setAuthError] = useState("");
+  const [platform, setPlatform] = useState<PlatformHealth | null>(null);
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null);
 
   useEffect(() => {
@@ -156,6 +175,10 @@ export default function AdminPage() {
     fetch(`${API_BASE}/api/admin/dedup/companies?limit=15`, fetchOpts)
       .then((r) => (r.ok ? r.json() : { clusters: [] }))
       .then((d) => setDupClusters(d.clusters ?? []))
+      .catch(() => {});
+    fetch(`${API_BASE}/api/admin/health`, fetchOpts)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setPlatform(d))
       .catch(() => {});
     fetch(`${API_BASE}/api/admin/health/runtime`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
@@ -283,6 +306,62 @@ export default function AdminPage() {
           Refresh
         </button>
       </div>
+
+      <section style={{ ...card, marginBottom: "1.5rem" }}>
+        <h2 style={{ marginTop: 0, fontSize: 15 }}>Platform health</h2>
+        <p style={{ color: "var(--muted)", margin: "0 0 12px" }}>
+          Core ops checks: API, database, legacy ETL source, AIS sync, and cached parity drift.
+        </p>
+        {platform ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
+              {[
+                ["API", platform.api_ok === true],
+                ["Database", platform.db_ok === true],
+                ["Legacy DB", platform.legacy_db_reachable === true],
+                ["AIS sync", platform.ais_sync_enabled === true],
+                [
+                  "Parity",
+                  platform.legacy_parity_summary?.available === true && platform.legacy_parity_summary?.passed === true,
+                ],
+              ].map(([label, ok]) => (
+                <div key={String(label)} style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, border: "1px solid var(--border)", borderRadius: 4 }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      background: ok ? "#22c55e" : "#ef4444",
+                      flexShrink: 0,
+                    }}
+                    aria-hidden
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{label}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 11 }}>{ok ? "ok" : "issue"}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "var(--muted)" }}>
+              <span>Vessels AIS 24h: <strong style={{ color: "var(--text)" }}>{platform.vessels_ais_24h ?? "—"}</strong></span>
+              {platform.legacy_parity_summary?.summary && (
+                <span>
+                  Parity: <strong style={{ color: platform.legacy_parity_summary.passed ? "var(--accent)" : "#f87171" }}>{platform.legacy_parity_summary.summary}</strong>
+                </span>
+              )}
+              {platform.legacy_db_error && platform.legacy_db_reachable !== true && (
+                <span style={{ color: "#f87171" }}>Legacy: {platform.legacy_db_error}</span>
+              )}
+              {platform.legacy_parity_summary?.checked_at && (
+                <span>Checked {new Date(platform.legacy_parity_summary.checked_at).toLocaleString()}</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: "var(--muted)" }}>Loading platform health…</p>
+        )}
+      </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: "1.5rem" }}>
         {[

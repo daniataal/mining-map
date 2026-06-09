@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,77 @@ type parityCache struct {
 	at     time.Time
 	report ingestion.ParityReport
 	err    error
+}
+
+func (s *Server) adminHealthPlatform(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	dbOK := s.pool.Ping(ctx) == nil
+
+	var vessels24h int
+	if dbOK {
+		_ = s.pool.QueryRow(ctx, `
+			SELECT COUNT(*)::int FROM vessels WHERE last_seen_at > now() - interval '24 hours'
+		`).Scan(&vessels24h)
+	}
+
+	aisEnabled := s.cfg.EnableAISSync
+	if s.aisStats != nil {
+		aisEnabled = s.aisStats.Enabled
+	}
+
+	legacyReachable := false
+	var legacyErr string
+	if s.cfg.LegacyDBURL == "" {
+		legacyErr = "LEGACY_DATABASE_URL not configured"
+	} else {
+		legacy, err := database.ConnectURL(ctx, s.cfg.LegacyDBURL)
+		if err != nil {
+			legacyErr = err.Error()
+		} else {
+			pingErr := legacy.Ping(ctx)
+			legacy.Close()
+			if pingErr != nil {
+				legacyErr = pingErr.Error()
+			} else {
+				legacyReachable = true
+			}
+		}
+	}
+
+	paritySummary := map[string]any{"available": false}
+	if s.cfg.LegacyDBURL != "" && dbOK {
+		parity, parityErr := s.cachedLegacyParity(ctx)
+		if parityErr != nil {
+			paritySummary["available"] = false
+			paritySummary["error"] = parityErr.Error()
+		} else {
+			paritySummary["available"] = true
+			paritySummary["passed"] = parity.Passed
+			paritySummary["checked_at"] = parity.CheckedAt
+			paritySummary["failed_critical"] = parity.FailedCritical
+			paritySummary["table_count"] = len(parity.Tables)
+			if parity.Passed {
+				paritySummary["summary"] = "all tables within threshold"
+			} else if len(parity.FailedCritical) > 0 {
+				paritySummary["summary"] = "critical drift: " + strings.Join(parity.FailedCritical, ", ")
+			} else {
+				paritySummary["summary"] = "non-critical drift detected"
+			}
+		}
+	} else if s.cfg.LegacyDBURL == "" {
+		paritySummary["error"] = "LEGACY_DATABASE_URL not configured"
+	}
+
+	writeJSON(w, map[string]any{
+		"api_ok":                true,
+		"db_ok":                 dbOK,
+		"legacy_db_reachable":   legacyReachable,
+		"legacy_db_error":       legacyErr,
+		"ais_sync_enabled":      aisEnabled,
+		"vessels_ais_24h":       vessels24h,
+		"legacy_parity_summary": paritySummary,
+	})
 }
 
 func (s *Server) adminHealthRuntime(w http.ResponseWriter, r *http.Request) {
