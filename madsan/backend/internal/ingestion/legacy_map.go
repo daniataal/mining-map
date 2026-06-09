@@ -90,7 +90,8 @@ func vesselMMSI(raw map[string]any) string {
 	return ""
 }
 
-func layerToAssetType(layer string) string {
+// LayerToAssetType maps petroleum OSM layer_id values to MadSan asset_type.
+func LayerToAssetType(layer string) string {
 	switch layer {
 	case "storage_terminals":
 		return "tank_farm"

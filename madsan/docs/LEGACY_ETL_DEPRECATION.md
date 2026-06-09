@@ -40,5 +40,13 @@ After cutover: delete `madsan/etl/legacy_import.py`, `run_legacy_import` shell p
 ```bash
 cd madsan/backend
 go test ./internal/ingestion/... -run Legacy
+go run ./cmd/legacy-parity   # JSON report; exit 1 on critical drift > 5%
 # Hybrid: enqueue "Vessels refresh (Go)" from /admin with worker running
+```
+
+After parity passes, run petroleum type backfill if metals map still shows energy assets:
+
+```bash
+go run ./cmd/backfill-petroleum-types --dry-run
+go run ./cmd/backfill-petroleum-types
 ```

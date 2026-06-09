@@ -68,6 +68,53 @@ go run ./cmd/backfill-vessel-links
 go run ./cmd/scan-company-duplicates
 ```
 
+### Legacy parity (Phase 4e)
+
+Compares legacy `mining_db` row counts with `madsan_db` for each Go import table. Prints JSON to stdout; exits **1** when critical tables drift beyond threshold (default **5%**, override with `MADSAN_PARITY_THRESHOLD_PCT`).
+
+```bash
+cd madsan/backend
+go run ./cmd/legacy-parity
+```
+
+Requires `DATABASE_URL` (madsan `:5433`) and `LEGACY_DATABASE_URL` (legacy `:5434`). Critical tables: `oil_vessels`, `licenses`, `petroleum_osm_features`. `oil_companies` is informational (name dedup lowers madsan count).
+
+Sample output shape:
+
+```json
+{
+  "checked_at": "2026-06-09T12:00:00Z",
+  "threshold_pct": 5,
+  "passed": true,
+  "tables": [
+    {
+      "legacy_table": "oil_vessels",
+      "madsan_target": "vessels",
+      "legacy_count": 9627,
+      "madsan_count": 9627,
+      "drift": 0,
+      "drift_pct": 0,
+      "critical": true,
+      "ok": true,
+      "note": "madsan may exceed legacy when live AIS sync is enabled"
+    }
+  ]
+}
+```
+
+### Petroleum asset type backfill
+
+Fixes misclassified petroleum OSM rows still stored as `processing_plant` (pre–layer_id filter). Only touches assets with petroleum provenance (`legacy_table` or `commodities_supported`).
+
+```bash
+cd madsan/backend
+go run ./cmd/backfill-petroleum-types --dry-run
+go run ./cmd/backfill-petroleum-types --limit 1000
+go run ./cmd/backfill-petroleum-types
+```
+
+Refreshes `map_energy_assets` and `map_metals_assets` after a non–dry-run run.
+
 ## API highlights
 
 - `GET /api/core/ticker` — benchmark quotes (`eia_open_data` when `EIA_API_KEY` set; else `reference_stub`)

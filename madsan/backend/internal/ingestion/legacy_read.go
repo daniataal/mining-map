@@ -244,7 +244,7 @@ func normalizeLegacyRow(spec legacyTableSpec, row map[string]any) NormalizedReco
 		}
 	case "petroleum_osm_features":
 		rec.EntityType = "asset"
-		rec.AssetType = layerToAssetType(fmt.Sprint(row["layer_id"]))
+		rec.AssetType = LayerToAssetType(fmt.Sprint(row["layer_id"]))
 		rec.Commodities = []string{"petroleum"}
 		tags := parseTags(row["tags"])
 		rec.RawPayload["tags"] = tags

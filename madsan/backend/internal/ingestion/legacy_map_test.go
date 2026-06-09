@@ -18,7 +18,7 @@ func TestLayerToAssetTypePetroleum(t *testing.T) {
 		"unknown_layer":     "terminal",
 	}
 	for layer, want := range cases {
-		if got := layerToAssetType(layer); got != want {
+		if got := LayerToAssetType(layer); got != want {
 			t.Fatalf("%s: got %q want %q", layer, got, want)
 		}
 	}
