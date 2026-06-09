@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-06-09",
+  "note": "Fields from legacy tables not yet mapped to master schema",
+  "legacy_tables": {
+    "petroleum_osm_features": ["osm_id", "tags", "feature_class", "operator_raw"],
+    "oil_vessels": ["last_ais_source", "provider_coverage_note"],
+    "licenses": ["cadastre_ref", "mineral_type", "holder_address"],
+    "meridian_cargo_records": ["synthetic_bol_recipe", "triangulation_edges"],
+    "eia_historic_imports": ["series_id", "units", "frequency"]
+  },
+  "preservation": "Stored in staging_generic_records.raw_payload and assets.raw_source_payload until mapped"
+}

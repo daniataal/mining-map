@@ -1,0 +1,18 @@
+:80 {
+	encode gzip
+	handle /api/core/ws {
+		reverse_proxy madsan-api:8080
+	}
+	handle /api/* {
+		reverse_proxy madsan-api:8080
+	}
+	handle /tiles/* {
+		reverse_proxy madsan-api:8080
+	}
+	handle /health* {
+		reverse_proxy madsan-api:8080
+	}
+	handle {
+		reverse_proxy madsan-frontend:3000
+	}
+}
