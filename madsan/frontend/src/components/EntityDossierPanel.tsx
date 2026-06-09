@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
+import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
   isPointInPersianGulf,
