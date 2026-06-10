@@ -191,7 +191,7 @@ func SweepRecentPositions(ctx context.Context, pool *pgxpool.Pool, cfg config.Co
 		LEFT JOIN vessels v ON v.mmsi = p.mmsi
 		WHERE p.ts > now() - ($1 || ' hours')::interval
 		ORDER BY p.mmsi, p.ts DESC
-	`, hours)
+	`, strconv.Itoa(hours))
 	if err != nil {
 		return 0, err
 	}

@@ -6,6 +6,7 @@ import {
   VesselOwnershipSection,
   VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
+import StartDealPackLink from "@/components/StartDealPackLink";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
@@ -343,6 +344,8 @@ export default function VesselDrawerPanel({ dossier, onNavigateMmsi }: Props) {
           )}
         </TabsContent>
       </Tabs>
+
+      <StartDealPackLink dossier={dossier} vertical="energy" />
     </div>
   );
 }

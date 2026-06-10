@@ -8,6 +8,7 @@ import DDCopilotPanel from "@/components/DDCopilotPanel";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
 import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import { parseDealPackSearchParams } from "@/lib/dealPackNav";
 import { API_BASE } from "@/lib/layers";
 
 const fetchOpts = authFetchOpts;
@@ -215,11 +216,14 @@ export default function DealsPage() {
   const [authError, setAuthError] = useState("");
   const [formSeed, setFormSeed] = useState<Record<string, string> | null>(null);
   const [packDownloadMsg, setPackDownloadMsg] = useState("");
+  const [prefillFromMap, setPrefillFromMap] = useState(false);
 
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    setSellerDefault(p.get("seller") ?? "");
-    if (p.get("vertical") === "metals") setDealVertical("metals");
+    const { vertical, prefill, fromMap } = parseDealPackSearchParams(window.location.search);
+    setDealVertical(vertical);
+    setPrefillFromMap(fromMap);
+    if (prefill.seller) setSellerDefault(prefill.seller);
+    if (Object.keys(prefill).length > 0) setFormSeed(prefill);
   }, []);
 
   useEffect(() => {
@@ -465,6 +469,11 @@ export default function DealsPage() {
           <button type="submit" style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>Register / sign in</button>
           {authError && <p style={{ color: "#f87171" }}>{authError}</p>}
         </form>
+      )}
+      {prefillFromMap && authed && !result && (
+        <p style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(16,185,129,0.08)", border: "1px solid var(--accent)", fontSize: 12 }}>
+          Pre-filled from map selection — linked entity IDs and supply-web deliverability attach when you verify.
+        </p>
       )}
       {authed && !result && (
         <div style={{ marginBottom: "1rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)", fontSize: 13 }}>

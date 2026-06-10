@@ -118,7 +118,7 @@ Legend — Track: **A** backfill, **B** live adapter, **D** derived, **S** strea
 
 1. **EIA → `prices` (Track B)** — ✅ `eia_daily` scheduler job + `markets.PersistDailySpots`; historic 746k via `go run ./cmd/legacy-phase-a --tables eia_historic_imports`.
 2. **Generalize** the adapter into `internal/sources` (registry-driven dispatch) once EIA proves the shape.
-3. **`oil_terminals` backfill (Track A)** — in `legacyTableCatalog`; after import completes, re-run `go run ./cmd/asset-enrich --limit 500` (do **not** restart worker mid `vessel-enrich`).
+3. **`oil_terminals` backfill (Track A)** — in `legacyTableCatalog`; after import completes, re-run `go run ./cmd/asset-enrich --limit 500` (do **not** restart worker mid `vessel-enrich`). **Status (2026-06-10):** ~18,150 / 19,960 geocoded imported (`legacy_import` job `b43e3807` running); orphaned `7f54a7a3` already `failed`; `legacy-parity` red on `oil_terminals` only (9.3% gap, import in flight).
 4. **GEM trackers (Track B, xlsx)** — attributed oil/gas infra (operator/capacity/status).
 5. **OSM Overpass live (Track B, monthly)** — map self-updates without legacy.
 6. **Derived jobs** — port_calls + STS from AIS into `core_signals` (feeds the wired 6-factor scorer).

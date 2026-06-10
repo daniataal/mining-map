@@ -89,14 +89,23 @@ Respond in JSON with keys: summary, risk_narrative, unanswered_questions (array)
 }
 
 func buildDDGrounding(pack map[string]any) string {
+	sections, _ := pack["sections"].(map[string]any)
+	if sections == nil {
+		sections = map[string]any{}
+	}
 	slim := map[string]any{
-		"deal_id":       pack["deal_id"],
-		"deal_summary":  pack["deal_summary"],
-		"sections":      pack["sections"],
-		"parties":       pack["parties"],
-		"supply_web":    pack["supply_web"],
-		"price_context": pack["price_context"],
-		"limitations":   pack["limitations"],
+		"deal_id":              pack["deal_id"],
+		"deal_summary":         pack["deal_summary"],
+		"parties":              pack["parties"],
+		"supply_web":           pack["supply_web"],
+		"price_context":        pack["price_context"],
+		"limitations":          pack["limitations"],
+		"dd_checks":            sections["dd_checks"],
+		"sanctions_screening":  sections["sanctions_screening"],
+		"red_flags":            sections["red_flags"],
+		"positive_evidence":    sections["positive_evidence"],
+		"missing_documents":    sections["missing_documents"],
+		"recommended_questions": sections["recommended_questions"],
 	}
 	b, _ := json.MarshalIndent(slim, "", "  ")
 	return string(b)

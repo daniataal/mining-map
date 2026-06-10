@@ -27,11 +27,11 @@ import {
   vesselNoRotationFilter,
 } from "@/lib/vesselMapIcon";
 import {
+  vesselChevronIconSize,
   vesselDotRadius,
-  vesselIconSize,
-  zoomAtTrueScale,
-  zoomBelowTrueScale,
+  vesselHullIconSize,
 } from "@/lib/vesselScale";
+import { ensureMapRtlPlugin } from "@/lib/mapRtl";
 import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
 
@@ -143,64 +143,89 @@ function entityTypeForLayer(layerId: string): string {
   return "asset";
 }
 
-const VESSEL_TILE_LAYERS = ["vessels-glow", "vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
+const VESSEL_TILE_LAYERS = ["vessels-dot-low", "vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
 const VESSEL_LIVE_LAYERS = [
-  "live-vessels-pulse",
+  "live-vessels-dot-low",
   "live-vessels-no-heading",
   "live-vessels-ship",
   "live-vessels-hull",
 ] as const;
 
-/** Soft halo only at world/regional zoom — fades out before port detail. */
-const VESSEL_GLOW_RADIUS: ExpressionSpecification = [
+/** Below this zoom every vessel renders as a small shady dot (like other layers). */
+const VESSEL_SHAPE_MIN_ZOOM = 6.5;
+/** From this zoom the LOA-scaled ship silhouette replaces the arrow. */
+const VESSEL_TRUE_SCALE_ZOOM = 14;
+
+const VESSEL_LOW_DOT_RADIUS: ExpressionSpecification = [
   "interpolate",
   ["linear"],
   ["zoom"],
-  3,
-  3,
-  6,
-  6,
-  8,
-  8,
+  2,
+  1.3,
+  VESSEL_SHAPE_MIN_ZOOM,
+  2.6,
 ];
-const VESSEL_GLOW_OPACITY: ExpressionSpecification = [
+const VESSEL_LOW_DOT_OPACITY: ExpressionSpecification = [
   "interpolate",
   ["linear"],
   ["zoom"],
-  3,
-  0.14,
-  6,
-  0.08,
-  8,
-  0,
+  2,
+  0.35,
+  VESSEL_SHAPE_MIN_ZOOM,
+  0.65,
+];
+/**
+ * Tile vessels carry ais_age_h (hours since last AIS fix; tiles only serve <72h).
+ * Fresh (<2h) renders solid; older last-known positions dim progressively.
+ * Live WS overlay vessels have no ais_age_h and render at full opacity.
+ */
+const VESSEL_AGE_OPACITY: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["coalesce", ["to-number", ["get", "ais_age_h"]], 0],
+  2,
+  1,
+  24,
+  0.75,
+  72,
+  0.45,
 ];
 
-function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: string, visible: boolean) {
+type VesselLayerSet = {
+  prefix: "vessels" | "live-vessels";
+  source: string;
+  sourceLayer?: string;
+  shipIcon: string;
+  hullIcon: string;
+};
+
+function addVesselLayerSet(map: maplibregl.Map, opts: VesselLayerSet, visible: boolean) {
   const visibility = visible ? "visible" : "none";
+  const common = opts.sourceLayer
+    ? { source: opts.source, "source-layer": opts.sourceLayer }
+    : { source: opts.source };
   map.addLayer({
-    id: "vessels-glow",
+    id: `${opts.prefix}-dot-low`,
     type: "circle",
-    source: src,
-    "source-layer": sourceLayer,
-    maxzoom: 8,
+    ...common,
+    maxzoom: VESSEL_SHAPE_MIN_ZOOM,
     paint: {
-      "circle-radius": VESSEL_GLOW_RADIUS,
+      "circle-radius": VESSEL_LOW_DOT_RADIUS,
       "circle-color": MAP_COLORS.vessel,
-      "circle-blur": 0.8,
-      "circle-opacity": VESSEL_GLOW_OPACITY,
+      "circle-opacity": VESSEL_LOW_DOT_OPACITY,
     },
     layout: { visibility },
   });
   map.addLayer({
-    id: "vessels-no-heading",
+    id: `${opts.prefix}-no-heading`,
     type: "circle",
-    source: src,
-    "source-layer": sourceLayer,
+    ...common,
+    minzoom: VESSEL_SHAPE_MIN_ZOOM,
     filter: vesselNoRotationFilter,
     paint: {
       "circle-radius": vesselDotRadius,
       "circle-color": MAP_COLORS.vessel,
-      "circle-opacity": 0.92,
+      "circle-opacity": VESSEL_AGE_OPACITY,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
       "circle-stroke-color": SELECTED_STROKE,
       "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
@@ -208,122 +233,103 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
     layout: { visibility },
   });
   map.addLayer({
-    id: "vessels-ship",
+    id: `${opts.prefix}-ship`,
     type: "symbol",
-    source: src,
-    "source-layer": sourceLayer,
-    filter: ["all", vesselHasRotationFilter, zoomBelowTrueScale],
+    ...common,
+    minzoom: VESSEL_SHAPE_MIN_ZOOM,
+    maxzoom: VESSEL_TRUE_SCALE_ZOOM,
+    filter: vesselHasRotationFilter,
     layout: {
       visibility,
-      "icon-image": "vessel-ship",
-      "icon-size": vesselIconSize,
+      "icon-image": opts.shipIcon,
+      "icon-size": vesselChevronIconSize,
       "icon-rotate": vesselIconRotate,
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
     paint: {
+      "icon-opacity": VESSEL_AGE_OPACITY,
       "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
       "icon-halo-color": "#5dffc8",
     },
   });
   map.addLayer({
-    id: "vessels-hull",
+    id: `${opts.prefix}-hull`,
     type: "symbol",
-    source: src,
-    "source-layer": sourceLayer,
-    filter: ["all", vesselHasRotationFilter, zoomAtTrueScale],
+    ...common,
+    minzoom: VESSEL_TRUE_SCALE_ZOOM,
+    filter: vesselHasRotationFilter,
     layout: {
       visibility,
-      "icon-image": "vessel-hull",
-      "icon-size": vesselIconSize,
+      "icon-image": opts.hullIcon,
+      "icon-size": vesselHullIconSize,
       "icon-rotate": vesselIconRotate,
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
     paint: {
+      "icon-opacity": VESSEL_AGE_OPACITY,
       "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
       "icon-halo-color": "#5dffc8",
     },
   });
+}
+
+function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: string, visible: boolean) {
+  addVesselLayerSet(
+    map,
+    { prefix: "vessels", source: src, sourceLayer, shipIcon: "vessel-ship", hullIcon: "vessel-hull" },
+    visible,
+  );
 }
 
 function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
-  const visibility = visible ? "visible" : "none";
-  // Subtle pulse on live AIS only — no extra glow layer (was stacking into smudges in ports).
-  map.addLayer({
-    id: "live-vessels-pulse",
-    type: "circle",
-    source: "live-vessels",
-    maxzoom: 10,
-    paint: {
-      "circle-radius": 5,
-      "circle-color": MAP_COLORS.vessel,
-      "circle-opacity": 0.18,
-      "circle-blur": 0.35,
-    },
-    layout: { visibility },
-  });
-  map.addLayer({
-    id: "live-vessels-no-heading",
-    type: "circle",
-    source: "live-vessels",
-    filter: vesselNoRotationFilter,
-    paint: {
-      "circle-radius": vesselDotRadius,
-      "circle-color": MAP_COLORS.vessel,
-      "circle-opacity": 0.95,
-      "circle-stroke-width": SELECTED_STROKE_WIDTH,
-      "circle-stroke-color": SELECTED_STROKE,
-      "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
-    },
-    layout: { visibility },
-  });
-  map.addLayer({
-    id: "live-vessels-ship",
-    type: "symbol",
-    source: "live-vessels",
-    filter: ["all", vesselHasRotationFilter, zoomBelowTrueScale],
-    layout: {
-      visibility,
-      "icon-image": "vessel-ship-live",
-      "icon-size": vesselIconSize,
-      "icon-rotate": vesselIconRotate,
-      "icon-rotation-alignment": "map",
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-    },
-    paint: {
-      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
-      "icon-halo-color": "#5dffc8",
-    },
-  });
-  map.addLayer({
-    id: "live-vessels-hull",
-    type: "symbol",
-    source: "live-vessels",
-    filter: ["all", vesselHasRotationFilter, zoomAtTrueScale],
-    layout: {
-      visibility,
-      "icon-image": "vessel-hull-live",
-      "icon-size": vesselIconSize,
-      "icon-rotate": vesselIconRotate,
-      "icon-rotation-alignment": "map",
-      "icon-allow-overlap": true,
-      "icon-ignore-placement": true,
-    },
-    paint: {
-      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
-      "icon-halo-color": "#5dffc8",
-    },
-  });
+  addVesselLayerSet(
+    map,
+    { prefix: "live-vessels", source: "live-vessels", shipIcon: "vessel-ship-live", hullIcon: "vessel-hull-live" },
+    visible,
+  );
 }
 
-function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean) {
-  const visibility = visible ? "visible" : "none";
-  for (const lid of [...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS]) {
-    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", visibility);
+/**
+ * MVT tiles are the stored-intelligence base (all vessels, regardless of AIS freshness).
+ * The live overlay adds fresh WS positions on top; tile copies of live vessels are
+ * filtered out by MMSI (setVesselTileExclusion) so nothing draws twice (no bloom).
+ */
+function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean, liveConnected: boolean) {
+  const tileVis = visible ? "visible" : "none";
+  const liveVis = visible && liveConnected ? "visible" : "none";
+  for (const lid of VESSEL_TILE_LAYERS) {
+    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", tileVis);
+  }
+  for (const lid of VESSEL_LIVE_LAYERS) {
+    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", liveVis);
+  }
+}
+
+const VESSEL_TILE_BASE_FILTERS: Record<(typeof VESSEL_TILE_LAYERS)[number], ExpressionSpecification | null> = {
+  "vessels-dot-low": null, // zoom bounds only — no property filter
+  "vessels-no-heading": vesselNoRotationFilter,
+  "vessels-ship": vesselHasRotationFilter,
+  "vessels-hull": vesselHasRotationFilter,
+};
+
+/** Hide tile copies of vessels already rendered by the live overlay (dedupe by MMSI). */
+function setVesselTileExclusion(map: maplibregl.Map, liveMmsis: string[]) {
+  const exclusion: ExpressionSpecification | null = liveMmsis.length
+    ? ["!", ["in", ["get", "mmsi"], ["literal", liveMmsis]]]
+    : null;
+  for (const lid of VESSEL_TILE_LAYERS) {
+    if (!map.getLayer(lid)) continue;
+    const base = VESSEL_TILE_BASE_FILTERS[lid];
+    const combined = exclusion
+      ? base
+        ? (["all", base, exclusion] as ExpressionSpecification)
+        : exclusion
+      : base;
+    map.setFilter(lid, combined ?? null);
   }
 }
 
@@ -338,6 +344,11 @@ function mvtSourceLayer(tileLayer: string): string {
     default:
       return "energy_assets";
   }
+}
+
+/** MVT feature property used for promoteId / feature-state (not the source-layer name). */
+function mvtPromoteId(tileLayer: string): string {
+  return tileLayer === "vessels" ? "mmsi" : "id";
 }
 
 function energyAssetFilter(layer: LayerDef): maplibregl.FilterSpecification | undefined {
@@ -520,7 +531,9 @@ function layerLocked(layer: LayerDef, entitlements?: Partial<Record<string, bool
 }
 
 function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
-  const ids = layersForVertical(vertical).filter((l) => l.tileLayer).map((l) => l.id);
+  const ids = layersForVertical(vertical)
+    .filter((l) => l.tileLayer && l.id !== "vessels")
+    .map((l) => l.id);
   if (vertical === "energy") {
     ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS, "sts-events", "mcr-corridors");
   }
@@ -617,6 +630,7 @@ export default function IntelligenceMap({
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
+    ensureMapRtlPlugin();
     const map = new maplibregl.Map({
       container: container.current,
       transformRequest: (url, resourceType) => {
@@ -635,6 +649,7 @@ export default function IntelligenceMap({
     mapRef.current = map;
 
     let ws: WebSocket | null = null;
+    let wsRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let moveEndHandler: (() => void) | null = null;
     let vesselMotion: VesselDeadReckoning | null = null;
     let cancelled = false;
@@ -656,7 +671,7 @@ export default function IntelligenceMap({
               tiles: [`${API_BASE}/tiles/${layer.tileLayer}/{z}/{x}/{y}.mvt`],
               minzoom: layer.tileLayer === "pipelines" ? 4 : 0,
               maxzoom: 14,
-              promoteId: mvtSourceLayer(layer.tileLayer!),
+              promoteId: mvtPromoteId(layer.tileLayer!),
             });
             sourcesAdded.add(src);
             if (layer.tileLayer === "energy-assets") {
@@ -691,9 +706,19 @@ export default function IntelligenceMap({
       const updateLayerCounts = () => {
         const counts: Record<string, number> = {};
         for (const l of layersForVertical(vertical)) {
-          if (!l.tileLayer || !map.getLayer(l.id)) continue;
-          if (map.getLayoutProperty(l.id, "visibility") === "none") continue;
+          if (!l.tileLayer) continue;
           try {
+            if (l.id === "vessels") {
+              const vesselLayers = [...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS].filter(
+                (lid) => map.getLayer(lid) && map.getLayoutProperty(lid, "visibility") !== "none",
+              );
+              if (vesselLayers.length) {
+                counts[l.id] = map.queryRenderedFeatures({ layers: [...vesselLayers] }).length;
+              }
+              continue;
+            }
+            if (!map.getLayer(l.id)) continue;
+            if (map.getLayoutProperty(l.id, "visibility") === "none") continue;
             counts[l.id] = map.queryRenderedFeatures({ layers: [l.id] }).length;
           } catch {
             /* layer may not be queryable yet */
@@ -759,7 +784,10 @@ export default function IntelligenceMap({
         }
         map.getCanvas().style.cursor = "pointer";
         const props = (hit.properties ?? {}) as Record<string, unknown>;
-        hoverPopup.setLngLat(e.lngLat).setHTML(`<div class="map-hover-title">${hoverLabel(props)}</div>`).addTo(map);
+        hoverPopup
+          .setLngLat(e.lngLat)
+          .setHTML(`<div class="map-hover-title" dir="auto">${hoverLabel(props)}</div>`)
+          .addTo(map);
       });
       map.on("mouseleave", () => {
         map.getCanvas().style.cursor = "";
@@ -885,8 +913,10 @@ export default function IntelligenceMap({
 
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
+        // Default to MVT until WS connects — prevents double-render bloom on first paint.
+        setVesselLayerVisibility(map, !!layers.vessels, false);
 
-        // Micro-motion: live-vessel pulse ring + marching dash on the focused track.
+        // Marching dash on the focused vessel track only.
         const dashPhases: number[][] = [
           [0, 4, 3],
           [0.5, 4, 2.5],
@@ -901,11 +931,6 @@ export default function IntelligenceMap({
           if (cancelled) return;
           if (now - lastTick > 90) {
             lastTick = now;
-            const t = (now % 1800) / 1800;
-            if (map.getLayer("live-vessels-pulse") && map.getZoom() < 10) {
-              map.setPaintProperty("live-vessels-pulse", "circle-radius", 4 + t * 8);
-              map.setPaintProperty("live-vessels-pulse", "circle-opacity", 0.14 * (1 - t));
-            }
             if (map.getLayer("vessel-track")) {
               const phase = dashPhases[Math.floor((now / 90) % dashPhases.length)];
               map.setPaintProperty("vessel-track", "line-dasharray", phase);
@@ -928,6 +953,7 @@ export default function IntelligenceMap({
         updateGulfCoverage();
 
         const liveSrc = () => map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
+        let liveMmsiKey = "";
         vesselMotion = new VesselDeadReckoning({
           getBbox: () => {
             const b = map.getBounds();
@@ -936,12 +962,31 @@ export default function IntelligenceMap({
           onFeatures: (features) => {
             const src = liveSrc();
             if (src) src.setData({ type: "FeatureCollection", features });
+            // Dedupe tiles vs live overlay only when membership changes (not per animation frame).
+            const mmsis = features
+              .map((f) => String(f.properties?.mmsi ?? ""))
+              .filter(Boolean)
+              .sort();
+            const key = mmsis.join(",");
+            if (key !== liveMmsiKey) {
+              liveMmsiKey = key;
+              setVesselTileExclusion(map, mmsis);
+            }
           },
         });
 
         const wsUrl = `${API_BASE.replace("http", "ws")}/api/core/ws?format=msgpack`;
-        try {
-          ws = new WebSocket(wsUrl);
+        // Auto-reconnect with capped backoff so an API restart doesn't silently
+        // kill the live overlay for already-open tabs.
+        let wsRetryMs = 2000;
+        const connectWs = () => {
+          if (cancelled) return;
+          try {
+            ws = new WebSocket(wsUrl);
+          } catch {
+            setWsState("unavailable");
+            return;
+          }
           ws.binaryType = "arraybuffer";
           ws.onmessage = (ev) => {
             setLastWsAt(new Date().toISOString());
@@ -955,7 +1000,9 @@ export default function IntelligenceMap({
             }
           };
           ws.onopen = () => {
+            wsRetryMs = 2000;
             setWsState("connected");
+            setVesselLayerVisibility(map, !!layers.vessels, true);
             const sendSub = () => {
               if (ws?.readyState !== WebSocket.OPEN) return;
               const b = map.getBounds();
@@ -966,16 +1013,25 @@ export default function IntelligenceMap({
               }));
               vesselMotion?.viewportChanged();
             };
+            if (moveEndHandler) map.off("moveend", moveEndHandler);
             moveEndHandler = sendSub;
             map.on("moveend", sendSub);
             sendSub();
           };
-          ws.onclose = () => setWsState("disconnected");
-          ws.onerror = () => setWsState("disconnected");
-        } catch {
-          setWsState("unavailable");
-          /* WS optional in dev */
-        }
+          ws.onclose = () => {
+            setWsState("disconnected");
+            setVesselLayerVisibility(map, !!layers.vessels, false);
+            vesselMotion?.clear(); // empties live source + restores full tile filter
+            if (!cancelled) {
+              wsRetryTimer = setTimeout(connectWs, wsRetryMs);
+              wsRetryMs = Math.min(wsRetryMs * 2, 30000);
+            }
+          };
+          ws.onerror = () => {
+            ws?.close(); // funnel retries through onclose
+          };
+        };
+        connectWs();
       }
     };
 
@@ -988,6 +1044,7 @@ export default function IntelligenceMap({
     return () => {
       cancelled = true;
       cancelAnimationFrame(animFrame);
+      if (wsRetryTimer) clearTimeout(wsRetryTimer);
       if (moveEndHandler) map.off("moveend", moveEndHandler);
       vesselMotion?.dispose();
       vesselMotion = null;
@@ -1035,7 +1092,7 @@ export default function IntelligenceMap({
     if (!map) return;
     layersForVertical(vertical).forEach((l) => {
       if (l.id === "pipelines") {
-        const vis = layers[l.id] ? "visible" : "none";
+        const vis = layers[l.id] && !layerLocked(l, entitlements) ? "visible" : "none";
         for (const pid of PIPELINE_LAYER_IDS) {
           if (map.getLayer(pid)) map.setLayoutProperty(pid, "visibility", vis);
         }
@@ -1056,7 +1113,7 @@ export default function IntelligenceMap({
       map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layers));
     }
     if (vertical === "energy") {
-      setVesselLayerVisibility(map, !!layers.vessels);
+      setVesselLayerVisibility(map, !!layers.vessels, wsState === "connected");
       for (const lid of ["sts-events", "sts-events-glow", "mcr-corridors", "ais-coverage-fill"] as const) {
         if (map.getLayer(lid)) {
           const key = lid === "ais-coverage-fill" ? "ais-coverage" : lid === "sts-events-glow" ? "sts-events" : lid;
@@ -1077,7 +1134,7 @@ export default function IntelligenceMap({
         }
       }
     }
-  }, [layers, vertical]);
+  }, [layers, vertical, wsState, entitlements]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1148,7 +1205,11 @@ export default function IntelligenceMap({
                 </label>
                 {l.drawerHint && (
                   <div className="layer-row-hint">
-                    {locked ? "Upgrade plan or sign in to unlock premium map layers." : l.drawerHint}
+                    {locked
+                      ? l.id === "pipelines"
+                        ? "Sign in (Deals or Portal) to toggle pipelines — included on the free plan in dev."
+                        : "Upgrade plan or sign in to unlock premium map layers."
+                      : l.drawerHint}
                   </div>
                 )}
               </div>

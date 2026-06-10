@@ -40,8 +40,8 @@ func SetLocalTenantGUC(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error
 	if tenantID == uuid.Nil {
 		return nil
 	}
-	var ok bool
-	if err := tx.QueryRow(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID.String()).Scan(&ok); err != nil {
+	var value string
+	if err := tx.QueryRow(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID.String()).Scan(&value); err != nil {
 		return fmt.Errorf("set local app.tenant_id: %w", err)
 	}
 	return nil

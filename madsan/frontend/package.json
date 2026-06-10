@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "mkdir -p public && cp node_modules/@mapbox/mapbox-gl-rtl-text/dist/mapbox-gl-rtl-text.js public/mapbox-gl-rtl-text.js"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",

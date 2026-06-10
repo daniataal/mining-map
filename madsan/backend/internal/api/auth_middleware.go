@@ -48,6 +48,10 @@ func (s *Server) requirePremiumTileAccess(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if s.cfg.GrantMapPremiumLayers {
+			next.ServeHTTP(w, r)
+			return
+		}
 		claims, err := s.auth.ParseRequest(r)
 		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

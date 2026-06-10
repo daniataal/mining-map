@@ -9,25 +9,45 @@ import (
 	"time"
 )
 
-const madsanModule = "github.com/madsan/intelligence"
+const (
+	madsanModule   = "github.com/madsan/intelligence"
+	rawSeedMarker  = "bunker_fuel_suppliers_seed.json"
+)
 
 // resolveRawDir resolves MADSAN_RAW_DIR to an absolute path.
 // Default and repo-relative values (madsan/raw, raw, ../raw) map to madsan/raw next to
 // madsan/backend, independent of process cwd — avoids …/backend/madsan/raw when the worker
-// runs from madsan/backend with MADSAN_RAW_DIR=madsan/raw.
+// runs from madsan/backend with MADSAN_RAW_DIR=madsan/raw or "$(pwd)/madsan/raw".
 func resolveRawDir(raw string) string {
 	if raw == "" || isMadsanRawReference(raw) {
 		if dir := locateMadsanRawDir(); dir != "" {
 			return dir
 		}
 	}
-	if filepath.IsAbs(raw) {
-		return raw
+
+	candidate := raw
+	wasRelative := !filepath.IsAbs(candidate)
+	if wasRelative {
+		if ap, err := filepath.Abs(candidate); err == nil {
+			candidate = ap
+		}
 	}
-	if ap, err := filepath.Abs(raw); err == nil {
-		return ap
+
+	if isWrongBackendRawPath(candidate) {
+		if dir := locateMadsanRawDir(); dir != "" {
+			return dir
+		}
 	}
-	return raw
+
+	// Relative paths that do not exist (e.g. cwd=madsan/backend + madsan/raw) → auto-locate.
+	// Absolute paths (e.g. Docker /raw) pass through even when the dir is not mounted yet.
+	if wasRelative && !isUsableRawDir(candidate) {
+		if dir := locateMadsanRawDir(); dir != "" {
+			return dir
+		}
+	}
+
+	return candidate
 }
 
 func isMadsanRawReference(raw string) bool {
@@ -39,23 +59,88 @@ func isMadsanRawReference(raw string) bool {
 	}
 }
 
-// locateMadsanRawDir walks up from this package to github.com/madsan/intelligence go.mod
-// and returns ../raw (i.e. madsan/raw in the repo layout).
-func locateMadsanRawDir() string {
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
+func isUsableRawDir(dir string) bool {
+	if dir == "" || isWrongBackendRawPath(dir) {
+		return false
 	}
-	dir := filepath.Dir(self)
+	st, err := os.Stat(dir)
+	return err == nil && st.IsDir()
+}
+
+func isWrongBackendRawPath(dir string) bool {
+	clean := filepath.Clean(dir)
+	parts := strings.Split(clean, string(filepath.Separator))
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "backend" && parts[i+1] == "madsan" && parts[i+2] == "raw" {
+			return true
+		}
+	}
+	return false
+}
+
+func rawDirHasSeed(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, rawSeedMarker))
+	return err == nil
+}
+
+// locateMadsanRawDir walks up from the executable, cwd, and this package to find madsan/raw.
+func locateMadsanRawDir() string {
+	anchors := make([]string, 0, 3)
+	if _, self, _, ok := runtime.Caller(0); ok {
+		anchors = append(anchors, filepath.Dir(self))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		anchors = append(anchors, filepath.Dir(exe))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		anchors = append(anchors, wd)
+	}
+	for _, anchor := range anchors {
+		if dir := walkUpForRawDir(anchor); dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func walkUpForRawDir(start string) string {
+	dir := start
+	for {
+		if raw := rawBesideBackendMod(dir); raw != "" {
+			return raw
+		}
+		raw := filepath.Join(dir, "raw")
+		if isUsableRawDir(raw) && !isWrongBackendRawPath(raw) {
+			if ap, err := filepath.Abs(raw); err == nil {
+				return ap
+			}
+			return raw
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+func rawBesideBackendMod(start string) string {
+	dir := start
 	for {
 		modPath := filepath.Join(dir, "go.mod")
 		b, err := os.ReadFile(modPath)
 		if err == nil && strings.Contains(string(b), "module "+madsanModule) {
 			raw := filepath.Join(filepath.Dir(dir), "raw")
-			if ap, err := filepath.Abs(raw); err == nil {
-				return ap
+			if isUsableRawDir(raw) {
+				if ap, err := filepath.Abs(raw); err == nil {
+					return ap
+				}
+				return raw
 			}
-			return raw
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -113,6 +198,8 @@ type Config struct {
 	GLEIFBatchLimit           int
 	SECEdgarUserAgent         string
 	SECEdgarBatchLimit        int
+	// GrantMapPremiumLayers unlocks pipelines MVT for local dev (default when JWT secret is dev default).
+	GrantMapPremiumLayers bool
 }
 
 func defaultETLDir() string {
@@ -125,6 +212,8 @@ func defaultETLDir() string {
 }
 
 func Load() Config {
+	// Worker/scheduler CLIs do not source deploy/.env via shell; load unset keys here.
+	LoadDeployEnv()
 	etlDir := defaultETLDir()
 	return Config{
 		Addr:                      env("MADSAN_API_ADDR", ":8088"),
@@ -173,7 +262,17 @@ func Load() Config {
 		GLEIFBatchLimit:           envInt("GLEIF_BATCH_LIMIT", 50),
 		SECEdgarUserAgent:         env("SEC_EDGAR_USER_AGENT", "MadSanIntelligence/1.0 (open-data research)"),
 		SECEdgarBatchLimit:        envInt("SEC_EDGAR_BATCH_LIMIT", 25),
+		GrantMapPremiumLayers:     grantMapPremiumLayersDefault(),
 	}
+}
+
+func grantMapPremiumLayersDefault() bool {
+	if v := os.Getenv("MADSAN_GRANT_MAP_PREMIUM_LAYERS"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return env("MADSAN_JWT_SECRET", "dev-change-me-in-production") == "dev-change-me-in-production"
 }
 
 func env(k, def string) string {

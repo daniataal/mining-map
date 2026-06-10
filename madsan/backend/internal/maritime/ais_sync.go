@@ -112,6 +112,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 
 	var maxTS time.Time
 	updated := 0
+	linksCreated := 0
 	for rows.Next() {
 		var d VesselDelta
 		var speed, course, heading *float64
@@ -136,8 +137,8 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			}
 			if n, err := LinkVesselProximities(ctx, s.madsan, vesselID, d.MMSI, d.Destination, &d.Lat, &d.Lon); err != nil {
 				s.log.Debug().Err(err).Str("mmsi", d.MMSI).Msg("vessel proximity link skipped")
-			} else if n > 0 {
-				s.log.Debug().Int("links", n).Str("mmsi", d.MMSI).Msg("vessel terminal links")
+			} else {
+				linksCreated += n
 			}
 		}
 		updated++
@@ -152,7 +153,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		s.stats.RecordSuccess(updated)
 	}
 	if updated > 0 {
-		s.log.Info().Int("updated", updated).Time("since", s.since).Msg("ais sync batch")
+		s.log.Info().Int("updated", updated).Int("terminal_links", linksCreated).Time("since", s.since).Msg("ais sync batch")
 	}
 	return rows.Err()
 }
@@ -201,7 +202,7 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
 		  AND longitude BETWEEN $1 AND $2
 		  AND latitude BETWEEN $3 AND $4
-		  AND last_seen_at > now() - interval '7 days'
+		  AND last_seen_at > now() - interval '72 hours'
 		ORDER BY last_seen_at DESC NULLS LAST
 		LIMIT $5
 	`, west, east, south, north, limit)

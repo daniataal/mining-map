@@ -91,7 +91,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     tileLayer: "vessels",
     group: "Maritime",
-    drawerHint: "DWT/LOA-scaled icons · Gulf/Hormuz: limited provider coverage",
+    drawerHint: "Live AIS positions (<72h) · dimmer = older fix · Gulf/Hormuz: limited provider coverage",
     defaultOn: true,
   },
   {
@@ -149,7 +149,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileLayer: "pipelines",
     premium: true,
     group: "Infrastructure",
-    drawerHint: "Premium layer — requires plan entitlement",
+    drawerHint: "Petroleum pipeline geometry (OSM). Free plan includes this layer when signed in.",
     defaultOn: false,
   },
   {

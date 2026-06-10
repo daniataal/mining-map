@@ -1,10 +1,15 @@
 import type { ExpressionSpecification } from "maplibre-gl";
 
-/** Coalesce numeric MVT / GeoJSON property to a positive number. */
+/**
+ * Coalesce numeric MVT / GeoJSON property to a positive number.
+ * NOTE: in the expression language `to-number(null)` is 0 (not null), so a plain
+ * `coalesce` never falls back for missing properties — guard with `has`/`> 0` instead.
+ */
 export const coalesceNum = (prop: string, fallback: number): ExpressionSpecification => [
-  "max",
-  0,
-  ["coalesce", ["to-number", ["get", prop]], fallback],
+  "case",
+  [">", ["to-number", ["coalesce", ["get", prop], 0]], 0],
+  ["to-number", ["get", prop]],
+  fallback,
 ];
 
 /** DWT-based chevron scale below z14 (reference: 80k DWT VLCC). */
@@ -35,15 +40,6 @@ export const vesselHullIconSize: ExpressionSpecification = [
   ["max", 1.1, ["*", ["/", coalesceNum("loa_m", 150), 150], 2.4]],
 ];
 
-/** Combined icon-size: chevrons below z14, LOA-scaled hull at z≥14. */
-export const vesselIconSize: ExpressionSpecification = [
-  "step",
-  ["zoom"],
-  vesselChevronIconSize,
-  14,
-  vesselHullIconSize,
-];
-
 /** Dot radius scales with DWT when no heading/course. */
 export const vesselDotRadius: ExpressionSpecification = [
   "interpolate",
@@ -57,6 +53,3 @@ export const vesselDotRadius: ExpressionSpecification = [
   ["+", 5, ["*", 1.8, ["sqrt", ["/", coalesceNum("loa_m", 120), 200]]]],
 ];
 
-/** Show chevron layers below z14; hull outline layer at z≥14. */
-export const zoomBelowTrueScale: ExpressionSpecification = ["<", ["zoom"], 14];
-export const zoomAtTrueScale: ExpressionSpecification = [">=", ["zoom"], 14];

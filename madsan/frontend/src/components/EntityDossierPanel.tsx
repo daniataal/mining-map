@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import StartDealPackLink from "@/components/StartDealPackLink";
 import type { FeatureCollection } from "geojson";
 import {
   AssetOperatorCapacitySection,
@@ -414,14 +414,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
         </TabsContent>
       </Tabs>
 
-      {dossier.entity_type === "company" && (
-        <Link
-          href={`/deals?seller=${encodeURIComponent(dossier.name)}${vertical === "metals" ? "&vertical=metals" : ""}`}
-          style={{ fontSize: 12, display: "inline-block", marginTop: 12 }}
-        >
-          Verify deal with this seller →
-        </Link>
-      )}
+      <StartDealPackLink dossier={dossier} selection={selection} vertical={vertical} />
 
       {dossier.limitations && dossier.limitations.length > 0 && (
         <p className="disclaimer" style={{ marginTop: 12 }}>

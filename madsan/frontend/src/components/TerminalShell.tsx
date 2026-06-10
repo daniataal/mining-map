@@ -18,7 +18,7 @@ import type { FeatureCollection } from "geojson";
 import { Badge } from "@/components/ui/badge";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
 import { authFetchOpts } from "@/lib/auth";
-import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import { canUse, effectiveEntitlements, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
@@ -224,7 +224,7 @@ export default function TerminalShell() {
           mapFocus={mapFocus}
           relationshipLines={relationshipLines}
           onRuntimeStatus={onRuntimeStatus}
-          entitlements={me?.entitlements}
+          entitlements={effectiveEntitlements(me)}
         />
         <aside className="panel">
           <header className="panel-header">

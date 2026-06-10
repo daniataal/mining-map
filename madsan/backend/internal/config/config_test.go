@@ -34,6 +34,22 @@ func TestResolveRawDirModuleDefault(t *testing.T) {
 	}
 }
 
+func TestGrantMapPremiumLayersDevDefault(t *testing.T) {
+	t.Setenv("MADSAN_GRANT_MAP_PREMIUM_LAYERS", "")
+	t.Setenv("MADSAN_JWT_SECRET", "dev-change-me-in-production")
+	if !grantMapPremiumLayersDefault() {
+		t.Fatal("expected grant when JWT secret is dev default")
+	}
+	t.Setenv("MADSAN_JWT_SECRET", "production-secret")
+	if grantMapPremiumLayersDefault() {
+		t.Fatal("expected no grant with production JWT secret")
+	}
+	t.Setenv("MADSAN_GRANT_MAP_PREMIUM_LAYERS", "true")
+	if !grantMapPremiumLayersDefault() {
+		t.Fatal("expected explicit env override true")
+	}
+}
+
 func TestResolveRawDirIgnoresCwd(t *testing.T) {
 	want := expectedMadsanRawDir(t)
 	backendDir := filepath.Dir(filepath.Dir(want)) // madsan/backend
@@ -63,5 +79,29 @@ func TestResolveRawDirAbsolutePassthrough(t *testing.T) {
 	const dockerRaw = "/raw"
 	if got := resolveRawDir(dockerRaw); got != dockerRaw {
 		t.Fatalf("resolveRawDir(/raw) = %q, want %q", got, dockerRaw)
+	}
+}
+
+func TestResolveRawDirWrongAbsoluteBackendPath(t *testing.T) {
+	want := expectedMadsanRawDir(t)
+	backendDir := filepath.Dir(filepath.Dir(want))
+	wrong := filepath.Join(backendDir, "madsan", "raw")
+
+	if got := resolveRawDir(wrong); got != want {
+		t.Fatalf("resolveRawDir(wrong abs) = %q, want %q", got, want)
+	}
+	t.Setenv("MADSAN_RAW_DIR", wrong)
+	if got := Load().RawDataDir; got != want {
+		t.Fatalf("Load().RawDataDir with wrong env = %q, want %q", got, want)
+	}
+}
+
+func TestLocateMadsanRawDirHasSeed(t *testing.T) {
+	dir := locateMadsanRawDir()
+	if dir == "" {
+		t.Fatal("locateMadsanRawDir returned empty")
+	}
+	if !rawDirHasSeed(dir) {
+		t.Fatalf("expected seed marker in %s", dir)
 	}
 }

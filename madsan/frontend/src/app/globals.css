@@ -280,7 +280,7 @@ a { color: var(--accent); text-decoration: none; }
   font-size: 11px;
   color: var(--text);
 }
-.map-hover-title { font-weight: 600; letter-spacing: 0.02em; }
+.map-hover-title { font-weight: 600; letter-spacing: 0.02em; unicode-bidi: plaintext; }
 
 .map-empty-state strong { font-size: 14px; color: var(--text); margin-bottom: 0.5rem; }
 .map-empty-state p { margin: 0; max-width: 420px; font-size: 12px; line-height: 1.5; color: var(--muted); }
@@ -450,6 +450,12 @@ a { color: var(--accent); text-decoration: none; }
   border-color: var(--border); background: transparent; color: var(--muted);
 }
 .panel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.deal-pack-cta { margin-top: 12px; }
+.deal-pack-cta .panel-btn { display: inline-flex; align-items: center; text-decoration: none; }
+.deal-pack-cta-hint {
+  margin: 6px 0 0; font-size: 10.5px; color: var(--muted); line-height: 1.4;
+}
 
 .layer-drawer { max-height: calc(100vh - 120px); overflow-y: auto; }
 

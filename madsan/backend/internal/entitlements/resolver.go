@@ -19,15 +19,19 @@ var AllFeatures = []string{
 }
 
 type Resolver struct {
-	pool *pgxpool.Pool
+	pool                  *pgxpool.Pool
+	grantMapPremiumLayers bool
 }
 
-func New(pool *pgxpool.Pool) *Resolver {
-	return &Resolver{pool: pool}
+func New(pool *pgxpool.Pool, grantMapPremiumLayers bool) *Resolver {
+	return &Resolver{pool: pool, grantMapPremiumLayers: grantMapPremiumLayers}
 }
 
 // Can returns whether tenant/user may use feature_key.
 func (r *Resolver) Can(ctx context.Context, tenantID, userID *uuid.UUID, featureKey string) (bool, error) {
+	if r.grantMapPremiumLayers && featureKey == "map_premium_layers" {
+		return true, nil
+	}
 	if tenantID == nil {
 		return false, nil
 	}

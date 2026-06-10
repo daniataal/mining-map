@@ -73,6 +73,7 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 		case <-ticker.C:
 			h.pushHeartbeat()
+			h.refreshSnapshots()
 		}
 	}
 }
@@ -83,6 +84,26 @@ func (h *Hub) pushHeartbeat() {
 	defer h.mu.RUnlock()
 	for c := range h.clients {
 		h.sendTo(c, payload)
+	}
+}
+
+// refreshSnapshots re-sends viewport vessel snapshots so clients see fresh AIS
+// positions in direct-ingest mode, where the writer (cmd/ais-ingest) is a
+// separate process and no per-message delta reaches this hub.
+func (h *Hub) refreshSnapshots() {
+	if h.pool == nil {
+		return
+	}
+	h.mu.RLock()
+	subs := make([]*client, 0, len(h.clients))
+	for c := range h.clients {
+		if c.sub.BBox[2] > c.sub.BBox[0] && c.sub.BBox[3] > c.sub.BBox[1] {
+			subs = append(subs, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range subs {
+		h.sendSnapshot(c, c.sub)
 	}
 }
 

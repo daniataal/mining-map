@@ -4,7 +4,22 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+func TestLegacyExternalID(t *testing.T) {
+	id := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	if got := legacyExternalID(id.String()); got != id.String() {
+		t.Fatalf("string: got %q", got)
+	}
+	if got := legacyExternalID(id[:]); got != id.String() {
+		t.Fatalf("[]byte uuid: got %q want %q", got, id.String())
+	}
+	if got := legacyExternalID(id); got != id.String() {
+		t.Fatalf("uuid.UUID: got %q", got)
+	}
+}
 
 func TestNormalizeLegacyLicenseRow(t *testing.T) {
 	rec := normalizeLegacyRow(legacyTableSpec{Table: "licenses", EntityType: "asset", AssetType: "mine"}, map[string]any{

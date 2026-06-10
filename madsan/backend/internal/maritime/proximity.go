@@ -39,7 +39,7 @@ func linkByDestination(ctx context.Context, pool *pgxpool.Pool, vesselID uuid.UU
 	rows, err := pool.Query(ctx, `
 		SELECT id, name, asset_type
 		FROM assets
-		WHERE asset_type = ANY($1)
+		WHERE asset_type = ANY($1::text[])
 		  AND (name ILIKE '%' || $2 || '%' OR normalized_name ILIKE '%' || lower($2) || '%')
 		ORDER BY confidence_score DESC NULLS LAST
 		LIMIT 3
@@ -65,11 +65,11 @@ func linkByDestination(ctx context.Context, pool *pgxpool.Pool, vesselID uuid.UU
 func linkByProximity(ctx context.Context, pool *pgxpool.Pool, vesselID uuid.UUID, lat, lng float64) (int, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT a.id, a.name, a.asset_type,
-		       ST_Distance(a.geom, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) / 1000 AS km
+		       ST_Distance(a.geom, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography) / 1000 AS km
 		FROM assets a
 		WHERE a.geom IS NOT NULL
-		  AND a.asset_type = ANY($4)
-		  AND ST_DWithin(a.geom, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography, 80000)
+		  AND a.asset_type = ANY($3::text[])
+		  AND ST_DWithin(a.geom, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography, 80000)
 		ORDER BY km ASC
 		LIMIT 2
 	`, lat, lng, energyTerminalTypes)

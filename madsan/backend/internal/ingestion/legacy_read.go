@@ -290,9 +290,9 @@ func normalizeLegacyRow(spec legacyTableSpec, row map[string]any) NormalizedReco
 	if spec.AssetType != "" {
 		m["asset_type"] = spec.AssetType
 	}
-	m["external_id"] = fmt.Sprint(row["id"])
+	m["external_id"] = legacyExternalID(row["id"])
 	if spec.Table == "oil_vessels" {
-		m["external_id"] = fmt.Sprint(row["mmsi"])
+		m["external_id"] = legacyExternalID(row["mmsi"])
 	}
 	m["raw_payload"] = copyMap(row)
 
@@ -405,6 +405,28 @@ func parseTags(v any) map[string]any {
 		return m
 	default:
 		return map[string]any{}
+	}
+}
+
+// legacyExternalID stringifies legacy row ids from pgx (uuid may arrive as []byte).
+func legacyExternalID(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case []byte:
+		if len(t) == 16 {
+			if u, err := uuid.FromBytes(t); err == nil {
+				return u.String()
+			}
+		}
+		return strings.TrimSpace(string(t))
+	case uuid.UUID:
+		return t.String()
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
 	}
 }
 

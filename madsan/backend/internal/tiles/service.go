@@ -50,7 +50,10 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	mvtGeom := `ST_AsMVTGeom(ST_Transform(geom::geometry, 3857), ST_TileEnvelope($1,$2,$3), 4096, 256, true)`
 	switch layer {
 	case "vessels":
-		// Query live vessels + ShipVault specs from vessel_enrichment for map icon scaling.
+		// Positions are live-only: vessels without AIS in the freshness window are
+		// excluded (registry-only entries stay in the DB for dossiers/search, not the map).
+		// ais_age_h lets the client dim older positions. DB enrichment (ShipVault
+		// dwt/loa) is joined onto the live position for icon scaling.
 		query = `
 			SELECT ST_AsMVT(mvt.*, $4) FROM (
 				SELECT ` + mvtGeom + ` AS geom,
@@ -63,6 +66,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 					v.course,
 					v.heading,
 					v.speed_knots,
+					ROUND(EXTRACT(EPOCH FROM (now() - v.last_seen_at)) / 3600.0, 1) AS ais_age_h,
 					COALESCE(
 						ve.deadweight_tons,
 						NULLIF((ve.raw_payload->'vessel_specs'->>'deadweight_tons')::numeric, 0)
@@ -78,7 +82,9 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 				FROM vessels v
 				LEFT JOIN vessel_enrichment ve ON ve.mmsi = v.mmsi
 				WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
-				  AND v.geom IS NOT NULL AND ` + tileFilter + `
+				  AND v.geom IS NOT NULL
+				  AND v.last_seen_at > now() - interval '72 hours'
+				  AND ` + tileFilter + `
 			) mvt`
 	case "metals-assets":
 		query = `

@@ -59,15 +59,16 @@ func (s *Service) EnqueueEntityEnrichmentRefresh(ctx context.Context, entityType
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	payload["entity_id"] = entityID
 	payload["force"] = true
 
 	var jobType string
 	switch entityType {
 	case "vessel":
 		jobType = vesselEnrichmentJobType
+		payload["entity_id"] = entityID
 	case "asset":
 		jobType = "terminal_enrichment"
+		payload["asset_id"] = entityID
 	default:
 		return uuid.Nil, fmt.Errorf("unsupported entity type %q", entityType)
 	}
