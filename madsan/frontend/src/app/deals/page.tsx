@@ -69,11 +69,26 @@ const SAMPLE_ENERGY_JET: Record<string, string> = {
   claimed_asset_id: "",
 };
 
+const SAMPLE_ENERGY_FUEL_OIL: Record<string, string> = {
+  commodity: "Fuel oil 380",
+  quantity: "8000",
+  quantity_unit: "MT",
+  location: "Singapore",
+  seller: "Sample Marine Fuels Pte",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "FOB",
+  price: "485",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
+};
+
 const ENERGY_SAMPLES = [
   { label: "Sample VLSFO · Fujairah", seed: SAMPLE_ENERGY_VLSFO },
   { label: "Sample EN590 · Rotterdam", seed: SAMPLE_ENERGY_EN590 },
   { label: "Sample crude · Rotterdam", seed: SAMPLE_ENERGY_CRUDE },
   { label: "Sample Jet A-1 · Singapore", seed: SAMPLE_ENERGY_JET },
+  { label: "Sample fuel oil · Singapore", seed: SAMPLE_ENERGY_FUEL_OIL },
 ] as const;
 
 const SAMPLE_METAL_GOLD: Record<string, string> = {
@@ -124,11 +139,26 @@ const METAL_SAMPLES = [
   { label: "Sample silver · London", seed: SAMPLE_METAL_SILVER },
 ] as const;
 
+type DDCheck = {
+  dimension?: string;
+  status?: string;
+  message?: string;
+  tier?: string;
+};
+
+type SanctionsParty = {
+  status?: string;
+  message?: string;
+  matches?: unknown[];
+};
+
 type VerifyResult = {
   deal_id?: string;
   confidence_score?: number;
   confidence_status?: string;
   dd_recommendation?: string;
+  dd_checks?: DDCheck[];
+  sanctions_screening?: { seller?: SanctionsParty; buyer?: SanctionsParty };
   positive_evidence?: string[];
   red_flags?: string[];
   warnings?: string[];
@@ -136,6 +166,12 @@ type VerifyResult = {
   recommended_questions?: string[];
   error?: string;
 };
+
+function sanctionsLabel(party: SanctionsParty | undefined, role: string): string | null {
+  if (!party?.status) return null;
+  const n = party.matches?.length ?? 0;
+  return `${role}: ${party.status}${n > 0 ? ` (${n} potential match${n === 1 ? "" : "es"})` : ""}`;
+}
 
 type PackGraph = {
   nodes?: Array<{
@@ -516,6 +552,34 @@ export default function DealsPage() {
             <div style={{ marginTop: 8 }}>
               <strong>Recommended questions</strong>
               <ul>{result.recommended_questions.map((f) => <li key={f}>{f}</li>)}</ul>
+            </div>
+          )}
+          {result.dd_checks && result.dd_checks.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Compliance checks</strong>
+              <ul>
+                {result.dd_checks.map((c, i) => (
+                  <li key={`${c.dimension}-${c.message}-${i}`}>
+                    [{c.status}] {c.dimension}: {c.message}
+                    {c.tier ? ` (${c.tier})` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.sanctions_screening && (
+            <div style={{ marginTop: 8 }}>
+              <strong>OpenSanctions screening</strong>
+              <ul>
+                {[sanctionsLabel(result.sanctions_screening.seller, "Seller"), sanctionsLabel(result.sanctions_screening.buyer, "Buyer")]
+                  .filter(Boolean)
+                  .map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+              </ul>
+              <p style={{ color: "var(--muted)", fontSize: 11, margin: "4px 0 0" }}>
+                Potential matches are leads for manual review — not confirmed sanctions designations.
+              </p>
             </div>
           )}
           <DealGraphPanel graph={packGraph} />

@@ -12,7 +12,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | **1** Schema + matviews | **COMPLETE** | 23 migrations; serving matviews + GIST/filter indexes (`023`); throttled per-table refresh during legacy import |
 | **5b** Entitlements (`phase5b-entitlements-ff`) | **COMPLETE** | `internal/entitlements` resolver `Can`+`Resolve`; `/api/core/auth/me` returns `entitlements`+`plan`; middleware on deals/supplier search/portal/admin/premium pipeline MVT; migration `023` pro/enterprise+`supplier_portal`/`deal_watch`; UI gating via `lib/entitlements.ts`; billing/Stripe deferred |
 | **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons, hover tooltip + selected glow, pipeline dossier lookup (`be4a5fba`, `74eeab55`, phase6 close) |
-| **9** Deal verification (`phase9-deal-verification-pack`) | **COMPLETE** | S19 E2E: commodity/qty/location/seller/buyer/incoterm/docs/price/asset+vessel → DD rules, OpenSanctions, location asset match, buyer+seller registry, pack v1.1 (json/md/html) + relationship graph; energy EN590/VLSFO/crude/jet/fuel-oil doc+benchmark tiers; metals doc routing; RBAC on verify/pack/watch; deals UI full result panels + cookie-auth pack download |
+| **9** Deal verification (`phase9-deal-verification-pack`) | **COMPLETE** | S19 closed — see checklist below; `0defdbd6` + UI dd_checks/sanctions panels |
 
 **Partial (shipped slices; batch agents may close gaps):**
 
@@ -245,6 +245,24 @@ Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `inges
 | Price markers layer | **DEFERRED** | Registry stub + drawer hint; ticker covers prices |
 
 **Remaining map UX (non-blocker):** geo price MVT when `prices` table has locations; 9b alert engine + map-pinned living packs; metals cadastre/smelter data coverage (11).
+
+### Phase 9 deal verification (S19) — closed 2026-06-10
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| Deal intake fields | **DONE** | commodity, qty, location, seller, buyer, incoterm, price, claimed asset + vessel MMSI |
+| DD rules (`dd_rules.json`) | **DONE** | sanctions corridors, KYC thresholds, commodity families |
+| OpenSanctions screening | **DONE** | seller + buyer; UI shows status + match count |
+| Registry verification | **DONE** | seller/buyer company match; location → asset count |
+| Missing documents | **DONE** | energy (EN590/VLSFO/crude/jet/fuel oil) + metals routing |
+| Price context in pack | **DONE** | `VLSFO_SG` distillates/jet; Brent/WTI crude; honest stub tiers |
+| Red flags / warnings / confidence | **DONE** | scored + status badge in UI |
+| Recommended questions | **DONE** | commodity + incoterm + location tailored |
+| Pack v1.1 export | **DONE** | json / markdown / html + relationship graph |
+| RBAC | **DONE** | `deal_verification`, `deal_pack_export`, `deal_watch` entitlements |
+| UI | **DONE** | full DD panels, energy samples, cookie-auth pack download |
+
+**Commits:** `0defdbd6` (backend + pack + RBAC), `bb490639` (entitlement UI gates); verify: `go build ./cmd/api`, `go test ./internal/deals/...`, `tsc --noEmit`.
 
 ### Ingestion pipeline — plan vs shipped
 
