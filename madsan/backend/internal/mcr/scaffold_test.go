@@ -11,9 +11,9 @@ func TestClampConf(t *testing.T) {
 	}
 }
 
-func TestScaffoldStatusHonestTier(t *testing.T) {
+func TestScaffoldStatusWired(t *testing.T) {
 	st := ScaffoldStatus()
-	if st.Tier != TierNotImplemented || st.Status != "scaffold" || len(st.Recipes) < 8 {
+	if st.Status != "wired" || len(st.Recipes) < 8 {
 		t.Fatalf("unexpected scaffold: %+v", st)
 	}
 }

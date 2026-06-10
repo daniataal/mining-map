@@ -72,6 +72,9 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == "legacy_import" {
 		return s.processLegacyImport(ctx, jobID, payload)
 	}
+	if jobType == "eia_daily" {
+		return s.processEIADaily(ctx, jobID)
+	}
 	if jobType == "deal_watch_scan" {
 		return s.processDealWatchScan(ctx, jobID)
 	}
@@ -83,6 +86,15 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	}
 	if jobType == portCallSweepJobType {
 		return s.processPortCallSweep(ctx, jobID)
+	}
+	if jobType == stsDetectJobType {
+		return s.processSTSDetect(ctx, jobID)
+	}
+	if jobType == mcrRebuildJobType {
+		return s.processMCRRebuild(ctx, jobID)
+	}
+	if jobType == voyageRebuildJobType {
+		return s.processVoyageRebuild(ctx, jobID)
 	}
 	if isSourceImportJob(jobType) {
 		return s.processSourceImport(ctx, jobID, jobType, payload)

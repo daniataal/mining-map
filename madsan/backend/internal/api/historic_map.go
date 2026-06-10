@@ -1,21 +1,125 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// listSTSEvents returns STS event points for the map layer (stub until Phase A migration completes).
+// listSTSEvents returns STS proximity signals from core_signals for the map layer.
 func (s *Server) listSTSEvents(w http.ResponseWriter, r *http.Request) {
-	_ = r.URL.Query().Get("bbox")
+	limit := 500
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+			limit = n
+		}
+	}
+	bbox := strings.TrimSpace(r.URL.Query().Get("bbox"))
+	var minLng, minLat, maxLng, maxLat *float64
+	if bbox != "" {
+		parts := strings.Split(bbox, ",")
+		if len(parts) == 4 {
+			if a, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64); err == nil {
+				minLng = &a
+			}
+			if a, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64); err == nil {
+				minLat = &a
+			}
+			if a, err := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64); err == nil {
+				maxLng = &a
+			}
+			if a, err := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64); err == nil {
+				maxLat = &a
+			}
+		}
+	}
+
+	rows, err := s.pool.Query(r.Context(), `
+		SELECT payload, COALESCE(confidence_score,0), observed_at
+		FROM core_signals
+		WHERE signal_type = 'sts'
+		ORDER BY observed_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		writeJSON(w, map[string]any{
+			"type":       "FeatureCollection",
+			"features":   []any{},
+			"tier":       "not_available",
+			"disclaimer": "STS layer unavailable",
+		})
+		return
+	}
+	defer rows.Close()
+
+	features := make([]any, 0)
+	for rows.Next() {
+		var payload []byte
+		var score float64
+		var observed time.Time
+		if rows.Scan(&payload, &score, &observed) != nil {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal(payload, &m) != nil {
+			continue
+		}
+		lat, okLat := toFloat64(m["centroid_lat"])
+		lon, okLon := toFloat64(m["centroid_lon"])
+		if !okLat || !okLon {
+			continue
+		}
+		if minLng != nil && (lon < *minLng || lon > *maxLng || lat < *minLat || lat > *maxLat) {
+			continue
+		}
+		tier := "observed"
+		if sc, ok := m["score"].(map[string]any); ok {
+			if ct, ok := sc["confidence_tier"].(string); ok && ct != "" {
+				tier = ct
+			}
+		}
+		features = append(features, map[string]any{
+			"type": "Feature",
+			"geometry": map[string]any{
+				"type":        "Point",
+				"coordinates": []float64{lon, lat},
+			},
+			"properties": map[string]any{
+				"mmsi_a":           m["mmsi_a"],
+				"mmsi_b":           m["mmsi_b"],
+				"confidence_score": score,
+				"tier":             tier,
+				"observed_at":      observed.UTC().Format(time.RFC3339),
+				"zone_name":        m["zone_name"],
+				"min_distance_m":   m["min_distance_m"],
+				"disclaimer":       "AIS proximity inference — not verified cargo transfer",
+			},
+		})
+	}
+
 	writeJSON(w, map[string]any{
-		"type":     "FeatureCollection",
-		"features": []any{},
-		"tier":     "stub",
-		"disclaimer": "STS map layer stub — events appear after oil_sts_events migration to core_signals.",
+		"type":       "FeatureCollection",
+		"features":   features,
+		"count":      len(features),
+		"tier":       "observed",
+		"disclaimer": "STS events from ais_positions proximity detector (6-factor scored core_signals)",
 	})
+}
+
+func toFloat64(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // getHistoricAggregates returns pre-bucketed series for charts (stub; no raw history rows).

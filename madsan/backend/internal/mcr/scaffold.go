@@ -65,10 +65,10 @@ func RecipeConfidences() []RecipeConfidence {
 
 func ScaffoldStatus() StatusResponse {
 	return StatusResponse{
-		Tier:         TierNotImplemented,
-		Status:       "scaffold",
-		Message:      "MCR v2 probabilistic log-odds engine not wired; additive recipe confidence constants ported from legacy syntheticbol",
-		SourceEngine: "oil-live-intel/internal/services/syntheticbol/engine.go",
+		Tier:         "synthetic",
+		Status:       "wired",
+		Message:      "MCR recipes A-G execute via mcr_rebuild worker job into meridian_cargo_records with evidence chains",
+		SourceEngine: "madsan/backend/internal/mcr/engine.go",
 		ConfidenceBounds: map[string]float64{
 			"min": ConfidenceMin,
 			"max": ConfidenceMax,
@@ -76,10 +76,10 @@ func ScaffoldStatus() StatusResponse {
 		MinTriangulationScore: MinTriangulationScore,
 		Recipes:               RecipeConfidences(),
 		Limitations: []string{
-			"no voyage-based MCR generation",
-			"no mass-balance or draught/TPC volume fusion",
+			"trade-flow recipes require legacy mining_db for oil_trade_flows",
+			"no mass-balance or draught/TPC volume fusion beyond draft_delta heuristic",
 			"no port_manifest calibration backtests",
-			"recipes A-G not executed in madsan worker yet",
+			"bol_tier remains synthetic — not carrier BOL",
 		},
 	}
 }
