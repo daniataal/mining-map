@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
+import { canUse, FEATURE, fetchMe } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 type Insights = {
@@ -63,16 +64,23 @@ export default function DataQualityPage() {
   const [parityTables, setParityTables] = useState<ParityTable[]>([]);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [canUseAdmin, setCanUseAdmin] = useState(false);
 
   useEffect(() => {
     clearLegacyAuthTokens();
-    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
-      .then((r) => setAuthed(r.ok))
-      .catch(() => setAuthed(false));
+    fetchMe()
+      .then((profile) => {
+        setAuthed(!!profile?.uid);
+        setCanUseAdmin(canUse(profile, FEATURE.apiAccess));
+      })
+      .catch(() => {
+        setAuthed(false);
+        setCanUseAdmin(false);
+      });
   }, []);
 
   const refresh = useCallback(() => {
-    if (!authed) return;
+    if (!authed || !canUseAdmin) return;
     fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setInsights(d));
@@ -85,14 +93,14 @@ export default function DataQualityPage() {
     fetch(`${API_BASE}/api/admin/ingestion/jobs`, fetchOpts)
       .then((r) => (r.ok ? r.json() : []))
       .then(setJobs);
-  }, [authed]);
+  }, [authed, canUseAdmin]);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || !canUseAdmin) return;
     refresh();
     const t = setInterval(refresh, 20000);
     return () => clearInterval(t);
-  }, [authed, refresh]);
+  }, [authed, canUseAdmin, refresh]);
 
   if (authed === null) {
     return (
@@ -107,6 +115,16 @@ export default function DataQualityPage() {
       <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
         <h1 style={{ marginTop: 0 }}>Data quality</h1>
         <p style={{ color: "var(--muted)" }}>Sign in via the <Link href="/admin">admin console</Link> first.</p>
+      </main>
+    );
+  }
+
+  if (!canUseAdmin) {
+    return (
+      <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+        <h1 style={{ marginTop: 0 }}>Data quality</h1>
+        <p style={{ color: "var(--warn)" }}>Your plan does not include admin API access.</p>
+        <Link href="/admin" style={{ fontSize: 12 }}>← Admin console</Link>
       </main>
     );
   }

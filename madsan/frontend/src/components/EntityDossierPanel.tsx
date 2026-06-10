@@ -15,6 +15,7 @@ import {
 
 export type MapSelection = {
   id?: string;
+  legacy_row_id?: string;
   name?: string;
   mmsi?: string;
   _entityType?: string;
@@ -26,6 +27,8 @@ export type MapSelection = {
   substance?: string;
   pipeline_substance?: string;
 };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type EvidenceClaim = {
   source_name: string;
@@ -142,12 +145,15 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
     const mmsi = selection.mmsi;
 
     let url = "";
-    if (id) {
+    const isPipeline = selection._layer === "pipelines";
+    const legacyId = selection.legacy_row_id ?? (id && !UUID_RE.test(id) ? id : undefined);
+    if (id && UUID_RE.test(id)) {
       url = `${API_BASE}/api/core/entities/${entityType}/${id}`;
+    } else if (isPipeline && legacyId) {
+      url = `${API_BASE}/api/core/assets/lookup?legacy_table=legacy_petroleum_osm_features&legacy_id=${encodeURIComponent(legacyId)}`;
     } else if (mmsi && entityType === "vessel") {
       url = `${API_BASE}/api/energy/vessels/by-mmsi/${mmsi}`;
     } else {
-      const isPipeline = selection._layer === "pipelines";
       setDossier({
         id: "",
         entity_type: entityType,

@@ -11,7 +11,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | **0** Reports + scaffold | **COMPLETE** | `agent_reports/`, `madsan/` tree, dev bootstrap |
 | **1** Schema + matviews | **COMPLETE** | 23 migrations; serving matviews + GIST/filter indexes (`023`); throttled per-table refresh during legacy import |
 | **5b** Entitlements (`phase5b-entitlements-ff`) | **COMPLETE** | `internal/entitlements` resolver `Can`+`Resolve`; `/api/core/auth/me` returns `entitlements`+`plan`; middleware on deals/supplier search/portal/admin/premium pipeline MVT; migration `023` pro/enterprise+`supplier_portal`/`deal_watch`; UI gating via `lib/entitlements.ts`; billing/Stripe deferred |
-| **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons (`be4a5fba`, `74eeab55`, `e917ecf6`) |
+| **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons, hover tooltip + selected glow, pipeline dossier lookup (`be4a5fba`, `74eeab55`, phase6 close) |
 | **9** Deal verification (`phase9-deal-verification-pack`) | **COMPLETE** | S19 E2E: commodity/qty/location/seller/buyer/incoterm/docs/price/asset+vessel → DD rules, OpenSanctions, location asset match, buyer+seller registry, pack v1.1 (json/md/html) + relationship graph; energy EN590/VLSFO/crude/jet/fuel-oil doc+benchmark tiers; metals doc routing; RBAC on verify/pack/watch; deals UI full result panels + cookie-auth pack download |
 
 **Partial (shipped slices; batch agents may close gaps):**
@@ -104,7 +104,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 - **Splink prep:** SQL duplicate clusters → pairwise CSV export (`/api/admin/dedup/companies/pairs.csv`, CLI)
 - **Pairwise dedup scoring:** `pair_score.go` — trigram + country agreement; tiers `high_confidence` / `manual_review` / `skip`; cluster list + CSV export include `match_score` + `review_tier` (`e934964`)
 - **Cross-name dedup discovery:** `cross_name_pairs.go` + migration `013_companies_trgm_index` — pg_trgm similarity pairs across differing `normalized_name`
-- **Entitlements (5b):** resolver merges plan → subscription → override → feature flag; `/api/core/auth/me` exposes per-feature map; gated routes: deals verify/pack/watch, `GET /api/energy/suppliers/search`, `POST /api/portal/*`, `/api/admin/*` (`api_access`), `GET /tiles/pipelines/*` (`map_premium_layers`); usage_events on verify/pack/watch/supplier search; frontend `fetchMe`+`canUse` on terminal/deals/portal/admin
+- **Entitlements (5b):** resolver merges plan → subscription → override → feature flag; `/api/core/auth/me` exposes per-feature map; gated routes: deals verify/pack/watch, `GET /api/energy/suppliers/search`, `POST /api/portal/*`, `/api/admin/*` (`api_access`), `GET /tiles/pipelines/*` (`map_premium_layers`); usage_events on verify/pack/watch/supplier search; frontend `fetchMe`+`canUse` on terminal/deals/portal/admin/data-quality
 - **RLS scaffold (dev):** migration `014_rls_scaffold` applied on dev — `usage_events` RLS + `madsan_rls` deny stub; `app_current_tenant_id()` helper; API still connects as owner (no behavior change until role cutover)
 - **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
 - **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`). **Petroleum OSM fail** (~70.6% under-imported, 89.5k/303.7k as of 19:44Z) — **Go `legacy_import` job running** (~37 min elapsed); blocks Python retirement until exit 0
@@ -227,7 +227,24 @@ Cross-check: plan `madsan_intelligence_v2_92fbee25`, `legacy-parity` CLI, `inges
 | Sparse vessel heading in tiles/WS | **FIXED** | `4f61f66b` | `cmd/backfill-vessel-heading` copies legacy `oil_ais_positions`; MVT exposes course/heading (`d1401a8b`) |
 | Pipeline click dossier thin | **FIXED** | `3610abe` | Asset summary shows geometry type, substance, OSM tags from `raw_payload` |
 
-**Remaining map UX (non-blocker):** 6b binary MessagePack WS frames; Gulf AIS coverage disclaimer; 9b alert engine + map-pinned living packs; metals cadastre/smelter data coverage (11).
+**Phase 6 map engine (S16/S17/S23) — closed 2026-06-10:**
+
+| Requirement | Status | Notes |
+|-------------|--------|-------|
+| MapLibre dark shell | **DONE** | CARTO dark raster + terminal chrome |
+| ST_AsMVT `/tiles/{layer}/{z}/{x}/{y}.mvt` | **DONE** | energy-assets, metals-assets, vessels, pipelines |
+| Typed layer registry | **DONE** | `frontend/src/lib/layers.ts` — energy/metals/shared + premium gate |
+| No DOM markers at scale | **DONE** | Vector tiles + symbol/circle/line layers; live AIS GeoJSON viewport-only |
+| Click → right dossier panel | **DONE** | `queryRenderedFeatures` → `EntityDossierPanel` |
+| Pipeline LineString MVT | **DONE** | `pipeline_graph_edges` + legacy fallback; z≥4 |
+| Vessel chevrons + heading | **DONE** | Symbol rotation from course/heading |
+| Metals petroleum exclusion | **DONE** | `MetalsMapWhereSQL` on tiles + search |
+| Hover tooltip | **DONE** | MapLibre popup on `mousemove` |
+| Selected feature glow | **DONE** | `feature-state.selected` stroke/line-width |
+| Pipeline dossier click-through | **DONE** | MVT `id` join + `/api/core/assets/lookup?legacy_table&legacy_id` |
+| Price markers layer | **DEFERRED** | Registry stub + drawer hint; ticker covers prices |
+
+**Remaining map UX (non-blocker):** geo price MVT when `prices` table has locations; 9b alert engine + map-pinned living packs; metals cadastre/smelter data coverage (11).
 
 ### Ingestion pipeline — plan vs shipped
 
@@ -290,7 +307,7 @@ flowchart LR
 | 4 Legacy ETL | **PARTIAL** | Petroleum OSM import in progress (~47% as of 2026-06-10); batch 2: dd_rules port + parity wait script |
 | 5 Go core + auth | **PARTIAL** | httpOnly cookie cutover shipped (`a68eb37d`); batch 1: S21 entity envelope |
 | 5b Entitlements | **COMPLETE** | Full resolver+middleware+UI gates; `023` plan features; Stripe/billing writes deferred |
-| 6 Map + MVT | **COMPLETE** | Pipeline lines, vessel chevrons, pipeline dossier shipped |
+| 6 Map + MVT | **COMPLETE** | MVT registry, click→panel, hover tooltip, selected glow, pipeline asset lookup; prices layer deferred (ticker only) |
 | 6b Realtime WS | **PARTIAL** | Dead-reckoning shipped (`d80d3fe3`); batch 1: MessagePack WS frames |
 | 7 Energy UI | **PARTIAL** | Status bar + ticker trends shipped; batch 1: Gulf AIS disclaimer |
 | 8 Supplier discovery | **PARTIAL** | Ranked geo+commodity queries shipped (`62015b65`); batch 1: fusion search |

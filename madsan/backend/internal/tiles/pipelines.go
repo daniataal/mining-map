@@ -14,6 +14,7 @@ FROM (
 			64,
 			true
 		) AS geom,
+		COALESCE(a.id::text, '') AS id,
 		COALESCE(e.metadata->>'legacy_id', e.id::text) AS legacy_row_id,
 		e.osm_id::text AS osm_id,
 		COALESCE(e.metadata->'tags'->>'osm_type', '') AS osm_type,
@@ -27,6 +28,9 @@ FROM (
 		COALESCE(e.metadata->'tags'->>'operator', '') AS operator,
 		COALESCE(e.metadata->'tags'->>'substance', '') AS substance,` + pipelineSubstanceCase("e.metadata->'tags'") + `
 	FROM pipeline_graph_edges e
+	LEFT JOIN assets a
+		ON a.legacy_table = 'legacy_petroleum_osm_features'
+		AND a.legacy_id = COALESCE(e.metadata->>'legacy_id', '')
 	WHERE e.geom IS NOT NULL
 		AND e.geom::geometry && ST_Transform(ST_TileEnvelope($1, $2, $3), 4326)
 ) AS mvt_row
@@ -46,6 +50,7 @@ FROM (
 			64,
 			true
 		) AS geom,
+		f.id::text AS id,
 		f.id::text AS legacy_row_id,
 		f.osm_id::text AS osm_id,
 		f.osm_type,

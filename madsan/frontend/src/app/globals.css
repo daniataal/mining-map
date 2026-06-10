@@ -107,6 +107,17 @@ a { color: var(--accent); text-decoration: none; }
   color: var(--muted);
   font-size: 10px;
 }
+.maplibregl-popup.map-hover-popup .maplibregl-popup-content {
+  padding: 6px 10px;
+  background: rgba(17, 24, 32, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  color: var(--text);
+}
+.map-hover-title { font-weight: 600; letter-spacing: 0.02em; }
+
 .map-empty-state strong { font-size: 14px; color: var(--text); margin-bottom: 0.5rem; }
 .map-empty-state p { margin: 0; max-width: 420px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .map-empty-state span { color: #c9a227; font-weight: 600; }
