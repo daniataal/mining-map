@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
-import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import AppShell from "@/components/AppShell";
+import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import { useAuth } from "@/contexts/AuthContext";
+import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 type Insights = {
@@ -173,35 +176,20 @@ export default function AdminPage() {
   const [dupClusters, setDupClusters] = useState<DupCluster[]>([]);
   const [msg, setMsg] = useState("");
   const [dedupMsg, setDedupMsg] = useState("");
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const [me, setMe] = useState<MeResponse | null>(null);
+  const { me, loading: authLoading, authed, refresh: refreshSession } = useAuth();
   const [entitlementError, setEntitlementError] = useState("");
-  const [authError, setAuthError] = useState("");
   const [platform, setPlatform] = useState<PlatformHealth | null>(null);
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null);
 
-  useEffect(() => {
-    clearLegacyAuthTokens();
-    fetchMe()
-      .then((profile) => {
-        setMe(profile);
-        setAuthed(!!profile?.uid);
-      })
-      .catch(() => {
-        setMe(null);
-        setAuthed(false);
-      });
-  }, []);
-
   const canUseAdmin = canUse(me, FEATURE.apiAccess);
 
-  const refresh = useCallback(() => {
+  const refreshAdmin = useCallback(() => {
     if (!authed || !canUseAdmin) return;
     setEntitlementError("");
     fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
       .then((r) => {
         if (r.status === 401) {
-          setAuthed(false);
+          void refreshSession();
           return null;
         }
         if (r.status === 403) {
@@ -236,45 +224,14 @@ export default function AdminPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setRuntime(d))
       .catch(() => {});
-  }, [authed, canUseAdmin]);
+  }, [authed, canUseAdmin, refreshSession]);
 
   useEffect(() => {
     if (!authed) return;
-    refresh();
-    const t = setInterval(refresh, 15000);
+    refreshAdmin();
+    const t = setInterval(refreshAdmin, 15000);
     return () => clearInterval(t);
-  }, [authed, refresh]);
-
-  async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setAuthError("");
-    const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
-    const password = String(fd.get("password") ?? "");
-    const reg = await fetch(`${API_BASE}/api/core/auth/register`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, display_name: "Admin user", tenant_slug: "default" }),
-    });
-    if (!reg.ok && reg.status !== 400) {
-      setAuthError(await reg.text());
-      return;
-    }
-    const login = await fetch(`${API_BASE}/api/core/auth/login`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!login.ok) {
-      setAuthError(await login.text());
-      return;
-    }
-    const profile = await fetchMe();
-    setMe(profile);
-    setAuthed(!!profile?.uid);
-  }
+  }, [authed, refreshAdmin]);
 
   async function enqueueClusterMergeReview(normalizedName: string) {
     setDedupMsg("");
@@ -292,7 +249,7 @@ export default function AdminPage() {
     } else {
       setDedupMsg(`Enqueued merge review · ${data.review_tier ?? "high_confidence"} · queue ${data.queue_id ?? "—"}`);
     }
-    refresh();
+    refreshAdmin();
   }
 
   async function scanDuplicates() {
@@ -311,7 +268,7 @@ export default function AdminPage() {
         ? ` (${exact ?? 0} exact-name · ${cross ?? 0} cross-name)`
         : "";
     setDedupMsg(`Dedup scan: ${total} queued for review${breakdown}`);
-    refresh();
+    refreshAdmin();
   }
 
   async function exportPairsCSV() {
@@ -342,7 +299,7 @@ export default function AdminPage() {
       parts.push(`${crossEnqueued} cross-name enqueued for review`);
     }
     setDedupMsg(parts.join(" · "));
-    refresh();
+    refreshAdmin();
   }
 
   async function resolveQueueItem(queueId: string, action: "merge" | "dismiss", canonicalCompanyId?: string) {
@@ -364,7 +321,7 @@ export default function AdminPage() {
         ? `Merged ${mergeStats?.merged_company_ids?.length ?? 0} duplicates → ${canonicalCompanyId} (${mergeStats?.assets_updated ?? 0} asset FK updates)`
         : "Review item dismissed"
     );
-    refresh();
+    refreshAdmin();
   }
 
   async function enqueue(jobType: string, sourceSlug: string, payload?: Record<string, unknown>) {
@@ -377,45 +334,39 @@ export default function AdminPage() {
     });
     const data = await res.json();
     setMsg(res.ok ? `Job ${data.status}: ${data.job_id}` : String(data));
-    refresh();
+    refreshAdmin();
   }
 
   const ent = insights?.entities ?? {};
   const prov = insights?.provenance ?? {};
   const ing = insights?.ingestion ?? {};
 
-  if (authed === false) {
+  if (authLoading) {
     return (
-      <main style={{ maxWidth: 480, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
-        <h1 style={{ marginTop: 0 }}>Admin console</h1>
-        <p style={{ color: "var(--muted)" }}>Sign in to access ingestion, dedup, and review queue tools.</p>
-        <form onSubmit={ensureAuth} style={{ display: "grid", gap: "0.75rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)" }}>
-          <label style={{ display: "grid", gap: 4 }}>
-            email
-            <input name="email" type="email" required defaultValue="admin@madsan.dev" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            password
-            <input name="password" type="password" required defaultValue="devpass123" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
-          </label>
-          <button type="submit" style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>Register / sign in</button>
-          {authError && <p style={{ color: "#f87171", margin: 0 }}>{authError}</p>}
-        </form>
-      </main>
+      <AppShell maxWidth={1100}>
+        <AuthLoading />
+      </AppShell>
     );
   }
 
-  if (authed === null) {
+  if (!authed) {
     return (
-      <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
-        <p style={{ color: "var(--muted)" }}>Checking session…</p>
-      </main>
+      <AppShell maxWidth={1100}>
+        <h1 style={{ marginTop: 0 }}>Admin console</h1>
+        <p style={{ color: "var(--muted)", marginBottom: "1.5rem" }}>
+          Sign in to access ingestion, dedup, and review queue tools.
+        </p>
+        <AuthGate
+          title="Admin sign in"
+          subtitle="Ingestion controls and review queue require admin API access."
+        />
+      </AppShell>
     );
   }
 
   if (!canUseAdmin) {
     return (
-      <main style={{ maxWidth: 640, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+      <AppShell maxWidth={640}>
         <h1 style={{ marginTop: 0 }}>Admin console</h1>
         <p style={{ color: "var(--warn)" }}>
           {entitlementError || "Your plan does not include admin API access. Free tier includes api_access with quota — sign in with a subscribed tenant."}
@@ -423,20 +374,19 @@ export default function AdminPage() {
         <p style={{ color: "var(--muted)" }}>
           Plan: <code>{me?.plan || "unknown"}</code>
         </p>
-        <Link href="/" style={{ fontSize: 12 }}>← Terminal</Link>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+    <AppShell maxWidth={1100}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0 }}>Admin console</h1>
         <div style={{ display: "flex", gap: 8 }}>
           <Link href="/admin/data-quality" style={{ padding: "8px 12px", border: "1px solid var(--border)", color: "var(--accent)", textDecoration: "none" }}>
             Data quality
           </Link>
-          <button type="button" onClick={refresh} style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
+          <button type="button" onClick={refreshAdmin} style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}>
             Refresh
           </button>
         </div>
@@ -863,6 +813,6 @@ export default function AdminPage() {
           })
         )}
       </section>
-    </main>
+    </AppShell>
   );
 }

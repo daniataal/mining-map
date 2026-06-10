@@ -63,9 +63,29 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		"tid":  claims.TenantID,
 		"role": claims.Role,
 	}
+	if s.pool != nil && claims.UserID != "" {
+		uid, err := uuid.Parse(claims.UserID)
+		if err == nil {
+			var email, displayName *string
+			_ = s.pool.QueryRow(r.Context(), `
+				SELECT email, display_name FROM users WHERE id = $1 AND is_active = true
+			`, uid).Scan(&email, &displayName)
+			if email != nil {
+				out["email"] = *email
+			}
+			if displayName != nil && *displayName != "" {
+				out["display_name"] = *displayName
+			}
+		}
+	}
 	if s.pool != nil && claims.TenantID != "" {
 		tid, err := uuid.Parse(claims.TenantID)
 		if err == nil {
+			var tenantSlug *string
+			_ = s.pool.QueryRow(r.Context(), `SELECT slug FROM tenants WHERE id = $1`, tid).Scan(&tenantSlug)
+			if tenantSlug != nil {
+				out["tenant_slug"] = *tenantSlug
+			}
 			uid, _ := uuid.Parse(claims.UserID)
 			if ents, plan, err := s.ent.Resolve(r.Context(), &tid, &uid); err == nil {
 				out["entitlements"] = ents

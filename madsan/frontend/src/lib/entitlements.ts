@@ -18,6 +18,9 @@ export type MeResponse = {
   tid?: string;
   role?: string;
   plan?: string;
+  email?: string;
+  display_name?: string;
+  tenant_slug?: string;
   entitlements?: Partial<Record<FeatureKey, boolean>>;
 };
 

@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
-import { canUse, FEATURE, fetchMe } from "@/lib/entitlements";
+import AppShell from "@/components/AppShell";
+import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import { useAuth } from "@/contexts/AuthContext";
+import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 type Insights = {
@@ -63,21 +66,8 @@ export default function DataQualityPage() {
   const [platform, setPlatform] = useState<PlatformHealth | null>(null);
   const [parityTables, setParityTables] = useState<ParityTable[]>([]);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const [canUseAdmin, setCanUseAdmin] = useState(false);
-
-  useEffect(() => {
-    clearLegacyAuthTokens();
-    fetchMe()
-      .then((profile) => {
-        setAuthed(!!profile?.uid);
-        setCanUseAdmin(canUse(profile, FEATURE.apiAccess));
-      })
-      .catch(() => {
-        setAuthed(false);
-        setCanUseAdmin(false);
-      });
-  }, []);
+  const { me, loading: authLoading, authed } = useAuth();
+  const canUseAdmin = canUse(me, FEATURE.apiAccess);
 
   const refresh = useCallback(() => {
     if (!authed || !canUseAdmin) return;
@@ -102,30 +92,30 @@ export default function DataQualityPage() {
     return () => clearInterval(t);
   }, [authed, canUseAdmin, refresh]);
 
-  if (authed === null) {
+  if (authLoading) {
     return (
-      <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
-        <p style={{ color: "var(--muted)" }}>Checking session…</p>
-      </main>
+      <AppShell>
+        <AuthLoading />
+      </AppShell>
     );
   }
 
-  if (authed === false) {
+  if (!authed) {
     return (
-      <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+      <AppShell>
         <h1 style={{ marginTop: 0 }}>Data quality</h1>
-        <p style={{ color: "var(--muted)" }}>Sign in via the <Link href="/admin">admin console</Link> first.</p>
-      </main>
+        <AuthGate title="Sign in to view data quality" subtitle="Admin API access required." />
+      </AppShell>
     );
   }
 
   if (!canUseAdmin) {
     return (
-      <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+      <AppShell>
         <h1 style={{ marginTop: 0 }}>Data quality</h1>
         <p style={{ color: "var(--warn)" }}>Your plan does not include admin API access.</p>
         <Link href="/admin" style={{ fontSize: 12 }}>← Admin console</Link>
-      </main>
+      </AppShell>
     );
   }
 
@@ -135,7 +125,7 @@ export default function DataQualityPage() {
   const parity = platform?.legacy_parity_summary ?? {};
 
   return (
-    <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+    <AppShell>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <div>
           <h1 style={{ margin: 0 }}>Data quality</h1>
@@ -270,6 +260,6 @@ export default function DataQualityPage() {
           </tbody>
         </table>
       </section>
-    </main>
+    </AppShell>
   );
 }

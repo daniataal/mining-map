@@ -119,7 +119,7 @@ export default function SupplierSearchPanel({ canSearch = true, authed = true }:
     <div style={{ fontSize: 13 }}>
       {!authed && (
         <p style={{ color: "var(--muted)", marginBottom: 10 }}>
-          Sign in from <a href="/deals">Deals</a> or <a href="/portal">Portal</a> to run ranked supplier search.
+          <a href="/login?next=/">Sign in</a> to run ranked supplier search and save watchlists.
         </p>
       )}
       {authed && !canSearch && (

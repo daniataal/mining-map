@@ -17,8 +17,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import { Badge } from "@/components/ui/badge";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
+import UserMenu from "@/components/auth/UserMenu";
+import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
-import { canUse, effectiveEntitlements, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import { canUse, effectiveEntitlements, FEATURE } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
@@ -91,15 +93,11 @@ export default function TerminalShell() {
     wsState: "connecting",
     activeLayerCount: 2,
   });
-  const [me, setMe] = useState<MeResponse | null>(null);
+  const { me } = useAuth();
   const canDealWatch = useDealWatchAvailable(me);
 
   const onRuntimeStatus = useCallback((status: MapRuntimeStatus) => {
     setMapStatus(status);
-  }, []);
-
-  useEffect(() => {
-    fetchMe().then(setMe).catch(() => setMe(null));
   }, []);
 
   useEffect(() => {
@@ -183,6 +181,8 @@ export default function TerminalShell() {
           <Search size={12} style={{ display: "inline", marginRight: 4, verticalAlign: "-2px" }} />
           Search ⌘K
         </button>
+        <span className="ticker-spacer" />
+        <UserMenu compact />
       </div>
       <SearchPalette
         open={searchOpen}

@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import AppShell from "@/components/AppShell";
+import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
 import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
 import DDCopilotPanel from "@/components/DDCopilotPanel";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
-import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
-import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import { useAuth } from "@/contexts/AuthContext";
+import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE } from "@/lib/entitlements";
 import { parseDealPackSearchParams } from "@/lib/dealPackNav";
 import { API_BASE } from "@/lib/layers";
 
@@ -211,9 +214,7 @@ export default function DealsPage() {
   const [changesError, setChangesError] = useState("");
   const [watchBusy, setWatchBusy] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [authError, setAuthError] = useState("");
+  const { me, loading: authLoading, refresh } = useAuth();
   const [formSeed, setFormSeed] = useState<Record<string, string> | null>(null);
   const [packDownloadMsg, setPackDownloadMsg] = useState("");
   const [prefillFromMap, setPrefillFromMap] = useState(false);
@@ -226,50 +227,6 @@ export default function DealsPage() {
     if (Object.keys(prefill).length > 0) setFormSeed(prefill);
   }, []);
 
-  useEffect(() => {
-    clearLegacyAuthTokens();
-    fetchMe()
-      .then((profile) => {
-        setMe(profile);
-        setAuthed(!!profile?.uid);
-      })
-      .catch(() => {
-        setMe(null);
-        setAuthed(false);
-      });
-  }, []);
-
-  async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setAuthError("");
-    const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
-    const password = String(fd.get("password") ?? "");
-    const reg = await fetch(`${API_BASE}/api/core/auth/register`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, display_name: "Deals user", tenant_slug: "default" }),
-    });
-    if (!reg.ok && reg.status !== 400) {
-      setAuthError(await reg.text());
-      return;
-    }
-    const login = await fetch(`${API_BASE}/api/core/auth/login`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!login.ok) {
-      setAuthError(await login.text());
-      return;
-    }
-    const profile = await fetchMe();
-    setMe(profile);
-    setAuthed(!!profile?.uid);
-  }
-
   const canVerify = canUse(me, FEATURE.dealVerification);
   const canExportPack = canUse(me, FEATURE.dealPackExport);
   const canWatch = canUse(me, FEATURE.dealWatch);
@@ -278,7 +235,7 @@ export default function DealsPage() {
     setChangesError("");
     const res = await fetch(`${API_BASE}/api/deals/${dealId}/changes`, fetchOpts);
     if (res.status === 401) {
-      setAuthed(false);
+      await refresh();
       return;
     }
     if (res.status === 403) {
@@ -336,7 +293,7 @@ export default function DealsPage() {
       }),
     });
     if (res.status === 401) {
-      setAuthed(false);
+      await refresh();
       setResult({ error: "Session expired — sign in again." });
       setLoading(false);
       return;
@@ -359,7 +316,7 @@ export default function DealsPage() {
         fetch(`${API_BASE}/api/deals/${data.deal_id}/changes`, fetchOpts),
       ]);
       if (packRes.status === 401 || changesRes.status === 401) {
-        setAuthed(false);
+        await refresh();
         setResult({ ...data, error: "Session expired — sign in again." });
       } else {
         if (packRes.status === 403) {
@@ -385,7 +342,7 @@ export default function DealsPage() {
     setPackDownloadMsg("");
     const res = await fetch(`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`, fetchOpts);
     if (res.status === 401) {
-      setAuthed(false);
+      await refresh();
       setPackDownloadMsg("Session expired — sign in again.");
       return;
     }
@@ -409,21 +366,18 @@ export default function DealsPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (authed === null) {
+  if (authLoading) {
     return (
-      <main style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
-        <p style={{ color: "var(--muted)" }}>Checking session…</p>
-      </main>
+      <AppShell maxWidth={800}>
+        <AuthLoading />
+      </AppShell>
     );
   }
 
   const isMetals = dealVertical === "metals";
 
   return (
-    <main style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
-      <p style={{ marginBottom: 8 }}>
-        <Link href="/" style={{ fontSize: 12 }}>← Terminal</Link>
-      </p>
+    <AppShell maxWidth={800}>
       <h1>Deal verification</h1>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {(["energy", "metals"] as const).map((v) => (
@@ -455,27 +409,16 @@ export default function DealsPage() {
           ? "Metals commodities — gold, copper, silver, concentrates. DD rules, sanctions, relationship graph."
           : "Energy commodities — EN590, VLSFO, fuel oil, crude, jet. DD rules, corridor checks, OpenSanctions, relationship graph."}
       </p>
-      {authed === false && (
-        <form onSubmit={ensureAuth} style={{ display: "grid", gap: "0.75rem", marginBottom: "1.5rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)" }}>
-          <strong>Sign in to verify deals</strong>
-          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
-            email
-            <input name="email" type="email" required defaultValue="deals@madsan.dev" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
-          </label>
-          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
-            password
-            <input name="password" type="password" required defaultValue="devpass123" style={{ padding: 8, background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text)" }} />
-          </label>
-          <button type="submit" style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>Register / sign in</button>
-          {authError && <p style={{ color: "#f87171" }}>{authError}</p>}
-        </form>
-      )}
-      {prefillFromMap && authed && !result && (
+      <AuthGate
+        title="Sign in to verify deals"
+        subtitle="Deal verification, pack export, and watchlists require an authenticated session."
+      >
+      {prefillFromMap && !result && (
         <p style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(16,185,129,0.08)", border: "1px solid var(--accent)", fontSize: 12 }}>
           Pre-filled from map selection — linked entity IDs and supply-web deliverability attach when you verify.
         </p>
       )}
-      {authed && !result && (
+      {!result && (
         <div style={{ marginBottom: "1rem", padding: "1rem", background: "var(--panel)", border: "1px solid var(--border)", fontSize: 13 }}>
           <p style={{ color: "var(--muted)", margin: "0 0 8px" }}>No deal verified yet — load a sample or fill the form below.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -495,12 +438,11 @@ export default function DealsPage() {
           </div>
         </div>
       )}
-      {authed && !canVerify && (
+      {!canVerify && (
         <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
           Your plan does not include deal verification. Contact admin for entitlement override.
         </p>
       )}
-      {authed && (
         <form key={formSeed ? JSON.stringify(formSeed) : sellerDefault || "default"} onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
           {["commodity", "quantity", "quantity_unit", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi", "claimed_asset_id"].map((f) => (
             <label key={f} style={{ display: "grid", gap: 4, fontSize: 13 }}>
@@ -517,7 +459,6 @@ export default function DealsPage() {
             {loading ? "Verifying…" : "Verify deal"}
           </button>
         </form>
-      )}
       {result && (
         <div style={{ marginTop: "1.5rem", fontSize: 13 }}>
           {result.error && <p style={{ color: "#f87171" }}>{result.error}</p>}
@@ -628,7 +569,8 @@ export default function DealsPage() {
           )}
         </div>
       )}
+      </AuthGate>
       <p className="disclaimer">Intelligence pack — not legal or trading advice.</p>
-    </main>
+    </AppShell>
   );
 }

@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
-import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
+import AppShell from "@/components/AppShell";
+import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import { useAuth } from "@/contexts/AuthContext";
+import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
+import { useState } from "react";
 
 const fetchOpts = authFetchOpts;
 
@@ -23,56 +26,10 @@ const inputStyle: React.CSSProperties = {
 };
 
 export default function PortalPage() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [authError, setAuthError] = useState("");
+  const { me, loading: authLoading, refresh } = useAuth();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [docPlaceholder, setDocPlaceholder] = useState("");
-
-  useEffect(() => {
-    clearLegacyAuthTokens();
-    fetchMe()
-      .then((profile) => {
-        setMe(profile);
-        setAuthed(!!profile?.uid);
-      })
-      .catch(() => {
-        setMe(null);
-        setAuthed(false);
-      });
-  }, []);
-
-  async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setAuthError("");
-    const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
-    const password = String(fd.get("password") ?? "");
-    const reg = await fetch(`${API_BASE}/api/core/auth/register`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, display_name: "Supplier user", tenant_slug: "default" }),
-    });
-    if (!reg.ok && reg.status !== 400) {
-      setAuthError(await reg.text());
-      return;
-    }
-    const login = await fetch(`${API_BASE}/api/core/auth/login`, {
-      ...fetchOpts,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!login.ok) {
-      setAuthError(await login.text());
-      return;
-    }
-    const profile = await fetchMe();
-    setMe(profile);
-    setAuthed(!!profile?.uid);
-  }
 
   const canSubmit = canUse(me, FEATURE.supplierPortal);
 
@@ -110,7 +67,7 @@ export default function PortalPage() {
     }
 
     if (res.status === 401) {
-      setAuthed(false);
+      await refresh();
       setResult({ error: "Session expired — sign in again." });
       setLoading(false);
       return;
@@ -145,73 +102,31 @@ export default function PortalPage() {
     setDocPlaceholder("");
   }
 
-  if (authed === null) {
+  if (authLoading) {
     return (
-      <main style={{ maxWidth: 640, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
-        <p style={{ color: "var(--muted)" }}>Checking session…</p>
-      </main>
+      <AppShell maxWidth={640}>
+        <AuthLoading />
+      </AppShell>
     );
   }
 
   return (
-    <main style={{ maxWidth: 640, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
-      <p style={{ marginBottom: 8 }}>
-        <Link href="/" style={{ fontSize: 12 }}>
-          ← Terminal
-        </Link>
-      </p>
+    <AppShell maxWidth={640}>
       <h1 style={{ marginTop: 0 }}>Supplier portal</h1>
       <p style={{ color: "var(--muted)" }}>
         Submit commodity offers for analyst review. Submissions enqueue{" "}
         <code style={{ fontSize: 11 }}>manual_review_queue</code> with low confidence until verified.
       </p>
 
-      {authed === false && (
-        <form
-          onSubmit={ensureAuth}
-          style={{
-            display: "grid",
-            gap: "0.75rem",
-            marginBottom: "1.5rem",
-            padding: "1rem",
-            background: "var(--panel)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <strong>Sign in to submit offers</strong>
-          <label style={{ display: "grid", gap: 4 }}>
-            email
-            <input
-              name="email"
-              type="email"
-              required
-              defaultValue="supplier@madsan.dev"
-              style={{ ...inputStyle, background: "var(--bg)" }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            password
-            <input
-              name="password"
-              type="password"
-              required
-              defaultValue="devpass123"
-              style={{ ...inputStyle, background: "var(--bg)" }}
-            />
-          </label>
-          <button type="submit" style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>
-            Register / sign in
-          </button>
-          {authError && <p style={{ color: "#f87171", margin: 0 }}>{authError}</p>}
-        </form>
-      )}
-
-      {authed && !canSubmit && (
-        <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
-          Your plan does not include supplier portal submissions.
-        </p>
-      )}
-      {authed && (
+      <AuthGate
+        title="Sign in to submit offers"
+        subtitle="Supplier submissions require an authenticated session with portal entitlement."
+      >
+        {!canSubmit && (
+          <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
+            Your plan does not include supplier portal submissions.
+          </p>
+        )}
         <form onSubmit={submitOffer} style={{ display: "grid", gap: "0.75rem" }}>
           <label style={{ display: "grid", gap: 4 }}>
             company name
@@ -257,9 +172,8 @@ export default function PortalPage() {
             {loading ? "Submitting…" : "Submit for review"}
           </button>
         </form>
-      )}
 
-      {result && (
+        {result && (
         <div style={{ marginTop: "1.5rem" }}>
           {result.error && (
             <p style={{ color: result.fallback ? "var(--warn)" : "#f87171" }}>
@@ -281,12 +195,13 @@ export default function PortalPage() {
             </p>
           )}
         </div>
-      )}
+        )}
+      </AuthGate>
 
       <p className="disclaimer">
         Supplier submissions are intelligence signals, not verified listings. Analysts resolve items in the admin review
         queue before dossier promotion.
       </p>
-    </main>
+    </AppShell>
   );
 }
