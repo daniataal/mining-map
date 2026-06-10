@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/madsan/intelligence/internal/config"
 	"github.com/madsan/intelligence/internal/confidence"
+	"github.com/madsan/intelligence/internal/config"
 	"github.com/madsan/intelligence/internal/deals"
 )
 
@@ -30,18 +30,18 @@ func New(pool *pgxpool.Pool, cfg config.Config) *Service {
 }
 
 type NormalizedRecord struct {
-	EntityType   string         `json:"entity_type"`
-	Name         string         `json:"name"`
-	CountryCode  string         `json:"country_code,omitempty"`
-	Latitude     *float64       `json:"latitude,omitempty"`
-	Longitude    *float64       `json:"longitude,omitempty"`
-	Commodities  []string       `json:"commodities,omitempty"`
-	AssetType    string         `json:"asset_type,omitempty"`
-	GeomEWKB     []byte         `json:"-"` // pipeline LineString from legacy petroleum_osm_features
-	RawPayload   map[string]any `json:"raw_payload,omitempty"`
-	Unmapped     map[string]any `json:"unmapped_fields,omitempty"`
-	SourceSlug   string         `json:"source_slug"`
-	ExternalID   string         `json:"external_id,omitempty"`
+	EntityType  string         `json:"entity_type"`
+	Name        string         `json:"name"`
+	CountryCode string         `json:"country_code,omitempty"`
+	Latitude    *float64       `json:"latitude,omitempty"`
+	Longitude   *float64       `json:"longitude,omitempty"`
+	Commodities []string       `json:"commodities,omitempty"`
+	AssetType   string         `json:"asset_type,omitempty"`
+	GeomEWKB    []byte         `json:"-"` // pipeline LineString from legacy petroleum_osm_features
+	RawPayload  map[string]any `json:"raw_payload,omitempty"`
+	Unmapped    map[string]any `json:"unmapped_fields,omitempty"`
+	SourceSlug  string         `json:"source_slug"`
+	ExternalID  string         `json:"external_id,omitempty"`
 }
 
 func (s *Service) Enqueue(ctx context.Context, jobType, sourceSlug string, payload map[string]any) (uuid.UUID, error) {
@@ -73,6 +73,12 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	}
 	if jobType == "deal_watch_scan" {
 		return s.processDealWatchScan(ctx, jobID)
+	}
+	if jobType == "terminal_enrichment" {
+		return s.processTerminalEnrichment(ctx, jobID)
+	}
+	if jobType == vesselEnrichmentJobType {
+		return s.processVesselEnrichment(ctx, jobID)
 	}
 
 	jobDryRun := dryRun || dryRunFromPayload(payload)
@@ -244,11 +250,11 @@ func mapToRecord(m map[string]any, sourceSlug string) NormalizedRecord {
 		et = "asset"
 	}
 	rec := NormalizedRecord{
-		EntityType: et,
-		Name:       normalizeName(name),
+		EntityType:  et,
+		Name:        normalizeName(name),
 		CountryCode: strings.ToUpper(strings.TrimSpace(country)),
-		SourceSlug: sourceSlug,
-		RawPayload: m,
+		SourceSlug:  sourceSlug,
+		RawPayload:  m,
 	}
 	if lat, ok := toFloat(m["latitude"]); ok {
 		rec.Latitude = &lat

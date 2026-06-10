@@ -51,6 +51,8 @@ func sourceMeta(slug string) (name, typ, category string) {
 		return strings.ReplaceAll(slug, "_", " "), "etl", "legacy_import"
 	case slug == "legacy_oil_ais_positions":
 		return "Legacy AIS positions", "api", "ais"
+	case slug == "vessel_enrichment":
+		return "Vessel owner/operator enrichment", "derived", "maritime_registry"
 	default:
 		return slug, "file", "import"
 	}

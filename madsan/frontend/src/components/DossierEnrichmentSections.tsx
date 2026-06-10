@@ -199,7 +199,7 @@ export function VesselOwnershipSection({ dossier }: Props) {
       ) : (
         <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 12 }}>
           Registry owner and operator are not on file for this vessel. AIS identity fields (name, IMO, MMSI) appear
-          below. The scheduler refreshes from ShipVault cache and Equasis when a match exists.
+          below. The scheduler refreshes owner/operator from ShipVault when credentials are configured.
         </p>
       )}
     </div>

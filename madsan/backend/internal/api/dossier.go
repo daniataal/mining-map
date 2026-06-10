@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	venrich "github.com/madsan/intelligence/internal/enrichment/vessel"
 	"github.com/madsan/intelligence/internal/intelligence"
 )
 
@@ -73,11 +72,6 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 			&enrich.StaleAfter, &enrich.FetchedAt, &enrich.DWT, &enrich.GrossTonnage,
 			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations,
 		)
-	}
-	if enrich.OwnerName == "" && enrich.OperatorName == "" && enrich.Tier == "" && s.legacyPool != nil && (mmsi != "" || imo != "") {
-		if res, err := (&venrich.LegacyCacheProvider{Pool: s.legacyPool}).Enrich(r.Context(), mmsi, imo, name); err == nil {
-			enrich = vesselEnrichmentFromResult(res)
-		}
 	}
 	score := 0.0
 	if conf != nil {

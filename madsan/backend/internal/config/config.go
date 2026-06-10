@@ -67,23 +67,36 @@ func locateMadsanRawDir() string {
 }
 
 type Config struct {
-	Addr               string
-	DatabaseURL        string
-	JWTSecret          string
-	CookieSecure       bool
-	CookieDomain       string
-	AccessTokenTTL     time.Duration
-	RefreshTokenTTL    time.Duration
-	RawDataDir         string
-	LegacyDBURL        string
-	ETLDir             string
-	ETLPython          string
-	LegacyImportPython bool
-	EnableAISSync         bool
-	AISSyncInterval       time.Duration
-	AISSyncLookbackHours  int
-	EIAAPIKey            string
-	OpenSanctionsAPIKey  string
+	Addr                      string
+	DatabaseURL               string
+	JWTSecret                 string
+	CookieSecure              bool
+	CookieDomain              string
+	AccessTokenTTL            time.Duration
+	RefreshTokenTTL           time.Duration
+	RawDataDir                string
+	LegacyDBURL               string
+	ETLDir                    string
+	ETLPython                 string
+	LegacyImportPython        bool
+	EnableAISSync             bool
+	AISSyncInterval           time.Duration
+	AISSyncLookbackHours      int
+	EIAAPIKey                 string
+	OpenSanctionsAPIKey       string
+	ShipVaultEnabled          bool
+	ShipVaultBearerToken      string
+	ShipVaultRefreshToken     string
+	ShipVaultSessionJSON      string
+	ShipVaultEmail            string
+	ShipVaultPassword         string
+	ShipVaultFirebaseAPIKey   string
+	ShipVaultBaseURL          string
+	ShipVaultAppOriginURL     string
+	ShipVaultCacheTTLDays     int
+	VesselEnrichmentBatch     int
+	VesselEnrichmentStaleDays int
+	VesselEnrichmentRateMS    int
 }
 
 func defaultETLDir() string {
@@ -98,23 +111,36 @@ func defaultETLDir() string {
 func Load() Config {
 	etlDir := defaultETLDir()
 	return Config{
-		Addr:               env("MADSAN_API_ADDR", ":8088"),
-		DatabaseURL:        env("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable"),
-		JWTSecret:          env("MADSAN_JWT_SECRET", "dev-change-me-in-production"),
-		CookieSecure:       envBool("MADSAN_COOKIE_SECURE", false),
-		CookieDomain:       env("MADSAN_COOKIE_DOMAIN", ""),
-		AccessTokenTTL:     time.Duration(envInt("MADSAN_ACCESS_TTL_MIN", 15)) * time.Minute,
-		RefreshTokenTTL:    time.Duration(envInt("MADSAN_REFRESH_TTL_DAYS", 7)) * 24 * time.Hour,
-		RawDataDir:         resolveRawDir(env("MADSAN_RAW_DIR", "")),
-		LegacyDBURL:        env("LEGACY_DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable"),
-		ETLDir:             env("MADSAN_ETL_DIR", etlDir),
-		ETLPython:          env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
-		LegacyImportPython: envBool("MADSAN_LEGACY_PYTHON", false),
-		EnableAISSync:        envBool("MADSAN_AIS_SYNC", true),
-		AISSyncInterval:      time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
-		AISSyncLookbackHours: envInt("MADSAN_AIS_SYNC_LOOKBACK_HOURS", 168),
-		EIAAPIKey:           env("EIA_API_KEY", ""),
-		OpenSanctionsAPIKey: env("OPENSANCTIONS_API_KEY", ""),
+		Addr:                      env("MADSAN_API_ADDR", ":8088"),
+		DatabaseURL:               env("DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable"),
+		JWTSecret:                 env("MADSAN_JWT_SECRET", "dev-change-me-in-production"),
+		CookieSecure:              envBool("MADSAN_COOKIE_SECURE", false),
+		CookieDomain:              env("MADSAN_COOKIE_DOMAIN", ""),
+		AccessTokenTTL:            time.Duration(envInt("MADSAN_ACCESS_TTL_MIN", 15)) * time.Minute,
+		RefreshTokenTTL:           time.Duration(envInt("MADSAN_REFRESH_TTL_DAYS", 7)) * 24 * time.Hour,
+		RawDataDir:                resolveRawDir(env("MADSAN_RAW_DIR", "")),
+		LegacyDBURL:               env("LEGACY_DATABASE_URL", "postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable"),
+		ETLDir:                    env("MADSAN_ETL_DIR", etlDir),
+		ETLPython:                 env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
+		LegacyImportPython:        envBool("MADSAN_LEGACY_PYTHON", false),
+		EnableAISSync:             envBool("MADSAN_AIS_SYNC", true),
+		AISSyncInterval:           time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
+		AISSyncLookbackHours:      envInt("MADSAN_AIS_SYNC_LOOKBACK_HOURS", 168),
+		EIAAPIKey:                 env("EIA_API_KEY", ""),
+		OpenSanctionsAPIKey:       env("OPENSANCTIONS_API_KEY", ""),
+		ShipVaultEnabled:          envBool("MADSAN_SHIPVAULT_ENABLED", false),
+		ShipVaultBearerToken:      env("SHIPVAULT_BEARER_TOKEN", ""),
+		ShipVaultRefreshToken:     env("SHIPVAULT_REFRESH_TOKEN", ""),
+		ShipVaultSessionJSON:      env("SHIPVAULT_SESSION_JSON", ""),
+		ShipVaultEmail:            env("SHIPVAULT_EMAIL", ""),
+		ShipVaultPassword:         env("SHIPVAULT_PASSWORD", ""),
+		ShipVaultFirebaseAPIKey:   env("SHIPVAULT_FIREBASE_API_KEY", ""),
+		ShipVaultBaseURL:          env("SHIPVAULT_BASE_URL", "https://shipvaultapi-gjb8c.ondigitalocean.app"),
+		ShipVaultAppOriginURL:     env("SHIPVAULT_APP_ORIGIN_URL", "https://app.shipvault.io"),
+		ShipVaultCacheTTLDays:     envInt("SHIPVAULT_CACHE_TTL_DAYS", 120),
+		VesselEnrichmentBatch:     envInt("MADSAN_VESSEL_ENRICHMENT_BATCH", 50),
+		VesselEnrichmentStaleDays: envInt("MADSAN_VESSEL_ENRICHMENT_STALE_DAYS", 120),
+		VesselEnrichmentRateMS:    envInt("MADSAN_VESSEL_ENRICHMENT_RATE_MS", 500),
 	}
 }
 
