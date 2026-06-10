@@ -210,7 +210,7 @@ func (s *Service) buildWatchSnapshot(ctx context.Context, dealID string) (watchS
 		Sanctions:    map[string]string{},
 	}
 
-	ticker := markets.NewHandler(s.eiaKey)
+	ticker := markets.NewHandler(s.eiaKey).WithPool(s.pool)
 	if q, ok := ticker.LookupBenchmark(commodity, now); ok {
 		snap.Benchmark = &snapshotBenchmark{Symbol: q.Symbol, Price: q.Price, Tier: q.Tier}
 	}
@@ -309,13 +309,14 @@ func detectSanctionsRescreen(ctx context.Context, screener *compliance.Screener,
 		Tier:       ChangeTierNotImplemented,
 		DetectedAt: now.Format(time.RFC3339),
 		Source:     "opensanctions",
-		Message:    "Re-screen diff worker not shipped — baseline stored at watch; manual re-verify recommended",
 	}
 	if len(snap.Sanctions) == 0 {
+		item.Message = "No sanctions baseline captured at watch — re-screen not applicable"
 		return item
 	}
 
 	changes := []string{}
+	screened := 0
 	for role, baseStatus := range snap.Sanctions {
 		name := snap.Seller
 		if role == "buyer" {
@@ -326,17 +327,29 @@ func detectSanctionsRescreen(ctx context.Context, screener *compliance.Screener,
 		}
 		cur := screener.ScreenCompany(ctx, name, 5)
 		if cur.Status == "unknown" {
+			if cur.StatusCode == 401 {
+				item.Message = "OpenSanctions API key missing or invalid — set OPENSANCTIONS_API_KEY"
+			} else if cur.Message != "" {
+				item.Message = "OpenSanctions re-screen unavailable: " + cur.Message
+			}
 			continue
 		}
+		screened++
 		if cur.Status != baseStatus {
 			changes = append(changes, fmt.Sprintf("%s %s → %s", role, baseStatus, cur.Status))
 		}
 	}
-	if len(changes) == 0 {
+	if screened == 0 {
 		return item
 	}
 	item.Tier = ChangeTierObserved
+	if len(changes) == 0 {
+		item.Message = "No sanctions status change since watch baseline"
+		item.NewValue = "unchanged"
+		return item
+	}
 	item.OldValue = strings.Join(changes, "; ")
+	item.NewValue = "changed"
 	item.Message = "Sanctions screening status changed since watch baseline"
 	return item
 }

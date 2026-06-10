@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -26,6 +28,7 @@ type Quote struct {
 
 type Handler struct {
 	eiaKey string
+	pool   *pgxpool.Pool
 	cache  *eiaCache
 	client *http.Client
 }
@@ -39,6 +42,14 @@ func NewHandler(eiaKey string) *Handler {
 		cache:  newEIACache(),
 		client: &http.Client{Timeout: eiaHTTPTimeout},
 	}
+}
+
+// WithPool enables persisted prices lookup for bunker benchmarks.
+func (h *Handler) WithPool(pool *pgxpool.Pool) *Handler {
+	if h != nil {
+		h.pool = pool
+	}
+	return h
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +84,10 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 	var quotes []Quote
 	eiaUsed := false
 
+	var brentPrice float64
+	var brentAvailable bool
+	var brentTier string
+
 	if h.eiaKey != "" {
 		spots, err := h.cache.get(h.eiaKey, h.client)
 		if err == nil && len(spots) > 0 {
@@ -93,12 +108,18 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 					ObservedAt: observed,
 				})
 				eiaUsed = true
+				if meta.Symbol == "BRENT" {
+					brentPrice = spot.Price
+					brentAvailable = true
+					brentTier = tierEIAOpenData
+				}
 			}
 		}
 	}
 
 	if !eiaUsed {
 		quotes = append(quotes, stubEnergy...)
+		brentPrice = stubEnergy[1].Price
 	} else {
 		// Preserve stable Brent/WTI ordering when only one series returns.
 		order := []string{"WTI", "BRENT"}
@@ -114,7 +135,9 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 		}
 	}
 
-	quotes = append(quotes, bunkerVLSFOQuote(now))
+	quotes = append(quotes, buildBunkerVLSFOQuote(bunkerQuoteInput{
+		pool: h.pool, brentPrice: brentPrice, brentAvailable: brentAvailable || !eiaUsed, brentTier: brentTier,
+	}, now))
 	quotes = append(quotes,
 		Quote{
 			Symbol: "GOLD", Label: "Gold spot", Price: 2348.5, Currency: "USD", Unit: "/oz",
@@ -124,10 +147,10 @@ func (h *Handler) buildQuotes(now time.Time) ([]Quote, string, string) {
 	)
 
 	topTier := tierReferenceStub
-	disclaimer := "Reference placeholders — set EIA_API_KEY for EIA daily crude spot (WTI/Brent); VLSFO from bunker supplier register context (no price feed)"
+	disclaimer := "Reference placeholders — set EIA_API_KEY for EIA daily crude spot (WTI/Brent); VLSFO uses desk stub when Brent unavailable"
 	if eiaUsed {
 		topTier = tierEIAOpenData
-		disclaimer = "Crude from EIA open data (daily spot, not exchange tick); VLSFO/Gold remain reference stubs (bunker register has no prices)"
+		disclaimer = "Crude from EIA open data (daily spot, not exchange tick); VLSFO derived from Brent when no persisted bunker price; Gold remains reference stub"
 	} else if h.eiaKey != "" {
 		disclaimer = "EIA fetch unavailable — showing reference placeholders; not live exchange prices"
 	}

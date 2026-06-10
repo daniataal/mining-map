@@ -114,6 +114,12 @@ func TestHandlerReferenceStubWithoutKey(t *testing.T) {
 		t.Fatalf("expected 4 quotes, got %d", len(quotes))
 	}
 	for _, q := range quotes {
+		if q.Symbol == "VLSFO_SG" {
+			if q.Tier != tierReferenceStub && q.Tier != tierDerivedOpen {
+				t.Fatalf("quote %s tier %q", q.Symbol, q.Tier)
+			}
+			continue
+		}
 		if q.Tier != tierReferenceStub {
 			t.Fatalf("quote %s tier %q", q.Symbol, q.Tier)
 		}

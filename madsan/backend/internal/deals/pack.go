@@ -61,6 +61,7 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 	}
 
 	graph := s.buildRelationshipGraph(ctx, seller, buyer, verification)
+	supplyWeb := s.buildSupplyWeb(ctx, seller, location, commodity)
 
 	vertical := "energy"
 	if compliance.CommodityFamily(commodity) == "mining" {
@@ -69,7 +70,7 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 	priceCtx := s.buildPriceContext(commodity, quantityUnit, price, currency)
 
 	pack := map[string]any{
-		"pack_version":  "1.1",
+		"pack_version":  "1.2",
 		"generated_at":  time.Now().UTC().Format(time.RFC3339),
 		"platform":      "MadSan Intelligence",
 		"vertical":      vertical,
@@ -89,6 +90,7 @@ func (s *Service) BuildPack(ctx context.Context, id string) (map[string]any, err
 		"price_context":        priceCtx,
 		"parties":              parties,
 		"relationship_graph":   graph,
+		"supply_web":         supplyWeb,
 		"verification":         verification,
 		"sections": map[string]any{
 			"confidence_score":      pickFloat(verification, "confidence_score", score),
@@ -117,7 +119,7 @@ func packDisclaimer(vertical string) string {
 
 func (s *Service) buildPriceContext(commodity string, quantityUnit *string, price *float64, currency string) map[string]any {
 	out := map[string]any{"comparable": false}
-	ticker := markets.NewHandler(s.eiaKey)
+	ticker := markets.NewHandler(s.eiaKey).WithPool(s.pool)
 	now := time.Now().UTC()
 	q, ok := ticker.LookupBenchmark(commodity, now)
 	if !ok {
@@ -304,6 +306,31 @@ func PackToMarkdown(pack map[string]any) string {
 				}
 				write("\n")
 			}
+		}
+	}
+
+	if sw, ok := pack["supply_web"].(map[string]any); ok && len(sw) > 0 {
+		write("## Supply-web deliverability\n\n")
+		if score, ok := sw["deliverability_score"].(float64); ok {
+			write("- **Score:** %.0f/100\n", score)
+		}
+		if tier, ok := sw["tier"].(string); ok && tier != "" {
+			write("- **Tier:** %s\n", tier)
+		}
+		if hops, ok := sw["hops"].([]any); ok && len(hops) > 0 {
+			write("\n**Chain:**\n")
+			for _, h := range hops {
+				if m, ok := h.(map[string]any); ok {
+					write("- %v: %v (%v)\n", m["role"], m["name"], m["tier"])
+				}
+			}
+			write("\n")
+		}
+		if lims, ok := sw["limitations"].([]any); ok {
+			for _, l := range lims {
+				write("- %v\n", l)
+			}
+			write("\n")
 		}
 	}
 

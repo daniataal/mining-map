@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
+import DDCopilotPanel from "@/components/DDCopilotPanel";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
 import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
@@ -583,6 +584,7 @@ export default function DealsPage() {
             </div>
           )}
           <DealGraphPanel graph={packGraph} />
+          <DDCopilotPanel dealId={result.deal_id} disabled={!canVerify} />
           <DealChangesPanel
             changes={dealChanges}
             error={changesError || undefined}

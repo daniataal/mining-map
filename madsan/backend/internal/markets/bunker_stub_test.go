@@ -49,7 +49,7 @@ func TestHandlerIncludesBunkerVLSFOStub(t *testing.T) {
 	if vlsfo == nil {
 		t.Fatal("missing VLSFO_SG quote")
 	}
-	if vlsfo.Tier != tierReferenceStub {
+	if vlsfo.Tier != tierReferenceStub && vlsfo.Tier != tierDerivedOpen {
 		t.Fatalf("vlsfo tier %q", vlsfo.Tier)
 	}
 	if disclaimer == "" {
