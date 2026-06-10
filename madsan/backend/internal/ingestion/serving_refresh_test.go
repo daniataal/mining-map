@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 func sortedViews(views []string) []string {
@@ -103,6 +104,23 @@ func TestMatviewsForRecords(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestShouldRefreshServingMatview(t *testing.T) {
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	if shouldRefreshServingMatview(0, now, now) {
+		t.Fatal("zero rows should not refresh")
+	}
+	if !shouldRefreshServingMatview(legacyMatviewRefreshRows, now, now) {
+		t.Fatal("row threshold should trigger refresh")
+	}
+	last := now.Add(-legacyMatviewRefreshMinInterval - time.Second)
+	if !shouldRefreshServingMatview(100, last, now) {
+		t.Fatal("interval threshold should trigger refresh")
+	}
+	if shouldRefreshServingMatview(100, now, now) {
+		t.Fatal("below thresholds should not refresh")
 	}
 }
 

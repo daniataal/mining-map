@@ -2,13 +2,52 @@ package ingestion
 
 import (
 	"context"
+	"time"
 )
 
 const (
 	matviewEnergy = "map_energy_assets"
 	matviewMetals = "map_metals_assets"
 	matviewVessel = "map_vessels"
+
+	// Throttle targeted refresh during long legacy imports (avoid per-batch full refresh).
+	legacyMatviewRefreshRows        = 5000
+	legacyMatviewRefreshMinInterval = 90 * time.Second
 )
+
+// matviewRefreshThrottle gates incremental matview refresh during bulk imports.
+type matviewRefreshThrottle struct {
+	lastAt    time.Time
+	rowsSince int
+}
+
+func (t *matviewRefreshThrottle) addRows(n int) {
+	if n > 0 {
+		t.rowsSince += n
+	}
+}
+
+func shouldRefreshServingMatview(rowsSince int, lastAt time.Time, now time.Time) bool {
+	if rowsSince == 0 {
+		return false
+	}
+	if rowsSince >= legacyMatviewRefreshRows {
+		return true
+	}
+	if !lastAt.IsZero() && now.Sub(lastAt) >= legacyMatviewRefreshMinInterval {
+		return true
+	}
+	return false
+}
+
+func (t *matviewRefreshThrottle) shouldRefresh(now time.Time) bool {
+	return shouldRefreshServingMatview(t.rowsSince, t.lastAt, now)
+}
+
+func (t *matviewRefreshThrottle) markRefreshed(now time.Time) {
+	t.lastAt = now
+	t.rowsSince = 0
+}
 
 // matviewsForJobType returns serving matviews for ingestion job types that do not
 // carry row-level entity hints (e.g. scheduled AIS refresh).
@@ -123,13 +162,10 @@ func (s *Service) refreshServingMatviews(ctx context.Context, views []string) er
 }
 
 func (s *Service) refreshOneMatview(ctx context.Context, view string) error {
-	if view == matviewEnergy {
-		_, err := s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY `+view)
-		if err != nil {
-			_, err = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW `+view)
-		}
-		return err
+	// All serving matviews have a unique index on id (required for CONCURRENTLY).
+	_, err := s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY `+view)
+	if err != nil {
+		_, err = s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW `+view)
 	}
-	_, err := s.pool.Exec(ctx, `REFRESH MATERIALIZED VIEW `+view)
 	return err
 }

@@ -9,7 +9,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | Phase | Status | Evidence |
 |-------|--------|----------|
 | **0** Reports + scaffold | **COMPLETE** | `agent_reports/`, `madsan/` tree, dev bootstrap |
-| **1** Schema + matviews | **COMPLETE** | 11+ migrations, PostGIS `madsan_db` :5433 |
+| **1** Schema + matviews | **COMPLETE** | 23 migrations; serving matviews + GIST/filter indexes (`023`); throttled per-table refresh during legacy import |
 | **5b** Entitlements | **COMPLETE** | Plans, feature flags, deals RBAC (`e934964`) |
 | **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons (`be4a5fba`, `74eeab55`, `e917ecf6`) |
 | **9** Deal verification | **COMPLETE** | DD rules, OpenSanctions, pack v1.1 + relationship graph |
@@ -244,7 +244,7 @@ flowchart LR
   wrk --> pathC["watch_folder\nBROKEN path"]
   pathA --> master["master tables\nassets / vessels / companies"]
   pathB --> master
-  master --> mv["REFRESH MATERIALIZED VIEW\n(all map_* views)"]
+  master --> mv["targeted REFRESH\n(per table / 5k rows / 90s)"]
 ```
 
 | Plan step | Status | Notes |
@@ -254,18 +254,37 @@ flowchart LR
 | Hash / skip unchanged | **PARTIAL** | SHA256 in `watch_folder` only; legacy Go import always re-reads |
 | Raw snapshot on disk | **PARTIAL** | `SnapshotRaw` exists; not wired for all adapters |
 | manual_review_queue in pipeline | **PARTIAL** | Dedup admin enqueue only; not post-import uncertain routing |
-| Targeted matview refresh | **PARTIAL** | Per-job-type refresh shipped (`71fc3701`); worker restart deferred to pick up |
+| Targeted matview refresh | **SHIPPED** | Per-job-type + throttled legacy import refresh; CONCURRENTLY when unique index present; worker restart deferred to pick up |
 | Splink batch dedup | **GAP** | CSV export + Go `pair_score` only; no Splink runtime |
 | watch_folder cron path | **BLOCKED** | Fails: `open …/backend/madsan/raw: no such file or directory` |
 
 **Import job status (live):** 1× `legacy_import` **running** (started 19:07Z); 3× completed; petroleum count climbing (~89.5k → target 303.7k). Worker on host (`go run ./cmd/worker`); compose stack currently DB-only.
+
+### Phase 1 schema — `phase1-schema` (2026-06-10)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Canonical master + staging tables | **DONE** | `001`–`022` migrations applied |
+| Serving matviews | **DONE** | `map_energy_assets`, `map_metals_assets`, `map_vessels`; search views are live (`supplier_search`, etc.) |
+| PostGIS GIST on geom | **DONE** | Master `assets`/`vessels`; matview geom indexes including `idx_map_vessels_geom` restored in `023` |
+| Type/country/confidence indexes | **DONE** | Master tables + serving matviews (`023`) |
+| Targeted matview refresh | **DONE** | Per job type + per legacy table; throttled every 5k rows or 90s during import; final refresh at job end |
+| `map_prices` matview | **DEFERRED** | Prices served from `prices` table; no matview needed for MVP |
+
+**GO_MIGRATION_ALIGNMENT:** Permanent refresh logic in Go (`internal/ingestion/serving_refresh.go`); no new Python.
+
+**CUTOVER_PLAN:** Apply `023` via golang-migrate on next deploy; running worker picks up throttled refresh on restart (no restart required mid-import for code already deployed).
+
+**ROLLBACK_PLAN:** Revert commit; `023` indexes are additive (`IF NOT EXISTS`); throttle is code-only rollback.
+
+**Plan todo `phase1-schema`:** **COMPLETE**
 
 ### Phase gap summary
 
 | Phase | Status | Top gap |
 |-------|--------|---------|
 | 0 Reports + scaffold | **COMPLETE** | — |
-| 1 Schema + matviews | **COMPLETE** | Serving matviews may lag during long imports |
+| 1 Schema + matviews | **COMPLETE** | `phase1-schema`: `023` GIST + filter indexes; incremental matview refresh during long imports; MVT tiles read live `assets`/`vessels` |
 | 2 Ingestion pipeline | **PARTIAL** | Batch 1: import reports, dry-run, dedup auto-enqueue; no Splink / full 16-step |
 | 3 Scheduler + worker | **PARTIAL** | Targeted matview refresh shipped (`71fc3701`); worker restart deferred; watch_folder path fix shipped (`9a84ec7f`) |
 | 4 Legacy ETL | **PARTIAL** | Petroleum OSM import in progress (~47% as of 2026-06-10); batch 2: dd_rules port + parity wait script |

@@ -92,7 +92,7 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 	var lastErr error
 
 	for _, spec := range tables {
-		n, ev, err := s.importLegacyTable(ctx, legacy, spec, sourceID, opts.MaxRows, opts.DryRun)
+		n, ev, err := s.importLegacyTable(ctx, legacy, spec, sourceID, opts.MaxRows, opts.DryRun, &matviewRefreshThrottle{})
 		counts[spec.Table] = n
 		imported += n
 		evidenceRows += ev
@@ -164,7 +164,11 @@ func tableNames(specs []legacyTableSpec) []string {
 	return out
 }
 
-func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, spec legacyTableSpec, sourceID uuid.UUID, maxRows int, dryRun bool) (imported, evidence int, err error) {
+func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, spec legacyTableSpec, sourceID uuid.UUID, maxRows int, dryRun bool, refresh *matviewRefreshThrottle) (imported, evidence int, err error) {
+	if refresh == nil {
+		refresh = &matviewRefreshThrottle{}
+	}
+	matview := legacyTableMatview(spec.Table)
 	offset := 0
 	for {
 		if maxRows > 0 && imported >= maxRows {
@@ -219,10 +223,21 @@ func (s *Service) importLegacyTable(ctx context.Context, legacy *pgxpool.Pool, s
 				}
 			}
 		}
+		if !dryRun && matview != "" {
+			refresh.addRows(len(batch))
+			if refresh.shouldRefresh(time.Now()) {
+				_ = s.refreshServingMatviews(ctx, []string{matview})
+				refresh.markRefreshed(time.Now())
+			}
+		}
 		offset += len(batch)
 		if len(batch) < limit {
 			break
 		}
+	}
+	if !dryRun && matview != "" && refresh.rowsSince > 0 {
+		_ = s.refreshServingMatviews(ctx, []string{matview})
+		refresh.markRefreshed(time.Now())
 	}
 	return imported, evidence, nil
 }
