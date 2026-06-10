@@ -11,11 +11,15 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/madsan/intelligence/internal/config"
+	"github.com/madsan/intelligence/internal/database"
 )
 
 const assetEnrichProgressEvery = 25
 
-var terminalEnrichAssetTypes = []string{"tank_farm", "storage", "terminal", "refinery"}
+// terminalEnrichAssetTypes selects petroleum storage assets for enrichment.
+// Individual OSM man_made=storage_tank features import as tank_farm (storage_terminals layer), not tank.
+// Curated oil_terminals rows enrich directly after legacy import; until then proximity match uses mining_db.
+var terminalEnrichAssetTypes = []string{"tank_farm", "tank", "storage", "terminal", "refinery"}
 
 // AssetEnrichBatchOptions controls a one-off or scheduled tank/terminal enrichment run.
 type AssetEnrichBatchOptions struct {
@@ -44,6 +48,14 @@ func RunAssetEnrichmentBatch(ctx context.Context, pool *pgxpool.Pool, cfg config
 		limit = terminalEnrichmentBatch
 	}
 	s := &Service{pool: pool, cfg: cfg}
+	if cfg.LegacyDBURL != "" {
+		if legacy, lerr := database.ConnectURL(ctx, cfg.LegacyDBURL); lerr == nil {
+			s.legacyPool = legacy
+			defer legacy.Close()
+		} else if !opts.Quiet {
+			log.Warn().Err(lerr).Msg("asset enrichment: legacy db unavailable for oil_terminals proximity")
+		}
+	}
 	sourceID, _ := s.ensureSource(ctx, terminalEnrichmentSource)
 
 	if opts.AssetID != "" {

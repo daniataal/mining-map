@@ -21,8 +21,9 @@ import (
 )
 
 type Service struct {
-	pool *pgxpool.Pool
-	cfg  config.Config
+	pool       *pgxpool.Pool
+	cfg        config.Config
+	legacyPool *pgxpool.Pool // optional; set for batch jobs that reconcile against mining_db
 }
 
 func New(pool *pgxpool.Pool, cfg config.Config) *Service {

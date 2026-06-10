@@ -166,6 +166,14 @@ type curatedTerminalMatch struct {
 }
 
 func (s *Service) findNearbyCuratedTerminal(ctx context.Context, lat, lng float64, assetName string) (*curatedTerminalMatch, error) {
+	best, err := s.findNearbyCuratedTerminalInMadsan(ctx, lat, lng, assetName)
+	if err != nil || best != nil || s.legacyPool == nil {
+		return best, err
+	}
+	return s.findNearbyCuratedTerminalInLegacy(ctx, lat, lng, assetName)
+}
+
+func (s *Service) findNearbyCuratedTerminalInMadsan(ctx context.Context, lat, lng float64, assetName string) (*curatedTerminalMatch, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.legacy_id, a.name, a.raw_source_payload,
 		       ST_Distance(a.geom, ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) AS dist_m
@@ -181,7 +189,7 @@ func (s *Service) findNearbyCuratedTerminal(ctx context.Context, lat, lng float6
 	}
 	defer rows.Close()
 
-	var best *curatedTerminalMatch
+	var candidates []curatedTerminalMatch
 	for rows.Next() {
 		var m curatedTerminalMatch
 		var raw []byte
@@ -202,6 +210,53 @@ func (s *Service) findNearbyCuratedTerminal(ctx context.Context, lat, lng float6
 		if cs, ok := toFloat(payload["confidence_score"]); ok {
 			m.Confidence = cs
 		}
+		candidates = append(candidates, m)
+	}
+	return pickBestCuratedTerminalMatch(assetName, candidates), rows.Err()
+}
+
+func (s *Service) findNearbyCuratedTerminalInLegacy(ctx context.Context, lat, lng float64, assetName string) (*curatedTerminalMatch, error) {
+	rows, err := s.legacyPool.Query(ctx, `
+		SELECT id::text, name, operator_name, owner_name, products, confidence,
+		       ST_Distance(geom, ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) AS dist_m
+		FROM oil_terminals
+		WHERE geom IS NOT NULL
+		  AND ST_DWithin(geom, ST_SetSRID(ST_MakePoint($2,$1),4326)::geography, $3)
+		ORDER BY dist_m
+		LIMIT 10
+	`, lat, lng, terminalProximityMeters)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var candidates []curatedTerminalMatch
+	for rows.Next() {
+		var m curatedTerminalMatch
+		var operator, owner *string
+		var products []string
+		var confidence *float64
+		if rows.Scan(&m.LegacyID, &m.Name, &operator, &owner, &products, &confidence, &m.DistanceM) != nil {
+			continue
+		}
+		if operator != nil {
+			m.OperatorName = normalizeName(*operator)
+		}
+		if owner != nil {
+			m.OwnerName = normalizeName(*owner)
+		}
+		m.Products = products
+		if confidence != nil {
+			m.Confidence = *confidence
+		}
+		candidates = append(candidates, m)
+	}
+	return pickBestCuratedTerminalMatch(assetName, candidates), rows.Err()
+}
+
+func pickBestCuratedTerminalMatch(assetName string, candidates []curatedTerminalMatch) *curatedTerminalMatch {
+	var best *curatedTerminalMatch
+	for _, m := range candidates {
 		if m.OperatorName == "" && m.OwnerName == "" && len(m.Products) == 0 {
 			continue
 		}
@@ -215,7 +270,7 @@ func (s *Service) findNearbyCuratedTerminal(ctx context.Context, lat, lng float6
 			best = &cp
 		}
 	}
-	return best, nil
+	return best
 }
 
 func applyCuratedMatch(result *terminalEnrichmentResult, match *curatedTerminalMatch, assetName string) {
