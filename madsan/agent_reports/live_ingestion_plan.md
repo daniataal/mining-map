@@ -232,6 +232,44 @@ Design (perf-first) — **precompute the reconciliation, store on the asset, rea
 
 This is the **same enrichment cron pattern as vessels (§8b)** — one mechanism for vessels (owner/operator) and assets (operator/capacity), differing only by source and reconciliation rules. Capacity tier is honest: `observed` (OSM/GEM stated) vs `inferred` (geometry-estimated, deferred).
 
+**Runbook (offline tank/terminal batch — not on dossier click):**
+
+`cmd/asset-enrich` reconciles OSM tags + nearby curated `legacy_oil_terminals` into `asset_enrichment`. The dossier API reads precomputed rows via `loadAssetEnrichment` — no live scrape on click.
+
+```bash
+cd madsan/backend
+# deploy/.env: DATABASE_URL → madsan_db :5433; LEGACY_DATABASE_URL for oil_terminals import
+
+# Apply migration 025 once (or start API with MADSAN_RUN_MIGRATIONS=true)
+migrate -path migrations -database "$DATABASE_URL" up
+
+# Smoke test one asset (dry-run, no writes)
+go run ./cmd/asset-enrich --dry-run --limit 5
+
+# Single asset by madsan uuid or legacy petroleum row id
+go run ./cmd/asset-enrich --dry-run --asset-id '<uuid>'
+go run ./cmd/asset-enrich --legacy-id '275414308' --force
+
+# Stale/missing tank farms only (resume-safe; skips fresh stale_after)
+go run ./cmd/asset-enrich --limit 100
+
+# Full refresh off-peak
+go run ./cmd/asset-enrich --force --limit 500
+
+go build -o /tmp/asset-enrich ./cmd/asset-enrich
+```
+
+**Data sources reconciled (no paid APIs):**
+| Source | In DB today | Used for |
+|---|---|---|
+| OSM `petroleum_osm_features` tags | `assets.raw_source_payload.tags` | operator, owner, capacity when tagged |
+| Legacy `oil_terminals` | `assets` where `legacy_table=legacy_oil_terminals` | operator, owner, products (spatial match ≤5 km) |
+| `data/storage_terminals_seed.json` | Python only (not wired in Go yet) | major hubs — future adapter |
+| GEM Plant Tracker | not ingested | capacity — deferred |
+| Copernicus tank volume | deferred | satellite-derived — deferred |
+
+Scheduler job `terminal_enrichment` (daily) uses the same batch path via the worker. Do **not** restart workers mid-import.
+
 ### Performance principles (apply to ALL enrichment, critical)
 - **Decouple acquisition from the request** — UI reads precomputed cache; any refresh is a 202 + background job + WS push. Nothing expensive blocks a click.
 - **Cache + TTL + skip-fresh** — never re-pull static data; staleness gates the cron.
