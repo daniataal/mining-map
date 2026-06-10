@@ -300,6 +300,19 @@ func (r shipSearchResponse) vesselRows() []map[string]any {
 	}
 }
 
+func imosEqual(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	return a != "" && b != "" && a == b
+}
+
+// shipSearchPick is the result of disambiguating shipsearch rows.
+type shipSearchPick struct {
+	row          map[string]any
+	explicitMMSI bool
+	ambiguous    bool
+}
+
 func pickShipSearchVessel(resp shipSearchResponse, imo string) map[string]any {
 	rows := resp.vesselRows()
 	if len(rows) == 0 {
@@ -307,11 +320,11 @@ func pickShipSearchVessel(resp shipSearchResponse, imo string) map[string]any {
 	}
 	imoNorm := strings.TrimSpace(imo)
 	for _, row := range rows {
-		if imoString(row, "imo", "IMO", "imo_number") == imoNorm {
+		if imosEqual(imoString(row, "imo", "IMO", "imo_number"), imoNorm) {
 			return row
 		}
 	}
-	return rows[0]
+	return nil
 }
 
 // GetVesselByIMO fetches vessel details from ShipVault by IMO via shipsearch.
@@ -328,37 +341,44 @@ func (s *Service) GetVesselByIMO(ctx context.Context, imo string) (map[string]an
 }
 
 // GetVesselByMMSI resolves a vessel via shipsearch when IMO lookup 404s (e.g. stale AIS IMO).
-func (s *Service) GetVesselByMMSI(ctx context.Context, mmsi string) (map[string]any, error) {
+// expectedIMO disambiguates when shipsearch returns multiple similar rows.
+// The bool is true when the row matched on MMSI field (registry IMO may differ from AIS IMO).
+func (s *Service) GetVesselByMMSI(ctx context.Context, mmsi, expectedIMO string) (map[string]any, bool, error) {
 	mmsi = strings.TrimSpace(mmsi)
 	if mmsi == "" {
-		return nil, fmt.Errorf("empty mmsi")
+		return nil, false, fmt.Errorf("empty mmsi")
 	}
 	resp, err := s.searchVessels(ctx, mmsi)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	vessel := pickShipSearchVesselByMMSI(resp, mmsi)
-	if vessel == nil {
-		return nil, fmt.Errorf("shipvault 404: no vessel match for MMSI %s", mmsi)
+	pick := pickShipSearchVesselByMMSI(resp, mmsi, expectedIMO)
+	if pick.row == nil {
+		return nil, false, fmt.Errorf("shipvault 404: no vessel match for MMSI %s", mmsi)
 	}
-	return vessel, nil
+	return pick.row, pick.explicitMMSI, nil
 }
 
 // GetVesselByName resolves a vessel via shipsearch when IMO/MMSI lookup fails.
-func (s *Service) GetVesselByName(ctx context.Context, name string) (map[string]any, error) {
+// expectedIMO disambiguates when multiple vessels share a similar name.
+// The bool is true when the name match was ambiguous (no IMO tie-break).
+func (s *Service) GetVesselByName(ctx context.Context, name, expectedIMO string) (map[string]any, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, fmt.Errorf("empty vessel name")
+		return nil, false, fmt.Errorf("empty vessel name")
 	}
 	resp, err := s.searchVessels(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	vessel := pickShipSearchVesselByName(resp, name)
-	if vessel == nil {
-		return nil, fmt.Errorf("shipvault 404: no vessel match for name %q", name)
+	pick := pickShipSearchVesselByName(resp, name, expectedIMO)
+	if pick.row == nil {
+		if pick.ambiguous {
+			return nil, true, fmt.Errorf("shipvault 404: ambiguous name match for %q", name)
+		}
+		return nil, false, fmt.Errorf("shipvault 404: no vessel match for name %q", name)
 	}
-	return vessel, nil
+	return pick.row, pick.ambiguous, nil
 }
 
 func (s *Service) searchVessels(ctx context.Context, query string) (shipSearchResponse, error) {
@@ -373,18 +393,40 @@ func (s *Service) searchVessels(ctx context.Context, query string) (shipSearchRe
 	return parseShipSearchPayload(raw), nil
 }
 
-func pickShipSearchVesselByMMSI(resp shipSearchResponse, mmsi string) map[string]any {
+func pickShipSearchVesselByMMSI(resp shipSearchResponse, mmsi, expectedIMO string) shipSearchPick {
 	mmsi = strings.TrimSpace(mmsi)
 	rows := resp.vesselRows()
 	if mmsi == "" || len(rows) == 0 {
-		return nil
+		return shipSearchPick{}
 	}
+	var mmsiHits []map[string]any
 	for _, row := range rows {
 		if strField(row, "mmsi", "MMSI") == mmsi {
-			return row
+			mmsiHits = append(mmsiHits, row)
 		}
 	}
-	return rows[0]
+	if len(mmsiHits) == 1 {
+		return shipSearchPick{row: mmsiHits[0], explicitMMSI: true}
+	}
+	if len(mmsiHits) > 1 && expectedIMO != "" {
+		for _, row := range mmsiHits {
+			if imosEqual(imoString(row, "imo", "IMO", "imo_number"), expectedIMO) {
+				return shipSearchPick{row: row, explicitMMSI: true}
+			}
+		}
+	}
+	if len(mmsiHits) > 0 {
+		return shipSearchPick{row: mmsiHits[0], explicitMMSI: true}
+	}
+	if expectedIMO != "" {
+		for _, row := range rows {
+			if imosEqual(imoString(row, "imo", "IMO", "imo_number"), expectedIMO) {
+				return shipSearchPick{row: row}
+			}
+		}
+		return shipSearchPick{}
+	}
+	return shipSearchPick{}
 }
 
 func normalizeVesselName(name string) string {
@@ -410,16 +452,20 @@ func vesselNameMatchScore(queryNorm, rowNorm string) int {
 	}
 }
 
-func pickShipSearchVesselByName(resp shipSearchResponse, query string) map[string]any {
+func pickShipSearchVesselByName(resp shipSearchResponse, query, expectedIMO string) shipSearchPick {
 	query = strings.TrimSpace(query)
 	rows := resp.vesselRows()
 	if query == "" || len(rows) == 0 {
-		return nil
+		return shipSearchPick{}
 	}
 	queryNorm := normalizeVesselName(query)
-	best := map[string]any(nil)
+	type scored struct {
+		row   map[string]any
+		score int
+		len   int
+	}
+	var candidates []scored
 	bestScore := 0
-	bestLen := 0
 	for _, row := range rows {
 		if row == nil {
 			continue
@@ -439,16 +485,46 @@ func pickShipSearchVesselByName(resp shipSearchResponse, query string) map[strin
 				nameLen = len(norm)
 			}
 		}
-		if score > bestScore || (score == bestScore && score > 0 && nameLen > bestLen) {
+		if score <= 0 {
+			continue
+		}
+		if score > bestScore {
 			bestScore = score
-			bestLen = nameLen
-			best = row
+			candidates = []scored{{row: row, score: score, len: nameLen}}
+		} else if score == bestScore {
+			candidates = append(candidates, scored{row: row, score: score, len: nameLen})
 		}
 	}
-	if best != nil {
-		return best
+	if len(candidates) == 0 {
+		return shipSearchPick{ambiguous: len(rows) > 1}
 	}
-	return rows[0]
+	ties := make([]map[string]any, 0, len(candidates))
+	for _, c := range candidates {
+		ties = append(ties, c.row)
+	}
+	if expectedIMO != "" {
+		var imoMatches []map[string]any
+		for _, row := range ties {
+			if imosEqual(imoString(row, "imo", "IMO", "imo_number"), expectedIMO) {
+				imoMatches = append(imoMatches, row)
+			}
+		}
+		switch len(imoMatches) {
+		case 1:
+			return shipSearchPick{row: imoMatches[0]}
+		case 0:
+			if len(ties) > 1 {
+				return shipSearchPick{ambiguous: true}
+			}
+			return shipSearchPick{row: ties[0], ambiguous: true}
+		default:
+			return shipSearchPick{row: imoMatches[0], ambiguous: true}
+		}
+	}
+	if len(ties) == 1 {
+		return shipSearchPick{row: ties[0]}
+	}
+	return shipSearchPick{ambiguous: true}
 }
 
 func isShipvaultNotFound(err error) bool {

@@ -48,6 +48,15 @@ func TestPickShipSearchVessel(t *testing.T) {
 			want: "ONLY",
 		},
 		{
+			name: "no imo match rejects first row",
+			resp: shipSearchResponse{Data: []map[string]any{
+				{"imo": "1111111", "name": "WRONG"},
+				{"imo": 2222222, "name": "ALSO_WRONG"},
+			}},
+			imo:  "9304605",
+			want: "",
+		},
+		{
 			name: "empty",
 			resp: shipSearchResponse{},
 			imo:  "9304605",
@@ -279,6 +288,56 @@ func TestParseShipSearchPayload(t *testing.T) {
 				t.Fatalf("got %#v, want name %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPickShipSearchVesselByMMSI(t *testing.T) {
+	t.Parallel()
+	resp := shipSearchResponse{Data: []map[string]any{
+		{"imo": 7530901, "name": "MS LEON", "mmsi": "636019825"},
+		{"imo": 9599377, "name": "MS LEON II", "mmsi": "636019826"},
+	}}
+	pick := pickShipSearchVesselByMMSI(resp, "636019825", "9599377")
+	if pick.row == nil || pick.row["name"] != "MS LEON" {
+		t.Fatalf("explicit MMSI pick = %#v", pick.row)
+	}
+	if !pick.explicitMMSI {
+		t.Fatal("expected explicit MMSI hit")
+	}
+	pick = pickShipSearchVesselByMMSI(resp, "999999999", "9599377")
+	if pick.row == nil || pick.row["name"] != "MS LEON II" {
+		t.Fatalf("IMO disambiguation = %#v", pick.row)
+	}
+	if pick.explicitMMSI {
+		t.Fatal("expected non-explicit pick when MMSI missing")
+	}
+	pick = pickShipSearchVesselByMMSI(resp, "999999999", "0000000")
+	if pick.row != nil {
+		t.Fatalf("expected reject when IMO absent from results, got %#v", pick.row)
+	}
+}
+
+func TestPickShipSearchVesselByName_imoDisambiguation(t *testing.T) {
+	t.Parallel()
+	resp := shipSearchResponse{Data: []map[string]any{
+		{"imo": 1111111, "name": "ATLANTIC STAR"},
+		{"imo": 9304605, "name": "ATLANTIC STAR"},
+		{"imo": 2222222, "name": "ATLANTIC STAR"},
+	}}
+	pick := pickShipSearchVesselByName(resp, "ATLANTIC STAR", "9304605")
+	if pick.row == nil || imoString(pick.row, "imo") != "9304605" {
+		t.Fatalf("IMO tie-break = %#v", pick.row)
+	}
+	if pick.ambiguous {
+		t.Fatal("expected unambiguous IMO match")
+	}
+	pick = pickShipSearchVesselByName(resp, "ATLANTIC STAR", "")
+	if !pick.ambiguous || pick.row != nil {
+		t.Fatalf("expected ambiguous without IMO, got row=%#v ambiguous=%v", pick.row, pick.ambiguous)
+	}
+	pick = pickShipSearchVesselByName(resp, "ATLANTIC STAR", "9999999")
+	if pick.row != nil || !pick.ambiguous {
+		t.Fatalf("expected ambiguous reject, got row=%#v ambiguous=%v", pick.row, pick.ambiguous)
 	}
 }
 

@@ -277,22 +277,53 @@ func (s *Service) LoadVesselDetail(ctx context.Context, imo, vesselID, mmsi, nam
 		return nil, fmt.Errorf("imo, vessel id, mmsi, or name required")
 	}
 
+	inputIMO := imo
 	var raw map[string]any
 	var err error
 	lookupSource := "imo"
+	var explicitMMSI bool
 	if imo != "" {
 		raw, err = s.GetVesselByIMO(ctx, imo)
 	}
 	if err != nil && isShipvaultNotFound(err) && mmsi != "" {
-		raw, err = s.GetVesselByMMSI(ctx, mmsi)
+		raw, explicitMMSI, err = s.GetVesselByMMSI(ctx, mmsi, inputIMO)
 		lookupSource = "mmsi"
 	}
 	if err != nil && isShipvaultNotFound(err) && name != "" {
-		raw, err = s.GetVesselByName(ctx, name)
+		var nameAmbiguous bool
+		raw, nameAmbiguous, err = s.GetVesselByName(ctx, name, inputIMO)
 		lookupSource = "name"
+		if nameAmbiguous {
+			s.log.Warn().Str("imo", inputIMO).Str("name", name).Msg("ambiguous shipsearch name match")
+		}
 	}
 	if err != nil {
 		return nil, err
+	}
+	if inputIMO != "" {
+		gotIMO := imoString(raw, "imo", "IMO")
+		if gotIMO != "" && !imosEqual(inputIMO, gotIMO) {
+			if explicitMMSI {
+				s.log.Warn().
+					Str("input_imo", inputIMO).Str("registry_imo", gotIMO).Str("mmsi", mmsi).
+					Msg("registry IMO differs from AIS IMO after explicit MMSI match")
+			} else if lookupSource == "imo" && mmsi != "" {
+				raw2, mmsiHit, err2 := s.GetVesselByMMSI(ctx, mmsi, inputIMO)
+				if err2 == nil && raw2 != nil {
+					raw = raw2
+					lookupSource = "mmsi"
+					explicitMMSI = mmsiHit
+					gotIMO = imoString(raw, "imo", "IMO")
+					if gotIMO != "" && !imosEqual(inputIMO, gotIMO) && !explicitMMSI {
+						return nil, fmt.Errorf("shipvault imo mismatch: expected %s got %s", inputIMO, gotIMO)
+					}
+				} else {
+					return nil, fmt.Errorf("shipvault imo mismatch: expected %s got %s", inputIMO, gotIMO)
+				}
+			} else {
+				return nil, fmt.Errorf("shipvault imo mismatch: expected %s got %s", inputIMO, gotIMO)
+			}
+		}
 	}
 	if vesselID == "" && raw != nil {
 		vesselID = strField(raw, "id", "vessel_id", "unit_id", "parentid", "parentId", "unitid", "unitId")
