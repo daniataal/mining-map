@@ -2,14 +2,13 @@ package markets
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// Indicative desk baseline — not sourced from bunker_fuel_suppliers_seed (register only).
+// Indicative desk baseline when no open-data source is available.
 const vlsfoReferenceUSDMT = 612.0
 
 type bunkerSeedMeta struct {
@@ -22,27 +21,7 @@ type bunkerSeedMeta struct {
 }
 
 func bunkerVLSFOQuote(now time.Time) Quote {
-	meta := loadBunkerSeedMeta()
-	disclaimer := "Reference stub — no bunker price feed wired; indicative desk baseline only"
-	if meta.Loaded {
-		disclaimer = fmt.Sprintf(
-			"Reference stub — bunker_fuel_suppliers_seed lists %d licensed suppliers across %d hubs (%d VLSFO-capable, %d in Singapore); register has no prices",
-			meta.SupplierCount, meta.HubCount, meta.VLSFOSupplierCount, meta.SingaporeSuppliers,
-		)
-		if meta.SourceAccessed != "" {
-			disclaimer += " (register accessed " + meta.SourceAccessed + ")"
-		}
-	}
-	return Quote{
-		Symbol:     "VLSFO_SG",
-		Label:      "VLSFO Singapore",
-		Price:      vlsfoReferenceUSDMT,
-		Currency:   "USD",
-		Unit:       "/MT",
-		Tier:       tierReferenceStub,
-		Disclaimer: disclaimer,
-		ObservedAt: now,
-	}
+	return buildBunkerVLSFOQuote(bunkerQuoteInput{}, now)
 }
 
 func loadBunkerSeedMeta() bunkerSeedMeta {

@@ -36,11 +36,9 @@ Two stacks wrote into `mining_db`:
 
 ## 2. Current MadSan ingestion (what exists today)
 
-- **Scheduler** (`cmd/scheduler`) enqueues only 4 job types: `watch_folder` (6h), `bunker_seed` (7d), `legacy_import` (24h), `deal_watch_scan` (1h).
-- **Worker** (`cmd/worker`) polls `ingestion_jobs` (`FOR UPDATE SKIP LOCKED`, 5s) and `ProcessJob` dispatches: `watch_folder`, `bunker_seed`, `legacy_etl`, `legacy_import` (Go default), `deal_watch_scan`.
-- **No live external-API ingestion adapters yet.** But the live-API pattern is already proven inline:
-  - `internal/markets/eia.go` — `api.eia.gov/v2`, cached, `EIA_API_KEY`.
-  - `internal/compliance/opensanctions.go` — live screening.
+- **Scheduler** (`cmd/scheduler`) enqueues: `watch_folder` (6h), `bunker_seed` (7d), `legacy_import` (24h), `deal_watch_scan` (1h), enrichment jobs, and **Tier-1 source adapters** (`gleif`, `sec_edgar`, `legacy_procurement`).
+- **Worker** (`cmd/worker`) polls `ingestion_jobs` and dispatches adapters via `internal/sources/{gleif,sec,procurement}` → `NormalizedRecord` → `stageRecord` → `upsertMaster`/`upsertSourceRecord` → `attachEvidence`.
+- Inline live-API patterns also exist: `internal/markets/eia.go` (EIA prices), `internal/compliance/opensanctions.go` (screening).
 - Pipeline per job: fetch → `stageRecord` → `upsertMaster` (dedup) → `attachEvidence` → `persistImportSignals` → targeted matview refresh.
 
 ---
@@ -89,11 +87,11 @@ Legend — Track: **A** backfill, **B** live adapter, **D** derived, **S** strea
 | UN Comtrade | B | `comtradeapi.un.org` | sub key | monthly | `commodity_trade_flows` | reporter+partner+hs+period | observed | ○ |
 | Eurostat | B | Eurostat REST | none | monthly | trade flows | dataset+dims | observed | ○ (legacy proved 500 rows) |
 | JODI | B | `JODI_CSV_URL` | none | monthly | trade snapshots | country+product+period | observed | ○ (needs URL) |
-| TED procurement | B | TED API | none | weekly | `leads` | notice_id | observed | ○ (433 in legacy) |
-| Gov procurement | B | national/USAspending | varies | weekly | `leads` | award_id | observed | ○ (251 in legacy) |
-| GLEIF (LEI) | B | `api.gleif.org` | none | enrichment | `companies` | LEI | observed | ○ |
+| TED procurement | B | TED API | none | weekly | `companies` + evidence (lead) | notice_id | observed | ✅ (legacy backfill Phase H) |
+| Gov procurement | B | national/USAspending | varies | weekly | `companies` + evidence (lead) | award_id | observed | ✅ (legacy backfill Phase H) |
+| GLEIF (LEI) | B | `api.gleif.org` | none | weekly | `companies` + evidence | LEI | observed | ✅ (Phase H) |
 | OpenSanctions | B | yente/API | key | on-demand + weekly | `risk_flags` | entity_id | observed | ◐ (screening inline) |
-| SEC EDGAR | B | `data.sec.gov` | none | enrichment | `companies` | CIK | observed | ○ |
+| SEC EDGAR | B | `data.sec.gov` | User-Agent | weekly | `companies` + evidence | CIK | inferred match (stub) | ✅ (Phase H stub) |
 | USGS MRDS/MCS | A/B | USGS file/API | none | quarterly | `assets` (metals) | dep_id | observed | ○ (Metals vertical) |
 | Port calls | D | from AIS | — | hourly job | `core_signals`/`voyages` | vessel+port+ts | inferred | ○ (66k in legacy) |
 | STS events | D | from AIS | — | hourly job | `core_signals` | pair+ts | observed/inferred | ◐ (scorer wired) |
@@ -126,6 +124,29 @@ Legend — Track: **A** backfill, **B** live adapter, **D** derived, **S** strea
 6. **Derived jobs** — port_calls + STS from AIS into `core_signals` (feeds the wired 6-factor scorer).
 7. **Comtrade / Eurostat / TED / gov-proc (Track B)** — trade context + supplier leads.
 8. **Enrichment (GLEIF/SEC/Wikidata)** — company credibility for supplier ranking.
+
+### Phase H shipped (2026-06-10) — Tier-1 source adapters
+
+Migration `031_tier1_sources` registers `sources` + `core_source_ledger` rows (`commercial_use_ok=true`).
+
+| Slug | Job type | Adapter | Cadence |
+|---|---|---|---|
+| `gleif` | `gleif` | `internal/sources/gleif` — GLEIF API LEI enrichment for companies missing LEI evidence | weekly |
+| `sec_edgar` | `sec_edgar` | `internal/sources/sec` — SEC tickers JSON CIK linker (honest inferred tier stub) | weekly |
+| `legacy_procurement` | `legacy_procurement` | `internal/sources/procurement` — backfill `eu_procurement_notices` + `gov_procurement_awards` from `mining_db` when tables exist | daily |
+
+```bash
+cd madsan/backend
+# Apply migration 031
+migrate -path migrations -database "$DATABASE_URL" up
+
+# Enqueue one-shot imports (worker must be running, or use ingest-once)
+MADSAN_JOB_TYPE=gleif MADSAN_SOURCE_SLUG=gleif go run ./cmd/ingest-once
+MADSAN_JOB_TYPE=sec_edgar MADSAN_SOURCE_SLUG=sec_edgar go run ./cmd/ingest-once
+MADSAN_JOB_TYPE=legacy_procurement MADSAN_SOURCE_SLUG=legacy_procurement go run ./cmd/ingest-once
+
+# Config (optional): GLEIF_USER_AGENT, GLEIF_BATCH_LIMIT, SEC_EDGAR_USER_AGENT, SEC_EDGAR_BATCH_LIMIT
+```
 
 Track A (legacy backfill) runs in parallel to populate now; Track B replaces each source for freshness, then the legacy table can be dropped from the import catalog.
 

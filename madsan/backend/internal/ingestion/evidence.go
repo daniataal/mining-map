@@ -53,6 +53,12 @@ func sourceMeta(slug string) (name, typ, category string) {
 		return "Legacy AIS positions", "api", "ais"
 	case slug == "vessel_enrichment":
 		return "Vessel owner/operator enrichment", "derived", "maritime_registry"
+	case slug == "gleif":
+		return "GLEIF LEI", "api", "government_register"
+	case slug == "sec_edgar":
+		return "SEC EDGAR", "api", "government_register"
+	case slug == "legacy_procurement":
+		return "Legacy procurement leads", "etl", "procurement"
 	default:
 		return slug, "file", "import"
 	}
@@ -99,7 +105,7 @@ func claimsForRecord(rec NormalizedRecord) []evidenceClaim {
 	if rec.RawPayload == nil {
 		return claims
 	}
-	for _, key := range []string{"phone", "email", "source_url", "register_tier", "license_authority", "port_name", "hub_key", "imo", "vessel_type", "tanker_class"} {
+	for _, key := range []string{"phone", "email", "source_url", "register_tier", "license_authority", "port_name", "hub_key", "imo", "vessel_type", "tanker_class", "lei", "cik", "ticker", "notice_id", "award_id", "lead_type", "match_tier", "match_disclaimer"} {
 		v, ok := rec.RawPayload[key]
 		if !ok {
 			continue
@@ -111,6 +117,11 @@ func claimsForRecord(rec NormalizedRecord) []evidenceClaim {
 		tier := "observed"
 		if key == "register_tier" && val != "official_register" {
 			tier = "inferred"
+		}
+		if key == "cik" || key == "ticker" {
+			if mt, ok := rec.RawPayload["match_tier"].(string); ok && mt == "inferred" {
+				tier = "inferred"
+			}
 		}
 		claims = append(claims, evidenceClaim{Type: key, Value: val, Tier: tier})
 	}

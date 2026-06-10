@@ -93,6 +93,9 @@ type Config struct {
 	AISTerminalBufferDeg      float64
 	EIAAPIKey                 string
 	OpenSanctionsAPIKey       string
+	DocumentsDir              string
+	GroqAPIKey                string
+	OpenRouterAPIKey          string
 	ShipVaultEnabled          bool
 	ShipVaultBearerToken      string
 	ShipVaultRefreshToken     string
@@ -150,6 +153,9 @@ func Load() Config {
 		AISTerminalBufferDeg:      envFloat("MADSAN_AIS_TERMINAL_BUFFER_DEG", 0.45),
 		EIAAPIKey:                 env("EIA_API_KEY", ""),
 		OpenSanctionsAPIKey:       env("OPENSANCTIONS_API_KEY", ""),
+		DocumentsDir:              env("MADSAN_DOCUMENTS_DIR", ""),
+		GroqAPIKey:                env("GROQ_API_KEY", env("GROQ_AI_API_KEY", "")),
+		OpenRouterAPIKey:          env("OPENROUTER_API_KEY", env("OPENROUTER_AI_API_KEY", "")),
 		ShipVaultEnabled:          envBool("MADSAN_SHIPVAULT_ENABLED", false),
 		ShipVaultBearerToken:      env("SHIPVAULT_BEARER_TOKEN", ""),
 		ShipVaultRefreshToken:     env("SHIPVAULT_REFRESH_TOKEN", ""),
