@@ -56,6 +56,31 @@ function drawChevronIcon(fill: string, stroke: string, size = 32): ImageData {
   return ctx.getImageData(0, 0, size, size);
 }
 
+/** Elongated hull outline for true-scale display at z≥14 (LOA along vertical axis). */
+function drawHullIcon(fill: string, stroke: string, w = 32, h = 64): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas 2d unavailable");
+  const cx = w / 2;
+  const pad = 2;
+  ctx.translate(cx, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(0, -h / 2 + pad);
+  ctx.lineTo(w / 2 - pad, h * 0.08);
+  ctx.lineTo(w / 2 - pad, h / 2 - pad);
+  ctx.lineTo(-(w / 2 - pad), h / 2 - pad);
+  ctx.lineTo(-(w / 2 - pad), h * 0.08);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.25;
+  ctx.stroke();
+  return ctx.getImageData(0, 0, w, h);
+}
+
 export function ensureVesselImages(map: MaplibreMap): void {
   if (!map.hasImage("vessel-ship")) {
     const img = drawChevronIcon("#5eb3ff", "#0a0e14");
@@ -64,6 +89,14 @@ export function ensureVesselImages(map: MaplibreMap): void {
   if (!map.hasImage("vessel-ship-live")) {
     const img = drawChevronIcon("#7ec8ff", "#ffffff");
     map.addImage("vessel-ship-live", { width: img.width, height: img.height, data: img.data });
+  }
+  if (!map.hasImage("vessel-hull")) {
+    const img = drawHullIcon("rgba(94,179,255,0.85)", "#0a0e14");
+    map.addImage("vessel-hull", { width: img.width, height: img.height, data: img.data });
+  }
+  if (!map.hasImage("vessel-hull-live")) {
+    const img = drawHullIcon("rgba(126,200,255,0.9)", "#ffffff");
+    map.addImage("vessel-hull-live", { width: img.width, height: img.height, data: img.data });
   }
 }
 

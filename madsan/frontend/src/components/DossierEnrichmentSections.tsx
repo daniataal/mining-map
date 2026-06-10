@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { authFetchOpts } from "@/lib/auth";
 import {
   type EnrichmentBlock,
@@ -17,28 +19,28 @@ import {
   resolveVesselEnrichment,
 } from "@/lib/dossier";
 import { API_BASE } from "@/lib/layers";
+import { cn } from "@/lib/utils";
 
 type Props = {
   dossier: CoreDossier;
 };
 
+function enrichmentBadgeVariant(tier: string): "verified" | "partial" | "destructive" | "muted" {
+  const cls = enrichmentTierBadgeClass(tier);
+  if (cls === "tier-high" || cls === "verified") return "verified";
+  if (cls === "tier-mid" || cls === "partial") return "partial";
+  if (cls === "tier-low") return "destructive";
+  return "muted";
+}
+
 function EnrichmentDl({ rows }: { rows: Array<{ label: string; value: string }> }) {
   if (!rows.length) return null;
   return (
-    <dl
-      style={{
-        margin: "6px 0 0",
-        display: "grid",
-        gridTemplateColumns: "auto 1fr",
-        gap: "4px 12px",
-        color: "var(--muted)",
-        fontSize: 12,
-      }}
-    >
+    <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {rows.map((row) => (
-        <span key={row.label} style={{ display: "contents" }}>
+        <span key={row.label} className="contents">
           <dt>{row.label}</dt>
-          <dd style={{ margin: 0, color: "var(--text)" }}>{row.value}</dd>
+          <dd className="m-0 text-foreground">{row.value}</dd>
         </span>
       ))}
     </dl>
@@ -90,42 +92,33 @@ function EnrichmentHeader({
   const stale = block ? isEnrichmentStale(block) : false;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-      <strong>{title}</strong>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span
-          className={`badge compact ${enrichmentTierBadgeClass(tier)}`}
-          title={block?.source ? `Source: ${block.source}` : undefined}
-        >
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <CardTitle className="text-sm">{title}</CardTitle>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={enrichmentBadgeVariant(tier)} title={block?.source ? `Source: ${block.source}` : undefined}>
           {formatEnrichmentTier(tier)}
-        </span>
+        </Badge>
         {showRefresh && (
           <button
             type="button"
             onClick={() => void requestRefresh()}
             disabled={refreshBusy}
-            style={{
-              padding: "2px 8px",
-              fontSize: 10,
-              fontWeight: 600,
-              borderRadius: 4,
-              border: "1px solid var(--border)",
-              background: "transparent",
-              color: "var(--muted)",
-              cursor: refreshBusy ? "wait" : "pointer",
-            }}
+            className={cn(
+              "rounded-md border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground",
+              refreshBusy ? "cursor-wait opacity-60" : "cursor-pointer hover:border-brand-secondary hover:text-brand-secondary",
+            )}
           >
             {refreshBusy ? "Queuing…" : "Request refresh"}
           </button>
         )}
       </div>
       {stale && (
-        <p className="disclaimer" style={{ margin: "4px 0 0", width: "100%", fontSize: 11 }}>
+        <p className="disclaimer m-0 w-full text-[11px]">
           Enrichment data is past its freshness window — values may be outdated.
         </p>
       )}
       {refreshMsg && (
-        <p style={{ margin: "4px 0 0", width: "100%", fontSize: 11, color: "var(--warn)" }}>{refreshMsg}</p>
+        <p className="m-0 w-full text-[11px]" style={{ color: "var(--warn)" }}>{refreshMsg}</p>
       )}
     </div>
   );
@@ -137,20 +130,12 @@ function EnrichmentMeta({ block }: { block: EnrichmentBlock }) {
   if (fetched) parts.push(`fetched ${fetched}`);
   if (block.source && block.source !== "—") parts.push(block.source);
   if (!parts.length) return null;
-  return (
-    <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--muted)" }}>
-      {parts.join(" · ")}
-    </p>
-  );
+  return <p className="mt-2 text-[11px] text-muted-foreground">{parts.join(" · ")}</p>;
 }
 
 function EnrichmentLimitations({ block }: { block: EnrichmentBlock }) {
   if (!block.limitations?.length) return null;
-  return (
-    <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 11 }}>
-      {block.limitations[0]}
-    </p>
-  );
+  return <p className="disclaimer mt-2 text-[11px]">{block.limitations[0]}</p>;
 }
 
 type NameHistoryEntry = {
@@ -339,10 +324,14 @@ export function VesselSpecificationsSection({ dossier }: Props) {
   if (!rows.length) return null;
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <EnrichmentHeader title="Vessel specifications" block={block} showRefresh={false} entityType="vessel" entityId={dossier.id} />
-      <EnrichmentDl rows={rows} />
-    </div>
+    <Card size="sm" className="mb-3">
+      <CardHeader>
+        <EnrichmentHeader title="Vessel specifications" block={block} showRefresh={false} entityType="vessel" entityId={dossier.id} />
+      </CardHeader>
+      <CardContent>
+        <EnrichmentDl rows={rows} />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -380,58 +369,60 @@ export function VesselOwnershipSection({ dossier }: Props) {
   const hasContent = rows.length > 0 || nameHistory.length > 0;
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <EnrichmentHeader
-        title="Ownership"
-        block={block}
-        showRefresh={hasUuid}
-        entityType="vessel"
-        entityId={dossier.id}
-      />
-      {ownerCompanyId && ownerProfile?.madsan_company_id != null && (
-        <p style={{ margin: "4px 0 0", fontSize: 11 }}>
-          <a href={`/dossier/company/${ownerCompanyId}`} style={{ color: "var(--accent)" }}>
-            View owner company dossier
-          </a>
-        </p>
-      )}
-      {nameHistory.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <strong style={{ fontSize: 12 }}>Name history</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 11, color: "var(--muted)" }}>
-            {nameHistory.map((entry, i) => (
-              <li key={`${entry.name}-${i}`} style={{ marginBottom: 4 }}>
-                <span style={{ color: "var(--text)", fontWeight: 600 }}>{entry.name}</span>
-                {(entry.from_date || entry.to_date) && (
-                  <span> · {[entry.from_date, entry.to_date].filter(Boolean).join(" → ")}</span>
-                )}
-                {entry.disponent && <span> · {entry.disponent}</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {hasContent ? (
-        <>
-          <EnrichmentDl rows={rows} />
-          {block && <EnrichmentMeta block={block} />}
-          {block && <EnrichmentLimitations block={block} />}
-        </>
-      ) : block ? (
-        <>
-          <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 12 }}>
-            No owner or operator on file for this vessel.
+    <Card size="sm" className="mb-3">
+      <CardHeader>
+        <EnrichmentHeader
+          title="Ownership"
+          block={block}
+          showRefresh={hasUuid}
+          entityType="vessel"
+          entityId={dossier.id}
+        />
+      </CardHeader>
+      <CardContent>
+        {ownerCompanyId && ownerProfile?.madsan_company_id != null && (
+          <p className="mt-0 text-[11px]">
+            <a href={`/dossier/company/${ownerCompanyId}`} style={{ color: "var(--accent)" }}>
+              View owner company dossier
+            </a>
           </p>
-          <EnrichmentMeta block={block} />
-          <EnrichmentLimitations block={block} />
-        </>
-      ) : (
-        <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 12 }}>
-          Registry owner and operator are not on file for this vessel. AIS identity fields (name, IMO, MMSI) appear
-          below. The scheduler refreshes owner/operator from ShipVault when credentials are configured.
-        </p>
-      )}
-    </div>
+        )}
+        {nameHistory.length > 0 && (
+          <div className="mt-2">
+            <strong className="text-xs">Name history</strong>
+            <ul className="mt-1.5 list-disc pl-4 text-[11px] text-muted-foreground">
+              {nameHistory.map((entry, i) => (
+                <li key={`${entry.name}-${i}`} className="mb-1">
+                  <span className="font-semibold text-foreground">{entry.name}</span>
+                  {(entry.from_date || entry.to_date) && (
+                    <span> · {[entry.from_date, entry.to_date].filter(Boolean).join(" → ")}</span>
+                  )}
+                  {entry.disponent && <span> · {entry.disponent}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {hasContent ? (
+          <>
+            <EnrichmentDl rows={rows} />
+            {block && <EnrichmentMeta block={block} />}
+            {block && <EnrichmentLimitations block={block} />}
+          </>
+        ) : block ? (
+          <>
+            <p className="disclaimer mt-0 text-xs">No owner or operator on file for this vessel.</p>
+            <EnrichmentMeta block={block} />
+            <EnrichmentLimitations block={block} />
+          </>
+        ) : (
+          <p className="disclaimer mt-0 text-xs">
+            Registry owner and operator are not on file for this vessel. AIS identity fields (name, IMO, MMSI) appear
+            below. The scheduler refreshes owner/operator from ShipVault when credentials are configured.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -455,34 +446,38 @@ export function AssetOperatorCapacitySection({ dossier }: Props) {
   const hasContent = rows.length > 0;
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <EnrichmentHeader
-        title="Operator & capacity"
-        block={block}
-        showRefresh={hasUuid}
-        entityType="asset"
-        entityId={dossier.id}
-      />
-      {hasContent ? (
-        <>
-          <EnrichmentDl rows={rows} />
-          {block && <EnrichmentMeta block={block} />}
-          {block && <EnrichmentLimitations block={block} />}
-        </>
-      ) : block ? (
-        <>
-          <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 12 }}>
-            No operator or capacity on file — OSM tags may still appear in the summary above.
+    <Card size="sm" className="mb-3">
+      <CardHeader>
+        <EnrichmentHeader
+          title="Operator & capacity"
+          block={block}
+          showRefresh={hasUuid}
+          entityType="asset"
+          entityId={dossier.id}
+        />
+      </CardHeader>
+      <CardContent>
+        {hasContent ? (
+          <>
+            <EnrichmentDl rows={rows} />
+            {block && <EnrichmentMeta block={block} />}
+            {block && <EnrichmentLimitations block={block} />}
+          </>
+        ) : block ? (
+          <>
+            <p className="disclaimer mt-0 text-xs">
+              No operator or capacity on file — OSM tags may still appear in the summary above.
+            </p>
+            <EnrichmentMeta block={block} />
+            <EnrichmentLimitations block={block} />
+          </>
+        ) : (
+          <p className="disclaimer mt-0 text-xs">
+            Not enriched yet — scheduled background refresh reconciles OSM tags with curated terminal and capacity
+            registries.
           </p>
-          <EnrichmentMeta block={block} />
-          <EnrichmentLimitations block={block} />
-        </>
-      ) : (
-        <p className="disclaimer" style={{ margin: "6px 0 0", fontSize: 12 }}>
-          Not enriched yet — scheduled background refresh reconciles OSM tags with curated terminal and capacity
-          registries.
-        </p>
-      )}
-    </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

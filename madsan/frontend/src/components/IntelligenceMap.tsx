@@ -23,6 +23,12 @@ import {
   vesselIconRotate,
   vesselNoRotationFilter,
 } from "@/lib/vesselMapIcon";
+import {
+  vesselDotRadius,
+  vesselIconSize,
+  zoomAtTrueScale,
+  zoomBelowTrueScale,
+} from "@/lib/vesselScale";
 import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
 
@@ -73,8 +79,8 @@ function entityTypeForLayer(layerId: string): string {
   return "asset";
 }
 
-const VESSEL_TILE_LAYERS = ["vessels-no-heading", "vessels-ship"] as const;
-const VESSEL_LIVE_LAYERS = ["live-vessels-no-heading", "live-vessels-ship"] as const;
+const VESSEL_TILE_LAYERS = ["vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
+const VESSEL_LIVE_LAYERS = ["live-vessels-no-heading", "live-vessels-ship", "live-vessels-hull"] as const;
 
 function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: string, visible: boolean) {
   const visibility = visible ? "visible" : "none";
@@ -85,7 +91,7 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
     "source-layer": sourceLayer,
     filter: vesselNoRotationFilter,
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2, 10, 5],
+      "circle-radius": vesselDotRadius,
       "circle-color": "#5eb3ff",
       "circle-opacity": 0.5,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
@@ -99,11 +105,27 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
     type: "symbol",
     source: src,
     "source-layer": sourceLayer,
-    filter: vesselHasRotationFilter,
+    filter: ["all", vesselHasRotationFilter, zoomBelowTrueScale],
     layout: {
       visibility,
       "icon-image": "vessel-ship",
-      "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.55, 8, 0.75, 12, 1],
+      "icon-size": vesselIconSize,
+      "icon-rotate": vesselIconRotate,
+      "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+  map.addLayer({
+    id: "vessels-hull",
+    type: "symbol",
+    source: src,
+    "source-layer": sourceLayer,
+    filter: ["all", vesselHasRotationFilter, zoomAtTrueScale],
+    layout: {
+      visibility,
+      "icon-image": "vessel-hull",
+      "icon-size": vesselIconSize,
       "icon-rotate": vesselIconRotate,
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
@@ -120,7 +142,7 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
     source: "live-vessels",
     filter: vesselNoRotationFilter,
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 10, 6],
+      "circle-radius": vesselDotRadius,
       "circle-color": "#7ec8ff",
       "circle-opacity": 0.55,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
@@ -133,11 +155,26 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
     id: "live-vessels-ship",
     type: "symbol",
     source: "live-vessels",
-    filter: vesselHasRotationFilter,
+    filter: ["all", vesselHasRotationFilter, zoomBelowTrueScale],
     layout: {
       visibility,
       "icon-image": "vessel-ship-live",
-      "icon-size": ["interpolate", ["linear"], ["zoom"], 4, 0.55, 8, 0.75, 12, 1],
+      "icon-size": vesselIconSize,
+      "icon-rotate": vesselIconRotate,
+      "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+  map.addLayer({
+    id: "live-vessels-hull",
+    type: "symbol",
+    source: "live-vessels",
+    filter: ["all", vesselHasRotationFilter, zoomAtTrueScale],
+    layout: {
+      visibility,
+      "icon-image": "vessel-hull-live",
+      "icon-size": vesselIconSize,
       "icon-rotate": vesselIconRotate,
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
@@ -166,6 +203,20 @@ function mvtSourceLayer(tileLayer: string): string {
   }
 }
 
+function energyAssetFilter(layerId: string): maplibregl.FilterSpecification | undefined {
+  if (layerId === "energy-refineries") {
+    return ["==", ["get", "asset_type"], "refinery"];
+  }
+  if (layerId === "energy-terminals") {
+    return [
+      "in",
+      ["get", "asset_type"],
+      ["literal", ["tank_farm", "terminal", "port", "sts_zone", "storage", "berth"]],
+    ];
+  }
+  return undefined;
+}
+
 function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | undefined {
   if (layerId === "metals-mines") {
     return ["==", ["get", "asset_type"], "mine"];
@@ -177,7 +228,13 @@ function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | un
 }
 
 function addPointTileLayer(map: maplibregl.Map, layer: LayerDef, src: string, visible: boolean) {
-  const filter = metalsAssetFilter(layer.id);
+  const filter = energyAssetFilter(layer.id) ?? metalsAssetFilter(layer.id);
+  const color =
+    layer.id === "energy-refineries"
+      ? "#f59e0b"
+      : layer.vertical === "metals"
+        ? "#c9a227"
+        : "#10b981";
   map.addLayer({
     id: layer.id,
     type: "circle",
@@ -186,7 +243,7 @@ function addPointTileLayer(map: maplibregl.Map, layer: LayerDef, src: string, vi
     ...(filter ? { filter } : {}),
     paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
-      "circle-color": layer.vertical === "metals" ? "#c9a227" : "#3dffb5",
+      "circle-color": color,
       "circle-opacity": 0.85,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
       "circle-stroke-color": SELECTED_STROKE,
@@ -259,7 +316,7 @@ function layerLocked(layer: LayerDef, entitlements?: Partial<Record<string, bool
 function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
   const ids = layersForVertical(vertical).filter((l) => l.tileLayer).map((l) => l.id);
   if (vertical === "energy") {
-    ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS);
+    ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS, "sts-events");
   }
   return ids;
 }
@@ -417,6 +474,7 @@ export default function IntelligenceMap({
         const hit = feats.find(
           (f) =>
             activeIds.has(f.layer.id) ||
+            f.layer.id === "sts-events" ||
             isPipelineLayer(f.layer.id) ||
             (vertical === "energy" && isVesselLayerId(f.layer.id))
         );
@@ -488,6 +546,42 @@ export default function IntelligenceMap({
           "line-dasharray": [2, 2],
         },
       });
+
+      if (vertical === "energy") {
+        map.addSource("sts-events", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        map.addLayer({
+          id: "sts-events",
+          type: "circle",
+          source: "sts-events",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 8, 14, 12],
+            "circle-color": "#f59e0b",
+            "circle-opacity": 0.75,
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#0f172a",
+            "circle-stroke-opacity": 0.6,
+          },
+          layout: { visibility: layers["sts-events"] ? "visible" : "none" },
+        });
+
+        const refreshStsEvents = () => {
+          if (!layers["sts-events"]) return;
+          const b = map.getBounds();
+          const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+          fetch(`${API_BASE}/api/energy/sts/events?bbox=${encodeURIComponent(bbox)}`, { credentials: "include" })
+            .then((r) => r.json())
+            .then((fc: FeatureCollection) => {
+              const src = map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined;
+              if (src && fc?.type === "FeatureCollection") src.setData(fc);
+            })
+            .catch(() => {});
+        };
+        map.on("moveend", refreshStsEvents);
+        refreshStsEvents();
+      }
 
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
@@ -623,6 +717,9 @@ export default function IntelligenceMap({
     });
     if (vertical === "energy") {
       setVesselLayerVisibility(map, !!layers.vessels);
+      if (map.getLayer("sts-events")) {
+        map.setLayoutProperty("sts-events", "visibility", layers["sts-events"] ? "visible" : "none");
+      }
     }
   }, [layers, vertical]);
 

@@ -1,8 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ClipboardList,
+  Factory,
+  Pickaxe,
+  Search,
+  Settings,
+  Upload,
+  Zap,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
+import { Badge } from "@/components/ui/badge";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
@@ -54,6 +65,10 @@ function wsStatusLabel(state: MapRuntimeStatus["wsState"]): string {
 function dataTierHint(tier: string): string {
   if (tier === "eia_open_data") return "EIA daily spot (1-day lag)";
   return "Reference stub — not exchange";
+}
+
+function tierBadgeVariant(tier: string): "verified" | "partial" {
+  return tier === "eia_open_data" ? "verified" : "partial";
 }
 
 export default function TerminalShell() {
@@ -129,6 +144,14 @@ export default function TerminalShell() {
     }
   }, []);
 
+  const confidenceVariant = (score?: number | string): "verified" | "partial" | "destructive" | "muted" => {
+    const cls = confidenceTierClass(score);
+    if (cls === "tier-high") return "verified";
+    if (cls === "tier-mid") return "partial";
+    if (cls === "tier-low") return "destructive";
+    return "muted";
+  };
+
   return (
     <div className="terminal">
       <div className="ticker">
@@ -143,17 +166,16 @@ export default function TerminalShell() {
                 : "—"}
             </strong>
             {q.tier === "reference_stub" && q.label.toLowerCase().includes("vlsfo") ? (
-              <span className="badge partial compact" title="Bunker register — no price feed">STUB</span>
+              <Badge variant="partial" title="Bunker register — no price feed">STUB</Badge>
             ) : null}
           </span>
         ))}
-        {tickerTier === "eia_open_data" ? (
-          <span className="badge verified" title={tickerDisclaimer}>EIA OPEN DATA</span>
-        ) : (
-          <span className="badge partial" title={tickerDisclaimer}>REF PRICES</span>
-        )}
-        <span className="badge partial">LIVE AIS — limited Gulf coverage</span>
+        <Badge variant={tierBadgeVariant(tickerTier)} title={tickerDisclaimer}>
+          {tickerTier === "eia_open_data" ? "EIA OPEN DATA" : "REF PRICES"}
+        </Badge>
+        <Badge variant="warn">LIVE AIS — limited Gulf coverage</Badge>
         <button type="button" className="ticker-search" onClick={() => setSearchOpen(true)}>
+          <Search size={12} style={{ display: "inline", marginRight: 4, verticalAlign: "-2px" }} />
           Search ⌘K
         </button>
       </div>
@@ -165,12 +187,24 @@ export default function TerminalShell() {
       />
       <div className="shell">
         <nav className="rail">
-          <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("intel"); }}>⚡</button>
-          <button className={vertical === "metals" ? "active" : ""} title="Metals" onClick={() => { setVertical("metals"); setPanel("intel"); }}>⛏</button>
-          <Link href={vertical === "metals" ? "/deals?vertical=metals" : "/deals"} className="rail-link" title="Deals">📋</Link>
-          <Link href="/portal" className="rail-link" title="Supplier portal">📤</Link>
-          <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>🏭</button>
-          <Link href="/admin" className="rail-link" title="Admin">⚙</Link>
+          <button className={vertical === "energy" ? "active" : ""} title="Energy" onClick={() => { setVertical("energy"); setPanel("intel"); }}>
+            <Zap size={18} />
+          </button>
+          <button className={vertical === "metals" ? "active" : ""} title="Metals" onClick={() => { setVertical("metals"); setPanel("intel"); }}>
+            <Pickaxe size={18} />
+          </button>
+          <Link href={vertical === "metals" ? "/deals?vertical=metals" : "/deals"} className="rail-link" title="Deals">
+            <ClipboardList size={18} />
+          </Link>
+          <Link href="/portal" className="rail-link" title="Supplier portal">
+            <Upload size={18} />
+          </Link>
+          <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>
+            <Factory size={18} />
+          </button>
+          <Link href="/admin" className="rail-link" title="Admin">
+            <Settings size={18} />
+          </Link>
         </nav>
         <IntelligenceMap
           vertical={vertical}
@@ -194,16 +228,16 @@ export default function TerminalShell() {
             </span>
             {panel === "intel" && (
               <span className="panel-header-badges">
-                <span className="badge partial compact">{vertical}</span>
+                <Badge variant="outline">{vertical}</Badge>
                 {selected ? (
-                  <span
-                    className={`badge compact ${confidenceTierClass(selected.confidence_score)}`}
+                  <Badge
+                    variant={confidenceVariant(selected.confidence_score)}
                     title={`Confidence: ${confidenceTierLabel(selected.confidence_score)}`}
                   >
                     {confidenceTierLabel(selected.confidence_score)}
-                  </span>
+                  </Badge>
                 ) : (
-                  <span className="badge tier-none compact">No selection</span>
+                  <Badge variant="muted">No selection</Badge>
                 )}
               </span>
             )}
@@ -221,33 +255,44 @@ export default function TerminalShell() {
           )}
           {panel === "intel" && !selected && vertical === "energy" && (
             <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--muted)", borderBottom: "1px solid var(--border)", lineHeight: 1.4 }}>
-              Toggle <strong style={{ color: "var(--text)", fontWeight: 600 }}>Pipelines</strong> (z≥4).{" "}
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Vessels</strong> — Gulf AIS coverage is limited by provider.
+              Toggle <strong style={{ color: "var(--text)", fontWeight: 600 }}>Refineries</strong>,{" "}
+              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Pipelines</strong> (z≥4), or{" "}
+              <strong style={{ color: "var(--text)", fontWeight: 600 }}>STS events</strong>. Vessels scale by DWT/LOA — Gulf AIS coverage is limited by provider.
             </div>
           )}
           <div className="body">
-            {panel === "suppliers" ? (
-              <SupplierSearchPanel
-                canSearch={canUse(me, FEATURE.supplierDiscovery)}
-                authed={!!me?.uid}
-              />
-            ) : (
-              <EntityDossierPanel
-                selection={selected}
-                vertical={vertical}
-                onRelationshipLines={setRelationshipLines}
-                onNavigate={(feat, focus) => {
-                  setSelected(feat);
-                  setPanel("intel");
-                  if (focus) setMapFocus(focus);
-                  if (feat._entityType === "asset") {
-                    setVertical(feat.asset_type === "mine" ? "metals" : "energy");
-                  } else if (feat._entityType === "company") {
-                    setVertical("energy");
-                  }
-                }}
-              />
-            )}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={panel === "suppliers" ? "suppliers" : selected?.id ?? selected?.mmsi ?? "empty"}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18 }}
+              >
+                {panel === "suppliers" ? (
+                  <SupplierSearchPanel
+                    canSearch={canUse(me, FEATURE.supplierDiscovery)}
+                    authed={!!me?.uid}
+                  />
+                ) : (
+                  <EntityDossierPanel
+                    selection={selected}
+                    vertical={vertical}
+                    onRelationshipLines={setRelationshipLines}
+                    onNavigate={(feat, focus) => {
+                      setSelected(feat);
+                      setPanel("intel");
+                      if (focus) setMapFocus(focus);
+                      if (feat._entityType === "asset") {
+                        setVertical(feat.asset_type === "mine" ? "metals" : "energy");
+                      } else if (feat._entityType === "company") {
+                        setVertical("energy");
+                      }
+                    }}
+                  />
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </aside>
       </div>

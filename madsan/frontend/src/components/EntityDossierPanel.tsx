@@ -9,6 +9,9 @@ import {
   VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
@@ -24,6 +27,7 @@ import {
   LIMITED_AIS_COVERAGE_LABEL,
   API_BASE,
 } from "@/lib/layers";
+import { type HistoricPreset, useHistoricAggregates, useHistoricRange } from "@/lib/historicRange";
 
 export type MapSelection = {
   id?: string;
@@ -108,6 +112,79 @@ type Props = {
   onNavigate?: (selection: MapSelection, focus?: { lat: number; lng: number }) => void;
   onRelationshipLines?: (lines: FeatureCollection) => void;
 };
+
+function confidenceBadgeVariant(score?: number | string, status?: string): "verified" | "partial" | "destructive" | "muted" {
+  const cls = confidenceTierClass(score, status);
+  if (cls === "tier-high") return "verified";
+  if (cls === "tier-mid") return "partial";
+  if (cls === "tier-low") return "destructive";
+  return "muted";
+}
+
+function DossierSkeleton() {
+  return (
+    <div className="space-y-3">
+      <Skeleton className="h-5 w-3/4" />
+      <div className="flex gap-2">
+        <Skeleton className="h-5 w-16 rounded-full" />
+        <Skeleton className="h-5 w-20 rounded-full" />
+      </div>
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-16 w-full" />
+    </div>
+  );
+}
+
+function HistoricAggregateStub({
+  entityType,
+  entityId,
+}: {
+  entityType: string;
+  entityId: string;
+}) {
+  const { range, setPreset } = useHistoricRange("30d");
+  const { data, loading, error } = useHistoricAggregates({
+    entityType,
+    entityId,
+    range,
+    enabled: !!entityId,
+  });
+  const presets: HistoricPreset[] = ["7d", "30d", "90d", "1y"];
+
+  return (
+    <Card size="sm" className="mb-3">
+      <CardHeader>
+        <CardTitle className="text-sm">Signal history (aggregates)</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="historic-range-bar">
+          {presets.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={range.preset === p ? "active" : ""}
+              onClick={() => setPreset(p)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        {loading && <Skeleton className="h-12 w-full" />}
+        {!loading && error && (
+          <p className="disclaimer" style={{ margin: 0 }}>Aggregates unavailable — {error.slice(0, 80)}</p>
+        )}
+        {!loading && !error && data && (
+          <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
+            {data.buckets.length
+              ? `${data.buckets.length} ${data.bucket} buckets · ${data.metric}`
+              : data.disclaimer ?? "No pre-aggregated buckets in range (stub API)."}
+            {data.tier === "stub" ? " · server-side rollups pending migration" : ""}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   if (!dossier?.location) {
@@ -222,7 +299,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
     );
   }
 
-  if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;
+  if (loading) return <DossierSkeleton />;
   if (error) return <p style={{ color: "#f87171" }}>{error}</p>;
   if (!dossier) return null;
 
@@ -243,35 +320,47 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
   return (
     <div style={{ fontSize: 13 }}>
-      <h3 style={{ margin: "0 0 0.5rem" }}>{dossier.name}</h3>
-      <div style={{ marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
-          {dossier.entity_type} · {score ?? "—"}
-        </span>
-        {showAisCoverageBadge && (
-          <span className="badge warn compact" title={LIMITED_AIS_COVERAGE_DETAIL}>
-            {LIMITED_AIS_COVERAGE_LABEL}
-          </span>
-        )}
-        {dossier.opportunity_score != null && (
-          <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
-            opp {Math.round(dossier.opportunity_score)}
-          </span>
-        )}
-      </div>
+      <Card size="sm" className="mb-3">
+        <CardHeader>
+          <CardTitle>{dossier.name}</CardTitle>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            <Badge variant={confidenceBadgeVariant(score, dossier.confidence?.status)}>
+              {dossier.entity_type} · {score ?? "—"}
+            </Badge>
+            {showAisCoverageBadge && (
+              <Badge variant="warn" title={LIMITED_AIS_COVERAGE_DETAIL}>
+                {LIMITED_AIS_COVERAGE_LABEL}
+              </Badge>
+            )}
+            {dossier.opportunity_score != null && (
+              <Badge variant={confidenceBadgeVariant(dossier.opportunity_score)}>
+                opp {Math.round(dossier.opportunity_score)}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+      </Card>
+
+      {dossier.id && UUID_RE.test(dossier.id) && (
+        <HistoricAggregateStub entityType={dossier.entity_type} entityId={dossier.id} />
+      )}
 
       {dossier.signals && dossier.signals.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>Live signals</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
-            {dossier.signals.map((s) => (
-              <li key={`${s.signal_type}-${s.label}`}>
-                {s.label}
-                <span style={{ color: "var(--muted)" }}> ({s.tier}{s.detail ? ` — ${s.detail}` : ""})</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <Card size="sm" className="mb-3">
+          <CardHeader>
+            <CardTitle className="text-sm">Live signals</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+              {dossier.signals.map((s) => (
+                <li key={`${s.signal_type}-${s.label}`}>
+                  {s.label}
+                  <span style={{ color: "var(--muted)" }}> ({s.tier}{s.detail ? ` — ${s.detail}` : ""})</span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
 
       <VesselOwnershipSection dossier={dossier} />

@@ -50,22 +50,35 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	mvtGeom := `ST_AsMVTGeom(ST_Transform(geom::geometry, 3857), ST_TileEnvelope($1,$2,$3), 4096, 256, true)`
 	switch layer {
 	case "vessels":
-		// Query live vessels table (not stale materialized view) for AIS freshness.
+		// Query live vessels + ShipVault specs from vessel_enrichment for map icon scaling.
 		query = `
 			SELECT ST_AsMVT(mvt.*, $4) FROM (
 				SELECT ` + mvtGeom + ` AS geom,
-					id::text, name, mmsi,
-					vessel_type,
-					vessel_type AS ship_type,
-					vessel_type AS asset_type,
-					flag_country_code AS country_code,
-					confidence_score,
-					course,
-					heading,
-					speed_knots
-				FROM vessels
-				WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-				  AND geom IS NOT NULL AND ` + tileFilter + `
+					v.id::text, v.name, v.mmsi,
+					v.vessel_type,
+					v.vessel_type AS ship_type,
+					v.vessel_type AS asset_type,
+					v.flag_country_code AS country_code,
+					v.confidence_score,
+					v.course,
+					v.heading,
+					v.speed_knots,
+					COALESCE(
+						ve.deadweight_tons,
+						NULLIF((ve.raw_payload->'vessel_specs'->>'deadweight_tons')::numeric, 0)
+					) AS dwt,
+					COALESCE(
+						NULLIF((ve.raw_payload->'vessel_specs'->>'length_m')::numeric, 0),
+						NULLIF((ve.raw_payload->>'length_m')::numeric, 0)
+					) AS loa_m,
+					COALESCE(
+						NULLIF((ve.raw_payload->'vessel_specs'->>'beam_m')::numeric, 0),
+						NULLIF((ve.raw_payload->>'beam_m')::numeric, 0)
+					) AS beam_m
+				FROM vessels v
+				LEFT JOIN vessel_enrichment ve ON ve.mmsi = v.mmsi
+				WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+				  AND v.geom IS NOT NULL AND ` + tileFilter + `
 			) mvt`
 	case "metals-assets":
 		query = `

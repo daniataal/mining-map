@@ -13,8 +13,30 @@ export type LayerDef = {
 };
 
 export const LAYER_REGISTRY: LayerDef[] = [
-  { id: "energy-assets", label: "Tank farms & terminals", vertical: "energy", tileLayer: "energy-assets", defaultOn: true },
-  { id: "vessels", label: "Vessels / AIS", vertical: "energy", tileLayer: "vessels", drawerHint: "Chevron = AIS course/heading · Gulf/Hormuz: limited provider coverage", defaultOn: true },
+  {
+    id: "energy-terminals",
+    label: "Tank farms & terminals",
+    vertical: "energy",
+    tileLayer: "energy-assets",
+    tileSourceKey: "src-energy-assets",
+    defaultOn: true,
+  },
+  {
+    id: "energy-refineries",
+    label: "Refineries",
+    vertical: "energy",
+    tileLayer: "energy-assets",
+    tileSourceKey: "src-energy-assets",
+    defaultOn: true,
+  },
+  { id: "vessels", label: "Vessels / AIS", vertical: "energy", tileLayer: "vessels", drawerHint: "Chevron below z14 · true-scale hull at z≥14 when LOA known · Gulf/Hormuz: limited provider coverage", defaultOn: true },
+  {
+    id: "sts-events",
+    label: "STS events",
+    vertical: "energy",
+    drawerHint: "Ship-to-ship transfers — stub until legacy STS migration completes",
+    defaultOn: false,
+  },
   {
     id: "metals-mines",
     label: "Mining licenses (cadastre)",

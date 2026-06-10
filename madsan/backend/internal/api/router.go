@@ -18,8 +18,10 @@ import (
 	"github.com/madsan/intelligence/internal/config"
 	"github.com/madsan/intelligence/internal/database"
 	"github.com/madsan/intelligence/internal/deals"
+	"github.com/madsan/intelligence/internal/documents"
 	"github.com/madsan/intelligence/internal/entitlements"
 	"github.com/madsan/intelligence/internal/ingestion"
+	"github.com/madsan/intelligence/internal/llm"
 	"github.com/madsan/intelligence/internal/maritime"
 	"github.com/madsan/intelligence/internal/markets"
 	"github.com/madsan/intelligence/internal/notify"
@@ -37,6 +39,8 @@ type Server struct {
 	ent        *entitlements.Resolver
 	hub        *realtime.Hub
 	deals      *deals.Service
+	documents  *documents.Service
+	llm        *llm.Client
 	search     *search.Service
 	tiles      *tiles.Service
 	ingest     *ingestion.Service
@@ -68,6 +72,8 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		ent:        entitlements.New(pool),
 		hub:        hub,
 		deals:      deals.New(pool, cfg.OpenSanctionsAPIKey, cfg.EIAAPIKey),
+		documents:  documents.New(pool, cfg.DocumentsDir),
+		llm:        llm.NewFromEnv(),
 		search:     search.New(pool),
 		tiles:      tiles.New(pool, legacyPool),
 		ingest:     ingestion.New(pool, cfg),
@@ -164,10 +170,13 @@ func (s *Server) Router() http.Handler {
 		api.Get("/{id}", s.getDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification), s.requireCommercialSources).Post("/verify", s.verifyDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport), s.requireCommercialSources).Get("/{id}/pack", s.dealPack)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification)).Post("/{id}/dd-assist", s.dealDDAssist)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Post("/{id}/watch", s.watchDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Delete("/{id}/watch", s.unwatchDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Get("/{id}/changes", s.dealChanges)
 	})
+
+	r.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification)).Post("/api/documents", s.uploadDocument)
 
 	r.Post("/api/feedback", s.submitProductFeedback)
 
