@@ -5,6 +5,7 @@ import maplibregl, { type ExpressionSpecification } from "maplibre-gl";
 import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { FEATURE } from "@/lib/entitlements";
+import { fetchMCRCorridors, fetchSTSEvents, fetchVesselTrack } from "@/lib/energyApi";
 import {
   API_BASE,
   defaultLayerState,
@@ -13,6 +14,7 @@ import {
   LIMITED_AIS_COVERAGE_LABEL,
   mapSourceKey,
   metalsMapLayersActive,
+  PERSIAN_GULF_COVERAGE_POLYGON,
   viewportOverlapsPersianGulf,
   type LayerDef,
 } from "@/lib/layers";
@@ -203,18 +205,12 @@ function mvtSourceLayer(tileLayer: string): string {
   }
 }
 
-function energyAssetFilter(layerId: string): maplibregl.FilterSpecification | undefined {
-  if (layerId === "energy-refineries") {
-    return ["==", ["get", "asset_type"], "refinery"];
+function energyAssetFilter(layer: LayerDef): maplibregl.FilterSpecification | undefined {
+  if (!layer.assetTypes?.length) return undefined;
+  if (layer.assetTypes.length === 1) {
+    return ["==", ["get", "asset_type"], layer.assetTypes[0]];
   }
-  if (layerId === "energy-terminals") {
-    return [
-      "in",
-      ["get", "asset_type"],
-      ["literal", ["tank_farm", "terminal", "port", "sts_zone", "storage", "berth"]],
-    ];
-  }
-  return undefined;
+  return ["in", ["get", "asset_type"], ["literal", layer.assetTypes]];
 }
 
 function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | undefined {
@@ -228,13 +224,15 @@ function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | un
 }
 
 function addPointTileLayer(map: maplibregl.Map, layer: LayerDef, src: string, visible: boolean) {
-  const filter = energyAssetFilter(layer.id) ?? metalsAssetFilter(layer.id);
+  const filter = energyAssetFilter(layer) ?? metalsAssetFilter(layer.id);
   const color =
     layer.id === "energy-refineries"
       ? "#f59e0b"
-      : layer.vertical === "metals"
-        ? "#c9a227"
-        : "#10b981";
+      : layer.id === "energy-sts-zones"
+        ? "#c084fc"
+        : layer.vertical === "metals"
+          ? "#c9a227"
+          : "#10b981";
   map.addLayer({
     id: layer.id,
     type: "circle",
@@ -316,9 +314,14 @@ function layerLocked(layer: LayerDef, entitlements?: Partial<Record<string, bool
 function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
   const ids = layersForVertical(vertical).filter((l) => l.tileLayer).map((l) => l.id);
   if (vertical === "energy") {
-    ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS, "sts-events");
+    ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS, "sts-events", "mcr-corridors");
   }
   return ids;
+}
+
+function bboxString(map: maplibregl.Map): string {
+  const b = map.getBounds();
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
 }
 
 function hoverLabel(props: Record<string, unknown>): string {
@@ -548,9 +551,27 @@ export default function IntelligenceMap({
       });
 
       if (vertical === "energy") {
-        map.addSource("sts-events", {
+        map.addSource("sts-events", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("mcr-corridors", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("ais-coverage", {
           type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
+          data: { type: "Feature", geometry: PERSIAN_GULF_COVERAGE_POLYGON, properties: {} },
+        });
+        map.addSource("vessel-track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+
+        map.addLayer({
+          id: "ais-coverage-fill",
+          type: "fill",
+          source: "ais-coverage",
+          paint: { "fill-color": "#f59e0b", "fill-opacity": 0.08 },
+          layout: { visibility: layers["ais-coverage"] ? "visible" : "none" },
+        });
+        map.addLayer({
+          id: "mcr-corridors",
+          type: "line",
+          source: "mcr-corridors",
+          paint: { "line-color": "#fbbf24", "line-width": 2.5, "line-opacity": 0.75 },
+          layout: { visibility: layers["mcr-corridors"] ? "visible" : "none", "line-cap": "round", "line-join": "round" },
         });
         map.addLayer({
           id: "sts-events",
@@ -558,29 +579,42 @@ export default function IntelligenceMap({
           source: "sts-events",
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 8, 14, 12],
-            "circle-color": "#f59e0b",
-            "circle-opacity": 0.75,
+            "circle-color": "#c084fc",
+            "circle-opacity": 0.8,
             "circle-stroke-width": 2,
             "circle-stroke-color": "#0f172a",
-            "circle-stroke-opacity": 0.6,
+            "circle-stroke-opacity": 0.5,
           },
           layout: { visibility: layers["sts-events"] ? "visible" : "none" },
         });
+        map.addLayer({
+          id: "vessel-track",
+          type: "line",
+          source: "vessel-track",
+          paint: { "line-color": "#38bdf8", "line-width": 3, "line-opacity": 0.9 },
+        });
 
-        const refreshStsEvents = () => {
-          if (!layers["sts-events"]) return;
-          const b = map.getBounds();
-          const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
-          fetch(`${API_BASE}/api/energy/sts/events?bbox=${encodeURIComponent(bbox)}`, { credentials: "include" })
-            .then((r) => r.json())
-            .then((fc: FeatureCollection) => {
-              const src = map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined;
-              if (src && fc?.type === "FeatureCollection") src.setData(fc);
-            })
-            .catch(() => {});
+        const refreshOverlays = () => {
+          const bbox = bboxString(map);
+          if (layers["sts-events"]) {
+            fetchSTSEvents(bbox)
+              .then((fc) => {
+                const src = map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined;
+                if (src) src.setData(fc);
+              })
+              .catch(() => {});
+          }
+          if (layers["mcr-corridors"]) {
+            fetchMCRCorridors(bbox)
+              .then((fc) => {
+                const src = map.getSource("mcr-corridors") as maplibregl.GeoJSONSource | undefined;
+                if (src) src.setData(fc);
+              })
+              .catch(() => {});
+          }
         };
-        map.on("moveend", refreshStsEvents);
-        refreshStsEvents();
+        map.on("moveend", refreshOverlays);
+        refreshOverlays();
       }
 
       if (vertical === "energy") {
@@ -717,11 +751,42 @@ export default function IntelligenceMap({
     });
     if (vertical === "energy") {
       setVesselLayerVisibility(map, !!layers.vessels);
-      if (map.getLayer("sts-events")) {
-        map.setLayoutProperty("sts-events", "visibility", layers["sts-events"] ? "visible" : "none");
+      for (const lid of ["sts-events", "mcr-corridors", "ais-coverage-fill"] as const) {
+        if (map.getLayer(lid)) {
+          const key = lid === "ais-coverage-fill" ? "ais-coverage" : lid;
+          map.setLayoutProperty(lid, "visibility", layers[key] ? "visible" : "none");
+        }
+      }
+      if (layers["sts-events"] || layers["mcr-corridors"]) {
+        const bbox = bboxString(map);
+        if (layers["sts-events"]) {
+          fetchSTSEvents(bbox)
+            .then((fc) => (map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
+            .catch(() => {});
+        }
+        if (layers["mcr-corridors"]) {
+          fetchMCRCorridors(bbox)
+            .then((fc) => (map.getSource("mcr-corridors") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
+            .catch(() => {});
+        }
       }
     }
   }, [layers, vertical]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || vertical !== "energy") return;
+    const mmsi = selection?.mmsi;
+    const src = map.getSource("vessel-track") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    if (!mmsi || selection?._entityType !== "vessel") {
+      src.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+    fetchVesselTrack(mmsi, 24)
+      .then((fc) => src.setData(fc))
+      .catch(() => src.setData({ type: "FeatureCollection", features: [] }));
+  }, [selection, vertical]);
 
   const showMetalsEmpty = vertical === "metals" && !metalsMapLayersActive(layers);
 
@@ -729,35 +794,51 @@ export default function IntelligenceMap({
     <div className="map-wrap">
       <div className="layer-drawer">
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>LAYERS</div>
-        {layersForVertical(vertical).map((l) => {
-          const locked = layerLocked(l, entitlements);
-          const input = (
-            <input
-              type="checkbox"
-              checked={!!layers[l.id] && !locked}
-              disabled={locked}
-              onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
-            />
-          );
-          return l.drawerHint ? (
-            <div key={l.id}>
-              <label style={locked ? { opacity: 0.55 } : undefined}>
+        {(() => {
+          let lastGroup = "";
+          return layersForVertical(vertical).map((l) => {
+            if (l.geoJsonSource && !l.tileLayer && vertical === "metals") return null;
+            const locked = layerLocked(l, entitlements);
+            const showGroup = l.group && l.group !== lastGroup;
+            if (l.group) lastGroup = l.group;
+            const input = (
+              <input
+                type="checkbox"
+                checked={!!layers[l.id] && !locked}
+                disabled={locked || !l.tileLayer && !l.geoJsonSource}
+                onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+              />
+            );
+            const row = l.drawerHint ? (
+              <div key={l.id}>
+                <label style={locked ? { opacity: 0.55 } : undefined}>
+                  {input}
+                  {l.label}
+                  {locked ? " (plan)" : ""}
+                </label>
+                <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
+                  {locked ? "Upgrade plan or sign in to unlock premium map layers." : l.drawerHint}
+                </div>
+              </div>
+            ) : (
+              <label key={l.id} style={locked ? { opacity: 0.55 } : undefined}>
                 {input}
                 {l.label}
                 {locked ? " (plan)" : ""}
               </label>
-              <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
-                {locked ? "Upgrade plan or sign in to unlock premium map layers." : l.drawerHint}
+            );
+            return (
+              <div key={l.id}>
+                {showGroup && (
+                  <div style={{ fontSize: 10, color: "var(--warn)", margin: "8px 0 4px", letterSpacing: "0.06em" }}>
+                    {l.group}
+                  </div>
+                )}
+                {row}
               </div>
-            </div>
-          ) : (
-            <label key={l.id} style={locked ? { opacity: 0.55 } : undefined}>
-              {input}
-              {l.label}
-              {locked ? " (plan)" : ""}
-            </label>
-          );
-        })}
+            );
+          });
+        })()}
       </div>
       {vertical === "energy" && gulfAisLimited && (
         <div className="map-coverage-banner" role="status">

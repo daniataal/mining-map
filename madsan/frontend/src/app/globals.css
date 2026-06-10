@@ -271,6 +271,55 @@ a { color: var(--accent); text-decoration: none; }
   border-color: var(--accent); color: var(--accent); background: rgba(16,185,129,0.08);
 }
 
+.tabs-list {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px;
+}
+.tabs-trigger {
+  padding: 4px 10px; font-size: 10px; font-weight: 600; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;
+}
+.tabs-trigger.active {
+  border-color: var(--accent); color: var(--accent); background: rgba(16,185,129,0.08);
+}
+.tabs-content { font-size: 13px; }
+
+.dossier-dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; color: var(--muted); font-size: 12px; }
+.dossier-dl-row { display: contents; }
+.dossier-dl dt { text-transform: lowercase; }
+.dossier-dl dd { margin: 0; color: var(--text); }
+
+.intel-card {
+  padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: rgba(15,23,42,0.5); margin-bottom: 8px;
+}
+.intel-card-stack { display: flex; flex-direction: column; gap: 0; }
+.intel-card-btn {
+  width: 100%; text-align: left; cursor: pointer; transition: border-color 0.15s;
+}
+.intel-card-btn:hover { border-color: var(--accent); }
+
+.fleet-table-wrap { overflow-x: auto; margin-top: 8px; }
+.fleet-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.fleet-table th {
+  text-align: left; padding: 4px 6px; color: var(--muted); font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.fleet-table td { padding: 5px 6px; border-bottom: 1px solid rgba(51,65,85,0.5); }
+.fleet-link {
+  background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 11px;
+}
+
+.panel-btn {
+  padding: 5px 12px; font-size: 11px; font-weight: 600; border-radius: 6px;
+  border: 1px solid var(--accent); background: rgba(16,185,129,0.08); color: var(--accent); cursor: pointer;
+}
+.panel-btn.muted {
+  border-color: var(--border); background: transparent; color: var(--muted);
+}
+.panel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.layer-drawer { max-height: calc(100vh - 120px); overflow-y: auto; }
+
 .dark ::-webkit-scrollbar { width: 6px; }
 .dark ::-webkit-scrollbar-track { background: var(--bg); }
 .dark ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }

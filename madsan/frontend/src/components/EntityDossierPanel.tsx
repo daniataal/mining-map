@@ -8,10 +8,10 @@ import {
   VesselOwnershipSection,
   VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
+import HistoricChart from "@/components/HistoricChart";
+import VesselDrawerPanel from "@/components/VesselDrawerPanel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
@@ -27,7 +27,6 @@ import {
   LIMITED_AIS_COVERAGE_LABEL,
   API_BASE,
 } from "@/lib/layers";
-import { type HistoricPreset, useHistoricAggregates, useHistoricRange } from "@/lib/historicRange";
 
 export type MapSelection = {
   id?: string;
@@ -113,79 +112,6 @@ type Props = {
   onRelationshipLines?: (lines: FeatureCollection) => void;
 };
 
-function confidenceBadgeVariant(score?: number | string, status?: string): "verified" | "partial" | "destructive" | "muted" {
-  const cls = confidenceTierClass(score, status);
-  if (cls === "tier-high") return "verified";
-  if (cls === "tier-mid") return "partial";
-  if (cls === "tier-low") return "destructive";
-  return "muted";
-}
-
-function DossierSkeleton() {
-  return (
-    <div className="space-y-3">
-      <Skeleton className="h-5 w-3/4" />
-      <div className="flex gap-2">
-        <Skeleton className="h-5 w-16 rounded-full" />
-        <Skeleton className="h-5 w-20 rounded-full" />
-      </div>
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-16 w-full" />
-    </div>
-  );
-}
-
-function HistoricAggregateStub({
-  entityType,
-  entityId,
-}: {
-  entityType: string;
-  entityId: string;
-}) {
-  const { range, setPreset } = useHistoricRange("30d");
-  const { data, loading, error } = useHistoricAggregates({
-    entityType,
-    entityId,
-    range,
-    enabled: !!entityId,
-  });
-  const presets: HistoricPreset[] = ["7d", "30d", "90d", "1y"];
-
-  return (
-    <Card size="sm" className="mb-3">
-      <CardHeader>
-        <CardTitle className="text-sm">Signal history (aggregates)</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="historic-range-bar">
-          {presets.map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={range.preset === p ? "active" : ""}
-              onClick={() => setPreset(p)}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-        {loading && <Skeleton className="h-12 w-full" />}
-        {!loading && error && (
-          <p className="disclaimer" style={{ margin: 0 }}>Aggregates unavailable — {error.slice(0, 80)}</p>
-        )}
-        {!loading && !error && data && (
-          <p style={{ margin: 0, fontSize: 11, color: "var(--muted)" }}>
-            {data.buckets.length
-              ? `${data.buckets.length} ${data.bucket} buckets · ${data.metric}`
-              : data.disclaimer ?? "No pre-aggregated buckets in range (stub API)."}
-            {data.tier === "stub" ? " · server-side rollups pending migration" : ""}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   if (!dossier?.location) {
     return { type: "FeatureCollection", features: [] };
@@ -215,6 +141,11 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("overview");
+
+  useEffect(() => {
+    setTab("overview");
+  }, [selection?.id, selection?.mmsi]);
 
   useEffect(() => {
     if (!selection) {
@@ -293,65 +224,77 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
     return (
       <>
         <p>Click a map feature to inspect evidence-backed intelligence.</p>
-        <p>Energy layers: tank farms, terminals, refineries, vessels, pipelines.</p>
+        <p>Energy: granular infrastructure toggles, STS/MCR overlays, vessel track on focus.</p>
         <p className="disclaimer">Provider coverage varies by region. Missing data is shown honestly.</p>
       </>
     );
   }
 
-  if (loading) return <DossierSkeleton />;
+  if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;
   if (error) return <p style={{ color: "#f87171" }}>{error}</p>;
   if (!dossier) return null;
+
+  if (dossier.entity_type === "vessel") {
+    return (
+      <VesselDrawerPanel
+        dossier={dossier}
+        onNavigateMmsi={(mmsi, name) =>
+          onNavigate?.({ mmsi, name, _entityType: "vessel", _layer: "vessels" })
+        }
+      />
+    );
+  }
 
   const score = dossier.confidence?.score;
   const summary = dossier.summary ?? {};
   const enrichment =
-    dossier.entity_type === "vessel"
-      ? resolveVesselEnrichment(dossier)
-      : dossier.entity_type === "asset"
-        ? resolveAssetEnrichment(dossier)
-        : null;
-  const loc = dossier.location ?? {};
-  const lat = loc.latitude != null ? Number(loc.latitude) : NaN;
-  const lng = loc.longitude != null ? Number(loc.longitude) : NaN;
-  const showAisCoverageBadge =
-    dossier.entity_type === "vessel" &&
-    (Number.isFinite(lat) && Number.isFinite(lng) ? isPointInPersianGulf(lat, lng) : true);
+    dossier.entity_type === "asset" ? resolveAssetEnrichment(dossier) : null;
+  const entityId = dossier.id || selection.id || "";
 
   return (
-    <div style={{ fontSize: 13 }}>
-      <Card size="sm" className="mb-3">
-        <CardHeader>
-          <CardTitle>{dossier.name}</CardTitle>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-            <Badge variant={confidenceBadgeVariant(score, dossier.confidence?.status)}>
-              {dossier.entity_type} · {score ?? "—"}
-            </Badge>
-            {showAisCoverageBadge && (
-              <Badge variant="warn" title={LIMITED_AIS_COVERAGE_DETAIL}>
-                {LIMITED_AIS_COVERAGE_LABEL}
-              </Badge>
-            )}
-            {dossier.opportunity_score != null && (
-              <Badge variant={confidenceBadgeVariant(dossier.opportunity_score)}>
-                opp {Math.round(dossier.opportunity_score)}
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-      </Card>
+    <div className="dossier-tabbed">
+      <h3 style={{ margin: "0 0 0.5rem" }}>{dossier.name}</h3>
+      <div style={{ marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
+          {dossier.entity_type} · {score ?? "—"}
+        </span>
+        {dossier.opportunity_score != null && (
+          <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
+            opp {Math.round(dossier.opportunity_score)}
+          </span>
+        )}
+      </div>
 
-      {dossier.id && UUID_RE.test(dossier.id) && (
-        <HistoricAggregateStub entityType={dossier.entity_type} entityId={dossier.id} />
-      )}
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="signals">Signals</TabsTrigger>
+          <TabsTrigger value="relationships">Relationships</TabsTrigger>
+          <TabsTrigger value="evidence">Evidence</TabsTrigger>
+          <TabsTrigger value="trade">Trade</TabsTrigger>
+        </TabsList>
 
-      {dossier.signals && dossier.signals.length > 0 && (
-        <Card size="sm" className="mb-3">
-          <CardHeader>
-            <CardTitle className="text-sm">Live signals</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+        <TabsContent value="overview">
+          <VesselOwnershipSection dossier={dossier} />
+          <VesselSpecificationsSection dossier={dossier} />
+          <AssetOperatorCapacitySection dossier={dossier} />
+          <dl className="dossier-dl">
+            {Object.entries(summary).map(([k, v]) => {
+              const display = formatSummaryValue(v);
+              if (display == null || summaryKeyHiddenInEnrichment(k, enrichment, dossier.entity_type)) return null;
+              return (
+                <span key={k} className="dossier-dl-row">
+                  <dt>{k.replace(/_/g, " ")}</dt>
+                  <dd>{display}</dd>
+                </span>
+              );
+            })}
+          </dl>
+        </TabsContent>
+
+        <TabsContent value="signals">
+          {dossier.signals && dossier.signals.length > 0 ? (
+            <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
               {dossier.signals.map((s) => (
                 <li key={`${s.signal_type}-${s.label}`}>
                   {s.label}
@@ -359,114 +302,115 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <p className="disclaimer" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
+              No live signals on this entity.
+            </p>
+          )}
+          {dossier.signal_history && dossier.signal_history.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <strong>Signal history</strong>
+              <ul className="signal-timeline">
+                {dossier.signal_history.map((h) => (
+                  <li key={`${h.signal_type}-${h.observed_at}`}>
+                    <span className="signal-timeline-time">{formatObservedAt(h.observed_at)}</span>
+                    <span className="signal-timeline-label">{h.label}</span>
+                    <span className="signal-timeline-meta">
+                      {h.tier}
+                      {h.detail ? ` · ${h.detail}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </TabsContent>
 
-      <VesselOwnershipSection dossier={dossier} />
-      <VesselSpecificationsSection dossier={dossier} />
-      <AssetOperatorCapacitySection dossier={dossier} />
+        <TabsContent value="relationships">
+          {dossier.relationships && dossier.relationships.length > 0 ? (
+            <ul className="rel-list">
+              {dossier.relationships.map((rel) => (
+                <li key={`${rel.type}-${rel.id}`}>
+                  <button
+                    type="button"
+                    className="rel-link"
+                    onClick={() => {
+                      const focus =
+                        rel.latitude != null && rel.longitude != null
+                          ? { lat: rel.latitude, lng: rel.longitude }
+                          : undefined;
+                      onNavigate?.(
+                        { id: rel.id, name: rel.name, _entityType: rel.entity_type },
+                        focus,
+                      );
+                    }}
+                  >
+                    <span className="rel-type">{rel.type.replace(/_/g, " ")}</span>
+                    <span className="rel-name">{rel.name}</span>
+                    <span className="rel-meta">{rel.entity_type}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="disclaimer" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
+              No graph relationships indexed for this entity yet.
+            </p>
+          )}
+        </TabsContent>
 
-      {dossier.signal_history && dossier.signal_history.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>Signal history</strong>
-          <ul className="signal-timeline">
-            {dossier.signal_history.map((h) => (
-              <li key={`${h.signal_type}-${h.observed_at}`}>
-                <span className="signal-timeline-time">{formatObservedAt(h.observed_at)}</span>
-                <span className="signal-timeline-label">{h.label}</span>
-                <span className="signal-timeline-meta">
-                  {h.tier}
-                  {h.signal_type === "sts" ? ` · score ${Math.round(h.confidence_score)}` : ""}
-                  {h.opportunity_score != null ? ` · opp ${Math.round(h.opportunity_score)}` : ""}
-                  {h.source ? ` · ${h.source}` : ""}
-                  {h.detail ? ` · ${h.detail}` : ""}
-                </span>
-                {h.signal_type === "sts" && h.sts_factors && h.sts_factors.length > 0 && (
-                  <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 11, color: "var(--muted)" }}>
-                    {h.sts_factors.map((f) => (
-                      <li key={`${h.observed_at}-${f.name}`}>
-                        {f.name.replace(/_/g, " ")} {(f.weighted * 100).toFixed(0)}% — {f.detail}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+        <TabsContent value="evidence">
+          {dossier.evidence && dossier.evidence.length > 0 ? (
+            <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
+              {dossier.evidence.map((e) => (
+                <li key={`${e.claim_type}-${e.source_name}`}>
+                  <span style={{ color: "var(--text)" }}>{e.claim_type}</span>
+                  {e.claim_value && (
+                    <span style={{ color: "var(--muted)" }}>
+                      : {e.claim_value.length > 48 ? `${e.claim_value.slice(0, 48)}…` : e.claim_value}
+                    </span>
+                  )}
+                  <span style={{ color: "var(--muted)" }}> — {e.source_name}{e.tier ? ` (${e.tier})` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="disclaimer" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
+              Evidence chain empty — ingestion or enrichment pending.
+            </p>
+          )}
+        </TabsContent>
 
-      <dl style={{ margin: "0 0 12px", display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", color: "var(--muted)" }}>
-        {Object.entries(summary).map(([k, v]) => {
-          const display = formatSummaryValue(v);
-          if (display == null || summaryKeyHiddenInEnrichment(k, enrichment, dossier.entity_type)) return null;
-          return (
-            <span key={k} style={{ display: "contents" }}>
-              <dt>{k.replace(/_/g, " ")}</dt>
-              <dd style={{ margin: 0, color: "var(--text)" }}>{display}</dd>
-            </span>
-          );
-        })}
-        {loc.latitude != null && (
-          <>
-            <dt>coordinates</dt>
-            <dd style={{ margin: 0, color: "var(--text)" }}>{String(loc.latitude)}, {String(loc.longitude)}</dd>
-          </>
-        )}
-      </dl>
-
-      {dossier.relationships && dossier.relationships.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>Relationships</strong>
-          <ul className="rel-list">
-            {dossier.relationships.map((rel) => (
-              <li key={`${rel.type}-${rel.id}`}>
-                <button
-                  type="button"
-                  className="rel-link"
-                  onClick={() => {
-                    const focus =
-                      rel.latitude != null && rel.longitude != null
-                        ? { lat: rel.latitude, lng: rel.longitude }
-                        : undefined;
-                    onNavigate?.(
-                      { id: rel.id, name: rel.name, _entityType: rel.entity_type },
-                      focus,
-                    );
-                  }}
-                >
-                  <span className="rel-type">{rel.type.replace(/_/g, " ")}</span>
-                  <span className="rel-name">{rel.name}</span>
-                  <span className="rel-meta">{rel.entity_type}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {dossier.evidence && dossier.evidence.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <strong>Evidence chain</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
-            {dossier.evidence.slice(0, 10).map((e) => (
-              <li key={`${e.claim_type}-${e.source_name}`}>
-                <span style={{ color: "var(--text)" }}>{e.claim_type}</span>
-                {e.claim_value && (
-                  <span style={{ color: "var(--muted)" }}>: {e.claim_value.length > 48 ? `${e.claim_value.slice(0, 48)}…` : e.claim_value}</span>
-                )}
-                <span style={{ color: "var(--muted)" }}> — {e.source_name}{e.tier ? ` (${e.tier})` : ""}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+        <TabsContent value="trade">
+          {entityId && UUID_RE.test(entityId) && (
+            <HistoricChart
+              entityType={dossier.entity_type}
+              entityId={entityId}
+              metric="signals"
+              title="Activity (server aggregates)"
+            />
+          )}
+          {entityId && UUID_RE.test(entityId) && (
+            <div style={{ marginTop: 16 }}>
+              <HistoricChart
+                entityType={dossier.entity_type}
+                entityId={entityId}
+                metric="price_context"
+                title="Price context (historic rollup)"
+                valueLabel="index"
+              />
+            </div>
+          )}
+          <p className="disclaimer" style={{ marginTop: 12 }}>
+            Trade-flow charts use pre-bucketed aggregates only — no raw manifest rows in the browser.
+          </p>
+        </TabsContent>
+      </Tabs>
 
       {dossier.entity_type === "company" && (
         <Link
           href={`/deals?seller=${encodeURIComponent(dossier.name)}${vertical === "metals" ? "&vertical=metals" : ""}`}
-          style={{ fontSize: 12 }}
+          style={{ fontSize: 12, display: "inline-block", marginTop: 12 }}
         >
           Verify deal with this seller →
         </Link>

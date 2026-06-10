@@ -1,3 +1,5 @@
+import type { Polygon } from "geojson";
+
 export type LayerDef = {
   id: string;
   label: string;
@@ -5,20 +7,38 @@ export type LayerDef = {
   tileLayer?: string;
   /** MapLibre source key when multiple toggles share one MVT endpoint */
   tileSourceKey?: string;
+  /** MVT feature filter when sharing energy-assets tiles */
+  assetTypes?: string[];
+  /** GeoJSON overlay fetched from API (not MVT) */
+  geoJsonSource?: "sts" | "mcr" | "coverage";
   /** Optional sub-label under the checkbox (e.g. AIS hint, cadastre tier) */
   drawerHint?: string;
   /** Gated by map_premium_layers entitlement */
   premium?: boolean;
   defaultOn: boolean;
+  /** Group header in layer drawer (no checkbox) */
+  group?: string;
 };
 
 export const LAYER_REGISTRY: LayerDef[] = [
   {
-    id: "energy-terminals",
-    label: "Tank farms & terminals",
+    id: "energy-tank-farms",
+    label: "Tank farms & storage",
     vertical: "energy",
     tileLayer: "energy-assets",
     tileSourceKey: "src-energy-assets",
+    assetTypes: ["tank_farm", "storage"],
+    group: "Infrastructure",
+    defaultOn: true,
+  },
+  {
+    id: "energy-terminals",
+    label: "Terminals & ports",
+    vertical: "energy",
+    tileLayer: "energy-assets",
+    tileSourceKey: "src-energy-assets",
+    assetTypes: ["terminal", "port", "berth"],
+    group: "Infrastructure",
     defaultOn: true,
   },
   {
@@ -27,15 +47,56 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     tileLayer: "energy-assets",
     tileSourceKey: "src-energy-assets",
+    assetTypes: ["refinery"],
+    group: "Infrastructure",
     defaultOn: true,
   },
-  { id: "vessels", label: "Vessels / AIS", vertical: "energy", tileLayer: "vessels", drawerHint: "Chevron below z14 · true-scale hull at z≥14 when LOA known · Gulf/Hormuz: limited provider coverage", defaultOn: true },
+  {
+    id: "energy-sts-zones",
+    label: "STS anchorages",
+    vertical: "energy",
+    tileLayer: "energy-assets",
+    tileSourceKey: "src-energy-assets",
+    assetTypes: ["sts_zone"],
+    group: "Infrastructure",
+    drawerHint: "Known STS zones from legacy import",
+    defaultOn: false,
+  },
+  {
+    id: "vessels",
+    label: "Vessels / AIS",
+    vertical: "energy",
+    tileLayer: "vessels",
+    group: "Maritime",
+    drawerHint: "DWT/LOA-scaled icons · Gulf/Hormuz: limited provider coverage",
+    defaultOn: true,
+  },
   {
     id: "sts-events",
     label: "STS events",
     vertical: "energy",
-    drawerHint: "Ship-to-ship transfers — stub until legacy STS migration completes",
+    geoJsonSource: "sts",
+    group: "Maritime",
+    drawerHint: "Proximity events — fills after STS migration",
     defaultOn: false,
+  },
+  {
+    id: "mcr-corridors",
+    label: "MCR voyage corridors",
+    vertical: "energy",
+    geoJsonSource: "mcr",
+    group: "Maritime",
+    drawerHint: "Load→discharge arcs from voyages table",
+    defaultOn: false,
+  },
+  {
+    id: "ais-coverage",
+    label: "AIS coverage overlay",
+    vertical: "energy",
+    geoJsonSource: "coverage",
+    group: "Maritime",
+    drawerHint: "Highlights sparse open-AIS regions (Gulf/Hormuz)",
+    defaultOn: true,
   },
   {
     id: "metals-mines",
@@ -60,6 +121,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     tileLayer: "pipelines",
     premium: true,
+    group: "Infrastructure",
     drawerHint: "Premium layer — requires plan entitlement",
     defaultOn: false,
   },
@@ -78,7 +140,7 @@ export function layersForVertical(vertical: "energy" | "metals"): LayerDef[] {
 
 export function defaultLayerState(vertical: "energy" | "metals"): Record<string, boolean> {
   return Object.fromEntries(
-    LAYER_REGISTRY.map((l) => [l.id, l.defaultOn && (l.vertical === vertical || l.vertical === "shared")])
+    LAYER_REGISTRY.map((l) => [l.id, l.defaultOn && (l.vertical === vertical || l.vertical === "shared")]),
   );
 }
 
@@ -102,6 +164,20 @@ export const PERSIAN_GULF_AIS_BBOX = {
   east: 60,
   north: 30.5,
 } as const;
+
+/** GeoJSON polygon for AIS coverage gap overlay */
+export const PERSIAN_GULF_COVERAGE_POLYGON: Polygon = {
+  type: "Polygon",
+  coordinates: [
+    [
+      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.south],
+      [PERSIAN_GULF_AIS_BBOX.east, PERSIAN_GULF_AIS_BBOX.south],
+      [PERSIAN_GULF_AIS_BBOX.east, PERSIAN_GULF_AIS_BBOX.north],
+      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.north],
+      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.south],
+    ],
+  ],
+};
 
 export const LIMITED_AIS_COVERAGE_LABEL = "Limited provider coverage";
 

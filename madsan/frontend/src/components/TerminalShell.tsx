@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  Bell,
   ClipboardList,
   Factory,
   Pickaxe,
+  Radio,
   Search,
   Settings,
   Upload,
@@ -20,12 +22,14 @@ import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
+import LiveIntelPanel from "./LiveIntelPanel";
 import SearchPalette from "./SearchPalette";
 import SupplierSearchPanel from "./SupplierSearchPanel";
 import TickerTrendBar from "./TickerTrendBar";
+import WatchlistsPanel, { useDealWatchAvailable } from "./WatchlistsPanel";
 
 type Vertical = "energy" | "metals";
-type Panel = "intel" | "suppliers";
+type Panel = "intel" | "suppliers" | "live" | "watch";
 
 type TickerQuote = {
   label: string;
@@ -88,6 +92,7 @@ export default function TerminalShell() {
     activeLayerCount: 2,
   });
   const [me, setMe] = useState<MeResponse | null>(null);
+  const canDealWatch = useDealWatchAvailable(me);
 
   const onRuntimeStatus = useCallback((status: MapRuntimeStatus) => {
     setMapStatus(status);
@@ -202,6 +207,12 @@ export default function TerminalShell() {
           <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>
             <Factory size={18} />
           </button>
+          <button className={panel === "live" ? "active" : ""} title="Live intel" onClick={() => setPanel("live")}>
+            <Radio size={18} />
+          </button>
+          <button className={panel === "watch" ? "active" : ""} title="Watchlists" onClick={() => setPanel("watch")}>
+            <Bell size={18} />
+          </button>
           <Link href="/admin" className="rail-link" title="Admin">
             <Settings size={18} />
           </Link>
@@ -220,11 +231,15 @@ export default function TerminalShell() {
             <span className="panel-title">
               {panel === "suppliers"
                 ? "Supplier discovery"
-                : selected?.name
-                  ? String(selected.name)
-                  : vertical === "metals"
-                    ? "Metals intelligence"
-                    : "Intelligence"}
+                : panel === "live"
+                  ? "Live intel"
+                  : panel === "watch"
+                    ? "Watchlists"
+                    : selected?.name
+                      ? String(selected.name)
+                      : vertical === "metals"
+                        ? "Metals intelligence"
+                        : "Intelligence"}
             </span>
             {panel === "intel" && (
               <span className="panel-header-badges">
@@ -263,7 +278,15 @@ export default function TerminalShell() {
           <div className="body">
             <AnimatePresence mode="wait">
               <motion.div
-                key={panel === "suppliers" ? "suppliers" : selected?.id ?? selected?.mmsi ?? "empty"}
+                key={
+                  panel === "suppliers"
+                    ? "suppliers"
+                    : panel === "live"
+                      ? "live"
+                      : panel === "watch"
+                        ? "watch"
+                        : selected?.id ?? selected?.mmsi ?? "empty"
+                }
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
@@ -273,6 +296,24 @@ export default function TerminalShell() {
                   <SupplierSearchPanel
                     canSearch={canUse(me, FEATURE.supplierDiscovery)}
                     authed={!!me?.uid}
+                  />
+                ) : panel === "live" ? (
+                  <LiveIntelPanel
+                    onSelectLead={(feat) => {
+                      setSelected(feat);
+                      setPanel("intel");
+                      setVertical("energy");
+                    }}
+                  />
+                ) : panel === "watch" ? (
+                  <WatchlistsPanel
+                    selection={selected}
+                    authed={!!me?.uid}
+                    canDealWatch={canDealWatch}
+                    onSelect={(feat) => {
+                      setSelected(feat);
+                      setPanel("intel");
+                    }}
                   />
                 ) : (
                   <EntityDossierPanel
@@ -285,7 +326,7 @@ export default function TerminalShell() {
                       if (focus) setMapFocus(focus);
                       if (feat._entityType === "asset") {
                         setVertical(feat.asset_type === "mine" ? "metals" : "energy");
-                      } else if (feat._entityType === "company") {
+                      } else if (feat._entityType === "company" || feat._entityType === "vessel") {
                         setVertical("energy");
                       }
                     }}
