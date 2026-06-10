@@ -21,6 +21,7 @@ func main() {
 	imo := flag.String("imo", "", "enrich a single vessel by IMO (e.g. 7530901 for MS LEON)")
 	skipCompanies := flag.Bool("skip-companies", false, "do not fetch ShipVault owner company fleet pages")
 	skipYards := flag.Bool("skip-yards", false, "do not fetch ShipVault yard pages")
+	quiet := flag.Bool("quiet", false, "suppress per-vessel and periodic progress logs")
 	flag.Parse()
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -42,6 +43,7 @@ func main() {
 		DryRun:        *dryRun,
 		SkipCompanies: *skipCompanies,
 		SkipYards:     *skipYards,
+		Quiet:         *quiet,
 	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("vessel enrichment failed")

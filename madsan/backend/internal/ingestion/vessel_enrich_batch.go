@@ -15,6 +15,8 @@ import (
 	sv "github.com/madsan/intelligence/internal/enrichment/vessel/shipvault"
 )
 
+const vesselEnrichProgressEvery = 10
+
 // VesselEnrichBatchOptions controls a one-off or scheduled vessel enrichment run.
 type VesselEnrichBatchOptions struct {
 	Limit         int
@@ -24,6 +26,7 @@ type VesselEnrichBatchOptions struct {
 	SkipCompanies bool
 	SkipYards     bool
 	RateLim       time.Duration
+	Quiet         bool // suppress per-vessel and periodic progress logs (CLI default is verbose)
 }
 
 // VesselEnrichBatchResult summarizes a batch enrichment run.
@@ -66,7 +69,12 @@ func RunVesselEnrichmentBatch(ctx context.Context, pool *pgxpool.Pool, cfg confi
 		if err := runSingleIMOEnrichment(ctx, s, svc, cfg, log, opts, &out, sourceID, companySeen, yardSeen); err != nil {
 			return out, err
 		}
+		logVesselEnrichProgress(log, opts.Quiet, 1, &out)
 		return out, nil
+	}
+
+	if !opts.Quiet {
+		log.Info().Int("limit", limit).Bool("force", opts.Force).Bool("dry_run", opts.DryRun).Msg("vessel enrichment batch starting")
 	}
 
 	rows, err := pool.Query(ctx, venrich.SelectVesselsSQL(opts.Force), limit)
@@ -75,6 +83,7 @@ func RunVesselEnrichmentBatch(ctx context.Context, pool *pgxpool.Pool, cfg confi
 	}
 	defer rows.Close()
 
+	processed := 0
 	for rows.Next() {
 		var vesselID uuid.UUID
 		var mmsi, imo, name string
@@ -83,17 +92,28 @@ func RunVesselEnrichmentBatch(ctx context.Context, pool *pgxpool.Pool, cfg confi
 		var staleAfter *time.Time
 		if err := rows.Scan(&vesselID, &mmsi, &imo, &name, &lastSeen, &hasRow, &staleAfter); err != nil {
 			out.Errors = append(out.Errors, err.Error())
+			processed++
+			logVesselEnrichProgress(log, opts.Quiet, processed, &out)
 			continue
 		}
 		if !opts.Force && !venrich.NeedsEnrichment(hasRow, staleAfter, time.Now()) {
 			out.Skipped++
+			processed++
+			logVesselStart(log, opts.Quiet, imo, mmsi, name, "skipped_fresh")
+			logVesselEnrichProgress(log, opts.Quiet, processed, &out)
 			continue
 		}
 		if imo == "" {
 			out.Skipped++
+			processed++
+			logVesselStart(log, opts.Quiet, imo, mmsi, name, "skipped_no_imo")
+			logVesselEnrichProgress(log, opts.Quiet, processed, &out)
 			continue
 		}
+		processed++
+		logVesselStart(log, opts.Quiet, imo, mmsi, name, "starting")
 		_ = processVesselEnrichment(ctx, s, svc, cfg, log, opts, &out, sourceID, companySeen, yardSeen, vesselID, mmsi, imo, name)
+		logVesselEnrichProgress(log, opts.Quiet, processed, &out)
 	}
 	return out, rows.Err()
 }
@@ -129,12 +149,15 @@ func runSingleIMOEnrichment(
 	}
 	if imo != "" && !opts.Force && hasRow && !venrich.NeedsEnrichment(hasRow, staleAfter, time.Now()) {
 		out.Skipped++
+		logVesselStart(log, opts.Quiet, imo, mmsi, name, "skipped_fresh")
 		return nil
 	}
 	if imo == "" {
 		out.Skipped++
+		logVesselStart(log, opts.Quiet, imo, mmsi, name, "skipped_no_imo")
 		return nil
 	}
+	logVesselStart(log, opts.Quiet, imo, mmsi, name, "starting")
 	return processVesselEnrichment(ctx, s, svc, cfg, log, opts, out, sourceID, companySeen, yardSeen, vesselID, mmsi, imo, name)
 }
 
@@ -159,8 +182,14 @@ func processVesselEnrichment(
 		rate = defaultEnrichmentRateLimit
 	}
 
+	if !opts.Quiet {
+		log.Info().Str("imo", imo).Str("mmsi", mmsi).Str("name", name).Msg("fetching ShipVault")
+	}
 	svResult, err := svc.FetchLive(ctx, imo, mmsi, name)
 	if err != nil {
+		if !opts.Quiet {
+			log.Warn().Str("imo", imo).Str("mmsi", mmsi).Str("name", name).Err(err).Msg("shipvault fetch failed")
+		}
 		out.Errors = append(out.Errors, fmt.Sprintf("imo=%s mmsi=%s: %v", imo, mmsi, err))
 		return nil
 	}
@@ -241,8 +270,35 @@ func processVesselEnrichment(
 		}
 	}
 	out.Enriched++
+	if !opts.Quiet {
+		log.Info().
+			Str("imo", imo).Str("mmsi", mmsi).Str("name", name).
+			Str("tier", res.Tier).Float64("confidence", res.Confidence).
+			Msg("vessel enriched")
+	}
 	time.Sleep(rate)
 	return nil
+}
+
+func logVesselStart(log zerolog.Logger, quiet bool, imo, mmsi, name, status string) {
+	if quiet {
+		return
+	}
+	log.Info().
+		Str("imo", imo).Str("mmsi", mmsi).Str("name", name).Str("status", status).
+		Msg("vessel")
+}
+
+func logVesselEnrichProgress(log zerolog.Logger, quiet bool, processed int, out *VesselEnrichBatchResult) {
+	if quiet || processed%vesselEnrichProgressEvery != 0 {
+		return
+	}
+	log.Info().
+		Int("processed", processed).
+		Int("enriched", out.Enriched).
+		Int("skipped", out.Skipped).
+		Int("errors", len(out.Errors)).
+		Msg("vessel enrichment progress")
 }
 
 func safeNameHistory(r *sv.EnrichmentResult) []sv.NameHistoryEntry {
