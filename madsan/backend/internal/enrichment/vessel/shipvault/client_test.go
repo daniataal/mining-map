@@ -282,6 +282,55 @@ func TestParseShipSearchPayload(t *testing.T) {
 	}
 }
 
+func TestLoadVesselDetail_mmsiFallback(t *testing.T) {
+	t.Parallel()
+
+	const mmsi = "636019825"
+	const imo = "9599377"
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/units/shipsearch/"+imo):
+			http.Error(w, "not found", http.StatusNotFound)
+		case strings.HasPrefix(r.URL.Path, "/api/units/shipsearch/"+mmsi):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": 120202, "imo": 7530901, "name": "MS LEON", "mmsi": mmsi,
+				"groupname": "CRUDE OIL TANKER", "built": 2006, "owner": "MINERVA MARINE",
+			}})
+		case strings.HasPrefix(r.URL.Path, "/api/vessels/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "120202", "imo": 7530901, "lengthM": 274.2, "beamM": 48,
+				"propulsion": "Diesel", "status": "ACTIVE",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer api.Close()
+
+	svc := &Service{
+		baseURL:    api.URL,
+		authMode:   AuthManual,
+		tokenProv:  &staticTokenProvider{bearer: "test-token"},
+		httpClient: api.Client(),
+		log:        testLogger(),
+	}
+
+	detail, err := svc.LoadVesselDetail(context.Background(), imo, "", mmsi, "MS LEON")
+	if err != nil {
+		t.Fatalf("LoadVesselDetail: %v", err)
+	}
+	if detail.IMO != "7530901" {
+		t.Fatalf("imo = %q", detail.IMO)
+	}
+	if detail.LengthM != 274.2 || detail.BeamM != 48 {
+		t.Fatalf("detail dims = %v x %v", detail.LengthM, detail.BeamM)
+	}
+	if detail.DetailRaw["lookup_fallback"] != "mmsi" {
+		t.Fatalf("fallback = %v", detail.DetailRaw["lookup_fallback"])
+	}
+}
+
 func TestParseVesselProfile_nestedOwner(t *testing.T) {
 	t.Parallel()
 	raw := map[string]any{

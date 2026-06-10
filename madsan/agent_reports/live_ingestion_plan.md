@@ -184,8 +184,8 @@ cd madsan/backend
 # Apply migration 027 once (or start API with MADSAN_RUN_MIGRATIONS=true)
 migrate -path migrations -database "$DATABASE_URL" up
 
-# Smoke test (MS LEON / LERRIX name history — IMO 7530901)
-go run ./cmd/vessel-enrich --dry-run --imo 7530901
+# Smoke test (MS LEON / LERRIX name history — IMO 7530901; MMSI fallback when AIS IMO 9599377 404s)
+go run ./cmd/vessel-enrich --dry-run --imo 9599377
 
 # Small batch after auth check
 go run ./cmd/vessel-enrich --limit 5
@@ -210,6 +210,8 @@ go build -o /tmp/vessel-enrich ./cmd/vessel-enrich
 | `vessel_yard_links` | Vessel ↔ yard + yard number |
 
 Scheduler job `vessel_enrichment` (weekly) uses the same batch path via the worker. Do **not** restart workers mid-import.
+
+**2026-06-10 deeper ShipVault ingest shipped:** `LoadVesselDetail` always merges `/api/vessels/{id}` (LOA/beam/depth/draft, propulsion, engine kW/HP, grain/bale/TEU, events, yard, disponent); IMO shipsearch 404 falls back to MMSI then name; `vessel_specs` in `raw_payload` feeds dossier **Vessel specifications** panel (class/GT/DWT/built/dimensions/yard/status/est. value). Offline backfill: `go run ./cmd/vessel-enrich --limit 200` → **196 enriched**, **145 companies**, 4 not in ShipVault registry.
 
 ## 8c. Tank / terminal enrichment: operator + capacity (same pattern)
 

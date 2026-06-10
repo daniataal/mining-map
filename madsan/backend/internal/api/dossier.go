@@ -62,18 +62,24 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	evidence, _ := loadEvidence(r.Context(), s.pool, "vessel", uid)
 	var enrich vesselEnrichmentRow
 	var ownerProfileJSON []byte
+	var enrichBuilder string
+	var enrichBuildYear *int
+	var enrichRawPayload []byte
 	if mmsi != "" {
 		_ = s.pool.QueryRow(r.Context(), `
 			SELECT COALESCE(owner_name,''), COALESCE(operator_name,''),
 			       COALESCE(source,''), COALESCE(tier,''), COALESCE(confidence_score,0),
 			       stale_after, fetched_at, deadweight_tons, gross_tonnage,
 			       COALESCE(vessel_class,''), COALESCE(flag,''), COALESCE(limitations,'{}'),
-			       COALESCE(owner_profile,'{}'::jsonb)
+			       COALESCE(owner_profile,'{}'::jsonb),
+			       COALESCE(builder,''), build_year,
+			       COALESCE(raw_payload,'{}'::jsonb)
 			FROM vessel_enrichment WHERE mmsi = $1
 		`, mmsi).Scan(
 			&enrich.OwnerName, &enrich.OperatorName, &enrich.Source, &enrich.Tier, &enrich.Confidence,
 			&enrich.StaleAfter, &enrich.FetchedAt, &enrich.DWT, &enrich.GrossTonnage,
 			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations, &ownerProfileJSON,
+			&enrichBuilder, &enrichBuildYear, &enrichRawPayload,
 		)
 	}
 	score := 0.0
@@ -84,6 +90,7 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 		"vessel_type": vtype, "mmsi": mmsi, "imo": imo, "flag": flag, "destination": dest,
 	}
 	mergeVesselEnrichmentSummary(summary, enrich)
+	mergeVesselTechnicalSummary(summary, enrichBuilder, enrichBuildYear, enrichRawPayload)
 	if len(ownerProfileJSON) > 0 {
 		var ownerProfile map[string]any
 		if json.Unmarshal(ownerProfileJSON, &ownerProfile) == nil && len(ownerProfile) > 0 {

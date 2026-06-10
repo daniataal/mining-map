@@ -11,7 +11,7 @@ import (
 
 // ShipVaultProvider enriches vessels via live ShipVault API (IMO required).
 type ShipVaultProvider struct {
-	Service *sv.Service
+	Service   *sv.Service
 	StaleDays int
 }
 
@@ -25,7 +25,7 @@ func (p *ShipVaultProvider) Enrich(ctx context.Context, mmsi, imo, name string) 
 	if imo == "" {
 		return Enrichment{}, fmt.Errorf("vessel %s has no IMO; ShipVault enrichment requires IMO", mmsi)
 	}
-	result, err := p.Service.FetchLive(ctx, imo)
+	result, err := p.Service.FetchLive(ctx, imo, mmsi, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			return Enrichment{}, ErrNotFound
@@ -108,7 +108,15 @@ func FromShipVaultResult(mmsi, imo string, result *sv.EnrichmentResult, staleDay
 		raw["name_history"] = names
 	}
 	if result.VesselDetail != nil {
+		specs := result.VesselDetail.TechnicalSpecs()
+		raw["vessel_specs"] = vesselSpecsMap(specs)
 		raw["vessel_detail"] = result.VesselDetail
+		if result.VesselDetail.Status != "" {
+			raw["vessel_status"] = result.VesselDetail.Status
+		}
+	}
+	if v.EstimatedValueUSD > 0 {
+		raw["estimated_value_usd"] = v.EstimatedValueUSD
 	}
 	return Enrichment{
 		MMSI:           mmsi,
@@ -135,6 +143,46 @@ func FromShipVaultResult(mmsi, imo string, result *sv.EnrichmentResult, staleDay
 			result.Disclaimer,
 		},
 	}
+}
+
+func vesselSpecsMap(spec sv.TechnicalSpecs) map[string]any {
+	out := map[string]any{}
+	if spec.BuildYear > 0 {
+		out["build_year"] = spec.BuildYear
+	}
+	putStr := func(k, v string) {
+		if strings.TrimSpace(v) != "" {
+			out[k] = strings.TrimSpace(v)
+		}
+	}
+	putFloat := func(k string, v float64) {
+		if v > 0 {
+			out[k] = v
+		}
+	}
+	putStr("vessel_class", spec.VesselClass)
+	putStr("flag", spec.Flag)
+	putStr("propulsion", spec.Propulsion)
+	putStr("status", spec.Status)
+	putStr("builder", spec.Builder)
+	putStr("yard_id", spec.YardID)
+	putStr("yard_name", spec.YardName)
+	putStr("yard_number", spec.YardNumber)
+	putStr("disponent", spec.Disponent)
+	putFloat("gross_tonnage", spec.GrossTonnage)
+	putFloat("deadweight_tons", spec.DeadweightTons)
+	putFloat("net_tonnage", spec.NetTonnage)
+	putFloat("estimated_value_usd", spec.EstimatedValueUSD)
+	putFloat("length_m", spec.LengthM)
+	putFloat("beam_m", spec.BeamM)
+	putFloat("depth_m", spec.DepthM)
+	putFloat("draft_m", spec.DraftM)
+	putFloat("engine_power_kw", spec.EnginePowerKW)
+	putFloat("engine_power_hp", spec.EnginePowerHP)
+	putFloat("capacity_grain", spec.CapacityGrain)
+	putFloat("capacity_bale", spec.CapacityBale)
+	putFloat("capacity_teu", spec.CapacityTEU)
+	return out
 }
 
 func loadCompanyDetailFromResult(result *sv.EnrichmentResult) *sv.CompanyDetail {

@@ -159,7 +159,7 @@ func processVesselEnrichment(
 		rate = defaultEnrichmentRateLimit
 	}
 
-	svResult, err := svc.FetchLive(ctx, imo)
+	svResult, err := svc.FetchLive(ctx, imo, mmsi, name)
 	if err != nil {
 		out.Errors = append(out.Errors, fmt.Sprintf("imo=%s mmsi=%s: %v", imo, mmsi, err))
 		return nil

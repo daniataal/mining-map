@@ -44,3 +44,29 @@ func TestFromShipVaultResultMapsOwnerOperator(t *testing.T) {
 		t.Fatal("expected implemented enrichment")
 	}
 }
+
+func TestFromShipVaultResultVesselSpecs(t *testing.T) {
+	res := FromShipVaultResult("636019825", "7530901", &sv.EnrichmentResult{
+		Vessel: &sv.VesselProfile{
+			IMO: "7530901", Name: "MS LEON", VesselClass: "CRUDE OIL TANKER",
+			GrossTonnage: 83722, DeadweightTons: 159450, BuildYear: 2006,
+			EstimatedValueUSD: 37377989,
+		},
+		VesselDetail: &sv.VesselDetail{
+			VesselProfile: sv.VesselProfile{
+				IMO: "7530901", VesselClass: "CRUDE OIL TANKER",
+				GrossTonnage: 83722, DeadweightTons: 159450, BuildYear: 2006,
+				EstimatedValueUSD: 37377989,
+			},
+			LengthM: 274.2, BeamM: 48, Propulsion: "Diesel", Status: "ACTIVE",
+		},
+		DataSource: "shipvault", EnrichmentTier: "registry",
+	}, 90)
+	specs, ok := res.RawPayload["vessel_specs"].(map[string]any)
+	if !ok {
+		t.Fatalf("vessel_specs missing: %#v", res.RawPayload)
+	}
+	if specs["length_m"] != 274.2 || specs["propulsion"] != "Diesel" {
+		t.Fatalf("specs = %#v", specs)
+	}
+}

@@ -6,6 +6,7 @@ import type { FeatureCollection } from "geojson";
 import {
   AssetOperatorCapacitySection,
   VesselOwnershipSection,
+  VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts } from "@/lib/auth";
@@ -274,6 +275,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       )}
 
       <VesselOwnershipSection dossier={dossier} />
+      <VesselSpecificationsSection dossier={dossier} />
       <AssetOperatorCapacitySection dossier={dossier} />
 
       {dossier.signal_history && dossier.signal_history.length > 0 && (

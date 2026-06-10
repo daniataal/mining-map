@@ -38,10 +38,14 @@ func mergeVesselEnrichmentSummary(summary map[string]any, row vesselEnrichmentRo
 		summary["gross_tonnage"] = *row.GrossTonnage
 	}
 	if row.VesselClass != "" {
-		summary["vessel_class"] = row.VesselClass
+		if _, set := summary["vessel_class"]; !set {
+			summary["vessel_class"] = row.VesselClass
+		}
 	}
 	if row.Flag != "" {
-		summary["registry_flag"] = row.Flag
+		if _, set := summary["registry_flag"]; !set {
+			summary["registry_flag"] = row.Flag
+		}
 	}
 	if row.Tier == "" && row.OwnerName == "" && row.OperatorName == "" {
 		return

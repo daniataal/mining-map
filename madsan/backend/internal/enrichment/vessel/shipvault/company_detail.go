@@ -266,32 +266,54 @@ func parseFleetVessel(f map[string]any) FleetVessel {
 	return v
 }
 
-// LoadVesselDetail loads shipsearch summary and optional /api/vessels/{id} detail.
-func (s *Service) LoadVesselDetail(ctx context.Context, imo, vesselID string) (*VesselDetail, error) {
+// LoadVesselDetail loads shipsearch summary, always merges /api/vessels/{id} when an id is known,
+// and falls back to MMSI then vessel name when IMO shipsearch returns 404.
+func (s *Service) LoadVesselDetail(ctx context.Context, imo, vesselID, mmsi, name string) (*VesselDetail, error) {
 	imo = strings.TrimSpace(imo)
-	if imo == "" && strings.TrimSpace(vesselID) == "" {
-		return nil, fmt.Errorf("imo or vessel id required")
+	mmsi = strings.TrimSpace(mmsi)
+	name = strings.TrimSpace(name)
+	vesselID = strings.TrimSpace(vesselID)
+	if imo == "" && vesselID == "" && mmsi == "" && name == "" {
+		return nil, fmt.Errorf("imo, vessel id, mmsi, or name required")
 	}
+
 	var raw map[string]any
 	var err error
+	lookupSource := "imo"
 	if imo != "" {
 		raw, err = s.GetVesselByIMO(ctx, imo)
-		if err != nil {
-			return nil, err
-		}
 	}
-	if strings.TrimSpace(vesselID) == "" && raw != nil {
-		vesselID = strField(raw, "id", "vessel_id", "unit_id", "parentid", "parentId")
+	if err != nil && isShipvaultNotFound(err) && mmsi != "" {
+		raw, err = s.GetVesselByMMSI(ctx, mmsi)
+		lookupSource = "mmsi"
 	}
-	if strings.TrimSpace(vesselID) != "" {
-		if detailRaw, derr := s.GetVesselByVesselID(ctx, vesselID); derr == nil && detailRaw != nil {
+	if err != nil && isShipvaultNotFound(err) && name != "" {
+		raw, err = s.GetVesselByName(ctx, name)
+		lookupSource = "name"
+	}
+	if err != nil {
+		return nil, err
+	}
+	if vesselID == "" && raw != nil {
+		vesselID = strField(raw, "id", "vessel_id", "unit_id", "parentid", "parentId", "unitid", "unitId")
+	}
+	if vesselID != "" {
+		detailRaw, derr := s.GetVesselByVesselID(ctx, vesselID)
+		if derr == nil && detailRaw != nil {
 			raw = mergeMaps(raw, detailRaw)
 		}
 	}
-	if imo == "" {
-		imo = imoString(raw, "imo", "IMO")
+	if imoFromRaw := imoString(raw, "imo", "IMO"); imoFromRaw != "" {
+		imo = imoFromRaw
 	}
-	return parseVesselDetail(raw, imo), nil
+	detail := parseVesselDetail(raw, imo)
+	if detail != nil && lookupSource != "imo" {
+		if detail.DetailRaw == nil {
+			detail.DetailRaw = map[string]any{}
+		}
+		detail.DetailRaw["lookup_fallback"] = lookupSource
+	}
+	return detail, nil
 }
 
 func mergeMaps(base, overlay map[string]any) map[string]any {

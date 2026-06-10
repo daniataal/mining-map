@@ -316,16 +316,143 @@ func pickShipSearchVessel(resp shipSearchResponse, imo string) map[string]any {
 
 // GetVesselByIMO fetches vessel details from ShipVault by IMO via shipsearch.
 func (s *Service) GetVesselByIMO(ctx context.Context, imo string) (map[string]any, error) {
-	var raw json.RawMessage
-	if err := s.doRequest(ctx, shipSearchPath(imo), &raw); err != nil {
+	resp, err := s.searchVessels(ctx, imo)
+	if err != nil {
 		return nil, err
 	}
-	resp := parseShipSearchPayload(raw)
 	vessel := pickShipSearchVessel(resp, imo)
 	if vessel == nil {
 		return nil, fmt.Errorf("shipvault 404: no vessel match for IMO %s", imo)
 	}
 	return vessel, nil
+}
+
+// GetVesselByMMSI resolves a vessel via shipsearch when IMO lookup 404s (e.g. stale AIS IMO).
+func (s *Service) GetVesselByMMSI(ctx context.Context, mmsi string) (map[string]any, error) {
+	mmsi = strings.TrimSpace(mmsi)
+	if mmsi == "" {
+		return nil, fmt.Errorf("empty mmsi")
+	}
+	resp, err := s.searchVessels(ctx, mmsi)
+	if err != nil {
+		return nil, err
+	}
+	vessel := pickShipSearchVesselByMMSI(resp, mmsi)
+	if vessel == nil {
+		return nil, fmt.Errorf("shipvault 404: no vessel match for MMSI %s", mmsi)
+	}
+	return vessel, nil
+}
+
+// GetVesselByName resolves a vessel via shipsearch when IMO/MMSI lookup fails.
+func (s *Service) GetVesselByName(ctx context.Context, name string) (map[string]any, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("empty vessel name")
+	}
+	resp, err := s.searchVessels(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	vessel := pickShipSearchVesselByName(resp, name)
+	if vessel == nil {
+		return nil, fmt.Errorf("shipvault 404: no vessel match for name %q", name)
+	}
+	return vessel, nil
+}
+
+func (s *Service) searchVessels(ctx context.Context, query string) (shipSearchResponse, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return shipSearchResponse{}, fmt.Errorf("empty shipsearch query")
+	}
+	var raw json.RawMessage
+	if err := s.doRequest(ctx, shipSearchPath(query), &raw); err != nil {
+		return shipSearchResponse{}, err
+	}
+	return parseShipSearchPayload(raw), nil
+}
+
+func pickShipSearchVesselByMMSI(resp shipSearchResponse, mmsi string) map[string]any {
+	mmsi = strings.TrimSpace(mmsi)
+	rows := resp.vesselRows()
+	if mmsi == "" || len(rows) == 0 {
+		return nil
+	}
+	for _, row := range rows {
+		if strField(row, "mmsi", "MMSI") == mmsi {
+			return row
+		}
+	}
+	return rows[0]
+}
+
+func normalizeVesselName(name string) string {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	replacer := strings.NewReplacer(".", " ", ",", " ", "-", " ", "/", " ", "(", " ", ")", " ")
+	name = replacer.Replace(name)
+	return strings.Join(strings.Fields(name), " ")
+}
+
+func vesselNameMatchScore(queryNorm, rowNorm string) int {
+	if queryNorm == "" || rowNorm == "" {
+		return 0
+	}
+	switch {
+	case queryNorm == rowNorm:
+		return 100
+	case strings.HasPrefix(rowNorm, queryNorm) || strings.HasPrefix(queryNorm, rowNorm):
+		return 80
+	case strings.Contains(rowNorm, queryNorm) || strings.Contains(queryNorm, rowNorm):
+		return 60
+	default:
+		return 0
+	}
+}
+
+func pickShipSearchVesselByName(resp shipSearchResponse, query string) map[string]any {
+	query = strings.TrimSpace(query)
+	rows := resp.vesselRows()
+	if query == "" || len(rows) == 0 {
+		return nil
+	}
+	queryNorm := normalizeVesselName(query)
+	best := map[string]any(nil)
+	bestScore := 0
+	bestLen := 0
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		score := 0
+		nameLen := 0
+		for _, n := range []string{
+			strField(row, "name", "vessel_name", "vesselName", "parentname", "parentName", "shipName"),
+			strField(row, "unit1", "unit"),
+		} {
+			if n == "" {
+				continue
+			}
+			norm := normalizeVesselName(n)
+			if sc := vesselNameMatchScore(queryNorm, norm); sc > score || (sc == score && sc > 0 && len(norm) > nameLen) {
+				score = sc
+				nameLen = len(norm)
+			}
+		}
+		if score > bestScore || (score == bestScore && score > 0 && nameLen > bestLen) {
+			bestScore = score
+			bestLen = nameLen
+			best = row
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return rows[0]
+}
+
+func isShipvaultNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "shipvault 404")
 }
 
 func parseShipSearchPayload(raw json.RawMessage) shipSearchResponse {
@@ -421,14 +548,16 @@ func (s *Service) GetFleet(ctx context.Context, companyID string) ([]map[string]
 	return rows, nil
 }
 
-// FetchLive pulls vessel registry facts from ShipVault by IMO (no upstream DB cache).
-func (s *Service) FetchLive(ctx context.Context, imo string) (*EnrichmentResult, error) {
+// FetchLive pulls vessel registry facts from ShipVault (IMO with MMSI/name fallback).
+func (s *Service) FetchLive(ctx context.Context, imo, mmsi, name string) (*EnrichmentResult, error) {
 	imo = strings.TrimSpace(imo)
-	if imo == "" {
-		return nil, fmt.Errorf("no IMO number; cannot enrich via ShipVault")
+	mmsi = strings.TrimSpace(mmsi)
+	name = strings.TrimSpace(name)
+	if imo == "" && mmsi == "" && name == "" {
+		return nil, fmt.Errorf("imo, mmsi, or name required for ShipVault enrichment")
 	}
 
-	detail, err := s.LoadVesselDetail(ctx, imo, "")
+	detail, err := s.LoadVesselDetail(ctx, imo, "", mmsi, name)
 	if err != nil {
 		return nil, fmt.Errorf("shipvault vessel lookup: %w", err)
 	}
@@ -439,8 +568,15 @@ func (s *Service) FetchLive(ctx context.Context, imo string) (*EnrichmentResult,
 	s.mergeVesselNameHistory(ctx, vessel)
 
 	var ownerProfile *CompanyProfile
-	if vessel.OwnerCompanyID != "" {
-		if cd, cerr := s.LoadCompanyDetail(ctx, vessel.OwnerCompanyID); cerr == nil && cd != nil {
+	companyID := strings.TrimSpace(vessel.OwnerCompanyID)
+	if companyID == "" && strings.TrimSpace(vessel.OwnerName) != "" {
+		if resolved, rerr := s.ResolveCompanyID(ctx, "", vessel.OwnerName); rerr == nil {
+			companyID = resolved
+			vessel.OwnerCompanyID = resolved
+		}
+	}
+	if companyID != "" {
+		if cd, cerr := s.LoadCompanyDetail(ctx, companyID); cerr == nil && cd != nil {
 			ownerProfile = companyDetailToProfile(cd)
 		}
 	}
