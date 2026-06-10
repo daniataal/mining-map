@@ -142,6 +142,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
+		api.With(s.requireAuth).Post("/entities/{entityType}/{id}/enrichment/refresh", s.refreshEntityEnrichment)
 		api.Get("/aggregates/{entityType}/{entityID}", s.getHistoricAggregates)
 		api.Get("/assets/lookup", s.getAssetByLegacy)
 		api.Get("/trust/{entityType}/{id}", s.getTrustScore)

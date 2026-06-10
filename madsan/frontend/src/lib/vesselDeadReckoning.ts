@@ -222,10 +222,30 @@ function normalizeLastSeen(value: unknown): string | undefined {
   return undefined;
 }
 
-function normalizeVessel(raw: VesselMsg & { last_seen_at?: unknown }): VesselMsg {
+/** Go msgpack uses struct field names (MMSI, Lat); JSON uses json tags (mmsi, lat). */
+function normalizeVessel(raw: Record<string, unknown>): VesselMsg {
+  const num = (lower: string, upper: string): number | undefined => {
+    const v = raw[lower] ?? raw[upper];
+    if (v == null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const str = (lower: string, upper: string): string | undefined => {
+    const v = raw[lower] ?? raw[upper];
+    return v == null ? undefined : String(v);
+  };
   return {
-    ...raw,
-    last_seen_at: normalizeLastSeen(raw.last_seen_at),
+    mmsi: str("mmsi", "MMSI") ?? "",
+    name: str("name", "Name"),
+    vessel_type: str("vessel_type", "VesselType"),
+    lat: num("lat", "Lat") ?? 0,
+    lon: num("lon", "Lon") ?? 0,
+    course: num("course", "Course"),
+    heading: num("heading", "Heading"),
+    speed_knots: num("speed_knots", "SpeedKnots"),
+    destination: str("destination", "Destination"),
+    last_seen_at: normalizeLastSeen(raw.last_seen_at ?? raw.LastSeenAt),
+    source: str("source", "Source"),
   };
 }
 
@@ -236,10 +256,10 @@ export function parseWsFrame(data: string | ArrayBuffer): WsFrame | null {
     }
     const msg = decode(new Uint8Array(data)) as WsFrame;
     if (Array.isArray(msg.vessels)) {
-      msg.vessels = msg.vessels.map((v) => normalizeVessel(v as VesselMsg & { last_seen_at?: unknown }));
+      msg.vessels = msg.vessels.map((v) => normalizeVessel(v as Record<string, unknown>));
     }
     if (msg.data) {
-      msg.data = normalizeVessel(msg.data as VesselMsg & { last_seen_at?: unknown });
+      msg.data = normalizeVessel(msg.data as Record<string, unknown>);
     }
     return msg;
   } catch {

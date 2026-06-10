@@ -59,8 +59,8 @@ func (c *Chain) Enrich(ctx context.Context, mmsi, imo, name string) (Enrichment,
 
 // Options configures the default provider chain for the ingestion worker.
 type Options struct {
-	ShipVaultService *sv.Service
-	StaleDays        int
+	ShipVaultService  *sv.Service
+	StaleDays         int
 	NotImplementedTTL time.Duration
 }
 

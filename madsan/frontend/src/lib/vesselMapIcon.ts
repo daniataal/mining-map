@@ -83,19 +83,19 @@ function drawHullIcon(fill: string, stroke: string, w = 32, h = 64): ImageData {
 
 export function ensureVesselImages(map: MaplibreMap): void {
   if (!map.hasImage("vessel-ship")) {
-    const img = drawChevronIcon("#5eb3ff", "#0a0e14");
+    const img = drawChevronIcon("#38bdf8", "#06121f");
     map.addImage("vessel-ship", { width: img.width, height: img.height, data: img.data });
   }
   if (!map.hasImage("vessel-ship-live")) {
-    const img = drawChevronIcon("#7ec8ff", "#ffffff");
+    const img = drawChevronIcon("#7dd3fc", "#ffffff");
     map.addImage("vessel-ship-live", { width: img.width, height: img.height, data: img.data });
   }
   if (!map.hasImage("vessel-hull")) {
-    const img = drawHullIcon("rgba(94,179,255,0.85)", "#0a0e14");
+    const img = drawHullIcon("rgba(56,189,248,0.85)", "#06121f");
     map.addImage("vessel-hull", { width: img.width, height: img.height, data: img.data });
   }
   if (!map.hasImage("vessel-hull-live")) {
-    const img = drawHullIcon("rgba(126,200,255,0.9)", "#ffffff");
+    const img = drawHullIcon("rgba(125,211,252,0.9)", "#ffffff");
     map.addImage("vessel-hull-live", { width: img.width, height: img.height, data: img.data });
   }
 }

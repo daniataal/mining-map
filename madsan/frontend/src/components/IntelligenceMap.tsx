@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Layers, X } from "lucide-react";
 import maplibregl, { type ExpressionSpecification } from "maplibre-gl";
 import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -10,8 +11,8 @@ import {
   API_BASE,
   defaultLayerState,
   layersForVertical,
-  LIMITED_AIS_COVERAGE_DETAIL,
-  LIMITED_AIS_COVERAGE_LABEL,
+  MAP_COLORS,
+  MAP_STYLE_URL,
   mapSourceKey,
   metalsMapLayersActive,
   PERSIAN_GULF_COVERAGE_POLYGON,
@@ -53,20 +54,56 @@ type FeatureTarget = {
 const SELECTED_STROKE: ExpressionSpecification = [
   "case",
   ["boolean", ["feature-state", "selected"], false],
-  "#3dffb5",
+  "#5dffc8",
   "#0a0e14",
 ];
 const SELECTED_STROKE_WIDTH: ExpressionSpecification = [
   "case",
   ["boolean", ["feature-state", "selected"], false],
-  3,
+  4,
   1,
+];
+const SELECTED_STROKE_OPACITY: ExpressionSpecification = [
+  "case",
+  ["boolean", ["feature-state", "selected"], false],
+  0.95,
+  0.35,
+];
+const VESSEL_ICON_HALO_WIDTH: ExpressionSpecification = [
+  "case",
+  ["boolean", ["feature-state", "selected"], false],
+  2.5,
+  0,
 ];
 const SELECTED_LINE_WIDTH: ExpressionSpecification = [
   "case",
   ["boolean", ["feature-state", "selected"], false],
   6,
   3,
+];
+/**
+ * Zoom-scaled pipeline width: hairline at region scale, substantial at port scale.
+ * NOTE: ["zoom"] is only legal in a top-level interpolate/step, so the selected-state
+ * case lives inside each stop output, not the other way around.
+ */
+const selectedOr = (selected: number, base: number): ExpressionSpecification => [
+  "case",
+  ["boolean", ["feature-state", "selected"], false],
+  selected,
+  base,
+];
+const PIPELINE_LINE_WIDTH: ExpressionSpecification = [
+  "interpolate",
+  ["exponential", 1.6],
+  ["zoom"],
+  4,
+  selectedOr(3, 0.7),
+  7,
+  selectedOr(4, 1.4),
+  10,
+  selectedOr(5, 2.4),
+  14,
+  selectedOr(6.5, 4),
 ];
 
 export type MapRuntimeStatus = {
@@ -76,16 +113,84 @@ export type MapRuntimeStatus = {
   gulfAisLimited?: boolean;
 };
 
+/** MVT point colors — keep in sync with addPointTileLayer / vessel layers */
+const MAP_LEGEND_ITEMS = [
+  { label: "Tank farm", color: MAP_COLORS.tankFarm },
+  { label: "Terminal", color: MAP_COLORS.terminal },
+  { label: "Refinery", color: MAP_COLORS.refinery },
+  { label: "STS", color: MAP_COLORS.stsEvent },
+  { label: "Vessel", color: MAP_COLORS.vessel },
+] as const;
+
+/** Basemap layer tweaks applied after the remote style loads (deep navy ocean). */
+function tuneBasemap(map: maplibregl.Map) {
+  try {
+    const style = map.getStyle();
+    for (const layer of style.layers ?? []) {
+      if (layer.type === "background") {
+        map.setPaintProperty(layer.id, "background-color", "#060a12");
+      } else if (layer.type === "fill" && /water|ocean/i.test(layer.id)) {
+        map.setPaintProperty(layer.id, "fill-color", "#0b1322");
+      }
+    }
+  } catch {
+    /* defensive: remote style structure may change */
+  }
+}
+
 function entityTypeForLayer(layerId: string): string {
   if (isVesselLayerId(layerId)) return "vessel";
   return "asset";
 }
 
-const VESSEL_TILE_LAYERS = ["vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
-const VESSEL_LIVE_LAYERS = ["live-vessels-no-heading", "live-vessels-ship", "live-vessels-hull"] as const;
+const VESSEL_TILE_LAYERS = ["vessels-glow", "vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
+const VESSEL_LIVE_LAYERS = [
+  "live-vessels-pulse",
+  "live-vessels-no-heading",
+  "live-vessels-ship",
+  "live-vessels-hull",
+] as const;
+
+/** Soft halo only at world/regional zoom — fades out before port detail. */
+const VESSEL_GLOW_RADIUS: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  3,
+  3,
+  6,
+  6,
+  8,
+  8,
+];
+const VESSEL_GLOW_OPACITY: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  3,
+  0.14,
+  6,
+  0.08,
+  8,
+  0,
+];
 
 function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: string, visible: boolean) {
   const visibility = visible ? "visible" : "none";
+  map.addLayer({
+    id: "vessels-glow",
+    type: "circle",
+    source: src,
+    "source-layer": sourceLayer,
+    maxzoom: 8,
+    paint: {
+      "circle-radius": VESSEL_GLOW_RADIUS,
+      "circle-color": MAP_COLORS.vessel,
+      "circle-blur": 0.8,
+      "circle-opacity": VESSEL_GLOW_OPACITY,
+    },
+    layout: { visibility },
+  });
   map.addLayer({
     id: "vessels-no-heading",
     type: "circle",
@@ -94,11 +199,11 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
     filter: vesselNoRotationFilter,
     paint: {
       "circle-radius": vesselDotRadius,
-      "circle-color": "#5eb3ff",
-      "circle-opacity": 0.5,
+      "circle-color": MAP_COLORS.vessel,
+      "circle-opacity": 0.92,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
       "circle-stroke-color": SELECTED_STROKE,
-      "circle-stroke-opacity": 0.35,
+      "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
     },
     layout: { visibility },
   });
@@ -117,6 +222,10 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
+    paint: {
+      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
+      "icon-halo-color": "#5dffc8",
+    },
   });
   map.addLayer({
     id: "vessels-hull",
@@ -133,11 +242,29 @@ function addVesselTileLayers(map: maplibregl.Map, src: string, sourceLayer: stri
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
+    paint: {
+      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
+      "icon-halo-color": "#5dffc8",
+    },
   });
 }
 
 function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
   const visibility = visible ? "visible" : "none";
+  // Subtle pulse on live AIS only — no extra glow layer (was stacking into smudges in ports).
+  map.addLayer({
+    id: "live-vessels-pulse",
+    type: "circle",
+    source: "live-vessels",
+    maxzoom: 10,
+    paint: {
+      "circle-radius": 5,
+      "circle-color": MAP_COLORS.vessel,
+      "circle-opacity": 0.18,
+      "circle-blur": 0.35,
+    },
+    layout: { visibility },
+  });
   map.addLayer({
     id: "live-vessels-no-heading",
     type: "circle",
@@ -145,11 +272,11 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
     filter: vesselNoRotationFilter,
     paint: {
       "circle-radius": vesselDotRadius,
-      "circle-color": "#7ec8ff",
-      "circle-opacity": 0.55,
+      "circle-color": MAP_COLORS.vessel,
+      "circle-opacity": 0.95,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
       "circle-stroke-color": SELECTED_STROKE,
-      "circle-stroke-opacity": 0.4,
+      "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
     },
     layout: { visibility },
   });
@@ -167,6 +294,10 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
     },
+    paint: {
+      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
+      "icon-halo-color": "#5dffc8",
+    },
   });
   map.addLayer({
     id: "live-vessels-hull",
@@ -181,6 +312,10 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
+    },
+    paint: {
+      "icon-halo-width": VESSEL_ICON_HALO_WIDTH,
+      "icon-halo-color": "#5dffc8",
     },
   });
 }
@@ -223,31 +358,101 @@ function metalsAssetFilter(layerId: string): maplibregl.FilterSpecification | un
   return undefined;
 }
 
+/** Circles fade in 5→6 while the density heatmap fades out — no dot soup at world zoom. */
+const POINT_FADE_OPACITY: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  4.5,
+  0,
+  6,
+  0.9,
+];
+
 function addPointTileLayer(map: maplibregl.Map, layer: LayerDef, src: string, visible: boolean) {
   const filter = energyAssetFilter(layer) ?? metalsAssetFilter(layer.id);
-  const color =
-    layer.id === "energy-refineries"
-      ? "#f59e0b"
-      : layer.id === "energy-sts-zones"
-        ? "#c084fc"
-        : layer.vertical === "metals"
-          ? "#c9a227"
-          : "#10b981";
+  const color = layer.color ?? "#10b981";
+  const visibility = visible ? "visible" : "none";
+  // Tight, faint halo — heavy blur at low zoom reads as mud next to crisp pipeline lines.
+  map.addLayer({
+    id: `${layer.id}-glow`,
+    type: "circle",
+    source: src,
+    "source-layer": mvtSourceLayer(layer.tileLayer!),
+    minzoom: 6,
+    ...(filter ? { filter } : {}),
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 4, 10, 9],
+      "circle-color": color,
+      "circle-blur": 0.9,
+      "circle-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0, 7.5, 0.12],
+    },
+    layout: { visibility },
+  });
   map.addLayer({
     id: layer.id,
     type: "circle",
     source: src,
     "source-layer": mvtSourceLayer(layer.tileLayer!),
+    minzoom: 4.5,
     ...(filter ? { filter } : {}),
     paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 3, 10, 8],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 2.5, 10, 7],
       "circle-color": color,
-      "circle-opacity": 0.85,
+      "circle-opacity": POINT_FADE_OPACITY,
       "circle-stroke-width": SELECTED_STROKE_WIDTH,
       "circle-stroke-color": SELECTED_STROKE,
+      "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
     },
-    layout: { visibility: visible ? "visible" : "none" },
+    layout: { visibility },
   });
+}
+
+/** One density heatmap per MVT source: glowing aggregate at world zoom, fades into dots. */
+function addDensityHeatLayer(
+  map: maplibregl.Map,
+  id: string,
+  src: string,
+  sourceLayer: string,
+  rampColor: [string, string, string],
+) {
+  map.addLayer({
+    id,
+    type: "heatmap",
+    source: src,
+    "source-layer": sourceLayer,
+    maxzoom: 7,
+    paint: {
+      "heatmap-weight": 0.6,
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.5, 7, 1.5],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 3, 4, 12, 7, 22],
+      "heatmap-color": [
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+        0,
+        "rgba(0,0,0,0)",
+        0.15,
+        rampColor[0],
+        0.5,
+        rampColor[1],
+        1,
+        rampColor[2],
+      ],
+      "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 4.5, 0.9, 6.5, 0],
+    },
+  });
+}
+
+/** Filter the density heatmap to the asset types whose toggles are active. */
+function heatFilterForActiveLayers(
+  vertical: "energy" | "metals",
+  layers: Record<string, boolean>,
+): maplibregl.FilterSpecification {
+  const types = layersForVertical(vertical)
+    .filter((l) => l.assetTypes?.length && layers[l.id])
+    .flatMap((l) => l.assetTypes!);
+  return ["in", ["get", "asset_type"], ["literal", types.length ? types : ["__none__"]]];
 }
 
 const PIPELINE_LAYER_IDS = ["pipelines-hit", "pipelines", "pipelines-water"] as const;
@@ -274,8 +479,8 @@ function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
         "#38bdf8",
         "#fbbf24",
       ],
-      "line-width": SELECTED_LINE_WIDTH,
-      "line-opacity": 0.9,
+      "line-width": PIPELINE_LINE_WIDTH,
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.65, 8, 0.9],
     },
     layout: { visibility, "line-cap": "round", "line-join": "round" },
   });
@@ -287,23 +492,26 @@ function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
     filter: ["==", ["get", "pipeline_substance"], "water"],
     paint: {
       "line-color": "#0891b2",
-      "line-width": 2.5,
-      "line-opacity": 0.8,
+      "line-width": ["interpolate", ["exponential", 1.6], ["zoom"], 4, 0.6, 10, 2],
+      "line-opacity": 0.75,
       "line-dasharray": [2, 6],
     },
     layout: { visibility, "line-cap": "round", "line-join": "round" },
   });
+  // Invisible fat hit-target for clicks; gated to z>=6 so it doesn't tessellate
+  // the whole network at region scale (clicking a 0.7px line at z4 isn't a real flow).
   map.addLayer({
     id: "pipelines-hit",
     type: "line",
     source: src,
     "source-layer": "petroleum_osm",
+    minzoom: 6,
     paint: {
       "line-color": "#000000",
-      "line-width": 12,
+      "line-width": 10,
       "line-opacity": 0,
     },
-    layout: { visibility, "line-cap": "round", "line-join": "round" },
+    layout: { visibility },
   });
 }
 
@@ -386,6 +594,8 @@ export default function IntelligenceMap({
   );
   const [lastWsAt, setLastWsAt] = useState<string | undefined>();
   const [gulfAisLimited, setGulfAisLimited] = useState(false);
+  const [layerDrawerOpen, setLayerDrawerOpen] = useState(true);
+  const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setLayers(defaultLayerState(vertical));
@@ -410,23 +620,13 @@ export default function IntelligenceMap({
     const map = new maplibregl.Map({
       container: container.current,
       transformRequest: (url, resourceType) => {
-        if (resourceType === "Tile" && url.includes("/tiles/")) {
+        // Only send auth cookies to our own tile API — never to the public basemap host.
+        if (resourceType === "Tile" && url.startsWith(API_BASE)) {
           return { url, credentials: "include" };
         }
         return { url };
       },
-      style: {
-        version: 8,
-        sources: {
-          basemap: {
-            type: "raster",
-            tiles: ["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"],
-            tileSize: 256,
-            attribution: "© CARTO © OSM",
-          },
-        },
-        layers: [{ id: "basemap", type: "raster", source: "basemap" }],
-      },
+      style: MAP_STYLE_URL,
       center: [55, 25],
       zoom: 4,
       attributionControl: false,
@@ -438,10 +638,12 @@ export default function IntelligenceMap({
     let moveEndHandler: (() => void) | null = null;
     let vesselMotion: VesselDeadReckoning | null = null;
     let cancelled = false;
+    let animFrame = 0;
 
     const setupMap = () => {
       if (cancelled) return;
       ensureVesselImages(map);
+      tuneBasemap(map);
 
       const sourcesAdded = new Set<string>();
       layersForVertical(vertical)
@@ -457,6 +659,21 @@ export default function IntelligenceMap({
               promoteId: mvtSourceLayer(layer.tileLayer!),
             });
             sourcesAdded.add(src);
+            if (layer.tileLayer === "energy-assets") {
+              addDensityHeatLayer(map, "energy-assets-heat", src, "energy_assets", [
+                "rgba(120,53,15,0.4)",
+                "rgba(217,119,6,0.6)",
+                "rgba(254,243,199,0.9)",
+              ]);
+              map.setFilter("energy-assets-heat", heatFilterForActiveLayers("energy", layers));
+            } else if (layer.tileLayer === "metals-assets") {
+              addDensityHeatLayer(map, "metals-assets-heat", src, "metals_assets", [
+                "rgba(113,63,18,0.4)",
+                "rgba(202,138,4,0.6)",
+                "rgba(254,249,195,0.9)",
+              ]);
+              map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layers));
+            }
           }
           if (layer.id === "pipelines") {
             if (vertical === "energy") {
@@ -470,6 +687,21 @@ export default function IntelligenceMap({
           }
           addPointTileLayer(map, layer, src, !!layers[layer.id]);
         });
+
+      const updateLayerCounts = () => {
+        const counts: Record<string, number> = {};
+        for (const l of layersForVertical(vertical)) {
+          if (!l.tileLayer || !map.getLayer(l.id)) continue;
+          if (map.getLayoutProperty(l.id, "visibility") === "none") continue;
+          try {
+            counts[l.id] = map.queryRenderedFeatures({ layers: [l.id] }).length;
+          } catch {
+            /* layer may not be queryable yet */
+          }
+        }
+        setLayerCounts(counts);
+      };
+      map.on("idle", updateLayerCounts);
 
       map.on("click", (e) => {
         const feats = map.queryRenderedFeatures(e.point);
@@ -552,7 +784,11 @@ export default function IntelligenceMap({
 
       if (vertical === "energy") {
         map.addSource("sts-events", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addSource("mcr-corridors", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("mcr-corridors", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          lineMetrics: true,
+        });
         map.addSource("ais-coverage", {
           type: "geojson",
           data: { type: "Feature", geometry: PERSIAN_GULF_COVERAGE_POLYGON, properties: {} },
@@ -563,15 +799,40 @@ export default function IntelligenceMap({
           id: "ais-coverage-fill",
           type: "fill",
           source: "ais-coverage",
-          paint: { "fill-color": "#f59e0b", "fill-opacity": 0.08 },
+          paint: { "fill-color": "#f59e0b", "fill-opacity": 0.05 },
           layout: { visibility: layers["ais-coverage"] ? "visible" : "none" },
         });
         map.addLayer({
           id: "mcr-corridors",
           type: "line",
           source: "mcr-corridors",
-          paint: { "line-color": "#fbbf24", "line-width": 2.5, "line-opacity": 0.75 },
+          paint: {
+            "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1.5, 8, 3],
+            "line-opacity": 0.8,
+            // load → discharge direction encoded as amber → cyan
+            "line-gradient": [
+              "interpolate",
+              ["linear"],
+              ["line-progress"],
+              0,
+              MAP_COLORS.corridorLoad,
+              1,
+              MAP_COLORS.corridorDischarge,
+            ],
+          },
           layout: { visibility: layers["mcr-corridors"] ? "visible" : "none", "line-cap": "round", "line-join": "round" },
+        });
+        map.addLayer({
+          id: "sts-events-glow",
+          type: "circle",
+          source: "sts-events",
+          paint: {
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 10, 10, 18],
+            "circle-color": MAP_COLORS.stsEvent,
+            "circle-blur": 1.3,
+            "circle-opacity": 0.3,
+          },
+          layout: { visibility: layers["sts-events"] ? "visible" : "none" },
         });
         map.addLayer({
           id: "sts-events",
@@ -579,11 +840,11 @@ export default function IntelligenceMap({
           source: "sts-events",
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 4, 10, 8, 14, 12],
-            "circle-color": "#c084fc",
-            "circle-opacity": 0.8,
-            "circle-stroke-width": 2,
+            "circle-color": MAP_COLORS.stsEvent,
+            "circle-opacity": 0.85,
+            "circle-stroke-width": 1.5,
             "circle-stroke-color": "#0f172a",
-            "circle-stroke-opacity": 0.5,
+            "circle-stroke-opacity": 0.6,
           },
           layout: { visibility: layers["sts-events"] ? "visible" : "none" },
         });
@@ -591,7 +852,12 @@ export default function IntelligenceMap({
           id: "vessel-track",
           type: "line",
           source: "vessel-track",
-          paint: { "line-color": "#38bdf8", "line-width": 3, "line-opacity": 0.9 },
+          paint: {
+            "line-color": MAP_COLORS.vessel,
+            "line-width": 3,
+            "line-opacity": 0.9,
+            "line-dasharray": [0, 4, 3],
+          },
         });
 
         const refreshOverlays = () => {
@@ -619,6 +885,35 @@ export default function IntelligenceMap({
 
       if (vertical === "energy") {
         addLiveVesselLayers(map, !!layers.vessels);
+
+        // Micro-motion: live-vessel pulse ring + marching dash on the focused track.
+        const dashPhases: number[][] = [
+          [0, 4, 3],
+          [0.5, 4, 2.5],
+          [1, 4, 2],
+          [1.5, 4, 1.5],
+          [2, 4, 1],
+          [2.5, 4, 0.5],
+          [3, 4, 0],
+        ];
+        let lastTick = 0;
+        const animate = (now: number) => {
+          if (cancelled) return;
+          if (now - lastTick > 90) {
+            lastTick = now;
+            const t = (now % 1800) / 1800;
+            if (map.getLayer("live-vessels-pulse") && map.getZoom() < 10) {
+              map.setPaintProperty("live-vessels-pulse", "circle-radius", 4 + t * 8);
+              map.setPaintProperty("live-vessels-pulse", "circle-opacity", 0.14 * (1 - t));
+            }
+            if (map.getLayer("vessel-track")) {
+              const phase = dashPhases[Math.floor((now / 90) % dashPhases.length)];
+              map.setPaintProperty("vessel-track", "line-dasharray", phase);
+            }
+          }
+          animFrame = requestAnimationFrame(animate);
+        };
+        animFrame = requestAnimationFrame(animate);
 
         const updateGulfCoverage = () => {
           const b = map.getBounds();
@@ -692,6 +987,7 @@ export default function IntelligenceMap({
 
     return () => {
       cancelled = true;
+      cancelAnimationFrame(animFrame);
       if (moveEndHandler) map.off("moveend", moveEndHandler);
       vesselMotion?.dispose();
       vesselMotion = null;
@@ -745,15 +1041,25 @@ export default function IntelligenceMap({
         }
         return;
       }
+      const vis = layers[l.id] ? "visible" : "none";
       if (map.getLayer(l.id)) {
-        map.setLayoutProperty(l.id, "visibility", layers[l.id] ? "visible" : "none");
+        map.setLayoutProperty(l.id, "visibility", vis);
+      }
+      if (map.getLayer(`${l.id}-glow`)) {
+        map.setLayoutProperty(`${l.id}-glow`, "visibility", vis);
       }
     });
+    if (map.getLayer("energy-assets-heat")) {
+      map.setFilter("energy-assets-heat", heatFilterForActiveLayers("energy", layers));
+    }
+    if (map.getLayer("metals-assets-heat")) {
+      map.setFilter("metals-assets-heat", heatFilterForActiveLayers("metals", layers));
+    }
     if (vertical === "energy") {
       setVesselLayerVisibility(map, !!layers.vessels);
-      for (const lid of ["sts-events", "mcr-corridors", "ais-coverage-fill"] as const) {
+      for (const lid of ["sts-events", "sts-events-glow", "mcr-corridors", "ais-coverage-fill"] as const) {
         if (map.getLayer(lid)) {
-          const key = lid === "ais-coverage-fill" ? "ais-coverage" : lid;
+          const key = lid === "ais-coverage-fill" ? "ais-coverage" : lid === "sts-events-glow" ? "sts-events" : lid;
           map.setLayoutProperty(lid, "visibility", layers[key] ? "visible" : "none");
         }
       }
@@ -790,10 +1096,30 @@ export default function IntelligenceMap({
 
   const showMetalsEmpty = vertical === "metals" && !metalsMapLayersActive(layers);
 
+  const formatCount = (n?: number) => {
+    if (n == null) return null;
+    if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+    return String(n);
+  };
+
   return (
     <div className="map-wrap">
+      <button
+        type="button"
+        className={`layer-drawer-toggle${layerDrawerOpen ? " open" : ""}`}
+        title={layerDrawerOpen ? "Hide layers" : "Show layers"}
+        onClick={() => setLayerDrawerOpen((v) => !v)}
+      >
+        <Layers size={16} />
+      </button>
+      {layerDrawerOpen && (
       <div className="layer-drawer">
-        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>LAYERS</div>
+        <div className="layer-drawer-header">
+          <span>Layers</span>
+          <button type="button" className="layer-drawer-close" title="Hide layers" onClick={() => setLayerDrawerOpen(false)}>
+            <X size={14} />
+          </button>
+        </div>
         {(() => {
           let lastGroup = "";
           return layersForVertical(vertical).map((l) => {
@@ -801,50 +1127,44 @@ export default function IntelligenceMap({
             const locked = layerLocked(l, entitlements);
             const showGroup = l.group && l.group !== lastGroup;
             if (l.group) lastGroup = l.group;
-            const input = (
-              <input
-                type="checkbox"
-                checked={!!layers[l.id] && !locked}
-                disabled={locked || !l.tileLayer && !l.geoJsonSource}
-                onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
-              />
-            );
-            const row = l.drawerHint ? (
-              <div key={l.id}>
-                <label style={locked ? { opacity: 0.55 } : undefined}>
-                  {input}
-                  {l.label}
-                  {locked ? " (plan)" : ""}
-                </label>
-                <div style={{ fontSize: 10, color: "var(--muted)", margin: "0 0 4px 1.35rem", lineHeight: 1.35 }}>
-                  {locked ? "Upgrade plan or sign in to unlock premium map layers." : l.drawerHint}
-                </div>
-              </div>
-            ) : (
-              <label key={l.id} style={locked ? { opacity: 0.55 } : undefined}>
-                {input}
-                {l.label}
-                {locked ? " (plan)" : ""}
-              </label>
-            );
+            const count = formatCount(layerCounts[l.id]);
             return (
               <div key={l.id}>
-                {showGroup && (
-                  <div style={{ fontSize: 10, color: "var(--warn)", margin: "8px 0 4px", letterSpacing: "0.06em" }}>
-                    {l.group}
+                {showGroup && <div className="layer-group-label">{l.group}</div>}
+                <label className={`layer-row${locked ? " locked" : ""}`}>
+                  <input
+                    type="checkbox"
+                    className="layer-switch"
+                    checked={!!layers[l.id] && !locked}
+                    disabled={locked || (!l.tileLayer && !l.geoJsonSource)}
+                    onChange={(e) => setLayers((prev) => ({ ...prev, [l.id]: e.target.checked }))}
+                  />
+                  {l.color && <span className="layer-row-swatch" style={{ background: l.color }} />}
+                  <span className="layer-row-label">
+                    {l.label}
+                    {locked ? " (plan)" : ""}
+                  </span>
+                  {count != null && layers[l.id] && <span className="layer-row-count">{count}</span>}
+                </label>
+                {l.drawerHint && (
+                  <div className="layer-row-hint">
+                    {locked ? "Upgrade plan or sign in to unlock premium map layers." : l.drawerHint}
                   </div>
                 )}
-                {row}
               </div>
             );
           });
         })()}
       </div>
-      {vertical === "energy" && gulfAisLimited && (
-        <div className="map-coverage-banner" role="status">
-          <span className="badge warn compact">{LIMITED_AIS_COVERAGE_LABEL}</span>
-          <strong>Gulf / Hormuz AIS</strong>
-          <p>{LIMITED_AIS_COVERAGE_DETAIL}</p>
+      )}
+      {vertical === "energy" && (
+        <div className="map-legend" aria-label="Infrastructure legend">
+          {MAP_LEGEND_ITEMS.map((item) => (
+            <span key={item.label} className="map-legend-item">
+              <span className="map-legend-swatch" style={{ background: item.color }} />
+              {item.label}
+            </span>
+          ))}
         </div>
       )}
       {showMetalsEmpty && (

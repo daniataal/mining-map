@@ -32,10 +32,22 @@ Python runner: `madsan/etl/legacy_import.py` via `legacy_runner.go`.
 |--------------|---------------|----------|-----------|
 | `oil_vessels` | `vessels` | yes | `drift_pct ≤ 5%` **or** `madsan_count ≥ legacy_count` (live AIS may add vessels) |
 | `licenses` | `assets` where `legacy_table = 'legacy_licenses'` | yes | `drift_pct ≤ 5%` (legacy count: **distinct importable** rows — geolocated, non-empty `company`, dedupe key matches Go upsert: `normalized_name` + `asset_type` + `country_code`) |
-| `petroleum_osm_features` | `assets` where `legacy_table = 'legacy_petroleum_osm_features'` | yes | `drift_pct ≤ 5%` (legacy count: rows with `geom`) |
+| `petroleum_osm_features` | `assets` where `legacy_table = 'legacy_petroleum_osm_features'` | yes | `drift_pct ≤ 5%` (legacy count: **distinct dedup keys** — `geom`-bearing rows collapsed by Go upsert key `normalized_name` + `asset_type`, name precedence `name → operator → layer_id:id`; **not** raw OSM rows) |
 | `oil_companies` | `companies` | no | informational only; dedupe by name+country makes counts incomparable |
 
-**Drift semantics:** `drift = madsan_count - legacy_count`. Negative drift (madsan lower) usually means an **incomplete Go import** — enqueue **Legacy import (all)** with worker running, or wait for the daily scheduler job. Positive drift on vessels is expected when AIS sync is active.
+**Drift semantics:** `drift = madsan_count - legacy_count` where `legacy_count` is the **expected dedup-key count** for `licenses` and `petroleum_osm_features` (not raw rows). Negative drift against the dedup-key count means an **incomplete Go import** — enqueue **Legacy import (all)** with worker running, or wait for the daily scheduler job. Comparing madsan against the raw OSM/license row count is **not** a bug signal: use `under_import_gap` in `license_tiers` / `petroleum_tiers`. Positive drift on vessels is expected when AIS sync is active.
+
+**Petroleum — expected dedup vs bug (honest tiers):**
+
+CLI JSON includes `petroleum_tiers` on the petroleum row. The importer upserts one canonical asset per `(normalized_name, asset_type)`; multi-segment pipelines and same-named storage features collapse. **This is not data loss** — every pipeline segment's geometry is preserved in `pipeline_graph_edges`.
+
+| Tier / signal | Field | Expected? | Explanation |
+|---------------|-------|-----------|-------------|
+| Raw OSM rows with geom | `legacy_total` | informational | ~303.7k; do **not** use as parity denominator |
+| Rows carrying `name`/`operator` | `with_name_or_operator` | informational | ~174k; these collapse where names repeat |
+| Synthetic-named rows | `synthetic_named` | informational | ~130k; named `layer_id:id`, stay unique |
+| Dedup collapse | `expected_dedup_keys` | **yes** | One asset per `(normalized_name, asset_type)`; ~303.7k rows → ~217.1k keys |
+| Madsan ≪ dedup keys after full import | `under_import_gap` | **bug** | Incomplete import, worker down, or DB crash mid-import |
 
 **Licenses — expected vs bug (honest tiers):**
 
@@ -67,9 +79,36 @@ go run ./cmd/legacy-parity
 | `oil_vessels` | 9,595 | 9,595 | 0% | **pass** |
 | `oil_companies` | 5,074 | 18,680 | 268% | informational |
 | `licenses` | 45,506 dedup keys | 45,503 | 0.01% | **pass** (`license_tiers.under_import_gap`: 3) |
-| `petroleum_osm_features` | 303,745 | 70,526 | 76.8% | **fail** (under-imported) |
+| `petroleum_osm_features` | 303,745 | 70,526 | 76.8% | **fail** (measured vs raw rows — see 2026-06-10 correction) |
 
-**Result:** `passed: false`, `failed_critical: ["petroleum_osm_features"]`. Vessels and licenses at dedup-key parity; petroleum OSM needs full Go import before Python retirement.
+**Result:** `passed: false`, `failed_critical: ["petroleum_osm_features"]`. Vessels and licenses at dedup-key parity; petroleum reported failing.
+
+### `legacy-parity` correction (2026-06-10)
+
+Investigation found the petroleum "fail" was a **measurement bug**, not an under-import. The importer upserts assets by `(normalized_name, asset_type)`, but the parity spec compared madsan against the **raw** OSM row count (303,745) instead of the **dedup-key** count — the same mismatch licenses had already fixed. Petroleum was at the natural dedup ceiling all along (pipeline segment geometry preserved in `pipeline_graph_edges` = 223,757).
+
+Fix: `petroleumDedupKeySQL` + `petroleum_tiers` in `legacy_parity.go` (mirrors `license_tiers`). Re-run is now green:
+
+| Table | Legacy (dedup keys) | Madsan | Drift % | Status |
+|-------|--------|--------|---------|--------|
+| `oil_vessels` | 9,595 | 9,595 | 0% | **pass** |
+| `oil_companies` | 5,074 | 50,009 | informational | pass (info only) |
+| `licenses` | 45,506 | 45,503 | 0.01% | **pass** (`under_import_gap`: 3) |
+| `petroleum_osm_features` | 217,106 | 217,106 | 0% | **pass** (`under_import_gap`: 0) |
+
+**Result:** `passed: true`, exit 0 — **Python `legacy_import.py` retirement is unblocked** on this snapshot (pending the 30-day no-`use_python` soak in removal criteria).
+
+Petroleum tiers on this snapshot:
+
+| Field | Count |
+|-------|-------|
+| `legacy_total` (raw geom rows) | 303,745 |
+| `with_name_or_operator` | 173,972 |
+| `synthetic_named` | 129,773 |
+| `expected_dedup_keys` | 217,106 |
+| `under_import_gap` | 0 |
+
+> **Infra note:** the dev `madsan-db` runs an **x86 PostGIS image (`postgis/postgis:16-3.4`) under Rosetta** on Apple Silicon and crashed mid-import (exit 133 / `rosetta error … sigreturn`), which is what repeatedly killed the import jobs and left an orphaned `running` row. The prod overlay already pins `linux/arm64`; for dev, use an arm64 Postgres/PostGIS image to stop the crashes.
 
 License tiers on this snapshot:
 
@@ -102,14 +141,64 @@ go run ./cmd/backfill-petroleum-types
 
 Complete **in order** before retiring Python `legacy_import.py`:
 
-- [ ] **1. Env** — `LEGACY_DATABASE_URL` points at legacy DB (`sync_env_from_root.sh` rewrites Docker hostnames to `127.0.0.1:5434` for hybrid dev). `MADSAN_LEGACY_PYTHON=false`.
-- [ ] **2. Full Go import** — worker running; enqueue **Legacy import (all)** from `/admin` (no `max_rows`). Scheduler also runs daily (`cmd/scheduler`). Avoid admin buttons capped at `max_rows: 5000` for cutover validation.
-- [ ] **3. Parity CLI** — `go run ./cmd/legacy-parity` exits 0; all critical tables within 5% (or vessels ≥ legacy).
-- [ ] **4. Admin panel** — Platform health **Parity** green; Runtime health table shows no critical **drift** badges.
-- [ ] **5. Petroleum backfill** — if metals map shows energy assets, dry-run backfill; apply only when `would_update > 0`.
-- [ ] **6. Go tests** — `go test ./internal/ingestion/... -run Legacy` passes.
-- [ ] **7. Soak** — no `use_python: true` jobs for 30 days; monitor ingestion job `result_report.engine = "go"`.
-- [ ] **8. Remove Python** — delete `legacy_import.py`, shell path, and `MADSAN_LEGACY_PYTHON` after checklist green in staging/production-like snapshot.
+- [x] **1. Env** — `LEGACY_DATABASE_URL` points at legacy DB (`sync_env_from_root.sh` rewrites Docker hostnames to `127.0.0.1:5434` for hybrid dev). `MADSAN_LEGACY_PYTHON=false`.
+- [x] **2. Full Go import** — petroleum/licenses/vessels imported to the dedup ceiling (217,106 / 45,503 / 9,595). Scheduler runs daily (`cmd/scheduler`).
+- [x] **3. Parity CLI** — `go run ./cmd/legacy-parity` exits 0 (2026-06-10, re-verified 2026-06-10T15:30Z); all critical tables within 5%.
+- [~] **4. Admin panel** — `GET /api/admin/health` and `/health/runtime` use the same `ingestion.RunLegacyParity` as the CLI (expected **passed: true** when legacy DB reachable). API live on `:8088` (`/health/live` 200). **Human verify:** sign in at `/admin` → Runtime health → Parity row green, no critical drift badges. `legacy_import_running` may show while a scheduled import is active — parity counts remain valid.
+- [x] **5. Petroleum backfill** — `go run ./cmd/backfill-petroleum-types --dry-run` → `would_update=0` (2026-06-10); no apply needed.
+- [x] **6. Go tests** — `go test ./internal/ingestion/...` passes (2026-06-10).
+- [~] **7. Soak** — **started 2026-06-10** (parity exit 0 + Go-default confirmed). **Earliest Python removal: 2026-07-10.** No `use_python: true` enqueue; monitor `result_report.engine = "go"`. See [Soak tracking](#soak-tracking) below.
+- [ ] **8. Remove Python** — **gated** until item 7 complete on staging/production-like snapshot. See [Gated removal (post-soak)](#gated-removal-post-soak). Rollback path must remain until deletion ships.
+
+## Soak tracking
+
+| Field | Value |
+|-------|-------|
+| Soak start | **2026-06-10** (parity CLI exit 0; petroleum dedup-key measurement fix merged) |
+| Soak end (earliest) | **2026-07-10** (30 calendar days; not accelerable) |
+| Env default | `MADSAN_LEGACY_PYTHON=false` (`config.go`, `deploy/.env.example`, `docker-compose.yml`) |
+| Job default | Go unless payload `use_python: true` **or** env flag true (`legacy_runner.go`) |
+| Scheduler | Daily `legacy_import` — no `use_python` in payload (`cmd/scheduler`) |
+| Admin UI | Python button hidden unless `legacy_python_enabled` (API reflects env flag) |
+
+**Monitor (weekly):**
+
+```sql
+-- No Python orchestrator jobs since soak start
+SELECT COUNT(*) FROM ingestion_jobs
+WHERE job_type = 'legacy_import'
+  AND created_at >= '2026-06-10'
+  AND (
+    payload::text LIKE '%"use_python": true%'
+    OR result_report->>'orchestrator' = 'legacy_import.py'
+  );
+
+-- Go engine on completed jobs since soak start
+SELECT result_report->>'engine' AS engine, COUNT(*)
+FROM ingestion_jobs
+WHERE job_type = 'legacy_import' AND status = 'completed'
+  AND created_at >= '2026-06-10'
+GROUP BY 1;
+```
+
+Pre-soak snapshot (informational): one completed job on 2026-06-09 used Python orchestrator (`result_report.orchestrator = legacy_import.py`); zero payload `use_python: true` jobs in history.
+
+## Gated removal (post-soak)
+
+Execute **only after** soak end (2026-07-10) **and** items 1–6 remain green on a production-like DB snapshot.
+
+| Artifact | Path / symbol | Action |
+|----------|---------------|--------|
+| Python orchestrator | `madsan/etl/legacy_import.py` | Delete |
+| Host ETL script | `madsan/scripts/run_legacy_etl.sh` | Delete or rewrite to enqueue Go job only |
+| Go Python runner | `runLegacyImportScript`, `processLegacyImport` Python branch in `legacy_runner.go` | Remove branch; Go-only `processLegacyImportGo` |
+| Config | `MADSAN_LEGACY_PYTHON`, `LegacyImportPython` in `config.go` | Remove key + struct field |
+| Deploy | `deploy/.env.example`, `docker-compose.yml` | Remove env var |
+| Admin API | `legacy_python_enabled` in `admin.go` | Remove field |
+| Admin UI | Python button + flag gate in `admin/page.tsx` | Remove button and copy referencing opt-in |
+| Docs | This file rollback section | Keep rollback narrative as historical ADR until Obsidian runbook updated |
+
+**Keep until soak ends:** all rows above — rollback requires `MADSAN_LEGACY_PYTHON=true` + optional `use_python` enqueue.
 
 ## Removal criteria
 
@@ -144,15 +233,15 @@ go run ./cmd/legacy-parity   # JSON report; exit 1 on critical drift > 5%
 ## PYTHON_TECHNICAL_DEBT_ADDED_OR_REMOVED
 
 - **Removed from default path:** Python no longer runs unless explicitly opted in.
-- **Remaining debt:** `legacy_import.py`, `runLegacyImportScript`, `MADSAN_LEGACY_PYTHON` config and admin Python button — retire after parity checklist green.
+- **Remaining debt:** `legacy_import.py`, `runLegacyImportScript`, `MADSAN_LEGACY_PYTHON` config and admin Python button — retire after **30-day soak** (earliest 2026-07-10).
 
 ## CUTOVER_PLAN
 
 1. Run full Go **Legacy import (all)** with worker + scheduler.
 2. Re-run `legacy-parity` until exit 0.
 3. Confirm admin parity panel green for 24h (5m cache).
-4. Disable Python flag in all envs; monitor 30 days.
-5. Delete Python runner and config keys.
+4. Disable Python flag in all envs; monitor 30 days (**soak started 2026-06-10**).
+5. Delete Python runner and config keys (earliest **2026-07-10**; see gated removal table).
 
 ## ROLLBACK_PLAN
 

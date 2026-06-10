@@ -12,15 +12,15 @@ import (
 // NewShipVaultService builds a live ShipVault client from madsan config.
 func NewShipVaultService(cfg config.Config, log zerolog.Logger) (*sv.Service, error) {
 	opts := sv.ServiceOptions{
-		BaseURL:          cfg.ShipVaultBaseURL,
-		CacheTTLDays:     cfg.ShipVaultCacheTTLDays,
-		BearerToken:      cfg.ShipVaultBearerToken,
-		RefreshToken:     cfg.ShipVaultRefreshToken,
-		SessionJSON:      cfg.ShipVaultSessionJSON,
-		Email:            cfg.ShipVaultEmail,
-		Password:         cfg.ShipVaultPassword,
-		FirebaseAPIKey:   cfg.ShipVaultFirebaseAPIKey,
-		AppOriginURL:     cfg.ShipVaultAppOriginURL,
+		BaseURL:        cfg.ShipVaultBaseURL,
+		CacheTTLDays:   cfg.ShipVaultCacheTTLDays,
+		BearerToken:    cfg.ShipVaultBearerToken,
+		RefreshToken:   cfg.ShipVaultRefreshToken,
+		SessionJSON:    cfg.ShipVaultSessionJSON,
+		Email:          cfg.ShipVaultEmail,
+		Password:       cfg.ShipVaultPassword,
+		FirebaseAPIKey: cfg.ShipVaultFirebaseAPIKey,
+		AppOriginURL:   cfg.ShipVaultAppOriginURL,
 	}
 	svc, mode, err := sv.NewService(opts, log)
 	if err != nil {

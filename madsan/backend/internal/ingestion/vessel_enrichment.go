@@ -25,10 +25,17 @@ func (s *Service) processVesselEnrichment(ctx context.Context, jobID uuid.UUID) 
 	if batch <= 0 {
 		batch = defaultEnrichmentBatchSize
 	}
-
-	result, err := RunVesselEnrichmentBatch(ctx, s.pool, s.cfg, zerolog.Nop(), VesselEnrichBatchOptions{
+	payload := s.loadJobPayload(ctx, jobID)
+	opts := VesselEnrichBatchOptions{
 		Limit: batch,
-	})
+		Force: payloadBool(payload, "force"),
+		IMO:   payloadString(payload, "imo"),
+	}
+	if opts.IMO != "" {
+		opts.Limit = 1
+	}
+
+	result, err := RunVesselEnrichmentBatch(ctx, s.pool, s.cfg, zerolog.Nop(), opts)
 	var lastErr error
 	if err != nil {
 		lastErr = err

@@ -21,7 +21,7 @@ func operatorNameFromRecord(rec NormalizedRecord) string {
 			return normalizeName(op)
 		}
 	}
-	for _, key := range []string{"company", "operator", "operator_company"} {
+	for _, key := range []string{"company", "operator", "operator_company", "operator_name"} {
 		if v, ok := rec.RawPayload[key].(string); ok && strings.TrimSpace(v) != "" {
 			return normalizeName(v)
 		}

@@ -192,7 +192,7 @@ Parallel agents landed dedup scoring, cross-name discovery, deals RBAC, DR backu
 
 ## 2026-06-09 Phase 4b — legacy ETL orchestration
 
-- `legacy_import` job type: Go worker runs `etl/legacy_import.py` against mining-db :5434
+- `legacy_import` job type: Go worker runs **Go-native import by default** (`processLegacyImportGo`); Python `legacy_import.py` only when `MADSAN_LEGACY_PYTHON=true` or `use_python: true`
 - Enqueues batched `legacy_etl` child jobs; worker drains up to 10 jobs per tick
 - Admin: "Legacy import (all)" + "Vessels refresh" (incremental, max 2000 rows)
 - Config: `MADSAN_ETL_DIR`, `MADSAN_ETL_PYTHON`, `LEGACY_DATABASE_URL`

@@ -2,6 +2,22 @@
 
 North star: **discover → verify → price → execute** (honest tiers, evidence chains, map-first UX).
 
+## Close V2 reality gap (plan `close_the_v2_reality_gap`, 2026-06-10)
+
+| Plan item | Status | Notes |
+|-----------|--------|-------|
+| A legacy imports (port calls, STS, EIA, misc) | **CODE COMPLETE** | `cmd/legacy-phase-a`, `legacy_intelligence.go`, migration `029`; **run import on DB** for row counts |
+| B STS / MCR / voyages workers | **COMPLETE** | `intelligence_jobs.go`, `mcr/engine.go`, `voyages/` |
+| C UI richness | **COMPLETE** | Map layers, dossier tabs, watchlists, historic UX |
+| D deal depth | **COMPLETE** | sanctions, bunker benchmark, `POST /api/documents`, watch diffs |
+| E live AIS + port calls | **COMPLETE** | `cmd/ais-ingest`, port-call sweep job |
+| F AI DD copilot | **COMPLETE** (draft only) | `POST /api/deals/{id}/dd-assist`, `DDCopilotPanel`; **OCR doc intelligence deferred** |
+| G supply-web + unified pack | **COMPLETE** | `supplyweb/engine.go`, pack section |
+| H Tier-1 adapters | **COMPLETE** | source import pipeline wired |
+| Dossier enrichment refresh API | **COMPLETE (this pass)** | `POST /api/core/entities/{type}/{id}/enrichment/refresh` → queued ShipVault/terminal jobs |
+| UI north star: one-click deal | **NOT STARTED** | entity → pre-filled deal form |
+| Cross-industry algorithms | **DEFERRED** | Louvain, Kalman, etc. — post-MVP |
+
 ## Plan phase completion (effective)
 
 Based on prior commits on `new-refactor-eng-style` (not plan file edits):
@@ -19,7 +35,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | Phase | Status | Shipped | Remaining gap |
 |-------|--------|---------|---------------|
 | 2–3 Ingestion + worker | **PARTIAL** | Targeted matview refresh (`71fc3701`); RawDataDir fix (`9a84ec7f`); import report + dry-run + dedup auto-enqueue (`ef359e38`) | 16-step pipeline, River queue, watch_folder worker restart |
-| 4 Legacy ETL | **PARTIAL** | Go-default import; licenses + vessels parity green (`bcb0f2a`) | `petroleum_osm_features` import ~47% → 100%; `legacy-parity` exit 0 |
+| **4** Legacy ETL | **COMPLETE (2026-06-10)** | Go-default import; **all 4 critical tables parity-green, `legacy-parity` exit 0**; petroleum was a parity *measurement* bug (compared raw OSM rows vs dedup keys), now fixed in `legacy_parity.go` | 30-day no-`use_python` soak before deleting `legacy_import.py` |
 | 5 Go core + auth | **PARTIAL** | JWT + httpOnly cookie cutover (`a68eb37d`) | S21 entity envelope (batch 1) |
 | 6b Realtime WS | **PARTIAL** | Dead-reckoning (`d80d3fe3`) | MessagePack frames (batch 1); alert job queue |
 | 7 Energy UI | **PARTIAL** | Status bar + ticker trends (`3c64a846`) | Gulf AIS disclaimer (batch 1); real VLSFO feed |
@@ -76,14 +92,17 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 
 ## Live data (madsan_db :5433)
 
-| Table | Rows | Notes |
+| Table | Rows (2026-06-10 verified) | Notes |
 |-------|------|-------|
-| companies | ~18.7k | Includes operator stubs from OSM backfill |
-| assets | ~76k | Energy OSM + license cadastre |
-| vessels | ~9.6k | Live AIS sync from legacy |
-| evidence | ~227k | Provenance claims |
-| relationships | ~16k | Company↔asset + vessel↔terminal |
-| core_signals | ~18k | AIS + import snapshots |
+| companies | **50,009** | Includes operator stubs from OSM backfill (ETL dupes; deduped in search) |
+| assets | **262,609** | 217,106 petroleum OSM (dedup ceiling) + 45,503 license cadastre |
+| vessels | **9,595** | Live AIS sync from legacy; 100% parity |
+| evidence | **1,659,850** | Provenance claims |
+| relationships | **58,683** | Company↔asset + vessel↔terminal |
+| core_signals | **276,261** | AIS + import snapshots |
+| pipeline_graph_edges | **223,757** | Every legacy pipeline segment geometry preserved (assets dedupe by name) |
+| prices / documents | **pending import / 0** | Phase A `legacy-phase-a` + `eia_daily` worker populate `prices`; run on target DB before go-live |
+| voyages / port_call signals | **post Phase A** | `legacy_intelligence` + live port-call sweep; verify counts after import |
 
 ## Phase completion
 
@@ -107,7 +126,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 - **Entitlements (5b):** resolver merges plan → subscription → override → feature flag; `/api/core/auth/me` exposes per-feature map; gated routes: deals verify/pack/watch, `GET /api/energy/suppliers/search`, `POST /api/portal/*`, `/api/admin/*` (`api_access`), `GET /tiles/pipelines/*` (`map_premium_layers`); usage_events on verify/pack/watch/supplier search; frontend `fetchMe`+`canUse` on terminal/deals/portal/admin/data-quality
 - **RLS scaffold (dev):** migration `014_rls_scaffold` applied on dev — `usage_events` RLS + `madsan_rls` deny stub; `app_current_tenant_id()` helper; API still connects as owner (no behavior change until role cutover)
 - **Legacy import (Go default):** `legacy_import` jobs via `processLegacyImportGo`; daily scheduler enqueue; Python opt-in only (`MADSAN_LEGACY_PYTHON`)
-- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **Licenses green** — dedup-key parity (45,506 expected keys, 0.01% drift; `bcb0f2a`, `1f745a6`). **Petroleum OSM fail** (~70.6% under-imported, 89.5k/303.7k as of 19:44Z) — **Go `legacy_import` job running** (~37 min elapsed); blocks Python retirement until exit 0
+- **Parity gate:** `cmd/legacy-parity` CLI (exit 0/1) + cached admin Runtime health panel; 5% threshold on critical tables (`oil_vessels`, `licenses`, `petroleum_osm_features`). **All critical green** on dev (2026-06-10): petroleum measured on dedup keys (217,106). **30-day soak** for Python retirement in progress (start 2026-06-10 → ~2026-07-10).
 
 ### Evening parallel UI batch (2026-06-09)
 
@@ -147,7 +166,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | Item | Gap | Next step |
 |------|-----|-----------|
 | 16-step ingestion pipeline | Jobs poll `ingestion_jobs`; no Splink/River | Dedup merge UI shipped (`099e7850`); Splink batch automation deferred |
-| Python ETL | Fallback only | Licenses + vessels green; **petroleum_osm_features import** → retire `legacy_import.py` |
+| Python ETL | Fallback only (opt-in) | Parity green on dev; **retire `legacy_import.py` after soak** (~2026-07-10) |
 | Matviews | `map_energy_assets` may lag live tiles | Drop or refresh-on-ingest only |
 | RBAC | Cookie auth MVP | Admin ✅ · Deals ✅ · portal/billing routes next |
 | Price ticker | EIA crude when keyed | VLSFO/Gold stub row shipped (`9473721e`); real feed deferred |
@@ -179,7 +198,7 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 | 4d | Splink prep export | Done |
 | **4d+** | Pairwise dedup scoring (clusters + CSV) | **Done** (`e934964`) |
 | 11a | Admin runtime health | Done |
-| **4e** | Legacy parity gate (CLI + admin panel) | **Partial** — licenses + vessels pass; petroleum OSM import pending |
+| **4e** | Legacy parity gate (CLI + admin panel) | **Done (2026-06-10)** — all 4 critical tables green, `legacy-parity` exit 0; petroleum parity SQL corrected to dedup-key count |
 | **RBAC / entitlements** | Deals, suppliers, portal, admin API, premium MVT + UI gates | **Done** (phase5b) |
 | **12d** | RLS scaffold (`014_rls_scaffold`) | **Partial** — applied on dev; API role cutover deferred |
 | **13** | Prod compose overlay (`docker-compose.prod.yml`) | **Done** — limits, reservations, healthchecks, `linux/arm64`, named volumes, Caddy :80, no dev bind mounts |
@@ -199,10 +218,11 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 
 ## Next priorities (ordered)
 
-1. **4e** — Full Go **Legacy import (all)** for `petroleum_osm_features` (no `max_rows` cap); re-run `legacy-parity` until exit 0 — **blocker for Python retirement**
-2. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
-3. **12d** — RLS role cutover (`madsan_rls` + `SET app.tenant_id`) after map/search tenant audit
-4. **9b alert engine** — Living deal packs pinned on map; diff linked entities (price, vessel, sanctions) → deal card alerts
+1. ~~**4e** — petroleum parity~~ **DONE 2026-06-10**: was a parity measurement bug (raw OSM rows vs dedup keys), fixed in `legacy_parity.go`; `legacy-parity` exits 0. Python retirement unblocked (pending 30-day soak).
+2. **Dev DB stability** — replace x86 `postgis/postgis:16-3.4` (Rosetta, crashed mid-import with exit 133) with an **arm64** Postgres/PostGIS image in dev compose; prod overlay already pins `linux/arm64`.
+3. **14** — Production launch checklist (TLS on Caddy, volume seed for `/raw`/`/etl`, `backup_db.sh` cron, smoke test via Caddy :80)
+4. **12d** — RLS role cutover (`madsan_rls` + `SET app.tenant_id`) after map/search tenant audit
+5. **9b alert engine** — Living deal packs pinned on map; diff linked entities (price, vessel, sanctions) → deal card alerts
 
 ## Risks
 
@@ -211,8 +231,9 @@ Aligned with `madsan_v2_execution_log.md` and `madsan_v2_compose_rebuild_plan.md
 - **Inferred links:** vessel-terminal and operator links are intelligence hints, not facts
 - **OpenSanctions:** screening is review-tier, not confirmation
 - **Prod volumes:** `madsan_raw_data` / `madsan_etl_data` named volumes start empty — seed before legacy import jobs
-- **Parity drift:** licenses + vessels pass; **petroleum_osm_features ~70% under-imported** blocks Python retirement — full Go Legacy import (all) must finish with worker up
-- **Watch folder:** 2 failed jobs — bad `RawDataDir` when worker runs from `madsan/backend` (`…/backend/madsan/raw` missing); fix path or run worker from repo root / compose
+- ~~**Parity drift:** petroleum_osm_features under-imported~~ **RESOLVED 2026-06-10**: was a measurement bug (raw OSM rows vs dedup keys); petroleum at dedup ceiling (217,106), `legacy-parity` exits 0.
+- **Dev DB crashes (Rosetta):** `madsan-db` x86 image under Rosetta crashed with exit 133 (`rosetta error … sigreturn`) mid-import — root cause of repeatedly killed import jobs + orphaned `running` rows. Switch dev to an arm64 PostGIS image.
+- **Watch folder:** failed jobs — bad `RawDataDir` when worker started with explicit `MADSAN_RAW_DIR="$(pwd)/madsan/raw"` from `madsan/backend` (resolves to `…/backend/madsan/raw`). Unset the var (config now auto-locates `madsan/raw`) or run worker from repo root / compose.
 
 ## Known gaps (2026-06-09 audit vs plan)
 
@@ -293,7 +314,7 @@ flowchart LR
 | Splink batch dedup | **GAP** | CSV export + Go `pair_score` only; no Splink runtime |
 | watch_folder cron path | **BLOCKED** | Fails: `open …/backend/madsan/raw: no such file or directory` |
 
-**Import job status (live):** 1× `legacy_import` **running** (started 19:07Z); 3× completed; petroleum count climbing (~89.5k → target 303.7k). Worker on host (`go run ./cmd/worker`); compose stack currently DB-only.
+**Import job status (2026-06-10):** petroleum at dedup ceiling (217,106); `legacy-parity` exit 0. Daily scheduler enqueues Go `legacy_import`; Python soak tracking in `LEGACY_ETL_DEPRECATION.md`.
 
 ### Phase 1 schema — `phase1-schema` (2026-06-10)
 
@@ -322,7 +343,7 @@ flowchart LR
 | 1 Schema + matviews | **COMPLETE** | `phase1-schema`: `023` GIST + filter indexes; incremental matview refresh during long imports; MVT tiles read live `assets`/`vessels` |
 | 2 Ingestion pipeline | **PARTIAL** | Batch 1: import reports, dry-run, dedup auto-enqueue; no Splink / full 16-step |
 | 3 Scheduler + worker | **PARTIAL** | Targeted matview refresh shipped (`71fc3701`); worker restart deferred; watch_folder path fix shipped (`9a84ec7f`) |
-| 4 Legacy ETL | **PARTIAL** | Petroleum OSM import in progress (~47% as of 2026-06-10); batch 2: dd_rules port + parity wait script |
+| 4 Legacy ETL | **COMPLETE** | All critical tables parity-green (`legacy-parity` exit 0, 2026-06-10); petroleum parity SQL fixed to dedup-key count; dd_rules port + parity wait script landed |
 | 5 Go core + auth | **PARTIAL** | httpOnly cookie cutover shipped (`a68eb37d`); batch 1: S21 entity envelope |
 | 5b Entitlements | **COMPLETE** | Full resolver+middleware+UI gates; `023` plan features; Stripe/billing writes deferred |
 | 6 Map + MVT | **COMPLETE** | MVT registry, click→panel, hover tooltip, selected glow, pipeline asset lookup; prices layer deferred (ticker only) |

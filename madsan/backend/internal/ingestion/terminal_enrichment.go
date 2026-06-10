@@ -49,9 +49,16 @@ type terminalEnrichmentResult struct {
 
 func (s *Service) processTerminalEnrichment(ctx context.Context, jobID uuid.UUID) error {
 	started := time.Now()
-	result, err := RunAssetEnrichmentBatch(ctx, s.pool, s.cfg, zerolog.Nop(), AssetEnrichBatchOptions{
-		Limit: terminalEnrichmentBatch,
-	})
+	payload := s.loadJobPayload(ctx, jobID)
+	opts := AssetEnrichBatchOptions{
+		Limit:   terminalEnrichmentBatch,
+		Force:   payloadBool(payload, "force"),
+		AssetID: payloadString(payload, "asset_id"),
+	}
+	if opts.AssetID != "" {
+		opts.Limit = 1
+	}
+	result, err := RunAssetEnrichmentBatch(ctx, s.pool, s.cfg, zerolog.Nop(), opts)
 	report := buildLegacyImportReport(map[string]any{
 		"enriched":        result.Enriched,
 		"skipped":         result.Skipped,

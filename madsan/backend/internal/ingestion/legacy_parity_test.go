@@ -7,15 +7,16 @@ import (
 
 func TestLegacyParityCatalog(t *testing.T) {
 	catalog := LegacyParityCatalog()
-	if len(catalog) != 10 {
-		t.Fatalf("expected 10 tables, got %d", len(catalog))
+	if len(catalog) != 13 {
+		t.Fatalf("expected 13 tables, got %d", len(catalog))
 	}
 	want := map[string]bool{
 		"oil_vessels": true, "oil_companies": true,
-		"licenses": true, "petroleum_osm_features": true,
+		"licenses": true, "oil_terminals": true, "petroleum_osm_features": true,
 		"oil_port_calls": true, "oil_sts_events": true,
 		"eia_historic_imports": true, "oil_commercial_events": true,
 		"oil_company_contacts": true, "broker_deal_packs": true,
+		"oil_intelligence_cards": true, "entity_relationships": true,
 	}
 	for _, spec := range catalog {
 		if !want[spec.LegacyTable] {
@@ -68,6 +69,20 @@ func TestLicenseImportTiersJSON(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "under_import_gap") {
 		t.Fatal("expected under_import_gap in JSON")
+	}
+}
+
+func TestTerminalTierSQLDefined(t *testing.T) {
+	if terminalTierSQL == "" {
+		t.Fatal("terminalTierSQL must be defined")
+	}
+	for _, col := range []string{
+		"legacy_total", "not_importable_no_geom", "import_pool_geocoded",
+		"expected_skip_empty_name", "name_dedup_keys",
+	} {
+		if !strings.Contains(terminalTierSQL, col) {
+			t.Fatalf("terminalTierSQL missing %q", col)
+		}
 	}
 }
 

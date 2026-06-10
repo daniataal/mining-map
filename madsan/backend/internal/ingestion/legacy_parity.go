@@ -29,6 +29,18 @@ type LicenseImportTiers struct {
 	UnderImportGap        int64 `json:"under_import_gap"`
 }
 
+// TerminalImportTiers breaks oil_terminals parity into honest import tiers.
+// Each legacy row has a unique id; name+country dedup would collapse ~18k storage tanks
+// that share generic names (e.g. "Unnamed Storage Terminal").
+type TerminalImportTiers struct {
+	LegacyTotal           int64 `json:"legacy_total"`
+	NotImportableNoGeom   int64 `json:"not_importable_no_geom"`
+	ImportPoolGeocoded    int64 `json:"import_pool_geocoded"`
+	ExpectedSkipEmptyName int64 `json:"expected_skip_empty_name"`
+	NameDedupKeys         int64 `json:"name_dedup_keys"`
+	UnderImportGap        int64 `json:"under_import_gap"`
+}
+
 // PetroleumImportTiers breaks petroleum_osm_features parity into honest import tiers.
 // The importer upserts canonical assets by (normalized_name, asset_type, country); many
 // raw OSM features (especially multi-segment pipelines and same-named storage features)
@@ -55,6 +67,7 @@ type ParityTableResult struct {
 	Note           string                `json:"note,omitempty"`
 	LicenseTiers   *LicenseImportTiers   `json:"license_tiers,omitempty"`
 	PetroleumTiers *PetroleumImportTiers `json:"petroleum_tiers,omitempty"`
+	TerminalTiers  *TerminalImportTiers  `json:"terminal_tiers,omitempty"`
 }
 
 // ParityReport is printed as JSON by cmd/legacy-parity.
@@ -143,6 +156,29 @@ func LegacyParityCatalog() []ParityTableSpec {
 			Critical:       false,
 		},
 		{
+			LegacyTable:    "oil_intelligence_cards",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_intelligence_cards`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM evidence WHERE claim_type LIKE 'intel_card:%'`,
+			MadsanTarget:   "evidence(intel_card)",
+			Critical:       false,
+		},
+		{
+			LegacyTable: "entity_relationships",
+			LegacyCountSQL: `
+				SELECT COUNT(*)::bigint FROM entity_relationships
+				WHERE fingerprint IS NOT NULL AND NULLIF(trim(fingerprint), '') IS NOT NULL`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM relationships WHERE metadata->>'legacy_fingerprint' IS NOT NULL`,
+			MadsanTarget:   "relationships(legacy_fingerprint)",
+			Critical:       false,
+		},
+		{
+			LegacyTable:    "oil_terminals",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_terminals WHERE geom IS NOT NULL`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM assets WHERE legacy_table = 'legacy_oil_terminals'`,
+			MadsanTarget:   "assets(legacy_oil_terminals)",
+			Critical:       true,
+		},
+		{
 			LegacyTable: "petroleum_osm_features",
 			// Import upserts assets by normalized_name + asset_type (+ empty country);
 			// multi-segment pipelines and same-named features dedupe. Compare against the
@@ -215,6 +251,24 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 			ok = true
 		}
 	}
+	if spec.LegacyTable == "oil_intelligence_cards" {
+		if legacyCount > 0 {
+			coverage := float64(madsanCount) / float64(legacyCount) * 100
+			note = fmt.Sprintf("import requires matched vessel/company/terminal entity (coverage %.1f%%)", coverage)
+		}
+		if madsanCount >= legacyCount*95/100 {
+			ok = true
+		}
+	}
+	if spec.LegacyTable == "entity_relationships" {
+		if legacyCount > 0 {
+			coverage := float64(madsanCount) / float64(legacyCount) * 100
+			note = fmt.Sprintf("import requires license asset + resolvable target company (coverage %.1f%%)", coverage)
+		}
+		if madsanCount > 0 && driftPct <= 15 {
+			ok = true
+		}
+	}
 	if spec.LegacyTable == "eia_historic_imports" && madsanCount >= legacyCount*95/100 {
 		ok = true
 	}
@@ -271,6 +325,33 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 			OK:             ok,
 			Note:           note,
 			PetroleumTiers: &tiers,
+		}, nil
+	}
+	if spec.LegacyTable == "oil_terminals" {
+		tiers, terr := fetchTerminalImportTiers(ctx, legacy)
+		if terr != nil {
+			return ParityTableResult{}, terr
+		}
+		tiers.UnderImportGap = legacyCount - madsanCount
+		if tiers.UnderImportGap < 0 {
+			tiers.UnderImportGap = 0
+		}
+		note = fmt.Sprintf(
+			"legacy_count is geocoded import pool (%d); name_dedup_keys=%d (not used — import is 1:1 by legacy_id); empty-name skip=%d; no-geom=%d; under_import_gap=%d",
+			tiers.ImportPoolGeocoded, tiers.NameDedupKeys, tiers.ExpectedSkipEmptyName,
+			tiers.NotImportableNoGeom, tiers.UnderImportGap,
+		)
+		return ParityTableResult{
+			LegacyTable:   spec.LegacyTable,
+			MadsanTarget:  spec.MadsanTarget,
+			LegacyCount:   legacyCount,
+			MadsanCount:   madsanCount,
+			Drift:         drift,
+			DriftPct:      round2(driftPct),
+			Critical:      spec.Critical,
+			OK:            ok,
+			Note:          note,
+			TerminalTiers: &tiers,
 		}, nil
 	}
 	return ParityTableResult{
@@ -357,6 +438,41 @@ func fetchPetroleumImportTiers(ctx context.Context, legacy *pgxpool.Pool) (Petro
 		&t.LegacyTotal,
 		&t.WithNameOrOperator,
 		&t.SyntheticNamed,
+	)
+	return t, err
+}
+
+// terminalNameExpr mirrors normalizeLegacyRow + TerminalTypeToAssetType for informational name-dedup tier.
+const terminalNameExpr = `lower(trim(regexp_replace(name, '\s+', ' ', 'g')))`
+
+const terminalAssetTypeExpr = `CASE lower(COALESCE(terminal_type, ''))
+	WHEN 'storage_tank' THEN 'tank_farm'
+	WHEN 'tank_farm' THEN 'tank_farm'
+	WHEN 'refinery' THEN 'refinery'
+	ELSE 'terminal' END`
+
+const terminalTierSQL = `
+SELECT
+  (SELECT COUNT(*)::bigint FROM oil_terminals) AS legacy_total,
+  (SELECT COUNT(*)::bigint FROM oil_terminals WHERE geom IS NULL) AS not_importable_no_geom,
+  (SELECT COUNT(*)::bigint FROM oil_terminals WHERE geom IS NOT NULL) AS import_pool_geocoded,
+  (SELECT COUNT(*)::bigint FROM oil_terminals
+     WHERE geom IS NOT NULL AND NULLIF(btrim(name), '') IS NULL) AS expected_skip_empty_name,
+  (SELECT COUNT(*)::bigint FROM (
+     SELECT DISTINCT ` + terminalNameExpr + `, ` + terminalAssetTypeExpr + `, COALESCE(upper(trim(country)), '')
+     FROM oil_terminals
+     WHERE geom IS NOT NULL AND NULLIF(btrim(name), '') IS NOT NULL
+   ) name_keys) AS name_dedup_keys
+`
+
+func fetchTerminalImportTiers(ctx context.Context, legacy *pgxpool.Pool) (TerminalImportTiers, error) {
+	var t TerminalImportTiers
+	err := legacy.QueryRow(ctx, terminalTierSQL).Scan(
+		&t.LegacyTotal,
+		&t.NotImportableNoGeom,
+		&t.ImportPoolGeocoded,
+		&t.ExpectedSkipEmptyName,
+		&t.NameDedupKeys,
 	)
 	return t, err
 }

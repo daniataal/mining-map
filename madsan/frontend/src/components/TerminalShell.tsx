@@ -263,16 +263,13 @@ export default function TerminalShell() {
             </div>
           )}
           {panel === "intel" && !selected && vertical === "metals" && (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--muted)", borderBottom: "1px solid var(--border)", lineHeight: 1.4 }}>
-              Toggle <strong style={{ color: "var(--text)", fontWeight: 600 }}>Mining licenses</strong> or{" "}
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Smelters</strong>. Cadastre coverage is partial — not all countries ingested.
+            <div className="panel-onboarding-hint">
+              Toggle <strong>Mining licenses</strong> or <strong>Smelters</strong> on the map — cadastre coverage is partial.
             </div>
           )}
           {panel === "intel" && !selected && vertical === "energy" && (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--muted)", borderBottom: "1px solid var(--border)", lineHeight: 1.4 }}>
-              Toggle <strong style={{ color: "var(--text)", fontWeight: 600 }}>Refineries</strong>,{" "}
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>Pipelines</strong> (z≥4), or{" "}
-              <strong style={{ color: "var(--text)", fontWeight: 600 }}>STS events</strong>. Vessels scale by DWT/LOA — Gulf AIS coverage is limited by provider.
+            <div className="panel-onboarding-hint">
+              Use the <strong>layers</strong> control on the map to toggle infrastructure, vessels, and STS/MCR overlays.
             </div>
           )}
           <div className="body">
@@ -320,6 +317,7 @@ export default function TerminalShell() {
                     selection={selected}
                     vertical={vertical}
                     onRelationshipLines={setRelationshipLines}
+                    onOpenLive={() => setPanel("live")}
                     onNavigate={(feat, focus) => {
                       setSelected(feat);
                       setPanel("intel");
@@ -352,6 +350,14 @@ export default function TerminalShell() {
           Ticker {formatStatusTime(tickerRefreshedAt)}
           {mapStatus.lastWsAt ? ` · AIS ${formatStatusTime(mapStatus.lastWsAt)}` : ""}
         </span>
+        {vertical === "energy" && mapStatus.gulfAisLimited && (
+          <>
+            <span className="statusbar-sep">·</span>
+            <span className="status-gulf-indicator" title="Open AIS is sparse in Persian Gulf / Hormuz — empty map ≠ no traffic">
+              Gulf AIS limited
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

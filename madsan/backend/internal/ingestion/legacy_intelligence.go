@@ -23,6 +23,8 @@ var legacyIntelligenceTables = []string{
 	"oil_commercial_events",
 	"broker_deal_packs",
 	"oil_company_contacts",
+	"oil_intelligence_cards",
+	"entity_relationships",
 }
 
 func filterIntelligenceTables(requested []string) []string {
@@ -115,6 +117,10 @@ func (s *Service) importLegacyIntelligenceTable(ctx context.Context, legacy *pgx
 		return s.importLegacyBrokerDealPacks(ctx, legacy, maxRows, dryRun)
 	case "oil_company_contacts":
 		return s.importLegacyCompanyContacts(ctx, legacy, sourceID, maxRows, dryRun)
+	case "oil_intelligence_cards":
+		return s.importLegacyIntelligenceCards(ctx, legacy, sourceID, maxRows, dryRun)
+	case "entity_relationships":
+		return s.importLegacyEntityRelationships(ctx, legacy, sourceID, maxRows, dryRun)
 	default:
 		return 0, fmt.Errorf("unknown intelligence table %q", table)
 	}
@@ -651,6 +657,128 @@ func parseJSONAny(v any) any {
 	default:
 		return v
 	}
+}
+
+func (s *Service) importLegacyIntelligenceCards(ctx context.Context, legacy *pgxpool.Pool, sourceID uuid.UUID, maxRows int, dryRun bool) (int, error) {
+	const q = `
+		SELECT c.id, c.title, c.summary, c.event_type, c.product_family_inferred,
+		       c.possible_seller, c.possible_buyer, c.confidence, c.severity, c.evidence,
+		       c.company_id, c.terminal_id, c.port_call_id, pc.mmsi
+		FROM oil_intelligence_cards c
+		LEFT JOIN oil_port_calls pc ON pc.id = c.port_call_id
+		ORDER BY c.created_at, c.id OFFSET $1 LIMIT $2`
+	return s.batchLegacyImport(ctx, legacy, maxRows, dryRun, q, func(row map[string]any) error {
+		legacyID := fmt.Sprint(row["id"])
+		entityType, entityID := s.resolveIntelCardEntity(ctx, legacy, row)
+		if entityID == uuid.Nil {
+			return nil
+		}
+		conf, _ := toFloat(row["confidence"])
+		if conf <= 1 {
+			conf *= 100
+		}
+		title := fmt.Sprint(row["title"])
+		summary := fmt.Sprint(row["summary"])
+		claimValue := title
+		if claimValue == "" || claimValue == "<nil>" {
+			claimValue = summary
+		}
+		evidenceJSON, _ := json.Marshal(map[string]any{
+			"legacy_card_id":          legacyID,
+			"event_type":              row["event_type"],
+			"product_family_inferred": row["product_family_inferred"],
+			"possible_seller":         row["possible_seller"],
+			"possible_buyer":          row["possible_buyer"],
+			"severity":                row["severity"],
+			"summary":                 summary,
+			"source":                  "legacy_import",
+		})
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO evidence (source_id, entity_type, entity_id, claim_type, claim_value, extracted_text, confidence_score, tier)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'inferred')
+			ON CONFLICT (source_id, entity_type, entity_id, claim_type) DO UPDATE SET
+				claim_value = EXCLUDED.claim_value,
+				extracted_text = EXCLUDED.extracted_text,
+				confidence_score = GREATEST(evidence.confidence_score, EXCLUDED.confidence_score)
+		`, sourceID, entityType, entityID, "intel_card:"+legacyID, claimValue, string(evidenceJSON), conf)
+		return err
+	})
+}
+
+func (s *Service) importLegacyEntityRelationships(ctx context.Context, legacy *pgxpool.Pool, sourceID uuid.UUID, maxRows int, dryRun bool) (int, error) {
+	const q = `
+		SELECT fingerprint, source_entity_kind, source_entity_ref, target_entity_kind, target_entity_ref,
+		       target_name, relationship_type, relationship_label, ownership_pct, confidence_score,
+		       source_name, source_url, source_type, raw_payload, extracted_from
+		FROM entity_relationships
+		WHERE fingerprint IS NOT NULL AND NULLIF(trim(fingerprint), '') IS NOT NULL
+		ORDER BY fingerprint OFFSET $1 LIMIT $2`
+	return s.batchLegacyImport(ctx, legacy, maxRows, dryRun, q, func(row map[string]any) error {
+		fingerprint := strings.TrimSpace(fmt.Sprint(row["fingerprint"]))
+		if fingerprint == "" {
+			return nil
+		}
+		sourceKind := strings.ToLower(fmt.Sprint(row["source_entity_kind"]))
+		sourceRef := strings.TrimSpace(fmt.Sprint(row["source_entity_ref"]))
+		targetName := normalizeName(fmt.Sprint(row["target_name"]))
+		if targetName == "" {
+			return nil
+		}
+		var fromType string
+		var fromID uuid.UUID
+		switch sourceKind {
+		case "license":
+			fromType = "asset"
+			fromID = s.assetIDByLegacyLicenseRef(ctx, sourceRef)
+		default:
+			return nil
+		}
+		if fromID == uuid.Nil {
+			return nil
+		}
+		toID := s.companyIDByName(ctx, targetName, "")
+		if toID == uuid.Nil {
+			return nil
+		}
+		relType := mapLegacyRelationshipType(strings.TrimSpace(fmt.Sprint(row["relationship_type"])))
+		if relType == "" {
+			return nil
+		}
+		conf := legacyRelationshipScore(mustFloat(row["confidence_score"]))
+		meta, _ := json.Marshal(map[string]any{
+			"legacy_fingerprint": fingerprint,
+			"source_entity_kind": sourceKind,
+			"source_entity_ref":  sourceRef,
+			"target_name":        targetName,
+			"relationship_label": row["relationship_label"],
+			"ownership_pct":      row["ownership_pct"],
+			"source_name":        row["source_name"],
+			"source_url":         row["source_url"],
+			"source_type":        row["source_type"],
+			"extracted_from":     row["extracted_from"],
+			"raw_payload":        parseJSONAny(row["raw_payload"]),
+		})
+		snippet := targetName
+		if label := fmt.Sprint(row["relationship_label"]); label != "" && label != "<nil>" {
+			snippet = label
+		}
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO relationships (
+				from_entity_type, from_entity_id, to_entity_type, to_entity_id,
+				relationship_type, source_id, confidence_score, evidence_snippet, metadata
+			) VALUES ($1, $2, 'company', $3, $4, NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'), $6, $7, $8)
+			ON CONFLICT ((metadata->>'legacy_fingerprint')) WHERE metadata->>'legacy_fingerprint' IS NOT NULL
+			DO UPDATE SET
+				confidence_score = GREATEST(relationships.confidence_score, EXCLUDED.confidence_score),
+				evidence_snippet = COALESCE(NULLIF(EXCLUDED.evidence_snippet, ''), relationships.evidence_snippet)
+		`, fromType, fromID, toID, relType, sourceID, conf, snippet, meta)
+		return err
+	})
+}
+
+func mustFloat(v any) float64 {
+	f, _ := toFloat(v)
+	return f
 }
 
 // RunPhaseAImport runs all Phase A intelligence table imports (CLI entry).

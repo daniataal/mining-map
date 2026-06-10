@@ -1,8 +1,8 @@
 # MadSan V2 — daily Postgres backup (cron example)
 #
-# Install on prod VM (operator adjusts REPO_ROOT):
+# Install on prod VM (operator adjusts REPO_ROOT if not /opt/mining-map):
 #   crontab -e
-#   # paste the cron line below (replace /path/to/mining-map)
+#   # paste the cron block below
 #
 # Prerequisites:
 #   - docker + docker compose available to the cron user
@@ -10,13 +10,14 @@
 #   - repo checkout at REPO_ROOT; backups land in REPO_ROOT/backups/
 #
 # Verify manually first:
-#   cd /path/to/mining-map && ./madsan/scripts/backup_db.sh
+#   cd /opt/mining-map && ./madsan/scripts/backup_db.sh
+#   ls -lh backups/madsan_v2_pre_*.dump
 #
 # Optional: prune old dumps after N days (example — adjust retention):
-#   find /path/to/mining-map/backups -name 'madsan_v2_pre_*.dump' -mtime +14 -delete
+#   find /opt/mining-map/backups -name 'madsan_v2_pre_*.dump' -mtime +14 -delete
 
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Daily 02:30 local — timestamped dump via backup_db.sh
-30 2 * * * cd /path/to/mining-map && ./madsan/scripts/backup_db.sh >> backups/backup_cron.log 2>&1
+30 2 * * * cd /opt/mining-map && ./madsan/scripts/backup_db.sh >> backups/backup_cron.log 2>&1

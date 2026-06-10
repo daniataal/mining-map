@@ -10,6 +10,8 @@ madsan/frontend/.env.local
 madsan/frontend/node_modules/
 madsan/frontend/.next/
 madsan/frontend/tsconfig.tsbuildinfo
+# Go cmd build artifacts (use go run ./cmd/...)
+madsan/backend/legacy-parity
 mining-viz/node_modules/
 mining-viz/dist/
 # Generated license backups (source of truth is Postgres; export via admin API)

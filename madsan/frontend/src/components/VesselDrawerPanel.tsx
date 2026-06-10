@@ -163,6 +163,10 @@ export default function VesselDrawerPanel({ dossier, onNavigateMmsi }: Props) {
   );
 
   useEffect(() => {
+    setTab("identity");
+  }, [mmsi]);
+
+  useEffect(() => {
     if (tab !== "port-calls" || !mmsi) return;
     setPortCallsLoading(true);
     fetchVesselPortCalls(mmsi)
@@ -191,7 +195,7 @@ export default function VesselDrawerPanel({ dossier, onNavigateMmsi }: Props) {
   }, [tab, summary]);
 
   return (
-    <div className="vessel-drawer">
+    <div className="vessel-drawer vessel-drawer-selected">
       <div style={{ marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
         <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
           vessel · {score ?? "—"}

@@ -9,6 +9,7 @@ import {
   VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
 import HistoricChart from "@/components/HistoricChart";
+import IntelHomeSummary from "@/components/IntelHomeSummary";
 import VesselDrawerPanel from "@/components/VesselDrawerPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
@@ -110,6 +111,7 @@ type Props = {
   vertical?: "energy" | "metals";
   onNavigate?: (selection: MapSelection, focus?: { lat: number; lng: number }) => void;
   onRelationshipLines?: (lines: FeatureCollection) => void;
+  onOpenLive?: () => void;
 };
 
 function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
@@ -137,7 +139,7 @@ function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-export default function EntityDossierPanel({ selection, vertical = "energy", onNavigate, onRelationshipLines }: Props) {
+export default function EntityDossierPanel({ selection, vertical = "energy", onNavigate, onRelationshipLines, onOpenLive }: Props) {
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -221,13 +223,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
         </>
       );
     }
-    return (
-      <>
-        <p>Click a map feature to inspect evidence-backed intelligence.</p>
-        <p>Energy: granular infrastructure toggles, STS/MCR overlays, vessel track on focus.</p>
-        <p className="disclaimer">Provider coverage varies by region. Missing data is shown honestly.</p>
-      </>
-    );
+    return <IntelHomeSummary onOpenLive={onOpenLive} />;
   }
 
   if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;
@@ -253,16 +249,18 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
   return (
     <div className="dossier-tabbed">
-      <h3 style={{ margin: "0 0 0.5rem" }}>{dossier.name}</h3>
-      <div style={{ marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
-          {dossier.entity_type} · {score ?? "—"}
-        </span>
-        {dossier.opportunity_score != null && (
-          <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
-            opp {Math.round(dossier.opportunity_score)}
+      <div className="dossier-head">
+        <h3 className="dossier-title">{dossier.name}</h3>
+        <div className="dossier-head-badges">
+          <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
+            {dossier.entity_type} · {score ?? "—"}
           </span>
-        )}
+          {dossier.opportunity_score != null && (
+            <span className={`badge compact ${confidenceTierClass(dossier.opportunity_score)}`}>
+              opp {Math.round(dossier.opportunity_score)}
+            </span>
+          )}
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -294,11 +292,14 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
         <TabsContent value="signals">
           {dossier.signals && dossier.signals.length > 0 ? (
-            <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
+            <ul className="dossier-list">
               {dossier.signals.map((s) => (
                 <li key={`${s.signal_type}-${s.label}`}>
-                  {s.label}
-                  <span style={{ color: "var(--muted)" }}> ({s.tier}{s.detail ? ` — ${s.detail}` : ""})</span>
+                  <span className="dossier-list-main">{s.label}</span>
+                  <span className="dossier-list-meta">
+                    {s.tier}
+                    {s.detail ? ` — ${s.detail}` : ""}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -361,16 +362,22 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
         <TabsContent value="evidence">
           {dossier.evidence && dossier.evidence.length > 0 ? (
-            <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>
+            <ul className="dossier-list">
               {dossier.evidence.map((e) => (
                 <li key={`${e.claim_type}-${e.source_name}`}>
-                  <span style={{ color: "var(--text)" }}>{e.claim_type}</span>
-                  {e.claim_value && (
-                    <span style={{ color: "var(--muted)" }}>
-                      : {e.claim_value.length > 48 ? `${e.claim_value.slice(0, 48)}…` : e.claim_value}
-                    </span>
-                  )}
-                  <span style={{ color: "var(--muted)" }}> — {e.source_name}{e.tier ? ` (${e.tier})` : ""}</span>
+                  <span className="dossier-list-main">
+                    {e.claim_type}
+                    {e.claim_value && (
+                      <span className="dossier-list-value">
+                        {" · "}
+                        {e.claim_value.length > 48 ? `${e.claim_value.slice(0, 48)}…` : e.claim_value}
+                      </span>
+                    )}
+                  </span>
+                  <span className="dossier-list-meta">
+                    {e.source_name}
+                    {e.tier ? ` (${e.tier})` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

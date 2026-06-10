@@ -49,6 +49,8 @@ func sourceMeta(slug string) (name, typ, category string) {
 		return "Bunker fuel suppliers seed", "file", "government_register"
 	case strings.HasPrefix(slug, "legacy_"):
 		return strings.ReplaceAll(slug, "_", " "), "etl", "legacy_import"
+	case strings.HasPrefix(slug, "gem_"):
+		return strings.ReplaceAll(slug, "_", " "), "file", "government_register"
 	case slug == "legacy_oil_ais_positions":
 		return "Legacy AIS positions", "api", "ais"
 	case slug == "vessel_enrichment":

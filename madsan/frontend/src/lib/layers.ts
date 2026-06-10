@@ -18,7 +18,26 @@ export type LayerDef = {
   defaultOn: boolean;
   /** Group header in layer drawer (no checkbox) */
   group?: string;
+  /** Point color on the map (curated palette) */
+  color?: string;
 };
+
+/** Vector basemap — free, keyless, dark navy with borders + labels. */
+export const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
+
+/** Curated map palette — keep legend + layer paint in sync. */
+export const MAP_COLORS = {
+  tankFarm: "#2dd4bf",
+  terminal: "#fbbf24",
+  refinery: "#fb7185",
+  stsZone: "#c084fc",
+  stsEvent: "#e879f9",
+  vessel: "#38bdf8",
+  mine: "#e8b923",
+  smelter: "#fb923c",
+  corridorLoad: "#fbbf24",
+  corridorDischarge: "#38bdf8",
+} as const;
 
 export const LAYER_REGISTRY: LayerDef[] = [
   {
@@ -29,6 +48,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileSourceKey: "src-energy-assets",
     assetTypes: ["tank_farm", "storage"],
     group: "Infrastructure",
+    color: MAP_COLORS.tankFarm,
     defaultOn: true,
   },
   {
@@ -39,6 +59,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileSourceKey: "src-energy-assets",
     assetTypes: ["terminal", "port", "berth"],
     group: "Infrastructure",
+    color: MAP_COLORS.terminal,
     defaultOn: true,
   },
   {
@@ -49,6 +70,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileSourceKey: "src-energy-assets",
     assetTypes: ["refinery"],
     group: "Infrastructure",
+    color: MAP_COLORS.refinery,
     defaultOn: true,
   },
   {
@@ -60,6 +82,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     assetTypes: ["sts_zone"],
     group: "Infrastructure",
     drawerHint: "Known STS zones from legacy import",
+    color: MAP_COLORS.stsZone,
     defaultOn: false,
   },
   {
@@ -105,6 +128,8 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileLayer: "metals-assets",
     tileSourceKey: "src-metals-assets",
     drawerHint: "License polygons — partial country coverage",
+    assetTypes: ["mine"],
+    color: MAP_COLORS.mine,
     defaultOn: true,
   },
   {
@@ -113,6 +138,8 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "metals",
     tileLayer: "metals-assets",
     tileSourceKey: "src-metals-assets",
+    assetTypes: ["smelter", "processing_plant"],
+    color: MAP_COLORS.smelter,
     defaultOn: true,
   },
   {

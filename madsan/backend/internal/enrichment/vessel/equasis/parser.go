@@ -25,10 +25,10 @@ type ShipRecord struct {
 }
 
 type ManagementRow struct {
-	IMO      string
-	Role     string
-	Name     string
-	Address  string
+	IMO       string
+	Role      string
+	Name      string
+	Address   string
 	Effective string
 }
 

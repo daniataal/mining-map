@@ -425,6 +425,9 @@ func (s *Service) upsertMaster(ctx context.Context, rec NormalizedRecord) (uuid.
 		if rec.Name == "" {
 			return uuid.Nil, nil
 		}
+		if rec.SourceSlug == legacyOilTerminalsTable && rec.ExternalID != "" {
+			return s.upsertOilTerminalAsset(ctx, rec, assetType, score, status)
+		}
 		var existing uuid.UUID
 		err := s.pool.QueryRow(ctx, `
 			SELECT id FROM assets
@@ -445,6 +448,38 @@ func (s *Service) upsertMaster(ctx context.Context, rec NormalizedRecord) (uuid.
 		`, rec.Name, strings.ToLower(rec.Name), assetType, rec.Latitude, rec.Longitude, rec.CountryCode, rec.Commodities, score, status, rec.RawPayload, rec.SourceSlug, rec.ExternalID).Scan(&assetID)
 		return assetID, err
 	}
+}
+
+// upsertOilTerminalAsset imports curated oil_terminals 1:1 by legacy_id. Name+country dedup
+// would collapse ~18k distinct storage tanks that share generic names like "Unnamed Storage Terminal".
+func (s *Service) upsertOilTerminalAsset(ctx context.Context, rec NormalizedRecord, assetType string, score float64, status string) (uuid.UUID, error) {
+	var assetID uuid.UUID
+	err := s.pool.QueryRow(ctx, `
+		SELECT id FROM assets WHERE legacy_table = $1 AND legacy_id = $2
+	`, rec.SourceSlug, rec.ExternalID).Scan(&assetID)
+	if err == nil {
+		_, err = s.pool.Exec(ctx, `
+			UPDATE assets SET
+				name = $2, normalized_name = lower($2), asset_type = $3,
+				latitude = $4::double precision, longitude = $5::double precision,
+				geom = CASE WHEN $4::double precision IS NOT NULL AND $5::double precision IS NOT NULL
+					THEN ST_SetSRID(ST_MakePoint($5::float8,$4::float8),4326)::geography ELSE geom END,
+				country_code = $6, commodities_supported = $7,
+				confidence_score = $8, data_quality_status = $9,
+				raw_source_payload = $10, updated_at = now()
+			WHERE id = $1
+		`, assetID, rec.Name, assetType, rec.Latitude, rec.Longitude, rec.CountryCode, rec.Commodities, score, status, rec.RawPayload)
+		return assetID, err
+	}
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO assets (name, normalized_name, asset_type, latitude, longitude, geom, country_code, commodities_supported, confidence_score, data_quality_status, raw_source_payload, legacy_table, legacy_id)
+		VALUES ($1,$2,$3,$4::double precision,$5::double precision,
+			CASE WHEN $4::double precision IS NOT NULL AND $5::double precision IS NOT NULL
+				THEN ST_SetSRID(ST_MakePoint($5::float8,$4::float8),4326)::geography ELSE NULL END,
+			$6,$7,$8,$9,$10,$11,$12)
+		RETURNING id
+	`, rec.Name, strings.ToLower(rec.Name), assetType, rec.Latitude, rec.Longitude, rec.CountryCode, rec.Commodities, score, status, rec.RawPayload, rec.SourceSlug, rec.ExternalID).Scan(&assetID)
+	return assetID, err
 }
 
 func (s *Service) ScanRawDir(ctx context.Context) error {

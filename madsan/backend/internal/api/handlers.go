@@ -166,13 +166,19 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	evidence, _ := loadEvidence(r.Context(), s.pool, "asset", uid)
 	summary := map[string]any{"asset_type": assetType, "country": country}
 	enrichAssetSummary(summary, assetType, commodities, rawPayload, geomType)
+	limitations := []string{"Verify against source evidence before deal execution"}
+	if enrich, err := loadAssetEnrichment(r.Context(), s.pool, uid); err == nil {
+		if extra := applyAssetEnrichment(summary, enrich); len(extra) > 0 {
+			limitations = append(limitations, extra...)
+		}
+	}
 	resp := CoreEntityResponse{
 		ID: id, EntityType: "asset", Name: name,
 		Summary:     summary,
 		Location:    map[string]any{"latitude": lat, "longitude": lng},
 		Confidence:  ConfidenceBlock{Score: conf, Status: status},
 		Evidence:    evidence,
-		Limitations: []string{"Verify against source evidence before deal execution"},
+		Limitations: limitations,
 	}
 	attachAssetSignals(&resp, assetType, commodities)
 	resp.SignalHistory = loadSignalHistory(r.Context(), s.pool, "asset", uid, 15)
