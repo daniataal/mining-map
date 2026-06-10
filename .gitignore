@@ -30,3 +30,16 @@ data/gem/goit-pipeline-routes/
 .vscode/
 # Local graphify knowledge graph (regenerate: graphify update .)
 graphify-out/
+
+# Local database/backups - never commit
+backups/
+*.dump
+*.sql.gz
+*.bak
+*.backup
+*.tar
+*.tar.gz
+*.zip
+
+# Build artifacts
+*.tsbuildinfo
