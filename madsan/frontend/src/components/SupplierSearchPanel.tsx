@@ -43,7 +43,12 @@ const PRESETS: Preset[] = [
   { label: "Gold Ghana", commodity: "gold", country_code: "GH" },
 ];
 
-export default function SupplierSearchPanel() {
+type Props = {
+  canSearch?: boolean;
+  authed?: boolean;
+};
+
+export default function SupplierSearchPanel({ canSearch = true, authed = true }: Props) {
   const [q, setQ] = useState("");
   const [commodity, setCommodity] = useState("");
   const [country, setCountry] = useState("");
@@ -56,6 +61,7 @@ export default function SupplierSearchPanel() {
   const [selected, setSelected] = useState<CompanyDetail | null>(null);
 
   const search = useCallback(async (overrides?: Partial<Preset & { q: string }>) => {
+    if (!canSearch) return;
     setLoading(true);
     const params = new URLSearchParams();
     const query = overrides?.q ?? q;
@@ -71,10 +77,22 @@ export default function SupplierSearchPanel() {
     if (lon != null) params.set("near_lon", String(lon));
     if (radius != null) params.set("radius_km", String(radius));
     const res = await fetch(`${API_BASE}/api/energy/suppliers/search?${params}`, authFetchOpts);
+    if (res.status === 401) {
+      setResults([]);
+      setSelected(null);
+      setLoading(false);
+      return;
+    }
+    if (res.status === 403) {
+      setResults([]);
+      setSelected(null);
+      setLoading(false);
+      return;
+    }
     setResults(res.ok ? await res.json() : []);
     setSelected(null);
     setLoading(false);
-  }, [q, commodity, country, nearLat, nearLon, radiusKm]);
+  }, [q, commodity, country, nearLat, nearLon, radiusKm, canSearch]);
 
   function applyPreset(preset: Preset) {
     setActivePreset(preset.label);
@@ -99,6 +117,16 @@ export default function SupplierSearchPanel() {
 
   return (
     <div style={{ fontSize: 13 }}>
+      {!authed && (
+        <p style={{ color: "var(--muted)", marginBottom: 10 }}>
+          Sign in from <a href="/deals">Deals</a> or <a href="/portal">Portal</a> to run ranked supplier search.
+        </p>
+      )}
+      {authed && !canSearch && (
+        <p style={{ color: "var(--warn)", marginBottom: 10 }}>
+          Your plan does not include supplier discovery. Upgrade to search ranked suppliers.
+        </p>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
         {PRESETS.map((p) => (
           <button

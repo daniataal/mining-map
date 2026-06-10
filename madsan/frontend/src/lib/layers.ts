@@ -7,6 +7,8 @@ export type LayerDef = {
   tileSourceKey?: string;
   /** Optional sub-label under the checkbox (e.g. AIS hint, cadastre tier) */
   drawerHint?: string;
+  /** Gated by map_premium_layers entitlement */
+  premium?: boolean;
   defaultOn: boolean;
 };
 
@@ -30,8 +32,22 @@ export const LAYER_REGISTRY: LayerDef[] = [
     tileSourceKey: "src-metals-assets",
     defaultOn: true,
   },
-  { id: "pipelines", label: "Pipelines (petroleum OSM)", vertical: "energy", tileLayer: "pipelines", defaultOn: false },
-  { id: "prices", label: "Price markers", vertical: "shared", defaultOn: false },
+  {
+    id: "pipelines",
+    label: "Pipelines (petroleum OSM)",
+    vertical: "energy",
+    tileLayer: "pipelines",
+    premium: true,
+    drawerHint: "Premium layer — requires plan entitlement",
+    defaultOn: false,
+  },
+  {
+    id: "prices",
+    label: "Price markers",
+    vertical: "shared",
+    drawerHint: "Deferred — use top ticker; geo price MVT when prices table has locations",
+    defaultOn: false,
+  },
 ];
 
 export function layersForVertical(vertical: "energy" | "metals"): LayerDef[] {

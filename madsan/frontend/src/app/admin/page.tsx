@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
+import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 type Insights = {
@@ -173,23 +174,38 @@ export default function AdminPage() {
   const [msg, setMsg] = useState("");
   const [dedupMsg, setDedupMsg] = useState("");
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [entitlementError, setEntitlementError] = useState("");
   const [authError, setAuthError] = useState("");
   const [platform, setPlatform] = useState<PlatformHealth | null>(null);
   const [runtime, setRuntime] = useState<RuntimeHealth | null>(null);
 
   useEffect(() => {
     clearLegacyAuthTokens();
-    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
-      .then((r) => setAuthed(r.ok))
-      .catch(() => setAuthed(false));
+    fetchMe()
+      .then((profile) => {
+        setMe(profile);
+        setAuthed(!!profile?.uid);
+      })
+      .catch(() => {
+        setMe(null);
+        setAuthed(false);
+      });
   }, []);
 
+  const canUseAdmin = canUse(me, FEATURE.apiAccess);
+
   const refresh = useCallback(() => {
-    if (!authed) return;
+    if (!authed || !canUseAdmin) return;
+    setEntitlementError("");
     fetch(`${API_BASE}/api/admin/insights/summary`, fetchOpts)
       .then((r) => {
         if (r.status === 401) {
           setAuthed(false);
+          return null;
+        }
+        if (r.status === 403) {
+          setEntitlementError("Your plan does not include admin API access.");
           return null;
         }
         return r.ok ? r.json() : null;
@@ -220,7 +236,7 @@ export default function AdminPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setRuntime(d))
       .catch(() => {});
-  }, [authed]);
+  }, [authed, canUseAdmin]);
 
   useEffect(() => {
     if (!authed) return;
@@ -255,7 +271,9 @@ export default function AdminPage() {
       setAuthError(await login.text());
       return;
     }
-    setAuthed(true);
+    const profile = await fetchMe();
+    setMe(profile);
+    setAuthed(!!profile?.uid);
   }
 
   async function enqueueClusterMergeReview(normalizedName: string) {
@@ -391,6 +409,21 @@ export default function AdminPage() {
     return (
       <main style={{ maxWidth: 1100, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
         <p style={{ color: "var(--muted)" }}>Checking session…</p>
+      </main>
+    );
+  }
+
+  if (!canUseAdmin) {
+    return (
+      <main style={{ maxWidth: 640, margin: "2rem auto", padding: "0 1rem", fontSize: 13 }}>
+        <h1 style={{ marginTop: 0 }}>Admin console</h1>
+        <p style={{ color: "var(--warn)" }}>
+          {entitlementError || "Your plan does not include admin API access. Free tier includes api_access with quota — sign in with a subscribed tenant."}
+        </p>
+        <p style={{ color: "var(--muted)" }}>
+          Plan: <code>{me?.plan || "unknown"}</code>
+        </p>
+        <Link href="/" style={{ fontSize: 12 }}>← Terminal</Link>
       </main>
     );
   }

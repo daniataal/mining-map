@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
+import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 const fetchOpts = authFetchOpts;
@@ -23,6 +24,7 @@ const inputStyle: React.CSSProperties = {
 
 export default function PortalPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
@@ -30,9 +32,15 @@ export default function PortalPage() {
 
   useEffect(() => {
     clearLegacyAuthTokens();
-    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
-      .then((r) => setAuthed(r.ok))
-      .catch(() => setAuthed(false));
+    fetchMe()
+      .then((profile) => {
+        setMe(profile);
+        setAuthed(!!profile?.uid);
+      })
+      .catch(() => {
+        setMe(null);
+        setAuthed(false);
+      });
   }, []);
 
   async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
@@ -61,8 +69,12 @@ export default function PortalPage() {
       setAuthError(await login.text());
       return;
     }
-    setAuthed(true);
+    const profile = await fetchMe();
+    setMe(profile);
+    setAuthed(!!profile?.uid);
   }
+
+  const canSubmit = canUse(me, FEATURE.supplierPortal);
 
   async function submitOffer(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -100,6 +112,12 @@ export default function PortalPage() {
     if (res.status === 401) {
       setAuthed(false);
       setResult({ error: "Session expired — sign in again." });
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 403) {
+      setResult({ error: "Your plan does not include supplier portal submissions." });
       setLoading(false);
       return;
     }
@@ -188,6 +206,11 @@ export default function PortalPage() {
         </form>
       )}
 
+      {authed && !canSubmit && (
+        <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
+          Your plan does not include supplier portal submissions.
+        </p>
+      )}
       {authed && (
         <form onSubmit={submitOffer} style={{ display: "grid", gap: "0.75rem" }}>
           <label style={{ display: "grid", gap: 4 }}>
@@ -228,7 +251,7 @@ export default function PortalPage() {
           </label>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !canSubmit}
             style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}
           >
             {loading ? "Submitting…" : "Submit for review"}

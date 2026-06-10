@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
 import { confidenceTierClass, confidenceTierLabel } from "@/lib/confidenceTier";
 import { authFetchOpts } from "@/lib/auth";
+import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
@@ -71,9 +72,14 @@ export default function TerminalShell() {
     wsState: "connecting",
     activeLayerCount: 2,
   });
+  const [me, setMe] = useState<MeResponse | null>(null);
 
   const onRuntimeStatus = useCallback((status: MapRuntimeStatus) => {
     setMapStatus(status);
+  }, []);
+
+  useEffect(() => {
+    fetchMe().then(setMe).catch(() => setMe(null));
   }, []);
 
   useEffect(() => {
@@ -168,10 +174,12 @@ export default function TerminalShell() {
         </nav>
         <IntelligenceMap
           vertical={vertical}
+          selection={selected}
           onSelect={onMapSelect}
           mapFocus={mapFocus}
           relationshipLines={relationshipLines}
           onRuntimeStatus={onRuntimeStatus}
+          entitlements={me?.entitlements}
         />
         <aside className="panel">
           <header className="panel-header">
@@ -219,7 +227,10 @@ export default function TerminalShell() {
           )}
           <div className="body">
             {panel === "suppliers" ? (
-              <SupplierSearchPanel />
+              <SupplierSearchPanel
+                canSearch={canUse(me, FEATURE.supplierDiscovery)}
+                authed={!!me?.uid}
+              />
             ) : (
               <EntityDossierPanel
                 selection={selected}
