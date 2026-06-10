@@ -3,9 +3,20 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FeatureCollection } from "geojson";
+import {
+  AssetOperatorCapacitySection,
+  VesselOwnershipSection,
+} from "@/components/DossierEnrichmentSections";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
+import {
+  type CoreDossier,
+  resolveAssetEnrichment,
+  resolveVesselEnrichment,
+  formatSummaryValue,
+  summaryKeyHiddenInEnrichment,
+} from "@/lib/dossier";
 import {
   isPointInPersianGulf,
   LIMITED_AIS_COVERAGE_DETAIL,
@@ -66,19 +77,11 @@ type SignalHistoryEntry = {
   sts_factors?: STSScoreFactor[];
 };
 
-type Dossier = {
-  id: string;
-  entity_type: string;
-  name: string;
-  summary?: Record<string, unknown>;
-  location?: Record<string, unknown>;
-  confidence?: { score?: number; status?: string; last_verified_at?: string };
+type Dossier = CoreDossier & {
   evidence?: EvidenceClaim[];
   signals?: EntitySignal[];
   signal_history?: SignalHistoryEntry[];
   relationships?: RelationshipEdge[];
-  opportunity_score?: number;
-  limitations?: string[];
 };
 
 function formatObservedAt(iso: string) {
@@ -224,6 +227,12 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
   const score = dossier.confidence?.score;
   const summary = dossier.summary ?? {};
+  const enrichment =
+    dossier.entity_type === "vessel"
+      ? resolveVesselEnrichment(dossier)
+      : dossier.entity_type === "asset"
+        ? resolveAssetEnrichment(dossier)
+        : null;
   const loc = dossier.location ?? {};
   const lat = loc.latitude != null ? Number(loc.latitude) : NaN;
   const lng = loc.longitude != null ? Number(loc.longitude) : NaN;
@@ -264,6 +273,9 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
         </div>
       )}
 
+      <VesselOwnershipSection dossier={dossier} />
+      <AssetOperatorCapacitySection dossier={dossier} />
+
       {dossier.signal_history && dossier.signal_history.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <strong>Signal history</strong>
@@ -295,14 +307,16 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       )}
 
       <dl style={{ margin: "0 0 12px", display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", color: "var(--muted)" }}>
-        {Object.entries(summary).map(([k, v]) => (
-          v != null && String(v) !== "" ? (
+        {Object.entries(summary).map(([k, v]) => {
+          const display = formatSummaryValue(v);
+          if (display == null || summaryKeyHiddenInEnrichment(k, enrichment, dossier.entity_type)) return null;
+          return (
             <span key={k} style={{ display: "contents" }}>
               <dt>{k.replace(/_/g, " ")}</dt>
-              <dd style={{ margin: 0, color: "var(--text)" }}>{String(v)}</dd>
+              <dd style={{ margin: 0, color: "var(--text)" }}>{display}</dd>
             </span>
-          ) : null
-        ))}
+          );
+        })}
         {loc.latitude != null && (
           <>
             <dt>coordinates</dt>

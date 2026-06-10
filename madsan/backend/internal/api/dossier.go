@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	venrich "github.com/madsan/intelligence/internal/enrichment/vessel"
 	"github.com/madsan/intelligence/internal/intelligence"
 )
 
@@ -59,6 +60,25 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 		return
 	}
 	evidence, _ := loadEvidence(r.Context(), s.pool, "vessel", uid)
+	var enrich vesselEnrichmentRow
+	if mmsi != "" {
+		_ = s.pool.QueryRow(r.Context(), `
+			SELECT COALESCE(owner_name,''), COALESCE(operator_name,''),
+			       COALESCE(source,''), COALESCE(tier,''), COALESCE(confidence_score,0),
+			       stale_after, fetched_at, deadweight_tons, gross_tonnage,
+			       COALESCE(vessel_class,''), COALESCE(flag,''), COALESCE(limitations,'{}')
+			FROM vessel_enrichment WHERE mmsi = $1
+		`, mmsi).Scan(
+			&enrich.OwnerName, &enrich.OperatorName, &enrich.Source, &enrich.Tier, &enrich.Confidence,
+			&enrich.StaleAfter, &enrich.FetchedAt, &enrich.DWT, &enrich.GrossTonnage,
+			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations,
+		)
+	}
+	if enrich.OwnerName == "" && enrich.OperatorName == "" && enrich.Tier == "" && s.legacyPool != nil && (mmsi != "" || imo != "") {
+		if res, err := (&venrich.LegacyCacheProvider{Pool: s.legacyPool}).Enrich(r.Context(), mmsi, imo, name); err == nil {
+			enrich = vesselEnrichmentFromResult(res)
+		}
+	}
 	score := 0.0
 	if conf != nil {
 		score = *conf
@@ -66,6 +86,7 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	summary := map[string]any{
 		"vessel_type": vtype, "mmsi": mmsi, "imo": imo, "flag": flag, "destination": dest,
 	}
+	mergeVesselEnrichmentSummary(summary, enrich)
 	if lastSeen != nil {
 		summary["last_seen_at"] = lastSeen.UTC().Format(time.RFC3339)
 		summary["ais_fresh"] = time.Since(*lastSeen) < 72*time.Hour
@@ -85,11 +106,11 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 		ID: id, EntityType: "vessel", Name: name,
 		Summary: summary, Location: loc,
 		Confidence: ConfidenceBlock{Score: score, Status: status, LastVerifiedAt: lastSeen},
-		Evidence: evidence,
-		Limitations: []string{
+		Evidence:   evidence,
+		Limitations: append([]string{
 			"AIS positions reflect provider coverage — Persian Gulf may be sparse",
 			"Intelligence only — not voyage or cargo confirmation",
-		},
+		}, enrichmentLimitations(enrich)...),
 	}
 	signals, opp := intelligence.VesselSignals(lastSeen, speed, score)
 	resp.Signals = toAPISignals(signals)
