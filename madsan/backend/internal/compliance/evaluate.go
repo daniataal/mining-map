@@ -232,9 +232,84 @@ func EnergyMissingDocuments(commodity string) []string {
 		return append(base, "CN code / customs classification", "Product specification EN590")
 	case strings.Contains(c, "crude"):
 		return append(base, "Bill of lading", "Assay certificate")
+	case strings.Contains(c, "fuel oil"), strings.Contains(c, "ifo"), strings.Contains(c, "hfo") && !strings.Contains(c, "vlsfo"):
+		return append(base, "Bill of lading", "ISO 8217 marine fuel spec", "Vessel nomination")
+	case strings.Contains(c, "jet"), strings.Contains(c, "aviation"), strings.Contains(c, "kerosene"):
+		return append(base, "DEF STAN / Jet A-1 spec sheet", "Into-plane delivery ticket", "Airport fuel farm release")
 	default:
 		return base
 	}
+}
+
+func MetalsMissingDocuments(commodity string) []string {
+	c := strings.ToLower(commodity)
+	base := []string{
+		"Assay certificate (accredited lab)",
+		"Certificate of origin",
+		"KYC/AML beneficial ownership disclosure",
+	}
+	switch {
+	case strings.Contains(c, "gold"):
+		return append(base, "LBMA good delivery certificate", "Refinery license", "Export permit")
+	case strings.Contains(c, "copper"), strings.Contains(c, "cathode"):
+		return append(base, "Warehouse warrant", "Purity / cathode brand certificate")
+	case strings.Contains(c, "silver"):
+		return append(base, "LBMA silver delivery standard", "Vault receipt")
+	default:
+		return append(base, "Mining license or concession evidence")
+	}
+}
+
+// DealMissingDocuments returns the commodity-appropriate document checklist.
+func DealMissingDocuments(commodity string) []string {
+	if CommodityFamily(commodity) == "mining" {
+		return MetalsMissingDocuments(commodity)
+	}
+	return EnergyMissingDocuments(commodity)
+}
+
+// RecommendedQuestions returns broker DD prompts tailored to commodity and terms.
+func RecommendedQuestions(commodity, incoterm, location string) []string {
+	family := CommodityFamily(commodity)
+	c := strings.ToLower(strings.TrimSpace(commodity))
+	if family == "mining" {
+		qs := []string{
+			"Request assay from accredited lab on stamped sample",
+			"Verify export license and chain-of-custody to refinery",
+		}
+		if strings.Contains(c, "gold") {
+			qs = append(qs, "Confirm LBMA refinery status and good-delivery bar list")
+		}
+		if strings.Contains(c, "copper") {
+			qs = append(qs, "Confirm cathode brand and warehouse warrant validity")
+		}
+		return qs
+	}
+	qs := []string{
+		"Request tank storage receipt",
+		"Request terminal operator confirmation",
+		"Ask for product origin/refinery proof",
+	}
+	switch {
+	case strings.Contains(c, "vlsfo"), strings.Contains(c, "mgo"), strings.Contains(c, "hsfo"):
+		qs = append(qs, "Confirm ISO 8217 parameters and sulphur cap compliance")
+	case strings.Contains(c, "en590"), strings.Contains(c, "diesel"):
+		qs = append(qs, "Confirm EN590 winter grade and sulphur content for destination")
+	case strings.Contains(c, "crude"):
+		qs = append(qs, "Request dated assay and loading port nomination")
+	case strings.Contains(c, "jet"), strings.Contains(c, "aviation"):
+		qs = append(qs, "Confirm Jet A-1 freeze point and DEF STAN compliance")
+	case strings.Contains(c, "fuel oil"):
+		qs = append(qs, "Confirm viscosity/COT and bunker or port delivery mechanism")
+	}
+	inc := strings.ToUpper(strings.TrimSpace(incoterm))
+	if inc == "FOB" || inc == "FCA" {
+		qs = append(qs, "Who arranges and pays for marine survey at load port?")
+	}
+	if location != "" {
+		qs = append(qs, "Can seller provide terminal/storage title at "+location+"?")
+	}
+	return qs
 }
 
 // MissingDocuments is the energy commodity document checklist (legacy alias).

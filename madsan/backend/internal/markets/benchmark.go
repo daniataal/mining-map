@@ -13,8 +13,12 @@ func BenchmarkSymbol(commodity string) string {
 		return "GOLD"
 	case strings.Contains(c, "wti"):
 		return "WTI"
-	case strings.Contains(c, "brent"), strings.Contains(c, "crude"), strings.Contains(c, "oil"),
-		strings.Contains(c, "diesel"), strings.Contains(c, "vlsfo"), strings.Contains(c, "fuel"):
+	case strings.Contains(c, "vlsfo"), strings.Contains(c, "hsfo"), strings.Contains(c, "mgo"),
+		strings.Contains(c, "en590"), strings.Contains(c, "diesel"),
+		strings.Contains(c, "jet"), strings.Contains(c, "aviation"):
+		return "VLSFO_SG"
+	case strings.Contains(c, "brent"), strings.Contains(c, "crude"), strings.Contains(c, "fuel oil"),
+		strings.Contains(c, "petroleum"), strings.Contains(c, "oil"):
 		return "BRENT"
 	default:
 		return ""
@@ -32,6 +36,8 @@ func PriceComparable(commodity, quantityUnit string) bool {
 	switch sym {
 	case "GOLD":
 		return u == "oz" || strings.Contains(c, "oz")
+	case "VLSFO_SG":
+		return u == "mt" || u == "ton" || u == "tonnes" || strings.Contains(c, "mt")
 	case "WTI", "BRENT":
 		return u == "bbl" || u == "" || strings.Contains(c, "bbl")
 	default:

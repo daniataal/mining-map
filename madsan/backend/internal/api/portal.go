@@ -8,8 +8,8 @@ import (
 )
 
 func (s *Server) submitSupplierOffer(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.auth.ParseRequest(r)
-	if err != nil {
+	claims, ok := authClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -26,7 +26,7 @@ func (s *Server) submitSupplierOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	score := confidence.Score(15, nil)
 	payload, _ := json.Marshal(body)
-	_, err = s.pool.Exec(r.Context(), `
+	_, err := s.pool.Exec(r.Context(), `
 		INSERT INTO supplier_submissions (submitted_by, company_name, payload, status)
 		VALUES ($1,$2,$3,'pending')
 	`, claims.UserID, body.CompanyName, payload)
@@ -42,8 +42,8 @@ func (s *Server) submitSupplierOffer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) submitFeedback(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.auth.ParseRequest(r)
-	if err != nil {
+	claims, ok := authClaims(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -61,7 +61,7 @@ func (s *Server) submitFeedback(w http.ResponseWriter, r *http.Request) {
 	if body.IsScam {
 		verdict = "scam_report"
 	}
-	_, err = s.pool.Exec(r.Context(), `
+	_, err := s.pool.Exec(r.Context(), `
 		INSERT INTO feedback_events (user_id, entity_type, entity_id, verdict, notes)
 		VALUES ($1,$2,$3,$4,$5)
 	`, claims.UserID, body.EntityType, body.EntityID, verdict, body.Feedback)

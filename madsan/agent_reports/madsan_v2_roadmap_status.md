@@ -12,7 +12,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | **1** Schema + matviews | **COMPLETE** | 23 migrations; serving matviews + GIST/filter indexes (`023`); throttled per-table refresh during legacy import |
 | **5b** Entitlements | **COMPLETE** | Plans, feature flags, deals RBAC (`e934964`) |
 | **6** Map + MVT | **COMPLETE** | ST_AsMVT tiles, pipeline lines, vessel chevrons (`be4a5fba`, `74eeab55`, `e917ecf6`) |
-| **9** Deal verification | **COMPLETE** | DD rules, OpenSanctions, pack v1.1 + relationship graph |
+| **9** Deal verification (`phase9-deal-verification-pack`) | **COMPLETE** | S19 E2E: commodity/qty/location/seller/buyer/incoterm/docs/price/asset+vessel → DD rules, OpenSanctions, location asset match, buyer+seller registry, pack v1.1 (json/md/html) + relationship graph; energy EN590/VLSFO/crude/jet/fuel-oil doc+benchmark tiers; metals doc routing; RBAC on verify/pack/watch; deals UI full result panels + cookie-auth pack download |
 
 **Partial (shipped slices; batch agents may close gaps):**
 
@@ -27,7 +27,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 | 8b Intelligence signals | **PARTIAL** | Signal history, corridors | 6-factor STS model (batch 1) |
 | 9b Deal monitoring | **PARTIAL** | Watch toggle + changes panel (`e99d9d62`); alert diff scaffold (`465e1f81`) | Scheduled watch worker, map-pinned living packs |
 | 10 Portal + admin | **PARTIAL** | Portal scaffold (`03ccc97c`); dedup merge UI (`099e7850`) | Data-quality dashboard (batch 1); review promotion |
-| 11 Metals vertical | **PARTIAL** | Layer registry (`5be9729e`) | Smelters/cadastre data; metals deal-pack parity (batch 1) |
+| 11 Metals vertical | **PARTIAL** | Layer registry (`5be9729e`); metals deal verify + doc routing (phase 9) | Smelters/cadastre data; full metals pack parity vs energy |
 | 12c Legal | **PARTIAL** | Legal page + dispute/GDPR APIs (`8ff57533`, `696cc53d`) | External counsel sign-off; commercial_use_ok gate (batch 1) |
 | 12d Security/RLS | **PARTIAL** | `014_rls_scaffold`; GUC middleware stub (`9bbce7c8`) | Audit log + role cutover (batch 1) |
 | 12e Notifications | **PARTIAL** | Onboarding (`9269409f`); feedback flywheel (`100e4844`) | Email notification scaffold (batch 1) |
@@ -95,7 +95,7 @@ Based on prior commits on `new-refactor-eng-style` (not plan file edits):
 - Map: MapLibre terminal, vector tiles, WS live vessels, corridor lines
 - **Map UX fixes:** pipeline LineString MVT + line layers (`be4a5fba`); vessel ship chevrons with heading rotation (`74eeab55`); legacy AIS heading backfill (`4f61f66b`); pipeline dossier OSM metadata (`3610abe`)
 - Dossiers: company/asset/vessel, signals, signal history, relationships
-- Deals: verify, sanctions, pack export (json/md/html), relationship graph in pack
+- Deals: verify (S19 full field coverage), sanctions, pack export (json/md/html), relationship graph in pack; energy commodity benchmarks (VLSFO_SG for distillates/jet, Brent/WTI crude); metals missing-doc routing; authenticated pack download in UI
 - Admin console, metals vertical, global search
 - **Git:** `madsan/` committed on branch `new-refactor-eng-style` (~159 tracked files)
 - **Admin health:** `/admin` runtime panel + `GET /api/admin/health/runtime` (AIS sync, legacy parity drift)
@@ -295,7 +295,7 @@ flowchart LR
 | 7 Energy UI | **PARTIAL** | Status bar + ticker trends shipped; batch 1: Gulf AIS disclaimer |
 | 8 Supplier discovery | **PARTIAL** | Ranked geo+commodity queries shipped (`62015b65`); batch 1: fusion search |
 | 8b Intelligence | **PARTIAL** | Signal history + corridors; batch 1: STS 6-factor; batch 2: 8c–8f scaffolds |
-| 9 Deal verification | **COMPLETE** | Pack v1.1 + RBAC |
+| 9 Deal verification (`phase9-deal-verification-pack`) | **COMPLETE** | S19 E2E verified; pack v1.1 json/md/html; energy EN590/VLSFO/crude/jet/fuel-oil; metals doc checklist; RBAC + UI gaps closed |
 | 9b Deal monitoring | **PARTIAL** | Watch UI + alert diff scaffold (`465e1f81`); batch 1: watch worker |
 | 10 Portal + admin | **PARTIAL** | Portal + dedup merge UI shipped; batch 1: data-quality dashboard |
 | 11 Metals vertical | **PARTIAL** | Layer registry shipped (`5be9729e`); batch 1: metals deal-pack parity |

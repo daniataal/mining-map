@@ -72,6 +72,39 @@ func TestEvaluateDealClean(t *testing.T) {
 	}
 }
 
+func TestDealMissingDocumentsEnergy(t *testing.T) {
+	for _, commodity := range []string{"EN590", "fuel oil", "Jet A-1", "VLSFO", "crude"} {
+		docs := DealMissingDocuments(commodity)
+		if len(docs) < 3 {
+			t.Fatalf("%s: expected doc checklist, got %v", commodity, docs)
+		}
+	}
+}
+
+func TestDealMissingDocumentsMetals(t *testing.T) {
+	docs := DealMissingDocuments("Gold (AU)")
+	found := false
+	for _, d := range docs {
+		if d == "LBMA good delivery certificate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("gold docs missing LBMA: %v", docs)
+	}
+}
+
+func TestRecommendedQuestions(t *testing.T) {
+	qs := RecommendedQuestions("VLSFO", "FOB", "Fujairah")
+	if len(qs) < 4 {
+		t.Fatalf("expected commodity+incoterm questions, got %v", qs)
+	}
+	gold := RecommendedQuestions("Gold (AU)", "CIF", "Dubai")
+	if len(gold) < 2 {
+		t.Fatalf("expected metals questions, got %v", gold)
+	}
+}
+
 func TestCommodityFamily(t *testing.T) {
 	cases := map[string]string{
 		"EN590 diesel": "oil",

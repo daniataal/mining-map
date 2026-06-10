@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -57,7 +58,22 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, claims)
+	out := map[string]any{
+		"uid":  claims.UserID,
+		"tid":  claims.TenantID,
+		"role": claims.Role,
+	}
+	if s.pool != nil && claims.TenantID != "" {
+		tid, err := uuid.Parse(claims.TenantID)
+		if err == nil {
+			uid, _ := uuid.Parse(claims.UserID)
+			if ents, plan, err := s.ent.Resolve(r.Context(), &tid, &uid); err == nil {
+				out["entitlements"] = ents
+				out["plan"] = plan
+			}
+		}
+	}
+	writeJSON(w, out)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +181,29 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
+func (s *Server) getAssetByLegacy(w http.ResponseWriter, r *http.Request) {
+	table := r.URL.Query().Get("legacy_table")
+	legacyID := r.URL.Query().Get("legacy_id")
+	if table == "" || legacyID == "" {
+		http.Error(w, "legacy_table and legacy_id required", http.StatusBadRequest)
+		return
+	}
+	var id uuid.UUID
+	err := s.pool.QueryRow(r.Context(), `
+		SELECT id FROM assets WHERE legacy_table = $1 AND legacy_id = $2 LIMIT 1
+	`, table, legacyID).Scan(&id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	rctx := chi.RouteContext(r.Context())
+	if rctx == nil {
+		rctx = chi.NewRouteContext()
+	}
+	rctx.URLParams.Add("id", id.String())
+	s.getAsset(w, r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx)))
+}
+
 func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	uid, err := uuid.Parse(id)
@@ -202,11 +241,19 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) supplierSearch(w http.ResponseWriter, r *http.Request) {
+	claims, ok := authClaims(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	out, err := search.SearchSuppliers(r.Context(), s.pool, search.ParseSupplierSearchParams(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	tid, _ := uuid.Parse(claims.TenantID)
+	uid, _ := uuid.Parse(claims.UserID)
+	_ = s.ent.RecordUsage(r.Context(), &tid, &uid, featureSupplierDiscovery, 1)
 	writeJSON(w, out)
 }
 
@@ -290,6 +337,8 @@ func (s *Server) watchDeal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	tid, _ := uuid.Parse(claims.TenantID)
+	_ = s.ent.RecordUsage(r.Context(), &tid, &uid, featureDealWatch, 1)
 	writeJSON(w, map[string]string{"status": "watching"})
 }
 

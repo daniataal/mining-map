@@ -58,12 +58,8 @@ func (s *Service) Verify(ctx context.Context, tenantID *uuid.UUID, in VerifyInpu
 	positive := []string{}
 	warnings := []string{}
 	redFlags := []string{}
-	missing := compliance.EnergyMissingDocuments(in.Commodity)
-	questions := []string{
-		"Request tank storage receipt",
-		"Request terminal operator confirmation",
-		"Ask for product origin/refinery proof",
-	}
+	missing := compliance.DealMissingDocuments(in.Commodity)
+	questions := compliance.RecommendedQuestions(in.Commodity, in.Incoterm, in.Location)
 
 	sellerCountry := in.SellerCountry
 	if sellerCountry == "" && in.Seller != "" {
@@ -72,6 +68,19 @@ func (s *Service) Verify(ctx context.Context, tenantID *uuid.UUID, in VerifyInpu
 	buyerCountry := in.BuyerCountry
 	if buyerCountry == "" && in.Buyer != "" {
 		buyerCountry = s.lookupCompanyCountry(ctx, in.Buyer)
+	}
+
+	if in.Location != "" {
+		var assetHits int
+		_ = s.pool.QueryRow(ctx, `
+			SELECT COUNT(*)::int FROM assets
+			WHERE name ILIKE $1 OR normalized_name ILIKE lower($1) OR country_code ILIKE $1
+		`, "%"+in.Location+"%").Scan(&assetHits)
+		if assetHits > 0 {
+			positive = append(positive, fmt.Sprintf("Location matches %d infrastructure asset(s) in registry", assetHits))
+		} else {
+			warnings = append(warnings, "Location not matched to known terminal/storage in asset registry")
+		}
 	}
 
 	if in.Seller != "" {
@@ -90,6 +99,23 @@ func (s *Service) Verify(ctx context.Context, tenantID *uuid.UUID, in VerifyInpu
 		} else {
 			warnings = append(warnings, "Seller not found in company registry")
 			score = confidence.Score(score, map[string]bool{"weak_single_source": true})
+		}
+	}
+
+	if in.Buyer != "" {
+		var n int
+		var conf *float64
+		_ = s.pool.QueryRow(ctx, `
+			SELECT COUNT(*)::int, MAX(confidence_score) FROM companies
+			WHERE name ILIKE $1 OR normalized_name ILIKE lower($1)
+		`, "%"+in.Buyer+"%").Scan(&n, &conf)
+		if n > 0 {
+			positive = append(positive, "Buyer matches a company in registry")
+			if conf != nil && *conf >= 70 {
+				positive = append(positive, fmt.Sprintf("Buyer registry confidence %.0f", *conf))
+			}
+		} else {
+			warnings = append(warnings, "Buyer not found in company registry")
 		}
 	}
 

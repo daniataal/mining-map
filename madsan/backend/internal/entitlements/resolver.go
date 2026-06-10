@@ -7,6 +7,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// AllFeatures is the canonical gated capability list (plan + overrides + flags).
+var AllFeatures = []string{
+	"deal_verification",
+	"deal_pack_export",
+	"deal_watch",
+	"map_premium_layers",
+	"supplier_discovery",
+	"supplier_portal",
+	"api_access",
+}
+
 type Resolver struct {
 	pool *pgxpool.Pool
 }
@@ -59,6 +70,28 @@ func (r *Resolver) Can(ctx context.Context, tenantID, userID *uuid.UUID, feature
 		)
 	`, tenantID, featureKey).Scan(&freeHas)
 	return freeHas, nil
+}
+
+// Resolve returns per-feature access and the active plan slug for a tenant/user.
+func (r *Resolver) Resolve(ctx context.Context, tenantID, userID *uuid.UUID) (map[string]bool, string, error) {
+	out := make(map[string]bool, len(AllFeatures))
+	var planSlug string
+	if tenantID != nil {
+		_ = r.pool.QueryRow(ctx, `
+			SELECT p.slug FROM tenant_subscriptions ts
+			JOIN plans p ON p.id = ts.plan_id
+			WHERE ts.tenant_id = $1 AND ts.status = 'active'
+			ORDER BY ts.started_at DESC NULLS LAST LIMIT 1
+		`, tenantID).Scan(&planSlug)
+	}
+	for _, key := range AllFeatures {
+		ok, err := r.Can(ctx, tenantID, userID, key)
+		if err != nil {
+			return nil, planSlug, err
+		}
+		out[key] = ok
+	}
+	return out, planSlug, nil
 }
 
 func (r *Resolver) RecordUsage(ctx context.Context, tenantID, userID *uuid.UUID, featureKey string, qty int) error {

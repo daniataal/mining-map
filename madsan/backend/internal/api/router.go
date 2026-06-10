@@ -125,6 +125,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
+		api.Get("/assets/lookup", s.getAssetByLegacy)
 		api.Get("/trust/{entityType}/{id}", s.getTrustScore)
 	})
 
@@ -134,7 +135,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/companies/{id}", s.getCompany)
 		api.Get("/vessels/by-mmsi/{mmsi}", s.getVesselByMMSI)
 		api.Get("/vessels/{id}", s.getVessel)
-		api.Get("/suppliers/search", s.supplierSearch)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureSupplierDiscovery)).Get("/suppliers/search", s.supplierSearch)
 		api.Get("/pipelines/{id}/connectivity", s.getPipelineConnectivity)
 		api.Get("/mcr/scaffold/status", s.mcrScaffoldStatus)
 		api.Get("/predictive/status", s.predictiveStatus)
@@ -150,9 +151,9 @@ func (s *Server) Router() http.Handler {
 		api.Get("/{id}", s.getDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealVerification), s.requireCommercialSources).Post("/verify", s.verifyDeal)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealPackExport), s.requireCommercialSources).Get("/{id}/pack", s.dealPack)
-		api.With(s.requireAuth, s.withTenantGUC).Post("/{id}/watch", s.watchDeal)
-		api.With(s.requireAuth, s.withTenantGUC).Delete("/{id}/watch", s.unwatchDeal)
-		api.With(s.requireAuth, s.withTenantGUC).Get("/{id}/changes", s.dealChanges)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Post("/{id}/watch", s.watchDeal)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Delete("/{id}/watch", s.unwatchDeal)
+		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureDealWatch)).Get("/{id}/changes", s.dealChanges)
 	})
 
 	r.Post("/api/feedback", s.submitProductFeedback)
@@ -163,12 +164,13 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Route("/api/portal", func(api chi.Router) {
+		api.Use(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureSupplierPortal))
 		api.Post("/offers", s.submitSupplierOffer)
 		api.Post("/feedback", s.submitFeedback)
 	})
 
 	r.Route("/api/admin", func(api chi.Router) {
-		api.Use(s.requireAuth, s.withTenantGUC)
+		api.Use(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureAPIAccess))
 		api.Get("/ingestion/jobs", s.listIngestionJobs)
 		api.With(s.withAudit("admin.ingestion.enqueue", "ingestion_job")).Post("/ingestion/enqueue", s.enqueueIngestionJob)
 		api.Get("/sources", s.listSources)
@@ -184,7 +186,7 @@ func (s *Server) Router() http.Handler {
 		api.With(s.withAudit("admin.dedup.enqueue_review", "dedup_cluster")).Post("/dedup/clusters/{id}/enqueue-review", s.enqueueClusterMergeReview)
 	})
 
-	r.Get("/tiles/{layer}/{z}/{x}/{y}.mvt", s.tiles.ServeMVT)
+	r.With(s.requirePremiumTileAccess).Get("/tiles/{layer}/{z}/{x}/{y}.mvt", s.tiles.ServeMVT)
 	r.Get("/api/core/search", s.search.Handle)
 	r.Get("/api/core/ticker", markets.NewHandler(s.cfg.EIAAPIKey).ServeHTTP)
 	r.Get("/api/billing/plans", s.listPlans)

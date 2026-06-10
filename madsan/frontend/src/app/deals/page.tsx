@@ -6,13 +6,14 @@ import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPane
 import DealGraphPanel from "@/components/DealGraphPanel";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts, clearLegacyAuthTokens } from "@/lib/auth";
+import { canUse, FEATURE, fetchMe, type MeResponse } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
 
 const fetchOpts = authFetchOpts;
 
 type DealVertical = "energy" | "metals";
 
-const SAMPLE_ENERGY_DEAL: Record<string, string> = {
+const SAMPLE_ENERGY_VLSFO: Record<string, string> = {
   commodity: "VLSFO",
   quantity: "5000",
   quantity_unit: "MT",
@@ -23,7 +24,57 @@ const SAMPLE_ENERGY_DEAL: Record<string, string> = {
   price: "612",
   currency: "USD",
   claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
 };
+
+const SAMPLE_ENERGY_EN590: Record<string, string> = {
+  commodity: "EN590 diesel",
+  quantity: "10000",
+  quantity_unit: "MT",
+  location: "Rotterdam, NL",
+  seller: "Sample Trader BV",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "CIF",
+  price: "780",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
+};
+
+const SAMPLE_ENERGY_CRUDE: Record<string, string> = {
+  commodity: "Brent crude",
+  quantity: "50000",
+  quantity_unit: "bbl",
+  location: "Rotterdam, NL",
+  seller: "Sample Refinery SA",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "FOB",
+  price: "82",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
+};
+
+const SAMPLE_ENERGY_JET: Record<string, string> = {
+  commodity: "Jet A-1",
+  quantity: "2000",
+  quantity_unit: "MT",
+  location: "Singapore",
+  seller: "Sample Aviation Fuel Pte",
+  buyer: "Sample Buyer Ltd",
+  incoterm: "DAP",
+  price: "920",
+  currency: "USD",
+  claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
+};
+
+const ENERGY_SAMPLES = [
+  { label: "Sample VLSFO · Fujairah", seed: SAMPLE_ENERGY_VLSFO },
+  { label: "Sample EN590 · Rotterdam", seed: SAMPLE_ENERGY_EN590 },
+  { label: "Sample crude · Rotterdam", seed: SAMPLE_ENERGY_CRUDE },
+  { label: "Sample Jet A-1 · Singapore", seed: SAMPLE_ENERGY_JET },
+] as const;
 
 const SAMPLE_METAL_GOLD: Record<string, string> = {
   commodity: "Gold (AU)",
@@ -36,6 +87,7 @@ const SAMPLE_METAL_GOLD: Record<string, string> = {
   price: "68500",
   currency: "USD",
   claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
 };
 
 const SAMPLE_METAL_COPPER: Record<string, string> = {
@@ -49,6 +101,7 @@ const SAMPLE_METAL_COPPER: Record<string, string> = {
   price: "9850",
   currency: "USD",
   claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
 };
 
 const SAMPLE_METAL_SILVER: Record<string, string> = {
@@ -62,6 +115,7 @@ const SAMPLE_METAL_SILVER: Record<string, string> = {
   price: "31.5",
   currency: "USD",
   claimed_vessel_mmsi: "",
+  claimed_asset_id: "",
 };
 
 const METAL_SAMPLES = [
@@ -75,8 +129,11 @@ type VerifyResult = {
   confidence_score?: number;
   confidence_status?: string;
   dd_recommendation?: string;
+  positive_evidence?: string[];
   red_flags?: string[];
   warnings?: string[];
+  missing_documents?: string[];
+  recommended_questions?: string[];
   error?: string;
 };
 
@@ -117,8 +174,10 @@ export default function DealsPage() {
   const [watchBusy, setWatchBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [authError, setAuthError] = useState("");
   const [formSeed, setFormSeed] = useState<Record<string, string> | null>(null);
+  const [packDownloadMsg, setPackDownloadMsg] = useState("");
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -128,9 +187,15 @@ export default function DealsPage() {
 
   useEffect(() => {
     clearLegacyAuthTokens();
-    fetch(`${API_BASE}/api/core/auth/me`, fetchOpts)
-      .then((r) => setAuthed(r.ok))
-      .catch(() => setAuthed(false));
+    fetchMe()
+      .then((profile) => {
+        setMe(profile);
+        setAuthed(!!profile?.uid);
+      })
+      .catch(() => {
+        setMe(null);
+        setAuthed(false);
+      });
   }, []);
 
   async function ensureAuth(e: React.FormEvent<HTMLFormElement>) {
@@ -159,8 +224,14 @@ export default function DealsPage() {
       setAuthError(await login.text());
       return;
     }
-    setAuthed(true);
+    const profile = await fetchMe();
+    setMe(profile);
+    setAuthed(!!profile?.uid);
   }
+
+  const canVerify = canUse(me, FEATURE.dealVerification);
+  const canExportPack = canUse(me, FEATURE.dealPackExport);
+  const canWatch = canUse(me, FEATURE.dealWatch);
 
   async function refreshChanges(dealId: string) {
     setChangesError("");
@@ -220,6 +291,7 @@ export default function DealsPage() {
         price: Number(body.price) || 0,
         currency: body.currency || "USD",
         claimed_vessel_mmsi: body.claimed_vessel_mmsi || undefined,
+        claimed_asset_id: body.claimed_asset_id || undefined,
       }),
     });
     if (res.status === 401) {
@@ -267,6 +339,35 @@ export default function DealsPage() {
     setLoading(false);
   }
 
+  async function downloadPack(fmt: "json" | "markdown" | "html") {
+    if (!result?.deal_id) return;
+    setPackDownloadMsg("");
+    const res = await fetch(`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`, fetchOpts);
+    if (res.status === 401) {
+      setAuthed(false);
+      setPackDownloadMsg("Session expired — sign in again.");
+      return;
+    }
+    if (res.status === 403) {
+      setPackDownloadMsg("Your plan does not include deal pack export.");
+      return;
+    }
+    if (!res.ok) {
+      setPackDownloadMsg(await res.text());
+      return;
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const filenameMatch = disposition.match(/filename=([^;]+)/);
+    const filename = filenameMatch?.[1]?.replace(/"/g, "") ?? `madsan-deal-pack.${fmt === "markdown" ? "md" : fmt}`;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (authed === null) {
     return (
       <main style={{ maxWidth: 800, margin: "2rem auto", padding: "0 1rem" }}>
@@ -283,6 +384,31 @@ export default function DealsPage() {
         <Link href="/" style={{ fontSize: 12 }}>← Terminal</Link>
       </p>
       <h1>Deal verification</h1>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {(["energy", "metals"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => {
+              setDealVertical(v);
+              setFormSeed(null);
+              setResult(null);
+              setPackGraph(null);
+            }}
+            style={{
+              padding: "6px 12px",
+              background: dealVertical === v ? "var(--accent)" : "var(--panel)",
+              color: dealVertical === v ? "#000" : "var(--text)",
+              border: "1px solid var(--border)",
+              fontWeight: 600,
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            {v === "energy" ? "Energy" : "Metals"}
+          </button>
+        ))}
+      </div>
       <p style={{ color: "var(--muted)" }}>
         {isMetals
           ? "Metals commodities — gold, copper, silver, concentrates. DD rules, sanctions, relationship graph."
@@ -314,27 +440,34 @@ export default function DealsPage() {
                 </button>
               ))
             ) : (
-              <button type="button" onClick={() => setFormSeed(SAMPLE_ENERGY_DEAL)} style={sampleButtonStyle}>
-                Sample VLSFO · Fujairah
-              </button>
+              ENERGY_SAMPLES.map(({ label, seed }) => (
+                <button key={label} type="button" onClick={() => setFormSeed({ ...seed })} style={sampleButtonStyle}>
+                  {label}
+                </button>
+              ))
             )}
           </div>
         </div>
       )}
+      {authed && !canVerify && (
+        <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
+          Your plan does not include deal verification. Contact admin for entitlement override.
+        </p>
+      )}
       {authed && (
         <form key={formSeed ? JSON.stringify(formSeed) : sellerDefault || "default"} onSubmit={verify} style={{ display: "grid", gap: "0.75rem" }}>
-          {["commodity", "quantity", "quantity_unit", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi"].map((f) => (
+          {["commodity", "quantity", "quantity_unit", "location", "seller", "buyer", "incoterm", "price", "currency", "claimed_vessel_mmsi", "claimed_asset_id"].map((f) => (
             <label key={f} style={{ display: "grid", gap: 4, fontSize: 13 }}>
               {f}
               <input
                 name={f}
                 defaultValue={formSeed?.[f] ?? (f === "seller" ? sellerDefault : f === "quantity_unit" && !formSeed ? "MT" : undefined)}
-                required={f !== "buyer" && f !== "incoterm" && f !== "price" && f !== "currency" && f !== "claimed_vessel_mmsi"}
+                required={f !== "buyer" && f !== "incoterm" && f !== "price" && f !== "currency" && f !== "claimed_vessel_mmsi" && f !== "claimed_asset_id"}
                 style={{ padding: 8, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" }}
               />
             </label>
           ))}
-          <button type="submit" disabled={loading} style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>
+          <button type="submit" disabled={loading || !canVerify} style={{ padding: 10, background: "var(--accent)", color: "#000", border: 0, fontWeight: 600 }}>
             {loading ? "Verifying…" : "Verify deal"}
           </button>
         </form>
@@ -355,6 +488,12 @@ export default function DealsPage() {
               )}
             </p>
           )}
+          {result.positive_evidence && result.positive_evidence.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Positive evidence</strong>
+              <ul>{result.positive_evidence.map((f) => <li key={f}>{f}</li>)}</ul>
+            </div>
+          )}
           {result.red_flags && result.red_flags.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <strong>Red flags</strong>
@@ -367,28 +506,48 @@ export default function DealsPage() {
               <ul>{result.warnings.map((f) => <li key={f}>{f}</li>)}</ul>
             </div>
           )}
+          {result.missing_documents && result.missing_documents.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Missing documents</strong>
+              <ul>{result.missing_documents.map((f) => <li key={f}>{f}</li>)}</ul>
+            </div>
+          )}
+          {result.recommended_questions && result.recommended_questions.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Recommended questions</strong>
+              <ul>{result.recommended_questions.map((f) => <li key={f}>{f}</li>)}</ul>
+            </div>
+          )}
           <DealGraphPanel graph={packGraph} />
           <DealChangesPanel
             changes={dealChanges}
             error={changesError || undefined}
             watchBusy={watchBusy}
-            onWatch={result.deal_id ? () => toggleWatch(true) : undefined}
-            onUnwatch={result.deal_id ? () => toggleWatch(false) : undefined}
+            onWatch={result.deal_id && canWatch ? () => toggleWatch(true) : undefined}
+            onUnwatch={result.deal_id && canWatch ? () => toggleWatch(false) : undefined}
           />
+          {result.deal_id && !canWatch && (
+            <p style={{ color: "var(--muted)", marginTop: 8 }}>Deal watch requires a plan with deal monitoring.</p>
+          )}
           {result.deal_id && (
             <>
-              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                {(["json", "markdown", "html"] as const).map((fmt) => (
-                  <a
-                    key={fmt}
-                    href={`${API_BASE}/api/deals/${result.deal_id}/pack?format=${fmt}`}
-                    download
-                    style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--accent)", fontSize: 12, textDecoration: "none" }}
-                  >
-                    Download {fmt.toUpperCase()} pack
-                  </a>
-                ))}
-              </div>
+              {canExportPack ? (
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  {(["json", "markdown", "html"] as const).map((fmt) => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => downloadPack(fmt)}
+                      style={{ padding: "8px 12px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--accent)", fontSize: 12, cursor: "pointer" }}
+                    >
+                      Download {fmt.toUpperCase()} pack
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: "var(--muted)", marginTop: 12 }}>Pack export is not included in your plan.</p>
+              )}
+              {packDownloadMsg && <p style={{ color: "#f87171", marginTop: 8 }}>{packDownloadMsg}</p>}
               <FeedbackFlywheel mode="deal" dealId={result.deal_id} />
             </>
           )}
