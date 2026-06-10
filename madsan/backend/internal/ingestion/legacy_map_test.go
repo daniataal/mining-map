@@ -9,6 +9,12 @@ func TestVesselMMSI(t *testing.T) {
 	}
 }
 
+func TestTerminalTypeToAssetTypeLegacy(t *testing.T) {
+	if got := TerminalTypeToAssetType("storage_tank"); got != "tank_farm" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestLayerToAssetTypePetroleum(t *testing.T) {
 	cases := map[string]string{
 		"storage_terminals": "tank_farm",

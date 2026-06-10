@@ -21,26 +21,40 @@ type ParityTableSpec struct {
 
 // LicenseImportTiers breaks license parity into honest import tiers (legacy mining_db).
 type LicenseImportTiers struct {
-	LegacyTotal            int64 `json:"legacy_total"`
-	NotImportableNoCoords  int64 `json:"not_importable_no_coords"`
-	ImportPoolGeocoded     int64 `json:"import_pool_geocoded"`
-	ExpectedSkipEmptyName  int64 `json:"expected_skip_empty_name"`
-	ExpectedDedupKeys      int64 `json:"expected_dedup_keys"`
-	UnderImportGap         int64 `json:"under_import_gap"`
+	LegacyTotal           int64 `json:"legacy_total"`
+	NotImportableNoCoords int64 `json:"not_importable_no_coords"`
+	ImportPoolGeocoded    int64 `json:"import_pool_geocoded"`
+	ExpectedSkipEmptyName int64 `json:"expected_skip_empty_name"`
+	ExpectedDedupKeys     int64 `json:"expected_dedup_keys"`
+	UnderImportGap        int64 `json:"under_import_gap"`
+}
+
+// PetroleumImportTiers breaks petroleum_osm_features parity into honest import tiers.
+// The importer upserts canonical assets by (normalized_name, asset_type, country); many
+// raw OSM features (especially multi-segment pipelines and same-named storage features)
+// collapse to one asset. Pipeline segment geometry is preserved separately in
+// pipeline_graph_edges, so dedup is not data loss.
+type PetroleumImportTiers struct {
+	LegacyTotal        int64 `json:"legacy_total"`
+	WithNameOrOperator int64 `json:"with_name_or_operator"`
+	SyntheticNamed     int64 `json:"synthetic_named"`
+	ExpectedDedupKeys  int64 `json:"expected_dedup_keys"`
+	UnderImportGap     int64 `json:"under_import_gap"`
 }
 
 // ParityTableResult is one table comparison in the parity report.
 type ParityTableResult struct {
-	LegacyTable  string              `json:"legacy_table"`
-	MadsanTarget string              `json:"madsan_target"`
-	LegacyCount  int64               `json:"legacy_count"`
-	MadsanCount  int64               `json:"madsan_count"`
-	Drift        int64               `json:"drift"`
-	DriftPct     float64             `json:"drift_pct"`
-	Critical     bool                `json:"critical"`
-	OK           bool                `json:"ok"`
-	Note         string              `json:"note,omitempty"`
-	LicenseTiers *LicenseImportTiers `json:"license_tiers,omitempty"`
+	LegacyTable    string                `json:"legacy_table"`
+	MadsanTarget   string                `json:"madsan_target"`
+	LegacyCount    int64                 `json:"legacy_count"`
+	MadsanCount    int64                 `json:"madsan_count"`
+	Drift          int64                 `json:"drift"`
+	DriftPct       float64               `json:"drift_pct"`
+	Critical       bool                  `json:"critical"`
+	OK             bool                  `json:"ok"`
+	Note           string                `json:"note,omitempty"`
+	LicenseTiers   *LicenseImportTiers   `json:"license_tiers,omitempty"`
+	PetroleumTiers *PetroleumImportTiers `json:"petroleum_tiers,omitempty"`
 }
 
 // ParityReport is printed as JSON by cmd/legacy-parity.
@@ -87,8 +101,53 @@ func LegacyParityCatalog() []ParityTableSpec {
 			Critical:       true,
 		},
 		{
-			LegacyTable:    "petroleum_osm_features",
-			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM petroleum_osm_features WHERE geom IS NOT NULL`,
+			LegacyTable:    "oil_port_calls",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_port_calls`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM core_signals WHERE signal_type = 'port_call'`,
+			MadsanTarget:   "core_signals(port_call)",
+			Critical:       true,
+		},
+		{
+			LegacyTable:    "oil_sts_events",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_sts_events`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM core_signals WHERE signal_type = 'sts'`,
+			MadsanTarget:   "core_signals(sts)",
+			Critical:       true,
+		},
+		{
+			LegacyTable:    "eia_historic_imports",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM eia_historic_imports`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM prices WHERE price_type = 'eia_historic_import'`,
+			MadsanTarget:   "prices(eia_historic_import)",
+			Critical:       true,
+		},
+		{
+			LegacyTable:    "oil_commercial_events",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_commercial_events`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM core_signals WHERE signal_type = 'commercial_event'`,
+			MadsanTarget:   "core_signals(commercial_event)",
+			Critical:       false,
+		},
+		{
+			LegacyTable:    "oil_company_contacts",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM oil_company_contacts`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM contacts WHERE metadata->>'legacy_contact_id' IS NOT NULL`,
+			MadsanTarget:   "contacts(legacy)",
+			Critical:       false,
+		},
+		{
+			LegacyTable:    "broker_deal_packs",
+			LegacyCountSQL: `SELECT COUNT(*)::bigint FROM broker_deal_packs`,
+			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM deals WHERE metadata->>'legacy_broker_pack_id' IS NOT NULL`,
+			MadsanTarget:   "deals(legacy_broker_pack)",
+			Critical:       false,
+		},
+		{
+			LegacyTable: "petroleum_osm_features",
+			// Import upserts assets by normalized_name + asset_type (+ empty country);
+			// multi-segment pipelines and same-named features dedupe. Compare against the
+			// expected dedup-key count, not the raw OSM row count.
+			LegacyCountSQL: petroleumDedupKeySQL,
 			MadsanCountSQL: `SELECT COUNT(*)::bigint FROM assets WHERE legacy_table = 'legacy_petroleum_osm_features'`,
 			MadsanTarget:   "assets(legacy_petroleum_osm_features)",
 			Critical:       true,
@@ -146,6 +205,19 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 		ok = true // AIS sync may add vessels beyond legacy snapshot
 		note = "madsan may exceed legacy when live AIS sync is enabled"
 	}
+	if spec.LegacyTable == "oil_port_calls" || spec.LegacyTable == "oil_sts_events" || spec.LegacyTable == "oil_commercial_events" {
+		// Import skips rows without a matching madsan vessel/company — drift vs raw legacy count is expected.
+		if legacyCount > 0 {
+			coverage := float64(madsanCount) / float64(legacyCount) * 100
+			note = fmt.Sprintf("madsan count may be lower: only rows with matched vessel/company import (coverage %.1f%%)", coverage)
+		}
+		if madsanCount > 0 && driftPct <= 35 {
+			ok = true
+		}
+	}
+	if spec.LegacyTable == "eia_historic_imports" && madsanCount >= legacyCount*95/100 {
+		ok = true
+	}
 	if spec.LegacyTable == "licenses" {
 		tiers, terr := fetchLicenseImportTiers(ctx, legacy)
 		if terr != nil {
@@ -171,6 +243,34 @@ func compareParityTable(ctx context.Context, legacy, madsan *pgxpool.Pool, spec 
 			OK:           ok,
 			Note:         note,
 			LicenseTiers: &tiers,
+		}, nil
+	}
+	if spec.LegacyTable == "petroleum_osm_features" {
+		tiers, terr := fetchPetroleumImportTiers(ctx, legacy)
+		if terr != nil {
+			return ParityTableResult{}, terr
+		}
+		tiers.ExpectedDedupKeys = legacyCount
+		tiers.UnderImportGap = tiers.ExpectedDedupKeys - madsanCount
+		if tiers.UnderImportGap < 0 {
+			tiers.UnderImportGap = 0
+		}
+		note = fmt.Sprintf(
+			"legacy_count is expected_dedup_keys (%d) not raw OSM rows (%d); name+operator=%d; synthetic-named=%d; under_import_gap=%d; pipeline segment geometry preserved in pipeline_graph_edges",
+			tiers.ExpectedDedupKeys, tiers.LegacyTotal, tiers.WithNameOrOperator,
+			tiers.SyntheticNamed, tiers.UnderImportGap,
+		)
+		return ParityTableResult{
+			LegacyTable:    spec.LegacyTable,
+			MadsanTarget:   spec.MadsanTarget,
+			LegacyCount:    legacyCount,
+			MadsanCount:    madsanCount,
+			Drift:          drift,
+			DriftPct:       round2(driftPct),
+			Critical:       spec.Critical,
+			OK:             ok,
+			Note:           note,
+			PetroleumTiers: &tiers,
 		}, nil
 	}
 	return ParityTableResult{
@@ -216,6 +316,47 @@ func fetchLicenseImportTiers(ctx context.Context, legacy *pgxpool.Pool) (License
 		&t.ImportPoolGeocoded,
 		&t.ExpectedSkipEmptyName,
 		&t.ExpectedDedupKeys,
+	)
+	return t, err
+}
+
+// petroleumNameExpr mirrors normalizeLegacyRow name precedence (name -> operator -> synthetic
+// "layer_id:id") and normalizeName (trim + collapse internal whitespace), lowercased for the
+// dedup compare. assetTypeExpr mirrors LayerToAssetType.
+const petroleumNameExpr = `lower(trim(regexp_replace(
+	COALESCE(NULLIF(btrim(tags->>'name'), ''), NULLIF(btrim(tags->>'operator'), ''), layer_id || ':' || id::text),
+	'\s+', ' ', 'g')))`
+
+const petroleumAssetTypeExpr = `CASE layer_id
+	WHEN 'storage_terminals' THEN 'tank_farm'
+	WHEN 'refineries' THEN 'refinery'
+	WHEN 'pipelines' THEN 'pipeline'
+	ELSE 'terminal' END`
+
+var petroleumDedupKeySQL = `
+	SELECT COUNT(*)::bigint FROM (
+		SELECT DISTINCT ` + petroleumNameExpr + `, ` + petroleumAssetTypeExpr + `
+		FROM petroleum_osm_features
+		WHERE geom IS NOT NULL
+	) importable`
+
+var petroleumTierSQL = `
+SELECT
+  (SELECT COUNT(*)::bigint FROM petroleum_osm_features WHERE geom IS NOT NULL) AS legacy_total,
+  (SELECT COUNT(*)::bigint FROM petroleum_osm_features
+     WHERE geom IS NOT NULL
+       AND (NULLIF(btrim(tags->>'name'), '') IS NOT NULL OR NULLIF(btrim(tags->>'operator'), '') IS NOT NULL)) AS with_name_or_operator,
+  (SELECT COUNT(*)::bigint FROM petroleum_osm_features
+     WHERE geom IS NOT NULL
+       AND NULLIF(btrim(tags->>'name'), '') IS NULL AND NULLIF(btrim(tags->>'operator'), '') IS NULL) AS synthetic_named
+`
+
+func fetchPetroleumImportTiers(ctx context.Context, legacy *pgxpool.Pool) (PetroleumImportTiers, error) {
+	var t PetroleumImportTiers
+	err := legacy.QueryRow(ctx, petroleumTierSQL).Scan(
+		&t.LegacyTotal,
+		&t.WithNameOrOperator,
+		&t.SyntheticNamed,
 	)
 	return t, err
 }

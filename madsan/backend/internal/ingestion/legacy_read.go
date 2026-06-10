@@ -67,6 +67,17 @@ var legacyTableCatalog = []legacyTableSpec{
 			WHERE geom IS NOT NULL
 			ORDER BY id OFFSET $1 LIMIT $2`,
 	},
+	{
+		Table: "oil_terminals", EntityType: "asset",
+		Query: `
+			SELECT id, name, terminal_type, operator_name, owner_name, country,
+			       port, city, products, source, confidence, metadata,
+			       ST_Y(ST_PointOnSurface(geom)) AS latitude,
+			       ST_X(ST_PointOnSurface(geom)) AS longitude
+			FROM oil_terminals
+			WHERE geom IS NOT NULL
+			ORDER BY id OFFSET $1 LIMIT $2`,
+	},
 }
 
 func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, payload []byte) error {
@@ -82,6 +93,14 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 	defer legacy.Close()
 
 	tables := filterLegacyTables(opts.Tables)
+	intelTables := filterIntelligenceTables(opts.Tables)
+	if len(opts.Tables) == 0 {
+		intelTables = nil
+	}
+	if len(intelTables) > 0 && len(tables) == 0 {
+		return s.processLegacyIntelligenceImport(ctx, jobID, intelTables, opts, started)
+	}
+
 	var sourceID uuid.UUID
 	if !opts.DryRun {
 		sourceID, _ = s.ensureSource(ctx, "legacy_mining_db")
@@ -101,6 +120,24 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 		}
 	}
 
+	intelCounts := map[string]int{}
+	if len(intelTables) > 0 && !opts.DryRun {
+		legacy, lerr := s.poolFromLegacy(ctx)
+		if lerr == nil {
+			for _, table := range intelTables {
+				n, ierr := s.importLegacyIntelligenceTable(ctx, legacy, sourceID, table, opts.MaxRows, false)
+				intelCounts[table] = n
+				if ierr != nil && lastErr == nil {
+					lastErr = ierr
+				}
+				imported += n
+			}
+			legacy.Close()
+		} else if lastErr == nil {
+			lastErr = lerr
+		}
+	}
+
 	var dedupEnqueue dedup.CompanyEnqueueResult
 	if !opts.DryRun {
 		_ = s.refreshServingMatviews(ctx, matviewsForLegacyTableNames(tableNames(tables)))
@@ -111,8 +148,8 @@ func (s *Service) processLegacyImportGo(ctx context.Context, jobID uuid.UUID, pa
 		"engine":          "go",
 		"imported":        imported,
 		"evidence_claims": evidenceRows,
-		"legacy_counts":   counts,
-		"tables":          tableNames(tables),
+		"legacy_counts":   mergeCounts(counts, intelCounts),
+		"tables":          append(tableNames(tables), intelTables...),
 		"dry_run":         opts.DryRun,
 		"dedup_enqueued": map[string]int{
 			"exact_name": dedupEnqueue.ExactNameEnqueued,
@@ -309,8 +346,49 @@ func normalizeLegacyRow(spec legacyTableSpec, row map[string]any) NormalizedReco
 		} else {
 			rec.Name = normalizeName(fmt.Sprintf("%s:%v", row["layer_id"], row["id"]))
 		}
+	case "oil_terminals":
+		rec.EntityType = "asset"
+		rec.AssetType = TerminalTypeToAssetType(fmt.Sprint(row["terminal_type"]))
+		rec.Commodities = []string{"petroleum"}
+		if n, ok := row["name"].(string); ok {
+			rec.Name = normalizeName(n)
+		}
+		if c, ok := row["country"].(string); ok {
+			rec.CountryCode = strings.ToUpper(strings.TrimSpace(c))
+		}
+		if op, ok := row["operator_name"].(string); ok && strings.TrimSpace(op) != "" {
+			rec.RawPayload["operator_name"] = normalizeName(op)
+		}
+		if ow, ok := row["owner_name"].(string); ok && strings.TrimSpace(ow) != "" {
+			rec.RawPayload["owner_name"] = normalizeName(ow)
+		}
+		if products := legacyStringArray(row["products"]); len(products) > 0 {
+			rec.RawPayload["products"] = products
+			rec.Commodities = products
+		}
+		if cs, ok := toFloat(row["confidence"]); ok {
+			rec.RawPayload["confidence_score"] = cs * 100
+		}
 	}
 	return rec
+}
+
+func legacyStringArray(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			s := strings.TrimSpace(fmt.Sprint(item))
+			if s != "" && s != "<nil>" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func parseTags(v any) map[string]any {

@@ -90,6 +90,20 @@ func vesselMMSI(raw map[string]any) string {
 	return ""
 }
 
+// TerminalTypeToAssetType maps legacy oil_terminals.terminal_type to MadSan asset_type.
+func TerminalTypeToAssetType(terminalType string) string {
+	switch strings.ToLower(strings.TrimSpace(terminalType)) {
+	case "storage_tank", "tank_farm":
+		return "tank_farm"
+	case "refinery":
+		return "refinery"
+	case "storage_terminal", "terminal", "berth", "port":
+		return "terminal"
+	default:
+		return "terminal"
+	}
+}
+
 // LayerToAssetType maps petroleum OSM layer_id values to MadSan asset_type.
 func LayerToAssetType(layer string) string {
 	switch layer {

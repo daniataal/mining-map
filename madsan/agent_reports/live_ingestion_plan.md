@@ -79,22 +79,22 @@ Legend — Track: **A** backfill, **B** live adapter, **D** derived, **S** strea
 | Source | Track | Endpoint / origin | Auth | Cadence | MadSan target | Dedup key | Tier | Status |
 |---|---|---|---|---|---|---|---|---|
 | AISStream | S | wss AISStream | key | live | `vessels` (+positions) | mmsi | observed | ◐ (madsan AIS sync) |
-| **EIA prices** | **B** | `api.eia.gov/v2` | `EIA_API_KEY` | daily | `prices` | series+date | observed | ○ (client exists, not persisted) |
+| **EIA prices** | **B** | `api.eia.gov/v2` | `EIA_API_KEY` | daily | `prices` | series+date | observed | ✅ (`eia_daily` job persists WTI/Brent spot) |
 | OSM petroleum | A→B | Overpass API | none | monthly | `assets` + `pipeline_graph_edges` | name+type / osm_id | observed | A ✅ / B ○ |
 | GEM trackers | B | repo `.xlsx` (extraction/plant/GOIT) | none | on update | `assets` | gem_id | observed | ○ (never ingested) |
 | Licenses | A→B | bulk file + portal | none | quarterly | `assets` | company+type+country | observed | A ✅ |
-| EIA history | A→B | legacy `eia_historic_imports` | — | once + B daily | `prices`/`commodities` | flow+period | observed | ○ (746k stranded) |
+| EIA history | A→B | legacy `eia_historic_imports` | — | once + B daily | `prices`/`commodities` | flow+period | observed | ✅ (746k → `prices` via `cmd/legacy-phase-a`) |
 | UN Comtrade | B | `comtradeapi.un.org` | sub key | monthly | `commodity_trade_flows` | reporter+partner+hs+period | observed | ○ |
 | Eurostat | B | Eurostat REST | none | monthly | trade flows | dataset+dims | observed | ○ (legacy proved 500 rows) |
 | JODI | B | `JODI_CSV_URL` | none | monthly | trade snapshots | country+product+period | observed | ○ (needs URL) |
 | TED procurement | B | TED API | none | weekly | `companies` + evidence (lead) | notice_id | observed | ✅ (legacy backfill Phase H) |
 | Gov procurement | B | national/USAspending | varies | weekly | `companies` + evidence (lead) | award_id | observed | ✅ (legacy backfill Phase H) |
 | GLEIF (LEI) | B | `api.gleif.org` | none | weekly | `companies` + evidence | LEI | observed | ✅ (Phase H) |
-| OpenSanctions | B | yente/API | key | on-demand + weekly | `risk_flags` | entity_id | observed | ◐ (screening inline) |
+| OpenSanctions | B | yente/API | `OPENSANCTIONS_API_KEY` | on-demand + weekly | `risk_flags` | entity_id | observed | ◐ (key in `deploy/.env.example`; screening inline) |
 | SEC EDGAR | B | `data.sec.gov` | User-Agent | weekly | `companies` + evidence | CIK | inferred match (stub) | ✅ (Phase H stub) |
 | USGS MRDS/MCS | A/B | USGS file/API | none | quarterly | `assets` (metals) | dep_id | observed | ○ (Metals vertical) |
-| Port calls | D | from AIS | — | hourly job | `core_signals`/`voyages` | vessel+port+ts | inferred | ○ (66k in legacy) |
-| STS events | D | from AIS | — | hourly job | `core_signals` | pair+ts | observed/inferred | ◐ (scorer wired) |
+| Port calls | A→D | legacy `oil_port_calls` + AIS | — | hourly job | `core_signals`/`voyages` | vessel+port+ts | inferred | ✅ (66k backfilled; live job pending) |
+| STS events | A→D | legacy `oil_sts_events` + AIS | — | hourly job | `core_signals` | pair+ts | observed/inferred | ✅ (17.5k rescored via `ScoreSTS`) |
 | MCR | D | from AIS+manifests | — | nightly job | mcr/signals | recipe+voyage | inferred | ○ (scaffold) |
 | Copernicus (tank vol) | B | Sentinel-1/2 | free acct | deferred | signals | tile+date | satellite-derived | ○ (deferred, CPU-heavy) |
 
@@ -116,9 +116,9 @@ Legend — Track: **A** backfill, **B** live adapter, **D** derived, **S** strea
 
 ## 7. Phased rollout (recommended order)
 
-1. **EIA → `prices` (Track B)** — reuses `eia.go`; opens the empty Price pillar; becomes the **adapter template** every other API copies.
+1. **EIA → `prices` (Track B)** — ✅ `eia_daily` scheduler job + `markets.PersistDailySpots`; historic 746k via `go run ./cmd/legacy-phase-a --tables eia_historic_imports`.
 2. **Generalize** the adapter into `internal/sources` (registry-driven dispatch) once EIA proves the shape.
-3. **`oil_terminals` backfill (Track A)** — cheap, fixes `oil_terminals=0`, densifies map.
+3. **`oil_terminals` backfill (Track A)** — in `legacyTableCatalog`; after import completes, re-run `go run ./cmd/asset-enrich --limit 500` (do **not** restart worker mid `vessel-enrich`).
 4. **GEM trackers (Track B, xlsx)** — attributed oil/gas infra (operator/capacity/status).
 5. **OSM Overpass live (Track B, monthly)** — map self-updates without legacy.
 6. **Derived jobs** — port_calls + STS from AIS into `core_signals` (feeds the wired 6-factor scorer).

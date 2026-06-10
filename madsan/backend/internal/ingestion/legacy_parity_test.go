@@ -7,12 +7,15 @@ import (
 
 func TestLegacyParityCatalog(t *testing.T) {
 	catalog := LegacyParityCatalog()
-	if len(catalog) != 4 {
-		t.Fatalf("expected 4 tables, got %d", len(catalog))
+	if len(catalog) != 10 {
+		t.Fatalf("expected 10 tables, got %d", len(catalog))
 	}
 	want := map[string]bool{
 		"oil_vessels": true, "oil_companies": true,
 		"licenses": true, "petroleum_osm_features": true,
+		"oil_port_calls": true, "oil_sts_events": true,
+		"eia_historic_imports": true, "oil_commercial_events": true,
+		"oil_company_contacts": true, "broker_deal_packs": true,
 	}
 	for _, spec := range catalog {
 		if !want[spec.LegacyTable] {

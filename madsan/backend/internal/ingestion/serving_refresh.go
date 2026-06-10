@@ -55,6 +55,8 @@ func matviewsForJobType(jobType string) []string {
 	switch jobType {
 	case "ais":
 		return []string{matviewVessel}
+	case "terminal_enrichment":
+		return nil
 	case "bunker_seed":
 		return nil
 	case "legacy_import":
@@ -81,7 +83,7 @@ func legacyTableMatview(table string) string {
 		return matviewVessel
 	case "licenses":
 		return matviewMetals
-	case "petroleum_osm_features":
+	case "petroleum_osm_features", "oil_terminals":
 		return matviewEnergy
 	default:
 		return ""
