@@ -80,8 +80,17 @@ type Config struct {
 	ETLPython                 string
 	LegacyImportPython        bool
 	EnableAISSync             bool
+	EnableAISDirect           bool
 	AISSyncInterval           time.Duration
 	AISSyncLookbackHours      int
+	AISStreamAPIKey           string
+	AISRetainDays             int
+	AISInsecureTLS            bool
+	AISAutoTLSFallback        bool
+	AISCycleMinutes           int
+	AISPositionMinIntervalSec int
+	AISGeofenceRadiusM        float64
+	AISTerminalBufferDeg      float64
 	EIAAPIKey                 string
 	OpenSanctionsAPIKey       string
 	ShipVaultEnabled          bool
@@ -97,6 +106,10 @@ type Config struct {
 	VesselEnrichmentBatch     int
 	VesselEnrichmentStaleDays int
 	VesselEnrichmentRateMS    int
+	GLEIFUserAgent            string
+	GLEIFBatchLimit           int
+	SECEdgarUserAgent         string
+	SECEdgarBatchLimit        int
 }
 
 func defaultETLDir() string {
@@ -124,8 +137,17 @@ func Load() Config {
 		ETLPython:                 env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
 		LegacyImportPython:        envBool("MADSAN_LEGACY_PYTHON", false),
 		EnableAISSync:             envBool("MADSAN_AIS_SYNC", true),
+		EnableAISDirect:           envBool("MADSAN_AIS_DIRECT", env("AISSTREAM_API_KEY", "") != ""),
 		AISSyncInterval:           time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
 		AISSyncLookbackHours:      envInt("MADSAN_AIS_SYNC_LOOKBACK_HOURS", 168),
+		AISStreamAPIKey:           env("AISSTREAM_API_KEY", ""),
+		AISRetainDays:             envInt("MADSAN_AIS_RETAIN_DAYS", 30),
+		AISInsecureTLS:            envBool("MARITIME_SSL_VERIFY", true) == false,
+		AISAutoTLSFallback:        envBool("MARITIME_SSL_AUTO_FALLBACK", true),
+		AISCycleMinutes:           envInt("MADSAN_AIS_CYCLE_MIN", 20),
+		AISPositionMinIntervalSec: envInt("MADSAN_AIS_POSITION_MIN_SEC", 90),
+		AISGeofenceRadiusM:        envFloat("MADSAN_AIS_GEOFENCE_RADIUS_M", 1200),
+		AISTerminalBufferDeg:      envFloat("MADSAN_AIS_TERMINAL_BUFFER_DEG", 0.45),
 		EIAAPIKey:                 env("EIA_API_KEY", ""),
 		OpenSanctionsAPIKey:       env("OPENSANCTIONS_API_KEY", ""),
 		ShipVaultEnabled:          envBool("MADSAN_SHIPVAULT_ENABLED", false),
@@ -141,6 +163,10 @@ func Load() Config {
 		VesselEnrichmentBatch:     envInt("MADSAN_VESSEL_ENRICHMENT_BATCH", 50),
 		VesselEnrichmentStaleDays: envInt("MADSAN_VESSEL_ENRICHMENT_STALE_DAYS", 120),
 		VesselEnrichmentRateMS:    envInt("MADSAN_VESSEL_ENRICHMENT_RATE_MS", 500),
+		GLEIFUserAgent:            env("GLEIF_USER_AGENT", "MadSanIntelligence/1.0 (open-data research)"),
+		GLEIFBatchLimit:           envInt("GLEIF_BATCH_LIMIT", 50),
+		SECEdgarUserAgent:         env("SEC_EDGAR_USER_AGENT", "MadSanIntelligence/1.0 (open-data research)"),
+		SECEdgarBatchLimit:        envInt("SEC_EDGAR_BATCH_LIMIT", 25),
 	}
 }
 
@@ -173,4 +199,16 @@ func envInt(k string, def int) int {
 		return def
 	}
 	return n
+}
+
+func envFloat(k string, def float64) float64 {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
 }

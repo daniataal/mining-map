@@ -81,6 +81,12 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == vesselEnrichmentJobType {
 		return s.processVesselEnrichment(ctx, jobID)
 	}
+	if jobType == portCallSweepJobType {
+		return s.processPortCallSweep(ctx, jobID)
+	}
+	if isSourceImportJob(jobType) {
+		return s.processSourceImport(ctx, jobID, jobType, payload)
+	}
 
 	jobDryRun := dryRun || dryRunFromPayload(payload)
 

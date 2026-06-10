@@ -112,7 +112,11 @@ func (s *Server) adminHealthRuntime(w http.ResponseWriter, r *http.Request) {
 	ais["vessels_total"] = vesselsTotal
 	ais["vessels_fresh_24h"] = vessels24h
 	ais["vessels_fresh_72h"] = vessels72h
-	ais["coverage_note"] = "AIS reflects legacy provider coverage; Persian Gulf may be sparse"
+	ais["coverage_note"] = "AIS reflects AISStream provider coverage; Persian Gulf may be sparse"
+	if s.cfg.EnableAISDirect && s.cfg.AISStreamAPIKey != "" {
+		ais["direct_ingest"] = true
+		ais["retain_days"] = s.cfg.AISRetainDays
+	}
 
 	parityBlock := map[string]any{
 		"threshold_pct": 5.0,
@@ -136,9 +140,9 @@ func (s *Server) adminHealthRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{
-		"ais_sync":       ais,
-		"legacy_parity":  parityBlock,
-		"legacy_python":  s.cfg.LegacyImportPython,
+		"ais_sync":      ais,
+		"legacy_parity": parityBlock,
+		"legacy_python": s.cfg.LegacyImportPython,
 	})
 }
 

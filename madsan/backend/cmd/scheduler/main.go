@@ -25,6 +25,10 @@ var schedules = []struct {
 	{interval: 24 * time.Hour, jobType: "terminal_enrichment", source: "terminal_enrichment"},
 	{interval: 1 * time.Hour, jobType: "deal_watch_scan", source: "deal_watch"},
 	{interval: 7 * 24 * time.Hour, jobType: "vessel_enrichment", source: "vessel_enrichment"},
+	{interval: 6 * time.Hour, jobType: "port_call_sweep", source: "live_ais"},
+	{interval: 7 * 24 * time.Hour, jobType: "gleif", source: "gleif"},
+	{interval: 7 * 24 * time.Hour, jobType: "sec_edgar", source: "sec_edgar"},
+	{interval: 24 * time.Hour, jobType: "legacy_procurement", source: "legacy_procurement"},
 }
 
 func main() {

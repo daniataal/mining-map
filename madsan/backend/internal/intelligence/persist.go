@@ -59,6 +59,26 @@ func PersistImportSnapshot(ctx context.Context, pool *pgxpool.Pool, entityID uui
 	return err
 }
 
+// PersistPortCall writes a core_signals row for a closed live port call visit.
+func PersistPortCall(ctx context.Context, pool *pgxpool.Pool, vesselID, visitID, assetID uuid.UUID, eventType, family string, confidence float64, evidence []string) error {
+	if vesselID == uuid.Nil || visitID == uuid.Nil {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"port_call_visit_id": visitID.String(),
+		"asset_id":           assetID.String(),
+		"event_type":         eventType,
+		"commodity_family":   family,
+		"evidence":           evidence,
+		"source":             "live_ais",
+	})
+	_, err := pool.Exec(ctx, `
+		INSERT INTO core_signals (entity_type, entity_id, signal_type, tier, confidence_score, payload)
+		VALUES ('vessel', $1, 'port_call', 'observed', $2, $3)
+	`, vesselID, confidence, payload)
+	return err
+}
+
 // PersistVesselAIS writes a durable AIS freshness signal, throttled to once per hour per vessel.
 func PersistVesselAIS(ctx context.Context, pool *pgxpool.Pool, vesselID uuid.UUID, lastSeen time.Time, speed *float64, confidence float64) error {
 	signals, opp := VesselSignals(&lastSeen, speed, confidence)

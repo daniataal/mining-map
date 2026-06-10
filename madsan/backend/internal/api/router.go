@@ -20,8 +20,8 @@ import (
 	"github.com/madsan/intelligence/internal/deals"
 	"github.com/madsan/intelligence/internal/entitlements"
 	"github.com/madsan/intelligence/internal/ingestion"
-	"github.com/madsan/intelligence/internal/markets"
 	"github.com/madsan/intelligence/internal/maritime"
+	"github.com/madsan/intelligence/internal/markets"
 	"github.com/madsan/intelligence/internal/notify"
 	"github.com/madsan/intelligence/internal/realtime"
 	"github.com/madsan/intelligence/internal/search"
@@ -32,19 +32,19 @@ type Server struct {
 	pool       *pgxpool.Pool
 	legacyPool *pgxpool.Pool
 	log        zerolog.Logger
-	cfg      config.Config
-	auth     *auth.Service
-	ent      *entitlements.Resolver
-	hub      *realtime.Hub
-	deals    *deals.Service
-	search   *search.Service
-	tiles    *tiles.Service
-	ingest   *ingestion.Service
-	aisStats *maritime.SyncStats
-	ledger   *compliance.SourceLedger
-	auditor  *audit.Writer
-	notifier notify.Sender
-	parity   parityCache
+	cfg        config.Config
+	auth       *auth.Service
+	ent        *entitlements.Resolver
+	hub        *realtime.Hub
+	deals      *deals.Service
+	search     *search.Service
+	tiles      *tiles.Service
+	ingest     *ingestion.Service
+	aisStats   *maritime.SyncStats
+	ledger     *compliance.SourceLedger
+	auditor    *audit.Writer
+	notifier   notify.Sender
+	parity     parityCache
 }
 
 func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Server {
@@ -63,17 +63,17 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 		pool:       pool,
 		legacyPool: legacyPool,
 		log:        log,
-		cfg:    cfg,
-		auth:   auth.New(pool, cfg),
-		ent:    entitlements.New(pool),
-		hub:    hub,
-		deals:  deals.New(pool, cfg.OpenSanctionsAPIKey, cfg.EIAAPIKey),
-		search: search.New(pool),
-		tiles:  tiles.New(pool, legacyPool),
-		ingest:   ingestion.New(pool, cfg),
-		ledger:   compliance.NewSourceLedger(pool),
-		auditor:  audit.NewWriter(pool),
-		notifier: notify.NewLogSender(log),
+		cfg:        cfg,
+		auth:       auth.New(pool, cfg),
+		ent:        entitlements.New(pool),
+		hub:        hub,
+		deals:      deals.New(pool, cfg.OpenSanctionsAPIKey, cfg.EIAAPIKey),
+		search:     search.New(pool),
+		tiles:      tiles.New(pool, legacyPool),
+		ingest:     ingestion.New(pool, cfg),
+		ledger:     compliance.NewSourceLedger(pool),
+		auditor:    audit.NewWriter(pool),
+		notifier:   notify.NewLogSender(log),
 	}
 	srv.deals.SetNotifier(srv.notifier)
 	srv.startAISSync()
@@ -82,8 +82,19 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 
 func (s *Server) startAISSync() {
 	legacyConfigured := s.cfg.LegacyDBURL != ""
-	s.aisStats = maritime.NewSyncStats(s.cfg.EnableAISSync, s.cfg.AISSyncInterval, legacyConfigured)
-	if !s.cfg.EnableAISSync || !legacyConfigured {
+	directMode := s.cfg.EnableAISDirect && s.cfg.AISStreamAPIKey != ""
+	useLegacy := s.cfg.EnableAISSync && legacyConfigured && !directMode
+
+	s.aisStats = maritime.NewSyncStats(useLegacy, s.cfg.AISSyncInterval, legacyConfigured)
+	if directMode {
+		s.aisStats.SetMode("direct")
+		s.log.Info().Msg("ais: direct ingest mode — legacy 2-hop sync disabled; run cmd/ais-ingest")
+		return
+	}
+	if !useLegacy {
+		if !legacyConfigured {
+			s.log.Info().Msg("ais sync disabled: no legacy database and no direct ingest key")
+		}
 		return
 	}
 	ctx := context.Background()
@@ -125,6 +136,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/auth/me", s.me)
 		api.Get("/ws", s.hub.ServeWS)
 		api.Get("/entities/{entityType}/{id}", s.getEntity)
+		api.Get("/aggregates/{entityType}/{entityID}", s.getHistoricAggregates)
 		api.Get("/assets/lookup", s.getAssetByLegacy)
 		api.Get("/trust/{entityType}/{id}", s.getTrustScore)
 	})
@@ -133,6 +145,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/assets", s.listEnergyAssets)
 		api.Get("/assets/{id}", s.getAsset)
 		api.Get("/companies/{id}", s.getCompany)
+		api.Get("/sts/events", s.listSTSEvents)
 		api.Get("/vessels/by-mmsi/{mmsi}", s.getVesselByMMSI)
 		api.Get("/vessels/{id}", s.getVessel)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureSupplierDiscovery)).Get("/suppliers/search", s.supplierSearch)
