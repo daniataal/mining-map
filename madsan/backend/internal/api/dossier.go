@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -60,17 +61,19 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	}
 	evidence, _ := loadEvidence(r.Context(), s.pool, "vessel", uid)
 	var enrich vesselEnrichmentRow
+	var ownerProfileJSON []byte
 	if mmsi != "" {
 		_ = s.pool.QueryRow(r.Context(), `
 			SELECT COALESCE(owner_name,''), COALESCE(operator_name,''),
 			       COALESCE(source,''), COALESCE(tier,''), COALESCE(confidence_score,0),
 			       stale_after, fetched_at, deadweight_tons, gross_tonnage,
-			       COALESCE(vessel_class,''), COALESCE(flag,''), COALESCE(limitations,'{}')
+			       COALESCE(vessel_class,''), COALESCE(flag,''), COALESCE(limitations,'{}'),
+			       COALESCE(owner_profile,'{}'::jsonb)
 			FROM vessel_enrichment WHERE mmsi = $1
 		`, mmsi).Scan(
 			&enrich.OwnerName, &enrich.OperatorName, &enrich.Source, &enrich.Tier, &enrich.Confidence,
 			&enrich.StaleAfter, &enrich.FetchedAt, &enrich.DWT, &enrich.GrossTonnage,
-			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations,
+			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations, &ownerProfileJSON,
 		)
 	}
 	score := 0.0
@@ -81,6 +84,13 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 		"vessel_type": vtype, "mmsi": mmsi, "imo": imo, "flag": flag, "destination": dest,
 	}
 	mergeVesselEnrichmentSummary(summary, enrich)
+	if len(ownerProfileJSON) > 0 {
+		var ownerProfile map[string]any
+		if json.Unmarshal(ownerProfileJSON, &ownerProfile) == nil && len(ownerProfile) > 0 {
+			summary["owner_profile"] = ownerProfile
+		}
+	}
+	mergeVesselShipvaultSummary(summary, mmsi, ownerProfileJSON, r.Context(), s.pool)
 	if lastSeen != nil {
 		summary["last_seen_at"] = lastSeen.UTC().Format(time.RFC3339)
 		summary["ais_fresh"] = time.Since(*lastSeen) < 72*time.Hour

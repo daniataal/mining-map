@@ -153,6 +153,35 @@ function EnrichmentLimitations({ block }: { block: EnrichmentBlock }) {
   );
 }
 
+type NameHistoryEntry = {
+  name?: string;
+  from_date?: string;
+  to_date?: string;
+  disponent?: string;
+};
+
+function readNameHistory(summary: Record<string, unknown>): NameHistoryEntry[] {
+  const raw = summary.name_history;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((e): e is Record<string, unknown> => e != null && typeof e === "object" && !Array.isArray(e))
+    .map((e) => ({
+      name: e.name != null ? String(e.name) : undefined,
+      from_date: e.from_date != null ? String(e.from_date) : undefined,
+      to_date: e.to_date != null ? String(e.to_date) : undefined,
+      disponent: e.disponent != null ? String(e.disponent) : undefined,
+    }))
+    .filter((e) => e.name);
+}
+
+function readOwnerProfile(summary: Record<string, unknown>): Record<string, unknown> | null {
+  const raw = summary.owner_profile;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return null;
+}
+
 export function VesselOwnershipSection({ dossier }: Props) {
   if (dossier.entity_type !== "vessel") return null;
 
@@ -163,6 +192,18 @@ export function VesselOwnershipSection({ dossier }: Props) {
     block?.deadweight_tons ??
     (summary.deadweight_tons != null ? Number(summary.deadweight_tons) : undefined) ??
     (summary.dwt != null ? Number(summary.dwt) : undefined);
+  const nameHistory = readNameHistory(summary);
+  const ownerProfile = readOwnerProfile(summary);
+  const ownerCompanyId =
+    ownerProfile?.madsan_company_id != null
+      ? String(ownerProfile.madsan_company_id)
+      : ownerProfile?.shipvault_company_id != null
+        ? String(ownerProfile.shipvault_company_id)
+        : undefined;
+  const fleetSize =
+    ownerProfile?.fleet_size != null && Number.isFinite(Number(ownerProfile.fleet_size))
+      ? Number(ownerProfile.fleet_size)
+      : undefined;
 
   const hasUuid = /^[0-9a-f-]{36}$/i.test(dossier.id);
   const rows: Array<{ label: string; value: string }> = [];
@@ -170,8 +211,9 @@ export function VesselOwnershipSection({ dossier }: Props) {
   if (block?.operator) rows.push({ label: "operator", value: block.operator });
   if (flag) rows.push({ label: "flag", value: flag });
   if (dwt != null && Number.isFinite(dwt)) rows.push({ label: "DWT", value: dwt.toLocaleString() });
+  if (fleetSize != null) rows.push({ label: "owner fleet", value: fleetSize.toLocaleString() });
 
-  const hasContent = rows.length > 0;
+  const hasContent = rows.length > 0 || nameHistory.length > 0;
 
   return (
     <div style={{ marginBottom: 12 }}>
@@ -182,6 +224,29 @@ export function VesselOwnershipSection({ dossier }: Props) {
         entityType="vessel"
         entityId={dossier.id}
       />
+      {ownerCompanyId && ownerProfile?.madsan_company_id != null && (
+        <p style={{ margin: "4px 0 0", fontSize: 11 }}>
+          <a href={`/dossier/company/${ownerCompanyId}`} style={{ color: "var(--accent)" }}>
+            View owner company dossier
+          </a>
+        </p>
+      )}
+      {nameHistory.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <strong style={{ fontSize: 12 }}>Name history</strong>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 11, color: "var(--muted)" }}>
+            {nameHistory.map((entry, i) => (
+              <li key={`${entry.name}-${i}`} style={{ marginBottom: 4 }}>
+                <span style={{ color: "var(--text)", fontWeight: 600 }}>{entry.name}</span>
+                {(entry.from_date || entry.to_date) && (
+                  <span> · {[entry.from_date, entry.to_date].filter(Boolean).join(" → ")}</span>
+                )}
+                {entry.disponent && <span> · {entry.disponent}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {hasContent ? (
         <>
           <EnrichmentDl rows={rows} />

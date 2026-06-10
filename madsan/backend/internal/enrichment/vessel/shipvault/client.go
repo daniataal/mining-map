@@ -74,9 +74,10 @@ type VesselProfile struct {
 
 // NameHistoryEntry is one entry in a vessel's name history.
 type NameHistoryEntry struct {
-	Name     string `json:"name"`
-	FromDate string `json:"from_date,omitempty"`
-	ToDate   string `json:"to_date,omitempty"`
+	Name      string `json:"name"`
+	FromDate  string `json:"from_date,omitempty"`
+	ToDate    string `json:"to_date,omitempty"`
+	Disponent string `json:"disponent,omitempty"`
 }
 
 // CompanyProfile is the structured data returned by GetCompany.
@@ -101,6 +102,7 @@ type FleetItem struct {
 type EnrichmentResult struct {
 	Vessel         *VesselProfile  `json:"vessel"`
 	OwnerProfile   *CompanyProfile `json:"owner_profile,omitempty"`
+	VesselDetail   *VesselDetail   `json:"vessel_detail,omitempty"`
 	CachedAt       time.Time       `json:"cached_at"`
 	DataSource     string          `json:"data_source"`
 	EnrichmentTier string          `json:"enrichment_tier"`
@@ -426,25 +428,27 @@ func (s *Service) FetchLive(ctx context.Context, imo string) (*EnrichmentResult,
 		return nil, fmt.Errorf("no IMO number; cannot enrich via ShipVault")
 	}
 
-	vesselRaw, err := s.GetVesselByIMO(ctx, imo)
+	detail, err := s.LoadVesselDetail(ctx, imo, "")
 	if err != nil {
 		return nil, fmt.Errorf("shipvault vessel lookup: %w", err)
 	}
-
-	vessel := parseVesselProfile(vesselRaw, imo)
-
-	var companyRaw map[string]any
-	var fleet []map[string]any
-	if vessel.OwnerCompanyID != "" {
-		companyRaw, _ = s.GetCompany(ctx, vessel.OwnerCompanyID)
-		fleet, _ = s.GetFleet(ctx, vessel.OwnerCompanyID)
+	if detail == nil {
+		return nil, fmt.Errorf("shipvault 404: no vessel match for IMO %s", imo)
 	}
+	vessel := &detail.VesselProfile
+	s.mergeVesselNameHistory(ctx, vessel)
 
-	ownerProfile := parseCompanyProfile(companyRaw, vessel.OwnerCompanyID, fleet)
+	var ownerProfile *CompanyProfile
+	if vessel.OwnerCompanyID != "" {
+		if cd, cerr := s.LoadCompanyDetail(ctx, vessel.OwnerCompanyID); cerr == nil && cd != nil {
+			ownerProfile = companyDetailToProfile(cd)
+		}
+	}
 
 	return &EnrichmentResult{
 		Vessel:         vessel,
 		OwnerProfile:   ownerProfile,
+		VesselDetail:   detail,
 		CachedAt:       time.Now().UTC(),
 		DataSource:     "shipvault",
 		EnrichmentTier: "registry",
@@ -455,6 +459,85 @@ func (s *Service) FetchLive(ctx context.Context, imo string) (*EnrichmentResult,
 			WriteStatus: "not_attempted",
 		},
 	}, nil
+}
+
+func companyDetailToProfile(cd *CompanyDetail) *CompanyProfile {
+	if cd == nil {
+		return nil
+	}
+	c := &CompanyProfile{
+		ShipVaultCompanyID: cd.ShipVaultCompanyID,
+		Name:               cd.Name,
+		Country:            cd.Country,
+		FleetSize:          cd.FleetSize,
+		Raw:                cd.Raw,
+	}
+	for _, f := range cd.Fleet {
+		c.Fleet = append(c.Fleet, FleetItem{
+			IMO:  f.IMO,
+			MMSI: f.MMSI,
+			Name: f.Name,
+			Type: f.Type,
+		})
+	}
+	return c
+}
+
+func (s *Service) mergeVesselNameHistory(ctx context.Context, vessel *VesselProfile) {
+	if vessel == nil || vessel.ShipVaultVesselID == "" {
+		return
+	}
+	rows, err := s.GetVesselNameHistory(ctx, vessel.ShipVaultVesselID)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(vessel.NameHistory))
+	for _, e := range vessel.NameHistory {
+		seen[e.Name] = struct{}{}
+	}
+	for _, row := range rows {
+		name := strField(row, "name", "unitname", "unitName", "vessel_name", "vesselName")
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		vessel.NameHistory = append(vessel.NameHistory, NameHistoryEntry{
+			Name:      name,
+			FromDate:  strField(row, "from", "from_date", "start_date", "date", "effective_date", "datefrom", "dateFrom"),
+			ToDate:    strField(row, "to", "to_date", "end_date", "dateto", "dateTo"),
+			Disponent: strField(row, "disponent", "disponent_name", "disponentName", "operator", "company", "company1"),
+		})
+	}
+}
+
+// GetVesselNameHistory fetches the name-history table when ShipVault exposes a dedicated endpoint.
+func (s *Service) GetVesselNameHistory(ctx context.Context, vesselID string) ([]map[string]any, error) {
+	vesselID = strings.TrimSpace(vesselID)
+	if vesselID == "" {
+		return nil, fmt.Errorf("empty vessel id")
+	}
+	paths := []string{
+		"/api/vessels/" + vesselID + "/names?page=1&pageSize=100",
+		"/api/units/namehistory/" + vesselID + "?page=1&pageSize=100",
+		"/api/units/" + vesselID + "/names?page=1&pageSize=100",
+	}
+	for _, path := range paths {
+		var raw json.RawMessage
+		if err := s.doRequest(ctx, path, &raw); err != nil {
+			if strings.Contains(err.Error(), "404") {
+				continue
+			}
+			continue
+		}
+		rows := parseShipSearchPayload(raw).vesselRows()
+		if len(rows) > 0 {
+			return rows, nil
+		}
+	}
+	return nil, nil
 }
 
 // ─── vessel / company parsing ────────────────────────────────────────────────
@@ -493,16 +576,19 @@ func parseVesselProfile(raw map[string]any, imo string) *VesselProfile {
 	v.DeadweightTons = floatField(raw, "deadweight", "dwt", "deadweight_tons", "deadweightTons", "tdw")
 	v.BuildYear = intField(raw, "year_built", "build_year", "yearBuilt", "built")
 
-	if hist := sliceField(raw, "name_history", "names", "previous_names"); hist != nil {
-		for _, item := range hist {
-			if m, ok := item.(map[string]any); ok {
-				entry := NameHistoryEntry{
-					Name:     strField(m, "name"),
-					FromDate: strField(m, "from", "from_date", "start_date"),
-					ToDate:   strField(m, "to", "to_date", "end_date"),
-				}
-				if entry.Name != "" {
-					v.NameHistory = append(v.NameHistory, entry)
+	for _, key := range []string{"name_history", "names", "previous_names", "nameHistory", "unitnames", "unitNames"} {
+		if hist := sliceField(raw, key); hist != nil {
+			for _, item := range hist {
+				if m, ok := item.(map[string]any); ok {
+					entry := NameHistoryEntry{
+						Name:      strField(m, "name", "unitname", "unitName", "vessel_name", "vesselName"),
+						FromDate:  strField(m, "from", "from_date", "start_date", "datefrom", "dateFrom"),
+						ToDate:    strField(m, "to", "to_date", "end_date", "dateto", "dateTo"),
+						Disponent: strField(m, "disponent", "disponent_name", "disponentName", "operator", "company", "company1"),
+					}
+					if entry.Name != "" {
+						v.NameHistory = append(v.NameHistory, entry)
+					}
 				}
 			}
 		}

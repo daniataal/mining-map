@@ -72,6 +72,11 @@ func FromShipVaultResult(mmsi, imo string, result *sv.EnrichmentResult, staleDay
 			"country":              result.OwnerProfile.Country,
 			"fleet_size":           result.OwnerProfile.FleetSize,
 		}
+		if cd := loadCompanyDetailFromResult(result); cd != nil {
+			ownerProfile["total_dwt"] = cd.TotalDWT
+			ownerProfile["total_gt"] = cd.TotalGT
+			ownerProfile["avg_age_years"] = cd.AvgAgeYears
+		}
 		for _, item := range result.OwnerProfile.Fleet {
 			fleet = append(fleet, map[string]any{
 				"imo":  item.IMO,
@@ -92,6 +97,18 @@ func FromShipVaultResult(mmsi, imo string, result *sv.EnrichmentResult, staleDay
 	}
 	if result.OwnerProfile != nil && result.OwnerProfile.Raw != nil {
 		raw["owner_company"] = result.OwnerProfile.Raw
+	}
+	if result.Vessel != nil && len(result.Vessel.NameHistory) > 0 {
+		names := make([]any, 0, len(result.Vessel.NameHistory))
+		for _, e := range result.Vessel.NameHistory {
+			names = append(names, map[string]any{
+				"name": e.Name, "from_date": e.FromDate, "to_date": e.ToDate, "disponent": e.Disponent,
+			})
+		}
+		raw["name_history"] = names
+	}
+	if result.VesselDetail != nil {
+		raw["vessel_detail"] = result.VesselDetail
 	}
 	return Enrichment{
 		MMSI:           mmsi,
@@ -118,4 +135,21 @@ func FromShipVaultResult(mmsi, imo string, result *sv.EnrichmentResult, staleDay
 			result.Disclaimer,
 		},
 	}
+}
+
+func loadCompanyDetailFromResult(result *sv.EnrichmentResult) *sv.CompanyDetail {
+	if result == nil || result.OwnerProfile == nil {
+		return nil
+	}
+	cd := &sv.CompanyDetail{
+		ShipVaultCompanyID: result.OwnerProfile.ShipVaultCompanyID,
+		Name:               result.OwnerProfile.Name,
+		Country:            result.OwnerProfile.Country,
+		FleetSize:          result.OwnerProfile.FleetSize,
+		Raw:                result.OwnerProfile.Raw,
+	}
+	for _, f := range result.OwnerProfile.Fleet {
+		cd.Fleet = append(cd.Fleet, sv.FleetVessel{IMO: f.IMO, MMSI: f.MMSI, Name: f.Name, Type: f.Type})
+	}
+	return cd
 }

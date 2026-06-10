@@ -173,15 +173,43 @@ Design (perf-first) — **precompute once, read from DB, never pull on the reque
 3. **Read path:** dossier reads owner/operator via a single indexed join on `vessel_enrichment` — **instant, no click, no live call.** A "Refresh ownership" action **enqueues a job (202)** and streams the update when ready; it never blocks.
 4. **Provider:** **ShipVault (live)** is the primary owner/operator path — port of `oil-live-intel/internal/services/shipvault` into madsan Go (`internal/enrichment/vessel/shipvault`). Results persist to **`madsan_db.vessel_enrichment`** (not `mining_db.vessel_enrichment_cache`). **Equasis deferred** (no bulk API; ToS limits automation).
 
-**Runbook (batch backfill):**
+**Runbook (offline ShipVault bulk ingest — not on dossier click):**
+
+`cmd/vessel-enrich` loads `madsan/deploy/.env` automatically, calls ShipVault with rate limiting, and writes to `madsan_db` only. The dossier API reads precomputed rows (`vessel_enrichment`, `vessel_name_history`, `shipvault_companies`, `shipvault_yards`, `vessel_yard_links`) — no live ShipVault on the request path.
+
 ```bash
 cd madsan/backend
-# Set MADSAN_SHIPVAULT_ENABLED=true + SHIPVAULT_REFRESH_TOKEN in deploy/.env (not committed)
-go run ./cmd/vessel-enrich --dry-run --imo 9599377   # LERRIX smoke test
-go run ./cmd/vessel-enrich --limit 50                # stale/missing rows only
-go run ./cmd/vessel-enrich --force --limit 200       # off-peak full refresh
+# deploy/.env: MADSAN_SHIPVAULT_ENABLED=true + SHIPVAULT_BEARER_TOKEN or SHIPVAULT_REFRESH_TOKEN
+
+# Apply migration 027 once (or start API with MADSAN_RUN_MIGRATIONS=true)
+migrate -path migrations -database "$DATABASE_URL" up
+
+# Smoke test (MS LEON / LERRIX name history — IMO 7530901)
+go run ./cmd/vessel-enrich --dry-run --imo 7530901
+
+# Small batch after auth check
+go run ./cmd/vessel-enrich --limit 5
+
+# Stale/missing vessels only (resume-safe; skips fresh stale_after)
+go run ./cmd/vessel-enrich --limit 50
+
+# Full refresh off-peak
+go run ./cmd/vessel-enrich --force --limit 200
+
+# Flags: --skip-companies --skip-yards to skip owner fleet / yard pages (faster)
+go build -o /tmp/vessel-enrich ./cmd/vessel-enrich
 ```
-Scheduler job `vessel_enrichment` (weekly) uses the same ShipVault path via the worker.
+
+**Tables (migration `027_shipvault_registry.up.sql`):**
+| Table | Contents |
+|---|---|
+| `vessel_enrichment` | Owner/operator, tonnages, fleet_list, owner_profile, raw_payload |
+| `vessel_name_history` | Prior names, dates, disponent (ShipVault history table) |
+| `shipvault_companies` | Owner company page: fleet aggregates (DWT/GT/avg age), fleet_list |
+| `shipvault_yards` | Yard page: vessels built list |
+| `vessel_yard_links` | Vessel ↔ yard + yard number |
+
+Scheduler job `vessel_enrichment` (weekly) uses the same batch path via the worker. Do **not** restart workers mid-import.
 
 ## 8c. Tank / terminal enrichment: operator + capacity (same pattern)
 
