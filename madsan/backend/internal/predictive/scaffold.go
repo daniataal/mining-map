@@ -11,6 +11,13 @@ type StatusResponse struct {
 	Limitations []string `json:"limitations"`
 }
 
+type RunResult struct {
+	Horizons    []int `json:"horizons"`
+	RowsScored  int   `json:"rows_scored"`
+	RowsWritten int   `json:"rows_written"`
+	DurationMS  int64 `json:"duration_ms"`
+}
+
 func ScaffoldStatus() StatusResponse {
 	return StatusResponse{
 		Tier:    TierNotImplemented,

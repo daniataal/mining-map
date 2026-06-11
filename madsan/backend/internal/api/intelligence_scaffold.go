@@ -15,7 +15,7 @@ func (s *Server) mcrScaffoldStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) predictiveStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, predictive.ScaffoldStatus())
+	writeJSON(w, predictive.Status(r.Context(), s.pool))
 }
 
 func (s *Server) unknownSupplierLeads(w http.ResponseWriter, r *http.Request) {

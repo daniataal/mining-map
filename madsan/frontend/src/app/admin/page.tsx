@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import AdminUsersPanel from "@/components/AdminUsersPanel";
 import AppShell from "@/components/AppShell";
 import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -388,6 +389,10 @@ export default function AdminPage() {
         <p style={{ color: "var(--muted)", margin: 0, fontSize: 11 }}>
           When enabled: tier <strong>satellite-derived</strong> (purple), separate disclaimer, feature flag default off.
         </p>
+      </section>
+
+      <section style={{ ...card, marginBottom: "1.5rem" }}>
+        <AdminUsersPanel />
       </section>
 
       <section style={{ ...card, marginBottom: "1.5rem" }}>

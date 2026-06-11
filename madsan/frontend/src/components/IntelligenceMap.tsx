@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Layers, X } from "lucide-react";
 import maplibregl, { type ExpressionSpecification } from "maplibre-gl";
 import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { FEATURE } from "@/lib/entitlements";
-import { fetchMCRCorridors, fetchSTSEvents, fetchVesselTrack } from "@/lib/energyApi";
+import { fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
 import {
   API_BASE,
   defaultLayerState,
+  isLayerGroupOn,
+  layerGroupsForVertical,
   layersForVertical,
   MAP_COLORS,
   MAP_STYLE_URL,
@@ -18,6 +20,7 @@ import {
   PERSIAN_GULF_COVERAGE_POLYGON,
   viewportOverlapsPersianGulf,
   type LayerDef,
+  type LayerGroupDef,
 } from "@/lib/layers";
 import {
   ensureVesselImages,
@@ -120,6 +123,7 @@ const MAP_LEGEND_ITEMS = [
   { label: "Terminal", color: MAP_COLORS.terminal },
   { label: "Refinery", color: MAP_COLORS.refinery },
   { label: "STS", color: MAP_COLORS.stsEvent },
+  { label: "STS prediction", color: MAP_COLORS.stsPrediction },
   { label: "Vessel", color: MAP_COLORS.vessel },
 ] as const;
 
@@ -140,7 +144,7 @@ function tuneBasemap(map: maplibregl.Map) {
 }
 
 function entityTypeForLayer(layerId: string): string {
-  if (layerId === "sts-events") return "sts";
+  if (layerId === "sts-events" || layerId === "sts-predictions") return "sts";
   if (isVesselLayerId(layerId)) return "vessel";
   return "asset";
 }
@@ -167,6 +171,26 @@ function stsSelectionFromProps(props: Record<string, unknown>, layerId: string):
     product_hint: strProp(props.product_hint),
     zone_name: strProp(props.zone_name),
     min_distance_m: props.min_distance_m as number | string | undefined,
+    transfer_probability: props.transfer_probability as number | string | undefined,
+    proximity_score: props.proximity_score as number | string | undefined,
+    cargo_confidence: props.cargo_confidence as number | string | undefined,
+    future_pair_probability: props.future_pair_probability as number | string | undefined,
+    horizon_hours: props.horizon_hours as number | string | undefined,
+    prediction_kind: strProp(props.prediction_kind),
+    pair_key: strProp(props.pair_key),
+    context_label: strProp(props.context_label),
+    review_tier: strProp(props.review_tier),
+    downgrade_reasons: props.downgrade_reasons,
+    maritime_context: props.maritime_context,
+    nearest_oil_terminal: props.nearest_oil_terminal,
+    distance_m: props.distance_m as number | string | undefined,
+    latest_a: strProp(props.latest_a),
+    latest_b: strProp(props.latest_b),
+    event_lat: props.event_lat as number | string | undefined,
+    event_lon: props.event_lon as number | string | undefined,
+    closest_approach_ts: strProp(props.closest_approach_ts),
+    predicted_at: strProp(props.predicted_at),
+    expires_at: strProp(props.expires_at),
     start_ts: strProp(props.start_ts),
     end_ts: strProp(props.end_ts),
     observed_at: strProp(props.observed_at),
@@ -574,7 +598,15 @@ function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
     .filter((l) => l.tileLayer && l.id !== "vessels")
     .map((l) => l.id);
   if (vertical === "energy") {
-    ids.push(...VESSEL_TILE_LAYERS, ...VESSEL_LIVE_LAYERS, ...PIPELINE_LAYER_IDS, "sts-events", "mcr-corridors");
+    ids.push(
+      ...VESSEL_TILE_LAYERS,
+      ...VESSEL_LIVE_LAYERS,
+      ...PIPELINE_LAYER_IDS,
+      "sts-events",
+      "sts-predictions",
+      "mcr-corridors",
+      "storage-sites",
+    );
   }
   return ids;
 }
@@ -588,6 +620,10 @@ function hoverLabel(props: Record<string, unknown>): string {
   const sts = stsHoverLabel(props);
   if (sts) return sts;
   const name = props.name != null ? String(props.name).trim() : "";
+  if (props.entity_kind === "storage_site") {
+    const tanks = props.tank_count != null ? `${props.tank_count} tanks` : "";
+    return ["Storage site (est.)", name, tanks].filter(Boolean).join(" · ");
+  }
   const assetType = props.asset_type != null ? String(props.asset_type) : "";
   if (assetType === "sts_zone") {
     return name ? `STS anchorage · ${name}` : "STS anchorage zone";
@@ -646,6 +682,7 @@ export default function IntelligenceMap({
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null);
   const selectedFeatureRef = useRef<FeatureTarget | null>(null);
   const [layers, setLayers] = useState<Record<string, boolean>>(() => defaultLayerState(vertical));
+  const layersRef = useRef(layers);
   const [wsState, setWsState] = useState<MapRuntimeStatus["wsState"]>(() =>
     vertical === "energy" ? "connecting" : "unavailable"
   );
@@ -653,6 +690,33 @@ export default function IntelligenceMap({
   const [gulfAisLimited, setGulfAisLimited] = useState(false);
   const [layerDrawerOpen, setLayerDrawerOpen] = useState(true);
   const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
+  const [stsSummary, setStsSummary] = useState<STSSummary | null>(null);
+
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+
+  const stsEventsOn = !!layers["sts-events"] || !!layers["sts-predictions"] || !!layers["energy-sts-zones"];
+  useEffect(() => {
+    if (!stsEventsOn) return;
+    let cancelled = false;
+    fetchSTSSummary()
+      .then((s) => {
+        if (!cancelled) setStsSummary(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [stsEventsOn]);
+
+  const setLayerGroup = useCallback((group: LayerGroupDef, on: boolean) => {
+    setLayers((prev) => {
+      const next = { ...prev };
+      for (const id of group.memberIds) next[id] = on;
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     setLayers(defaultLayerState(vertical));
@@ -779,6 +843,8 @@ export default function IntelligenceMap({
           (f) =>
             activeIds.has(f.layer.id) ||
             f.layer.id === "sts-events" ||
+            f.layer.id === "sts-predictions" ||
+            f.layer.id === "storage-sites" ||
             isPipelineLayer(f.layer.id) ||
             (vertical === "energy" && isVesselLayerId(f.layer.id))
         );
@@ -794,8 +860,18 @@ export default function IntelligenceMap({
               ? "live-vessels"
               : "vessels"
             : hit.layer.id;
-        if (layerId === "sts-events") {
+        if (layerId === "sts-events" || layerId === "sts-predictions") {
           onSelect(stsSelectionFromProps(props as Record<string, unknown>, layerId));
+          return;
+        }
+        if (layerId === "storage-sites") {
+          onSelect({
+            ...props,
+            id: undefined, // estimate row, not a registry entity — no dossier fetch
+            name: props.name != null ? String(props.name) : "Storage site",
+            _layer: "storage-sites",
+            _entityType: "storage_site",
+          });
           return;
         }
         onSelect({
@@ -864,6 +940,11 @@ export default function IntelligenceMap({
           data: { type: "FeatureCollection", features: [] },
           promoteId: "signal_id",
         });
+        map.addSource("sts-predictions", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          promoteId: "signal_id",
+        });
         map.addSource("mcr-corridors", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
@@ -874,6 +955,51 @@ export default function IntelligenceMap({
           data: { type: "Feature", geometry: PERSIAN_GULF_COVERAGE_POLYGON, properties: {} },
         });
         map.addSource("vessel-track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("storage-sites", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          promoteId: "site_id",
+        });
+        map.addLayer({
+          id: "storage-sites-glow",
+          type: "circle",
+          source: "storage-sites",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["to-number", ["coalesce", ["get", "tank_count"], 1]],
+              1, 6,
+              20, 14,
+              100, 24,
+            ],
+            "circle-color": MAP_COLORS.storageSite,
+            "circle-blur": 1.2,
+            "circle-opacity": 0.25,
+          },
+          layout: { visibility: layers["storage-sites"] ? "visible" : "none" },
+        });
+        map.addLayer({
+          id: "storage-sites",
+          type: "circle",
+          source: "storage-sites",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["to-number", ["coalesce", ["get", "tank_count"], 1]],
+              1, 3,
+              20, 7,
+              100, 12,
+            ],
+            "circle-color": MAP_COLORS.storageSite,
+            "circle-opacity": 0.85,
+            "circle-stroke-width": 1.2,
+            "circle-stroke-color": "#03241a",
+            "circle-stroke-opacity": 0.7,
+          },
+          layout: { visibility: layers["storage-sites"] ? "visible" : "none" },
+        });
 
         map.addLayer({
           id: "ais-coverage-fill",
@@ -929,6 +1055,52 @@ export default function IntelligenceMap({
           layout: { visibility: layers["sts-events"] ? "visible" : "none" },
         });
         map.addLayer({
+          id: "sts-predictions-glow",
+          type: "circle",
+          source: "sts-predictions",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["to-number", ["coalesce", ["get", "future_pair_probability"], ["get", "confidence_score"]], 65],
+              55,
+              10,
+              75,
+              20,
+              90,
+              30,
+            ],
+            "circle-color": MAP_COLORS.stsPrediction,
+            "circle-blur": 1.15,
+            "circle-opacity": 0.22,
+          },
+          layout: { visibility: layers["sts-predictions"] ? "visible" : "none" },
+        });
+        map.addLayer({
+          id: "sts-predictions",
+          type: "circle",
+          source: "sts-predictions",
+          paint: {
+            "circle-radius": [
+              "interpolate",
+              ["linear"],
+              ["to-number", ["coalesce", ["get", "future_pair_probability"], ["get", "confidence_score"]], 65],
+              55,
+              5,
+              75,
+              9,
+              90,
+              14,
+            ],
+            "circle-color": MAP_COLORS.stsPrediction,
+            "circle-opacity": 0.72,
+            "circle-stroke-width": 1.2,
+            "circle-stroke-color": "#03111f",
+            "circle-stroke-opacity": 0.72,
+          },
+          layout: { visibility: layers["sts-predictions"] ? "visible" : "none" },
+        });
+        map.addLayer({
           id: "vessel-track",
           type: "line",
           source: "vessel-track",
@@ -942,7 +1114,8 @@ export default function IntelligenceMap({
 
         const refreshOverlays = () => {
           const bbox = bboxString(map);
-          if (layers["sts-events"]) {
+          const activeLayers = layersRef.current;
+          if (activeLayers["sts-events"]) {
             fetchSTSEvents(bbox)
               .then((fc) => {
                 const src = map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined;
@@ -950,10 +1123,26 @@ export default function IntelligenceMap({
               })
               .catch(() => {});
           }
-          if (layers["mcr-corridors"]) {
+          if (activeLayers["sts-predictions"]) {
+            fetchSTSPredictions(bbox, 24)
+              .then((fc) => {
+                const src = map.getSource("sts-predictions") as maplibregl.GeoJSONSource | undefined;
+                if (src) src.setData(fc);
+              })
+              .catch(() => {});
+          }
+          if (activeLayers["mcr-corridors"]) {
             fetchMCRCorridors(bbox)
               .then((fc) => {
                 const src = map.getSource("mcr-corridors") as maplibregl.GeoJSONSource | undefined;
+                if (src) src.setData(fc);
+              })
+              .catch(() => {});
+          }
+          if (activeLayers["storage-sites"]) {
+            fetchStorageSites(bbox)
+              .then((fc) => {
+                const src = map.getSource("storage-sites") as maplibregl.GeoJSONSource | undefined;
                 if (src) src.setData(fc);
               })
               .catch(() => {});
@@ -1166,17 +1355,35 @@ export default function IntelligenceMap({
     }
     if (vertical === "energy") {
       setVesselLayerVisibility(map, !!layers.vessels, wsState === "connected");
-      for (const lid of ["sts-events", "sts-events-glow", "mcr-corridors", "ais-coverage-fill"] as const) {
+      for (const lid of [
+        "sts-events",
+        "sts-events-glow",
+        "sts-predictions",
+        "sts-predictions-glow",
+        "mcr-corridors",
+        "ais-coverage-fill",
+      ] as const) {
         if (map.getLayer(lid)) {
-          const key = lid === "ais-coverage-fill" ? "ais-coverage" : lid === "sts-events-glow" ? "sts-events" : lid;
+          const key = lid === "ais-coverage-fill"
+            ? "ais-coverage"
+            : lid === "sts-events-glow"
+              ? "sts-events"
+              : lid === "sts-predictions-glow"
+                ? "sts-predictions"
+                : lid;
           map.setLayoutProperty(lid, "visibility", layers[key] ? "visible" : "none");
         }
       }
-      if (layers["sts-events"] || layers["mcr-corridors"]) {
+      if (layers["sts-events"] || layers["sts-predictions"] || layers["mcr-corridors"]) {
         const bbox = bboxString(map);
         if (layers["sts-events"]) {
           fetchSTSEvents(bbox)
             .then((fc) => (map.getSource("sts-events") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
+            .catch(() => {});
+        }
+        if (layers["sts-predictions"]) {
+          fetchSTSPredictions(bbox, 24)
+            .then((fc) => (map.getSource("sts-predictions") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
             .catch(() => {});
         }
         if (layers["mcr-corridors"]) {
@@ -1184,6 +1391,11 @@ export default function IntelligenceMap({
             .then((fc) => (map.getSource("mcr-corridors") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
             .catch(() => {});
         }
+      }
+      if (layers["storage-sites"]) {
+        fetchStorageSites(bboxString(map))
+          .then((fc) => (map.getSource("storage-sites") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
+          .catch(() => {});
       }
     }
   }, [layers, vertical, wsState, entitlements]);
@@ -1230,16 +1442,61 @@ export default function IntelligenceMap({
           </button>
         </div>
         {(() => {
-          let lastGroup = "";
-          return layersForVertical(vertical).map((l) => {
-            if (l.geoJsonSource && !l.tileLayer && vertical === "metals") return null;
+          const groupDefs = layerGroupsForVertical(vertical);
+          const groupRendered = new Set<string>();
+          const groupHeaderShown = new Set<string>();
+          const rows: ReactNode[] = [];
+
+          for (const l of layersForVertical(vertical)) {
+            if (l.hideInDrawer) continue;
+            if (l.geoJsonSource && !l.tileLayer && vertical === "metals") continue;
+
+            if (l.layerGroup) {
+              const g = groupDefs.find((x) => x.id === l.layerGroup);
+              if (!g || groupRendered.has(g.id)) continue;
+              groupRendered.add(g.id);
+              if (!groupHeaderShown.has(g.group)) {
+                groupHeaderShown.add(g.group);
+                rows.push(<div key={`gh-${g.group}`} className="layer-group-label">{g.group}</div>);
+              }
+              const on = isLayerGroupOn(g, layers);
+              rows.push(
+                <div key={g.id}>
+                  <label className="layer-row">
+                    <input
+                      type="checkbox"
+                      className="layer-switch"
+                      checked={on}
+                      onChange={(e) => setLayerGroup(g, e.target.checked)}
+                    />
+                    <span className="layer-row-swatches">
+                      {g.swatches.map((s) => (
+                        <span key={s.label} className="layer-row-swatch" style={{ background: s.color }} title={s.label} />
+                      ))}
+                    </span>
+                    <span className="layer-row-label">{g.label}</span>
+                  </label>
+                  {g.drawerHint && (
+                    <div className="layer-row-hint">
+                      {g.drawerHint}
+                      {g.id === "sts-intelligence" && on && stsSummary != null && (
+                        <> · {stsSummary.events_7d ?? 0} events (7d), {stsSummary.predictions_active ?? 0} predictions active</>
+                      )}
+                    </div>
+                  )}
+                </div>,
+              );
+              continue;
+            }
+
+            if (l.group && !groupHeaderShown.has(l.group)) {
+              groupHeaderShown.add(l.group);
+              rows.push(<div key={`gh-${l.group}`} className="layer-group-label">{l.group}</div>);
+            }
             const locked = layerLocked(l, entitlements);
-            const showGroup = l.group && l.group !== lastGroup;
-            if (l.group) lastGroup = l.group;
             const count = formatCount(layerCounts[l.id]);
-            return (
+            rows.push(
               <div key={l.id}>
-                {showGroup && <div className="layer-group-label">{l.group}</div>}
                 <label className={`layer-row${locked ? " locked" : ""}`}>
                   <input
                     type="checkbox"
@@ -1264,9 +1521,10 @@ export default function IntelligenceMap({
                       : l.drawerHint}
                   </div>
                 )}
-              </div>
+              </div>,
             );
-          });
+          }
+          return rows;
         })()}
       </div>
       )}

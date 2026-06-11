@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import {
   fetchMCRStatus,
   fetchSTSEvents,
+  fetchSTSSummary,
   fetchUnknownSupplierLeads,
   type MCRScaffoldStatus,
+  type STSSummary,
   type UnknownSupplierLead,
 } from "@/lib/energyApi";
 
@@ -29,17 +31,20 @@ function formatWhen(iso?: string): string | undefined {
 function stsSignalFromProps(props: Record<string, unknown>): StsSignal {
   const a = props.vessel_a_name ?? props.vessel_a ?? props.vessel_name;
   const b = props.vessel_b_name ?? props.vessel_b;
-  const score = props.score != null ? Number(props.score) : undefined;
+  const probability =
+    props.transfer_probability != null ? Number(props.transfer_probability) : undefined;
   const label =
     a && b ? `${String(a)} ↔ ${String(b)}` : a ? String(a) : "STS proximity event";
-  const metaParts: string[] = ["STS"];
-  if (score != null && !Number.isNaN(score)) metaParts.push(`score ${score.toFixed(1)}`);
+  const metaParts: string[] = [props.event_kind === "historic" ? "Historic STS" : "STS"];
+  if (probability != null && !Number.isNaN(probability)) {
+    metaParts.push(`${Math.round(probability)}% transfer`);
+  }
   if (props.zone_name) metaParts.push(String(props.zone_name));
   return {
     label,
     meta: metaParts.join(" · "),
     when: formatWhen(
-      (props.occurred_at ?? props.started_at ?? props.detected_at) as string | undefined,
+      (props.start_ts ?? props.occurred_at ?? props.observed_at) as string | undefined,
     ),
   };
 }
@@ -47,7 +52,7 @@ function stsSignalFromProps(props: Record<string, unknown>): StsSignal {
 export default function IntelHomeSummary({ onOpenLive }: Props) {
   const [leads, setLeads] = useState<UnknownSupplierLead[]>([]);
   const [mcr, setMcr] = useState<MCRScaffoldStatus | null>(null);
-  const [stsCount, setStsCount] = useState<number | null>(null);
+  const [stsSummary, setStsSummary] = useState<STSSummary | null>(null);
   const [signals, setSignals] = useState<StsSignal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,22 +61,24 @@ export default function IntelHomeSummary({ onOpenLive }: Props) {
     Promise.all([
       fetchUnknownSupplierLeads(5).then(setLeads),
       fetchMCRStatus().then(setMcr),
+      fetchSTSSummary()
+        .then(setStsSummary)
+        .catch(() => setStsSummary(null)),
       fetchSTSEvents()
         .then((fc) => {
-          const feats = fc.features ?? [];
-          setStsCount(feats.length);
           setSignals(
-            feats
+            (fc.features ?? [])
               .slice(0, 5)
               .map((f) => stsSignalFromProps((f.properties ?? {}) as Record<string, unknown>)),
           );
         })
-        .catch(() => setStsCount(null)),
+        .catch(() => setSignals([])),
     ]).finally(() => setLoading(false));
   }, []);
 
   const topLead = leads[0];
   const showLeads = !loading && leads.length > 0;
+  const stsCount = stsSummary?.events_7d ?? null;
   const showSts = !loading && stsCount != null && stsCount > 0;
   const showMcrLive = !loading && mcr != null && mcr.status !== "not_implemented";
   const nothingYet = !loading && !showLeads && !showSts && signals.length === 0;
@@ -109,11 +116,16 @@ export default function IntelHomeSummary({ onOpenLive }: Props) {
           )}
           {showSts && (
             <div className="intel-home-stat">
-              <span className="intel-home-stat-label">STS events</span>
+              <span className="intel-home-stat-label">STS events · 7d</span>
               <strong className="intel-home-stat-value">
                 {stsCount! >= 1000 ? `${(stsCount! / 1000).toFixed(1)}k` : stsCount}
               </strong>
-              <span className="intel-home-stat-meta">global · toggle STS layer for viewport</span>
+              <span className="intel-home-stat-meta">
+                {stsSummary?.events_24h ?? 0} in last 24h
+                {stsSummary?.predictions_active
+                  ? ` · ${stsSummary.predictions_active} predicted`
+                  : ""}
+              </span>
             </div>
           )}
           {showMcrLive && (

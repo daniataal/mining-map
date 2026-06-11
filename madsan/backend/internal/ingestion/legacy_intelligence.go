@@ -334,7 +334,7 @@ func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Poo
 			ZoneName:        zoneName,
 		})
 
-		payload, _ := json.Marshal(map[string]any{
+		payloadMap := map[string]any{
 			"legacy_sts_id":  legacyID,
 			"mmsi_a":         mmsiA,
 			"mmsi_b":         mmsiB,
@@ -346,20 +346,34 @@ func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Poo
 			"min_distance_m": minDist,
 			"avg_sog":        avgSOG,
 			"duration_hours": endTS.Sub(startTS).Hours(),
-			"centroid_lat":   centroidLat,
-			"centroid_lon":   centroidLon,
 			"start_ts":       startTS.UTC().Format(time.RFC3339),
 			"end_ts":         endTS.UTC().Format(time.RFC3339),
 			"status":         status,
 			"data_source":    row["data_source"],
 			"score":          score,
 			"source":         "legacy_import",
-		})
+		}
+		// 0,0 means "no centroid" in legacy data; omit so the map never plots Null Island.
+		if centroidLat != 0 && centroidLon != 0 {
+			payloadMap["centroid_lat"] = centroidLat
+			payloadMap["centroid_lon"] = centroidLon
+		}
+		payload, _ := json.Marshal(payloadMap)
+		// On conflict, merge coordinates into rows imported before centroids were
+		// carried, and strip stale probability keys so sts_rescore re-scores them
+		// with spatial context.
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO core_signals (entity_type, entity_id, signal_type, tier, confidence_score, payload, observed_at)
 			VALUES ('vessel', $1, 'sts', $2, $3, $4, $5)
 			ON CONFLICT ((payload->>'legacy_sts_id')) WHERE signal_type = 'sts' AND payload->>'legacy_sts_id' IS NOT NULL
-			DO NOTHING
+			DO UPDATE SET payload =
+				(core_signals.payload
+					- 'transfer_probability' - 'probability' - 'proximity_score'
+					- 'cargo_confidence' - 'context_label' - 'review_tier'
+					- 'downgrade_reasons' - 'rescored_at'
+				) || EXCLUDED.payload
+			WHERE COALESCE(core_signals.payload->>'centroid_lat', '0') = '0'
+			  AND EXCLUDED.payload->>'centroid_lat' IS NOT NULL
 		`, vesselID, score.DataTier, score.Score, payload, startTS)
 		return err
 	})

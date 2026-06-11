@@ -95,6 +95,90 @@ export async function fetchSTSEvents(bbox?: string): Promise<FeatureCollection &
   return res.json() as Promise<FeatureCollection & { disclaimer?: string; tier?: string }>;
 }
 
+export type STSSummary = {
+  events_24h?: number;
+  events_7d?: number;
+  events_total?: number;
+  events_unscored?: number;
+  predictions_active?: number;
+  last_observed_at?: string | null;
+};
+
+export async function fetchSTSSummary(): Promise<STSSummary | null> {
+  const res = await fetch(`${API_BASE}/api/energy/sts/summary`, authFetchOpts);
+  if (!res.ok) return null;
+  return res.json() as Promise<STSSummary>;
+}
+
+export async function fetchSTSPredictions(
+  bbox?: string,
+  horizon = 24,
+): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
+  const params = new URLSearchParams({ horizon: String(horizon) });
+  if (bbox) params.set("bbox", bbox);
+  const res = await fetch(`${API_BASE}/api/energy/sts/predictions?${params}`, authFetchOpts);
+  if (!res.ok) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return res.json() as Promise<FeatureCollection & { disclaimer?: string; tier?: string }>;
+}
+
+export async function fetchBunkerSuppliers(): Promise<{
+  hubs: Array<{
+    hub_key: string;
+    port_name: string;
+    locode?: string;
+    country_code?: string;
+    license_authority?: string;
+    register_tier?: string;
+    suppliers: Array<{
+      id: string;
+      name: string;
+      phone?: string;
+      email?: string;
+      products?: string[];
+      fuels_supplied?: string;
+      source_url?: string;
+      confidence_score?: number;
+    }>;
+  }>;
+  supplier_count?: number;
+  disclaimer?: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/energy/bunker/suppliers`, authFetchOpts);
+  if (!res.ok) return { hubs: [] };
+  return res.json();
+}
+
+export async function fetchStorageSites(bbox?: string): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
+  const params = new URLSearchParams({ limit: "1500" });
+  if (bbox) params.set("bbox", bbox);
+  const res = await fetch(`${API_BASE}/api/energy/storage/sites?${params}`, authFetchOpts);
+  if (!res.ok) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return res.json() as Promise<FeatureCollection & { disclaimer?: string; tier?: string }>;
+}
+
+export type StorageSummary = {
+  sites?: number;
+  tanks?: number;
+  inventory_bbl_low?: number;
+  inventory_bbl_high?: number;
+  us_crude_stock_trend?: {
+    latest_kbbl?: number;
+    period?: string;
+    direction?: string;
+    weekly_delta_kbbl?: number;
+  };
+};
+
+export async function fetchStorageSummary(): Promise<StorageSummary | null> {
+  const res = await fetch(`${API_BASE}/api/energy/storage/summary`, authFetchOpts);
+  if (!res.ok) return null;
+  return res.json() as Promise<StorageSummary>;
+}
+
 export async function fetchMCRCorridors(bbox?: string, limit = 300): Promise<FeatureCollection & { disclaimer?: string; tier?: string }> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (bbox) params.set("bbox", bbox);

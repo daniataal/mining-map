@@ -30,6 +30,9 @@ type Candidate struct {
 	AvgSOG        float64
 	CentroidLat   float64
 	CentroidLon   float64
+	ClosestLat    float64
+	ClosestLon    float64
+	ClosestTS     time.Time
 	SampleBuckets int
 }
 
@@ -143,6 +146,9 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 			AVG(avg_sog) AS avg_sog,
 			AVG(lat) AS centroid_lat,
 			AVG(lon) AS centroid_lon,
+			(array_agg(lat ORDER BY min_dist_m ASC, bucket_start DESC))[1] AS closest_lat,
+			(array_agg(lon ORDER BY min_dist_m ASC, bucket_start DESC))[1] AS closest_lon,
+			(array_agg(bucket_start ORDER BY min_dist_m ASC, bucket_start DESC))[1] AS closest_ts,
 			COUNT(*)::int AS sample_buckets
 		FROM proximity
 		GROUP BY mmsi_a, mmsi_b
@@ -162,7 +168,8 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 		var c Candidate
 		if err := rows.Scan(
 			&c.MMSIA, &c.MMSIB, &c.StartTS, &c.EndTS,
-			&c.MinDistanceM, &c.AvgSOG, &c.CentroidLat, &c.CentroidLon, &c.SampleBuckets,
+			&c.MinDistanceM, &c.AvgSOG, &c.CentroidLat, &c.CentroidLon,
+			&c.ClosestLat, &c.ClosestLon, &c.ClosestTS, &c.SampleBuckets,
 		); err != nil {
 			return nil, err
 		}
@@ -181,9 +188,7 @@ func RunCycle(ctx context.Context, pool *pgxpool.Pool, termIndex *geofence.Index
 	candidates = dedupeCandidates(candidates)
 	written := 0
 	for _, c := range candidates {
-		if termIndex != nil && termIndex.Match(c.CentroidLat, c.CentroidLon) != nil {
-			continue
-		}
+		eventLat, eventLon := candidateEventPoint(c)
 		metaA, err := loadVesselMeta(ctx, pool, c.MMSIA)
 		if err != nil {
 			return written, err
@@ -192,17 +197,35 @@ func RunCycle(ctx context.Context, pool *pgxpool.Pool, termIndex *geofence.Index
 		if err != nil {
 			return written, err
 		}
-		zoneID, zoneName, inZone, err := matchSTSZone(ctx, pool, c.CentroidLat, c.CentroidLon)
+		zoneID, zoneName, inZone, err := matchSTSZone(ctx, pool, eventLat, eventLon)
 		if err != nil {
 			return written, err
 		}
 		bothTankers := isTanker(metaA.TankerClass) && isTanker(metaB.TankerClass)
-		if err := persistSTSSignal(ctx, pool, c, metaA, metaB, zoneID, zoneName, inZone, bothTankers); err != nil {
+		eventCtx, err := loadCandidateContext(ctx, pool, c)
+		if err != nil {
+			return written, err
+		}
+		if eventCtx.NearestTerminal == nil && termIndex != nil {
+			if match := termIndex.Match(eventLat, eventLon); match != nil {
+				eventCtx.NearestTerminal = &ContextMatch{
+					ID: match.ID, Name: match.Name, Kind: match.AssetType, DistanceM: 0,
+				}
+			}
+		}
+		if err := persistSTSSignal(ctx, pool, c, metaA, metaB, zoneID, zoneName, inZone, bothTankers, eventCtx); err != nil {
 			return written, err
 		}
 		written++
 	}
 	return written, nil
+}
+
+func candidateEventPoint(c Candidate) (float64, float64) {
+	if !c.ClosestTS.IsZero() {
+		return c.ClosestLat, c.ClosestLon
+	}
+	return c.CentroidLat, c.CentroidLon
 }
 
 func loadVesselMeta(ctx context.Context, pool *pgxpool.Pool, mmsi string) (VesselMeta, error) {

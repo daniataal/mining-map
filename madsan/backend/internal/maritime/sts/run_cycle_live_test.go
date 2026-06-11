@@ -56,7 +56,11 @@ func TestRunCycleStepsLive(t *testing.T) {
 		t.Fatalf("matchSTSZone reload: %v", err)
 	}
 	bothTankers := isTanker(metaA.TankerClass) && isTanker(metaB.TankerClass)
-	if err := persistSTSSignal(ctx, pool, c, metaA, metaB, zoneID, zoneName, inZone, bothTankers); err != nil {
+	eventCtx, err := loadCandidateContext(ctx, pool, c)
+	if err != nil {
+		t.Fatalf("loadCandidateContext: %v", err)
+	}
+	if err := persistSTSSignal(ctx, pool, c, metaA, metaB, zoneID, zoneName, inZone, bothTankers, eventCtx); err != nil {
 		t.Fatalf("persistSTSSignal: %v", err)
 	}
 }

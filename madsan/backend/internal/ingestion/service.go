@@ -90,6 +90,21 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == stsDetectJobType {
 		return s.processSTSDetect(ctx, jobID)
 	}
+	if jobType == stsPairPredictJobType {
+		return s.processSTSPairPredict(ctx, jobID)
+	}
+	if jobType == stsRescoreJobType {
+		return s.processSTSRescore(ctx, jobID, payload)
+	}
+	if jobType == maritimeContextJobType {
+		return s.processMaritimeContextImport(ctx, jobID, payload)
+	}
+	if jobType == geoReferenceJobType {
+		return s.processGeoReferenceImport(ctx, jobID, payload)
+	}
+	if jobType == storageInventoryJobType {
+		return s.processStorageInventory(ctx, jobID)
+	}
 	if jobType == mcrRebuildJobType {
 		return s.processMCRRebuild(ctx, jobID)
 	}

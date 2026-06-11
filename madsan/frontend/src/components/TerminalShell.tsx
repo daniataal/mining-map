@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Factory,
   Pickaxe,
+  MapPinned,
   Radio,
   Search,
   Settings,
@@ -200,6 +201,9 @@ export default function TerminalShell() {
           </button>
           <Link href={vertical === "metals" ? "/deals?vertical=metals" : "/deals"} className="rail-link" title="Deals">
             <ClipboardList size={18} />
+          </Link>
+          <Link href="/playground" className="rail-link" title="Deal playground — build deals on the map">
+            <MapPinned size={18} />
           </Link>
           <Link href="/portal" className="rail-link" title="Supplier portal">
             <Upload size={18} />

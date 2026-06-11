@@ -11,6 +11,7 @@ import {
 import HistoricChart from "@/components/HistoricChart";
 import IntelHomeSummary from "@/components/IntelHomeSummary";
 import STSEventPanel from "@/components/STSEventPanel";
+import StorageSitePanel from "@/components/StorageSitePanel";
 import VesselDrawerPanel from "@/components/VesselDrawerPanel";
 import { isStsSelection } from "@/lib/stsDisplay";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -48,8 +49,28 @@ export type MapSelection = {
   product_hint?: string;
   zone_name?: string;
   min_distance_m?: number | string;
+  transfer_probability?: number | string;
+  proximity_score?: number | string;
+  cargo_confidence?: number | string;
+  future_pair_probability?: number | string;
+  horizon_hours?: number | string;
+  prediction_kind?: string;
+  pair_key?: string;
+  context_label?: string;
+  review_tier?: string;
+  downgrade_reasons?: unknown;
+  maritime_context?: unknown;
+  nearest_oil_terminal?: unknown;
+  distance_m?: number | string;
+  latest_a?: string;
+  latest_b?: string;
+  event_lat?: number | string;
+  event_lon?: number | string;
+  closest_approach_ts?: string;
   start_ts?: string;
   end_ts?: string;
+  predicted_at?: string;
+  expires_at?: string;
   observed_at?: string;
   disclaimer?: string;
   tier?: string;
@@ -253,6 +274,10 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
   if (isStsSelection(selection)) {
     return <STSEventPanel selection={selection} onNavigate={onNavigate} />;
+  }
+
+  if (selection._layer === "storage-sites") {
+    return <StorageSitePanel selection={selection} />;
   }
 
   if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;
