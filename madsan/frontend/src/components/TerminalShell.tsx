@@ -1,5 +1,6 @@
 "use client";
 
+import BrandMark from "@/components/BrandMark";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -159,7 +160,9 @@ export default function TerminalShell() {
   return (
     <div className="terminal">
       <div className="ticker">
-        <strong>MADSAN</strong>
+        <Link href="/" className="ticker-brand" title="MadSan Intelligence">
+          <BrandMark size="sm" />
+        </Link>
         {(quotes.length ? quotes : [{ label: "Brent" }, { label: "VLSFO Singapore" }, { label: "Gold spot" }] as TickerQuote[]).map((q) => (
           <span key={q.label} className="ticker-item" title={q.disclaimer ?? tickerDisclaimer}>
             {isCrudeQuote(q) && q.change_pct != null ? <TickerTrendBar changePct={q.change_pct} /> : null}

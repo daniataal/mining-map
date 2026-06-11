@@ -84,6 +84,7 @@ a { color: var(--accent); text-decoration: none; }
 
 .terminal { display: grid; grid-template-rows: 40px 1fr 28px; height: 100vh; }
 .ticker { display: flex; gap: 2rem; padding: 0 1rem; align-items: center; background: #0a0e14; border-bottom: 1px solid var(--border); font-size: 12px; overflow: hidden; white-space: nowrap; }
+.ticker-brand { flex-shrink: 0; display: flex; align-items: center; margin-right: -0.75rem; }
 .ticker span { color: var(--muted); }
 .ticker strong { color: var(--accent); }
 
@@ -475,10 +476,24 @@ a { color: var(--accent); text-decoration: none; }
   padding: 0 1.25rem; height: 52px;
   background: #0a0e14; border-bottom: 1px solid var(--border);
 }
-.app-shell-brand { display: flex; align-items: baseline; gap: 8px; flex-shrink: 0; }
+.app-shell-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .app-shell-logo {
-  font-weight: 700; font-size: 13px; letter-spacing: 0.12em;
-  color: var(--accent); text-decoration: none;
+  display: flex; align-items: center; text-decoration: none; line-height: 0;
+}
+.brand-mark { object-fit: contain; display: block; max-width: 100%; }
+.brand-mark-sm { height: 26px; width: auto; }
+.brand-mark-md { height: 36px; width: auto; }
+.brand-mark-header { height: 32px; width: auto; max-width: 180px; }
+.brand-mark-lg { height: 88px; width: auto; max-width: 280px; }
+.brand-mark-emblem-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  overflow: hidden; flex-shrink: 0;
+}
+.brand-mark-emblem-wrap.brand-mark-sm { width: 28px; height: 28px; border-radius: 6px; }
+.brand-mark-emblem {
+  height: 100%; width: auto; max-width: none;
+  object-fit: cover; object-position: left center;
+  transform: scale(2.4); transform-origin: left center;
 }
 .app-shell-tag { font-size: 11px; color: var(--muted); }
 .app-shell-nav { display: flex; gap: 4px; flex: 1; }
@@ -500,10 +515,7 @@ a { color: var(--accent); text-decoration: none; }
   min-height: calc(100vh - 120px); padding: 2rem 1.25rem 3rem; gap: 1rem;
 }
 .auth-page-brand {
-  display: flex; align-items: baseline; gap: 8px; margin-bottom: 0.25rem;
-}
-.auth-page-logo {
-  font-size: 1.35rem; font-weight: 800; letter-spacing: 0.06em; color: var(--text);
+  display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 0.5rem;
 }
 .auth-page-tag {
   font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;

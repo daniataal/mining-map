@@ -1,6 +1,7 @@
 "use client";
 
 import AppShell from "@/components/AppShell";
+import BrandMark from "@/components/BrandMark";
 import LoginForm from "@/components/auth/LoginForm";
 import { AuthLoading } from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,7 +33,7 @@ function LoginContent() {
   return (
     <div className="auth-page-full">
       <div className="auth-page-brand">
-        <span className="auth-page-logo">MADSAN</span>
+        <BrandMark size="lg" />
         <span className="auth-page-tag">Intelligence</span>
       </div>
       {next !== "/" && (

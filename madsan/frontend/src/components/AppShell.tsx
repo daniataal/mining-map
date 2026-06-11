@@ -1,5 +1,6 @@
 "use client";
 
+import BrandMark from "@/components/BrandMark";
 import UserMenu from "@/components/auth/UserMenu";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -25,8 +26,8 @@ export default function AppShell({ children, maxWidth = 960 }: Props) {
     <div className="app-shell">
       <header className="app-shell-header">
         <div className="app-shell-brand">
-          <Link href="/" className="app-shell-logo">
-            MADSAN
+          <Link href="/" className="app-shell-logo" title="MadSan Intelligence">
+            <BrandMark size="header" />
           </Link>
           <span className="app-shell-tag">Intelligence</span>
         </div>
