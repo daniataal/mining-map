@@ -112,7 +112,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     geoJsonSource: "sts",
     group: "Maritime",
-    drawerHint: "Proximity events — fills after STS migration",
+    drawerHint: "Historic + live AIS proximity STS — click for vessels & inferred product",
     defaultOn: false,
   },
   {

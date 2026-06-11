@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // listSTSEvents returns STS proximity signals from core_signals for the map layer.
@@ -39,10 +40,16 @@ func (s *Server) listSTSEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT payload, COALESCE(confidence_score,0), observed_at
-		FROM core_signals
-		WHERE signal_type = 'sts'
-		ORDER BY observed_at DESC
+		SELECT cs.id, cs.payload, COALESCE(cs.confidence_score,0), cs.observed_at, COALESCE(cs.tier,''),
+			COALESCE(NULLIF(cs.payload->>'name_a',''), NULLIF(cs.payload->>'vessel_a_name',''), va.name, '') AS name_a,
+			COALESCE(NULLIF(cs.payload->>'name_b',''), NULLIF(cs.payload->>'vessel_b_name',''), vb.name, '') AS name_b,
+			COALESCE(NULLIF(cs.payload->>'vessel_a_class',''), va.vessel_type, '') AS class_a,
+			COALESCE(NULLIF(cs.payload->>'vessel_b_class',''), vb.vessel_type, '') AS class_b
+		FROM core_signals cs
+		LEFT JOIN vessels va ON va.mmsi = NULLIF(cs.payload->>'mmsi_a','')
+		LEFT JOIN vessels vb ON vb.mmsi = NULLIF(cs.payload->>'mmsi_b','')
+		WHERE cs.signal_type = 'sts'
+		ORDER BY cs.observed_at DESC
 		LIMIT $1
 	`, limit)
 	if err != nil {
@@ -58,10 +65,12 @@ func (s *Server) listSTSEvents(w http.ResponseWriter, r *http.Request) {
 
 	features := make([]any, 0)
 	for rows.Next() {
+		var signalID string
 		var payload []byte
 		var score float64
 		var observed time.Time
-		if rows.Scan(&payload, &score, &observed) != nil {
+		var rowTier, nameA, nameB, classA, classB string
+		if rows.Scan(&signalID, &payload, &score, &observed, &rowTier, &nameA, &nameB, &classA, &classB) != nil {
 			continue
 		}
 		var m map[string]any
@@ -76,28 +85,19 @@ func (s *Server) listSTSEvents(w http.ResponseWriter, r *http.Request) {
 		if minLng != nil && (lon < *minLng || lon > *maxLng || lat < *minLat || lat > *maxLat) {
 			continue
 		}
-		tier := "observed"
-		if sc, ok := m["score"].(map[string]any); ok {
-			if ct, ok := sc["confidence_tier"].(string); ok && ct != "" {
-				tier = ct
-			}
+		sid, err := uuid.Parse(signalID)
+		if err != nil {
+			continue
 		}
+		props := stsFeatureProperties(sid, m, score, observed, rowTier, nameA, nameB, classA, classB)
 		features = append(features, map[string]any{
 			"type": "Feature",
+			"id":   stsFeatureID(sid, m),
 			"geometry": map[string]any{
 				"type":        "Point",
 				"coordinates": []float64{lon, lat},
 			},
-			"properties": map[string]any{
-				"mmsi_a":           m["mmsi_a"],
-				"mmsi_b":           m["mmsi_b"],
-				"confidence_score": score,
-				"tier":             tier,
-				"observed_at":      observed.UTC().Format(time.RFC3339),
-				"zone_name":        m["zone_name"],
-				"min_distance_m":   m["min_distance_m"],
-				"disclaimer":       "AIS proximity inference — not verified cargo transfer",
-			},
+			"properties": props,
 		})
 	}
 

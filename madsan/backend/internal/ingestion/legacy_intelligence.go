@@ -286,6 +286,7 @@ func (s *Service) importLegacySTSZones(ctx context.Context, legacy *pgxpool.Pool
 func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Pool, maxRows int, dryRun bool) (int, error) {
 	const q = `
 		SELECT e.id, e.mmsi_a, e.mmsi_b, e.start_ts, e.end_ts, e.min_distance_m, e.avg_sog,
+		       e.centroid_lat, e.centroid_lon, e.status, e.data_source,
 		       COALESCE(z.name, '') AS zone_name,
 		       COALESCE(va.tanker_class, '') AS tanker_class_a,
 		       COALESCE(vb.tanker_class, '') AS tanker_class_b,
@@ -296,7 +297,10 @@ func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Poo
 		LEFT JOIN oil_vessels vb ON vb.mmsi = e.mmsi_b
 		ORDER BY e.start_ts OFFSET $1 LIMIT $2`
 	return s.batchLegacyImport(ctx, legacy, maxRows, dryRun, q, func(row map[string]any) error {
-		legacyID := fmt.Sprint(row["id"])
+		legacyID := parseUUID(row["id"]).String()
+		if legacyID == uuid.Nil.String() {
+			legacyID = strings.TrimSpace(fmt.Sprint(row["id"]))
+		}
 		mmsiA := legacyMMSIStr(row["mmsi_a"])
 		mmsiB := legacyMMSIStr(row["mmsi_b"])
 		vesselID := s.vesselIDByMMSI(ctx, mmsiA)
@@ -310,9 +314,15 @@ func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Poo
 		endTS, _ := row["end_ts"].(time.Time)
 		minDist, _ := toFloat(row["min_distance_m"])
 		avgSOG, _ := toFloat(row["avg_sog"])
+		centroidLat, _ := toFloat(row["centroid_lat"])
+		centroidLon, _ := toFloat(row["centroid_lon"])
 		zoneName := fmt.Sprint(row["zone_name"])
 		classA := fmt.Sprint(row["tanker_class_a"])
 		classB := fmt.Sprint(row["tanker_class_b"])
+		status := strings.TrimSpace(fmt.Sprint(row["status"]))
+		if status == "" || status == "<nil>" {
+			status = "inferred"
+		}
 
 		score := intelligence.ScoreSTS(intelligence.STSScoreInput{
 			MinDistanceM:    minDist,
@@ -325,16 +335,25 @@ func (s *Service) importLegacySTSEvents(ctx context.Context, legacy *pgxpool.Poo
 		})
 
 		payload, _ := json.Marshal(map[string]any{
-			"legacy_sts_id":      legacyID,
-			"mmsi_a":             mmsiA,
-			"mmsi_b":             mmsiB,
-			"name_a":             row["name_a"],
-			"name_b":             row["name_b"],
-			"zone_name":          zoneName,
-			"min_distance_m":     minDist,
-			"duration_hours":     endTS.Sub(startTS).Hours(),
-			"score":              score,
-			"source":             "legacy_import",
+			"legacy_sts_id":  legacyID,
+			"mmsi_a":         mmsiA,
+			"mmsi_b":         mmsiB,
+			"name_a":         row["name_a"],
+			"name_b":         row["name_b"],
+			"vessel_a_class": classA,
+			"vessel_b_class": classB,
+			"zone_name":      zoneName,
+			"min_distance_m": minDist,
+			"avg_sog":        avgSOG,
+			"duration_hours": endTS.Sub(startTS).Hours(),
+			"centroid_lat":   centroidLat,
+			"centroid_lon":   centroidLon,
+			"start_ts":       startTS.UTC().Format(time.RFC3339),
+			"end_ts":         endTS.UTC().Format(time.RFC3339),
+			"status":         status,
+			"data_source":    row["data_source"],
+			"score":          score,
+			"source":         "legacy_import",
 		})
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO core_signals (entity_type, entity_id, signal_type, tier, confidence_score, payload, observed_at)

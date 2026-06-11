@@ -10,7 +10,9 @@ import {
 } from "@/components/DossierEnrichmentSections";
 import HistoricChart from "@/components/HistoricChart";
 import IntelHomeSummary from "@/components/IntelHomeSummary";
+import STSEventPanel from "@/components/STSEventPanel";
 import VesselDrawerPanel from "@/components/VesselDrawerPanel";
+import { isStsSelection } from "@/lib/stsDisplay";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
 import { authFetchOpts } from "@/lib/auth";
@@ -31,9 +33,26 @@ import {
 
 export type MapSelection = {
   id?: string;
+  signal_id?: string;
   legacy_row_id?: string;
   name?: string;
+  event_title?: string;
   mmsi?: string;
+  mmsi_a?: string;
+  mmsi_b?: string;
+  vessel_a_name?: string;
+  vessel_b_name?: string;
+  vessel_a_class?: string;
+  vessel_b_class?: string;
+  event_kind?: string;
+  product_hint?: string;
+  zone_name?: string;
+  min_distance_m?: number | string;
+  start_ts?: string;
+  end_ts?: string;
+  observed_at?: string;
+  disclaimer?: string;
+  tier?: string;
   _entityType?: string;
   _layer?: string;
   asset_type?: string;
@@ -154,6 +173,12 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       setDossier(null);
       return;
     }
+    if (isStsSelection(selection)) {
+      setDossier(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
     const entityType = selection._entityType ?? "asset";
     const id = selection.id;
     const mmsi = selection.mmsi;
@@ -224,6 +249,10 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       );
     }
     return <IntelHomeSummary onOpenLive={onOpenLive} />;
+  }
+
+  if (isStsSelection(selection)) {
+    return <STSEventPanel selection={selection} onNavigate={onNavigate} />;
   }
 
   if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;

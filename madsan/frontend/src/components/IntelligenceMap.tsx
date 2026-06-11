@@ -34,6 +34,7 @@ import {
 import { ensureMapRtlPlugin } from "@/lib/mapRtl";
 import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
+import { stsHoverLabel } from "@/lib/stsDisplay";
 
 type Props = {
   vertical: "energy" | "metals";
@@ -139,8 +140,44 @@ function tuneBasemap(map: maplibregl.Map) {
 }
 
 function entityTypeForLayer(layerId: string): string {
+  if (layerId === "sts-events") return "sts";
   if (isVesselLayerId(layerId)) return "vessel";
   return "asset";
+}
+
+function strProp(v: unknown): string | undefined {
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  return s === "" ? undefined : s;
+}
+
+function stsSelectionFromProps(props: Record<string, unknown>, layerId: string): MapSelection {
+  return {
+    signal_id: strProp(props.signal_id),
+    id: strProp(props.signal_id),
+    name: strProp(props.name) ?? strProp(props.event_title),
+    event_title: strProp(props.event_title) ?? strProp(props.name),
+    event_kind: strProp(props.event_kind),
+    mmsi_a: strProp(props.mmsi_a),
+    mmsi_b: strProp(props.mmsi_b),
+    vessel_a_name: strProp(props.vessel_a_name),
+    vessel_b_name: strProp(props.vessel_b_name),
+    vessel_a_class: strProp(props.vessel_a_class),
+    vessel_b_class: strProp(props.vessel_b_class),
+    product_hint: strProp(props.product_hint),
+    zone_name: strProp(props.zone_name),
+    min_distance_m: props.min_distance_m as number | string | undefined,
+    start_ts: strProp(props.start_ts),
+    end_ts: strProp(props.end_ts),
+    observed_at: strProp(props.observed_at),
+    disclaimer: strProp(props.disclaimer),
+    tier: strProp(props.tier),
+    confidence_score: props.confidence_score as number | string | undefined,
+    asset_type: strProp(props.asset_type),
+    country_code: strProp(props.country_code),
+    _layer: layerId,
+    _entityType: "sts",
+  };
 }
 
 const VESSEL_TILE_LAYERS = ["vessels-dot-low", "vessels-no-heading", "vessels-ship", "vessels-hull"] as const;
@@ -548,8 +585,13 @@ function bboxString(map: maplibregl.Map): string {
 }
 
 function hoverLabel(props: Record<string, unknown>): string {
+  const sts = stsHoverLabel(props);
+  if (sts) return sts;
   const name = props.name != null ? String(props.name).trim() : "";
   const assetType = props.asset_type != null ? String(props.asset_type) : "";
+  if (assetType === "sts_zone") {
+    return name ? `STS anchorage · ${name}` : "STS anchorage zone";
+  }
   const substance = props.pipeline_substance ?? props.substance;
   const parts = [name || assetType || "Feature"];
   if (assetType && name) parts.push(assetType.replace(/_/g, " "));
@@ -752,6 +794,10 @@ export default function IntelligenceMap({
               ? "live-vessels"
               : "vessels"
             : hit.layer.id;
+        if (layerId === "sts-events") {
+          onSelect(stsSelectionFromProps(props as Record<string, unknown>, layerId));
+          return;
+        }
         onSelect({
           ...props,
           id: props.id != null ? String(props.id) : undefined,
@@ -813,7 +859,11 @@ export default function IntelligenceMap({
       });
 
       if (vertical === "energy") {
-        map.addSource("sts-events", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        map.addSource("sts-events", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          promoteId: "signal_id",
+        });
         map.addSource("mcr-corridors", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
