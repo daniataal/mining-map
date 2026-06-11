@@ -7,7 +7,7 @@ Go + Postgres/PostGIS intelligence terminal alongside legacy `mining-map`. North
 ### Option A — Full Docker stack (recommended for parity)
 
 ```bash
-cp madsan/deploy/.env.example madsan/deploy/.env   # optional
+cp madsan/deploy/.env.example madsan/deploy/.env   # required — canonical env (no parent .env)
 ./madsan/scripts/compose_up.sh
 ```
 
@@ -18,6 +18,8 @@ cp madsan/deploy/.env.example madsan/deploy/.env   # optional
 | Postgres | `localhost:5433` / `madsan_db` |
 
 With Caddy single entry: `./madsan/scripts/compose_up.sh --proxy` → http://localhost:9080
+
+Live AIS ingest (`madsan-ais-ingest`) starts automatically when `AISSTREAM_API_KEY` is set in `deploy/.env`; otherwise add `--ais` or use legacy sync via `LEGACY_DATABASE_URL`.
 
 Stop (keeps data): `./madsan/scripts/compose_down.sh`
 
@@ -34,7 +36,7 @@ Open http://localhost:3000 — terminal map, ⌘K search, `/deals`, `/admin`.
 
 **Requires** legacy `mining-db` on host port `:5434` for AIS sync and legacy import.
 
-Sync secrets from repo root: `./madsan/scripts/sync_env_from_root.sh` (never prints values).
+**Environment:** `madsan/deploy/.env` is the source of truth. Copy from `madsan/deploy/.env.example` and edit locally. The monorepo helper `./madsan/scripts/sync_env_from_root.sh` is deprecated (one-way migration only; never prints values).
 
 ### `LEGACY_DATABASE_URL` — hybrid vs Compose
 
@@ -45,17 +47,28 @@ Sync secrets from repo root: `./madsan/scripts/sync_env_from_root.sh` (never pri
 
 Hybrid default: `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable`
 
-If root `.env` still points at Docker hostname `db`, re-run `sync_env_from_root.sh` — it rewrites to `127.0.0.1` for `deploy/.env`.
+For hybrid dev, set `LEGACY_DATABASE_URL` to `127.0.0.1:5434` in `deploy/.env` (not Docker hostname `db`).
 
-## Environment
+## Environment (`madsan/deploy/.env`)
 
-| Variable | Default |
-|----------|---------|
-| `DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable` |
-| `LEGACY_DATABASE_URL` | `postgresql://postgres:password@127.0.0.1:5434/mining_db?sslmode=disable` (hybrid) |
-| `MADSAN_AIS_SYNC` | `true` |
-| `MADSAN_LEGACY_PYTHON` | `false` (Go import default) |
-| `EIA_API_KEY` | optional — EIA v2 daily WTI/Brent spot for ticker; omit for honest `reference_stub` fallback |
+Copy `madsan/deploy/.env.example` → `madsan/deploy/.env`. API, worker, and compose scripts load this file automatically.
+
+| Variable | Required | Default / notes |
+|----------|----------|-----------------|
+| `DATABASE_URL` | yes | `postgresql://postgres:password@127.0.0.1:5433/madsan_db?sslmode=disable` |
+| `MADSAN_DB_PASSWORD` | yes (compose) | `password` |
+| `MADSAN_JWT_SECRET` | yes | change in production |
+| `NEXT_PUBLIC_API_URL` | yes (frontend) | `http://localhost:8088` |
+| `LEGACY_DATABASE_URL` | yes (AIS/import) | `127.0.0.1:5434` hybrid; compose overrides to `host.docker.internal` |
+| `MADSAN_AIS_SYNC` | no | `true` when no `AISSTREAM_API_KEY`; `false` when key set (run `cmd/ais-ingest`) |
+| `AISSTREAM_API_KEY` | no | enables direct AIS; disables API legacy 2-hop sync by default |
+| `MADSAN_LEGACY_PYTHON` | no | `false` (Go import default) |
+| `MADSAN_RAW_DIR` | no | unset — auto-detects `madsan/raw` via go.mod |
+| `EIA_API_KEY` | no | EIA v2 daily WTI/Brent spot for ticker |
+| `OPENSANCTIONS_API_KEY` | no | deal sanctions screening |
+| `MADSAN_SHIPVAULT_ENABLED` | no | vessel registry enrichment |
+
+GEM trackers: place `.xlsx` files in `madsan/data/gem/` (see `madsan/data/gem/README.md`).
 
 ## Backfill commands
 
@@ -126,8 +139,17 @@ Refreshes `map_energy_assets` and `map_metals_assets` after a non–dry-run run.
 - `POST /api/admin/review-queue/{id}/resolve` — merge (`canonical_company_id`) or dismiss duplicate review items
 - `GET /api/admin/health/runtime` — AIS sync stats + cached legacy parity drift (auth required; also on `/admin` UI)
 
+## Standalone repo roadmap
+
+MadSan is migrating out of the `mining-map` monorepo to a standalone checkout (`/opt/madsan/`). The **master exit checklist** covers data migration, repo decoupling, ops, and honest product boundaries:
+
+**[docs/STANDALONE_MIGRATION.md](docs/STANDALONE_MIGRATION.md)**
+
+Honest status today: only **~4 of ~95** legacy tables are imported into `madsan_db`; Price pillar is empty; AIS may still use a legacy 2-hop path unless `AISSTREAM_API_KEY` is set. Full measured inventory: [agent_reports/legacy_migration_audit.md](agent_reports/legacy_migration_audit.md).
+
 ## Docs
 
+- [Standalone migration checklist](docs/STANDALONE_MIGRATION.md)
 - [Legacy ETL deprecation](docs/LEGACY_ETL_DEPRECATION.md)
 - [Execution log](agent_reports/madsan_v2_execution_log.md)
 - [Roadmap status](agent_reports/madsan_v2_roadmap_status.md)

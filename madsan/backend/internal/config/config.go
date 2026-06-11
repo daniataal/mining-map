@@ -228,8 +228,8 @@ func Load() Config {
 		ETLDir:                    env("MADSAN_ETL_DIR", etlDir),
 		ETLPython:                 env("MADSAN_ETL_PYTHON", filepath.Join(etlDir, ".venv", "bin", "python")),
 		LegacyImportPython:        envBool("MADSAN_LEGACY_PYTHON", false),
-		EnableAISSync:             envBool("MADSAN_AIS_SYNC", true),
-		EnableAISDirect:           envBool("MADSAN_AIS_DIRECT", env("AISSTREAM_API_KEY", "") != ""),
+		EnableAISSync:             envBool("MADSAN_AIS_SYNC", defaultAISSyncEnabled()),
+		EnableAISDirect:           envBool("MADSAN_AIS_DIRECT", defaultAISDirectEnabled()),
 		AISSyncInterval:           time.Duration(envInt("MADSAN_AIS_SYNC_SEC", 30)) * time.Second,
 		AISSyncLookbackHours:      envInt("MADSAN_AIS_SYNC_LOOKBACK_HOURS", 168),
 		AISStreamAPIKey:           env("AISSTREAM_API_KEY", ""),
@@ -260,10 +260,27 @@ func Load() Config {
 		VesselEnrichmentRateMS:    envInt("MADSAN_VESSEL_ENRICHMENT_RATE_MS", 500),
 		GLEIFUserAgent:            env("GLEIF_USER_AGENT", "MadSanIntelligence/1.0 (open-data research)"),
 		GLEIFBatchLimit:           envInt("GLEIF_BATCH_LIMIT", 50),
-		SECEdgarUserAgent:         env("SEC_EDGAR_USER_AGENT", "MadSanIntelligence/1.0 (open-data research)"),
+		SECEdgarUserAgent:         env("SEC_EDGAR_USER_AGENT", "MadSanIntelligence/1.0 (contact: ops@madsan.local)"),
 		SECEdgarBatchLimit:        envInt("SEC_EDGAR_BATCH_LIMIT", 25),
 		GrantMapPremiumLayers:     grantMapPremiumLayersDefault(),
 	}
+}
+
+// defaultAISSyncEnabled returns whether the API should default to legacy 2-hop AIS sync.
+// When AISSTREAM_API_KEY is set, direct ingest (cmd/ais-ingest) is preferred — legacy sync off.
+func defaultAISSyncEnabled() bool {
+	return env("AISSTREAM_API_KEY", "") == ""
+}
+
+// defaultAISDirectEnabled returns whether direct AISStream ingest mode is active by default.
+func defaultAISDirectEnabled() bool {
+	return env("AISSTREAM_API_KEY", "") != ""
+}
+
+// UseLegacyAISSync reports whether the API process should run legacy oil_ais_positions sync.
+func (c Config) UseLegacyAISSync() bool {
+	direct := c.EnableAISDirect && c.AISStreamAPIKey != ""
+	return c.EnableAISSync && c.LegacyDBURL != "" && !direct
 }
 
 func grantMapPremiumLayersDefault() bool {

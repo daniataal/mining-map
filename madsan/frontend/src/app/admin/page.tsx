@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
@@ -37,6 +37,8 @@ type PlatformHealth = {
   legacy_db_error?: string;
   ais_sync_enabled?: boolean;
   vessels_ais_24h?: number;
+  /** True when legacy 2-hop sync runs or direct ingest has fresh vessel rows. */
+  ais_healthy?: boolean;
   legacy_parity_summary?: {
     available?: boolean;
     passed?: boolean;
@@ -51,6 +53,7 @@ type PlatformHealth = {
 type RuntimeHealth = {
   ais_sync?: {
     enabled?: boolean;
+    mode?: string;
     legacy_configured?: boolean;
     interval_sec?: number;
     last_sync_at?: string;
@@ -341,45 +344,21 @@ export default function AdminPage() {
   const prov = insights?.provenance ?? {};
   const ing = insights?.ingestion ?? {};
 
-  if (authLoading) {
-    return (
-      <AppShell maxWidth={1100}>
-        <AuthLoading />
-      </AppShell>
-    );
-  }
-
-  if (!authed) {
-    return (
-      <AppShell maxWidth={1100}>
-        <h1 style={{ marginTop: 0 }}>Admin console</h1>
-        <p style={{ color: "var(--muted)", marginBottom: "1.5rem" }}>
-          Sign in to access ingestion, dedup, and review queue tools.
-        </p>
-        <AuthGate
-          title="Admin sign in"
-          subtitle="Ingestion controls and review queue require admin API access."
-        />
-      </AppShell>
-    );
-  }
-
-  if (!canUseAdmin) {
-    return (
-      <AppShell maxWidth={640}>
-        <h1 style={{ marginTop: 0 }}>Admin console</h1>
-        <p style={{ color: "var(--warn)" }}>
-          {entitlementError || "Your plan does not include admin API access. Free tier includes api_access with quota — sign in with a subscribed tenant."}
-        </p>
-        <p style={{ color: "var(--muted)" }}>
-          Plan: <code>{me?.plan || "unknown"}</code>
-        </p>
-      </AppShell>
-    );
-  }
-
   return (
-    <AppShell maxWidth={1100}>
+    <AppShell maxWidth={canUseAdmin ? 1100 : 640}>
+      <AuthGate>
+      {!canUseAdmin ? (
+        <>
+          <h1 style={{ marginTop: 0 }}>Admin console</h1>
+          <p style={{ color: "var(--warn)" }}>
+            {entitlementError || "Your plan does not include admin API access. Free tier includes api_access with quota — sign in with a subscribed tenant."}
+          </p>
+          <p style={{ color: "var(--muted)" }}>
+            Plan: <code>{me?.plan || "unknown"}</code>
+          </p>
+        </>
+      ) : (
+        <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <h1 style={{ margin: 0 }}>Admin console</h1>
         <div style={{ display: "flex", gap: 8 }}>
@@ -424,7 +403,12 @@ export default function AdminPage() {
                 ["API", platform.api_ok === true],
                 ["Database", platform.db_ok === true],
                 ["Legacy DB", platform.legacy_db_reachable === true],
-                ["AIS sync", platform.ais_sync_enabled === true],
+                [
+                  "AIS",
+                  platform.ais_healthy === true ||
+                    platform.ais_sync_enabled === true ||
+                    (platform.vessels_ais_24h ?? 0) > 0,
+                ],
                 [
                   "Parity",
                   platform.legacy_parity_summary?.available === true && platform.legacy_parity_summary?.passed === true,
@@ -498,7 +482,16 @@ export default function AdminPage() {
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
               {[
-                ["AIS sync", runtime.ais_sync?.enabled ? "on" : "off"],
+                [
+                  "AIS",
+                  runtime.ais_sync?.mode === "direct"
+                    ? "direct"
+                    : runtime.ais_sync?.enabled
+                      ? "on"
+                      : (runtime.ais_sync?.vessels_fresh_24h ?? 0) > 0
+                        ? "live"
+                        : "off",
+                ],
                 ["Legacy DB", runtime.ais_sync?.legacy_configured ? "connected" : "missing"],
                 ["Last batch", runtime.ais_sync?.last_batch_updated ?? "—"],
                 ["Vessels 24h", runtime.ais_sync?.vessels_fresh_24h ?? "—"],
@@ -813,6 +806,9 @@ export default function AdminPage() {
           })
         )}
       </section>
+        </>
+      )}
+      </AuthGate>
     </AppShell>
   );
 }

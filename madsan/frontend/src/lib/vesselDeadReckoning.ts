@@ -9,6 +9,7 @@ export type VesselMsg = {
   lon: number;
   course?: number;
   heading?: number;
+  inferred_course?: number;
   speed_knots?: number;
   destination?: string;
   last_seen_at?: string;
@@ -21,22 +22,62 @@ const KNOTS_TO_MPS = 0.514444;
 const EARTH_RADIUS_M = 6371000;
 const MAX_EXTRAPOLATION_MS = 60_000;
 const MIN_SPEED_KNOTS = 0.1;
+const MIN_TRACK_SEGMENT_M = 80;
 const VIEWPORT_BUFFER_DEG = 0.15;
 
 type VesselState = VesselMsg & { observedAtMs: number };
 
-export function isValidHeading(h: number | null | undefined): boolean {
-  return h != null && h >= 0 && h < 360 && h !== 511;
+export function isValidHeading(
+  h: number | null | undefined,
+  speedKnots?: number | null,
+): boolean {
+  if (h == null || h < 0 || h >= 360 || h === 511) return false;
+  const speed = speedKnots ?? 0;
+  if (h === 0 && speed < MIN_SPEED_KNOTS) return false;
+  return true;
 }
 
-export function isValidCourse(c: number | null | undefined): boolean {
+export function isValidInferredCourse(c: number | null | undefined): boolean {
   return c != null && c >= 0 && c < 360;
 }
 
-/** Prefer true heading when valid; otherwise course over ground. */
-export function vesselBearing(v: Pick<VesselMsg, "course" | "heading">): number | null {
-  if (isValidHeading(v.heading)) return v.heading!;
-  if (isValidCourse(v.course)) return v.course!;
+/** Great-circle initial bearing (0=north, clockwise). */
+export function bearingFromDelta(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function isValidCourse(
+  c: number | null | undefined,
+  speedKnots?: number | null,
+): boolean {
+  if (c == null || c < 0 || c >= 360) return false;
+  if (speedKnots != null && speedKnots < MIN_SPEED_KNOTS) return false;
+  return true;
+}
+
+/** Prefer COG when moving; otherwise true heading; else track-inferred bearing. */
+export function vesselBearing(
+  v: Pick<VesselMsg, "course" | "heading" | "inferred_course" | "speed_knots">,
+): number | null {
+  const speed = v.speed_knots ?? 0;
+  if (isValidCourse(v.course, speed)) return v.course!;
+  if (isValidHeading(v.heading, speed)) return v.heading!;
+  if (isValidInferredCourse(v.inferred_course)) return v.inferred_course!;
   return null;
 }
 
@@ -95,6 +136,7 @@ export function toVesselFeature(v: VesselMsg, lat = v.lat, lon = v.lon): Feature
       vessel_type: v.vessel_type ?? "",
       course: v.course ?? null,
       heading: v.heading ?? null,
+      inferred_course: v.inferred_course ?? null,
       speed_knots: v.speed_knots ?? null,
       last_seen_at: v.last_seen_at ?? "",
       source: v.source ?? "live",
@@ -130,19 +172,35 @@ export class VesselDeadReckoning {
     this.stopLoop();
   }
 
+  private enrich(msg: VesselMsg, prev?: VesselState): VesselState {
+    const observedAtMs = parseObservedAtMs(msg.last_seen_at);
+    let inferred = msg.inferred_course;
+    if (!isValidInferredCourse(inferred) && prev) {
+      const dist = haversineM(prev.lat, prev.lon, msg.lat, msg.lon);
+      if (dist >= MIN_TRACK_SEGMENT_M) {
+        inferred = bearingFromDelta(prev.lat, prev.lon, msg.lat, msg.lon);
+      }
+    }
+    return {
+      ...msg,
+      inferred_course: isValidInferredCourse(inferred) ? inferred : undefined,
+      observedAtMs,
+    };
+  }
+
   /** Drop stale WS/MVT frames by observed timestamp. */
   upsert(msg: VesselMsg): void {
-    const observedAtMs = parseObservedAtMs(msg.last_seen_at);
     const prev = this.vessels.get(msg.mmsi);
+    const observedAtMs = parseObservedAtMs(msg.last_seen_at);
     if (prev && observedAtMs < prev.observedAtMs) return;
-    this.vessels.set(msg.mmsi, { ...msg, observedAtMs });
+    this.vessels.set(msg.mmsi, this.enrich(msg, prev));
     this.publishAndMaybeAnimate();
   }
 
   replaceAll(msgs: VesselMsg[]): void {
     this.vessels.clear();
     for (const msg of msgs) {
-      this.vessels.set(msg.mmsi, { ...msg, observedAtMs: parseObservedAtMs(msg.last_seen_at) });
+      this.vessels.set(msg.mmsi, this.enrich(msg));
     }
     this.publishAndMaybeAnimate();
   }
@@ -242,6 +300,7 @@ function normalizeVessel(raw: Record<string, unknown>): VesselMsg {
     lon: num("lon", "Lon") ?? 0,
     course: num("course", "Course"),
     heading: num("heading", "Heading"),
+    inferred_course: num("inferred_course", "InferredCourse"),
     speed_knots: num("speed_knots", "SpeedKnots"),
     destination: str("destination", "Destination"),
     last_seen_at: normalizeLastSeen(raw.last_seen_at ?? raw.LastSeenAt),

@@ -339,6 +339,8 @@ function mvtSourceLayer(tileLayer: string): string {
       return "vessels";
     case "metals-assets":
       return "metals_assets";
+    case "energy-cadastre":
+      return "energy_cadastre";
     case "pipelines":
       return "petroleum_osm";
     default:

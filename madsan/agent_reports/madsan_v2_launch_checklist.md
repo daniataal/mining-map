@@ -69,27 +69,27 @@ Status key: **done** · **partial** · **blocked**
 
 ### Backup cron (prod VM)
 
-1. Verify manually from repo root (replace path):
+1. Verify manually from standalone prod checkout (see `deploy/DEPLOY.md`):
 
 ```bash
-cd /opt/mining-map && ./madsan/scripts/backup_db.sh
+cd /opt/madsan && ./scripts/backup_db.sh
 ls -lh backups/madsan_v2_pre_*.dump
 ```
 
-2. `crontab -e` — paste (adjust `REPO_ROOT`; see also `scripts/backup_cron.example`):
+2. `crontab -e` — paste (or run `./scripts/install_backup_cron.sh`; see `scripts/backup_cron.example`):
 
 ```cron
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Daily 02:30 local — madsan_db via compose madsan-db
-30 2 * * * cd /opt/mining-map && ./madsan/scripts/backup_db.sh >> backups/backup_cron.log 2>&1
+30 2 * * * cd /opt/madsan && ./scripts/backup_db.sh >> backups/backup_cron.log 2>&1
 ```
 
 3. Prerequisites: cron user can run `docker` + `docker compose`; `madsan-db` up before first run.
 4. After first scheduled run: check `backups/backup_cron.log` and newest `madsan_v2_pre_*.dump`.
 5. Optional retention (example — 14 days):  
-   `find /opt/mining-map/backups -name 'madsan_v2_pre_*.dump' -mtime +14 -delete`
+   `find /opt/madsan/backups -name 'madsan_v2_pre_*.dump' -mtime +14 -delete`
 
 ---
 
@@ -112,29 +112,29 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ### Volume seed (once per VM, before legacy import)
 
-From repo root on the prod VM (after checkout; stack may be down — volumes are Docker-managed):
+From MadSan repo root on the prod VM (`/opt/madsan`; stack may be down — volumes are Docker-managed):
 
 ```bash
-chmod +x madsan/scripts/seed_prod_volumes.sh
-./madsan/scripts/seed_prod_volumes.sh          # copy host trees into named volumes
-./madsan/scripts/seed_prod_volumes.sh --dry-run # preview only
+chmod +x scripts/seed_prod_volumes.sh
+./scripts/seed_prod_volumes.sh          # copy host trees into named volumes
+./scripts/seed_prod_volumes.sh --dry-run # preview only
 ```
 
 Manual equivalent (same volumes):
 
 ```bash
-docker run --rm -v madsan_raw_data:/dest -v "$PWD/madsan/raw":/src:ro alpine cp -a /src/. /dest/
-docker run --rm -v madsan_etl_data:/dest -v "$PWD/madsan/etl":/src:ro alpine cp -a /src/. /dest/
+docker run --rm -v madsan_raw_data:/dest -v "$PWD/raw":/src:ro alpine cp -a /src/. /dest/
+docker run --rm -v madsan_etl_data:/dest -v "$PWD/etl":/src:ro alpine cp -a /src/. /dest/
 ```
 
 Verify: `docker run --rm -v madsan_raw_data:/v alpine ls /v | head` (expect `bunker_fuel_suppliers_seed.json` symlink target or seed files).
 
 ### Prod stack smoke (k6 via Caddy :80)
 
-After `docker compose -f madsan/deploy/docker-compose.yml -f madsan/deploy/docker-compose.prod.yml --profile proxy up -d`:
+After `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml --profile proxy up -d` (from `/opt/madsan`):
 
 ```bash
-MADSAN_API_URL=http://<vm-ip-or-hostname>:80 k6 run madsan/scripts/k6_smoke.js
+MADSAN_API_URL=http://<vm-ip-or-hostname>:80 k6 run scripts/k6_smoke.js
 ```
 
 Hits `GET /health` and `GET /tiles/energy-assets/4/8/5.mvt` **through Caddy** (not `:8088` direct); pass when p95 &lt; 2s. Log run date + VM in this checklist when green.

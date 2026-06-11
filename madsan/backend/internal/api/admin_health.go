@@ -34,9 +34,17 @@ func (s *Server) adminHealthPlatform(w http.ResponseWriter, r *http.Request) {
 	}
 
 	aisEnabled := s.cfg.EnableAISSync
+	aisMode := "disabled"
 	if s.aisStats != nil {
 		aisEnabled = s.aisStats.Enabled
+		if snap := s.aisStats.Snapshot(); snap["mode"] != nil {
+			if m, ok := snap["mode"].(string); ok {
+				aisMode = m
+			}
+		}
 	}
+	directIngest := s.cfg.EnableAISDirect && s.cfg.AISStreamAPIKey != ""
+	aisHealthy := aisEnabled || (directIngest && vessels24h > 0) || vessels24h > 0
 
 	legacyReachable := false
 	var legacyErr string
@@ -84,6 +92,9 @@ func (s *Server) adminHealthPlatform(w http.ResponseWriter, r *http.Request) {
 		"legacy_db_reachable":   legacyReachable,
 		"legacy_db_error":       legacyErr,
 		"ais_sync_enabled":      aisEnabled,
+		"ais_healthy":           aisHealthy,
+		"ais_mode":              aisMode,
+		"ais_direct_ingest":     directIngest,
 		"vessels_ais_24h":       vessels24h,
 		"legacy_parity_summary": paritySummary,
 	})

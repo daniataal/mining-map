@@ -218,7 +218,7 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
           <p>Layers: mining licenses (partial global coverage), smelters &amp; processing plants.</p>
           <p className="disclaimer">
             License cadastre is incomplete — missing jurisdictions are not shown as empty confirmation.
-            Petroleum OSM assets appear on the energy vertical only.
+            Petroleum rights (leases, permits) appear on the energy vertical only, not here.
           </p>
         </>
       );

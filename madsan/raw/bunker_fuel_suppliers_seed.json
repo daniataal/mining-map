@@ -1,1 +1,3651 @@
-/Users/daniatallah/Gold Project /mining-map/data/bunker_fuel_suppliers_seed.json
+{
+  "meta": {
+    "source_id": "bunker_fuel_suppliers_curated",
+    "source_name": "Curated licensed bunker & marine fuel supplier registers",
+    "source_kind": "regulator_curated",
+    "disclaimer": "Public port/regulator bunker supplier lists only. Phones/emails only when published on official register pages. Confirm licence status before deals.",
+    "source_accessed_at": "2026-06-09",
+    "references": [
+      "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+      "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+      "https://www.mpa.gov.sg/port-marine-ops/marine-services/bunkering/bunkering-service-providers",
+      "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+      "https://www.ilent.nl/",
+      "https://fujairahport.ae/wp-content/uploads/2022/11/BUNKER-SUPPLIERS-PROVIDING-COMPLIANT-FUELS-IN-FUJAIRAH.pdf",
+      "https://fujairahport.ae/wp-content/uploads/2023/02/Registered_Shipping_Agent_List.pdf",
+      "https://www.gov.uk/government/publications/local-fuel-oil-suppliers-register",
+      "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+      "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+      "https://www.portofantwerpbruges.com/en/shipping/regulations-and-procedures/dangerous-goods/recognised-organisations-dangerous-goods",
+      "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+      "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
+      "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+      "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+      "https://www.adports.ae/port-users/port-documents/licensing/",
+      "https://eservices.dmca.ae/en/Services/ServiceDetails/313a8859-0a52-e811-844b-000d3a25638a",
+      "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+      "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=28",
+      "https://www.rews.org.mt/mt/services/fornituri-awtorizzati-settur-tal-fjuwil-bejgh-bl-ingrossa-bejgh-bl-imnut-bunkering-u-lpg/",
+      "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+      "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+      "https://pcs.maqta.ae/Web/m09NITZ7E0OqOt3jhOeB9w",
+      "https://ypen.gov.gr/energeia/ydrogonanthrakes/mitroa/adeies-eborias-petrelaioeidon/",
+      "https://lisans.epdk.gov.tr/epvys-web/faces/pages/lisans/lisansGenelOzetSorgula.xhtml"
+    ]
+  },
+  "hubs": [
+    {
+      "hub_key": "fujairah",
+      "locode": "AEFJR",
+      "port_name": "Fujairah",
+      "country": "United Arab Emirates",
+      "lat": 25.116,
+      "lng": 56.35,
+      "license_authority": "Port of Fujairah",
+      "register_source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+      "register_tier": "official_port_register",
+      "suppliers": [
+        {
+          "company_name": "Akron Trade and Transport",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo"
+          ],
+          "phone": "+971 9 222 8840",
+          "email": "operations@akron.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Gulf Petrol Supplies LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 9 228 2444",
+          "email": "gps@fng.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "International Supply",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 9 222 8253",
+          "email": "isuae@emirates.net.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Oil Marketing & Trading Intl. LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 9 228 1201",
+          "email": "agency@oil-marketing.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Vitol Bunkers (S) Pte Ltd – Fujairah Branch",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo"
+          ],
+          "phone": "+971 9 228 2922",
+          "email": "cqq@vitol.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Pearl Marine Logistics UAE FZE",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 4 307 9266",
+          "email": "ops@p-marine.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "PetroChina International (Middle East) Co. Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 4 440 7800",
+          "email": "Bunkers_PCIME@petrochina.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Al Shareq Al Matawaset Oil Services LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 9 222 9070",
+          "email": "operations@medieastern.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Al Arabia Bunkering",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "phone": "+971 9 222 2998",
+          "email": "agency@abcfuels.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Montfort Trading FZE",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 4 526 4747",
+          "email": "BunkeringOperations@mont-fort.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "G.E.O Marine LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 9 238 1269",
+          "email": "general@geomarine.ae",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Peninsula Fuel Supply LLC – Fujairah Branch",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 4 439 6308",
+          "email": "kdubash@peninsula360.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Sinopec Fuel Oil (Middle East) FZE",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo"
+          ],
+          "phone": "+971 4 426 9500",
+          "email": "xuhj2023.fuel@sinopec.com",
+          "source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+          "confidence_score": 0.88,
+          "fuels_supplied": "Compliant marine fuels (Port licensed)"
+        },
+        {
+          "company_name": "Sea Master Oil Marketing",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://fujairahport.ae/wp-content/uploads/2023/02/Registered_Shipping_Agent_List.pdf",
+          "confidence_score": 0.78,
+          "notes": "Listed under Licensed Bunker Suppliers on Port major-customers page; phone/email from Port Registered Shipping Agents PDF (Jun 2023) — SEAMASTER MARITIME LLC. No address or named contact on Port bunker register.",
+          "fuels_supplied": "Compliant marine fuels (major-customers listing)",
+          "phone": "+971 9 228 1117",
+          "email": "agency.fujairah@seamasteruae.com"
+        }
+      ],
+      "register_pdf_url": "https://fujairahport.ae/wp-content/uploads/2022/11/BUNKER-SUPPLIERS-PROVIDING-COMPLIANT-FUELS-IN-FUJAIRAH.pdf",
+      "register_as_of": "2024-02-13"
+    },
+    {
+      "hub_key": "singapore",
+      "locode": "SGSIN",
+      "port_name": "Singapore",
+      "country": "Singapore",
+      "lat": 1.264,
+      "lng": 103.82,
+      "license_authority": "MPA Singapore",
+      "register_source_url": "https://www.mpa.gov.sg/port-marine-ops/marine-services/bunkering/bunkering-service-providers",
+      "register_tier": "official_regulator_register",
+      "suppliers": [
+        {
+          "company_name": "BP Singapore Pte. Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "7 Straits View #26-01 Marina One East Tower, Singapore 018936",
+          "contact_person": "Ms Masaki Low / Mr Nicolas Robbins",
+          "phone": "+65 9728 9554",
+          "email": "masaki.low@se1.bp.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Bunker B Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MGO only",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "address": "8 Ubi Road 2 #08-24 Zervex, Singapore 408538",
+          "contact_person": "Mr Kevin Ng",
+          "phone": "+65 6509 1811",
+          "email": "kevin.ng@bunkerb.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Bunker House Petroleum Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "3 Ang Mo Kio Street 62 #07-03 LINK @ AMK, Singapore 569139",
+          "contact_person": "Mr Colin Wang",
+          "phone": "+65 6222 0337",
+          "email": "colinwang@bunkerhse.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Cathay Marine Fuel Oil Trading Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "18 Sin Ming Lane #08-08 Midview City, Singapore 573960",
+          "contact_person": "Mr Aric Kuoh",
+          "phone": "+65 6281 3437",
+          "email": "sales@cathaymarine.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Central Star Marine Supplies Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "56 Tuas South Street 5, Singapore 637799",
+          "contact_person": "Mr S.C. Yee",
+          "phone": "+65 6781 6969",
+          "email": "yee@centralstar.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Chevron (International) Trading Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "3 Fraser Street #12-28 DUO Tower, Singapore 189352",
+          "contact_person": "Ms Nicole Heng / Ms Nicole Liu",
+          "phone": "+65 6318 1000",
+          "email": "gmpsgb@chevron.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Consort Bunkers Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "61 Robinson Road #16-02 61 Robinson, Singapore 068893",
+          "contact_person": "Mr Yeo Siok Keak",
+          "phone": "+65 6344 3008",
+          "email": "bunkers@consortbunkers.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Eastpoint International Marketing Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "219 Henderson Road #11-03 Henderson Ind'l Park, Singapore 159556",
+          "contact_person": "Mr Alvin Tan Ah Ang",
+          "phone": "+65 6275 8116",
+          "email": "alvin.tan@eastpoint.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Eng Hua Company (Pte) Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "18 Sin Ming Lane Midview City #08-26, Singapore 573960",
+          "contact_person": "Mr Mike Sim",
+          "phone": "+65 6348 1191",
+          "email": "bunkers@enghuaco.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Equatorial Marine Fuel Management Services Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "27 Kim Chuan Drive #01-01, Singapore 537084",
+          "contact_person": "Ms Jenny Liaw",
+          "phone": "+65 6259 1314",
+          "email": "jenny_liaw@emf.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "ExxonMobil Asia Pacific Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Harbourfront Place #06-00 Harbourfront Tower 1, Singapore 098633",
+          "contact_person": "Mr Ognjen Plakalovic",
+          "phone": "+65 6813 9135",
+          "email": "ognjen.plakalovic@exxonmobil.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Fratelli Cosulich Bunkers (S) Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "79 Anson Road #16-01/02, Singapore 079906",
+          "contact_person": "Mr Timothy Cosulich",
+          "phone": "+65 6220 8389",
+          "email": "bunker@cosulich.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Glencore Singapore Pte.Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Temasek Avenue #34-01 Millenia Tower, Singapore 039192",
+          "contact_person": "Mr Chan WaiYeong",
+          "phone": "+65 6415 7600",
+          "email": "waiyeong.chan@glencore.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Global Energy Trading Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO /METHANOL",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "methanol"
+          ],
+          "address": "438 Alexandra Road #13-01 Alexandra Point, Singapore 119958",
+          "contact_person": "Ms Chow Munee",
+          "phone": "+65 6559 1600",
+          "email": "sales@genergytrading.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Global Marine Transportation Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "7500A Beach Road #15-311/312 The Plaza, Singapore 199591",
+          "contact_person": "Mr Ng Yeow Chong / Mr Aaron Tan Tong Bing",
+          "phone": "+65 6222 3112",
+          "email": "chong@globalmarinetpt.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Golden Island Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO /METHANOL",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "methanol"
+          ],
+          "address": "250 Sims Avenue #02-01 SPCS Building, Singapore 387513",
+          "contact_person": "Mr Johnny Tan",
+          "phone": "+65 6297 1100",
+          "email": "bunker@golden-island.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Grandeur Trading & Services Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "27 Kim Chuan Drive #01-01, Singapore 537084",
+          "contact_person": "Mr Choong Zhen Mao",
+          "phone": "+65 6253 8266",
+          "email": "zhenmao@grandeur.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Hai Fu Marine Services Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "6001 Beach Road #17-05/06 Golden Mile Tower, Singapore 199589",
+          "contact_person": "Mr Gabriel Sng",
+          "phone": "+65 6422 1664",
+          "email": "haisoon@haisoon.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Hong Lam Fuels Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "60 Paya Lebar Road #09-39 Paya Lebar Square, Singapore 409051",
+          "contact_person": "Mr Goon Ghen Cheit",
+          "phone": "+65 9635 6960",
+          "email": "chartering-snp@honglam.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Impex Marine (S) Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "171 Tras Street #08-179 Union Building, Singapore 079025",
+          "contact_person": "Mr Goh Poh Chuan",
+          "phone": "+65 6272 3868",
+          "email": "info@impexmarine.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Kenoil Marine Services Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Fusionopolis Walk #10-06 South Tower, Solaris, Singapore 138628",
+          "contact_person": "Mr Desmond Chong",
+          "phone": "+65 8499 3988",
+          "email": "general@kenoil.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Maersk Oil Trading Singapore Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Paya Lebar Link #13-01 Paya Lebar Quarter, Singapore 408533",
+          "contact_person": "Mr Kenny Yeo",
+          "phone": "+65 6323 8351",
+          "email": "kenny.yeo@maersk.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Marubeni Int'l Petroleum (S) Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "138 Market Street #31-01 CapitaGreen, Singapore 048946",
+          "contact_person": "Mr Kiefer Wong",
+          "phone": "+65 6336 8815",
+          "email": "wong-kiefer@marubeni.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "MGO Go Pte. Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MGO only",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "address": "8 Jurong Town Hall Road #24-01 The JTC Summit, Singapore 609434",
+          "contact_person": "Mr Patrick Ng",
+          "phone": "+65 6861 3311",
+          "email": "patrick.ng@pseg.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Minerva Bunkering Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "12 Marina View #26-01 Asia Square Tower 2, Singapore 018961",
+          "contact_person": "Mr Lester Chiu",
+          "phone": "+65 6416 4788",
+          "email": "singapore@minervabunkers.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Palmstone Tankers & Trading Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "18 Boon Lay Way #05-143 TradeHub 21, Singapore 609966",
+          "contact_person": "Mr Winnson Liew",
+          "phone": "+65 6473 2460",
+          "email": "winnson@palmstone.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Pegasus Maritime (S) Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1091 Lower Delta Road #02-08, Singapore 169202",
+          "contact_person": "Mr Jason Lee",
+          "phone": "+65 9692 5999",
+          "email": "admin@pegasus-m.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Pertamina International Marketing & Distribution Pte. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Raffles Place #56-00 One Raffles Place, Singapore 048616",
+          "contact_person": "Mr Daniel Binar Kumoro",
+          "phone": "+65 9052 8086",
+          "email": "daniel.kumoro@pertamina.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "PetroChina International (S) Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO /METHANOL",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "methanol"
+          ],
+          "address": "1 Temasek Avenue #27-00 Millenia Tower, Singapore 039192",
+          "contact_person": "Mr Wong Tet Keong",
+          "phone": "+65 6411 7531",
+          "email": "ops-fueloil@petrochina.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Shell Singapore Pte. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "9 North Buona Vista Drive #07-01 The Metropolis Tower 1, Singapore 138588",
+          "contact_person": "Mr David Ng",
+          "phone": "+65 6263 2139",
+          "email": "David.Ng@shell.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Shell Eastern Trading (Pte) Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "9 North Buona Vista Drive #07-01 The Metropolis Tower 1, Singapore 138588",
+          "contact_person": "Mr Vincent Tan",
+          "phone": "+65 6215 1398",
+          "email": "vincent.v.tan@shell.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Singamas Petroleum Trading Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "11 Collyer Quay #13-05 The Arcade, Singapore 049317",
+          "contact_person": "Mr Tang Weng Fei",
+          "phone": "+65 6226 3770",
+          "email": "operations@singamas.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Sinopec Fuel Oil (Singapore) Pte. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "1 Temasek Avenue #29-02 Millenia Tower, Singapore 039192",
+          "contact_person": "Mr Low Cheng Han",
+          "phone": "+65 9382 7671",
+          "email": "g-bunkers.fuel@sinopec.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "SK Energy International Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "9 Straits View #12-07/12 Marina One West Tower, Singapore 018937",
+          "contact_person": "Ms Anne Ang",
+          "phone": "+65 6249 5762",
+          "email": "asiabunker@sk.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "TFG Marine Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "10 Collyer Quay #29-00 Ocean Financial Centre, Singapore 049315",
+          "contact_person": "Mr Chris Baron",
+          "phone": "+65 6319 2963",
+          "email": "Chris.Baron@trafigura.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "TotalEnergies Marine Fuels Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "182 Cecil Street #27-01 Frasers Tower, Singapore 069547",
+          "contact_person": "Mr Jerry Lim",
+          "phone": "+65 6854 8421",
+          "email": "jerry.lim@totsa.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Triton Bunkering Services Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "127 Bukit Merah Lane 1 #01-224, Singapore 150127",
+          "contact_person": "Mr Victor Tay",
+          "phone": "+65 6276 7470",
+          "email": "admin@tritonbunkering.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Victory Pte Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "100 Pasir Panjang Road #03-08 100 Pasir Panjang, Singapore 118518",
+          "contact_person": "Ms Maureen Chan",
+          "phone": "+65 6777 8889",
+          "email": "vpt@vpt.com.sg",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        },
+        {
+          "company_name": "Vitol Bunkers (S) Pte. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MDO/ MGO /MFO",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "address": "460 Alexandra Road #15-02 mTower, Singapore 119963",
+          "contact_person": "Capt Rishab Bahl",
+          "phone": "+65 6839 4800",
+          "email": "rbb@vitol.com",
+          "source_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+          "confidence_score": 0.88
+        }
+      ],
+      "register_pdf_url": "https://www.mpa.gov.sg/api/media/a5c67b32-1119-4b00-9b0e-d1254cc397bf/List-of-licensed-bunker-suppliers---1-Jun-2026.pdf",
+      "register_as_of": "2026-06-01"
+    },
+    {
+      "hub_key": "rotterdam",
+      "locode": "NLRTM",
+      "port_name": "Rotterdam",
+      "country": "Netherlands",
+      "lat": 51.9,
+      "lng": 4.5,
+      "license_authority": "ILT (Human Environment and Transport Inspectorate)",
+      "register_source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "done",
+      "ingest_notes": "ILT registered marine fuel oil suppliers for seagoing vessels (publication 09-02-2026); names only — no phone/email/address on register",
+      "register_as_of": "2026-02-09",
+      "suppliers": [
+        {
+          "company_name": "A Nobel en Zn. Bunkerservice B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "ARA NOVA B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Atlantic Aardolieproducten Maatschappij B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Belgian Trading and Bunkering B.V. (Belgium)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "BP Nederland B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Catom Distribution B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85,
+          "notes": "Also known as Slurink and OK Marine (ILT register trade names)"
+        },
+        {
+          "company_name": "Dekker en Stam B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Esso Nederland B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "ExxonMobil Petroleum & Chemical BV (Belgium)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "FincoEnergies – Marine B.V",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "FincoEnergies – Inland Marine B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "FincoEnergies – International Marine B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "FinCo Supply & Trading B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Horizon Energy (Belgium)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Kieboom Werkendam B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Maersk Oil Trading B.V./S.A.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Minerva NWE NV Dutch Branch",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Northstar Bunkering B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Northstar Bunkers (Belgium)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Oliehandel Klaas de Boer B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Oliehandel J. Terlouw B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Orim Energy B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Osprey Energy Supply & Trade B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85,
+          "notes": "Also known as Osprey Energy and Osprey Energy Marine B.V. (ILT register trade names)"
+        },
+        {
+          "company_name": "Peninsula Petroleum Limited (Ireland)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Shell Trading Rotterdam B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "TFG MARINE PTE. LTD. (Singapore)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "TFG Marine B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Trefoil Trading B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85,
+          "notes": "Also known as Burando Energies (ILT register trade names)"
+        },
+        {
+          "company_name": "United Bunkers B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Varo Energy Netherlands B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Varo Energy Inland Bunker Services B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85,
+          "notes": "Also known as VARO Energy Rivier Bunkers, FIWADO and REINPLUS FIWADO BUNKER (ILT register trade names)"
+        },
+        {
+          "company_name": "Verde Marine Energy B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Vidol Fuel B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Vitol Bunkers B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        },
+        {
+          "company_name": "Xmoor Transport (pty) ltd (South Africa)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "ILT-registered marine fuel oil supplier (Netherlands)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "source_url": "https://english.ilent.nl/documents/shipping/sustainability-at-sea/publications/marine-fuel-suppliers-in-the-netherlands",
+          "confidence_score": 0.85
+        }
+      ]
+    },
+    {
+      "hub_key": "antwerp",
+      "locode": "BEANR",
+      "port_name": "Antwerp-Bruges",
+      "country": "Belgium",
+      "lat": 51.23,
+      "lng": 4.4,
+      "license_authority": "Port of Antwerp-Bruges (Harbour Master)",
+      "register_source_url": "https://www.portofantwerpbruges.com/en/shipping/regulations-and-procedures/dangerous-goods/recognised-organisations-dangerous-goods",
+      "register_tier": "official_port_register",
+      "ingest_status": "done",
+      "suppliers": [
+        {
+          "company_name": "Belgian Trading And Bunkering BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo"
+          ],
+          "address": "Asiadok - Oostkaai 28D, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "mail@btb-bunkering.com"
+        },
+        {
+          "company_name": "BB Energy Belgium NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Kambalastraat 14 , 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "bunkers.ara@bbenergy.com"
+        },
+        {
+          "company_name": "BP Europe SE - BP Nederland",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "d'Arcyweg 76, 3198 NA Rotterdam-Europoort, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "fueloiloperatorsrotterdam@bp.com"
+        },
+        {
+          "company_name": "Orim Energy Belgium B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Noorderlaan 147 Box 9, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "ara.ops@orim-energy.com"
+        },
+        {
+          "company_name": "ExxonMobil Petroleum & Chemical BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Polderdijkweg 3B - Haven 447, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "marinefuels.benelux@exxonmobil.com"
+        },
+        {
+          "company_name": "Finco Supply & Trading B.V",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "K.P. van der Mandelelaan 120, – 3062 MB Rotterdam ,  Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "Invoices.bunkering@gulf.nl"
+        },
+        {
+          "company_name": "Maersk A/S - Maersk Oil Trading",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Boompjes 40 - 1ste floor 3, 3011 XB Rotterdam, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "Motrotops@maersk.com"
+        },
+        {
+          "company_name": "Marfus BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Hofdreef 30, 4881 DR Zundert, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "info@marfus.nl"
+        },
+        {
+          "company_name": "Marine Oil Services BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Lichterweg 3, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "bunkers@marineoilservices.be"
+        },
+        {
+          "company_name": "Marine Support BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Conservenweg 5B, 2940 Stabroek",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "info@marinesupport.be"
+        },
+        {
+          "company_name": "Minerva NWE NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Scheldelaan 470, 2040 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "minervaopsara@minervabunkering.com"
+        },
+        {
+          "company_name": "Northstar Bunker NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Stokerijstraat 25b, 2110 Wijnegem",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "customs@northstarbunker.com"
+        },
+        {
+          "company_name": "Oilchart International NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Plantinkaai 13, 2000 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "operations@oilchart.com"
+        },
+        {
+          "company_name": "Orim Energy",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Noordzijde Haven 40 4611, GT Bergen op Zoom, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "ara.ops@orim-energy.com"
+        },
+        {
+          "company_name": "Peninsula Petroleum ARA NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Avenue Building, Noorderplaats 5, 2000 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "antwerpops@peninsula360.com"
+        },
+        {
+          "company_name": "TFG Marine BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Evert van de Beekstraat 1-82, The Base Tower B, 5th Floor: 1118 CL, Schiphol, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "tfgaraoperations@trafigura.com"
+        },
+        {
+          "company_name": "Trefoil Belgium BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Leopoldstraat 57 bus 11, 2000 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "bunkers@trefoil.be"
+        },
+        {
+          "company_name": "United Bunkers B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Rijnkaai 100 / A11 , 2000 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "ara@united-bunkers.com"
+        },
+        {
+          "company_name": "Vans Sea Bunkers NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Vosseschijnstraat kaai 140 - 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)",
+          "email": "bunkers@vansbunkers.be"
+        },
+        {
+          "company_name": "Vitol Bunkers BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — maritime shipping (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Weena 690, 3012 CN Rotterdam, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/562a9f30-c12c-4e43-9657-fd70ef0a8ee3/Bunkerbedrijven-voor-conventionele-brandstoffen-voor-de-zeevaart-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels maritime shipping (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Agaat NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — inland navigation (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Vosseschijnstraat kaai 140B, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels inland navigation (Antwerp port area, 29 Jul 2025)",
+          "email": "agaat@agaat.com"
+        },
+        {
+          "company_name": "De Wit Bunkering NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — inland navigation (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Asiadok - Oostkaai 28D, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels inland navigation (Antwerp port area, 29 Jul 2025)",
+          "email": "info@dewit-bunkering.com"
+        },
+        {
+          "company_name": "Finco Supply & Trading B.V",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — inland navigation (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "K.P. van der Mandelelaan 120, – 3062 MB Rotterdam – Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels inland navigation (Antwerp port area, 29 Jul 2025)",
+          "email": "Invoices.bunkering@gulf.nl"
+        },
+        {
+          "company_name": "Vans Bunkers BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed conventional fuels — inland navigation (Antwerp)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Vosseschijnstraat kaai 140, 2030 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/06f42f18-ae3e-4925-a03d-265e34108cce/Bunkerbedrijven-conventionele-brandstoffen-binnenvaart.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: conventional fuels inland navigation (Antwerp port area, 29 Jul 2025)",
+          "email": "vans@vansbunkers.be"
+        },
+        {
+          "company_name": "Castrol Belgium BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Langerbruggekaai 18, 9000 Gent",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Chevron Belgium NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Technologie park Zwijnaarde 88, Zwijnaarde",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "ExxonMobil Petrochemical & Chemical BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Polderdijkweg 3B - Haven 447 - 2030 Anwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "marinefuels.benelux@exxonmobil.com"
+        },
+        {
+          "company_name": "Gulf Oil Marine Pte. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "37 Tuas Road, Singapore 638503",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Lenol Marine",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Alsterufer 20, 20354 Hamburg, Duitsland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Lukoil Marine",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Alsterufer 20, 20354 Hamburg, Duitsland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Minerva NWE NV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Ruiterijschool 1, 2930 Brasschaat",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "ara.bunkers@ampni.com"
+        },
+        {
+          "company_name": "Maersk A/S - Maersk Oil Trading",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Boompjes 40 - 1st floor 3, 3011 XB Rotterdam, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "motrotops@maersk.com"
+        },
+        {
+          "company_name": "Oliehandel Klaas de Boer B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Klifweg 11-13, 8321 EH Urk, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "lubes@klaasdeboer.nl"
+        },
+        {
+          "company_name": "PetroChina International (Netherlands) Co B.V.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Weena 200, floor 11, 3012 NJ Rotterdam, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "Bunkers@petrochinaintl.nl"
+        },
+        {
+          "company_name": "Shell Trading Rotterdam B.V",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Weena 505, 3013 AL Rotterdam Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "STR-bunkers@shell.com"
+        },
+        {
+          "company_name": "Trans National Blenders BV",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Wieldrechtseweg 37, 3316 BG Dordrecht, Nederland",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)"
+        },
+        {
+          "company_name": "Trefoil Belgium BVBA",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Licensed lubricating oil bunker supplier (Antwerp)",
+          "product_types": [
+            "lubricating_oil"
+          ],
+          "address": "Leopoldstraat 57 bus 11, 2000 Antwerpen",
+          "source_url": "https://media.portofantwerpbruges.com/asset/df412fc1-bfe9-4dbe-b1fe-42a3018d56c5/Bunkerbedrijven-voor-smeerolie-in-Antwerpen.pdf",
+          "confidence_score": 0.88,
+          "notes": "Register: lubricating oil (Antwerp port area, 16 Dec 2025)",
+          "email": "bunkers@trefoil.be"
+        }
+      ],
+      "ingest_notes": "Licensed bunker companies PDFs (maritime conventional 16 Dec 2025, inland 29 Jul 2025, lubricating oil 16 Dec 2025); address+email on register; no phone; Zeebrugge list not published online"
+    },
+    {
+      "hub_key": "united_kingdom",
+      "locode": "GB",
+      "port_name": "United Kingdom (MARPOL local suppliers)",
+      "country": "United Kingdom",
+      "lat": 51.5,
+      "lng": -0.12,
+      "license_authority": "UK Department for Transport / MCA",
+      "register_source_url": "https://www.gov.uk/government/publications/local-fuel-oil-suppliers-register",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "done",
+      "ingest_notes": "MCA Local Fuel Oil Suppliers Approved List 2025-2026 (CSV, updated 25 Nov 2025)",
+      "suppliers": [
+        {
+          "company_name": "Anthony Jenkins Fuel Oil Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "T/A Jentex, Canterbury Road West, Ramsgate, Kent, CT12 5DU, United Kingdom",
+          "phone": "01843 596431",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "ASCO UK Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Unit A, 11 Harvest Avenue, D2 Business Park, Aberdeen, Grampian, AB21 0BQ, United Kingdom",
+          "phone": "01224 470707",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Calmac Ferries Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "The Ferry Terminal, Gourock, Inverclyde, PA19 1QP, United Kingdom",
+          "phone": "07811 098684",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Certas Energy UK Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "1st Floor Allday House, Warrington Road, Birchwood, Warrington, Cheshire, WA3 6GR, United Kingdom",
+          "phone": "07557 848776 / 07730 057316",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Chrystal Petroleum Co. Ltd.",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Cluny, Kirkcaldy, Fife, KY2 6QX, United Kingdom",
+          "phone": "01592 720366",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Comhairle Nan Eilean Siar",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Sandwick Road, Stornoway, Western Isles, HS1 2BW, United Kingdom",
+          "phone": "07944 949538",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "County Oil Group Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Becca House, Ashville Way, Sutton Weaver, Runcorn, Cheshire, WA7 3EZ, United Kingdom",
+          "phone": "01928 718000",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Crown Oil Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "The Oil Centre, Bury New Road, Heap Bridge, Bury, Greater Manchester, BL9 7HY, United Kingdom",
+          "phone": "0330 1231444 / 07584 608129",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "D. McNair & Son Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Kinloch Road, Campbeltown, Argyll, PA28 6EG, United Kingdom",
+          "phone": "01586 552020",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01586 552039"
+        },
+        {
+          "company_name": "Denholm Fishselling Ltd, T/A Johnston Brothers",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Harbour Buildings, Mallaig, Inverness-shire, PH41 4QD, United Kingdom",
+          "phone": "01687 462215",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "DOF UK Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Horizons House, 81-83 Waterloo Quay, Aberdeen, Grampian, AB11 5DE, United Kingdom",
+          "phone": "01224 614000",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Edda Wind AS",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "24/7-Bygget, Spannavegen 152, Haugesund, Rogaland, Norway, 5535",
+          "phone": "0047 92629022",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "ESL Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Dockyard Road, Ellesmere Port, Cheshire, CH65 4EF, United Kingdom",
+          "phone": "0151 6015201",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Esso Petroleum Company Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Ermyn House, Ermyn Way, Leatherhead, Surrey, KT22 8UX, United Kingdom",
+          "phone": "07894 604087",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "ExxonMobil Marine Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Ermyn House, Ermyn Way, Leatherhead, Surrey, KT22 8UX, United Kingdom",
+          "phone": "07894 604087",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Falmouth Petroleum Ltd / World Fuel Services",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "2nd Floor, Bridon Building, The Docks, Falmouth, Cornwall, TR11 4NR, United Kingdom",
+          "phone": "01326 213108",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Fletcher Supply Vessels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "River Court, DundeeOne, 5 West Victoria Dock Road, Dundee, Angus, DD1 3JT, United Kingdom",
+          "phone": "01224 785785",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01224 785786"
+        },
+        {
+          "company_name": "Fuel Supplies C.I. Ltd (Rubis Channel Islands)",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "La Collette, St Helier, Jersey, JE1 0FS, Channel Islands",
+          "phone": "01534 709832",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01534 709807"
+        },
+        {
+          "company_name": "Gleaner Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Ashgrove Road, Elgin, Moray, IV30 1UU, United Kingdom",
+          "phone": "01343 557400",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Heltor Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Old Newton Road, Newton Abbot, Devon, TQ12 6RW, United Kingdom",
+          "phone": "01626 832357",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Henty Oil Ltd / World Fuel Services",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Huskisson Dock No.1 , Regent Road, Liverpool Docks, Liverpool, Merseyside, L3 0AT, United Kingdom",
+          "phone": "07385 950546",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Highland Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Affric House, Beechwood Park, Inverness, Scotland, IV2 3BW, United Kingdom",
+          "phone": "01463 245824",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Imperial Heating Oils Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Dellingburn Street , Greenock, PA15 4TW, United Kingdom",
+          "phone": "01475 725399",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "John H Whitaker (Tankers) Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Crown Dry Dock, Tower Street, Hull, Yorkshire, HU9 1TY, United Kingdom",
+          "phone": "07971 719995",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "LCC Group Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "16 Churchtown Road, Cookstown, Tyrone, BT80 9UG, United Kingdom",
+          "phone": "02886 760640",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "02886 764211"
+        },
+        {
+          "company_name": "LHD Marine Supplies Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Mair's Quay, Holmsgarth, Lerwick, Shetland, ZE1 OPW, United Kingdom",
+          "phone": "01595 692882",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Lindsay Blee & Co Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Chiltern House, 45 Station Road, Henly-On-Thames, Oxfordshire, RG9 1AT, United Kingdom",
+          "phone": "01491 845415",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "07810 057562"
+        },
+        {
+          "company_name": "Maritime Bunkering Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "2 Humber Quays, Wellington Street West, Hull, East Yorkshire, HU1 2BN, United Kingdom",
+          "phone": "01482 214020",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Mitchell & Webber Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Fuel Depot, Scorrier, Redruth, Cornwall, YT16 5UT, United Kingdom",
+          "phone": "01209 821881",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Monjasa A/S",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Strevelingsvej 34, Fredericia, 7000, Denmark",
+          "phone": "0045 76 317302",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Moorland Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Moorlands House, North Road, Okehampton, Devon, EX20 1BQ, United Kingdom",
+          "phone": "01837 55700",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "New Era Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Riverview House, River Way, Harlow, Essex, CM20 2EA, United Kingdom",
+          "phone": "01279 425757",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01279 425758"
+        },
+        {
+          "company_name": "Nirva Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "12-14 Queen Street, Chasetown, Staffordshire, WS7 4QH, United Kingdom",
+          "phone": "01215 171265",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "North Star Shipping Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Suite 3, First Floor, Prime View, Prime Four Business Park, Kingswells Causeway, Kingswells, Aberdeen, AB15 8PU, United Kingdom",
+          "phone": "01224 261400",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "North Star South Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Columbus Buildings, Waveney Road, Lowestoft, Suffolk, NR32 1BN, United Kingdom",
+          "phone": "01502 573366",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01502 581500"
+        },
+        {
+          "company_name": "Oilfast Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Nethan Street, Motherwell, North Lanarkshire, ML1 3TF, United Kingdom",
+          "phone": "07702 559653",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Ostensjo Rederi AS",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Nautilus House, 35 Waterloo Quay, Aberdeen, Aberdeenshire, AB11 5BS, United Kingdom",
+          "phone": "07469 350360",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Peterson Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "1 Marischal Square, Broad Street, Aberdeen, AB10 1BL, United Kingdom",
+          "phone": "01224 288100",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Petroineos Manufacturing Scotland Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "P.O. Box 21, Bo'Ness Road, Grangemouth, Stirlingshire, FK3 9XH, United Kingdom",
+          "phone": "01324 476158",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Prema Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Abney Hall, Abney Park, Manchester Road, Chealde, Cheshire, SK8 2PD, United Kingdom",
+          "phone": "01614 130520",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Pricewatch Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "3 Waterside Road, Portslade, Brighton, East Sussex, BN41 1BD, United Kingdom",
+          "phone": "01825 840931",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Regency Oils Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "15 Marine Place, Buckie, Moray, AB56 1UT, United Kingdom",
+          "phone": "01542 832327",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "River Marine Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "46 Henry Street, Liverpool, Merseyside, L1 5AY, United Kingdom",
+          "phone": "01517 094149",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Sea Bunkering Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Chiltern House, 45 Station Road, Henley-on -Thames, Oxfordshire, RG9 1AT, United Kingdom",
+          "phone": "01491 845474",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Simpson Oils Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "South Quay, The Harbour, Wick, Caithness, KW1 5HA, United Kingdom",
+          "phone": "01955 604444",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Standard Fuel Oils Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Gores Road, Knowsley Industrial Park, Liverpool, Merseyside, L33 7XS, United Kingdom",
+          "phone": "01515 483038",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01515 468399"
+        },
+        {
+          "company_name": "Stena Line Ports Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Port Administration Building, Fishguard Harbour, Goodwick, Pembrokeshire, SA64 0BX, United Kingdom",
+          "phone": "01348 404435",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "T. Barbour Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Fuel Depot, Railway Pier, Oban, Argyll, PA34 4LW, United Kingdom",
+          "phone": "01631 562849",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026",
+          "fax": "01631 565832"
+        },
+        {
+          "company_name": "The Highland Council",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "Highland Harbour's Headquarters, Culag Pier, Lochinver, Sutherland, IV27 4LE, United Kingdom",
+          "phone": "01349 781612",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Tidewater Marine UK Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "The Exchange No 1, 62-104 Market Street, Aberdeen, Aberdeenshire, AB11 5PJ, United Kingdom",
+          "phone": "01224 336000",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Valero Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "27th Floor, 1 Canada Square, London, E14 5AA, United Kingdom",
+          "phone": "02075 133867",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "We Refuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "First floor, 42-44 Great Titchfield Street, London, W1W 7PY, United Kingdom",
+          "phone": "07342 873671",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        },
+        {
+          "company_name": "Yeoward Marine Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "MARPOL Annex VI compliant fuel oil (MCA registered local supplier)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "address": "14 Island Street, Salcombe, Devon, TQ8 8DP, United Kingdom",
+          "phone": "01548 844261",
+          "source_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+          "confidence_score": 0.88,
+          "registration_expires": "19/08/2026"
+        }
+      ],
+      "register_csv_url": "https://assets.publishing.service.gov.uk/media/6925aa4aaca6213a492dd044/Local_Fuel_Oil_Suppliers_Approved_List_2025_-_2026.csv",
+      "register_as_of": "2025-11-25"
+    },
+    {
+      "hub_key": "new_zealand",
+      "locode": "NZ",
+      "port_name": "New Zealand",
+      "country": "New Zealand",
+      "lat": -41.29,
+      "lng": 174.78,
+      "license_authority": "Trading Standards (MBIE) / Maritime NZ MARPOL Annex VI",
+      "register_source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "done",
+      "ingest_notes": "MARPOL Annex VI Reg 18.9.1 register (Trading Standards); phone + fuel by port; no email/address on register",
+      "suppliers": [
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Low Sulphur Fuel Oil (LSFO) (not exceeding 0.50% sulphur)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Barge"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Barge / Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Mobil Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "027 243 4244",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Auckland; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Bluff; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Bluff; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Mobil Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "027 243 4244",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Bluff; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Dunedin; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Dunedin; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "NPD Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 544 6162",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Dunedin; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Z Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 474 355",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Dunedin; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Gisborne; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Lyttelton; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "Mobil Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "027 243 4244",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Lyttelton; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Lyttelton; delivery: Road Tanker"
+        },
+        {
+          "company_name": "NPD Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 544 6162",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Lyttelton; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Low Sulphur Fuel Oil (LSFO) (not exceeding 0.50% sulphur)",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Marsden Point; delivery: Pipeline / Barge"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Marsden Point; delivery: Pipeline / Barge"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Marsden Point; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Mangōnui Wharf; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Low Sulphur Fuel Oil (LSFO)/ Marine Gas Oil (MGO) (not exceeding 0.50% sulphur)",
+          "product_types": [
+            "marine_gas_oil",
+            "marine_fuel_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Mt Maunganui; delivery: Barge"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Mt Maunganui; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Mt Maunganui; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Mobil Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "027 243 4244",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Mt Maunganui; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Napier; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Napier; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Napier; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Napier; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Nelson; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Nelson; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "NPD Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 544 6162",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Nelson; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Z Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 474 355",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Nelson; delivery: Pipeline and Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: New Plymouth; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: New Plymouth; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: New Plymouth; delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Northport; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Northport; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Northport; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Opua Wharf; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Opononi Wharf; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Port Nikau; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Port Nikau; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Port Whangarei; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Taranaki; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Taranaki; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Tauranga; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Tauranga; delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Tauranga; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Timaru; delivery: Road Tanker"
+        },
+        {
+          "company_name": "NPD Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 544 6162",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Timaru; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Tasman Fuels",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "021 838 6453",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Timaru; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Z Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 474 355",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Timaru; delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Timaru; delivery: Road Tanker"
+        },
+        {
+          "company_name": "Allied Petroleum Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 383 566",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "BP Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "+61 3 9268 4525",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Barge"
+        },
+        {
+          "company_name": "Gull NZ",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "09 489 1452",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Road Tanker"
+        },
+        {
+          "company_name": "Mobil Oil New Zealand Limited",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "027 243 4244",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Pipeline / Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Wellington (Kaiwharawhara); delivery: Road Tanker"
+        },
+        {
+          "company_name": "McFall Fuel Ltd",
+          "supplier_type": "bunker_supplier",
+          "fuels_supplied": "Marine Gas Oil (MGO) (ultra low sulphur)",
+          "product_types": [
+            "marine_gas_oil"
+          ],
+          "phone": "0800 623 255",
+          "source_url": "https://fuelquality.tradingstandards.govt.nz/marine/register-of-marine-fuel-suppliers/",
+          "confidence_score": 0.88,
+          "notes": "Port: Whakatane Wharf; delivery: Road Tanker"
+        }
+      ],
+      "register_as_of": "2026-06-09"
+    },
+    {
+      "hub_key": "sohar",
+      "locode": "OMSLL",
+      "port_name": "Sohar",
+      "country": "Oman",
+      "lat": 24.47,
+      "lng": 56.67,
+      "license_authority": "SOHAR Port and Freezone",
+      "register_source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+      "register_tier": "official_port_register",
+      "register_as_of": "2024-01-01",
+      "ingest_notes": "Active bunker suppliers from Port marine services brochure; port mandates MFM for all bunker deliveries.",
+      "suppliers": [
+        {
+          "company_name": "Oman Oil Marketing Company LLC (OOMCO)",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo",
+            "marine_gas_oil"
+          ],
+          "phone": "+968 24571207",
+          "email": "bunkers@oomco.com",
+          "website": "https://www.oomco.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "VLSFO, MGO, HSFO (Port-licensed barge MT ALPHA)"
+        },
+        {
+          "company_name": "TFG Marine",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "vlsfo",
+            "marine_gas_oil"
+          ],
+          "email": "Oman.sales@tfgmarine.com",
+          "website": "https://www.tfgmarine.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.84,
+          "notes": "Port brochure lists contact email; no phone on register page."
+        },
+        {
+          "company_name": "Hormuz Marine LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "phone": "+968 92318123",
+          "email": "sa@hormuzmarine.om",
+          "website": "https://www.hormuzmarine.om",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86
+        },
+        {
+          "company_name": "Global Oil Resources LLC",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil"
+          ],
+          "phone": "+971 55 805 1348",
+          "email": "bunk_mgr@globaloilresources.com",
+          "website": "https://globaloilresources.com",
+          "source_url": "https://soharportandfreezone.om/wp-content/uploads/2025/04/Marine-services-brochure-2024-.pdf",
+          "confidence_score": 0.86,
+          "notes": "Listed on Sohar Port marine services brochure; UAE mobile on register."
+        }
+      ]
+    },
+    {
+      "hub_key": "jebel_ali",
+      "locode": "AEJEA",
+      "port_name": "Jebel Ali / Dubai",
+      "country": "United Arab Emirates",
+      "lat": 25.01,
+      "lng": 55.06,
+      "license_authority": "Dubai Maritime Authority (DMCA)",
+      "register_source_url": "https://eservices.dmca.ae/en/Services/ServiceDetails/313a8859-0a52-e811-844b-000d3a25638a",
+      "register_tier": "official_regulator",
+      "ingest_status": "pending",
+      "ingest_notes": "DMCA issues bunker provider permits via e-services only; no published licensed-company table found. Checked eservices.dmca.ae service details page — permit verification only.",
+      "suppliers": []
+    },
+    {
+      "hub_key": "khalifa",
+      "locode": "AEKHL",
+      "port_name": "Khalifa Port / Abu Dhabi",
+      "country": "United Arab Emirates",
+      "lat": 24.82,
+      "lng": 54.65,
+      "license_authority": "AD Ports Group (Marine Bunker Supplies Licence)",
+      "register_source_url": "https://www.adports.ae/port-users/port-documents/licensing/",
+      "register_tier": "official_port_register",
+      "ingest_status": "pending",
+      "ingest_notes": "AD Ports licensing page links to mLMS valid-providers PDF at https://pcs.maqta.ae/Web/m09NITZ7E0OqOt3jhOeB9w but fetch timed out (>90s) from this environment — likely portal/session gated. Marine Bunker Supplies licence type documented; no attributable supplier rows ingested.",
+      "suppliers": []
+    },
+    {
+      "hub_key": "khor_fakkan",
+      "locode": "AEKLF",
+      "port_name": "Khor Fakkan",
+      "country": "United Arab Emirates",
+      "lat": 25.33,
+      "lng": 56.35,
+      "license_authority": "Port of Fujairah (offshore anchorage jurisdiction)",
+      "register_source_url": "https://fujairahport.ae/marine-centre/fujairah-offshore-anchorage-area/service-providers/bunkering-companies/",
+      "register_tier": "official_port_register",
+      "ingest_status": "pending",
+      "ingest_notes": "No separate Khor Fakkan bunker register found. Anchorage bunkering typically served by Port of Fujairah-licensed suppliers (see AEFJR hub). Avoid duplicating Fujairah rows until port publishes Khor Fakkan-specific list.",
+      "suppliers": []
+    },
+    {
+      "hub_key": "gibraltar",
+      "locode": "GIGIB",
+      "port_name": "Gibraltar",
+      "country": "Gibraltar",
+      "lat": 36.14,
+      "lng": -5.35,
+      "license_authority": "Gibraltar Port Authority",
+      "register_source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+      "register_tier": "official_port_register",
+      "ingest_status": "complete",
+      "suppliers": [
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Cepsa (Gibraltar) Ltd",
+          "phone": "+350 200 76170",
+          "email": "fwpitto@gibunco.com",
+          "address": "Europort, Building 7, 2nd Floor, PO Box 51, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+          "notes": "After-hours on duty +350 200 46909 on GPA directory"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Gib Oil",
+          "phone": "+350 200 03400",
+          "email": "info@giboil.com",
+          "address": "Western Arm, North Mole, PO Box 231, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Minerva Bunkering (Gibraltar) Ltd",
+          "phone": "+350 200 50246",
+          "email": "opsgib@minervabunkering.com",
+          "address": "Suite 2, Block 4 Watergardens, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4",
+          "notes": "Mobile +350 58360 000 on GPA directory"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Orim Energy (Gibraltar) Limited",
+          "phone": "+350 200 42070",
+          "email": "info@orim-energy.com",
+          "address": "Level 1, 1-7 Crutchett's Ramp, Gibraltar",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil",
+            "vlsfo"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "GPA Maritime Directory — BUNKERING OPERATORS",
+          "company_name": "Peninsula Petroleum Ltd",
+          "phone": "+350 200 52641",
+          "email": "gibraltar@peninsula360.com",
+          "address": "Suite 921, Second Floor, Building 9, Europort, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=4"
+        },
+        {
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "lng"
+          ],
+          "confidence_score": 0.88,
+          "fuels_supplied": "LNG bunkering (GPA LNG BUNKERING OPERATOR category)",
+          "company_name": "Shell LNG Bunkering BV (SLB)",
+          "phone": "+350 200 79000",
+          "email": "SLB-Info-GibraltarLNG@shell.com",
+          "address": "c/o Line Group, Madison Building, Gibraltar GX111AA",
+          "source_url": "https://www.gibraltarport.com/maritime-services/directory?categories%5B%5D=28"
+        }
+      ],
+      "register_as_of": "2026-06-09",
+      "ingest_notes": "GPA Maritime Directory BUNKERING OPERATORS (categories[]=4) returns 5 licensed operators; LNG operator from categories[]=28. URL category filter requires categories[] param — category=18 alone does not filter server-side."
+    },
+    {
+      "hub_key": "houston",
+      "locode": "USHOU",
+      "port_name": "Houston",
+      "country": "United States",
+      "lat": 29.73,
+      "lng": -95.27,
+      "license_authority": "USCG / state fuel dealer registers",
+      "register_source_url": "https://porthouston.com/",
+      "register_tier": "port_directory",
+      "ingest_status": "pending",
+      "ingest_notes": "Bunker/fuel suppliers via port directory + Texas petroleum dealer licensing",
+      "suppliers": []
+    },
+    {
+      "hub_key": "malta",
+      "locode": "MTMLA",
+      "port_name": "Malta",
+      "country": "Malta",
+      "lat": 35.89,
+      "lng": 14.51,
+      "license_authority": "Regulator for Energy and Water Services (REWS)",
+      "register_source_url": "https://www.rews.org.mt/mt/services/fornituri-awtorizzati-settur-tal-fjuwil-bejgh-bl-ingrossa-bejgh-bl-imnut-bunkering-u-lpg/",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "complete",
+      "suppliers": [
+        {
+          "company_name": "International Fuel Suppliers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal; also sheldonP@cnbunkerfuels.com on register",
+          "email": "operations@ifs.com.mt"
+        },
+        {
+          "company_name": "Valletta Bunkers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "admin@vallettabunkers.com"
+        },
+        {
+          "company_name": "Peninsula Petroleum Malta Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Authorised provider row: Pierre Sciberras c/o Peninsula Petroleum Malta Ltd",
+          "email": "legal@peninsulapetroleum.com"
+        },
+        {
+          "company_name": "Cornflower Shipping Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "johann@medsea.com.mt"
+        },
+        {
+          "company_name": "Zeta Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "operations@zetaen.com"
+        },
+        {
+          "company_name": "Orim Energy International Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "edwin.coppens@orim-energy.com"
+        },
+        {
+          "company_name": "CN Bunker Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "nick@cnbunkerfuels.com"
+        },
+        {
+          "company_name": "FG Ship Bunkers Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/bunkering_website_report_-May-2026-.pdf",
+          "confidence_score": 0.88,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Barge/marine terminal",
+          "email": "corporate@falzongroup.com"
+        },
+        {
+          "company_name": "PH Borg Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Cassar Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Falzon Fuel Services Limited",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Premier Transport Services",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Mediterranean Bunker & Brokerage Services Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Star Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Fritz Energy and Engineering Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "MZ Fuels Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        },
+        {
+          "company_name": "Petroleum Energy Ltd",
+          "supplier_type": "bunker_supplier",
+          "product_types": [
+            "marine_fuel_oil",
+            "marine_gas_oil"
+          ],
+          "source_url": "https://www.rews.org.mt/wp-content/uploads/2026/05/road_tankers_website_May-2026.pdf",
+          "confidence_score": 0.86,
+          "fuels_supplied": "REWS-authorised bunkering (Malta)",
+          "notes": "Road tanker bunkering; contact address on register only"
+        }
+      ],
+      "register_as_of": "2026-05-22",
+      "ingest_notes": "REWS authorised bunkering providers — barge/marine terminal (May 2026) + road tanker (May 2026). Transport Malta BOP required but company roster published by REWS."
+    },
+    {
+      "hub_key": "piraeus",
+      "locode": "GRPIR",
+      "port_name": "Piraeus",
+      "country": "Greece",
+      "lat": 37.94,
+      "lng": 23.64,
+      "license_authority": "Ministry of Environment and Energy (YPEN) — B1 tax-free marine fuels register",
+      "register_source_url": "https://ypen.gov.gr/energeia/ydrogonanthrakes/mitroa/adeies-eborias-petrelaioeidon/",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "blocked",
+      "suppliers": [],
+      "ingest_notes": "Official B1 wholesale marine fuels register exists on ypen.gov.gr but PDF downloads return HTTP 403 from automated fetch (Dec 2023–2025 URLs tested). Piraeus Port Authority (OLP) publishes no separate bunker supplier roster. Retry with manual download or EMSA DONA Greece profile."
+    },
+    {
+      "hub_key": "istanbul",
+      "locode": "TRIST",
+      "port_name": "Istanbul",
+      "country": "Turkey",
+      "lat": 41.01,
+      "lng": 28.97,
+      "license_authority": "EPDK (Energy Market Regulatory Authority)",
+      "register_source_url": "https://lisans.epdk.gov.tr/epvys-web/faces/pages/lisans/lisansGenelOzetSorgula.xhtml",
+      "register_tier": "official_regulator_register",
+      "ingest_status": "blocked",
+      "suppliers": [],
+      "ingest_notes": "Turkish bunker suppliers hold EPDK ihrakiye teslimi (bunker delivery) licences queryable via EPVYS portal only — no bulk downloadable official list without interactive session. Resmi Gazete grants individual decisions, not a maintained hub roster."
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/madsan/intelligence/internal/assets"
+	"github.com/madsan/intelligence/internal/maritime"
 )
 
 type Service struct {
@@ -30,6 +31,8 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	switch layer {
 	case "metals-assets":
 		layerName = "metals_assets"
+	case "energy-cadastre":
+		layerName = "energy_cadastre"
 	case "vessels":
 		table = "map_vessels"
 		layerName = "vessels"
@@ -66,6 +69,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 					v.course,
 					v.heading,
 					v.speed_knots,
+					track.inferred_course,
 					ROUND(EXTRACT(EPOCH FROM (now() - v.last_seen_at)) / 3600.0, 1) AS ais_age_h,
 					COALESCE(
 						ve.deadweight_tons,
@@ -80,6 +84,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 						NULLIF((ve.raw_payload->>'beam_m')::numeric, 0)
 					) AS beam_m
 				FROM vessels v
+				` + maritime.VesselTrackBearingLateralSQL + `
 				LEFT JOIN vessel_enrichment ve ON ve.mmsi = v.mmsi
 				WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
 				  AND v.geom IS NOT NULL
@@ -104,6 +109,16 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 				FROM assets
 				WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND geom IS NOT NULL
 				  AND asset_type IN ('tank_farm','terminal','refinery','port','sts_zone','storage','berth')
+				  AND ` + tileFilter + `
+			) mvt`
+	case "energy-cadastre":
+		query = `
+			SELECT ST_AsMVT(mvt.*, $4) FROM (
+				SELECT ` + mvtGeom + ` AS geom,
+					id::text, name, asset_type, country_code, confidence_score
+				FROM assets
+				WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND geom IS NOT NULL
+				  AND (` + assets.EnergyCadastreWhereSQL + `)
 				  AND ` + tileFilter + `
 			) mvt`
 	case "pipelines":
@@ -152,7 +167,7 @@ func (s *Service) ServeMVT(w http.ResponseWriter, r *http.Request) {
 	switch layer {
 	case "vessels":
 		cache = "public, max-age=30"
-	case "energy-assets", "metals-assets", "pipelines":
+	case "energy-assets", "energy-cadastre", "metals-assets", "pipelines":
 		cache = "public, max-age=120"
 	}
 	w.Header().Set("Cache-Control", cache)

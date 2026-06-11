@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
-import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
@@ -26,7 +26,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 export default function PortalPage() {
-  const { me, loading: authLoading, refresh } = useAuth();
+  const { me, refresh } = useAuth();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [docPlaceholder, setDocPlaceholder] = useState("");
@@ -102,26 +102,15 @@ export default function PortalPage() {
     setDocPlaceholder("");
   }
 
-  if (authLoading) {
-    return (
-      <AppShell maxWidth={640}>
-        <AuthLoading />
-      </AppShell>
-    );
-  }
-
   return (
     <AppShell maxWidth={640}>
+      <AuthGate>
       <h1 style={{ marginTop: 0 }}>Supplier portal</h1>
       <p style={{ color: "var(--muted)" }}>
         Submit commodity offers for analyst review. Submissions enqueue{" "}
         <code style={{ fontSize: 11 }}>manual_review_queue</code> with low confidence until verified.
       </p>
 
-      <AuthGate
-        title="Sign in to submit offers"
-        subtitle="Supplier submissions require an authenticated session with portal entitlement."
-      >
         {!canSubmit && (
           <p style={{ color: "var(--warn)", marginBottom: "1rem" }}>
             Your plan does not include supplier portal submissions.
@@ -196,12 +185,12 @@ export default function PortalPage() {
           )}
         </div>
         )}
-      </AuthGate>
 
       <p className="disclaimer">
         Supplier submissions are intelligence signals, not verified listings. Analysts resolve items in the admin review
         queue before dossier promotion.
       </p>
+      </AuthGate>
     </AppShell>
   );
 }

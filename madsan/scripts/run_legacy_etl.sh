@@ -23,7 +23,7 @@ if [[ ! -x "$VENV/bin/python" ]]; then
 fi
 
 echo "==> Enqueue legacy ETL jobs (set ETL_TABLES=oil_vessels to limit scope)"
-"$VENV/bin/python" "$ROOT/etl/legacy_import.py"
+"$VENV/bin/python" "$ROOT/etl/archive/legacy_import.py"
 
 echo "==> Process jobs (run worker in another terminal, or):"
 echo "  cd $ROOT/backend && DATABASE_URL='$DATABASE_URL' go run ./cmd/worker"

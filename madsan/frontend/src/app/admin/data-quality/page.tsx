@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import AuthGate from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, FEATURE } from "@/lib/entitlements";
@@ -66,7 +66,7 @@ export default function DataQualityPage() {
   const [platform, setPlatform] = useState<PlatformHealth | null>(null);
   const [parityTables, setParityTables] = useState<ParityTable[]>([]);
   const [jobs, setJobs] = useState<IngestJob[]>([]);
-  const { me, loading: authLoading, authed } = useAuth();
+  const { me, authed } = useAuth();
   const canUseAdmin = canUse(me, FEATURE.apiAccess);
 
   const refresh = useCallback(() => {
@@ -92,33 +92,6 @@ export default function DataQualityPage() {
     return () => clearInterval(t);
   }, [authed, canUseAdmin, refresh]);
 
-  if (authLoading) {
-    return (
-      <AppShell>
-        <AuthLoading />
-      </AppShell>
-    );
-  }
-
-  if (!authed) {
-    return (
-      <AppShell>
-        <h1 style={{ marginTop: 0 }}>Data quality</h1>
-        <AuthGate title="Sign in to view data quality" subtitle="Admin API access required." />
-      </AppShell>
-    );
-  }
-
-  if (!canUseAdmin) {
-    return (
-      <AppShell>
-        <h1 style={{ marginTop: 0 }}>Data quality</h1>
-        <p style={{ color: "var(--warn)" }}>Your plan does not include admin API access.</p>
-        <Link href="/admin" style={{ fontSize: 12 }}>← Admin console</Link>
-      </AppShell>
-    );
-  }
-
   const ent = insights?.entities ?? {};
   const dq = insights?.data_quality ?? {};
   const ing = insights?.ingestion ?? {};
@@ -126,6 +99,15 @@ export default function DataQualityPage() {
 
   return (
     <AppShell>
+      <AuthGate>
+      {!canUseAdmin ? (
+        <>
+          <h1 style={{ marginTop: 0 }}>Data quality</h1>
+          <p style={{ color: "var(--warn)" }}>Your plan does not include admin API access.</p>
+          <Link href="/admin" style={{ fontSize: 12 }}>← Admin console</Link>
+        </>
+      ) : (
+        <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
         <div>
           <h1 style={{ margin: 0 }}>Data quality</h1>
@@ -260,6 +242,9 @@ export default function DataQualityPage() {
           </tbody>
         </table>
       </section>
+        </>
+      )}
+      </AuthGate>
     </AppShell>
   );
 }

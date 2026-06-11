@@ -109,11 +109,13 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 		if err != nil {
 			return err
 		}
-		if _, err := PersistPosition(ctx, pool, u, minInterval); err != nil {
-			return err
-		}
-		if err := tracker.HandlePosition(ctx, vesselID, toPortCallPosition(u), tclass); err != nil {
-			return err
+		if u.HasKinematics {
+			if _, err := PersistPosition(ctx, pool, u, minInterval); err != nil {
+				return err
+			}
+			if err := tracker.HandlePosition(ctx, vesselID, toPortCallPosition(u), tclass); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, cfg.AISInsecureTLS, cfg.AISAutoTLSFallback)
@@ -184,14 +186,15 @@ func SweepRecentPositions(ctx context.Context, pool *pgxpool.Pool, cfg config.Co
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT DISTINCT ON (p.mmsi)
-			p.mmsi, p.lat, p.lon, p.ts, p.speed_knots, p.course, p.heading,
+			p.mmsi, p.lat, p.lon, p.ts,
+			COALESCE(p.speed_knots, 0), COALESCE(p.course, 0), COALESCE(p.heading, 0),
 			COALESCE(p.destination,''), COALESCE(p.draft_m, 0), p.draft_m IS NOT NULL,
 			COALESCE(v.id, '00000000-0000-0000-0000-000000000000'::uuid)
 		FROM ais_positions p
 		LEFT JOIN vessels v ON v.mmsi = p.mmsi
-		WHERE p.ts > now() - ($1 || ' hours')::interval
+		WHERE p.ts > now() - ($1::int * INTERVAL '1 hour')
 		ORDER BY p.mmsi, p.ts DESC
-	`, strconv.Itoa(hours))
+	`, hours)
 	if err != nil {
 		return 0, err
 	}

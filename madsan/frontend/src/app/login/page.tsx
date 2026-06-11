@@ -2,16 +2,18 @@
 
 import AppShell from "@/components/AppShell";
 import LoginForm from "@/components/auth/LoginForm";
+import { AuthLoading } from "@/components/auth/AuthGate";
 import { useAuth } from "@/contexts/AuthContext";
+import { nextPathLabel, sanitizeNextPath } from "@/lib/authRedirect";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
-import { AuthLoading } from "@/components/auth/AuthGate";
 
 function LoginContent() {
   const { authed, loading } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/";
+  const next = sanitizeNextPath(params.get("next"));
+  const returnLabel = nextPathLabel(next);
 
   useEffect(() => {
     if (!loading && authed) router.replace(next);
@@ -19,7 +21,7 @@ function LoginContent() {
 
   if (loading) {
     return (
-      <div className="auth-page-center">
+      <div className="auth-page-full">
         <AuthLoading />
       </div>
     );
@@ -28,8 +30,17 @@ function LoginContent() {
   if (authed) return null;
 
   return (
-    <div className="auth-page-center">
-      <LoginForm redirectTo={next} />
+    <div className="auth-page-full">
+      <div className="auth-page-brand">
+        <span className="auth-page-logo">MADSAN</span>
+        <span className="auth-page-tag">Intelligence</span>
+      </div>
+      {next !== "/" && (
+        <p className="auth-return-hint">
+          After sign in you&apos;ll return to <strong>{returnLabel}</strong>.
+        </p>
+      )}
+      <LoginForm redirectTo={next} showDevShortcuts />
     </div>
   );
 }
@@ -37,7 +48,13 @@ function LoginContent() {
 export default function LoginPage() {
   return (
     <AppShell maxWidth="full">
-      <Suspense fallback={<div className="auth-page-center"><AuthLoading /></div>}>
+      <Suspense
+        fallback={
+          <div className="auth-page-full">
+            <AuthLoading />
+          </div>
+        }
+      >
         <LoginContent />
       </Suspense>
     </AppShell>

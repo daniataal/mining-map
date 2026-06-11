@@ -1,16 +1,14 @@
 "use client";
 
-import LoginForm from "@/components/auth/LoginForm";
 import { useAuth } from "@/contexts/AuthContext";
+import { loginHref } from "@/lib/authRedirect";
 import { Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
 
 type Props = {
   children?: ReactNode;
-  title?: string;
-  subtitle?: string;
-  /** Show inline login form instead of redirecting to /login */
-  inline?: boolean;
+  /** Override return path (defaults to current pathname). */
   redirectTo?: string;
 };
 
@@ -23,21 +21,20 @@ export function AuthLoading() {
   );
 }
 
-export default function AuthGate({ children, title, subtitle, inline = true, redirectTo }: Props) {
+/** Redirects unauthenticated users to /login?next=…; renders children when authed. */
+export default function AuthGate({ children, redirectTo }: Props) {
   const { loading, authed } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const returnPath = redirectTo ?? pathname;
+
+  useEffect(() => {
+    if (!loading && !authed) {
+      router.replace(loginHref(returnPath));
+    }
+  }, [loading, authed, returnPath, router]);
 
   if (loading) return <AuthLoading />;
-
-  if (!authed) {
-    if (!inline) return null;
-    return (
-      <LoginForm
-        title={title}
-        subtitle={subtitle}
-        redirectTo={redirectTo}
-      />
-    );
-  }
-
+  if (!authed) return <AuthLoading />;
   return children ? <>{children}</> : null;
 }

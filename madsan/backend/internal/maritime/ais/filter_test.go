@@ -31,4 +31,7 @@ func TestParseMessagePositionReport(t *testing.T) {
 	if u.MMSI != 123456789 || u.Lat != 25.5 || u.Name != "TEST TANKER" {
 		t.Fatalf("unexpected update: %+v", u)
 	}
+	if !u.HasKinematics {
+		t.Fatal("PositionReport should carry kinematics")
+	}
 }

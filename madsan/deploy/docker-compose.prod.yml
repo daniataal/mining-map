@@ -36,6 +36,11 @@ x-prod-resources-scheduler: &prod-resources-scheduler
   mem_reservation: ${MADSAN_SCHEDULER_MEM_RESERVATION:-128m}
   cpus: ${MADSAN_SCHEDULER_CPUS:-0.5}
 
+x-prod-resources-ais-ingest: &prod-resources-ais-ingest
+  mem_limit: ${MADSAN_AIS_INGEST_MEM_LIMIT:-512m}
+  mem_reservation: ${MADSAN_AIS_INGEST_MEM_RESERVATION:-256m}
+  cpus: ${MADSAN_AIS_INGEST_CPUS:-0.5}
+
 x-prod-resources-frontend: &prod-resources-frontend
   mem_limit: ${MADSAN_FRONTEND_MEM_LIMIT:-512m}
   mem_reservation: ${MADSAN_FRONTEND_MEM_RESERVATION:-384m}
@@ -128,6 +133,15 @@ services:
       madsan-db:
         condition: service_healthy
       madsan-api:
+        condition: service_healthy
+
+  madsan-ais-ingest:
+    <<: [*prod-resources-ais-ingest, *prod-health-worker]
+    platform: linux/arm64
+    restart: always
+    stop_grace_period: 15s
+    depends_on:
+      madsan-db:
         condition: service_healthy
 
   madsan-frontend:

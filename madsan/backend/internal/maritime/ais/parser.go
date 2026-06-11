@@ -29,6 +29,8 @@ type Update struct {
 	HasDraft      bool
 	Raw           map[string]any
 	Timestamp     time.Time
+	MessageType   string
+	HasKinematics bool
 }
 
 func ParseMessage(raw []byte) (*Update, bool) {
@@ -63,16 +65,21 @@ func ParseMessage(raw []byte) (*Update, bool) {
 
 	lat := floatFromAny(first(body, "Latitude", "Lat"))
 	lon := floatFromAny(first(body, "Longitude", "Lon", "Lng"))
-	if lat == 0 && lon == 0 {
+	// MetaData lat/lon on ShipStaticData is often a stale coastal-receiver cache (e.g. last
+	// Mediterranean fix while the vessel is elsewhere). Only trust MetaData for kinematics types.
+	if lat == 0 && lon == 0 && HasPositionKinematics(msgType) {
 		lat = floatFromAny(first(meta, "latitude", "lat"))
 		lon = floatFromAny(first(meta, "longitude", "lon"))
 	}
-	if lat == 0 && lon == 0 {
+	hasPosition := lat != 0 || lon != 0
+	if !hasPosition && !isVoyageOnlyMessage(msgType) {
 		return nil, false
 	}
 
 	shipType := int(intFromAny(first(body, "Type", "TypeAndCargo", "ShipType")))
 	draft, hasDraft := floatFromAnyOptional(first(body, "MaximumStaticDraught", "Draught", "Draft"))
+
+	hasKinematics := HasPositionKinematics(msgType)
 
 	return &Update{
 		MMSI:          mmsi,
@@ -93,6 +100,8 @@ func ParseMessage(raw []byte) (*Update, bool) {
 		ETA:           strFromAny(first(body, "Eta", "ETA")),
 		Raw:           msg,
 		Timestamp:     time.Now().UTC(),
+		MessageType:   msgType,
+		HasKinematics: hasKinematics,
 	}, true
 }
 
@@ -148,6 +157,10 @@ func floatFromAnyOptional(v any) (float64, bool) {
 	}
 	f := floatFromAny(v)
 	return f, f > 0
+}
+
+func isVoyageOnlyMessage(msgType string) bool {
+	return msgType == "ShipStaticData"
 }
 
 func strFromAny(values ...any) string {

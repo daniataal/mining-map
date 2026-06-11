@@ -6,9 +6,10 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MADSAN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$MADSAN_ROOT/.." && pwd)"
 COMPOSE_FILE="$MADSAN_ROOT/deploy/docker-compose.yml"
-BACKUP_DIR="${REPO_ROOT}/backups"
+# Standalone checkout (/opt/madsan): backups under repo root.
+# Monorepo nested layout: set MADSAN_BACKUP_DIR to parent repo backups/ if needed.
+BACKUP_DIR="${MADSAN_BACKUP_DIR:-${MADSAN_ROOT}/backups}"
 mkdir -p "$BACKUP_DIR"
 STAMP=$(date +%Y%m%d_%H%M%S)
 

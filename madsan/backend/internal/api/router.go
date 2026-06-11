@@ -89,7 +89,7 @@ func NewServer(pool *pgxpool.Pool, log zerolog.Logger, cfg config.Config) *Serve
 func (s *Server) startAISSync() {
 	legacyConfigured := s.cfg.LegacyDBURL != ""
 	directMode := s.cfg.EnableAISDirect && s.cfg.AISStreamAPIKey != ""
-	useLegacy := s.cfg.EnableAISSync && legacyConfigured && !directMode
+	useLegacy := s.cfg.UseLegacyAISSync()
 
 	s.aisStats = maritime.NewSyncStats(useLegacy, s.cfg.AISSyncInterval, legacyConfigured)
 	if directMode {

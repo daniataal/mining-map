@@ -34,6 +34,49 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, table string) bool {
 	return n > 0
 }
 
+func normalizeCompanyName(s string) string {
+	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+}
+
+// companyIDByLegacyOilCompany maps legacy oil_companies.id to madsan companies.id by normalized name.
+func companyIDByLegacyOilCompany(ctx context.Context, pools Pools, legacyCompanyID uuid.UUID) *uuid.UUID {
+	if pools.Legacy == nil || pools.Primary == nil || legacyCompanyID == uuid.Nil {
+		return nil
+	}
+	var name string
+	if err := pools.Legacy.QueryRow(ctx, `SELECT name FROM oil_companies WHERE id = $1`, legacyCompanyID).Scan(&name); err != nil {
+		return nil
+	}
+	name = normalizeCompanyName(name)
+	if name == "" {
+		return nil
+	}
+	var id uuid.UUID
+	if err := pools.Primary.QueryRow(ctx, `SELECT id FROM companies WHERE normalized_name = lower($1) LIMIT 1`, name).Scan(&id); err != nil {
+		return nil
+	}
+	return &id
+}
+
+func companyExists(ctx context.Context, pool *pgxpool.Pool, id *uuid.UUID) bool {
+	if pool == nil || id == nil || *id == uuid.Nil {
+		return false
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM companies WHERE id = $1`, *id).Scan(&n)
+	return n > 0
+}
+
+// sanitizeMCRCompanyFKs clears shipper/consignee IDs that are not present in madsan companies.
+func sanitizeMCRCompanyFKs(ctx context.Context, pool *pgxpool.Pool, d *mcrDraft) {
+	if d.ShipperCompanyID != nil && !companyExists(ctx, pool, d.ShipperCompanyID) {
+		d.ShipperCompanyID = nil
+	}
+	if d.ConsigneeCompanyID != nil && !companyExists(ctx, pool, d.ConsigneeCompanyID) {
+		d.ConsigneeCompanyID = nil
+	}
+}
+
 func resolveCompany(ctx context.Context, pool *pgxpool.Pool, name, country string) (*uuid.UUID, error) {
 	if pool == nil || name == "" {
 		return nil, nil

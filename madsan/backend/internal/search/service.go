@@ -144,8 +144,11 @@ func (s *Service) searchAssets(r *http.Request, q, vertical string, limit int) [
 			SELECT DISTINCT ON (normalized_name, asset_type) id, name, COALESCE(country_code,''), asset_type, confidence_score, latitude, longitude
 			FROM assets
 			WHERE (name ILIKE '%' || $1 || '%' OR normalized_name ILIKE '%' || lower($1) || '%')
-			  AND asset_type = ANY($2)
 			  AND latitude IS NOT NULL
+			  AND (
+			    asset_type = ANY($2)
+			    OR (`+assets.EnergyCadastreWhereSQL+`)
+			  )
 			ORDER BY normalized_name, asset_type, confidence_score DESC NULLS LAST
 			LIMIT $3
 		`, q, energyAssetTypes(), limit)

@@ -2,7 +2,9 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { ChevronDown, LogOut, User } from "lucide-react";
+import { loginHref } from "@/lib/authRedirect";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 type Props = {
@@ -18,6 +20,7 @@ function displayLabel(email?: string, displayName?: string): string {
 
 export default function UserMenu({ compact = false }: Props) {
   const { me, authed, loading, logout } = useAuth();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -36,7 +39,7 @@ export default function UserMenu({ compact = false }: Props) {
 
   if (!authed) {
     return (
-      <Link href="/login" className={`user-menu-signin${compact ? " compact" : ""}`}>
+      <Link href={loginHref(pathname)} className={`user-menu-signin${compact ? " compact" : ""}`}>
         Sign in
       </Link>
     );

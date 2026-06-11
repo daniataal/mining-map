@@ -15,7 +15,8 @@ import (
 
 func main() {
 	tablesFlag := flag.String("tables", "", "comma-separated tables (legacy: oil_intelligence_cards,entity_relationships; gem: gem_extraction,gem_plants,gem_pipelines)")
-	repoRoot := flag.String("repo-root", "", "repo root containing GEM xlsx files (default: auto-detect)")
+	gemDir := flag.String("gem-dir", "", "directory with GEM xlsx files (default: auto-detect madsan/data/gem)")
+	repoRoot := flag.String("repo-root", "", "deprecated alias for --gem-dir (monorepo repo root fallback)")
 	maxRows := flag.Int("max-rows", 0, "max rows per table (0 = unlimited)")
 	dryRun := flag.Bool("dry-run", false, "count only, no writes")
 	gemSegments := flag.Bool("gem-segments", true, "also import legacy gem_pipeline_segments geometry into pipeline_graph_edges")
@@ -51,8 +52,13 @@ func main() {
 		}
 	}
 
+	gemDataDir := *gemDir
+	if gemDataDir == "" {
+		gemDataDir = *repoRoot
+	}
+
 	ing := ingestion.New(pool, cfg)
-	counts, err := ing.RunTier2LegacyImport(ctx, tables, *repoRoot, *maxRows, *dryRun, *gemSegments)
+	counts, err := ing.RunTier2LegacyImport(ctx, tables, gemDataDir, *maxRows, *dryRun, *gemSegments)
 	out, _ := json.MarshalIndent(map[string]any{
 		"tables":       tables,
 		"counts":       counts,

@@ -43,7 +43,7 @@ type VesselEnrichBatchResult struct {
 func RunVesselEnrichmentBatch(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log zerolog.Logger, opts VesselEnrichBatchOptions) (VesselEnrichBatchResult, error) {
 	var out VesselEnrichBatchResult
 	if !venrich.ShipVaultConfigured(cfg) {
-		return out, fmt.Errorf("ShipVault not configured — set MADSAN_SHIPVAULT_ENABLED and SHIPVAULT_REFRESH_TOKEN or SHIPVAULT_BEARER_TOKEN")
+		return out, fmt.Errorf("ShipVault not configured — set SHIPVAULT_BEARER_TOKEN or SHIPVAULT_REFRESH_TOKEN in deploy/.env")
 	}
 	svc, err := venrich.NewShipVaultService(cfg, log)
 	if err != nil {

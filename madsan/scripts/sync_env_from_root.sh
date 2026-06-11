@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Sync selected secrets from repo-root .env into madsan/deploy/.env (and optional frontend).
+# DEPRECATED — one-way migration helper from monorepo root .env → madsan/deploy/.env.
+# Canonical env for MadSan: madsan/deploy/.env (copy from madsan/deploy/.env.example).
 # Never prints secret values — only key names on success.
 set -euo pipefail
+
+echo "warning: sync_env_from_root.sh is deprecated; edit madsan/deploy/.env directly (see deploy/.env.example)" >&2
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

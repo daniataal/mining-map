@@ -15,6 +15,8 @@ type Props = {
   redirectTo?: string;
   onSuccess?: () => void;
   compact?: boolean;
+  /** One-click dev accounts — only on /login, not on gated pages. */
+  showDevShortcuts?: boolean;
 };
 
 const DEV_ACCOUNTS = [
@@ -29,6 +31,7 @@ export default function LoginForm({
   redirectTo,
   onSuccess,
   compact = false,
+  showDevShortcuts = false,
 }: Props) {
   const { login, register } = useAuth();
   const router = useRouter();
@@ -56,7 +59,7 @@ export default function LoginForm({
       return;
     }
     onSuccess?.();
-    if (redirectTo) router.push(redirectTo);
+    if (redirectTo) router.replace(redirectTo);
   }
 
   function fillDevAccount(email: string, password: string) {
@@ -136,7 +139,7 @@ export default function LoginForm({
         </button>
       </form>
 
-      {isLocalDevApi() && (
+      {showDevShortcuts && isLocalDevApi() && (
         <div className="auth-dev-hint">
           <span className="auth-dev-label">Local dev accounts</span>
           <div className="auth-dev-buttons">

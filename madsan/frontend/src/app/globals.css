@@ -492,6 +492,23 @@ a { color: var(--accent); text-decoration: none; }
   display: flex; justify-content: center; align-items: flex-start;
   padding: 2rem 0 3rem; min-height: 50vh;
 }
+.auth-page-full {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: calc(100vh - 120px); padding: 2rem 1.25rem 3rem; gap: 1rem;
+}
+.auth-page-brand {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 0.25rem;
+}
+.auth-page-logo {
+  font-size: 1.35rem; font-weight: 800; letter-spacing: 0.06em; color: var(--text);
+}
+.auth-page-tag {
+  font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+}
+.auth-return-hint {
+  margin: 0 0 0.5rem; font-size: 13px; color: var(--muted); text-align: center; max-width: 400px;
+}
+.auth-return-hint strong { color: var(--accent); font-weight: 600; }
 .auth-card {
   width: 100%; max-width: 400px;
   background: linear-gradient(180deg, #141f33 0%, #0f172a 100%);

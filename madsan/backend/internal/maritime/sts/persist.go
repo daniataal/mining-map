@@ -59,12 +59,12 @@ func persistSTSSignal(ctx context.Context, pool *pgxpool.Pool, c Candidate, meta
 
 	tag, err := pool.Exec(ctx, `
 		UPDATE core_signals SET
-			confidence_score = $2,
+			confidence_score = $1::numeric,
 			tier = 'observed',
-			payload = $3,
+			payload = $2::jsonb,
 			observed_at = now()
-		WHERE signal_type = 'sts' AND payload->>'sts_pair_key' = $4
-	`, entityID, score.Score, payload, pairKey)
+		WHERE signal_type = 'sts' AND payload->>'sts_pair_key' = $3::text
+	`, score.Score, payload, pairKey)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func persistSTSSignal(ctx context.Context, pool *pgxpool.Pool, c Candidate, meta
 	}
 	_, err = pool.Exec(ctx, `
 		INSERT INTO core_signals (entity_type, entity_id, signal_type, tier, confidence_score, payload)
-		VALUES ('vessel', $1, 'sts', 'observed', $2, $3)
+		VALUES ('vessel', $1::uuid, 'sts', 'observed', $2::numeric, $3::jsonb)
 	`, entityID, score.Score, payload)
 	return err
 }

@@ -94,12 +94,22 @@ func (s *Service) countPendingLegacyETL(ctx context.Context) (int, error) {
 	return n, err
 }
 
+func legacyImportScriptPath(etlDir string) string {
+	for _, rel := range []string{"archive/legacy_import.py", "legacy_import.py"} {
+		p := filepath.Join(etlDir, rel)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 func (s *Service) runLegacyImportScript(ctx context.Context, opts legacyImportOpts) (map[string]any, error) {
 	etlDir := s.cfg.ETLDir
 	python := s.cfg.ETLPython
-	script := filepath.Join(etlDir, "legacy_import.py")
-	if _, err := os.Stat(script); err != nil {
-		return nil, fmt.Errorf("legacy_import.py not found at %s", script)
+	script := legacyImportScriptPath(etlDir)
+	if script == "" {
+		return nil, fmt.Errorf("legacy_import.py not found under %s (expected etl/archive/ or etl/)", etlDir)
 	}
 	if _, err := os.Stat(python); err != nil {
 		return nil, fmt.Errorf("python not found at %s (run: python3 -m venv %s/.venv && pip install psycopg2-binary)", python, etlDir)

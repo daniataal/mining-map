@@ -104,6 +104,7 @@ func runRecipeBatch(ctx context.Context, pools Pools, log zerolog.Logger, recipe
 				continue
 			}
 			applyDischargeFallback(ctx, pools, d)
+			sanitizeMCRCompanyFKs(ctx, pools.Primary, d)
 			ok, err := upsertMCR(ctx, pools.Primary, *d)
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Sprintf("%s: %s", rf.name, err.Error()))
@@ -390,11 +391,15 @@ func recipeTenderBuyer(ctx context.Context, pools Pools) ([]mcrDraft, error) {
 		if hasImport {
 			score++
 		}
+		var consigneeID *uuid.UUID
+		if companyID != nil {
+			consigneeID = companyIDByLegacyOilCompany(ctx, pools, *companyID)
+		}
 		fp := fingerprint(RecipeTenderBuyer, id.String())
 		out = append(out, mcrDraft{
 			Fingerprint: fp, Recipe: RecipeTenderBuyer, CommodityFamily: fam,
 			Confidence: 0.58, TriangulationScore: score,
-			ConsigneeName: strPtr(title), ConsigneeCompanyID: companyID,
+			ConsigneeName: strPtr(title), ConsigneeCompanyID: consigneeID,
 			LoadCountry: partner, DischargeCountry: strPtr(country),
 			CommodityDescription: strPtr("Procurement demand signal — " + fam),
 			VolumeMethod:         strPtr("macro_demand"), VolumeUnit: "bbl", EventDate: occurred,
@@ -551,11 +556,15 @@ func recipeGovOfftake(ctx context.Context, pools Pools) ([]mcrDraft, error) {
 		if countryHasHSExport(ctx, pools.Legacy, "United States", "2710") {
 			score++
 		}
+		var shipperID *uuid.UUID
+		if companyID != nil {
+			shipperID = companyIDByLegacyOilCompany(ctx, pools, *companyID)
+		}
 		fp := fingerprint(RecipeGovOfftake, id.String())
 		out = append(out, mcrDraft{
 			Fingerprint: fp, Recipe: RecipeGovOfftake, CommodityFamily: "refined_products",
 			Confidence: 0.55, TriangulationScore: score,
-			ShipperName: strPtr(title), ShipperCompanyID: companyID,
+			ShipperName: strPtr(title), ShipperCompanyID: shipperID,
 			ConsigneeName: strPtr("US Government offtake"),
 			LoadCountry:   strPtr("United States"), DischargeCountry: strPtr(country),
 			CommodityDescription: strPtr("Government fuel offtake (inferred)"),

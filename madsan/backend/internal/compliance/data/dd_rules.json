@@ -1,6 +1,6 @@
 {
   "_version": "1.0.0",
-  "_comment": "Due-diligence rules config. Edit this file to change risk classifications without touching Python code. See backend/services/due_diligence.py for extension guide.",
+  "_comment": "Due-diligence rules config. Edit this file to change risk classifications. Loader: internal/compliance/ddrules.go (Go embed).",
 
   "sanctioned_countries": [
     "Iran", "North Korea", "Syria", "Cuba", "Venezuela",

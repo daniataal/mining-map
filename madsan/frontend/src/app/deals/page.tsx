@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import AuthGate from "@/components/auth/AuthGate";
 import DealChangesPanel, { type DealChanges } from "@/components/DealChangesPanel";
 import DealGraphPanel from "@/components/DealGraphPanel";
 import DDCopilotPanel from "@/components/DDCopilotPanel";
@@ -214,7 +214,7 @@ export default function DealsPage() {
   const [changesError, setChangesError] = useState("");
   const [watchBusy, setWatchBusy] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { me, loading: authLoading, refresh } = useAuth();
+  const { me, refresh } = useAuth();
   const [formSeed, setFormSeed] = useState<Record<string, string> | null>(null);
   const [packDownloadMsg, setPackDownloadMsg] = useState("");
   const [prefillFromMap, setPrefillFromMap] = useState(false);
@@ -366,18 +366,11 @@ export default function DealsPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (authLoading) {
-    return (
-      <AppShell maxWidth={800}>
-        <AuthLoading />
-      </AppShell>
-    );
-  }
-
   const isMetals = dealVertical === "metals";
 
   return (
     <AppShell maxWidth={800}>
+      <AuthGate>
       <h1>Deal verification</h1>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {(["energy", "metals"] as const).map((v) => (
@@ -409,10 +402,6 @@ export default function DealsPage() {
           ? "Metals commodities — gold, copper, silver, concentrates. DD rules, sanctions, relationship graph."
           : "Energy commodities — EN590, VLSFO, fuel oil, crude, jet. DD rules, corridor checks, OpenSanctions, relationship graph."}
       </p>
-      <AuthGate
-        title="Sign in to verify deals"
-        subtitle="Deal verification, pack export, and watchlists require an authenticated session."
-      >
       {prefillFromMap && !result && (
         <p style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(16,185,129,0.08)", border: "1px solid var(--accent)", fontSize: 12 }}>
           Pre-filled from map selection — linked entity IDs and supply-web deliverability attach when you verify.
@@ -569,8 +558,8 @@ export default function DealsPage() {
           )}
         </div>
       )}
-      </AuthGate>
       <p className="disclaimer">Intelligence pack — not legal or trading advice.</p>
+      </AuthGate>
     </AppShell>
   );
 }

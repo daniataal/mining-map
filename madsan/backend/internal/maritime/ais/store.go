@@ -15,6 +15,9 @@ import (
 
 // PersistPosition inserts into ais_positions when throttle elapsed.
 func PersistPosition(ctx context.Context, pool *pgxpool.Pool, u *Update, minInterval time.Duration) (bool, error) {
+	if !u.HasKinematics {
+		return false, nil
+	}
 	mmsi := strconv.FormatInt(u.MMSI, 10)
 	var lastTS time.Time
 	err := pool.QueryRow(ctx, `
@@ -27,6 +30,16 @@ func PersistPosition(ctx context.Context, pool *pgxpool.Pool, u *Update, minInte
 		return false, nil
 	}
 	raw, _ := json.Marshal(u.Raw)
+	var speed, course, heading any
+	if u.HasKinematics {
+		speed = u.Speed
+		if c, ok := ValidCourse(u.Course, u.Speed); ok {
+			course = c
+		}
+		if h, ok := ValidHeading(u.Heading, u.Speed); ok {
+			heading = h
+		}
+	}
 	_, err = pool.Exec(ctx, `
 		INSERT INTO ais_positions (
 			mmsi, ts, lat, lon, speed_knots, course, heading, nav_status,
@@ -35,7 +48,7 @@ func PersistPosition(ctx context.Context, pool *pgxpool.Pool, u *Update, minInte
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 			ST_SetSRID(ST_MakePoint($12, $13), 4326)::geography, $14
 		)
-	`, mmsi, u.Timestamp, u.Lat, u.Lon, u.Speed, u.Course, u.Heading, u.NavStatus,
+	`, mmsi, u.Timestamp, u.Lat, u.Lon, speed, course, heading, u.NavStatus,
 		nullableDraft(u.HasDraft, u.DraftM), nullStr(u.Destination), nullStr(u.ETA),
 		u.Lon, u.Lat, raw)
 	return err == nil, err
@@ -49,17 +62,15 @@ func UpsertVessel(ctx context.Context, pool *pgxpool.Pool, u *Update, tankerClas
 		vesselType = tankerClass
 	}
 	var speed, course, heading *float64
-	if u.Speed > 0 {
+	if u.HasKinematics {
 		s := u.Speed
 		speed = &s
-	}
-	if u.Course > 0 {
-		c := u.Course
-		course = &c
-	}
-	if u.Heading > 0 {
-		h := u.Heading
-		heading = &h
+		if c, ok := ValidCourse(u.Course, u.Speed); ok {
+			course = &c
+		}
+		if h, ok := ValidHeading(u.Heading, u.Speed); ok {
+			heading = &h
+		}
 	}
 
 	var id uuid.UUID
@@ -70,43 +81,52 @@ func UpsertVessel(ctx context.Context, pool *pgxpool.Pool, u *Update, tankerClas
 			course, heading, speed_knots, destination, last_seen_at,
 			confidence_score, data_quality_status
 		) VALUES (
-			$1, NULLIF($2,''), $3, $4, $5, $6,
-			ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography,
-			$7, $8, $9, NULLIF($10,''), $11, 70, 'observed'
+			$1, NULLIF($2,''), $3, $4,
+			CASE WHEN $12::bool THEN $5::double precision END,
+			CASE WHEN $12::bool THEN $6::double precision END,
+			CASE WHEN $12::bool AND $5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
+				THEN ST_SetSRID(ST_MakePoint($6::double precision, $5::double precision), 4326)::geography END,
+			$7, $8, $9, NULLIF($10,''), CASE WHEN $12::bool THEN $11::timestamptz END, 70, 'observed'
 		)
 		ON CONFLICT (mmsi) DO UPDATE SET
 			name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE vessels.name END,
 			imo = COALESCE(NULLIF(EXCLUDED.imo,''), vessels.imo),
 			vessel_type = COALESCE(NULLIF(EXCLUDED.vessel_type,''), vessels.vessel_type),
 			latitude = CASE
+				WHEN $12::bool IS FALSE THEN vessels.latitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.latitude ELSE vessels.latitude END,
 			longitude = CASE
+				WHEN $12::bool IS FALSE THEN vessels.longitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.longitude ELSE vessels.longitude END,
 			geom = CASE
+				WHEN $12::bool IS FALSE THEN vessels.geom
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.geom ELSE vessels.geom END,
 			course = CASE
+				WHEN $12::bool IS FALSE THEN vessels.course
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.course
 				WHEN vessels.course IS NULL THEN EXCLUDED.course
 				ELSE vessels.course END,
 			heading = CASE
+				WHEN $12::bool IS FALSE THEN vessels.heading
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.heading
 				WHEN vessels.heading IS NULL THEN EXCLUDED.heading
 				ELSE vessels.heading END,
 			speed_knots = CASE
+				WHEN $12::bool IS FALSE THEN vessels.speed_knots
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.speed_knots ELSE vessels.speed_knots END,
-			destination = CASE
-				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
-				THEN EXCLUDED.destination ELSE vessels.destination END,
-			last_seen_at = GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at),
+			destination = COALESCE(NULLIF(EXCLUDED.destination,''), vessels.destination),
+			last_seen_at = CASE
+				WHEN $12::bool THEN GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at)
+				ELSE vessels.last_seen_at END,
 			updated_at = now()
-		RETURNING id, (last_seen_at = $11::timestamptz) AS position_fresh
-	`, u.Name, u.IMO, mmsi, vesselType, u.Lat, u.Lon, course, heading, speed, u.Destination, u.Timestamp).Scan(&id, &fresh)
+		RETURNING id, ($12::bool AND last_seen_at = $11::timestamptz) AS position_fresh
+	`, u.Name, u.IMO, mmsi, vesselType, u.Lat, u.Lon, course, heading, speed, u.Destination, u.Timestamp, u.HasKinematics).Scan(&id, &fresh)
 	if err != nil {
 		return uuid.Nil, false, err
 	}

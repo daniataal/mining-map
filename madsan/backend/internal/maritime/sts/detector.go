@@ -100,6 +100,10 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 	}
 
 	speedCol := cfg.SpeedColumn
+	scanHours := int(cfg.WindowEnd.Sub(cfg.WindowStart).Hours())
+	if scanHours <= 0 {
+		scanHours = capDetectWindowHours(72)
+	}
 	q := fmt.Sprintf(`
 		WITH bucketed AS (
 			SELECT
@@ -110,8 +114,8 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 				ST_Centroid(ST_Collect(geom::geometry)) AS geom,
 				AVG(COALESCE(%s, 0)) AS speed
 			FROM %s
-			WHERE ts >= $1 AND ts <= $2
-				AND COALESCE(%s, 99) <= $3
+			WHERE ts >= now() - ($1::int * INTERVAL '1 hour')
+				AND COALESCE(%s, 99) <= $2::double precision
 			GROUP BY mmsi, 2
 		),
 		proximity AS (
@@ -128,7 +132,7 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 			FROM bucketed a
 			INNER JOIN bucketed b ON a.mmsi < b.mmsi
 				AND a.bucket = b.bucket
-				AND ST_DWithin(a.geom::geography, b.geom::geography, $5)
+				AND ST_DWithin(a.geom::geography, b.geom::geography, $3::double precision)
 			GROUP BY 1, 2, 3
 		)
 		SELECT
@@ -142,12 +146,12 @@ func Detect(ctx context.Context, pool *pgxpool.Pool, cfg DetectConfig) ([]Candid
 			COUNT(*)::int AS sample_buckets
 		FROM proximity
 		GROUP BY mmsi_a, mmsi_b
-		HAVING MAX(bucket_end) - MIN(bucket_start) >= $4::interval
+		HAVING MAX(bucket_end) - MIN(bucket_start) >= ($4::double precision * INTERVAL '1 second')
 	`, cfg.BucketMinutes, cfg.BucketMinutes, speedCol, cfg.PositionsTable, speedCol)
 
-	minDur := fmt.Sprintf("%f hours", cfg.MinDuration.Hours())
+	minDurSecs := cfg.MinDuration.Seconds()
 	rows, err := pool.Query(ctx, q,
-		cfg.WindowStart, cfg.WindowEnd, cfg.MaxSOG, minDur, cfg.MaxDistanceM)
+		scanHours, cfg.MaxSOG, cfg.MaxDistanceM, minDurSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +209,7 @@ func loadVesselMeta(ctx context.Context, pool *pgxpool.Pool, mmsi string) (Vesse
 	var meta VesselMeta
 	err := pool.QueryRow(ctx, `
 		SELECT id, COALESCE(name,''), COALESCE(vessel_type,'')
-		FROM vessels WHERE mmsi = $1
+		FROM vessels WHERE mmsi = $1::text
 	`, mmsi).Scan(&meta.ID, &meta.Name, &meta.TankerClass)
 	if err == pgx.ErrNoRows {
 		return VesselMeta{}, nil
@@ -231,7 +235,7 @@ func matchSTSZone(ctx context.Context, pool *pgxpool.Pool, lat, lon float64) (*u
 	err := pool.QueryRow(ctx, `
 		SELECT id, name FROM sts_zones
 		WHERE geom IS NOT NULL
-		  AND ST_Contains(geom::geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326))
+		  AND ST_Contains(geom::geometry, ST_SetSRID(ST_MakePoint($1::double precision, $2::double precision), 4326))
 		ORDER BY confidence DESC
 		LIMIT 1
 	`, lon, lat).Scan(&id, &name)

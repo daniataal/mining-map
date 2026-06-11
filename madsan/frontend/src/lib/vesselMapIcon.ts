@@ -1,9 +1,11 @@
 import type { ExpressionSpecification } from "maplibre-gl";
 import type { Map as MaplibreMap } from "maplibre-gl";
 
-/** AIS course over ground present and usable (0–360°). */
+/** Moving target with usable course over ground (0–360°). */
 export const vesselHasCourseFilter = [
   "all",
+  ["has", "speed_knots"],
+  [">", ["to-number", ["get", "speed_knots"]], 0.1],
   ["has", "course"],
   [">=", ["to-number", ["get", "course"]], 0],
   ["<", ["to-number", ["get", "course"]], 360],
@@ -16,20 +18,41 @@ export const vesselHasHeadingFilter = [
   [">=", ["to-number", ["get", "heading"]], 0],
   ["<", ["to-number", ["get", "heading"]], 360],
   ["!=", ["to-number", ["get", "heading"]], 511],
+  [
+    "any",
+    [">", ["to-number", ["coalesce", ["get", "heading"], 0]], 0],
+    [">", ["to-number", ["coalesce", ["get", "speed_knots"], 0]], 0.1],
+  ],
 ] as ExpressionSpecification;
 
-/** Ship chevron when course or heading is available (legacy prefers true heading). */
-export const vesselHasRotationFilter = ["any", vesselHasHeadingFilter, vesselHasCourseFilter] as ExpressionSpecification;
+/** Track-inferred bearing when AIS course/heading unavailable (tier: inferred). */
+export const vesselHasInferredCourseFilter = [
+  "all",
+  ["has", "inferred_course"],
+  [">=", ["to-number", ["get", "inferred_course"]], 0],
+  ["<", ["to-number", ["get", "inferred_course"]], 360],
+] as ExpressionSpecification;
+
+/** Ship chevron when COG (moving), true heading (berthed), or track bearing is available. */
+export const vesselHasRotationFilter = [
+  "any",
+  vesselHasCourseFilter,
+  vesselHasHeadingFilter,
+  vesselHasInferredCourseFilter,
+] as ExpressionSpecification;
 
 /** Position-only tier: no reported course/heading — render as dot, not ship chevron. */
 export const vesselNoRotationFilter = ["!", vesselHasRotationFilter] as ExpressionSpecification;
 
+/** Moving: COG; stationary/slow: true heading (bow). */
 export const vesselIconRotate = [
   "case",
-  vesselHasHeadingFilter,
-  ["to-number", ["get", "heading"]],
   vesselHasCourseFilter,
   ["to-number", ["get", "course"]],
+  vesselHasHeadingFilter,
+  ["to-number", ["get", "heading"]],
+  vesselHasInferredCourseFilter,
+  ["to-number", ["get", "inferred_course"]],
   0,
 ] as ExpressionSpecification;
 

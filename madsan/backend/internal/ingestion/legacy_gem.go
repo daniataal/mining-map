@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
@@ -71,14 +72,49 @@ func filterGEMTrackers(requested []string) []gemTrackerSpec {
 	return out
 }
 
-func locateRepoRoot() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
+const madsanModule = "github.com/madsan/intelligence"
+
+func gemDirHasTracker(dir string) bool {
+	if dir == "" {
+		return false
 	}
-	dir := wd
+	_, err := os.Stat(filepath.Join(dir, gemTrackerCatalog[0].Filename))
+	return err == nil
+}
+
+// locateGEMDataDir finds madsan/data/gem first, then falls back to monorepo repo root xlsx.
+func locateGEMDataDir() string {
+	anchors := make([]string, 0, 3)
+	if _, self, _, ok := runtime.Caller(0); ok {
+		anchors = append(anchors, filepath.Dir(self))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		anchors = append(anchors, filepath.Dir(exe))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		anchors = append(anchors, wd)
+	}
+	for _, anchor := range anchors {
+		if dir := walkUpForGEMDir(anchor); dir != "" {
+			return dir
+		}
+	}
+	return ""
+}
+
+func walkUpForGEMDir(start string) string {
+	dir := start
 	for {
-		if _, err := os.Stat(filepath.Join(dir, gemTrackerCatalog[0].Filename)); err == nil {
+		if gem := gemBesideMadsanRoot(dir); gem != "" {
+			return gem
+		}
+		if gemDirHasTracker(dir) {
+			if ap, err := filepath.Abs(dir); err == nil {
+				return ap
+			}
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -90,13 +126,42 @@ func locateRepoRoot() string {
 	return ""
 }
 
-// RunGEMImport ingests repo-root GEM xlsx trackers into assets (+ pipeline edges when geometry exists).
-func (s *Service) RunGEMImport(ctx context.Context, repoRoot string, trackers []string, maxRows int, dryRun bool, includeLegacySegments bool) (map[string]int, error) {
-	if repoRoot == "" {
-		repoRoot = locateRepoRoot()
+func gemBesideMadsanRoot(start string) string {
+	dir := start
+	for {
+		if gem := filepath.Join(dir, "data", "gem"); gemDirHasTracker(gem) {
+			if ap, err := filepath.Abs(gem); err == nil {
+				return ap
+			}
+			return gem
+		}
+		modPath := filepath.Join(dir, "go.mod")
+		b, err := os.ReadFile(modPath)
+		if err == nil && strings.Contains(string(b), "module "+madsanModule) {
+			gem := filepath.Join(filepath.Dir(dir), "data", "gem")
+			if gemDirHasTracker(gem) {
+				if ap, err := filepath.Abs(gem); err == nil {
+					return ap
+				}
+				return gem
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
-	if repoRoot == "" {
-		return nil, fmt.Errorf("repo root with GEM xlsx files not found")
+	return ""
+}
+
+// RunGEMImport ingests GEM xlsx trackers from madsan/data/gem into assets (+ pipeline edges when geometry exists).
+func (s *Service) RunGEMImport(ctx context.Context, gemDataDir string, trackers []string, maxRows int, dryRun bool, includeLegacySegments bool) (map[string]int, error) {
+	if gemDataDir == "" {
+		gemDataDir = locateGEMDataDir()
+	}
+	if gemDataDir == "" {
+		return nil, fmt.Errorf("GEM data dir not found (place trackers in madsan/data/gem/)")
 	}
 	specs := filterGEMTrackers(trackers)
 	counts := map[string]int{}
@@ -106,7 +171,7 @@ func (s *Service) RunGEMImport(ctx context.Context, repoRoot string, trackers []
 		if !dryRun {
 			sourceID, _ = s.ensureSource(ctx, spec.SourceSlug)
 		}
-		n, err := s.importGEMTracker(ctx, repoRoot, spec, sourceID, maxRows, dryRun)
+		n, err := s.importGEMTracker(ctx, gemDataDir, spec, sourceID, maxRows, dryRun)
 		counts[spec.Tracker] = n
 		if err != nil && firstErr == nil {
 			firstErr = err
@@ -128,8 +193,8 @@ func (s *Service) RunGEMImport(ctx context.Context, repoRoot string, trackers []
 	return counts, firstErr
 }
 
-func (s *Service) importGEMTracker(ctx context.Context, repoRoot string, spec gemTrackerSpec, sourceID uuid.UUID, maxRows int, dryRun bool) (int, error) {
-	path := filepath.Join(repoRoot, spec.Filename)
+func (s *Service) importGEMTracker(ctx context.Context, gemDataDir string, spec gemTrackerSpec, sourceID uuid.UUID, maxRows int, dryRun bool) (int, error) {
+	path := filepath.Join(gemDataDir, spec.Filename)
 	rows, err := readExcelSheet(path, spec.Sheet)
 	if err != nil {
 		return 0, err
@@ -414,7 +479,7 @@ func (s *Service) importLegacyGEMPipelineSegments(ctx context.Context, legacy *p
 }
 
 // RunTier2LegacyImport runs Phase C legacy DB tables plus optional GEM trackers.
-func (s *Service) RunTier2LegacyImport(ctx context.Context, tables []string, repoRoot string, maxRows int, dryRun bool, includeGEMSegments bool) (map[string]int, error) {
+func (s *Service) RunTier2LegacyImport(ctx context.Context, tables []string, gemDataDir string, maxRows int, dryRun bool, includeGEMSegments bool) (map[string]int, error) {
 	counts := map[string]int{}
 	var firstErr error
 
@@ -445,7 +510,7 @@ func (s *Service) RunTier2LegacyImport(ctx context.Context, tables []string, rep
 	}
 
 	if len(gemTrackers) > 0 {
-		gemCounts, err := s.RunGEMImport(ctx, repoRoot, gemTrackers, maxRows, dryRun, includeGEMSegments)
+		gemCounts, err := s.RunGEMImport(ctx, gemDataDir, gemTrackers, maxRows, dryRun, includeGEMSegments)
 		for k, v := range gemCounts {
 			counts[k] = v
 		}

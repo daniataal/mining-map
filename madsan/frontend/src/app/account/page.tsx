@@ -1,7 +1,7 @@
 "use client";
 
 import AppShell from "@/components/AppShell";
-import AuthGate, { AuthLoading } from "@/components/auth/AuthGate";
+import AuthGate from "@/components/auth/AuthGate";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { FEATURE, type FeatureKey } from "@/lib/entitlements";
@@ -91,20 +91,11 @@ function AccountBody() {
 }
 
 export default function AccountPage() {
-  const { loading } = useAuth();
-
   return (
     <AppShell>
-      {loading ? (
-        <AuthLoading />
-      ) : (
-        <AuthGate
-          title="Sign in to view your account"
-          subtitle="Manage your session and see which intelligence features your plan includes."
-        >
-          <AccountBody />
-        </AuthGate>
-      )}
+      <AuthGate>
+        <AccountBody />
+      </AuthGate>
     </AppShell>
   );
 }

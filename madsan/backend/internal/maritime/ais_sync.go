@@ -19,9 +19,10 @@ type VesselDelta struct {
 	VesselType  string    `json:"vessel_type,omitempty"`
 	Lat         float64   `json:"lat"`
 	Lon         float64   `json:"lon"`
-	Course      *float64  `json:"course,omitempty"`
-	Heading     *float64  `json:"heading,omitempty"`
-	SpeedKnots  *float64  `json:"speed_knots,omitempty"`
+	Course         *float64 `json:"course,omitempty"`
+	Heading        *float64 `json:"heading,omitempty"`
+	SpeedKnots     *float64 `json:"speed_knots,omitempty"`
+	InferredCourse *float64 `json:"inferred_course,omitempty"`
 	Destination string    `json:"destination,omitempty"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	Source      string    `json:"source"`
@@ -123,6 +124,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		d.Course = course
 		d.Heading = heading
 		d.Source = "legacy_oil_ais_positions"
+		SanitizeVesselDelta(&d)
 		if d.LastSeenAt.After(maxTS) {
 			maxTS = d.LastSeenAt
 		}
@@ -196,14 +198,17 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 	}
 	west, south, east, north := bbox[0], bbox[1], bbox[2], bbox[3]
 	rows, err := pool.Query(ctx, `
-		SELECT mmsi, COALESCE(name,''), COALESCE(vessel_type,''), latitude, longitude, course, heading, speed_knots,
-		       COALESCE(destination,''), COALESCE(last_seen_at, now())
-		FROM vessels
-		WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-		  AND longitude BETWEEN $1 AND $2
-		  AND latitude BETWEEN $3 AND $4
-		  AND last_seen_at > now() - interval '72 hours'
-		ORDER BY last_seen_at DESC NULLS LAST
+		SELECT v.mmsi, COALESCE(v.name,''), COALESCE(v.vessel_type,''), v.latitude, v.longitude,
+		       v.course, v.heading, v.speed_knots,
+		       COALESCE(v.destination,''), COALESCE(v.last_seen_at, now()),
+		       track.inferred_course
+		FROM vessels v
+		`+VesselTrackBearingLateralSQL+`
+		WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+		  AND v.longitude BETWEEN $1 AND $2
+		  AND v.latitude BETWEEN $3 AND $4
+		  AND v.last_seen_at > now() - interval '72 hours'
+		ORDER BY v.last_seen_at DESC NULLS LAST
 		LIMIT $5
 	`, west, east, south, north, limit)
 	if err != nil {
@@ -213,14 +218,16 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 	var out []VesselDelta
 	for rows.Next() {
 		var d VesselDelta
-		var speed, course, heading *float64
-		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &course, &heading, &speed, &d.Destination, &d.LastSeenAt); err != nil {
+		var speed, course, heading, inferred *float64
+		if err := rows.Scan(&d.MMSI, &d.Name, &d.VesselType, &d.Lat, &d.Lon, &course, &heading, &speed, &d.Destination, &d.LastSeenAt, &inferred); err != nil {
 			return nil, err
 		}
 		d.Course = course
 		d.Heading = heading
 		d.SpeedKnots = speed
+		d.InferredCourse = inferred
 		d.Source = "madsan_vessels"
+		SanitizeVesselDelta(&d)
 		out = append(out, d)
 	}
 	return out, rows.Err()

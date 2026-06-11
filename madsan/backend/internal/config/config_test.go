@@ -96,6 +96,65 @@ func TestResolveRawDirWrongAbsoluteBackendPath(t *testing.T) {
 	}
 }
 
+func TestDefaultAISSyncWhenAISStreamKeySet(t *testing.T) {
+	t.Setenv("MADSAN_AIS_SYNC", "")
+	t.Setenv("MADSAN_AIS_DIRECT", "")
+	t.Setenv("AISSTREAM_API_KEY", "")
+	if !defaultAISSyncEnabled() {
+		t.Fatal("expected legacy sync default true without AISSTREAM_API_KEY")
+	}
+	if defaultAISDirectEnabled() {
+		t.Fatal("expected direct ingest default false without AISSTREAM_API_KEY")
+	}
+
+	t.Setenv("AISSTREAM_API_KEY", "test-key")
+	if defaultAISSyncEnabled() {
+		t.Fatal("expected legacy sync default false when AISSTREAM_API_KEY is set")
+	}
+	if !defaultAISDirectEnabled() {
+		t.Fatal("expected direct ingest default true when AISSTREAM_API_KEY is set")
+	}
+
+	// Load() without deploy/.env interference (real deploy/.env may set MADSAN_AIS_SYNC=true).
+	root := t.TempDir()
+	backend := filepath.Join(root, "madsan", "backend")
+	if err := os.MkdirAll(backend, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(backend); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Load()
+	if cfg.EnableAISSync {
+		t.Fatal("Load().EnableAISSync should default false when AISSTREAM_API_KEY is set")
+	}
+	if !cfg.EnableAISDirect {
+		t.Fatal("Load().EnableAISDirect should default true when AISSTREAM_API_KEY is set")
+	}
+	if cfg.UseLegacyAISSync() {
+		t.Fatal("UseLegacyAISSync should be false in direct ingest mode")
+	}
+
+	t.Setenv("MADSAN_AIS_SYNC", "true")
+	t.Setenv("MADSAN_AIS_DIRECT", "false")
+	cfg = Load()
+	if !cfg.EnableAISSync {
+		t.Fatal("explicit MADSAN_AIS_SYNC=true should be honored")
+	}
+	if cfg.EnableAISDirect {
+		t.Fatal("explicit MADSAN_AIS_DIRECT=false should disable direct mode")
+	}
+	if !cfg.UseLegacyAISSync() {
+		t.Fatal("UseLegacyAISSync should be true when direct mode is explicitly off")
+	}
+}
+
 func TestLocateMadsanRawDirHasSeed(t *testing.T) {
 	dir := locateMadsanRawDir()
 	if dir == "" {

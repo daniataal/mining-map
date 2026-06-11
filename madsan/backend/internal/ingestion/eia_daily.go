@@ -2,17 +2,17 @@ package ingestion
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/madsan/intelligence/internal/markets"
+	"github.com/madsan/intelligence/internal/sources"
 )
 
 func (s *Service) processEIADaily(ctx context.Context, jobID uuid.UUID) error {
 	started := time.Now()
-	client := &http.Client{Timeout: 12 * time.Second}
+	client := sources.HTTPClient()
 	n, err := markets.PersistDailySpots(ctx, s.pool, s.cfg.EIAAPIKey, client)
 	report := buildLegacyImportReport(map[string]any{
 		"prices_upserted": n,

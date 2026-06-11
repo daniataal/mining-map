@@ -4,9 +4,11 @@
 # Prod overlay mounts madsan_raw_data → /raw and madsan_etl_data → /etl on worker/scheduler.
 # Named volumes start empty on first deploy; copy host trees before legacy import / bunker_seed jobs.
 #
-# Usage (from repo root):
-#   ./madsan/scripts/seed_prod_volumes.sh
-#   ./madsan/scripts/seed_prod_volumes.sh --dry-run
+# Usage (from MadSan repo root — standalone prod: /opt/madsan):
+#   ./scripts/seed_prod_volumes.sh
+#   ./scripts/seed_prod_volumes.sh --dry-run
+#
+# Monorepo (pre-split): ./madsan/scripts/seed_prod_volumes.sh
 #
 # Requires: docker, readable madsan/raw and madsan/etl on the host.
 set -euo pipefail
