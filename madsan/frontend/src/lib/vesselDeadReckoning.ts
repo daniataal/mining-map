@@ -21,6 +21,8 @@ export type BBox = [west: number, south: number, east: number, north: number];
 const KNOTS_TO_MPS = 0.514444;
 const EARTH_RADIUS_M = 6371000;
 const MAX_EXTRAPOLATION_MS = 60_000;
+/** Do not animate dead reckoning beyond live AIS window (matches backend LivePositionMaxAge). */
+const MAX_LIVE_POSITION_MS = 12 * 60 * 60 * 1000;
 const MIN_SPEED_KNOTS = 0.1;
 const MIN_TRACK_SEGMENT_M = 80;
 const VIEWPORT_BUFFER_DEG = 0.15;
@@ -93,6 +95,16 @@ export function parseObservedAtMs(last_seen_at?: string): number {
   return Number.isFinite(t) ? t : Date.now();
 }
 
+export function aisAgeHours(last_seen_at?: string, now = Date.now()): number {
+  const observedAtMs = parseObservedAtMs(last_seen_at);
+  return Math.max(0, (now - observedAtMs) / (60 * 60 * 1000));
+}
+
+export function isLivePosition(last_seen_at?: string, now = Date.now()): boolean {
+  const observedAtMs = parseObservedAtMs(last_seen_at);
+  return now - observedAtMs <= MAX_LIVE_POSITION_MS;
+}
+
 export function deadReckonPosition(
   lat: number,
   lon: number,
@@ -125,7 +137,8 @@ export function isInBbox(lat: number, lon: number, bbox: BBox, bufferDeg = VIEWP
   return lat >= south - bufferDeg && lat <= north + bufferDeg && lon >= west - bufferDeg && lon <= east + bufferDeg;
 }
 
-export function toVesselFeature(v: VesselMsg, lat = v.lat, lon = v.lon): Feature<Point> {
+export function toVesselFeature(v: VesselMsg, lat = v.lat, lon = v.lon, now = Date.now()): Feature<Point> {
+  const ageH = aisAgeHours(v.last_seen_at, now);
   return {
     type: "Feature",
     id: v.mmsi,
@@ -139,6 +152,7 @@ export function toVesselFeature(v: VesselMsg, lat = v.lat, lon = v.lon): Feature
       inferred_course: v.inferred_course ?? null,
       speed_knots: v.speed_knots ?? null,
       last_seen_at: v.last_seen_at ?? "",
+      ais_age_h: ageH,
       source: v.source ?? "live",
     },
   };
@@ -214,7 +228,7 @@ export class VesselDeadReckoning {
     for (const v of this.vessels.values()) {
       if (!canDeadReckon(v) || !isInBbox(v.lat, v.lon, bbox)) continue;
       const elapsed = now - v.observedAtMs;
-      if (elapsed > 0 && elapsed <= MAX_EXTRAPOLATION_MS) return true;
+      if (elapsed > 0 && elapsed <= MAX_EXTRAPOLATION_MS && isLivePosition(v.last_seen_at, now)) return true;
     }
     return false;
   }
@@ -228,7 +242,7 @@ export class VesselDeadReckoning {
       const bearing = vesselBearing(v);
       if (canDeadReckon(v) && bearing != null && isInBbox(lat, lon, bbox)) {
         const elapsed = now - v.observedAtMs;
-        if (elapsed > 0 && elapsed <= MAX_EXTRAPOLATION_MS) {
+        if (elapsed > 0 && elapsed <= MAX_EXTRAPOLATION_MS && isLivePosition(v.last_seen_at, now)) {
           ({ lat, lon } = deadReckonPosition(lat, lon, bearing, v.speed_knots!, elapsed));
         }
       }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/madsan/intelligence/internal/intelligence"
+	"github.com/madsan/intelligence/internal/realtime"
 )
 
 func (s *Server) getEntity(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +101,13 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	mergeVesselShipvaultSummary(summary, mmsi, ownerProfileJSON, r.Context(), s.pool)
 	if lastSeen != nil {
 		summary["last_seen_at"] = lastSeen.UTC().Format(time.RFC3339)
-		summary["ais_fresh"] = time.Since(*lastSeen) < 72*time.Hour
+		age := time.Since(*lastSeen)
+		summary["ais_age_hours"] = age.Hours()
+		summary["ais_fresh"] = age < 72*time.Hour
+		summary["position_live"] = realtime.PositionIsLive(*lastSeen)
+		if !realtime.PositionIsLive(*lastSeen) {
+			summary["position_caveat"] = "Last known AIS fix — vessel may have moved since this timestamp. Destination is reported intent, not verified location."
+		}
 	}
 	loc := map[string]any{}
 	if lat != nil && lng != nil {

@@ -191,10 +191,25 @@ func (s *Syncer) upsertVessel(ctx context.Context, d VesselDelta) (uuid.UUID, bo
 	return id, positionFresh, err
 }
 
+// LivePositionMaxAge is the AIS freshness window for the map live overlay.
+const LivePositionMaxAge = 12 * time.Hour
+
 // Snapshot returns vessels inside a viewport bbox [west, south, east, north].
 func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit int) ([]VesselDelta, error) {
+	return snapshot(ctx, pool, bbox, limit, 72*time.Hour)
+}
+
+// SnapshotLive returns vessels with AIS fixes fresh enough for the live map overlay.
+func SnapshotLive(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit int) ([]VesselDelta, error) {
+	return snapshot(ctx, pool, bbox, limit, LivePositionMaxAge)
+}
+
+func snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit int, maxAge time.Duration) ([]VesselDelta, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
+	}
+	if maxAge <= 0 {
+		maxAge = LivePositionMaxAge
 	}
 	west, south, east, north := bbox[0], bbox[1], bbox[2], bbox[3]
 	rows, err := pool.Query(ctx, `
@@ -207,10 +222,10 @@ func Snapshot(ctx context.Context, pool *pgxpool.Pool, bbox [4]float64, limit in
 		WHERE v.latitude IS NOT NULL AND v.longitude IS NOT NULL
 		  AND v.longitude BETWEEN $1 AND $2
 		  AND v.latitude BETWEEN $3 AND $4
-		  AND v.last_seen_at > now() - interval '72 hours'
+		  AND v.last_seen_at > now() - $5::interval
 		ORDER BY v.last_seen_at DESC NULLS LAST
-		LIMIT $5
-	`, west, east, south, north, limit)
+		LIMIT $6
+	`, west, east, south, north, maxAge.String(), limit)
 	if err != nil {
 		return nil, err
 	}

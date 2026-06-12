@@ -236,7 +236,7 @@ func Load() Config {
 		AISRetainDays:             envInt("MADSAN_AIS_RETAIN_DAYS", 30),
 		AISInsecureTLS:            envBool("MARITIME_SSL_VERIFY", true) == false,
 		AISAutoTLSFallback:        envBool("MARITIME_SSL_AUTO_FALLBACK", true),
-		AISCycleMinutes:           envInt("MADSAN_AIS_CYCLE_MIN", 20),
+		AISCycleMinutes:           envInt("MADSAN_AIS_CYCLE_MIN", 0),
 		AISPositionMinIntervalSec: envInt("MADSAN_AIS_POSITION_MIN_SEC", 90),
 		AISGeofenceRadiusM:        envFloat("MADSAN_AIS_GEOFENCE_RADIUS_M", 1200),
 		AISTerminalBufferDeg:      envFloat("MADSAN_AIS_TERMINAL_BUFFER_DEG", 0.45),

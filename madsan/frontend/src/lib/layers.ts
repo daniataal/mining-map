@@ -163,7 +163,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     tileLayer: "vessels",
     group: "Maritime",
-    drawerHint: "Live AIS positions (<72h) · dimmer = older fix · Gulf/Hormuz: sparse AISStream coverage",
+    drawerHint: "Live overlay (<12h, WS) · dimmer tiles = last known fix (<72h) · Gulf/Hormuz: sparse AISStream coverage",
     defaultOn: true,
   },
   {

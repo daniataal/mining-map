@@ -56,7 +56,7 @@ func (h *Hub) SetPool(pool *pgxpool.Pool) {
 }
 
 func (h *Hub) Run() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -168,7 +168,7 @@ func (c *client) readPump(h *Hub) {
 func (h *Hub) sendSnapshot(c *client, sub ViewportSub) {
 	vessels := []maritime.VesselDelta{}
 	if h.pool != nil && sub.BBox[2] > sub.BBox[0] && sub.BBox[3] > sub.BBox[1] {
-		if snap, err := maritime.Snapshot(context.Background(), h.pool, sub.BBox, 200); err == nil {
+		if snap, err := maritime.SnapshotLive(context.Background(), h.pool, sub.BBox, 200); err == nil {
 			vessels = snap
 		}
 	}

@@ -221,8 +221,8 @@ const VESSEL_LOW_DOT_OPACITY: ExpressionSpecification = [
 ];
 /**
  * Tile vessels carry ais_age_h (hours since last AIS fix; tiles only serve <72h).
+ * Live WS overlay uses the same opacity curve; only fixes <12h appear on the live layer.
  * Fresh (<2h) renders solid; older last-known positions dim progressively.
- * Live WS overlay vessels have no ais_age_h and render at full opacity.
  */
 const VESSEL_AGE_OPACITY: ExpressionSpecification = [
   "interpolate",
@@ -230,10 +230,12 @@ const VESSEL_AGE_OPACITY: ExpressionSpecification = [
   ["coalesce", ["to-number", ["get", "ais_age_h"]], 0],
   2,
   1,
+  12,
+  0.55,
   24,
-  0.75,
+  0.35,
   72,
-  0.45,
+  0.2,
 ];
 
 type VesselLayerSet = {

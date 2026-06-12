@@ -95,6 +95,7 @@ func (s *Server) startAISSync() {
 	if directMode {
 		s.aisStats.SetMode("direct")
 		s.log.Info().Msg("ais: direct ingest mode — legacy 2-hop sync disabled; run cmd/ais-ingest")
+		s.startAISDeltaListener(context.Background())
 		return
 	}
 	if !useLegacy {

@@ -157,6 +157,13 @@ export default function VesselDrawerPanel({ dossier, onNavigateMmsi }: Props) {
   const lng = loc.longitude != null ? Number(loc.longitude) : NaN;
   const showAisCoverageBadge =
     Number.isFinite(lat) && Number.isFinite(lng) ? isPointInPersianGulf(lat, lng) : true;
+  const positionCaveat =
+    typeof summary.position_caveat === "string" ? summary.position_caveat : undefined;
+  const positionLive = summary.position_live === true;
+  const aisAgeHours =
+    typeof summary.ais_age_hours === "number" && Number.isFinite(summary.ais_age_hours)
+      ? summary.ais_age_hours
+      : undefined;
 
   const stsHistory = (dossier.signal_history ?? []).filter((h) => h.signal_type === "sts");
   const mcrHistory = (dossier.signal_history ?? []).filter(
@@ -211,7 +218,18 @@ export default function VesselDrawerPanel({ dossier, onNavigateMmsi }: Props) {
             opp {Math.round(dossier.opportunity_score)}
           </span>
         )}
+        {!positionLive && aisAgeHours != null && (
+          <span className="badge warn compact" title={positionCaveat}>
+            last known · {aisAgeHours < 24 ? `${Math.round(aisAgeHours)}h ago` : `${Math.round(aisAgeHours / 24)}d ago`}
+          </span>
+        )}
       </div>
+
+      {!positionLive && positionCaveat && (
+        <p className="disclaimer" style={{ marginTop: 0, marginBottom: 10, paddingTop: 0, borderTop: 0, fontSize: 11 }}>
+          {positionCaveat}
+        </p>
+      )}
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>

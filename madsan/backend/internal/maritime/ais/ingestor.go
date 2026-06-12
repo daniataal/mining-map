@@ -18,7 +18,8 @@ const (
 	defaultTerminalBufferDeg = 0.45
 	defaultGeofenceRadiusM   = 1200
 	defaultPositionInterval  = 90 * time.Second
-	defaultCycleTimeout      = 20 * time.Minute
+	minReconnectDelay        = 5 * time.Second
+	maxReconnectDelay        = 60 * time.Second
 )
 
 // RunIngestor streams AISStream into madsan_db.ais_positions and vessels; detects port calls.
@@ -27,18 +28,30 @@ func RunIngestor(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log
 		log.Info().Msg("ais ingest disabled: AISSTREAM_API_KEY missing")
 		return
 	}
+	reconnectDelay := minReconnectDelay
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		if err := runCycle(ctx, pool, cfg, log); err != nil {
-			log.Warn().Err(err).Msg("ais ingest cycle failed; retry in 30s")
+			if ctx.Err() != nil {
+				return
+			}
+			log.Warn().Err(err).Dur("retry_in", reconnectDelay).Msg("ais ingest cycle failed")
 			_ = UpdateSourceHealth(ctx, pool, 0, err)
+		} else {
+			reconnectDelay = minReconnectDelay
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-time.After(reconnectDelay):
+		}
+		if reconnectDelay < maxReconnectDelay {
+			reconnectDelay *= 2
+			if reconnectDelay > maxReconnectDelay {
+				reconnectDelay = maxReconnectDelay
+			}
 		}
 	}
 }
@@ -79,11 +92,11 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 		minInterval = defaultPositionInterval
 	}
 
-	cycleTimeout := time.Duration(cfg.AISCycleMinutes) * time.Minute
-	if cycleTimeout <= 0 {
-		cycleTimeout = defaultCycleTimeout
+	cycleCtx := ctx
+	cancel := func() {}
+	if cfg.AISCycleMinutes > 0 {
+		cycleCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.AISCycleMinutes)*time.Minute)
 	}
-	cycleCtx, cancel := context.WithTimeout(ctx, cycleTimeout)
 	defer cancel()
 
 	_ = UpdateSourceHealth(cycleCtx, pool, 0, nil)
@@ -105,16 +118,22 @@ func runCycle(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, log ze
 			return nil
 		}
 		tclass := TankerClass(u.ShipTypeCode, u.ShipTypeLabel, u.Name)
-		vesselID, _, err := UpsertVessel(ctx, pool, u, tclass)
+		vesselID, fresh, err := UpsertVessel(ctx, pool, u, tclass)
 		if err != nil {
-			return err
+			log.Warn().Err(err).Int64("mmsi", u.MMSI).Msg("ais vessel upsert skipped")
+			return nil
+		}
+		if fresh && u.HasKinematics {
+			if err := notifyVesselDelta(ctx, pool, u, tclass); err != nil {
+				log.Warn().Err(err).Int64("mmsi", u.MMSI).Msg("ais live notify failed")
+			}
 		}
 		if u.HasKinematics {
 			if _, err := PersistPosition(ctx, pool, u, minInterval); err != nil {
-				return err
+				log.Warn().Err(err).Int64("mmsi", u.MMSI).Msg("ais position persist skipped")
 			}
 			if err := tracker.HandlePosition(ctx, vesselID, toPortCallPosition(u), tclass); err != nil {
-				return err
+				log.Warn().Err(err).Int64("mmsi", u.MMSI).Msg("ais port call track skipped")
 			}
 		}
 		return nil
