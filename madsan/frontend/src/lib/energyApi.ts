@@ -123,6 +123,157 @@ export async function fetchSTSPredictions(
   return res.json() as Promise<FeatureCollection & { disclaimer?: string; tier?: string }>;
 }
 
+export type NearestGemPipelineHit = {
+  found: boolean;
+  segment_key?: string;
+  project_id?: string;
+  distance_m?: number;
+  distance_km?: number;
+  tags?: Record<string, unknown>;
+  source_id?: string;
+  attribution?: string;
+  asset_id?: string;
+};
+
+export async function fetchNearestGemPipeline(
+  lat: number,
+  lng: number,
+  maxM = 2000,
+): Promise<NearestGemPipelineHit> {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+    max_m: String(maxM),
+  });
+  const res = await fetch(`${API_BASE}/api/energy/pipelines/nearest-gem?${params}`, authFetchOpts);
+  if (!res.ok) return { found: false };
+  return (await res.json()) as NearestGemPipelineHit;
+}
+
+export type PipelineSnappedAsset = {
+  id: string;
+  name: string;
+  asset_type: string;
+  distance_m?: number;
+  confidence_score?: number;
+  tier?: string;
+};
+
+export type PipelineConnectivity = {
+  pipeline_id: string;
+  osm_id?: string;
+  legacy_id?: string;
+  name?: string;
+  tier?: string;
+  method?: string;
+  endpoints: {
+    start: {
+      point: { latitude: number; longitude: number };
+      snapped_asset?: PipelineSnappedAsset;
+    };
+    end: {
+      point: { latitude: number; longitude: number };
+      snapped_asset?: PipelineSnappedAsset;
+    };
+  };
+  upstream?: unknown[];
+  downstream?: unknown[];
+  limitations?: string[];
+};
+
+export async function fetchPipelineConnectivity(pipelineId: string): Promise<PipelineConnectivity | null> {
+  const res = await fetch(
+    `${API_BASE}/api/energy/pipelines/${encodeURIComponent(pipelineId)}/connectivity`,
+    authFetchOpts,
+  );
+  if (!res.ok) return null;
+  return (await res.json()) as PipelineConnectivity;
+}
+
+export type PipelineMapFocus = {
+  osmId?: string;
+  legacyRowId?: string;
+  assetId?: string;
+  connectedAssetIds: string[];
+  overlay: FeatureCollection;
+} | null;
+
+export function pipelineFocusFromSelection(selection?: {
+  _layer?: string;
+  osm_id?: string;
+  legacy_row_id?: string;
+  id?: string;
+} | null): PipelineMapFocus {
+  if (!selection || selection._layer !== "pipelines") return null;
+  const osmId = selection.osm_id ? String(selection.osm_id) : undefined;
+  const legacyRowId = selection.legacy_row_id ? String(selection.legacy_row_id) : undefined;
+  const assetId = selection.id ? String(selection.id) : undefined;
+  if (!osmId && !legacyRowId && !assetId) return null;
+  return {
+    osmId,
+    legacyRowId,
+    assetId,
+    connectedAssetIds: [],
+    overlay: { type: "FeatureCollection", features: [] },
+  };
+}
+
+export function buildPipelineMapFocus(
+  conn: PipelineConnectivity,
+  selection?: { osm_id?: string; legacy_row_id?: string; id?: string },
+): PipelineMapFocus {
+  const connectedAssetIds: string[] = [];
+  const features: FeatureCollection["features"] = [];
+  for (const [label, ep] of [
+    ["Start", conn.endpoints?.start],
+    ["End", conn.endpoints?.end],
+  ] as const) {
+    if (!ep?.point) continue;
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [ep.point.longitude, ep.point.latitude] },
+      properties: { kind: "endpoint", label },
+    });
+    if (ep.snapped_asset?.id) {
+      connectedAssetIds.push(ep.snapped_asset.id);
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [ep.point.longitude, ep.point.latitude] },
+        properties: {
+          kind: "facility",
+          label: ep.snapped_asset.name,
+          asset_type: ep.snapped_asset.asset_type,
+          asset_id: ep.snapped_asset.id,
+        },
+      });
+    }
+  }
+  return {
+    osmId: selection?.osm_id ?? conn.osm_id,
+    legacyRowId: selection?.legacy_row_id ?? conn.legacy_id,
+    assetId: selection?.id,
+    connectedAssetIds,
+    overlay: { type: "FeatureCollection", features },
+  };
+}
+
+/** Keep map-click ids when connectivity enrichment arrives (or fails). */
+export function mergePipelineFocus(
+  base: PipelineMapFocus,
+  fromConnectivity: PipelineMapFocus | null | undefined,
+): PipelineMapFocus {
+  if (!base) return fromConnectivity ?? null;
+  if (!fromConnectivity) return base;
+  return {
+    osmId: base.osmId ?? fromConnectivity.osmId,
+    legacyRowId: base.legacyRowId ?? fromConnectivity.legacyRowId,
+    assetId: base.assetId ?? fromConnectivity.assetId,
+    connectedAssetIds: fromConnectivity.connectedAssetIds,
+    overlay:
+      fromConnectivity.overlay.features.length > 0 ? fromConnectivity.overlay : base.overlay,
+  };
+}
+
 export async function fetchBunkerSuppliers(): Promise<{
   hubs: Array<{
     hub_key: string;

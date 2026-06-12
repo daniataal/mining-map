@@ -165,6 +165,7 @@ func (s *Server) Router() http.Handler {
 		api.Get("/shipvault/companies/{id}", s.getShipvaultCompany)
 		api.Get("/mcr/corridors", s.listMCRCorridors)
 		api.With(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureSupplierDiscovery)).Get("/suppliers/search", s.supplierSearch)
+		api.Get("/pipelines/nearest-gem", s.nearestGemPipeline)
 		api.Get("/pipelines/{id}/connectivity", s.getPipelineConnectivity)
 		api.Get("/mcr/scaffold/status", s.mcrScaffoldStatus)
 		api.Get("/predictive/status", s.predictiveStatus)

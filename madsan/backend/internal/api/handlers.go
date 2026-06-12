@@ -169,7 +169,7 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var name, assetType, country, status string
-	var lat, lng, conf float64
+	var lat, lng, conf *float64
 	var rawPayload []byte
 	var geomType string
 	var commodities []string
@@ -192,11 +192,22 @@ func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
 			limitations = append(limitations, extra...)
 		}
 	}
+	loc := map[string]any{}
+	if lat != nil {
+		loc["latitude"] = *lat
+	}
+	if lng != nil {
+		loc["longitude"] = *lng
+	}
+	confScore := 0.0
+	if conf != nil {
+		confScore = *conf
+	}
 	resp := CoreEntityResponse{
 		ID: id, EntityType: "asset", Name: name,
 		Summary:     summary,
-		Location:    map[string]any{"latitude": lat, "longitude": lng},
-		Confidence:  ConfidenceBlock{Score: conf, Status: status},
+		Location:    loc,
+		Confidence:  ConfidenceBlock{Score: confScore, Status: status},
 		Evidence:    evidence,
 		Limitations: limitations,
 	}
@@ -216,7 +227,10 @@ func (s *Server) getAssetByLegacy(w http.ResponseWriter, r *http.Request) {
 	}
 	var id uuid.UUID
 	err := s.pool.QueryRow(r.Context(), `
-		SELECT id FROM assets WHERE legacy_table = $1 AND legacy_id = $2 LIMIT 1
+		SELECT id FROM assets
+		WHERE legacy_table = $1 AND legacy_id = $2
+		ORDER BY length(COALESCE(raw_source_payload::text, '')) DESC, updated_at DESC NULLS LAST
+		LIMIT 1
 	`, table, legacyID).Scan(&id)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)

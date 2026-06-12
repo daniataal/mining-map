@@ -73,12 +73,51 @@ const ASSET_ENRICHMENT_TYPES = new Set([
   "terminal",
   "storage",
   "tank",
+  "pipeline",
 ]);
 
 export function assetShowsEnrichment(assetType?: string): boolean {
   if (!assetType) return false;
   return ASSET_ENRICHMENT_TYPES.has(assetType.toLowerCase());
 }
+
+/** GEM pipeline fields rendered in dedicated dossier sections (hide from generic summary list). */
+export const GEM_PIPELINE_PROFILE_KEYS = new Set([
+  "parent_company",
+  "fuel",
+  "fuel_source",
+  "status",
+  "capacity_text",
+  "length_km",
+  "diameter",
+  "diameter_units",
+  "wiki_url",
+  "gem_owner_entity_ids",
+  "proposal_year",
+  "construction_year",
+  "start_years",
+  "cancelled_year",
+  "stop_year",
+  "shelved_year",
+  "delay_type",
+  "delay_note",
+  "start_location",
+  "start_country",
+  "start_sub_region",
+  "start_region",
+  "end_location",
+  "end_country",
+  "end_sub_region",
+  "end_region",
+  "cost",
+  "language",
+  "gem_last_updated",
+  "data_source",
+  "source_url",
+  "segment_key",
+  "project_id",
+  "countries",
+]);
 
 function str(v: unknown): string | undefined {
   if (v == null) return undefined;
@@ -312,12 +351,14 @@ export function summaryKeyHiddenInEnrichment(
     if (k === "operator_name" && enrichment.operator) return true;
   }
   if (entityType === "asset") {
+    if (GEM_PIPELINE_PROFILE_KEYS.has(k)) return true;
     if (k === "operator" && enrichment.operator) return true;
     if (k === "owner" && enrichment.owner) return true;
     if (k === "capacity" && enrichment.capacity != null) return true;
     if (k === "capacity_value" && enrichment.capacity != null) return true;
     if (k === "capacity_unit" && enrichment.capacity != null) return true;
     if (k === "products" && enrichment.products) return true;
+    if (k === "fuel" && enrichment.products) return true;
   }
   return false;
 }

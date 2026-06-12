@@ -5,6 +5,7 @@ import { Layers, X } from "lucide-react";
 import maplibregl, { type ExpressionSpecification } from "maplibre-gl";
 import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { applyBasemapTuning } from "@/lib/basemapLabels";
 import { FEATURE } from "@/lib/entitlements";
 import { fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
 import {
@@ -38,6 +39,7 @@ import { ensureMapRtlPlugin } from "@/lib/mapRtl";
 import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
 import { stsHoverLabel } from "@/lib/stsDisplay";
+import type { PipelineMapFocus } from "@/lib/energyApi";
 
 type Props = {
   vertical: "energy" | "metals";
@@ -45,6 +47,8 @@ type Props = {
   onSelect: (feature: MapSelection | null) => void;
   mapFocus?: { lat: number; lng: number } | null;
   relationshipLines?: FeatureCollection;
+  pipelineFocus?: PipelineMapFocus;
+  onExitPipelineFocus?: () => void;
   onRuntimeStatus?: (status: MapRuntimeStatus) => void;
   entitlements?: Partial<Record<string, boolean>>;
 };
@@ -126,22 +130,6 @@ const MAP_LEGEND_ITEMS = [
   { label: "STS prediction", color: MAP_COLORS.stsPrediction },
   { label: "Vessel", color: MAP_COLORS.vessel },
 ] as const;
-
-/** Basemap layer tweaks applied after the remote style loads (deep navy ocean). */
-function tuneBasemap(map: maplibregl.Map) {
-  try {
-    const style = map.getStyle();
-    for (const layer of style.layers ?? []) {
-      if (layer.type === "background") {
-        map.setPaintProperty(layer.id, "background-color", "#060a12");
-      } else if (layer.type === "fill" && /water|ocean/i.test(layer.id)) {
-        map.setPaintProperty(layer.id, "fill-color", "#0b1322");
-      }
-    }
-  } catch {
-    /* defensive: remote style structure may change */
-  }
-}
 
 function entityTypeForLayer(layerId: string): string {
   if (layerId === "sts-events" || layerId === "sts-predictions") return "sts";
@@ -531,6 +519,84 @@ function heatFilterForActiveLayers(
 
 const PIPELINE_LAYER_IDS = ["pipelines-hit", "pipelines", "pipelines-water"] as const;
 
+const PIPELINE_SUBSTANCE_OIL: maplibregl.FilterSpecification = ["!=", ["get", "pipeline_substance"], "water"];
+const PIPELINE_SUBSTANCE_WATER: maplibregl.FilterSpecification = ["==", ["get", "pipeline_substance"], "water"];
+
+function pipelineFocusMatchFilter(focus: NonNullable<PipelineMapFocus>): maplibregl.FilterSpecification | null {
+  const parts: maplibregl.FilterSpecification[] = [];
+  if (focus.osmId) parts.push(["==", ["get", "osm_id"], focus.osmId]);
+  if (focus.legacyRowId) parts.push(["==", ["get", "legacy_row_id"], focus.legacyRowId]);
+  if (focus.assetId) parts.push(["==", ["get", "id"], focus.assetId]);
+  if (!parts.length) return null;
+  return parts.length === 1 ? parts[0]! : (["any", ...parts] as maplibregl.FilterSpecification);
+}
+
+function restorePipelineLayerFilters(map: maplibregl.Map) {
+  if (map.getLayer("pipelines")) map.setFilter("pipelines", PIPELINE_SUBSTANCE_OIL);
+  if (map.getLayer("pipelines-water")) map.setFilter("pipelines-water", PIPELINE_SUBSTANCE_WATER);
+  if (map.getLayer("pipelines-hit")) map.setFilter("pipelines-hit", null);
+  for (const l of layersForVertical("energy")) {
+    if (l.tileLayer !== "energy-assets" || !l.assetTypes?.length) continue;
+    const base = energyAssetFilter(l);
+    if (!base) continue;
+    if (map.getLayer(l.id)) map.setFilter(l.id, base);
+    if (map.getLayer(`${l.id}-glow`)) map.setFilter(`${l.id}-glow`, base);
+  }
+}
+
+function applyPipelineFocusToMap(map: maplibregl.Map, focus: NonNullable<PipelineMapFocus>) {
+  const match = pipelineFocusMatchFilter(focus);
+  if (match) {
+    for (const pid of PIPELINE_LAYER_IDS) {
+      if (!map.getLayer(pid)) continue;
+      if (pid === "pipelines-water") {
+        map.setFilter(pid, ["all", PIPELINE_SUBSTANCE_WATER, match] as maplibregl.FilterSpecification);
+      } else if (pid === "pipelines") {
+        map.setFilter(pid, ["all", PIPELINE_SUBSTANCE_OIL, match] as maplibregl.FilterSpecification);
+      } else {
+        map.setFilter(pid, match);
+      }
+    }
+  }
+
+  if (focus.connectedAssetIds.length > 0) {
+    const idFilter = ["in", ["get", "id"], ["literal", focus.connectedAssetIds]] as maplibregl.FilterSpecification;
+    for (const l of layersForVertical("energy")) {
+      if (l.tileLayer !== "energy-assets" || !l.assetTypes?.length) continue;
+      const base = energyAssetFilter(l);
+      if (!base) continue;
+      const combined = ["all", base, idFilter] as maplibregl.FilterSpecification;
+      if (map.getLayer(l.id)) map.setFilter(l.id, combined);
+      if (map.getLayer(`${l.id}-glow`)) map.setFilter(`${l.id}-glow`, combined);
+    }
+  }
+
+  const focusSrc = map.getSource("pipeline-focus-sites") as maplibregl.GeoJSONSource | undefined;
+  if (focusSrc && focus.overlay.features.length > 0) {
+    focusSrc.setData(focus.overlay);
+  }
+}
+
+function featureMatchesPipelineFocus(
+  props: Record<string, unknown>,
+  focus: NonNullable<PipelineMapFocus>,
+): boolean {
+  if (focus.osmId && String(props.osm_id ?? "") === focus.osmId) return true;
+  if (focus.legacyRowId && String(props.legacy_row_id ?? "") === focus.legacyRowId) return true;
+  if (focus.assetId && String(props.id ?? "") === focus.assetId) return true;
+  return false;
+}
+
+function countFocusedPipelinesInView(map: maplibregl.Map, focus: NonNullable<PipelineMapFocus>): number {
+  const layers = PIPELINE_LAYER_IDS.filter(
+    (id) => map.getLayer(id) && map.getLayoutProperty(id, "visibility") !== "none",
+  );
+  if (!layers.length) return 0;
+  return map.queryRenderedFeatures({ layers }).filter((f) =>
+    featureMatchesPipelineFocus((f.properties ?? {}) as Record<string, unknown>, focus),
+  ).length;
+}
+
 function isPipelineLayer(layerId: string): boolean {
   return PIPELINE_LAYER_IDS.includes(layerId as (typeof PIPELINE_LAYER_IDS)[number]);
 }
@@ -628,10 +694,15 @@ function hoverLabel(props: Record<string, unknown>): string {
   if (assetType === "sts_zone") {
     return name ? `STS anchorage · ${name}` : "STS anchorage zone";
   }
+  const isGem =
+    props.pipeline_source === "gem" || String(props.osm_id ?? "").startsWith("gem:");
   const substance = props.pipeline_substance ?? props.substance;
+  const status = props.pipeline_status != null ? String(props.pipeline_status).trim() : "";
   const parts = [name || assetType || "Feature"];
   if (assetType && name) parts.push(assetType.replace(/_/g, " "));
   if (substance) parts.push(String(substance));
+  if (status) parts.push(status);
+  if (isGem) parts.push("GEM GOIT");
   return parts.join(" · ");
 }
 
@@ -674,6 +745,8 @@ export default function IntelligenceMap({
   onSelect,
   mapFocus,
   relationshipLines,
+  pipelineFocus,
+  onExitPipelineFocus,
   onRuntimeStatus,
   entitlements,
 }: Props) {
@@ -691,6 +764,11 @@ export default function IntelligenceMap({
   const [layerDrawerOpen, setLayerDrawerOpen] = useState(true);
   const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
   const [stsSummary, setStsSummary] = useState<STSSummary | null>(null);
+  const pipelineFocusRef = useRef<PipelineMapFocus>(null);
+
+  useEffect(() => {
+    pipelineFocusRef.current = pipelineFocus ?? null;
+  }, [pipelineFocus]);
 
   useEffect(() => {
     layersRef.current = layers;
@@ -766,7 +844,7 @@ export default function IntelligenceMap({
     const setupMap = () => {
       if (cancelled) return;
       ensureVesselImages(map);
-      tuneBasemap(map);
+      applyBasemapTuning(map);
 
       const sourcesAdded = new Set<string>();
       layersForVertical(vertical)
@@ -839,15 +917,21 @@ export default function IntelligenceMap({
       map.on("click", (e) => {
         const feats = map.queryRenderedFeatures(e.point);
         const activeIds = new Set(layersForVertical(vertical).map((l) => l.id));
-        const hit = feats.find(
-          (f) =>
-            activeIds.has(f.layer.id) ||
-            f.layer.id === "sts-events" ||
-            f.layer.id === "sts-predictions" ||
-            f.layer.id === "storage-sites" ||
-            isPipelineLayer(f.layer.id) ||
-            (vertical === "energy" && isVesselLayerId(f.layer.id))
+        const pipelineHits = feats.filter((f) => isPipelineLayer(f.layer.id));
+        const gemPipelineHit = pipelineHits.find((f) =>
+          String((f.properties as { osm_id?: string })?.osm_id ?? "").startsWith("gem:"),
         );
+        const hit =
+          gemPipelineHit ??
+          feats.find(
+            (f) =>
+              activeIds.has(f.layer.id) ||
+              f.layer.id === "sts-events" ||
+              f.layer.id === "sts-predictions" ||
+              f.layer.id === "storage-sites" ||
+              isPipelineLayer(f.layer.id) ||
+              (vertical === "energy" && isVesselLayerId(f.layer.id)),
+          );
         if (!hit) {
           onSelect(null);
           return;
@@ -880,12 +964,24 @@ export default function IntelligenceMap({
           legacy_row_id: (props as { legacy_row_id?: string }).legacy_row_id != null
             ? String((props as { legacy_row_id?: string }).legacy_row_id)
             : undefined,
+          osm_id: (props as { osm_id?: string }).osm_id != null
+            ? String((props as { osm_id?: string }).osm_id)
+            : undefined,
+          pipeline_source: (props as { pipeline_source?: string }).pipeline_source != null
+            ? String((props as { pipeline_source?: string }).pipeline_source)
+            : undefined,
+          pipeline_status: (props as { pipeline_status?: string }).pipeline_status != null
+            ? String((props as { pipeline_status?: string }).pipeline_status)
+            : undefined,
           mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
           name: props.name != null ? String(props.name) : undefined,
           asset_type: props.asset_type != null ? String(props.asset_type) : undefined,
           operator: props.operator != null ? String(props.operator) : undefined,
           substance: props.substance != null ? String(props.substance) : undefined,
           pipeline_substance: props.pipeline_substance != null ? String(props.pipeline_substance) : undefined,
+          confidence_score: props.confidence_score != null ? String(props.confidence_score) : undefined,
+          click_lat: e.lngLat.lat,
+          click_lng: e.lngLat.lng,
           _layer: layerId,
           _entityType: entityTypeForLayer(layerId),
         });
@@ -931,6 +1027,30 @@ export default function IntelligenceMap({
           "line-width": 2,
           "line-opacity": 0.65,
           "line-dasharray": [2, 2],
+        },
+      });
+      map.addSource("pipeline-focus-sites", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "pipeline-focus-sites",
+        type: "circle",
+        source: "pipeline-focus-sites",
+        paint: {
+          "circle-radius": ["match", ["get", "kind"], "endpoint", 7, "facility", 9, 6],
+          "circle-color": [
+            "match",
+            ["get", "kind"],
+            "endpoint",
+            "#5dffc8",
+            "facility",
+            "#fbbf24",
+            "#5dffc8",
+          ],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#0a0e14",
+          "circle-opacity": 0.92,
         },
       });
 
@@ -1331,6 +1451,64 @@ export default function IntelligenceMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    let exitTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const syncFocus = () => {
+      const focus = pipelineFocusRef.current;
+      if (exitTimer) {
+        clearTimeout(exitTimer);
+        exitTimer = null;
+      }
+      if (!focus) {
+        restorePipelineLayerFilters(map);
+        const src = map.getSource("pipeline-focus-sites") as maplibregl.GeoJSONSource | undefined;
+        if (src) src.setData({ type: "FeatureCollection", features: [] });
+        return;
+      }
+      if (!map.getLayer("pipelines")) return;
+      applyPipelineFocusToMap(map, focus);
+      if (countFocusedPipelinesInView(map, focus) === 0) {
+        exitTimer = setTimeout(() => {
+          const current = pipelineFocusRef.current;
+          if (!current || current !== focus) return;
+          if (countFocusedPipelinesInView(map, current) === 0) {
+            onExitPipelineFocus?.();
+          }
+        }, 450);
+      }
+    };
+
+    const onMapChange = () => {
+      window.requestAnimationFrame(syncFocus);
+    };
+
+    map.on("moveend", onMapChange);
+    map.on("idle", onMapChange);
+    onMapChange();
+
+    return () => {
+      if (exitTimer) clearTimeout(exitTimer);
+      map.off("moveend", onMapChange);
+      map.off("idle", onMapChange);
+    };
+  }, [pipelineFocus, onExitPipelineFocus]);
+
+  useEffect(() => {
+    if (!pipelineFocus) return;
+    setLayers((prev) => ({
+      ...prev,
+      pipelines: true,
+      "energy-terminals": true,
+      "energy-tank-farms": true,
+      "energy-refineries": true,
+      "storage-sites": prev["storage-sites"] ?? true,
+    }));
+  }, [pipelineFocus]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
     layersForVertical(vertical).forEach((l) => {
       if (l.id === "pipelines") {
         const vis = layers[l.id] && !layerLocked(l, entitlements) ? "visible" : "none";
@@ -1397,6 +1575,11 @@ export default function IntelligenceMap({
           .then((fc) => (map.getSource("storage-sites") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
           .catch(() => {});
       }
+    }
+    if (pipelineFocusRef.current && map.getLayer("pipelines")) {
+      applyPipelineFocusToMap(map, pipelineFocusRef.current);
+    } else if (!pipelineFocusRef.current) {
+      restorePipelineLayerFilters(map);
     }
   }, [layers, vertical, wsState, entitlements]);
 

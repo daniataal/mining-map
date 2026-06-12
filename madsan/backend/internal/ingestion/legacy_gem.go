@@ -78,12 +78,24 @@ func gemDirHasTracker(dir string) bool {
 	if dir == "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(dir, gemTrackerCatalog[0].Filename))
-	return err == nil
+	for _, spec := range gemTrackerCatalog {
+		if _, err := os.Stat(filepath.Join(dir, spec.Filename)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // locateGEMDataDir finds madsan/data/gem first, then falls back to monorepo repo root xlsx.
 func locateGEMDataDir() string {
+	if env := strings.TrimSpace(os.Getenv("MADSAN_GEM_DATA_DIR")); env != "" {
+		if gemDirHasTracker(env) {
+			if ap, err := filepath.Abs(env); err == nil {
+				return ap
+			}
+			return env
+		}
+	}
 	anchors := make([]string, 0, 3)
 	if _, self, _, ok := runtime.Caller(0); ok {
 		anchors = append(anchors, filepath.Dir(self))
@@ -223,6 +235,9 @@ func (s *Service) importGEMTracker(ctx context.Context, gemDataDir string, spec 
 		if sourceID != uuid.Nil {
 			_ = s.attachEvidence(ctx, sourceID, "asset", entityID, rec, score)
 			_ = s.linkAssetOperator(ctx, entityID, rec, sourceID)
+			if spec.Tracker == "gem_pipelines" {
+				_ = s.upsertGEMPipelineEnrichment(ctx, entityID, rec, nil, sourceID)
+			}
 		}
 		imported++
 	}
@@ -338,7 +353,7 @@ func normalizeGEMPipelineRow(spec gemTrackerSpec, row map[string]string, rowInde
 	raw["source_url"] = "https://globalenergymonitor.org/projects/global-oil-infrastructure-tracker/"
 	raw["segment_key"] = gemPipelineDedupKey(projectID, rowIndex, gemCleanText(row["SegmentName"]))
 	if op := gemCleanText(row["Owner"]); op != "" {
-		raw["operator_name"] = normalizeName(op)
+		raw["owner_name"] = normalizeName(stripGEMOwnershipPct(op))
 	}
 	fuel := gemCleanText(row["Fuel"])
 	return NormalizedRecord{
@@ -440,6 +455,7 @@ func (s *Service) importLegacyGEMPipelineSegments(ctx context.Context, legacy *p
 			meta, _ := json.Marshal(map[string]any{
 				"name":         name,
 				"segment_key":  segmentKey,
+				"legacy_id":    segmentKey,
 				"project_id":   row["project_id"],
 				"tags":         tags,
 				"source_slug":  gemPipelineSourceSlug,
@@ -461,11 +477,23 @@ func (s *Service) importLegacyGEMPipelineSegments(ctx context.Context, legacy *p
 				rec := NormalizedRecord{
 					EntityType: "asset", AssetType: "pipeline", Name: name,
 					ExternalID: segmentKey, SourceSlug: "gem_goit_pipelines",
+					CountryCode: gemCountryCode(fmt.Sprint(tags["countries"])),
+					Commodities: []string{"petroleum"},
 					RawPayload: map[string]any{"segment_key": segmentKey, "tags": tags, "data_tier": "observed"},
+				}
+				if owner := gemCleanText(tags["owner"]); owner != "" {
+					rec.RawPayload["owner_name"] = normalizeName(stripGEMOwnershipPct(owner))
+					rec.RawPayload["Owner"] = owner
+				}
+				for _, k := range []string{"Parent", "Fuel", "Status", "Capacity", "CapacityUnits", "Wiki", "OwnerEntityIDs", "project_id"} {
+					if v := gemCleanText(tags[strings.ToLower(k)]); v != "" {
+						rec.RawPayload[k] = v
+					}
 				}
 				if entityID, uerr := s.upsertMaster(ctx, rec); uerr == nil && entityID != uuid.Nil {
 					score := confidence.Score(75, map[string]bool{"has_coordinates": false})
 					_ = s.attachEvidence(ctx, sourceID, "asset", entityID, rec, score)
+					_ = s.upsertGEMPipelineEnrichment(ctx, entityID, rec, tags, sourceID)
 				}
 			}
 			imported++

@@ -24,6 +24,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { authFetchOpts } from "@/lib/auth";
 import { canUse, effectiveEntitlements, FEATURE } from "@/lib/entitlements";
 import { API_BASE } from "@/lib/layers";
+import { mergePipelineFocus, pipelineFocusFromSelection, type PipelineMapFocus } from "@/lib/energyApi";
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
 import LiveIntelPanel from "./LiveIntelPanel";
@@ -85,6 +86,7 @@ export default function TerminalShell() {
   const [selected, setSelected] = useState<MapSelection | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lat: number; lng: number } | null>(null);
   const [relationshipLines, setRelationshipLines] = useState<FeatureCollection>({ type: "FeatureCollection", features: [] });
+  const [pipelineFocus, setPipelineFocus] = useState<PipelineMapFocus>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [metalsSummary, setMetalsSummary] = useState<{ mines?: number; countries?: number } | null>(null);
   const [quotes, setQuotes] = useState<TickerQuote[]>([]);
@@ -135,7 +137,24 @@ export default function TerminalShell() {
 
   const onMapSelect = useCallback((feat: MapSelection | null) => {
     setSelected(feat);
+    if (!feat || feat._layer !== "pipelines") {
+      setPipelineFocus(null);
+    } else {
+      setPipelineFocus(pipelineFocusFromSelection(feat));
+    }
     if (feat) setPanel("intel");
+  }, []);
+
+  const onPipelineFocusUpdate = useCallback((focus: PipelineMapFocus) => {
+    if (!focus) {
+      setPipelineFocus(null);
+      return;
+    }
+    setPipelineFocus((prev) => mergePipelineFocus(prev, focus));
+  }, []);
+
+  const onExitPipelineFocus = useCallback(() => {
+    setPipelineFocus(null);
   }, []);
 
   const onSearchSelect = useCallback((feat: MapSelection, focus?: { lat: number; lng: number }) => {
@@ -230,6 +249,8 @@ export default function TerminalShell() {
           onSelect={onMapSelect}
           mapFocus={mapFocus}
           relationshipLines={relationshipLines}
+          pipelineFocus={pipelineFocus}
+          onExitPipelineFocus={onExitPipelineFocus}
           onRuntimeStatus={onRuntimeStatus}
           entitlements={effectiveEntitlements(me)}
         />
@@ -323,7 +344,10 @@ export default function TerminalShell() {
                   <EntityDossierPanel
                     selection={selected}
                     vertical={vertical}
+                    pipelineMapFocused={!!pipelineFocus}
                     onRelationshipLines={setRelationshipLines}
+                    onPipelineFocus={onPipelineFocusUpdate}
+                    onExitPipelineFocus={onExitPipelineFocus}
                     onOpenLive={() => setPanel("live")}
                     onNavigate={(feat, focus) => {
                       setSelected(feat);

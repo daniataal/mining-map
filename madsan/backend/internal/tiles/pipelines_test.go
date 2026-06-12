@@ -17,8 +17,11 @@ func TestPipelineGraphMVTQueryPresent(t *testing.T) {
 	}
 	for _, needle := range []string{
 		"pipeline_graph_edges",
-		"LEFT JOIN assets a",
+		"LEFT JOIN assets a_osm",
+		"LEFT JOIN assets a_gem",
 		"legacy_petroleum_osm_features",
+		"gem_goit_pipelines",
+		"pipeline_source",
 		"metadata->'tags'",
 		"pipeline_substance",
 		"ST_AsMVTGeom",

@@ -105,6 +105,9 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == storageInventoryJobType {
 		return s.processStorageInventory(ctx, jobID)
 	}
+	if jobType == gemPipelineImportJobType {
+		return s.processGEMPipelineImport(ctx, jobID)
+	}
 	if jobType == mcrRebuildJobType {
 		return s.processMCRRebuild(ctx, jobID)
 	}

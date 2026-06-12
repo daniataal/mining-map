@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/madsan/intelligence/internal/ingestion"
 )
 
 var osmTagSummaryKeys = []string{
@@ -33,6 +35,7 @@ func enrichAssetSummary(summary map[string]any, assetType string, commodities []
 	if err := json.Unmarshal(rawJSON, &raw); err != nil {
 		return
 	}
+	enrichGemPipelineSummary(summary, assetType, raw)
 	if layerID, ok := raw["layer_id"].(string); ok && layerID != "" {
 		summary["layer_id"] = layerID
 	}
@@ -72,4 +75,25 @@ func setSummaryFromTag(summary map[string]any, tags map[string]any, key string) 
 		return
 	}
 	summary[key] = val
+}
+
+func enrichGemPipelineSummary(summary map[string]any, assetType string, raw map[string]any) {
+	if assetType != "pipeline" {
+		return
+	}
+	var tags map[string]any
+	if t, ok := raw["tags"].(map[string]any); ok {
+		tags = t
+	}
+	profile := ingestion.BuildGEMPipelineProfile(raw, tags)
+	for k, v := range profile {
+		if _, exists := summary[k]; !exists {
+			summary[k] = v
+		}
+	}
+	if _, ok := summary["data_tier"]; !ok {
+		if v := raw["data_tier"]; v != nil {
+			summary["data_tier"] = v
+		}
+	}
 }

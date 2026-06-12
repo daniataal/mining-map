@@ -167,7 +167,8 @@ func resolveEntityCoords(ctx context.Context, pool *pgxpool.Pool, entityType str
 	case "company":
 		_ = pool.QueryRow(ctx, `
 			SELECT AVG(latitude), AVG(longitude) FROM assets
-			WHERE operator_company_id = $1 AND latitude IS NOT NULL
+			WHERE (operator_company_id = $1 OR owner_company_id = $1)
+			  AND latitude IS NOT NULL
 		`, id).Scan(&lat, &lng)
 	}
 	return lat, lng
@@ -208,7 +209,8 @@ func companyCentroid(ctx context.Context, pool *pgxpool.Pool, companyID uuid.UUI
 	var lat, lng *float64
 	_ = pool.QueryRow(ctx, `
 		SELECT AVG(latitude), AVG(longitude) FROM assets
-		WHERE operator_company_id = $1 AND latitude IS NOT NULL
+		WHERE (operator_company_id = $1 OR owner_company_id = $1)
+		  AND latitude IS NOT NULL
 	`, companyID).Scan(&lat, &lng)
 	if lat == nil || lng == nil {
 		return nil

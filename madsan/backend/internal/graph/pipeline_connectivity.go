@@ -142,9 +142,24 @@ func resolvePipeline(ctx context.Context, pool *pgxpool.Pool, idParam string) (*
 	lookupKeys := []string{idParam}
 	if uid, err := uuid.Parse(idParam); err == nil {
 		lookupKeys = append(lookupKeys, uid.String())
+		var legacyTable, legacyID string
+		if pool.QueryRow(ctx, `
+			SELECT legacy_table, legacy_id FROM assets
+			WHERE id = $1 AND asset_type = 'pipeline'
+		`, uid).Scan(&legacyTable, &legacyID) == nil && legacyID != "" {
+			lookupKeys = append(lookupKeys, legacyID)
+			if legacyTable == "gem_goit_pipelines" {
+				lookupKeys = append(lookupKeys, "gem:"+legacyID)
+			}
+		}
 	}
 	if !strings.HasPrefix(idParam, "legacy:") {
 		lookupKeys = append(lookupKeys, "legacy:"+idParam)
+	}
+	if strings.HasPrefix(idParam, "gem:") {
+		lookupKeys = append(lookupKeys, strings.TrimPrefix(idParam, "gem:"))
+	} else if !strings.Contains(idParam, ":") && idParam != "" {
+		lookupKeys = append(lookupKeys, "gem:"+idParam)
 	}
 
 	const q = `
@@ -157,6 +172,7 @@ func resolvePipeline(ctx context.Context, pool *pgxpool.Pool, idParam string) (*
 		WHERE id::text = ANY($1)
 		   OR osm_id = ANY($1)
 		   OR metadata->>'legacy_id' = ANY($1)
+		   OR metadata->>'segment_key' = ANY($1)
 		LIMIT 1`
 
 	var row pipelineRow
@@ -233,21 +249,21 @@ func neighborsAtPoint(ctx context.Context, pool *pgxpool.Pool, excludeID uuid.UU
 		SELECT e.id, COALESCE(e.osm_id, ''),
 		       COALESCE(NULLIF(e.metadata->'tags'->>'name', ''), NULLIF(e.metadata->>'name', ''), ''),
 		       LEAST(
-		         ST_Distance(ST_StartPoint(e.geom::geometry)::geography, pt),
-		         ST_Distance(ST_EndPoint(e.geom::geometry)::geography, pt)
+		         ST_Distance(ST_StartPoint(e.geom::geometry)::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography),
+		         ST_Distance(ST_EndPoint(e.geom::geometry)::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography)
 		       ) AS distance_m,
 		       CASE
-		         WHEN ST_DWithin(ST_StartPoint(e.geom::geometry)::geography, pt, $4) THEN 'start'
+		         WHEN ST_DWithin(ST_StartPoint(e.geom::geometry)::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $4) THEN 'start'
 		         ELSE 'end'
 		       END AS connection_point,
 		       COALESCE(e.metadata->'tags'->>'substance', '')
-		FROM pipeline_graph_edges e,
-		     ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography AS pt
+		FROM pipeline_graph_edges e
 		WHERE e.id <> $3
 		  AND e.geom IS NOT NULL
+		  AND e.geom::geometry && ST_Expand(ST_SetSRID(ST_MakePoint($1, $2), 4326), ($4 / 111320.0))
 		  AND (
-		    ST_DWithin(ST_StartPoint(e.geom::geometry)::geography, pt, $4)
-		    OR ST_DWithin(ST_EndPoint(e.geom::geometry)::geography, pt, $4)
+		    ST_DWithin(ST_StartPoint(e.geom::geometry)::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $4)
+		    OR ST_DWithin(ST_EndPoint(e.geom::geometry)::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $4)
 		  )
 		ORDER BY distance_m ASC
 		LIMIT $5`

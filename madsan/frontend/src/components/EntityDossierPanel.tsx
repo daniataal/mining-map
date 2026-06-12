@@ -5,6 +5,7 @@ import StartDealPackLink from "@/components/StartDealPackLink";
 import type { FeatureCollection } from "geojson";
 import {
   AssetOperatorCapacitySection,
+  GemPipelineProfileSection,
   VesselOwnershipSection,
   VesselSpecificationsSection,
 } from "@/components/DossierEnrichmentSections";
@@ -16,6 +17,7 @@ import VesselDrawerPanel from "@/components/VesselDrawerPanel";
 import { isStsSelection } from "@/lib/stsDisplay";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
+import { fetchNearestGemPipeline, fetchPipelineConnectivity, buildPipelineMapFocus, type PipelineMapFocus } from "@/lib/energyApi";
 import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
@@ -82,9 +84,28 @@ export type MapSelection = {
   operator?: string;
   substance?: string;
   pipeline_substance?: string;
+  pipeline_status?: string;
+  pipeline_source?: string;
+  osm_id?: string;
+  click_lat?: number;
+  click_lng?: number;
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function gemSegmentKeyFromSelection(selection: MapSelection): string | undefined {
+  if (selection.osm_id?.startsWith("gem:")) {
+    return selection.osm_id.slice(4);
+  }
+  if (
+    selection.pipeline_source === "gem" &&
+    selection.legacy_row_id &&
+    !UUID_RE.test(selection.legacy_row_id)
+  ) {
+    return selection.legacy_row_id;
+  }
+  return undefined;
+}
 
 type EvidenceClaim = {
   source_name: string;
@@ -149,10 +170,27 @@ type RelationshipEdge = {
 type Props = {
   selection: MapSelection | null;
   vertical?: "energy" | "metals";
+  pipelineMapFocused?: boolean;
   onNavigate?: (selection: MapSelection, focus?: { lat: number; lng: number }) => void;
   onRelationshipLines?: (lines: FeatureCollection) => void;
+  onPipelineFocus?: (focus: PipelineMapFocus) => void;
+  onExitPipelineFocus?: () => void;
   onOpenLive?: () => void;
 };
+
+function gemLookupURL(segmentKey: string): string {
+  return `${API_BASE}/api/core/assets/lookup?legacy_table=gem_goit_pipelines&legacy_id=${encodeURIComponent(segmentKey)}`;
+}
+
+function osmPipelineLookupURL(legacyId: string): string {
+  return `${API_BASE}/api/core/assets/lookup?legacy_table=legacy_petroleum_osm_features&legacy_id=${encodeURIComponent(legacyId)}`;
+}
+
+async function loadDossierJSON(url: string): Promise<Dossier> {
+  const r = await fetch(url, authFetchOpts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json() as Promise<Dossier>;
+}
 
 function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   if (!dossier?.location) {
@@ -179,7 +217,36 @@ function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-export default function EntityDossierPanel({ selection, vertical = "energy", onNavigate, onRelationshipLines, onOpenLive }: Props) {
+function buildSelectionShell(selection: MapSelection): Dossier {
+  const isPipeline = selection._layer === "pipelines";
+  const entityType = selection._entityType ?? "asset";
+  return {
+    id: selection.id && UUID_RE.test(selection.id) ? selection.id : "",
+    entity_type: entityType,
+    name: String(selection.name ?? (isPipeline ? "Pipeline" : "Unknown")),
+    summary: {
+      asset_type: selection.asset_type ?? (isPipeline ? "pipeline" : undefined),
+      country_code: selection.country_code,
+      operator: selection.operator,
+      substance: selection.substance || selection.pipeline_substance,
+      status: selection.pipeline_status,
+    },
+    confidence: { score: Number(selection.confidence_score) || undefined },
+    evidence: [],
+    limitations: [],
+  };
+}
+
+export default function EntityDossierPanel({
+  selection,
+  vertical = "energy",
+  pipelineMapFocused,
+  onNavigate,
+  onRelationshipLines,
+  onPipelineFocus,
+  onExitPipelineFocus,
+  onOpenLive,
+}: Props) {
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -200,61 +267,170 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       setLoading(false);
       return;
     }
-    const entityType = selection._entityType ?? "asset";
-    const id = selection.id;
-    const mmsi = selection.mmsi;
 
-    let url = "";
+    const entityType = selection._entityType ?? "asset";
+    const mmsi = selection.mmsi;
     const isPipeline = selection._layer === "pipelines";
-    const legacyId = selection.legacy_row_id ?? (id && !UUID_RE.test(id) ? id : undefined);
-    if (id && UUID_RE.test(id)) {
-      url = `${API_BASE}/api/core/entities/${entityType}/${id}`;
-    } else if (isPipeline && legacyId) {
-      url = `${API_BASE}/api/core/assets/lookup?legacy_table=legacy_petroleum_osm_features&legacy_id=${encodeURIComponent(legacyId)}`;
-    } else if (mmsi && entityType === "vessel") {
-      url = `${API_BASE}/api/energy/vessels/by-mmsi/${mmsi}`;
-    } else {
-      setDossier({
-        id: "",
-        entity_type: entityType,
-        name: String(selection.name ?? (isPipeline ? "Pipeline" : "Unknown")),
-        summary: {
-          asset_type: selection.asset_type ?? (isPipeline ? "pipeline" : undefined),
-          country_code: selection.country_code,
-          operator: selection.operator,
-          substance: selection.substance || selection.pipeline_substance,
-        },
-        confidence: { score: Number(selection.confidence_score) || undefined },
-        evidence: isPipeline
-          ? [{ source_name: "OpenStreetMap petroleum", claim_type: "geometry", tier: "observed" }]
-          : [],
-        limitations: [
-          isPipeline
-            ? "Pipeline geometry from OSM; full asset dossier available after legacy import links this feature."
-            : "No registry ID — live AIS overlay only",
-        ],
-      });
-      return;
+    const gemKey = gemSegmentKeyFromSelection(selection);
+    const legacyId =
+      selection.legacy_row_id ?? (selection.id && !UUID_RE.test(selection.id) ? selection.id : undefined);
+    const isOsmPipeline = isPipeline && !gemKey && selection.pipeline_source !== "gem";
+    const clickLat = selection.click_lat;
+    const clickLng = selection.click_lng;
+
+    let cancelled = false;
+
+    async function resolvePipelineDossier(): Promise<Dossier | null> {
+      if (clickLat == null || clickLng == null || !isOsmPipeline) return null;
+      const near = await fetchNearestGemPipeline(clickLat, clickLng);
+      if (!near.found || !near.segment_key) return null;
+      const d = await loadDossierJSON(gemLookupURL(near.segment_key));
+      if (near.distance_m != null) {
+        d.limitations = [
+          ...(d.limitations ?? []),
+          `GEM GOIT segment matched ${near.distance_m}m from OSM map click (CC BY 4.0 — verify independently).`,
+        ];
+      }
+      return d;
     }
 
-    setLoading(true);
-    setError("");
-    fetch(url, authFetchOpts)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(await r.text());
-        return r.json() as Promise<Dossier>;
-      })
-      .then(setDossier)
-      .catch((e) => {
+    // Pipelines resolve to a Postgres/GEM dossier — skip the map-click shell so we
+    // don't flash "Commercial (GEM) NOT AVAILABLE" before the registry API responds.
+    const skipOptimisticShell =
+      isPipeline &&
+      (!!gemKey ||
+        !!(selection!.id && UUID_RE.test(selection!.id)) ||
+        !!(legacyId && !UUID_RE.test(legacyId)) ||
+        (isOsmPipeline && clickLat != null && clickLng != null));
+
+    async function load() {
+      setError("");
+      if (skipOptimisticShell) {
         setDossier(null);
-        setError(e instanceof Error ? e.message : "Failed to load dossier");
-      })
-      .finally(() => setLoading(false));
+      } else {
+        setDossier(buildSelectionShell(selection!));
+      }
+      setLoading(true);
+      try {
+        if (gemKey) {
+          const d = await loadDossierJSON(gemLookupURL(gemKey));
+          if (!cancelled) setDossier(d);
+          return;
+        }
+
+        if (selection!.id && UUID_RE.test(selection!.id)) {
+          const d = await loadDossierJSON(`${API_BASE}/api/core/entities/${entityType}/${selection!.id}`);
+          if (!cancelled) setDossier(d);
+          return;
+        }
+
+        if (isOsmPipeline && clickLat != null && clickLng != null) {
+          const fused = await resolvePipelineDossier();
+          if (fused) {
+            if (!cancelled) setDossier(fused);
+            return;
+          }
+        }
+
+        if (isPipeline && legacyId && !UUID_RE.test(legacyId)) {
+          try {
+            const d = await loadDossierJSON(osmPipelineLookupURL(legacyId));
+            if (!cancelled) setDossier(d);
+            return;
+          } catch {
+            const fused = await resolvePipelineDossier();
+            if (fused) {
+              if (!cancelled) setDossier(fused);
+              return;
+            }
+            if (!cancelled) {
+              setDossier(null);
+              setError("No registry dossier — OSM geometry only (no GEM segment within 2 km).");
+            }
+            return;
+          }
+        }
+
+        if (mmsi && entityType === "vessel") {
+          const d = await loadDossierJSON(`${API_BASE}/api/energy/vessels/by-mmsi/${mmsi}`);
+          if (!cancelled) setDossier(d);
+          return;
+        }
+
+        if (!cancelled) {
+          setDossier({
+            id: "",
+            entity_type: entityType,
+            name: String(selection!.name ?? (isPipeline ? "Pipeline" : "Unknown")),
+            summary: {
+              asset_type: selection!.asset_type ?? (isPipeline ? "pipeline" : undefined),
+              country_code: selection!.country_code,
+              operator: selection!.operator,
+              substance: selection!.substance || selection!.pipeline_substance,
+            },
+            confidence: { score: Number(selection!.confidence_score) || undefined },
+            evidence: isPipeline
+              ? [{ source_name: "OpenStreetMap petroleum", claim_type: "geometry", tier: "observed" }]
+              : [],
+            limitations: [
+              isPipeline
+                ? "Pipeline geometry from OSM; no GEM GOIT segment within 2 km and no registry link."
+                : "No registry ID — live AIS overlay only",
+            ],
+          });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setDossier(null);
+          setError(e instanceof Error ? e.message : "Failed to load dossier");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [selection]);
 
   useEffect(() => {
     onRelationshipLines?.(buildRelationshipLines(dossier));
   }, [dossier, onRelationshipLines]);
+
+  useEffect(() => {
+    if (!onPipelineFocus) return;
+    const assetType = String(dossier?.summary?.asset_type ?? selection?.asset_type ?? "");
+    if (assetType !== "pipeline" && selection?._layer !== "pipelines") {
+      onPipelineFocus(null);
+      return;
+    }
+    const pipelineKey =
+      (dossier?.id && UUID_RE.test(dossier.id) && dossier.id) ||
+      selection?.osm_id ||
+      gemSegmentKeyFromSelection(selection ?? {}) ||
+      selection?.legacy_row_id;
+    if (!pipelineKey) return;
+    let cancelled = false;
+    fetchPipelineConnectivity(pipelineKey)
+      .then((conn) => {
+        if (cancelled || !conn) return;
+        onPipelineFocus(
+          buildPipelineMapFocus(conn, {
+            osm_id: selection?.osm_id,
+            legacy_row_id: selection?.legacy_row_id ?? gemSegmentKeyFromSelection(selection ?? {}),
+            id: dossier?.id && UUID_RE.test(dossier.id) ? dossier.id : selection?.id,
+          }),
+        );
+      })
+      .catch(() => {
+        /* keep map-click focus when connectivity is slow or unavailable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dossier, selection, onPipelineFocus]);
 
   if (!selection) {
     if (vertical === "metals") {
@@ -280,8 +456,46 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
     return <StorageSitePanel selection={selection} />;
   }
 
-  if (loading) return <p style={{ color: "var(--muted)" }}>Loading dossier…</p>;
-  if (error) return <p style={{ color: "#f87171" }}>{error}</p>;
+  if (loading && !dossier) {
+    const label = String(
+      selection.name ?? (selection._layer === "pipelines" ? "Pipeline" : "Asset"),
+    );
+    const previewRows = [
+      selection.operator ? { label: "operator (map)", value: String(selection.operator) } : null,
+      selection.pipeline_status
+        ? { label: "status (map)", value: String(selection.pipeline_status) }
+        : null,
+      selection.substance || selection.pipeline_substance
+        ? { label: "substance (map)", value: String(selection.substance ?? selection.pipeline_substance) }
+        : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
+    return (
+      <div className="dossier-tabbed">
+        <div className="dossier-head">
+          <h3 className="dossier-title">{label}</h3>
+          <div className="dossier-head-badges">
+            <span className="badge compact partial">loading…</span>
+          </div>
+        </div>
+        {previewRows.length > 0 ? (
+          <dl className="dossier-dl" style={{ marginTop: 8 }}>
+            {previewRows.map((row) => (
+              <span key={row.label} className="dossier-dl-row">
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </span>
+            ))}
+          </dl>
+        ) : null}
+        <p style={{ color: "var(--muted)", marginTop: 8 }}>
+          {selection._layer === "pipelines"
+            ? "Loading full GEM dossier from Postgres (not the spreadsheet at runtime)…"
+            : "Loading dossier…"}
+        </p>
+      </div>
+    );
+  }
+  if (error && !dossier) return <p style={{ color: "#f87171" }}>{error}</p>;
   if (!dossier) return null;
 
   if (dossier.entity_type === "vessel") {
@@ -297,6 +511,9 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
 
   const score = dossier.confidence?.score;
   const summary = dossier.summary ?? {};
+  const isPipelineDossier =
+    dossier.entity_type === "asset" &&
+    (String(summary.asset_type ?? "") === "pipeline" || selection._layer === "pipelines");
   const enrichment =
     dossier.entity_type === "asset" ? resolveAssetEnrichment(dossier) : null;
   const entityId = dossier.id || selection.id || "";
@@ -306,6 +523,9 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
       <div className="dossier-head">
         <h3 className="dossier-title">{dossier.name}</h3>
         <div className="dossier-head-badges">
+          {loading && dossier.id ? (
+            <span className="badge compact partial">refreshing…</span>
+          ) : null}
           <span className={`badge compact ${confidenceTierClass(score, dossier.confidence?.status)}`}>
             {dossier.entity_type} · {score ?? "—"}
           </span>
@@ -316,6 +536,17 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
           )}
         </div>
       </div>
+
+      {isPipelineDossier && pipelineMapFocused && onExitPipelineFocus ? (
+        <div style={{ marginBottom: 10 }}>
+          <button type="button" className="panel-btn" onClick={onExitPipelineFocus}>
+            Show all pipelines
+          </button>
+          <p className="disclaimer" style={{ marginTop: 6, marginBottom: 0 }}>
+            Map is filtered to this segment and linked facilities. Pan away or use this button to restore the full network.
+          </p>
+        </div>
+      ) : null}
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
@@ -329,7 +560,8 @@ export default function EntityDossierPanel({ selection, vertical = "energy", onN
         <TabsContent value="overview">
           <VesselOwnershipSection dossier={dossier} />
           <VesselSpecificationsSection dossier={dossier} />
-          <AssetOperatorCapacitySection dossier={dossier} />
+          <AssetOperatorCapacitySection dossier={dossier} onNavigateEntity={onNavigate} />
+          <GemPipelineProfileSection dossier={dossier} />
           <dl className="dossier-dl">
             {Object.entries(summary).map(([k, v]) => {
               const display = formatSummaryValue(v);

@@ -12,6 +12,7 @@ import type { FeatureCollection } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import AppShell from "@/components/AppShell";
 import AuthGate from "@/components/auth/AuthGate";
+import { applyBasemapTuning } from "@/lib/basemapLabels";
 import { MAP_STYLE_URL } from "@/lib/layers";
 import {
   addLink,
@@ -196,6 +197,7 @@ export default function PlaygroundPage() {
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     map.on("load", () => {
+      applyBasemapTuning(map);
       map.addSource("deal-links", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addSource("deal-nodes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({

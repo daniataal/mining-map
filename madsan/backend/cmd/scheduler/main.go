@@ -30,7 +30,7 @@ var schedules = []struct {
 	{interval: 1 * time.Hour, jobType: "sts_detect", source: "ais_proximity"},
 	{interval: 45 * time.Minute, jobType: "sts_pair_predict", source: "sts_pair_prediction"},
 	{interval: 24 * time.Hour, jobType: "sts_rescore", source: "sts_probability_backfill"},
-	{interval: 24 * time.Hour, jobType: "storage_inventory_estimate", source: "osm_eia_storage"},
+	{interval: 7 * 24 * time.Hour, jobType: "gem_pipeline_import", source: "gem_goit_pipelines"},
 	{interval: 24 * time.Hour, jobType: "mcr_rebuild", source: "syntheticbol"},
 	{interval: 24 * time.Hour, jobType: "voyage_rebuild", source: "port_calls"},
 	{interval: 7 * 24 * time.Hour, jobType: "gleif", source: "gleif"},

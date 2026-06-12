@@ -13,6 +13,7 @@ import {
   formatEnrichmentTier,
   formatFetchedAt,
   formatProducts,
+  formatSummaryValue,
   isEnrichmentStale,
   type CoreDossier,
   resolveAssetEnrichment,
@@ -21,8 +22,26 @@ import {
 import { API_BASE } from "@/lib/layers";
 import { cn } from "@/lib/utils";
 
+type EnrichmentDossier = CoreDossier & {
+  relationships?: Array<{
+    id: string;
+    type: string;
+    entity_type: string;
+    name: string;
+    latitude?: number;
+    longitude?: number;
+  }>;
+};
+
 type Props = {
-  dossier: CoreDossier;
+  dossier: EnrichmentDossier;
+};
+
+type NavigateEntityProps = {
+  onNavigateEntity?: (
+    selection: { id: string; name: string; _entityType: string },
+    focus?: { lat: number; lng: number },
+  ) => void;
 };
 
 function enrichmentBadgeVariant(tier: string): "verified" | "partial" | "destructive" | "muted" {
@@ -33,14 +52,22 @@ function enrichmentBadgeVariant(tier: string): "verified" | "partial" | "destruc
   return "muted";
 }
 
-function EnrichmentDl({ rows }: { rows: Array<{ label: string; value: string }> }) {
+function EnrichmentDl({ rows }: { rows: Array<{ label: string; value: string; link?: () => void }> }) {
   if (!rows.length) return null;
   return (
     <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {rows.map((row) => (
         <span key={row.label} className="contents">
           <dt>{row.label}</dt>
-          <dd className="m-0 text-foreground">{row.value}</dd>
+          <dd className="m-0 text-foreground">
+            {row.link ? (
+              <button type="button" className="rel-link inline p-0 text-left" onClick={row.link}>
+                {row.value}
+              </button>
+            ) : (
+              row.value
+            )}
+          </dd>
         </span>
       ))}
     </dl>
@@ -426,37 +453,110 @@ export function VesselOwnershipSection({ dossier }: Props) {
   );
 }
 
-export function AssetOperatorCapacitySection({ dossier }: Props) {
+export function AssetOperatorCapacitySection({
+  dossier,
+  onNavigateEntity,
+}: Props & NavigateEntityProps) {
   if (dossier.entity_type !== "asset") return null;
 
   const assetType = String(dossier.summary?.asset_type ?? "");
   if (!assetShowsEnrichment(assetType)) return null;
 
+  const isPipeline = assetType.toLowerCase() === "pipeline";
+  const summary = dossier.summary ?? {};
   const block = resolveAssetEnrichment(dossier);
-  const capacityStr = block ? formatCapacity(block) : undefined;
-  const productsStr = block ? formatProducts(block.products) : undefined;
+  const capacityStr =
+    block ? formatCapacity(block) : formatSummaryValue(summary.capacity_text) ?? undefined;
+  const productsStr =
+    block ? formatProducts(block.products) : formatSummaryValue(summary.fuel) ?? undefined;
 
   const hasUuid = /^[0-9a-f-]{36}$/i.test(dossier.id);
-  const rows: Array<{ label: string; value: string }> = [];
-  if (block?.operator) rows.push({ label: "operator", value: block.operator });
-  if (block?.owner) rows.push({ label: "owner", value: block.owner });
-  if (productsStr) rows.push({ label: "products", value: productsStr });
+  const ownerRel = dossier.relationships?.find(
+    (r) => r.entity_type === "company" && (r.type === "owned_by" || r.type === "operated_by"),
+  );
+  const ownerLabel = block?.owner ?? (summary.owner ? String(summary.owner) : undefined);
+
+  const rows: Array<{ label: string; value: string; link?: () => void }> = [];
+  if (ownerLabel) {
+    if (ownerRel && onNavigateEntity) {
+      rows.push({
+        label: "owner",
+        value: ownerLabel,
+        link: () => {
+          const focus =
+            ownerRel.latitude != null && ownerRel.longitude != null
+              ? { lat: ownerRel.latitude, lng: ownerRel.longitude }
+              : undefined;
+          onNavigateEntity({ id: ownerRel.id, name: ownerRel.name, _entityType: "company" }, focus);
+        },
+      });
+    } else {
+      rows.push({ label: "owner", value: ownerLabel });
+    }
+  }
+  if (isPipeline && summary.parent_company) {
+    const parentRel = dossier.relationships?.find(
+      (r) => r.entity_type === "company" && r.type === "parent_company",
+    );
+    if (parentRel && onNavigateEntity) {
+      rows.push({
+        label: "parent company",
+        value: String(summary.parent_company),
+        link: () => {
+          const focus =
+            parentRel.latitude != null && parentRel.longitude != null
+              ? { lat: parentRel.latitude, lng: parentRel.longitude }
+              : undefined;
+          onNavigateEntity({ id: parentRel.id, name: parentRel.name, _entityType: "company" }, focus);
+        },
+      });
+    } else {
+      rows.push({ label: "parent company", value: String(summary.parent_company) });
+    }
+  }
+  if (block?.operator && block.operator !== block.owner) {
+    rows.push({ label: "operator", value: block.operator });
+  }
+  if (productsStr) rows.push({ label: isPipeline ? "fuel / product" : "products", value: productsStr });
+  if (isPipeline && summary.fuel_source) {
+    rows.push({ label: "fuel source", value: String(summary.fuel_source) });
+  }
   if (capacityStr) rows.push({ label: "capacity", value: capacityStr });
+  if (isPipeline && summary.status) rows.push({ label: "status", value: String(summary.status) });
+  if (isPipeline && summary.length_km) rows.push({ label: "length (km)", value: String(summary.length_km) });
+  if (isPipeline && summary.diameter) {
+    const d = String(summary.diameter);
+    const units = summary.diameter_units ? ` ${summary.diameter_units}` : "";
+    rows.push({ label: "diameter", value: d + units });
+  }
+  if (isPipeline && summary.gem_owner_entity_ids) {
+    rows.push({ label: "GEM entity IDs", value: String(summary.gem_owner_entity_ids) });
+  }
+  if (isPipeline && summary.wiki_url) {
+    rows.push({ label: "GEM wiki", value: String(summary.wiki_url) });
+  }
 
   const hasContent = rows.length > 0;
+  const title = isPipeline ? "Commercial (GEM)" : "Operator & capacity";
 
   return (
     <Card size="sm" className="mb-3">
       <CardHeader>
         <EnrichmentHeader
-          title="Operator & capacity"
+          title={title}
           block={block}
-          showRefresh={hasUuid}
+          showRefresh={hasUuid && !isPipeline}
           entityType="asset"
           entityId={dossier.id}
         />
       </CardHeader>
       <CardContent>
+        {isPipeline && (
+          <p className="disclaimer mt-0 mb-2 text-xs">
+            Owner and parent from GEM Global Oil Infrastructure Tracker (CC BY 4.0). GEM does not publish phone,
+            email, or direct contact channels — use linked company dossiers or separate contact sources.
+          </p>
+        )}
         {hasContent ? (
           <>
             <EnrichmentDl rows={rows} />
@@ -466,16 +566,92 @@ export function AssetOperatorCapacitySection({ dossier }: Props) {
         ) : block ? (
           <>
             <p className="disclaimer mt-0 text-xs">
-              No operator or capacity on file — OSM tags may still appear in the summary above.
+              {isPipeline
+                ? "No GEM commercial attributes on file for this segment yet — run gem_pipeline_import or click a GEM-backed route."
+                : "No operator or capacity on file — OSM tags may still appear in the summary above."}
             </p>
             <EnrichmentMeta block={block} />
-            <EnrichmentLimitations block={block} />
+            {block && <EnrichmentLimitations block={block} />}
           </>
         ) : (
           <p className="disclaimer mt-0 text-xs">
-            Not enriched yet — scheduled background refresh reconciles OSM tags with curated terminal and capacity
-            registries.
+            {isPipeline
+              ? "Not enriched yet — scheduled GEM import writes owner, capacity, and status into Postgres."
+              : "Not enriched yet — scheduled background refresh reconciles OSM tags with curated terminal and capacity registries."}
           </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function profileRow(summary: Record<string, unknown>, key: string, label: string): { label: string; value: string } | null {
+  const v = formatSummaryValue(summary[key]);
+  return v ? { label, value: v } : null;
+}
+
+export function GemPipelineProfileSection({ dossier }: Props) {
+  if (dossier.entity_type !== "asset") return null;
+  const assetType = String(dossier.summary?.asset_type ?? "");
+  if (assetType.toLowerCase() !== "pipeline") return null;
+
+  const summary = dossier.summary ?? {};
+  const timeline = [
+    profileRow(summary, "proposal_year", "proposal year"),
+    profileRow(summary, "construction_year", "construction year"),
+    profileRow(summary, "start_years", "start year(s)"),
+    profileRow(summary, "cancelled_year", "cancelled year"),
+    profileRow(summary, "stop_year", "stop year"),
+    profileRow(summary, "shelved_year", "shelved year"),
+    profileRow(summary, "delay_type", "delay type"),
+    profileRow(summary, "delay_note", "delay note"),
+    profileRow(summary, "gem_last_updated", "GEM last updated"),
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+  const route = [
+    profileRow(summary, "start_location", "start location"),
+    profileRow(summary, "start_country", "start country"),
+    profileRow(summary, "start_sub_region", "start sub-region"),
+    profileRow(summary, "start_region", "start region"),
+    profileRow(summary, "end_location", "end location"),
+    profileRow(summary, "end_country", "end country"),
+    profileRow(summary, "end_sub_region", "end sub-region"),
+    profileRow(summary, "end_region", "end region"),
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+  const meta = [
+    profileRow(summary, "cost", "cost"),
+    profileRow(summary, "language", "local language name"),
+    profileRow(summary, "countries", "countries"),
+    profileRow(summary, "project_id", "GEM project ID"),
+    profileRow(summary, "segment_key", "segment key"),
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+
+  if (timeline.length === 0 && route.length === 0 && meta.length === 0) return null;
+
+  return (
+    <Card size="sm" className="mb-3">
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Pipeline profile (GEM)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {timeline.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Timeline</p>
+            <EnrichmentDl rows={timeline} />
+          </div>
+        )}
+        {route.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Route</p>
+            <EnrichmentDl rows={route} />
+          </div>
+        )}
+        {meta.length > 0 && (
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Cost & metadata</p>
+            <EnrichmentDl rows={meta} />
+          </div>
         )}
       </CardContent>
     </Card>
