@@ -1,5 +1,3 @@
-import type { Polygon } from "geojson";
-
 export type LayerDef = {
   id: string;
   label: string;
@@ -10,7 +8,7 @@ export type LayerDef = {
   /** MVT feature filter when sharing energy-assets tiles */
   assetTypes?: string[];
   /** GeoJSON overlay fetched from API (not MVT) */
-  geoJsonSource?: "sts" | "sts-predictions" | "mcr" | "coverage" | "storage";
+  geoJsonSource?: "sts" | "sts-predictions" | "mcr" | "storage";
   /** Optional sub-label under the checkbox (e.g. AIS hint, cadastre tier) */
   drawerHint?: string;
   /** Gated by map_premium_layers entitlement */
@@ -165,7 +163,7 @@ export const LAYER_REGISTRY: LayerDef[] = [
     vertical: "energy",
     tileLayer: "vessels",
     group: "Maritime",
-    drawerHint: "Live AIS positions (<72h) · dimmer = older fix · Gulf/Hormuz: limited provider coverage",
+    drawerHint: "Live AIS positions (<72h) · dimmer = older fix · Gulf/Hormuz: sparse AISStream coverage",
     defaultOn: true,
   },
   {
@@ -199,15 +197,6 @@ export const LAYER_REGISTRY: LayerDef[] = [
     group: "Maritime",
     drawerHint: "Load→discharge arcs from voyages table",
     defaultOn: false,
-  },
-  {
-    id: "ais-coverage",
-    label: "AIS coverage overlay",
-    vertical: "energy",
-    geoJsonSource: "coverage",
-    group: "Maritime",
-    drawerHint: "Highlights sparse open-AIS regions (Gulf/Hormuz)",
-    defaultOn: true,
   },
   {
     id: "metals-mines",
@@ -290,39 +279,10 @@ export const PERSIAN_GULF_AIS_BBOX = {
   north: 30.5,
 } as const;
 
-/** GeoJSON polygon for AIS coverage gap overlay */
-export const PERSIAN_GULF_COVERAGE_POLYGON: Polygon = {
-  type: "Polygon",
-  coordinates: [
-    [
-      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.south],
-      [PERSIAN_GULF_AIS_BBOX.east, PERSIAN_GULF_AIS_BBOX.south],
-      [PERSIAN_GULF_AIS_BBOX.east, PERSIAN_GULF_AIS_BBOX.north],
-      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.north],
-      [PERSIAN_GULF_AIS_BBOX.west, PERSIAN_GULF_AIS_BBOX.south],
-    ],
-  ],
-};
-
 export const LIMITED_AIS_COVERAGE_LABEL = "Limited provider coverage";
 
 export const LIMITED_AIS_COVERAGE_DETAIL =
   "Open AIS (AISStream) is sparse in the Persian Gulf, Strait of Hormuz, and Gulf of Oman. An empty map is not proof of no traffic.";
-
-export function viewportOverlapsPersianGulf(viewport: {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
-}): boolean {
-  const h = PERSIAN_GULF_AIS_BBOX;
-  return !(
-    viewport.north < h.south ||
-    viewport.south > h.north ||
-    viewport.east < h.west ||
-    viewport.west > h.east
-  );
-}
 
 export function isPointInPersianGulf(lat: number, lng: number): boolean {
   const h = PERSIAN_GULF_AIS_BBOX;

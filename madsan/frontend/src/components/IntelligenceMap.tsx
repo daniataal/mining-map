@@ -18,8 +18,6 @@ import {
   MAP_STYLE_URL,
   mapSourceKey,
   metalsMapLayersActive,
-  PERSIAN_GULF_COVERAGE_POLYGON,
-  viewportOverlapsPersianGulf,
   type LayerDef,
   type LayerGroupDef,
 } from "@/lib/layers";
@@ -40,7 +38,6 @@ import { VesselDeadReckoning, parseWsFrame } from "@/lib/vesselDeadReckoning";
 import type { MapSelection } from "./EntityDossierPanel";
 import { stsHoverLabel } from "@/lib/stsDisplay";
 import type { PipelineMapFocus } from "@/lib/energyApi";
-
 type Props = {
   vertical: "energy" | "metals";
   selection?: MapSelection | null;
@@ -118,7 +115,6 @@ export type MapRuntimeStatus = {
   wsState: "connecting" | "connected" | "disconnected" | "unavailable";
   activeLayerCount: number;
   lastWsAt?: string;
-  gulfAisLimited?: boolean;
 };
 
 /** MVT point colors — keep in sync with addPointTileLayer / vessel layers */
@@ -760,7 +756,6 @@ export default function IntelligenceMap({
     vertical === "energy" ? "connecting" : "unavailable"
   );
   const [lastWsAt, setLastWsAt] = useState<string | undefined>();
-  const [gulfAisLimited, setGulfAisLimited] = useState(false);
   const [layerDrawerOpen, setLayerDrawerOpen] = useState(true);
   const [layerCounts, setLayerCounts] = useState<Record<string, number>>({});
   const [stsSummary, setStsSummary] = useState<STSSummary | null>(null);
@@ -800,7 +795,6 @@ export default function IntelligenceMap({
     setLayers(defaultLayerState(vertical));
     setWsState(vertical === "energy" ? "connecting" : "unavailable");
     setLastWsAt(undefined);
-    setGulfAisLimited(false);
   }, [vertical]);
 
   const activeLayerCount = Object.values(layers).filter(Boolean).length;
@@ -810,9 +804,8 @@ export default function IntelligenceMap({
       wsState: vertical === "energy" ? wsState : "unavailable",
       activeLayerCount,
       lastWsAt,
-      gulfAisLimited: vertical === "energy" && gulfAisLimited,
     });
-  }, [wsState, activeLayerCount, lastWsAt, gulfAisLimited, vertical, onRuntimeStatus]);
+  }, [wsState, activeLayerCount, lastWsAt, vertical, onRuntimeStatus]);
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
@@ -1070,10 +1063,6 @@ export default function IntelligenceMap({
           data: { type: "FeatureCollection", features: [] },
           lineMetrics: true,
         });
-        map.addSource("ais-coverage", {
-          type: "geojson",
-          data: { type: "Feature", geometry: PERSIAN_GULF_COVERAGE_POLYGON, properties: {} },
-        });
         map.addSource("vessel-track", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addSource("storage-sites", {
           type: "geojson",
@@ -1121,13 +1110,6 @@ export default function IntelligenceMap({
           layout: { visibility: layers["storage-sites"] ? "visible" : "none" },
         });
 
-        map.addLayer({
-          id: "ais-coverage-fill",
-          type: "fill",
-          source: "ais-coverage",
-          paint: { "fill-color": "#f59e0b", "fill-opacity": 0.05 },
-          layout: { visibility: layers["ais-coverage"] ? "visible" : "none" },
-        });
         map.addLayer({
           id: "mcr-corridors",
           type: "line",
@@ -1300,18 +1282,6 @@ export default function IntelligenceMap({
           animFrame = requestAnimationFrame(animate);
         };
         animFrame = requestAnimationFrame(animate);
-
-        const updateGulfCoverage = () => {
-          const b = map.getBounds();
-          setGulfAisLimited(viewportOverlapsPersianGulf({
-            west: b.getWest(),
-            south: b.getSouth(),
-            east: b.getEast(),
-            north: b.getNorth(),
-          }));
-        };
-        map.on("moveend", updateGulfCoverage);
-        updateGulfCoverage();
 
         const liveSrc = () => map.getSource("live-vessels") as maplibregl.GeoJSONSource | undefined;
         let liveMmsiKey = "";
@@ -1539,16 +1509,13 @@ export default function IntelligenceMap({
         "sts-predictions",
         "sts-predictions-glow",
         "mcr-corridors",
-        "ais-coverage-fill",
       ] as const) {
         if (map.getLayer(lid)) {
-          const key = lid === "ais-coverage-fill"
-            ? "ais-coverage"
-            : lid === "sts-events-glow"
-              ? "sts-events"
-              : lid === "sts-predictions-glow"
-                ? "sts-predictions"
-                : lid;
+          const key = lid === "sts-events-glow"
+            ? "sts-events"
+            : lid === "sts-predictions-glow"
+              ? "sts-predictions"
+              : lid;
           map.setLayoutProperty(lid, "visibility", layers[key] ? "visible" : "none");
         }
       }

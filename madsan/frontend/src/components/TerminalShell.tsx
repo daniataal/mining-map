@@ -381,14 +381,6 @@ export default function TerminalShell() {
           Ticker {formatStatusTime(tickerRefreshedAt)}
           {mapStatus.lastWsAt ? ` · AIS ${formatStatusTime(mapStatus.lastWsAt)}` : ""}
         </span>
-        {vertical === "energy" && mapStatus.gulfAisLimited && (
-          <>
-            <span className="statusbar-sep">·</span>
-            <span className="status-gulf-indicator" title="Open AIS is sparse in Persian Gulf / Hormuz — empty map ≠ no traffic">
-              Gulf AIS limited
-            </span>
-          </>
-        )}
       </div>
     </div>
   );

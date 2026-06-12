@@ -15,14 +15,22 @@ import (
 
 // PersistPosition inserts into ais_positions when throttle elapsed.
 func PersistPosition(ctx context.Context, pool *pgxpool.Pool, u *Update, minInterval time.Duration) (bool, error) {
+	return PersistPositionFromSource(ctx, pool, u, "aisstream", minInterval)
+}
+
+func PersistPositionFromSource(ctx context.Context, pool *pgxpool.Pool, u *Update, dataSource string, minInterval time.Duration) (bool, error) {
 	if !u.HasKinematics {
 		return false, nil
+	}
+	if dataSource == "" {
+		dataSource = "aisstream"
 	}
 	mmsi := strconv.FormatInt(u.MMSI, 10)
 	var lastTS time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT COALESCE(MAX(ts), '1970-01-01'::timestamptz) FROM ais_positions WHERE mmsi = $1
-	`, mmsi).Scan(&lastTS)
+		SELECT COALESCE(MAX(ts), '1970-01-01'::timestamptz) FROM ais_positions
+		WHERE mmsi = $1 AND data_source = $2
+	`, mmsi, dataSource).Scan(&lastTS)
 	if err != nil {
 		return false, err
 	}
@@ -43,19 +51,26 @@ func PersistPosition(ctx context.Context, pool *pgxpool.Pool, u *Update, minInte
 	_, err = pool.Exec(ctx, `
 		INSERT INTO ais_positions (
 			mmsi, ts, lat, lon, speed_knots, course, heading, nav_status,
-			draft_m, destination, eta, geom, raw
+			draft_m, destination, eta, geom, raw, data_source
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			ST_SetSRID(ST_MakePoint($12, $13), 4326)::geography, $14
+			ST_SetSRID(ST_MakePoint($12, $13), 4326)::geography, $14, $15
 		)
 	`, mmsi, u.Timestamp, u.Lat, u.Lon, speed, course, heading, u.NavStatus,
 		nullableDraft(u.HasDraft, u.DraftM), nullStr(u.Destination), nullStr(u.ETA),
-		u.Lon, u.Lat, raw)
+		u.Lon, u.Lat, raw, dataSource)
 	return err == nil, err
 }
 
-// UpsertVessel updates madsan_db.vessels from a live AIS frame.
+// UpsertVessel updates madsan_db.vessels from a live AIS frame (AISStream).
 func UpsertVessel(ctx context.Context, pool *pgxpool.Pool, u *Update, tankerClass string) (uuid.UUID, bool, error) {
+	return UpsertVesselFromSource(ctx, pool, u, "aisstream", tankerClass)
+}
+
+func UpsertVesselFromSource(ctx context.Context, pool *pgxpool.Pool, u *Update, positionSource string, tankerClass string) (uuid.UUID, bool, error) {
+	if positionSource == "" {
+		positionSource = "aisstream"
+	}
 	mmsi := strconv.FormatInt(u.MMSI, 10)
 	vesselType := "Tanker"
 	if tankerClass != "" && tankerClass != "unknown" {
@@ -79,54 +94,63 @@ func UpsertVessel(ctx context.Context, pool *pgxpool.Pool, u *Update, tankerClas
 		INSERT INTO vessels (
 			name, imo, mmsi, vessel_type, latitude, longitude, geom,
 			course, heading, speed_knots, destination, last_seen_at,
+			callsign, last_position_source,
 			confidence_score, data_quality_status
 		) VALUES (
 			$1, NULLIF($2,''), $3, $4,
-			CASE WHEN $12::bool THEN $5::double precision END,
-			CASE WHEN $12::bool THEN $6::double precision END,
-			CASE WHEN $12::bool AND $5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
+			CASE WHEN $13::bool THEN $5::double precision END,
+			CASE WHEN $13::bool THEN $6::double precision END,
+			CASE WHEN $13::bool AND $5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
 				THEN ST_SetSRID(ST_MakePoint($6::double precision, $5::double precision), 4326)::geography END,
-			$7, $8, $9, NULLIF($10,''), CASE WHEN $12::bool THEN $11::timestamptz END, 70, 'observed'
+			$7, $8, $9, NULLIF($10,''),
+			CASE WHEN $13::bool THEN $11::timestamptz END,
+			NULLIF($14,''), $15,
+			70, 'observed'
 		)
 		ON CONFLICT (mmsi) DO UPDATE SET
 			name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE vessels.name END,
 			imo = COALESCE(NULLIF(EXCLUDED.imo,''), vessels.imo),
+			callsign = COALESCE(NULLIF(EXCLUDED.callsign,''), vessels.callsign),
 			vessel_type = COALESCE(NULLIF(EXCLUDED.vessel_type,''), vessels.vessel_type),
 			latitude = CASE
-				WHEN $12::bool IS FALSE THEN vessels.latitude
+				WHEN $13::bool IS FALSE THEN vessels.latitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.latitude ELSE vessels.latitude END,
 			longitude = CASE
-				WHEN $12::bool IS FALSE THEN vessels.longitude
+				WHEN $13::bool IS FALSE THEN vessels.longitude
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.longitude ELSE vessels.longitude END,
 			geom = CASE
-				WHEN $12::bool IS FALSE THEN vessels.geom
+				WHEN $13::bool IS FALSE THEN vessels.geom
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.geom ELSE vessels.geom END,
 			course = CASE
-				WHEN $12::bool IS FALSE THEN vessels.course
+				WHEN $13::bool IS FALSE THEN vessels.course
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.course
 				WHEN vessels.course IS NULL THEN EXCLUDED.course
 				ELSE vessels.course END,
 			heading = CASE
-				WHEN $12::bool IS FALSE THEN vessels.heading
+				WHEN $13::bool IS FALSE THEN vessels.heading
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.heading
 				WHEN vessels.heading IS NULL THEN EXCLUDED.heading
 				ELSE vessels.heading END,
 			speed_knots = CASE
-				WHEN $12::bool IS FALSE THEN vessels.speed_knots
+				WHEN $13::bool IS FALSE THEN vessels.speed_knots
 				WHEN EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
 				THEN EXCLUDED.speed_knots ELSE vessels.speed_knots END,
 			destination = COALESCE(NULLIF(EXCLUDED.destination,''), vessels.destination),
 			last_seen_at = CASE
-				WHEN $12::bool THEN GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at)
+				WHEN $13::bool THEN GREATEST(COALESCE(vessels.last_seen_at, EXCLUDED.last_seen_at), EXCLUDED.last_seen_at)
 				ELSE vessels.last_seen_at END,
+			last_position_source = CASE
+				WHEN $13::bool AND EXCLUDED.last_seen_at >= COALESCE(vessels.last_seen_at, 'epoch'::timestamptz)
+				THEN EXCLUDED.last_position_source
+				ELSE vessels.last_position_source END,
 			updated_at = now()
-		RETURNING id, ($12::bool AND last_seen_at = $11::timestamptz) AS position_fresh
-	`, u.Name, u.IMO, mmsi, vesselType, u.Lat, u.Lon, course, heading, speed, u.Destination, u.Timestamp, u.HasKinematics).Scan(&id, &fresh)
+		RETURNING id, ($13::bool AND last_seen_at = $11::timestamptz) AS position_fresh
+	`, u.Name, u.IMO, mmsi, vesselType, u.Lat, u.Lon, course, heading, speed, u.Destination, u.Timestamp, u.HasKinematics, nullStr(u.Callsign), positionSource).Scan(&id, &fresh)
 	if err != nil {
 		return uuid.Nil, false, err
 	}
@@ -137,6 +161,10 @@ func UpsertVessel(ctx context.Context, pool *pgxpool.Pool, u *Update, tankerClas
 }
 
 func UpdateSourceHealth(ctx context.Context, pool *pgxpool.Pool, observationCount int, lastError error) error {
+	return UpdateNamedSourceHealth(ctx, pool, "aisstream", "community_coastal_ais", "AISStream", observationCount, lastError)
+}
+
+func UpdateNamedSourceHealth(ctx context.Context, pool *pgxpool.Pool, source, sourceType, displayName string, observationCount int, lastError error) error {
 	status := "ok"
 	var limitations []string
 	if lastError != nil {
@@ -150,10 +178,12 @@ func UpdateSourceHealth(ctx context.Context, pool *pgxpool.Pool, observationCoun
 			source, source_type, display_name, status, coverage_tier,
 			last_observation_at, observation_count, limitations, updated_at
 		) VALUES (
-			'aisstream', 'community_coastal_ais', 'AISStream', $1, 'open_partial',
-			CASE WHEN $2 > 0 THEN now() ELSE NULL END, $2, COALESCE($3, ARRAY[]::TEXT[]), now()
+			$1, $2, $3, $4, 'open_partial',
+			CASE WHEN $5 > 0 THEN now() ELSE NULL END, $5, COALESCE($6, ARRAY[]::TEXT[]), now()
 		)
 		ON CONFLICT (source) DO UPDATE SET
+			source_type = EXCLUDED.source_type,
+			display_name = EXCLUDED.display_name,
 			status = EXCLUDED.status,
 			last_observation_at = COALESCE(EXCLUDED.last_observation_at, maritime_source_health.last_observation_at),
 			observation_count = maritime_source_health.observation_count + EXCLUDED.observation_count,
@@ -162,7 +192,7 @@ func UpdateSourceHealth(ctx context.Context, pool *pgxpool.Pool, observationCoun
 				ELSE maritime_source_health.limitations
 			END,
 			updated_at = EXCLUDED.updated_at
-	`, status, observationCount, limitations)
+	`, source, sourceType, displayName, status, observationCount, limitations)
 	return err
 }
 
