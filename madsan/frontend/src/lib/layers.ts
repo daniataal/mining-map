@@ -8,7 +8,7 @@ export type LayerDef = {
   /** MVT feature filter when sharing energy-assets tiles */
   assetTypes?: string[];
   /** GeoJSON overlay fetched from API (not MVT) */
-  geoJsonSource?: "sts" | "sts-predictions" | "mcr" | "storage";
+  geoJsonSource?: "sts" | "sts-predictions" | "mcr" | "storage" | "asset-geometries";
   /** Optional sub-label under the checkbox (e.g. AIS hint, cadastre tier) */
   drawerHint?: string;
   /** Gated by map_premium_layers entitlement */
@@ -37,6 +37,7 @@ export const MAP_COLORS = {
   stsEvent: "#e879f9",
   stsPrediction: "#22d3ee",
   storageSite: "#34d399",
+  gemRoute: "#5dffc8",
   vessel: "#38bdf8",
   mine: "#e8b923",
   smelter: "#fb923c",
@@ -130,6 +131,16 @@ export const LAYER_REGISTRY: LayerDef[] = [
     hideInDrawer: true,
     drawerHint: "Tank sites clustered from OSM with bounded capacity & fill estimates (OSM density × EIA utilization band) — estimates, not measurements",
     color: MAP_COLORS.storageSite,
+    defaultOn: false,
+  },
+  {
+    id: "gem-asset-geometries",
+    label: "GEM oil/gas/LNG routes",
+    vertical: "energy",
+    geoJsonSource: "asset-geometries",
+    group: "Infrastructure",
+    drawerHint: "BBox-filtered PostGIS geometries from GEM oil/NGL pipelines, gas pipelines, and LNG terminals",
+    color: MAP_COLORS.gemRoute,
     defaultOn: false,
   },
   {

@@ -72,14 +72,17 @@ func UnknownSupplierLeads(ctx context.Context, pool *pgxpool.Pool, p UnknownSupp
 		),
 		expanded AS (
 			SELECT
-				country_code,
+				ag.country_code,
+				expanded_commodities.commodity,
+				ag.confidence_score,
+				ag.operator_hint
+			FROM asset_gaps ag
+			CROSS JOIN LATERAL unnest(
 				CASE
-					WHEN cardinality(commodities_supported) > 0 THEN unnest(commodities_supported)
-					ELSE 'petroleum'
-				END AS commodity,
-				confidence_score,
-				operator_hint
-			FROM asset_gaps
+					WHEN cardinality(ag.commodities_supported) > 0 THEN ag.commodities_supported
+					ELSE ARRAY['petroleum']::text[]
+				END
+			) AS expanded_commodities(commodity)
 		),
 		corridor_gaps AS (
 			SELECT

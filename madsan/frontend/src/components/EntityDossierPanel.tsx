@@ -17,7 +17,14 @@ import VesselDrawerPanel from "@/components/VesselDrawerPanel";
 import { isStsSelection } from "@/lib/stsDisplay";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FeedbackFlywheel from "@/components/FeedbackFlywheel";
-import { fetchNearestGemPipeline, fetchPipelineConnectivity, buildPipelineMapFocus, type PipelineMapFocus } from "@/lib/energyApi";
+import {
+  fetchIntelInvestorPaths,
+  fetchNearestGemPipeline,
+  fetchPipelineConnectivity,
+  buildPipelineMapFocus,
+  type IntelInvestorPath,
+  type PipelineMapFocus,
+} from "@/lib/energyApi";
 import { authFetchOpts } from "@/lib/auth";
 import { confidenceTierClass } from "@/lib/confidenceTier";
 import {
@@ -192,28 +199,85 @@ async function loadDossierJSON(url: string): Promise<Dossier> {
   return r.json() as Promise<Dossier>;
 }
 
-function buildRelationshipLines(dossier: Dossier | null): FeatureCollection {
-  if (!dossier?.location) {
-    return { type: "FeatureCollection", features: [] };
+function recordText(value: unknown, key: string): string {
+  if (!value || typeof value !== "object") return "";
+  const raw = (value as Record<string, unknown>)[key];
+  return typeof raw === "string" ? raw : "";
+}
+
+function recordNumber(value: unknown, key: string): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = (value as Record<string, unknown>)[key];
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function chainCoord(path: IntelInvestorPath, side: "supplier" | "buyer"): [number, number] | null {
+  const row = side === "supplier" ? path.supplier : path.buyer;
+  const lat = recordNumber(row, "latitude");
+  const lng = recordNumber(row, "longitude");
+  if (lat == null || lng == null) return null;
+  return [lng, lat];
+}
+
+function buildRelationshipLines(dossier: Dossier | null, chains: IntelInvestorPath[] = []): FeatureCollection {
+  const features: FeatureCollection["features"] = [];
+  if (dossier?.location) {
+    const lat = Number(dossier.location.latitude);
+    const lng = Number(dossier.location.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      features.push(
+        ...(dossier.relationships ?? [])
+          .filter((r) => r.latitude != null && r.longitude != null)
+          .map((r) => ({
+            type: "Feature" as const,
+            geometry: {
+              type: "LineString" as const,
+              coordinates: [
+                [lng, lat],
+                [r.longitude!, r.latitude!],
+              ],
+            },
+            properties: { rel: r.type, name: r.name },
+          })),
+      );
+    }
   }
-  const lat = Number(dossier.location.latitude);
-  const lng = Number(dossier.location.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { type: "FeatureCollection", features: [] };
-  }
-  const features = (dossier.relationships ?? [])
-    .filter((r) => r.latitude != null && r.longitude != null)
-    .map((r) => ({
+
+  for (const [idx, path] of chains.slice(0, 6).entries()) {
+    const supplier = chainCoord(path, "supplier");
+    const buyer = chainCoord(path, "buyer");
+    if (!supplier || !buyer) continue;
+    const investorName = path.investor?.name ?? "reported investor";
+    const supplierName = recordText(path.supplier, "asset_name") || "supplier asset";
+    const buyerName = recordText(path.buyer, "asset_name") || "buyer asset";
+    features.push({
       type: "Feature" as const,
       geometry: {
         type: "LineString" as const,
-        coordinates: [
-          [lng, lat],
-          [r.longitude!, r.latitude!],
-        ],
+        coordinates: [supplier, buyer],
       },
-      properties: { rel: r.type, name: r.name },
-    }));
+      properties: {
+        rel: "opportunity_chain",
+        name: `${investorName}: ${supplierName} -> ${buyerName}`,
+        investor: investorName,
+        commodity: path.commodity,
+        focus_chain: idx === 0,
+      },
+    });
+    features.push(
+      {
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: supplier },
+        properties: { rel: "opportunity_chain_point", role: "supplier", name: supplierName, investor: investorName },
+      },
+      {
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: buyer },
+        properties: { rel: "opportunity_chain_point", role: "buyer", name: buyerName, investor: investorName },
+      },
+    );
+  }
   return { type: "FeatureCollection", features };
 }
 
@@ -251,6 +315,8 @@ export default function EntityDossierPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("overview");
+  const [assetChains, setAssetChains] = useState<IntelInvestorPath[]>([]);
+  const [chainsLoading, setChainsLoading] = useState(false);
 
   useEffect(() => {
     setTab("overview");
@@ -396,8 +462,38 @@ export default function EntityDossierPanel({
   }, [selection]);
 
   useEffect(() => {
-    onRelationshipLines?.(buildRelationshipLines(dossier));
-  }, [dossier, onRelationshipLines]);
+    onRelationshipLines?.(buildRelationshipLines(dossier, assetChains));
+  }, [dossier, assetChains, onRelationshipLines]);
+
+  useEffect(() => {
+    const assetID =
+      (selection?._entityType === "asset" || selection?._entityType === "company") && selection.id && UUID_RE.test(selection.id)
+        ? selection.id
+        : (dossier?.entity_type === "asset" || dossier?.entity_type === "company") && dossier.id && UUID_RE.test(dossier.id)
+          ? dossier.id
+          : "";
+    if (vertical !== "energy" || !assetID || isStsSelection(selection)) {
+      setAssetChains([]);
+      setChainsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setAssetChains([]);
+    setChainsLoading(true);
+    fetchIntelInvestorPaths({ assetId: assetID, limit: 8 })
+      .then((paths) => {
+        if (!cancelled) setAssetChains(paths);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetChains([]);
+      })
+      .finally(() => {
+        if (!cancelled) setChainsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selection, dossier?.id, dossier?.entity_type, vertical]);
 
   useEffect(() => {
     if (!onPipelineFocus) return;
@@ -545,6 +641,34 @@ export default function EntityDossierPanel({
           <p className="disclaimer" style={{ marginTop: 6, marginBottom: 0 }}>
             Map is filtered to this segment and linked facilities. Pan away or use this button to restore the full network.
           </p>
+        </div>
+      ) : null}
+
+      {vertical === "energy" && (selection._entityType === "asset" || selection._entityType === "company") ? (
+        <div className="asset-chain-card">
+          <div className="asset-chain-head">
+            <strong>Chain on map</strong>
+            <span>{chainsLoading ? "loading" : `${assetChains.length} path${assetChains.length === 1 ? "" : "s"}`}</span>
+          </div>
+          {assetChains[0] ? (
+            <>
+              <p>{assetChains[0].commercial_thesis}</p>
+              <div className="asset-chain-path">
+                <span>{assetChains[0].investor?.name ?? "investor"}</span>
+                <span>{recordText(assetChains[0].supplier, "asset_name") || "supplier asset"}</span>
+                <span>{recordText(assetChains[0].buyer, "asset_name") || "buyer asset"}</span>
+              </div>
+              <small>
+                The map is drawing the top chain lines from source-backed asset coordinates. Wider investor graph matching is still a precomputed-job candidate.
+              </small>
+            </>
+          ) : (
+            <p>
+              {chainsLoading
+                ? "Finding investor, supplier, buyer, route, and benchmark paths for this selection..."
+                : "No mapped opportunity chain is attached to this asset yet."}
+            </p>
+          )}
         </div>
       ) : null}
 

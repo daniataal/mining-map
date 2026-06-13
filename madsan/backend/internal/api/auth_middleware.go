@@ -83,16 +83,54 @@ func (s *Server) requireEntitlement(featureKey string) func(http.Handler) http.H
 			}
 			tid, _ := uuid.Parse(claims.TenantID)
 			uid, _ := uuid.Parse(claims.UserID)
-			allowed, err := s.ent.Can(r.Context(), &tid, &uid, featureKey)
+			status, err := s.ent.Check(r.Context(), &tid, &uid, featureKey, 1)
 			if err != nil {
 				http.Error(w, "entitlement check failed", http.StatusInternalServerError)
 				return
 			}
-			if !allowed {
+			if !status.Allowed {
+				if status.Reason == "quota_exceeded" {
+					w.WriteHeader(http.StatusTooManyRequests)
+					writeJSON(w, status)
+					return
+				}
 				http.Error(w, "feature not entitled", http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func (s *Server) requireMeteredEntitlement(featureKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := authClaims(r)
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			tid, _ := uuid.Parse(claims.TenantID)
+			uid, _ := uuid.Parse(claims.UserID)
+			status, err := s.ent.Check(r.Context(), &tid, &uid, featureKey, 1)
+			if err != nil {
+				http.Error(w, "entitlement check failed", http.StatusInternalServerError)
+				return
+			}
+			if !status.Allowed {
+				if status.Reason == "quota_exceeded" {
+					w.WriteHeader(http.StatusTooManyRequests)
+					writeJSON(w, status)
+					return
+				}
+				http.Error(w, "feature not entitled", http.StatusForbidden)
+				return
+			}
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+			if rec.status < http.StatusBadRequest {
+				_ = s.ent.RecordUsage(r.Context(), &tid, &uid, featureKey, 1)
+			}
 		})
 	}
 }

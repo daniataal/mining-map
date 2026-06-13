@@ -25,12 +25,13 @@ func main() {
 
 	jobType := env("MADSAN_JOB_TYPE", "bunker_seed")
 	source := env("MADSAN_SOURCE_SLUG", "bunker_fuel_suppliers")
+	payload := env("MADSAN_JOB_PAYLOAD", "{}")
 
 	var id uuid.UUID
 	err = pool.QueryRow(ctx, `
 		INSERT INTO ingestion_jobs (job_type, source_slug, status, payload, scheduled_at)
-		VALUES ($1,$2,'pending','{}'::jsonb, now()) RETURNING id
-	`, jobType, source).Scan(&id)
+		VALUES ($1,$2,'pending',$3::jsonb, now()) RETURNING id
+	`, jobType, source, payload).Scan(&id)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enqueue: %v\n", err)
 		os.Exit(1)

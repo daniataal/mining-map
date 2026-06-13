@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -127,7 +129,7 @@ func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, middleware.Timeout(60*time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:9080", "http://127.0.0.1:9080"},
+		AllowedOrigins:   allowedCORSOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Madsan-Source-Keys"},
 		AllowCredentials: true,
@@ -173,6 +175,20 @@ func (s *Server) Router() http.Handler {
 		api.Get("/leads/unknown-suppliers", s.unknownSupplierLeads)
 	})
 
+	r.Route("/api/intel", func(api chi.Router) {
+		api.Get("/opportunities", s.listIntelOpportunities)
+		api.Get("/cargo-movements", s.listIntelCargoMovements)
+		api.Get("/asset-geometries", s.listIntelAssetGeometries)
+		api.Get("/arbitrage", s.compareIntelArbitrage)
+		api.Get("/importers", s.listIntelImporters)
+		api.Get("/market-pressure", s.listIntelMarketPressure)
+		api.Get("/sts-predictions", s.listIntelSTSPredictions)
+		api.Get("/entities/{type}/{id}/commercial-profile", s.getCommercialProfile)
+		api.Get("/lanes/{id}", s.getIntelLane)
+		api.Get("/investor-paths", s.listIntelInvestorPaths)
+		api.Get("/investors/{id}/exposure", s.getInvestorExposure)
+	})
+
 	r.Route("/api/metals", func(api chi.Router) {
 		api.Get("/assets", s.listMetalsAssets)
 		api.Get("/licenses/summary", s.metalsLicenseSummary)
@@ -209,13 +225,13 @@ func (s *Server) Router() http.Handler {
 	})
 
 	r.Route("/api/portal", func(api chi.Router) {
-		api.Use(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureSupplierPortal))
+		api.Use(s.requireAuth, s.withTenantGUC, s.requireMeteredEntitlement(featureSupplierPortal))
 		api.Post("/offers", s.submitSupplierOffer)
 		api.Post("/feedback", s.submitFeedback)
 	})
 
 	r.Route("/api/admin", func(api chi.Router) {
-		api.Use(s.requireAuth, s.withTenantGUC, s.requireEntitlement(featureAPIAccess))
+		api.Use(s.requireAuth, s.withTenantGUC, s.requireMeteredEntitlement(featureAPIAccess))
 		api.Get("/ingestion/jobs", s.listIngestionJobs)
 		api.With(s.withAudit("admin.ingestion.enqueue", "ingestion_job")).Post("/ingestion/enqueue", s.enqueueIngestionJob)
 		api.Get("/sources", s.listSources)
@@ -242,6 +258,29 @@ func (s *Server) Router() http.Handler {
 	r.Get("/api/billing/plans", s.listPlans)
 
 	return r
+}
+
+func allowedCORSOrigins() []string {
+	origins := []string{
+		"http://localhost:3000",
+		"http://127.0.0.1:3000",
+		"http://localhost:3001",
+		"http://127.0.0.1:3001",
+		"http://localhost:3010",
+		"http://127.0.0.1:3010",
+		"http://localhost:3011",
+		"http://127.0.0.1:3011",
+		"http://localhost:9080",
+		"http://127.0.0.1:9080",
+	}
+	for _, raw := range strings.Split(os.Getenv("MADSAN_CORS_ORIGINS"), ",") {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			continue
+		}
+		origins = append(origins, origin)
+	}
+	return origins
 }
 
 func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {

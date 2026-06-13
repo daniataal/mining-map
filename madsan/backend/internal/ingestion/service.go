@@ -75,6 +75,33 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == "eia_daily" {
 		return s.processEIADaily(ctx, jobID)
 	}
+	if jobType == eiaCompanyImportsJobType {
+		return s.processEIACompanyImports(ctx, jobID, payload)
+	}
+	if jobType == worldBankPricesJobType {
+		return s.processWorldBankPrices(ctx, jobID, payload)
+	}
+	if jobType == jodiOilImportJobType {
+		return s.processJODIOilImport(ctx, jobID, payload)
+	}
+	if jobType == jodiMarketPressureJobType {
+		return s.processJODIMarketPressure(ctx, jobID, payload)
+	}
+	if jobType == oilOpportunityCandidatesJobType {
+		return s.processOilOpportunityCandidates(ctx, jobID, payload)
+	}
+	if jobType == cargoEstimatesBackfillJobType {
+		return s.processCargoEstimatesBackfill(ctx, jobID, payload)
+	}
+	if jobType == gemOilFoundationJobType {
+		return s.processGEMOilFoundation(ctx, jobID, payload)
+	}
+	if jobType == gemInfrastructureFoundationJobType {
+		return s.processGEMInfrastructureFoundation(ctx, jobID, payload)
+	}
+	if jobType == gemGeometryImportJobType {
+		return s.processGEMGeometryImport(ctx, jobID, payload)
+	}
 	if jobType == "deal_watch_scan" {
 		return s.processDealWatchScan(ctx, jobID)
 	}

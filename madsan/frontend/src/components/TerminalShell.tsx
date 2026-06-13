@@ -10,6 +10,7 @@ import {
   Pickaxe,
   MapPinned,
   Radio,
+  Route,
   Search,
   Settings,
   Upload,
@@ -28,13 +29,14 @@ import { mergePipelineFocus, pipelineFocusFromSelection, type PipelineMapFocus }
 import EntityDossierPanel, { type MapSelection } from "./EntityDossierPanel";
 import IntelligenceMap, { type MapRuntimeStatus } from "./IntelligenceMap";
 import LiveIntelPanel from "./LiveIntelPanel";
+import OpportunityOriginatorPanel from "./OpportunityOriginatorPanel";
 import SearchPalette from "./SearchPalette";
 import SupplierSearchPanel from "./SupplierSearchPanel";
 import TickerTrendBar from "./TickerTrendBar";
 import WatchlistsPanel, { useDealWatchAvailable } from "./WatchlistsPanel";
 
 type Vertical = "energy" | "metals";
-type Panel = "intel" | "suppliers" | "live" | "watch";
+type Panel = "intel" | "opportunities" | "suppliers" | "live" | "watch";
 
 type TickerQuote = {
   label: string;
@@ -230,6 +232,9 @@ export default function TerminalShell() {
           <Link href="/portal" className="rail-link" title="Supplier portal">
             <Upload size={18} />
           </Link>
+          <button className={panel === "opportunities" ? "active" : ""} title="Opportunities" onClick={() => { setVertical("energy"); setPanel("opportunities"); }}>
+            <Route size={18} />
+          </button>
           <button className={panel === "suppliers" ? "active" : ""} title="Suppliers" onClick={() => setPanel("suppliers")}>
             <Factory size={18} />
           </button>
@@ -259,6 +264,8 @@ export default function TerminalShell() {
             <span className="panel-title">
               {panel === "suppliers"
                 ? "Supplier discovery"
+                : panel === "opportunities"
+                  ? "Opportunity originator"
                 : panel === "live"
                   ? "Live intel"
                   : panel === "watch"
@@ -306,6 +313,8 @@ export default function TerminalShell() {
                 key={
                   panel === "suppliers"
                     ? "suppliers"
+                    : panel === "opportunities"
+                      ? "opportunities"
                     : panel === "live"
                       ? "live"
                       : panel === "watch"
@@ -322,6 +331,8 @@ export default function TerminalShell() {
                     canSearch={canUse(me, FEATURE.supplierDiscovery)}
                     authed={!!me?.uid}
                   />
+                ) : panel === "opportunities" ? (
+                  <OpportunityOriginatorPanel />
                 ) : panel === "live" ? (
                   <LiveIntelPanel
                     onSelectLead={(feat) => {

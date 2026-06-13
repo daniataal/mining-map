@@ -59,6 +59,131 @@ export type MCRScaffoldStatus = {
   limitations?: string[];
 };
 
+export type IntelOpportunity = {
+  id: string;
+  opportunity_type?: string;
+  commodity?: string;
+  origin_country?: string;
+  destination_country?: string;
+  supplier_company_id?: string;
+  buyer_company_id?: string;
+  supplier_asset_id?: string;
+  buyer_asset_id?: string;
+  vessel_id?: string;
+  lane_id?: string;
+  score?: number;
+  confidence_score?: number;
+  evidence_grade?: string;
+  score_breakdown?: {
+    supplier_reality?: number;
+    buyer_reality?: number;
+    market_pressure?: number;
+    route_feasibility?: number;
+    price_context?: number;
+    investor_control?: number;
+    risk_discount?: number;
+  };
+  route_summary?: Record<string, unknown>;
+  cargo_summary?: Record<string, unknown>;
+  market_pressure_summary?: Record<string, unknown>;
+  price_context?: Record<string, unknown>;
+  evidence?: Array<Record<string, unknown>>;
+  limitations?: string[];
+  tier?: string;
+  generated_at?: string;
+  expires_at?: string;
+};
+
+export type IntelCargoMovement = {
+  id: string;
+  source?: string;
+  vessel_id?: string;
+  vessel_name?: string;
+  imo?: string;
+  mmsi?: string;
+  vessel_class?: string;
+  owner_name?: string;
+  operator_name?: string;
+  product_family?: string;
+  load?: { port?: string; country?: string };
+  discharge?: { port?: string; country?: string };
+  quantity?: { low?: number; best?: number; high?: number; unit?: string; method?: string };
+  confidence?: number;
+  observed_at?: string;
+  evidence_label?: string;
+};
+
+export type IntelSTSPrediction = {
+  id: string;
+  signal_type?: string;
+  confidence_score?: number;
+  horizon_hours?: number;
+  payload?: Record<string, unknown>;
+  predicted_at?: string;
+  expires_at?: string;
+  evidence_label?: string;
+};
+
+export type IntelArbitrage = {
+  origin?: string;
+  destination?: string;
+  commodity?: string;
+  benchmarks?: Array<Record<string, unknown>>;
+  landed_margin?: Record<string, unknown>;
+  limitations?: string[];
+};
+
+export type IntelImporter = {
+  company_id?: string;
+  name?: string;
+  product_code?: string;
+  product_name?: string;
+  origin_country?: { country_code?: string };
+  quantity?: { value?: number; unit?: string };
+  rows?: number;
+  latest_month?: string;
+  port_count?: number;
+  port_states?: string[];
+  evidence_label?: string;
+  source?: string;
+};
+
+export type IntelInvestorPath = {
+  id: string;
+  opportunity_id?: string;
+  lane_id?: string;
+  commodity?: string;
+  origin_country?: string;
+  destination_country?: string;
+  score?: number;
+  confidence_score?: number;
+  investor_control_score?: number;
+  evidence_grade?: string;
+  evidence_label?: string;
+  investor?: {
+    entity_id?: string;
+    name?: string;
+    exposure_role?: string;
+    exposure_count?: number;
+    exposure_value?: number;
+    exposure_unit?: string;
+    exposure_types?: string[];
+    confidence_score?: number;
+  };
+  commercial_thesis?: string;
+  supplier?: Record<string, unknown>;
+  buyer?: Record<string, unknown>;
+  route?: Record<string, unknown>;
+  market?: Record<string, unknown>;
+  cargo?: Record<string, unknown>;
+  price_context?: Record<string, unknown>;
+  exposures?: Array<Record<string, unknown>>;
+  control_chain?: Array<Record<string, unknown>>;
+  evidence?: Array<Record<string, unknown>>;
+  limitations?: string[];
+  generated_at?: string;
+};
+
 export async function fetchShipvaultCompany(companyId: string): Promise<ShipvaultCompany | null> {
   const res = await fetch(`${API_BASE}/api/energy/shipvault/companies/${encodeURIComponent(companyId)}`, authFetchOpts);
   if (!res.ok) return null;
@@ -340,6 +465,19 @@ export async function fetchMCRCorridors(bbox?: string, limit = 300): Promise<Fea
   return res.json() as Promise<FeatureCollection & { disclaimer?: string; tier?: string }>;
 }
 
+export async function fetchAssetGeometries(
+  bbox?: string,
+  limit = 500,
+): Promise<FeatureCollection & { count?: number; simplified?: boolean; message?: string }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (bbox) params.set("bbox", bbox);
+  const res = await fetch(`${API_BASE}/api/intel/asset-geometries?${params}`, authFetchOpts);
+  if (!res.ok) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return res.json() as Promise<FeatureCollection & { count?: number; simplified?: boolean; message?: string }>;
+}
+
 export async function fetchUnknownSupplierLeads(limit = 12): Promise<UnknownSupplierLead[]> {
   const res = await fetch(`${API_BASE}/api/energy/leads/unknown-suppliers?limit=${limit}`, authFetchOpts);
   if (!res.ok) return [];
@@ -351,4 +489,99 @@ export async function fetchMCRStatus(): Promise<MCRScaffoldStatus | null> {
   const res = await fetch(`${API_BASE}/api/energy/mcr/scaffold/status`, authFetchOpts);
   if (!res.ok) return null;
   return res.json() as Promise<MCRScaffoldStatus>;
+}
+
+export async function fetchIntelOpportunities(params?: {
+  commodity?: string;
+  origin?: string;
+  destination?: string;
+  minScore?: number;
+  role?: string;
+  limit?: number;
+}): Promise<IntelOpportunity[]> {
+  const q = new URLSearchParams({ limit: String(params?.limit ?? 25) });
+  if (params?.commodity) q.set("commodity", params.commodity);
+  if (params?.origin) q.set("origin", params.origin);
+  if (params?.destination) q.set("destination", params.destination);
+  if (params?.minScore != null) q.set("min_score", String(params.minScore));
+  if (params?.role) q.set("role", params.role);
+  const res = await fetch(`${API_BASE}/api/intel/opportunities?${q}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelOpportunity[] };
+  return data.items ?? [];
+}
+
+export async function fetchIntelCargoMovements(params?: {
+  commodity?: string;
+  country?: string;
+  limit?: number;
+}): Promise<IntelCargoMovement[]> {
+  const q = new URLSearchParams({ limit: String(params?.limit ?? 12) });
+  if (params?.commodity) q.set("commodity", params.commodity);
+  if (params?.country) q.set("country", params.country);
+  const res = await fetch(`${API_BASE}/api/intel/cargo-movements?${q}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelCargoMovement[] };
+  return data.items ?? [];
+}
+
+export async function fetchIntelSTSPredictions(limit = 12): Promise<IntelSTSPrediction[]> {
+  const res = await fetch(`${API_BASE}/api/intel/sts-predictions?limit=${limit}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelSTSPrediction[] };
+  return data.items ?? [];
+}
+
+export async function fetchIntelImporters(params?: {
+  commodity?: string;
+  origin?: string;
+  company?: string;
+  limit?: number;
+}): Promise<IntelImporter[]> {
+  const q = new URLSearchParams({ limit: String(params?.limit ?? 12) });
+  if (params?.commodity) q.set("commodity", params.commodity);
+  if (params?.origin) q.set("origin", params.origin);
+  if (params?.company) q.set("company", params.company);
+  const res = await fetch(`${API_BASE}/api/intel/importers?${q}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelImporter[] };
+  return data.items ?? [];
+}
+
+export async function fetchIntelInvestorPaths(params?: {
+  commodity?: string;
+  origin?: string;
+  destination?: string;
+  investor?: string;
+  assetId?: string;
+  opportunityId?: string;
+  minScore?: number;
+  limit?: number;
+}): Promise<IntelInvestorPath[]> {
+  const q = new URLSearchParams({ limit: String(params?.limit ?? 12) });
+  if (params?.commodity) q.set("commodity", params.commodity);
+  if (params?.origin) q.set("origin", params.origin);
+  if (params?.destination) q.set("destination", params.destination);
+  if (params?.investor) q.set("investor", params.investor);
+  if (params?.assetId) q.set("asset_id", params.assetId);
+  if (params?.opportunityId) q.set("opportunity_id", params.opportunityId);
+  if (params?.minScore != null) q.set("min_score", String(params.minScore));
+  const res = await fetch(`${API_BASE}/api/intel/investor-paths?${q}`, authFetchOpts);
+  if (!res.ok) return [];
+  const data = (await res.json()) as { items?: IntelInvestorPath[] };
+  return data.items ?? [];
+}
+
+export async function fetchIntelArbitrage(params: {
+  origin?: string;
+  destination?: string;
+  commodity?: string;
+}): Promise<IntelArbitrage | null> {
+  const q = new URLSearchParams();
+  if (params.origin) q.set("origin", params.origin);
+  if (params.destination) q.set("destination", params.destination);
+  if (params.commodity) q.set("commodity", params.commodity);
+  const res = await fetch(`${API_BASE}/api/intel/arbitrage?${q}`, authFetchOpts);
+  if (!res.ok) return null;
+  return res.json() as Promise<IntelArbitrage>;
 }

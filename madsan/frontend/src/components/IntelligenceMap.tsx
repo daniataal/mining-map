@@ -7,7 +7,7 @@ import type { FeatureCollection, Point } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { applyBasemapTuning } from "@/lib/basemapLabels";
 import { FEATURE } from "@/lib/entitlements";
-import { fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
+import { fetchAssetGeometries, fetchMCRCorridors, fetchSTSEvents, fetchSTSPredictions, fetchSTSSummary, fetchStorageSites, fetchVesselTrack, type STSSummary } from "@/lib/energyApi";
 import {
   API_BASE,
   defaultLayerState,
@@ -122,6 +122,7 @@ const MAP_LEGEND_ITEMS = [
   { label: "Tank farm", color: MAP_COLORS.tankFarm },
   { label: "Terminal", color: MAP_COLORS.terminal },
   { label: "Refinery", color: MAP_COLORS.refinery },
+  { label: "GEM route", color: MAP_COLORS.gemRoute },
   { label: "STS", color: MAP_COLORS.stsEvent },
   { label: "STS prediction", color: MAP_COLORS.stsPrediction },
   { label: "Vessel", color: MAP_COLORS.vessel },
@@ -516,6 +517,14 @@ function heatFilterForActiveLayers(
 }
 
 const PIPELINE_LAYER_IDS = ["pipelines-hit", "pipelines", "pipelines-water"] as const;
+const GEM_ASSET_GEOMETRY_LAYER_IDS = [
+  "gem-asset-geometries-fill",
+  "gem-asset-geometries-line-hit",
+  "gem-asset-geometries-line-glow",
+  "gem-asset-geometries-line",
+  "gem-asset-geometries-point-glow",
+  "gem-asset-geometries-point",
+] as const;
 
 const PIPELINE_SUBSTANCE_OIL: maplibregl.FilterSpecification = ["!=", ["get", "pipeline_substance"], "water"];
 const PIPELINE_SUBSTANCE_WATER: maplibregl.FilterSpecification = ["==", ["get", "pipeline_substance"], "water"];
@@ -599,6 +608,10 @@ function isPipelineLayer(layerId: string): boolean {
   return PIPELINE_LAYER_IDS.includes(layerId as (typeof PIPELINE_LAYER_IDS)[number]);
 }
 
+function isGemAssetGeometryLayer(layerId: string): boolean {
+  return GEM_ASSET_GEOMETRY_LAYER_IDS.includes(layerId as (typeof GEM_ASSET_GEOMETRY_LAYER_IDS)[number]);
+}
+
 function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
   const visibility = visible ? "visible" : "none";
   map.addLayer({
@@ -653,6 +666,104 @@ function addPipelineLayers(map: maplibregl.Map, src: string, visible: boolean) {
   });
 }
 
+function gemRouteColor(): ExpressionSpecification {
+  return [
+    "match",
+    ["get", "source_key"],
+    "gem_ggit_gas_pipelines_geojson",
+    "#38bdf8",
+    "gem_goit_oil_ngl_pipelines_geojson",
+    "#fbbf24",
+    "gem_ggit_lng_terminals_geojson",
+    MAP_COLORS.gemRoute,
+    MAP_COLORS.gemRoute,
+  ];
+}
+
+function addGemAssetGeometryLayers(map: maplibregl.Map, visible: boolean) {
+  const visibility = visible ? "visible" : "none";
+  const lineFilter = ["==", ["geometry-type"], "LineString"] as maplibregl.FilterSpecification;
+  const polygonFilter = ["==", ["geometry-type"], "Polygon"] as maplibregl.FilterSpecification;
+  const pointFilter = ["==", ["geometry-type"], "Point"] as maplibregl.FilterSpecification;
+  map.addLayer({
+    id: "gem-asset-geometries-fill",
+    type: "fill",
+    source: "gem-asset-geometries",
+    filter: polygonFilter,
+    paint: {
+      "fill-color": gemRouteColor(),
+      "fill-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.08, 10, 0.16],
+      "fill-outline-color": MAP_COLORS.gemRoute,
+    },
+    layout: { visibility },
+  });
+  map.addLayer({
+    id: "gem-asset-geometries-line-glow",
+    type: "line",
+    source: "gem-asset-geometries",
+    filter: lineFilter,
+    paint: {
+      "line-color": gemRouteColor(),
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 9, 7],
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.08, 9, 0.18],
+      "line-blur": 2,
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+  map.addLayer({
+    id: "gem-asset-geometries-line",
+    type: "line",
+    source: "gem-asset-geometries",
+    filter: lineFilter,
+    paint: {
+      "line-color": gemRouteColor(),
+      "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 4, 0.8, 9, 2.2, 13, 4],
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.55, 9, 0.9],
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+  map.addLayer({
+    id: "gem-asset-geometries-line-hit",
+    type: "line",
+    source: "gem-asset-geometries",
+    filter: lineFilter,
+    paint: {
+      "line-color": "#000000",
+      "line-width": 12,
+      "line-opacity": 0,
+    },
+    layout: { visibility, "line-cap": "round", "line-join": "round" },
+  });
+  map.addLayer({
+    id: "gem-asset-geometries-point-glow",
+    type: "circle",
+    source: "gem-asset-geometries",
+    filter: pointFilter,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 5, 10, 15],
+      "circle-color": MAP_COLORS.gemRoute,
+      "circle-blur": 1.1,
+      "circle-opacity": 0.22,
+    },
+    layout: { visibility },
+  });
+  map.addLayer({
+    id: "gem-asset-geometries-point",
+    type: "circle",
+    source: "gem-asset-geometries",
+    filter: pointFilter,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 4, 2.5, 10, 7],
+      "circle-color": MAP_COLORS.gemRoute,
+      "circle-opacity": 0.86,
+      "circle-stroke-width": SELECTED_STROKE_WIDTH,
+      "circle-stroke-color": SELECTED_STROKE,
+      "circle-stroke-opacity": SELECTED_STROKE_OPACITY,
+    },
+    layout: { visibility },
+  });
+}
+
 function layerLocked(layer: LayerDef, entitlements?: Partial<Record<string, boolean>>): boolean {
   return !!layer.premium && !entitlements?.[FEATURE.mapPremiumLayers];
 }
@@ -666,6 +777,7 @@ function interactiveLayerIds(vertical: "energy" | "metals"): string[] {
       ...VESSEL_TILE_LAYERS,
       ...VESSEL_LIVE_LAYERS,
       ...PIPELINE_LAYER_IDS,
+      ...GEM_ASSET_GEOMETRY_LAYER_IDS,
       "sts-events",
       "sts-predictions",
       "mcr-corridors",
@@ -683,6 +795,11 @@ function bboxString(map: maplibregl.Map): string {
 function hoverLabel(props: Record<string, unknown>): string {
   const sts = stsHoverLabel(props);
   if (sts) return sts;
+  if (props.source_key && props.asset_name) {
+    const assetType = props.asset_type != null ? String(props.asset_type).replace(/_/g, " ") : "";
+    const geometryType = props.geometry_type != null ? String(props.geometry_type) : "";
+    return ["GEM", String(props.asset_name), assetType, geometryType].filter(Boolean).join(" · ");
+  }
   const name = props.name != null ? String(props.name).trim() : "";
   if (props.entity_kind === "storage_site") {
     const tanks = props.tank_count != null ? `${props.tank_count} tanks` : "";
@@ -718,6 +835,9 @@ function selectionFeatureTarget(sel: MapSelection, vertical: "energy" | "metals"
     const id = sel.id || sel.legacy_row_id;
     if (!id) return null;
     return { source: "src-pipelines", sourceLayer: "petroleum_osm", id };
+  }
+  if (layerKey === "gem-asset-geometries" && sel.id) {
+    return { source: "gem-asset-geometries", id: sel.id };
   }
   const layerDef = layersForVertical(vertical).find((l) => l.id === layerKey);
   if (!layerDef?.tileLayer || !sel.id) return null;
@@ -905,6 +1025,20 @@ export default function IntelligenceMap({
             /* layer may not be queryable yet */
           }
         }
+        if (vertical === "energy" && layersRef.current["gem-asset-geometries"]) {
+          const gemLayers = [
+            "gem-asset-geometries-fill",
+            "gem-asset-geometries-line",
+            "gem-asset-geometries-point",
+          ].filter((lid) => map.getLayer(lid) && map.getLayoutProperty(lid, "visibility") !== "none");
+          if (gemLayers.length) {
+            try {
+              counts["gem-asset-geometries"] = map.queryRenderedFeatures({ layers: gemLayers }).length;
+            } catch {
+              /* source may still be refreshing */
+            }
+          }
+        }
         setLayerCounts(counts);
       };
       map.on("idle", updateLayerCounts);
@@ -925,6 +1059,7 @@ export default function IntelligenceMap({
               f.layer.id === "sts-predictions" ||
               f.layer.id === "storage-sites" ||
               isPipelineLayer(f.layer.id) ||
+              isGemAssetGeometryLayer(f.layer.id) ||
               (vertical === "energy" && isVesselLayerId(f.layer.id)),
           );
         if (!hit) {
@@ -934,6 +1069,8 @@ export default function IntelligenceMap({
         const props = hit.properties as MapSelection;
         const layerId = isPipelineLayer(hit.layer.id)
           ? "pipelines"
+          : isGemAssetGeometryLayer(hit.layer.id)
+            ? "gem-asset-geometries"
           : isVesselLayerId(hit.layer.id)
             ? hit.layer.id.startsWith("live-vessels")
               ? "live-vessels"
@@ -953,9 +1090,16 @@ export default function IntelligenceMap({
           });
           return;
         }
+        const rawProps = props as Record<string, unknown>;
         onSelect({
           ...props,
-          id: props.id != null ? String(props.id) : undefined,
+          id: layerId === "gem-asset-geometries"
+            ? rawProps.asset_id != null
+              ? String(rawProps.asset_id)
+              : undefined
+            : props.id != null
+              ? String(props.id)
+              : undefined,
           legacy_row_id: (props as { legacy_row_id?: string }).legacy_row_id != null
             ? String((props as { legacy_row_id?: string }).legacy_row_id)
             : undefined,
@@ -969,7 +1113,11 @@ export default function IntelligenceMap({
             ? String((props as { pipeline_status?: string }).pipeline_status)
             : undefined,
           mmsi: props.mmsi != null ? String(props.mmsi) : undefined,
-          name: props.name != null ? String(props.name) : undefined,
+          name: layerId === "gem-asset-geometries" && rawProps.asset_name != null
+            ? String(rawProps.asset_name)
+            : props.name != null
+              ? String(props.name)
+              : undefined,
           asset_type: props.asset_type != null ? String(props.asset_type) : undefined,
           operator: props.operator != null ? String(props.operator) : undefined,
           substance: props.substance != null ? String(props.substance) : undefined,
@@ -1018,10 +1166,23 @@ export default function IntelligenceMap({
         type: "line",
         source: "rel-lines",
         paint: {
-          "line-color": "#5eb3ff",
-          "line-width": 2,
-          "line-opacity": 0.65,
+          "line-color": ["match", ["get", "rel"], "opportunity_chain", "#34d399", "#5eb3ff"],
+          "line-width": ["match", ["get", "rel"], "opportunity_chain", 3.2, 2],
+          "line-opacity": ["match", ["get", "rel"], "opportunity_chain", 0.9, 0.65],
           "line-dasharray": [2, 2],
+        },
+      });
+      map.addLayer({
+        id: "rel-points",
+        type: "circle",
+        source: "rel-lines",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": ["match", ["get", "role"], "supplier", 7, "buyer", 8, 6],
+          "circle-color": ["match", ["get", "role"], "supplier", "#5dffc8", "buyer", "#fbbf24", "#5eb3ff"],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#0a0e14",
+          "circle-opacity": 0.95,
         },
       });
       map.addSource("pipeline-focus-sites", {
@@ -1071,6 +1232,12 @@ export default function IntelligenceMap({
           data: { type: "FeatureCollection", features: [] },
           promoteId: "site_id",
         });
+        map.addSource("gem-asset-geometries", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          promoteId: "asset_id",
+        });
+        addGemAssetGeometryLayers(map, !!layers["gem-asset-geometries"]);
         map.addLayer({
           id: "storage-sites-glow",
           type: "circle",
@@ -1251,6 +1418,14 @@ export default function IntelligenceMap({
               })
               .catch(() => {});
           }
+          if (activeLayers["gem-asset-geometries"]) {
+            fetchAssetGeometries(bbox)
+              .then((fc) => {
+                const src = map.getSource("gem-asset-geometries") as maplibregl.GeoJSONSource | undefined;
+                if (src) src.setData(fc);
+              })
+              .catch(() => {});
+          }
         };
         map.on("moveend", refreshOverlays);
         refreshOverlays();
@@ -1418,6 +1593,31 @@ export default function IntelligenceMap({
     if (src) {
       src.setData(relationshipLines ?? { type: "FeatureCollection", features: [] });
     }
+    const chainLines = (relationshipLines?.features ?? []).filter(
+      (feature) =>
+        feature.geometry?.type === "LineString" &&
+        (feature.properties as Record<string, unknown> | null | undefined)?.rel === "opportunity_chain",
+    );
+    if (chainLines.length === 0) return;
+    const bounds = new maplibregl.LngLatBounds();
+    let points = 0;
+    for (const feature of chainLines) {
+      if (feature.geometry.type !== "LineString") continue;
+      for (const coord of feature.geometry.coordinates) {
+        if (coord.length < 2) continue;
+        const [lng, lat] = coord;
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        bounds.extend([lng, lat]);
+        points += 1;
+      }
+    }
+    if (points >= 2) {
+      map.fitBounds(bounds, {
+        padding: { top: 80, bottom: 80, left: 90, right: 430 },
+        duration: 900,
+        maxZoom: 7.5,
+      });
+    }
   }, [relationshipLines]);
 
   useEffect(() => {
@@ -1511,17 +1711,20 @@ export default function IntelligenceMap({
         "sts-predictions",
         "sts-predictions-glow",
         "mcr-corridors",
+        ...GEM_ASSET_GEOMETRY_LAYER_IDS,
       ] as const) {
         if (map.getLayer(lid)) {
           const key = lid === "sts-events-glow"
             ? "sts-events"
             : lid === "sts-predictions-glow"
               ? "sts-predictions"
+              : isGemAssetGeometryLayer(lid)
+                ? "gem-asset-geometries"
               : lid;
           map.setLayoutProperty(lid, "visibility", layers[key] ? "visible" : "none");
         }
       }
-      if (layers["sts-events"] || layers["sts-predictions"] || layers["mcr-corridors"]) {
+      if (layers["sts-events"] || layers["sts-predictions"] || layers["mcr-corridors"] || layers["gem-asset-geometries"]) {
         const bbox = bboxString(map);
         if (layers["sts-events"]) {
           fetchSTSEvents(bbox)
@@ -1536,6 +1739,11 @@ export default function IntelligenceMap({
         if (layers["mcr-corridors"]) {
           fetchMCRCorridors(bbox)
             .then((fc) => (map.getSource("mcr-corridors") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
+            .catch(() => {});
+        }
+        if (layers["gem-asset-geometries"]) {
+          fetchAssetGeometries(bbox)
+            .then((fc) => (map.getSource("gem-asset-geometries") as maplibregl.GeoJSONSource | undefined)?.setData(fc))
             .catch(() => {});
         }
       }

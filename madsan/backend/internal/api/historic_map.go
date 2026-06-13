@@ -174,7 +174,7 @@ func (s *Server) getSTSSummary(w http.ResponseWriter, r *http.Request) {
 	var predictionsActive int
 	_ = s.pool.QueryRow(r.Context(), `
 		SELECT COUNT(*)::int FROM predictive_signals
-		WHERE signal_type = 'sts_pair_prediction'
+		WHERE signal_type = 'commercial_sts_v1'
 		  AND (expires_at IS NULL OR expires_at > now())
 	`).Scan(&predictionsActive)
 	writeJSON(w, map[string]any{
