@@ -98,6 +98,7 @@ export type IntelCargoMovement = {
   id: string;
   source?: string;
   vessel_id?: string;
+  voyage_id?: string;
   vessel_name?: string;
   imo?: string;
   mmsi?: string;
@@ -107,10 +108,17 @@ export type IntelCargoMovement = {
   product_family?: string;
   load?: { port?: string; country?: string };
   discharge?: { port?: string; country?: string };
+  route_hint?: {
+    source?: string;
+    confidence_score?: number;
+    latest_destination?: string;
+    decoded_destination?: Record<string, unknown>;
+  };
   quantity?: { low?: number; best?: number; high?: number; unit?: string; method?: string };
   confidence?: number;
   observed_at?: string;
   evidence_label?: string;
+  commercial_chain?: Record<string, unknown>;
 };
 
 export type IntelSTSPrediction = {
@@ -179,6 +187,7 @@ export type IntelInvestorPath = {
   price_context?: Record<string, unknown>;
   exposures?: Array<Record<string, unknown>>;
   control_chain?: Array<Record<string, unknown>>;
+  chain_segments?: Array<Record<string, unknown>>;
   evidence?: Array<Record<string, unknown>>;
   limitations?: string[];
   generated_at?: string;

@@ -54,17 +54,18 @@ func loadVesselShipvaultOwner(ctx context.Context, pool *pgxpool.Pool, ownerComp
 	if ownerCompanyID == "" {
 		return nil
 	}
-	var name, country string
+	var name, country, city, parentName, parentID string
 	var fleetSize *int
 	var totalDWT, totalGT, avgAge *float64
 	var madsanCompanyID *uuid.UUID
 	var fetchedAt *time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT name, COALESCE(country,''), fleet_size, total_dwt, total_gt, avg_age_years,
+		SELECT name, COALESCE(country,''), COALESCE(city,''), COALESCE(parent_name,''), COALESCE(parent_company_id,''),
+		       fleet_size, total_dwt, total_gt, avg_age_years,
 		       madsan_company_id, fetched_at
 		FROM shipvault_companies
 		WHERE shipvault_company_id = $1
-	`, ownerCompanyID).Scan(&name, &country, &fleetSize, &totalDWT, &totalGT, &avgAge, &madsanCompanyID, &fetchedAt)
+	`, ownerCompanyID).Scan(&name, &country, &city, &parentName, &parentID, &fleetSize, &totalDWT, &totalGT, &avgAge, &madsanCompanyID, &fetchedAt)
 	if err != nil {
 		return nil
 	}
@@ -74,6 +75,15 @@ func loadVesselShipvaultOwner(ctx context.Context, pool *pgxpool.Pool, ownerComp
 	}
 	if country != "" {
 		out["country"] = country
+	}
+	if city != "" {
+		out["city"] = city
+	}
+	if parentName != "" {
+		out["parent_name"] = parentName
+	}
+	if parentID != "" {
+		out["parent_company_id"] = parentID
 	}
 	if fleetSize != nil {
 		out["fleet_size"] = *fleetSize
@@ -130,7 +140,8 @@ func mergeVesselShipvaultSummary(summary map[string]any, mmsi string, _ []byte, 
 	if summary == nil || mmsi == "" {
 		return
 	}
-	if hist := loadVesselNameHistory(ctx, pool, mmsi); len(hist) > 0 {
+	var hist []map[string]any
+	if hist = loadVesselNameHistory(ctx, pool, mmsi); len(hist) > 0 {
 		summary["name_history"] = hist
 	}
 	var ownerID string
@@ -156,4 +167,6 @@ func mergeVesselShipvaultSummary(summary map[string]any, mmsi string, _ []byte, 
 	if yard := loadVesselYardSummary(ctx, pool, mmsi); yard != nil {
 		summary["yard"] = yard
 	}
+	ownerProfile, _ := summary["owner_profile"].(map[string]any)
+	mergeVesselOwnershipIntel(summary, ownerProfile, loadVesselFleetMatch(ctx, pool, ownerID, mmsi, stringFromAny(summary["imo"]), hist))
 }

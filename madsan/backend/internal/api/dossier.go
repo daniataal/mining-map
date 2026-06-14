@@ -66,6 +66,7 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 	var enrichBuilder string
 	var enrichBuildYear *int
 	var enrichRawPayload []byte
+	var ownerCompanyID, operatorCompanyID string
 	if mmsi != "" {
 		_ = s.pool.QueryRow(r.Context(), `
 			SELECT COALESCE(owner_name,''), COALESCE(operator_name,''),
@@ -73,6 +74,7 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 			       stale_after, fetched_at, deadweight_tons, gross_tonnage,
 			       COALESCE(vessel_class,''), COALESCE(flag,''), COALESCE(limitations,'{}'),
 			       COALESCE(owner_profile,'{}'::jsonb),
+			       COALESCE(owner_company_id::text,''), COALESCE(operator_company_id::text,''),
 			       COALESCE(builder,''), build_year,
 			       COALESCE(raw_payload,'{}'::jsonb)
 			FROM vessel_enrichment WHERE mmsi = $1
@@ -80,6 +82,7 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 			&enrich.OwnerName, &enrich.OperatorName, &enrich.Source, &enrich.Tier, &enrich.Confidence,
 			&enrich.StaleAfter, &enrich.FetchedAt, &enrich.DWT, &enrich.GrossTonnage,
 			&enrich.VesselClass, &enrich.Flag, &enrich.Limitations, &ownerProfileJSON,
+			&ownerCompanyID, &operatorCompanyID,
 			&enrichBuilder, &enrichBuildYear, &enrichRawPayload,
 		)
 	}
@@ -99,6 +102,10 @@ func (s *Server) writeVesselDossier(w http.ResponseWriter, r *http.Request, uid 
 		}
 	}
 	mergeVesselShipvaultSummary(summary, mmsi, ownerProfileJSON, r.Context(), s.pool)
+	ownerProfile, _ := summary["owner_profile"].(map[string]any)
+	if contacts := loadVesselCommercialContacts(r.Context(), s.pool, ownerCompanyID, operatorCompanyID, enrich.OwnerName, enrich.OperatorName, ownerProfile); len(contacts) > 0 {
+		summary["commercial_contacts"] = contacts
+	}
 	if lastSeen != nil {
 		summary["last_seen_at"] = lastSeen.UTC().Format(time.RFC3339)
 		age := time.Since(*lastSeen)

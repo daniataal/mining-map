@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -127,35 +128,150 @@ func (s *Server) listIntelCargoMovements(w http.ResponseWriter, r *http.Request)
 	out := []map[string]any{}
 
 	rows, err := s.pool.Query(r.Context(), `
+		WITH enriched AS (
+			SELECT
+				ce.id::text AS id,
+				COALESCE(v.id::text, '') AS vessel_id,
+				COALESCE(v.name, '') AS vessel_name,
+				COALESCE(v.imo, ve.imo, '') AS imo,
+				COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') AS mmsi,
+				COALESCE(ve.vessel_class, v.vessel_type, '') AS vessel_class,
+				COALESCE(ve.owner_name, '') AS owner_name,
+				COALESCE(ve.operator_name, '') AS operator_name,
+				COALESCE(ve.owner_company_id::text, '') AS owner_company_id,
+				COALESCE(ve.operator_company_id::text, '') AS operator_company_id,
+				COALESCE(ve.owner_profile, '{}'::jsonb)::text AS owner_profile,
+				COALESCE(voy.id::text, '') AS voyage_id,
+				COALESCE(
+					NULLIF(voy.load_port_name, ''),
+					CASE WHEN pc.event_type ILIKE '%loading%' THEN pc.terminal_name ELSE '' END,
+					''
+				) AS load_port_name,
+				COALESCE(
+					NULLIF(voy.load_country, ''),
+					CASE WHEN pc.event_type ILIKE '%loading%' THEN pc.country_code ELSE '' END,
+					''
+				) AS load_country,
+				COALESCE(
+					NULLIF(voy.discharge_port_name, ''),
+					CASE WHEN pc.event_type ILIKE '%unloading%' THEN pc.terminal_name ELSE '' END,
+					NULLIF(dest.destination, ''),
+					''
+				) AS discharge_port_name,
+				COALESCE(
+					NULLIF(voy.discharge_country, ''),
+					CASE WHEN pc.event_type ILIKE '%unloading%' THEN pc.country_code ELSE '' END,
+					''
+				) AS discharge_country,
+				COALESCE(ce.product_family, voy.commodity_family, '') AS product_family,
+				COALESCE(ce.payload_low, 0) AS payload_low,
+				COALESCE(ce.payload_best, ce.payload_tons, 0) AS payload_best,
+				COALESCE(ce.payload_high, 0) AS payload_high,
+				COALESCE(ce.quantity_unit, 'tons') AS quantity_unit,
+				COALESCE(ce.method, '') AS method,
+				COALESCE(ce.confidence_score, 0) AS confidence_score,
+				ce.observed_at::text AS observed_at,
+				COALESCE(ce.evidence, '[]'::jsonb)::text AS evidence,
+				CASE
+					WHEN voy.id IS NOT NULL THEN 'voyage_match'
+					WHEN pc.id IS NOT NULL THEN 'port_call_' || COALESCE(NULLIF(pc.event_type, ''), 'visit')
+					WHEN NULLIF(dest.destination, '') IS NOT NULL THEN 'ais_destination'
+					ELSE ''
+				END AS route_source,
+				CASE
+					WHEN voy.id IS NOT NULL THEN COALESCE(voy.confidence_score, 0)
+					WHEN pc.id IS NOT NULL THEN COALESCE(pc.confidence_score, 0)
+					WHEN NULLIF(dest.destination, '') IS NOT NULL THEN 35
+					ELSE 0
+				END AS route_confidence,
+				COALESCE(NULLIF(dest.destination, ''), NULLIF(ce.source_payload->>'latest_destination', ''), '') AS latest_destination
+			FROM cargo_estimates ce
+			LEFT JOIN vessels v ON v.id = ce.vessel_id
+			LEFT JOIN LATERAL (
+				SELECT vy.*
+				FROM voyages vy
+				WHERE (ce.voyage_id IS NOT NULL AND vy.id = ce.voyage_id)
+				   OR (
+					ce.voyage_id IS NULL
+					AND (
+						(ce.vessel_id IS NOT NULL AND vy.vessel_id = ce.vessel_id)
+						OR (COALESCE(v.mmsi, '') <> '' AND vy.mmsi = v.mmsi)
+					)
+				   )
+				ORDER BY
+					CASE WHEN ce.voyage_id IS NOT NULL AND vy.id = ce.voyage_id THEN 0 ELSE 1 END,
+					ABS(EXTRACT(EPOCH FROM (COALESCE(vy.ended_at, vy.started_at, ce.observed_at) - ce.observed_at))) ASC,
+					COALESCE(vy.confidence_score, 0) DESC
+				LIMIT 1
+			) voy ON true
+			LEFT JOIN LATERAL (
+				SELECT ve.*
+				FROM vessel_enrichment ve
+				WHERE (v.id IS NOT NULL AND ve.vessel_id = v.id)
+				   OR (COALESCE(v.mmsi, voy.mmsi, '') <> '' AND ve.mmsi = COALESCE(v.mmsi, voy.mmsi))
+				ORDER BY (ve.vessel_id = v.id) DESC, ve.fetched_at DESC
+				LIMIT 1
+			) ve ON true
+			LEFT JOIN LATERAL (
+				SELECT pc.id::text AS id,
+				       COALESCE(a.name, '') AS terminal_name,
+				       COALESCE(a.country_code, '') AS country_code,
+				       COALESCE(pc.event_type, '') AS event_type,
+				       COALESCE(pc.confidence_score, 0) AS confidence_score,
+				       COALESCE(pc.departure_ts, pc.arrival_ts) AS event_ts
+				FROM port_call_visits pc
+				JOIN assets a ON a.id = pc.asset_id
+				WHERE COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') <> ''
+				  AND pc.mmsi = COALESCE(v.mmsi, voy.mmsi, ve.mmsi)
+				ORDER BY
+					ABS(EXTRACT(EPOCH FROM (COALESCE(pc.departure_ts, pc.arrival_ts) - ce.observed_at))) ASC,
+					COALESCE(pc.confidence_score, 0) DESC
+				LIMIT 1
+			) pc ON true
+			LEFT JOIN LATERAL (
+				SELECT CASE
+					WHEN UPPER(TRIM(raw.destination)) IN ('FOR ORDERS', 'FOR ORDER', 'TBA', 'UNKNOWN', 'N/A', 'NA') THEN ''
+					ELSE COALESCE(raw.destination, '')
+				END AS destination
+				FROM (
+					SELECT COALESCE(
+						NULLIF(TRIM(v.destination), ''),
+						NULLIF(TRIM(ap.destination), ''),
+						NULLIF(TRIM(ce.source_payload->>'latest_destination'), '')
+					) AS destination
+					FROM (SELECT 1) seed
+					LEFT JOIN LATERAL (
+						SELECT destination
+						FROM ais_positions ap
+						WHERE COALESCE(v.mmsi, voy.mmsi, ve.mmsi, '') <> ''
+						  AND ap.mmsi = COALESCE(v.mmsi, voy.mmsi, ve.mmsi)
+						  AND NULLIF(TRIM(ap.destination), '') IS NOT NULL
+						ORDER BY ap.ts DESC
+						LIMIT 1
+					) ap ON true
+				) raw
+			) dest ON true
+			WHERE ($1 = '' OR COALESCE(ce.product_family, voy.commodity_family, '') ILIKE '%' || $1 || '%')
+		),
+		base AS (
+			SELECT
+				enriched.*,
+				row_number() OVER (
+					PARTITION BY vessel_id, product_family, load_country, discharge_country
+					ORDER BY observed_at DESC, confidence_score DESC
+				) AS rn
+			FROM enriched
+		)
 		SELECT
-			ce.id::text,
-			COALESCE(v.id::text, ''),
-			COALESCE(v.name, ''),
-			COALESCE(v.imo, ve.imo, ''),
-			COALESCE(v.mmsi, voy.mmsi, ve.mmsi, ''),
-			COALESCE(ve.vessel_class, v.vessel_type, ''),
-			COALESCE(ve.owner_name, ''),
-			COALESCE(ve.operator_name, ''),
-			COALESCE(voy.load_port_name, ''),
-			COALESCE(voy.load_country, ''),
-			COALESCE(voy.discharge_port_name, ''),
-			COALESCE(voy.discharge_country, ''),
-			COALESCE(ce.product_family, voy.commodity_family, ''),
-			COALESCE(ce.payload_low, 0),
-			COALESCE(ce.payload_best, ce.payload_tons, 0),
-			COALESCE(ce.payload_high, 0),
-			COALESCE(ce.quantity_unit, 'tons'),
-			COALESCE(ce.method, ''),
-			COALESCE(ce.confidence_score, 0),
-			ce.observed_at::text,
-			COALESCE(ce.evidence, '[]'::jsonb)::text
-		FROM cargo_estimates ce
-		LEFT JOIN vessels v ON v.id = ce.vessel_id
-		LEFT JOIN voyages voy ON voy.id = ce.voyage_id
-		LEFT JOIN vessel_enrichment ve ON ve.vessel_id = v.id OR (v.mmsi IS NOT NULL AND ve.mmsi = v.mmsi)
-		WHERE ($1 = '' OR COALESCE(ce.product_family, voy.commodity_family, '') ILIKE '%' || $1 || '%')
-		  AND ($2 = '' OR voy.load_country ILIKE $2 OR voy.discharge_country ILIKE $2)
-		ORDER BY ce.observed_at DESC
+			id, vessel_id, vessel_name, imo, mmsi, vessel_class, owner_name, operator_name,
+			owner_company_id, operator_company_id, owner_profile, voyage_id,
+			load_port_name, load_country, discharge_port_name, discharge_country,
+			product_family, payload_low, payload_best, payload_high, quantity_unit, method,
+			confidence_score, observed_at, evidence, route_source, route_confidence, latest_destination
+		FROM base
+		WHERE rn = 1
+		  AND ($2 = '' OR load_country ILIKE $2 OR discharge_country ILIKE $2)
+		ORDER BY observed_at DESC
 		LIMIT $3
 	`, commodity, country, limit)
 	if err != nil {
@@ -164,58 +280,119 @@ func (s *Server) listIntelCargoMovements(w http.ResponseWriter, r *http.Request)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		out = append(out, scanCargoEstimate(rows)...)
+		out = append(out, s.scanCargoEstimate(r.Context(), rows)...)
 	}
 
 	if len(out) < limit {
 		mcrRows, err := s.pool.Query(r.Context(), `
-			SELECT
-				id::text,
-				COALESCE(vessel_name, ''),
-				COALESCE(imo, ''),
-				COALESCE(mmsi, ''),
-				COALESCE(commodity_family, ''),
-				COALESCE(load_port_name, ''),
-				COALESCE(load_country, ''),
-				COALESCE(discharge_hint, ''),
-				COALESCE(discharge_country, ''),
-				COALESCE(volume_low, 0),
-				COALESCE(volume_best_estimate, 0),
-				COALESCE(volume_high, 0),
-				COALESCE(volume_unit, 'bbl'),
-				COALESCE(volume_method, recipe, ''),
-				COALESCE(confidence, 0),
-				COALESCE(event_date::text, ''),
-				COALESCE(evidence_chain, '[]'::jsonb)::text
-			FROM meridian_cargo_records
-			WHERE ($1 = '' OR commodity_family ILIKE '%' || $1 || '%')
-			  AND ($2 = '' OR load_country ILIKE $2 OR discharge_country ILIKE $2)
-			ORDER BY event_date DESC NULLS LAST, confidence DESC
+				SELECT
+					mcr.id::text,
+					COALESCE(mcr.vessel_name, ''),
+					COALESCE(mcr.imo, ''),
+					COALESCE(mcr.mmsi, ''),
+					COALESCE(mcr.commodity_family, ''),
+					COALESCE(mcr.load_port_name, ''),
+					COALESCE(mcr.load_country, ''),
+					COALESCE(mcr.discharge_hint, ''),
+					COALESCE(mcr.discharge_country, ''),
+					COALESCE(mcr.volume_low, 0),
+					COALESCE(mcr.volume_best_estimate, 0),
+					COALESCE(mcr.volume_high, 0),
+					COALESCE(mcr.volume_unit, 'bbl'),
+					COALESCE(mcr.volume_method, mcr.recipe, ''),
+					COALESCE(mcr.confidence, 0),
+					COALESCE(mcr.event_date::text, ''),
+					COALESCE(mcr.evidence_chain, '[]'::jsonb)::text,
+					COALESCE(mcr.shipper_name, ''),
+					COALESCE(mcr.consignee_name, ''),
+					COALESCE(mcr.shipper_company_id::text, ''),
+					COALESCE(mcr.consignee_company_id::text, ''),
+				COALESCE(v.id::text, ''),
+				COALESCE(ve.vessel_class, v.vessel_type, ''),
+				COALESCE(ve.owner_name, ''),
+				COALESCE(ve.operator_name, ''),
+				COALESCE(ve.owner_company_id::text, ''),
+				COALESCE(ve.operator_company_id::text, ''),
+				COALESCE(ve.owner_profile, '{}'::jsonb)::text
+			FROM meridian_cargo_records mcr
+			LEFT JOIN vessels v ON (mcr.mmsi <> '' AND v.mmsi = mcr.mmsi) OR (mcr.imo <> '' AND v.imo = mcr.imo)
+			LEFT JOIN LATERAL (
+				SELECT ve.*
+				FROM vessel_enrichment ve
+				WHERE (v.id IS NOT NULL AND ve.vessel_id = v.id)
+				   OR (mcr.mmsi <> '' AND ve.mmsi = mcr.mmsi)
+				   OR (mcr.imo <> '' AND ve.imo = mcr.imo)
+				ORDER BY (ve.vessel_id = v.id) DESC, ve.fetched_at DESC
+				LIMIT 1
+			) ve ON true
+				WHERE ($1 = '' OR mcr.commodity_family ILIKE '%' || $1 || '%')
+				  AND ($2 = '' OR mcr.load_country ILIKE $2 OR mcr.discharge_country ILIKE $2)
+				ORDER BY mcr.event_date DESC NULLS LAST, mcr.confidence DESC
 			LIMIT $3
 		`, commodity, country, limit-len(out))
 		if err == nil {
 			defer mcrRows.Close()
 			for mcrRows.Next() {
 				var id, vesselName, imo, mmsi, product, loadPort, loadCountry, dischargePort, dischargeCountry, unit, method, observedAt, evidence string
+				var shipperName, consigneeName, shipperCompanyID, consigneeCompanyID, vesselID, vesselClass, owner, operator, ownerCompanyID, operatorCompanyID, ownerProfile string
 				var low, best, high, confidence float64
 				if err := mcrRows.Scan(&id, &vesselName, &imo, &mmsi, &product, &loadPort, &loadCountry, &dischargePort, &dischargeCountry,
-					&low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence); err != nil {
+					&low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence,
+					&shipperName, &consigneeName, &shipperCompanyID, &consigneeCompanyID, &vesselID, &vesselClass, &owner, &operator, &ownerCompanyID, &operatorCompanyID, &ownerProfile); err != nil {
 					continue
 				}
+				decodedDestination := decodeAISDestination(dischargePort)
+				chain := buildCargoCommercialContext(r.Context(), s.pool, cargoCommercialContextInput{
+					Source:             "meridian_cargo_records",
+					VesselID:           vesselID,
+					VesselName:         vesselName,
+					IMO:                imo,
+					MMSI:               mmsi,
+					VesselClass:        vesselClass,
+					OwnerName:          owner,
+					OperatorName:       operator,
+					OwnerCompanyID:     ownerCompanyID,
+					OperatorCompanyID:  operatorCompanyID,
+					OwnerProfileJSON:   ownerProfile,
+					ShipperName:        shipperName,
+					ConsigneeName:      consigneeName,
+					ShipperCompanyID:   shipperCompanyID,
+					ConsigneeCompanyID: consigneeCompanyID,
+					ProductFamily:      product,
+					LoadPort:           loadPort,
+					LoadCountry:        loadCountry,
+					DischargePort:      dischargePort,
+					DischargeCountry:   dischargeCountry,
+					RouteSource:        "meridian_cargo_record",
+					RouteConfidence:    confidence,
+					DecodedDestination: decodedDestination,
+					QuantityMethod:     method,
+					EvidenceLabel:      "inferred",
+				})
+				routeHint := map[string]any{"source": "meridian_cargo_record", "confidence_score": confidence}
+				if len(decodedDestination) > 0 {
+					routeHint["decoded_destination"] = decodedDestination
+				}
 				out = append(out, map[string]any{
-					"id":             id,
-					"source":         "meridian_cargo_records",
-					"vessel_name":    vesselName,
-					"imo":            imo,
-					"mmsi":           mmsi,
-					"product_family": product,
-					"load":           map[string]string{"port": loadPort, "country": loadCountry},
-					"discharge":      map[string]string{"port": dischargePort, "country": dischargeCountry},
-					"quantity":       map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
-					"confidence":     confidence,
-					"observed_at":    observedAt,
-					"evidence":       jsonBlock(evidence, "[]"),
-					"evidence_label": "inferred",
+					"id":               id,
+					"source":           "meridian_cargo_records",
+					"vessel_id":        vesselID,
+					"vessel_name":      vesselName,
+					"imo":              imo,
+					"mmsi":             mmsi,
+					"vessel_class":     vesselClass,
+					"owner_name":       owner,
+					"operator_name":    operator,
+					"product_family":   product,
+					"load":             map[string]string{"port": loadPort, "country": loadCountry},
+					"discharge":        map[string]string{"port": dischargePort, "country": dischargeCountry},
+					"route_hint":       routeHint,
+					"quantity":         map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
+					"confidence":       confidence,
+					"observed_at":      observedAt,
+					"evidence":         jsonBlock(evidence, "[]"),
+					"evidence_label":   "inferred",
+					"commercial_chain": chain,
 				})
 			}
 		}
@@ -520,6 +697,15 @@ func (s *Server) listIntelInvestorPaths(w http.ResponseWriter, r *http.Request) 
 	assetID := strings.TrimSpace(r.URL.Query().Get("asset_id"))
 	opportunityID := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("opportunity_id"), r.URL.Query().Get("lane_id")))
 
+	if snapshotItems, err := s.listIntelInvestorPathSnapshots(r, commodity, origin, destination, investor, assetID, opportunityID, minScore, limit); err == nil && len(snapshotItems) > 0 {
+		writeJSON(w, map[string]any{
+			"count":   len(snapshotItems),
+			"items":   snapshotItems,
+			"message": "Investor paths served from precomputed opportunity_investor_path_snapshots.",
+		})
+		return
+	}
+
 	rows, err := s.pool.Query(r.Context(), `
 		WITH opportunity AS (
 			SELECT *
@@ -639,13 +825,153 @@ func (s *Server) listIntelInvestorPaths(w http.ResponseWriter, r *http.Request) 
 					'price_context', COALESCE(oc.price_context, '{}'::jsonb),
 					'exposures', inv.exposures,
 					'control_chain', jsonb_build_array(
-						jsonb_build_object('step', 'investor', 'label', inv.investor_name, 'evidence_label', 'reported'),
-						jsonb_build_object('step', 'supplier_operator', 'label', COALESCE(sc.name, so.name, sa.name, 'supplier side'), 'asset', COALESCE(sa.name, ''), 'evidence_label', 'reported'),
-						jsonb_build_object('step', 'route_asset', 'label', COALESCE(oc.origin_country, '?') || ' -> ' || COALESCE(oc.destination_country, '?'), 'asset', COALESCE(sa.name, '') || ' -> ' || COALESCE(ba.name, ''), 'evidence_label', 'inferred'),
-						jsonb_build_object('step', 'cargo_or_vessel', 'label', CASE WHEN cargo.items IS NULL THEN 'cargo clue pending' ELSE 'cargo clues attached' END, 'evidence_label', CASE WHEN cargo.items IS NULL THEN 'not_attached' ELSE 'estimated' END),
-						jsonb_build_object('step', 'buyer_operator', 'label', COALESCE(bc.name, bo.name, ba.name, 'buyer side'), 'asset', COALESCE(ba.name, ''), 'evidence_label', 'reported'),
-						jsonb_build_object('step', 'price_context', 'label', COALESCE(oc.price_context->>'benchmark_key', oc.price_context->>'benchmark', 'open benchmark pending'), 'evidence_label', COALESCE(oc.price_context->>'evidence_label', 'estimated'))
+						jsonb_build_object(
+							'step', 'investor',
+							'role', 'capital_control',
+							'label', inv.investor_name,
+							'short_label', 'Investor',
+							'entity_id', COALESCE(inv.investor_entity_id, ''),
+							'exposure_role', CASE
+								WHEN inv.supplier_exposure AND inv.buyer_exposure THEN 'both_sides'
+								WHEN inv.supplier_exposure THEN 'supplier_side'
+								WHEN inv.buyer_exposure THEN 'buyer_side'
+								ELSE 'portfolio_context'
+							END,
+							'exposure_types', inv.exposure_types,
+							'evidence_label', 'reported'
+						),
+						jsonb_build_object(
+							'step', 'supplier_control',
+							'role', 'owner_or_operator',
+							'label', COALESCE(
+								NULLIF(supplier_ownership.items->0->>'parent_name', ''),
+								NULLIF(supplier_ownership.items->0->>'owner_name', ''),
+								NULLIF(sc.name, ''),
+								NULLIF(so.name, ''),
+								sa.name,
+								'supplier control'
+							),
+							'short_label', 'Supplier control',
+							'company_id', COALESCE(sc.id::text, so.id::text, ''),
+							'asset_id', COALESCE(sa.id::text, ''),
+							'asset', COALESCE(sa.name, ''),
+							'country_code', COALESCE(sa.country_code, oc.origin_country, ''),
+							'evidence_label', 'reported'
+						),
+						jsonb_build_object(
+							'step', 'supplier_asset',
+							'role', 'source_asset',
+							'label', COALESCE(sa.name, 'supplier asset'),
+							'short_label', 'Supplier asset',
+							'asset_id', COALESCE(sa.id::text, ''),
+							'asset_type', COALESCE(sa.asset_type, ''),
+							'country_code', COALESCE(sa.country_code, oc.origin_country, ''),
+							'coordinates', jsonb_build_object('latitude', sa.latitude, 'longitude', sa.longitude),
+							'evidence_label', 'reported'
+						),
+						jsonb_build_object(
+							'step', 'physical_route',
+							'role', 'route_or_terminal_access',
+							'label', COALESCE(oc.origin_country, '?') || ' -> ' || COALESCE(oc.destination_country, '?'),
+							'short_label', 'Route',
+							'lane_id', COALESCE(oc.lane_id, ''),
+							'asset', COALESCE(sa.name, '') || ' -> ' || COALESCE(ba.name, ''),
+							'pipeline_or_terminal_context', CASE
+								WHEN COALESCE(sa.asset_type, '') IN ('pipeline', 'terminal', 'lng_terminal', 'storage', 'tank_farm')
+								  OR COALESCE(ba.asset_type, '') IN ('pipeline', 'terminal', 'lng_terminal', 'storage', 'tank_farm')
+								THEN true ELSE false END,
+							'coordinates', CASE
+								WHEN sa.latitude IS NOT NULL AND sa.longitude IS NOT NULL AND ba.latitude IS NOT NULL AND ba.longitude IS NOT NULL
+								THEN jsonb_build_object('latitude', (sa.latitude + ba.latitude) / 2.0, 'longitude', (sa.longitude + ba.longitude) / 2.0)
+								ELSE '{}'::jsonb
+							END,
+							'evidence_label', 'inferred'
+						),
+						jsonb_build_object(
+							'step', 'cargo_or_vessel',
+							'role', 'movement_clue',
+							'label', CASE
+								WHEN cargo.items IS NULL OR jsonb_array_length(cargo.items) = 0 THEN 'cargo clue pending'
+								ELSE COALESCE(NULLIF(cargo.items->0->>'vessel_name', ''), 'cargo clue') || ' / ' ||
+									COALESCE(NULLIF(cargo.items->0->>'product_family', ''), COALESCE(oc.commodity, 'product'))
+							END,
+							'short_label', 'Cargo clue',
+							'vessel_name', COALESCE(cargo.items->0->>'vessel_name', ''),
+							'product_family', COALESCE(cargo.items->0->>'product_family', oc.commodity, ''),
+							'quantity_best', cargo.items->0->'quantity_best',
+							'unit', COALESCE(cargo.items->0->>'unit', ''),
+							'coordinates', CASE
+								WHEN sa.latitude IS NOT NULL AND sa.longitude IS NOT NULL AND ba.latitude IS NOT NULL AND ba.longitude IS NOT NULL
+								THEN jsonb_build_object('latitude', (sa.latitude + ba.latitude) / 2.0, 'longitude', (sa.longitude + ba.longitude) / 2.0)
+								ELSE '{}'::jsonb
+							END,
+							'evidence_label', CASE WHEN cargo.items IS NULL THEN 'not_attached' ELSE 'estimated' END
+						),
+						jsonb_build_object(
+							'step', 'buyer_asset',
+							'role', 'demand_asset',
+							'label', COALESCE(ba.name, 'buyer asset'),
+							'short_label', 'Buyer asset',
+							'asset_id', COALESCE(ba.id::text, ''),
+							'asset_type', COALESCE(ba.asset_type, ''),
+							'country_code', COALESCE(ba.country_code, oc.destination_country, ''),
+							'coordinates', jsonb_build_object('latitude', ba.latitude, 'longitude', ba.longitude),
+							'evidence_label', 'reported'
+						),
+						jsonb_build_object(
+							'step', 'buyer_control',
+							'role', 'owner_or_operator',
+							'label', COALESCE(
+								NULLIF(buyer_ownership.items->0->>'parent_name', ''),
+								NULLIF(buyer_ownership.items->0->>'owner_name', ''),
+								NULLIF(bc.name, ''),
+								NULLIF(bo.name, ''),
+								ba.name,
+								'buyer control'
+							),
+							'short_label', 'Buyer control',
+							'company_id', COALESCE(bc.id::text, bo.id::text, ''),
+							'asset_id', COALESCE(ba.id::text, ''),
+							'asset', COALESCE(ba.name, ''),
+							'country_code', COALESCE(ba.country_code, oc.destination_country, ''),
+							'evidence_label', 'reported'
+						),
+						jsonb_build_object(
+							'step', 'price_spread',
+							'role', 'market_context',
+							'label', COALESCE(oc.price_context->>'benchmark_key', oc.price_context->>'benchmark', 'open benchmark pending'),
+							'short_label', 'Price',
+							'benchmark_key', COALESCE(oc.price_context->>'benchmark_key', oc.price_context->>'benchmark', ''),
+							'price', oc.price_context->'price',
+							'currency', COALESCE(oc.price_context->>'currency', ''),
+							'unit', COALESCE(oc.price_context->>'unit', ''),
+							'evidence_label', COALESCE(oc.price_context->>'evidence_label', 'estimated')
+						)
 					),
+					'chain_segments',
+						CASE
+							WHEN snapshot_chain.segments IS NOT NULL THEN snapshot_chain.segments
+							ELSE COALESCE(chain_geometry.segments, '[]'::jsonb) ||
+								CASE
+									WHEN sa.latitude IS NOT NULL AND sa.longitude IS NOT NULL AND ba.latitude IS NOT NULL AND ba.longitude IS NOT NULL
+									THEN jsonb_build_array(jsonb_build_object(
+										'from_step', 'supplier_asset',
+										'to_step', 'buyer_asset',
+										'label', COALESCE(oc.origin_country, '?') || ' -> ' || COALESCE(oc.destination_country, '?') || ' inferred commercial corridor',
+										'geometry_source', 'inferred_direct_corridor',
+										'evidence_label', 'inferred',
+										'coordinates', jsonb_build_array(
+											jsonb_build_array(sa.longitude, sa.latitude),
+											jsonb_build_array(ba.longitude, ba.latitude)
+										),
+										'geometry', ST_AsGeoJSON(ST_MakeLine(
+											ST_SetSRID(ST_MakePoint(sa.longitude, sa.latitude), 4326),
+											ST_SetSRID(ST_MakePoint(ba.longitude, ba.latitude), 4326)
+										))::jsonb
+									))
+									ELSE '[]'::jsonb
+								END
+						END,
 					'evidence', COALESCE(oc.evidence, '[]'::jsonb),
 					'limitations', COALESCE(oc.limitations, ARRAY[]::text[]),
 					'generated_at', oc.generated_at::text
@@ -802,6 +1128,160 @@ func (s *Server) listIntelInvestorPaths(w http.ResponseWriter, r *http.Request) 
 					LIMIT 3
 				) cargo_rows
 			) cargo ON true
+			LEFT JOIN LATERAL (
+				SELECT jsonb_agg(jsonb_build_object(
+					'from_step', ocs.from_step,
+					'to_step', ocs.to_step,
+					'label', ocs.label,
+					'geometry_source', ocs.geometry_source,
+					'source_key', COALESCE(ocs.source_key, ''),
+					'project_id', COALESCE(ocs.project_id, ''),
+					'pipeline_name', COALESCE(ocs.pipeline_name, ''),
+					'distance_m', ocs.distance_m,
+					'evidence_label', ocs.evidence_label,
+					'geometry', ST_AsGeoJSON(ocs.geom)::jsonb,
+					'properties', COALESCE(ocs.properties, '{}'::jsonb),
+					'generated_at', ocs.generated_at::text
+				) ORDER BY ocs.segment_order) AS segments
+				FROM opportunity_chain_segments ocs
+				WHERE ocs.opportunity_id = oc.id
+				  AND ocs.generated_by = 'opportunity_chain_segments_v1'
+				  AND (($5 <> '' OR $6 <> '') OR ocs.geometry_source = 'inferred_direct_corridor')
+			) snapshot_chain ON true
+			LEFT JOIN LATERAL (
+				WITH supplier_asset_route_line AS (
+					SELECT
+						10 AS ord,
+						jsonb_build_object(
+							'from_step', 'supplier_asset',
+							'to_step', 'physical_route',
+							'label', COALESCE(sa.name, 'supplier asset') || ' reported geometry',
+							'geometry_source', 'asset_geometries',
+							'source_key', ag.source_key,
+							'evidence_label', 'reported',
+							'geometry', ST_AsGeoJSON(ST_SimplifyPreserveTopology(COALESCE(ag.geom_simplified, ag.geom), 0.05))::jsonb
+						) AS segment
+					FROM asset_geometries ag
+					WHERE ag.asset_id = oc.supplier_asset_id
+					  AND ($5 <> '' OR $6 <> '')
+					  AND snapshot_chain.segments IS NULL
+					  AND GeometryType(COALESCE(ag.geom_simplified, ag.geom)) IN ('LINESTRING', 'MULTILINESTRING')
+					ORDER BY ag.created_at DESC
+					LIMIT 1
+				),
+				buyer_asset_route_line AS (
+					SELECT
+						40 AS ord,
+						jsonb_build_object(
+							'from_step', 'physical_route',
+							'to_step', 'buyer_asset',
+							'label', COALESCE(ba.name, 'buyer asset') || ' reported geometry',
+							'geometry_source', 'asset_geometries',
+							'source_key', ag.source_key,
+							'evidence_label', 'reported',
+							'geometry', ST_AsGeoJSON(ST_SimplifyPreserveTopology(COALESCE(ag.geom_simplified, ag.geom), 0.05))::jsonb
+						) AS segment
+					FROM asset_geometries ag
+					WHERE ag.asset_id = oc.buyer_asset_id
+					  AND ($5 <> '' OR $6 <> '')
+					  AND snapshot_chain.segments IS NULL
+					  AND GeometryType(COALESCE(ag.geom_simplified, ag.geom)) IN ('LINESTRING', 'MULTILINESTRING')
+					ORDER BY ag.created_at DESC
+					LIMIT 1
+				),
+				asset_route_lines AS (
+					SELECT * FROM supplier_asset_route_line
+					UNION ALL
+					SELECT * FROM buyer_asset_route_line
+				),
+				endpoints AS (
+					SELECT
+						20 AS ord,
+						'supplier_asset' AS from_step,
+						'physical_route' AS to_step,
+						COALESCE(sa.name, 'supplier asset') || ' GEM pipeline access' AS label,
+						CASE
+							WHEN sa.latitude IS NOT NULL AND sa.longitude IS NOT NULL
+							THEN ST_SetSRID(ST_MakePoint(sa.longitude, sa.latitude), 4326)::geography
+							ELSE NULL::geography
+						END AS point
+					UNION ALL
+					SELECT
+						30 AS ord,
+						'physical_route' AS from_step,
+						'buyer_asset' AS to_step,
+						COALESCE(ba.name, 'buyer asset') || ' GEM pipeline access' AS label,
+						CASE
+							WHEN ba.latitude IS NOT NULL AND ba.longitude IS NOT NULL
+							THEN ST_SetSRID(ST_MakePoint(ba.longitude, ba.latitude), 4326)::geography
+							ELSE NULL::geography
+						END AS point
+				),
+				pipeline_access AS (
+					SELECT
+						ep.ord,
+						jsonb_build_object(
+							'from_step', ep.from_step,
+							'to_step', ep.to_step,
+							'label', ep.label,
+							'geometry_source', 'pipeline_graph_edges',
+							'source_key', COALESCE(hit.metadata->>'source_key', hit.metadata->'tags'->>'source_id', ''),
+							'project_id', COALESCE(hit.metadata->>'project_id', hit.metadata->'tags'->>'project_id', ''),
+							'pipeline_name', COALESCE(hit.metadata->>'pipeline_name', hit.metadata->>'name', hit.metadata->'tags'->>'name', ''),
+							'distance_m', round(ST_Distance(hit.geom, ep.point)::numeric, 1),
+							'evidence_label', 'reported',
+							'geometry', ST_AsGeoJSON(ST_SimplifyPreserveTopology(hit.geom::geometry, 0.05))::jsonb
+						) AS segment
+					FROM endpoints ep
+					JOIN LATERAL (
+						SELECT e.geom, e.metadata
+						FROM pipeline_graph_edges e
+						WHERE ($5 <> '' OR $6 <> '')
+						  AND snapshot_chain.segments IS NULL
+						  AND ep.point IS NOT NULL
+						  AND e.geom IS NOT NULL
+						  AND (e.osm_id LIKE 'gem:%' OR e.osm_id LIKE 'gemgeo:%')
+						  AND ST_DWithin(e.geom, ep.point, 25000)
+						  AND (
+							COALESCE(oc.commodity, '') = ''
+							OR (
+								oc.commodity ILIKE '%gas%'
+								AND (
+									COALESCE(e.metadata->>'source_key', '') ILIKE '%gas%'
+									OR COALESCE(e.metadata->'tags'->>'fuel_group', '') ILIKE '%gas%'
+									OR COALESCE(e.metadata->'tags'->>'fuel', '') ILIKE '%gas%'
+								)
+							)
+							OR (
+								oc.commodity ILIKE '%lng%'
+								AND (
+									COALESCE(e.metadata->>'source_key', '') ILIKE '%gas%'
+									OR COALESCE(e.metadata->'tags'->>'fuel_group', '') ILIKE '%gas%'
+									OR COALESCE(e.metadata->'tags'->>'fuel', '') ILIKE '%gas%'
+								)
+							)
+							OR (
+								(oc.commodity ILIKE '%oil%' OR oc.commodity ILIKE '%crude%' OR oc.commodity ILIKE '%lpg%' OR oc.commodity ILIKE '%ngl%')
+								AND (
+									COALESCE(e.metadata->>'source_key', '') ILIKE '%oil%'
+									OR COALESCE(e.metadata->>'source_key', '') ILIKE '%ngl%'
+									OR COALESCE(e.metadata->'tags'->>'fuel_group', '') ILIKE '%oil%'
+									OR COALESCE(e.metadata->'tags'->>'fuel', '') ILIKE '%oil%'
+									OR COALESCE(e.metadata->'tags'->>'fuel', '') ILIKE '%ngl%'
+								)
+							)
+						  )
+						ORDER BY e.geom <-> ep.point
+						LIMIT 1
+					) hit ON true
+				)
+				SELECT jsonb_agg(segment ORDER BY ord) FILTER (WHERE segment IS NOT NULL) AS segments
+				FROM (
+					SELECT * FROM asset_route_lines
+					UNION ALL
+					SELECT * FROM pipeline_access
+				) route_segments
+			) chain_geometry ON true
 			WHERE ($7 = '' OR inv.investor_name ILIKE '%' || $7 || '%')
 		) paths
 		ORDER BY both_sides DESC, opp_score DESC, investor_confidence DESC
@@ -826,6 +1306,37 @@ func (s *Server) listIntelInvestorPaths(w http.ResponseWriter, r *http.Request) 
 		"items":   out,
 		"message": "Investor paths expose named control-chain intelligence: investor exposure, supplier/buyer assets, route context, buyer pressure, cargo clues, and open price context.",
 	})
+}
+
+func (s *Server) listIntelInvestorPathSnapshots(r *http.Request, commodity, origin, destination, investor, assetID, opportunityID string, minScore float64, limit int) ([]json.RawMessage, error) {
+	rows, err := s.pool.Query(r.Context(), `
+		SELECT payload::text
+		FROM opportunity_investor_path_snapshots
+		WHERE generated_by = 'opportunity_investor_paths_v1'
+		  AND ($1 = '' OR commodity ILIKE $1 OR commodity ILIKE '%' || $1 || '%')
+		  AND ($2 = '' OR origin_country ILIKE $2)
+		  AND ($3 = '' OR destination_country ILIKE $3)
+		  AND ($4 = 0 OR COALESCE(score, 0) >= $4)
+		  AND ($5 = '' OR supplier_asset_id::text = $5 OR buyer_asset_id::text = $5 OR supplier_company_id::text = $5 OR buyer_company_id::text = $5)
+		  AND ($6 = '' OR opportunity_id::text = $6 OR lane_id = $6)
+		  AND ($7 = '' OR investor_name ILIKE '%' || $7 || '%' OR investor_entity_id = $7)
+		ORDER BY investor_control_score DESC, score DESC, confidence_score DESC, generated_at DESC
+		LIMIT $8
+	`, commodity, origin, destination, minScore, assetID, opportunityID, investor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []json.RawMessage{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		out = append(out, jsonBlock(raw, "{}"))
+	}
+	return out, rows.Err()
 }
 
 func (s *Server) getInvestorExposure(w http.ResponseWriter, r *http.Request) {
@@ -888,31 +1399,66 @@ func (s *Server) getInvestorExposure(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"count": len(out), "items": out})
 }
 
-func scanCargoEstimate(rows interface{ Scan(dest ...any) error }) []map[string]any {
-	var id, vesselID, vesselName, imo, mmsi, vesselClass, owner, operator, loadPort, loadCountry, dischargePort, dischargeCountry, product, unit, method, observedAt, evidence string
-	var low, best, high, confidence float64
-	if err := rows.Scan(&id, &vesselID, &vesselName, &imo, &mmsi, &vesselClass, &owner, &operator, &loadPort, &loadCountry, &dischargePort, &dischargeCountry,
-		&product, &low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence); err != nil {
+func (s *Server) scanCargoEstimate(ctx context.Context, rows interface{ Scan(dest ...any) error }) []map[string]any {
+	var id, vesselID, vesselName, imo, mmsi, vesselClass, owner, operator, ownerCompanyID, operatorCompanyID, ownerProfile, voyageID string
+	var loadPort, loadCountry, dischargePort, dischargeCountry, product, unit, method, observedAt, evidence, routeSource, latestDestination string
+	var low, best, high, confidence, routeConfidence float64
+	if err := rows.Scan(&id, &vesselID, &vesselName, &imo, &mmsi, &vesselClass, &owner, &operator,
+		&ownerCompanyID, &operatorCompanyID, &ownerProfile, &voyageID,
+		&loadPort, &loadCountry, &dischargePort, &dischargeCountry,
+		&product, &low, &best, &high, &unit, &method, &confidence, &observedAt, &evidence, &routeSource, &routeConfidence, &latestDestination); err != nil {
 		return nil
 	}
+	decodedDestination := decodeAISDestination(latestDestination)
+	chain := buildCargoCommercialContext(ctx, s.pool, cargoCommercialContextInput{
+		Source:             "cargo_estimates",
+		VesselID:           vesselID,
+		VesselName:         vesselName,
+		IMO:                imo,
+		MMSI:               mmsi,
+		VesselClass:        vesselClass,
+		OwnerName:          owner,
+		OperatorName:       operator,
+		OwnerCompanyID:     ownerCompanyID,
+		OperatorCompanyID:  operatorCompanyID,
+		OwnerProfileJSON:   ownerProfile,
+		ProductFamily:      product,
+		LoadPort:           loadPort,
+		LoadCountry:        loadCountry,
+		DischargePort:      dischargePort,
+		DischargeCountry:   dischargeCountry,
+		RouteSource:        routeSource,
+		RouteConfidence:    routeConfidence,
+		LatestDestination:  latestDestination,
+		DecodedDestination: decodedDestination,
+		QuantityMethod:     method,
+		EvidenceLabel:      "estimated",
+	})
+	routeHint := map[string]any{"source": routeSource, "confidence_score": routeConfidence, "latest_destination": latestDestination}
+	if len(decodedDestination) > 0 {
+		routeHint["decoded_destination"] = decodedDestination
+	}
 	return []map[string]any{{
-		"id":             id,
-		"source":         "cargo_estimates",
-		"vessel_id":      vesselID,
-		"vessel_name":    vesselName,
-		"imo":            imo,
-		"mmsi":           mmsi,
-		"vessel_class":   vesselClass,
-		"owner_name":     owner,
-		"operator_name":  operator,
-		"product_family": product,
-		"load":           map[string]string{"port": loadPort, "country": loadCountry},
-		"discharge":      map[string]string{"port": dischargePort, "country": dischargeCountry},
-		"quantity":       map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
-		"confidence":     confidence,
-		"observed_at":    observedAt,
-		"evidence":       jsonBlock(evidence, "[]"),
-		"evidence_label": "estimated",
+		"id":               id,
+		"source":           "cargo_estimates",
+		"vessel_id":        vesselID,
+		"voyage_id":        voyageID,
+		"vessel_name":      vesselName,
+		"imo":              imo,
+		"mmsi":             mmsi,
+		"vessel_class":     vesselClass,
+		"owner_name":       owner,
+		"operator_name":    operator,
+		"product_family":   product,
+		"load":             map[string]string{"port": loadPort, "country": loadCountry},
+		"discharge":        map[string]string{"port": dischargePort, "country": dischargeCountry},
+		"route_hint":       routeHint,
+		"quantity":         map[string]any{"low": low, "best": best, "high": high, "unit": unit, "method": method},
+		"confidence":       confidence,
+		"observed_at":      observedAt,
+		"evidence":         jsonBlock(evidence, "[]"),
+		"evidence_label":   "estimated",
+		"commercial_chain": chain,
 	}}
 }
 

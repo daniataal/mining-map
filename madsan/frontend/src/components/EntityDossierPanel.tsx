@@ -212,12 +212,99 @@ function recordNumber(value: unknown, key: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function chainCoord(path: IntelInvestorPath, side: "supplier" | "buyer"): [number, number] | null {
+function recordObject(value: unknown, key: string): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>)[key];
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+}
+
+function chainNodes(path: IntelInvestorPath): Record<string, unknown>[] {
+  return Array.isArray(path.control_chain)
+    ? path.control_chain.filter((node): node is Record<string, unknown> => !!node && typeof node === "object")
+    : [];
+}
+
+function nodeCoord(node: Record<string, unknown>): [number, number] | null {
+  const coords = recordObject(node, "coordinates");
+  if (!coords) return null;
+  const lat = recordNumber(coords, "latitude");
+  const lng = recordNumber(coords, "longitude");
+  if (lat == null || lng == null) return null;
+  return [lng, lat];
+}
+
+function nodeText(node: Record<string, unknown>, key: string, fallback = ""): string {
+  return recordText(node, key) || fallback;
+}
+
+function chainFallbackCoord(path: IntelInvestorPath, side: "supplier" | "buyer"): [number, number] | null {
   const row = side === "supplier" ? path.supplier : path.buyer;
   const lat = recordNumber(row, "latitude");
   const lng = recordNumber(row, "longitude");
   if (lat == null || lng == null) return null;
   return [lng, lat];
+}
+
+function segmentCoordinates(segment: Record<string, unknown>): [number, number][] {
+  const raw = segment.coordinates;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) return null;
+      const lng = Number(coord[0]);
+      const lat = Number(coord[1]);
+      return Number.isFinite(lng) && Number.isFinite(lat) ? ([lng, lat] as [number, number]) : null;
+    })
+    .filter((coord): coord is [number, number] => !!coord);
+}
+
+function geometryLineCoordinates(geometry: unknown): [number, number][][] {
+  if (!geometry || typeof geometry !== "object") return [];
+  const geom = geometry as Record<string, unknown>;
+  const type = recordText(geom, "type");
+  const coordinates = geom.coordinates;
+  if (type === "LineString" && Array.isArray(coordinates)) {
+    const line = coordinates
+      .map((coord) => {
+        if (!Array.isArray(coord) || coord.length < 2) return null;
+        const lng = Number(coord[0]);
+        const lat = Number(coord[1]);
+        return Number.isFinite(lng) && Number.isFinite(lat) ? ([lng, lat] as [number, number]) : null;
+      })
+      .filter((coord): coord is [number, number] => !!coord);
+    return line.length >= 2 ? [line] : [];
+  }
+  if (type === "MultiLineString" && Array.isArray(coordinates)) {
+    return coordinates
+      .map((line) =>
+        Array.isArray(line)
+          ? line
+              .map((coord) => {
+                if (!Array.isArray(coord) || coord.length < 2) return null;
+                const lng = Number(coord[0]);
+                const lat = Number(coord[1]);
+                return Number.isFinite(lng) && Number.isFinite(lat) ? ([lng, lat] as [number, number]) : null;
+              })
+              .filter((coord): coord is [number, number] => !!coord)
+          : [],
+      )
+      .filter((line) => line.length >= 2);
+  }
+  if (type === "GeometryCollection" && Array.isArray(geom.geometries)) {
+    return geom.geometries.flatMap(geometryLineCoordinates);
+  }
+  return [];
+}
+
+function segmentLines(segment: Record<string, unknown>): [number, number][][] {
+  const geometryLines = geometryLineCoordinates(segment.geometry);
+  if (geometryLines.length > 0) return geometryLines;
+  const coords = segmentCoordinates(segment);
+  return coords.length >= 2 ? [coords] : [];
+}
+
+function chainStepName(node: Record<string, unknown>): string {
+  return nodeText(node, "short_label") || nodeText(node, "step").replaceAll("_", " ") || "chain step";
 }
 
 function buildRelationshipLines(dossier: Dossier | null, chains: IntelInvestorPath[] = []): FeatureCollection {
@@ -245,38 +332,76 @@ function buildRelationshipLines(dossier: Dossier | null, chains: IntelInvestorPa
   }
 
   for (const [idx, path] of chains.slice(0, 6).entries()) {
-    const supplier = chainCoord(path, "supplier");
-    const buyer = chainCoord(path, "buyer");
-    if (!supplier || !buyer) continue;
     const investorName = path.investor?.name ?? "reported investor";
-    const supplierName = recordText(path.supplier, "asset_name") || "supplier asset";
-    const buyerName = recordText(path.buyer, "asset_name") || "buyer asset";
-    features.push({
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [supplier, buyer],
-      },
-      properties: {
-        rel: "opportunity_chain",
-        name: `${investorName}: ${supplierName} -> ${buyerName}`,
-        investor: investorName,
-        commodity: path.commodity,
-        focus_chain: idx === 0,
-      },
-    });
-    features.push(
-      {
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: supplier },
-        properties: { rel: "opportunity_chain_point", role: "supplier", name: supplierName, investor: investorName },
-      },
-      {
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: buyer },
-        properties: { rel: "opportunity_chain_point", role: "buyer", name: buyerName, investor: investorName },
-      },
+    const nodes = chainNodes(path);
+    const mappedNodes = nodes
+      .map((node) => ({ node, coord: nodeCoord(node) }))
+      .filter((item): item is { node: Record<string, unknown>; coord: [number, number] } => !!item.coord);
+    const supplier = chainFallbackCoord(path, "supplier");
+    const buyer = chainFallbackCoord(path, "buyer");
+    const fallbackCoords = supplier && buyer ? [supplier, buyer] : [];
+    const segments = Array.isArray(path.chain_segments)
+      ? path.chain_segments.filter((segment): segment is Record<string, unknown> => !!segment && typeof segment === "object")
+      : [];
+    const segmentLineItems = segments.flatMap((segment) =>
+      segmentLines(segment).map((coordinates) => ({ segment, coordinates })),
     );
+    if (segmentLineItems.length > 0) {
+      for (const [segmentIdx, item] of segmentLineItems.entries()) {
+        features.push({
+          type: "Feature" as const,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: item.coordinates,
+          },
+          properties: {
+            rel: "opportunity_chain",
+            name: recordText(item.segment, "label") || `${investorName}: ${recordText(path.supplier, "asset_name") || "supplier asset"} -> ${recordText(path.buyer, "asset_name") || "buyer asset"}`,
+            investor: investorName,
+            commodity: path.commodity,
+            evidence_label: recordText(item.segment, "evidence_label"),
+            geometry_source: recordText(item.segment, "geometry_source"),
+            segment_label: recordText(item.segment, "label"),
+            focus_chain: idx === 0 && segmentIdx === 0,
+          },
+        });
+      }
+    } else {
+      const coordinates = mappedNodes.map((item) => item.coord);
+      const lineCoords = coordinates.length >= 2 ? coordinates : fallbackCoords;
+      if (lineCoords.length >= 2) {
+        features.push({
+          type: "Feature" as const,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: lineCoords,
+          },
+          properties: {
+            rel: "opportunity_chain",
+            name: `${investorName}: ${recordText(path.supplier, "asset_name") || "supplier asset"} -> ${recordText(path.buyer, "asset_name") || "buyer asset"}`,
+            investor: investorName,
+            commodity: path.commodity,
+            geometry_source: "fallback_coordinates",
+            focus_chain: idx === 0,
+          },
+        });
+      }
+    }
+    for (const { node, coord } of mappedNodes) {
+      const step = nodeText(node, "step");
+      features.push({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: coord },
+        properties: {
+          rel: "opportunity_chain_point",
+          role: step,
+          name: nodeText(node, "label") || chainStepName(node),
+          short_label: chainStepName(node),
+          investor: investorName,
+          evidence_label: nodeText(node, "evidence_label"),
+        },
+      });
+    }
   }
   return { type: "FeatureCollection", features };
 }
@@ -653,13 +778,16 @@ export default function EntityDossierPanel({
           {assetChains[0] ? (
             <>
               <p>{assetChains[0].commercial_thesis}</p>
-              <div className="asset-chain-path">
-                <span>{assetChains[0].investor?.name ?? "investor"}</span>
-                <span>{recordText(assetChains[0].supplier, "asset_name") || "supplier asset"}</span>
-                <span>{recordText(assetChains[0].buyer, "asset_name") || "buyer asset"}</span>
+              <div className="asset-chain-sequence">
+                {chainNodes(assetChains[0]).slice(0, 8).map((node, idx) => (
+                  <span key={`${assetChains[0].id}-${idx}`}>
+                    <b>{chainStepName(node)}</b>
+                    <em>{nodeText(node, "label") || nodeText(node, "asset")}</em>
+                  </span>
+                ))}
               </div>
               <small>
-                The map is drawing the top chain lines from source-backed asset coordinates. Wider investor graph matching is still a precomputed-job candidate.
+                The map is drawing every chain step with coordinates; capital, ownership, cargo, and price steps remain in the intel chain even when they are not geographic.
               </small>
             </>
           ) : (

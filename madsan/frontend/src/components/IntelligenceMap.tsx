@@ -349,11 +349,18 @@ function addLiveVesselLayers(map: maplibregl.Map, visible: boolean) {
 function setVesselLayerVisibility(map: maplibregl.Map, visible: boolean, liveConnected: boolean) {
   const tileVis = visible ? "visible" : "none";
   const liveVis = visible && liveConnected ? "visible" : "none";
+  const setIfPresent = (lid: string, visibility: "visible" | "none") => {
+    try {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", visibility);
+    } catch {
+      // MapLibre can briefly clear style internals during reload/unmount while async AIS callbacks settle.
+    }
+  };
   for (const lid of VESSEL_TILE_LAYERS) {
-    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", tileVis);
+    setIfPresent(lid, tileVis);
   }
   for (const lid of VESSEL_LIVE_LAYERS) {
-    if (map.getLayer(lid)) map.setLayoutProperty(lid, "visibility", liveVis);
+    setIfPresent(lid, liveVis);
   }
 }
 
@@ -1166,9 +1173,19 @@ export default function IntelligenceMap({
         type: "line",
         source: "rel-lines",
         paint: {
-          "line-color": ["match", ["get", "rel"], "opportunity_chain", "#34d399", "#5eb3ff"],
-          "line-width": ["match", ["get", "rel"], "opportunity_chain", 3.2, 2],
-          "line-opacity": ["match", ["get", "rel"], "opportunity_chain", 0.9, 0.65],
+          "line-color": [
+            "case",
+            ["!=", ["get", "rel"], "opportunity_chain"],
+            "#5eb3ff",
+            ["match", ["get", "geometry_source"], "pipeline_graph_edges", "#38bdf8", "asset_geometries", "#5dffc8", "#34d399"],
+          ],
+          "line-width": [
+            "case",
+            ["!=", ["get", "rel"], "opportunity_chain"],
+            2,
+            ["match", ["get", "geometry_source"], "inferred_direct_corridor", 2.2, 3.3],
+          ],
+          "line-opacity": ["match", ["get", "rel"], "opportunity_chain", 0.92, 0.65],
           "line-dasharray": [2, 2],
         },
       });
@@ -1178,11 +1195,54 @@ export default function IntelligenceMap({
         source: "rel-lines",
         filter: ["==", ["geometry-type"], "Point"],
         paint: {
-          "circle-radius": ["match", ["get", "role"], "supplier", 7, "buyer", 8, 6],
-          "circle-color": ["match", ["get", "role"], "supplier", "#5dffc8", "buyer", "#fbbf24", "#5eb3ff"],
+          "circle-radius": [
+            "match",
+            ["get", "role"],
+            "supplier_asset",
+            7,
+            "buyer_asset",
+            8,
+            "physical_route",
+            6,
+            "cargo_or_vessel",
+            6,
+            5,
+          ],
+          "circle-color": [
+            "match",
+            ["get", "role"],
+            "supplier_asset",
+            "#5dffc8",
+            "buyer_asset",
+            "#fbbf24",
+            "physical_route",
+            "#38bdf8",
+            "cargo_or_vessel",
+            "#c084fc",
+            "#5eb3ff",
+          ],
           "circle-stroke-width": 2,
           "circle-stroke-color": "#0a0e14",
           "circle-opacity": 0.95,
+        },
+      });
+      map.addLayer({
+        id: "rel-point-labels",
+        type: "symbol",
+        source: "rel-lines",
+        filter: ["==", ["geometry-type"], "Point"],
+        layout: {
+          "text-field": ["coalesce", ["get", "short_label"], ["get", "name"], ""],
+          "text-size": 10,
+          "text-offset": [0, 1.35],
+          "text-anchor": "top",
+          "text-allow-overlap": false,
+          "text-ignore-placement": false,
+        },
+        paint: {
+          "text-color": "#dbeafe",
+          "text-halo-color": "#050914",
+          "text-halo-width": 1.4,
         },
       });
       map.addSource("pipeline-focus-sites", {
@@ -1497,6 +1557,7 @@ export default function IntelligenceMap({
           }
           ws.binaryType = "arraybuffer";
           ws.onmessage = (ev) => {
+            if (cancelled) return;
             setLastWsAt(new Date().toISOString());
             const payload = ev.data instanceof ArrayBuffer ? ev.data : (ev.data as string);
             const msg = parseWsFrame(payload);
@@ -1508,10 +1569,15 @@ export default function IntelligenceMap({
             }
           };
           ws.onopen = () => {
+            if (cancelled) {
+              ws?.close();
+              return;
+            }
             wsRetryMs = 2000;
             setWsState("connected");
             setVesselLayerVisibility(map, !!layers.vessels, true);
             const sendSub = () => {
+              if (cancelled) return;
               if (ws?.readyState !== WebSocket.OPEN) return;
               const b = map.getBounds();
               ws.send(JSON.stringify({
@@ -1527,6 +1593,7 @@ export default function IntelligenceMap({
             sendSub();
           };
           ws.onclose = () => {
+            if (cancelled) return;
             setWsState("disconnected");
             setVesselLayerVisibility(map, !!layers.vessels, false);
             vesselMotion?.clear(); // empties live source + restores full tile filter

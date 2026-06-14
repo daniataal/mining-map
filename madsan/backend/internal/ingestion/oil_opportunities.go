@@ -22,6 +22,8 @@ type OilOpportunityOptions struct {
 type OilOpportunityResult struct {
 	Month          string `json:"month"`
 	RowsWritten    int64  `json:"rows_written"`
+	ChainSegments  int64  `json:"chain_segments"`
+	ChainRefreshMs int64  `json:"chain_refresh_ms"`
 	DurationMillis int64  `json:"duration_ms"`
 }
 
@@ -111,6 +113,12 @@ func (s *Service) GenerateOilOpportunityCandidates(ctx context.Context, opts Oil
 		return res, err
 	}
 	res.RowsWritten = tag.RowsAffected()
+	chainRes, err := s.GenerateOpportunityChainSegments(ctx, OpportunityChainSegmentOptions{Limit: opts.Limit})
+	if err != nil {
+		return res, err
+	}
+	res.ChainSegments = chainRes.RowsWritten
+	res.ChainRefreshMs = chainRes.DurationMillis
 	res.DurationMillis = time.Since(started).Milliseconds()
 	return res, nil
 }

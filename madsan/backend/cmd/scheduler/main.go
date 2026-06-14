@@ -33,6 +33,7 @@ var schedules = []struct {
 	{interval: 24 * time.Hour, jobType: "terminal_enrichment", source: "terminal_enrichment"},
 	{interval: 6 * time.Hour, jobType: "cargo_estimates_backfill", source: "ais_draft_delta_v1"},
 	{interval: 24 * time.Hour, jobType: "oil_opportunity_candidates", source: "oil_opportunity_v1"},
+	{interval: 24 * time.Hour, jobType: "opportunity_chain_segments", source: "opportunity_chain_segments_v1"},
 	{interval: 1 * time.Hour, jobType: "deal_watch_scan", source: "deal_watch"},
 	{interval: 7 * 24 * time.Hour, jobType: "vessel_enrichment", source: "vessel_enrichment"},
 	{interval: 6 * time.Hour, jobType: "port_call_sweep", source: "live_ais"},

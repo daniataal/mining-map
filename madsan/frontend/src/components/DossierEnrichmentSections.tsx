@@ -194,6 +194,164 @@ function readOwnerProfile(summary: Record<string, unknown>): Record<string, unkn
   return null;
 }
 
+type OwnershipIntelEntry = {
+  role?: string;
+  label?: string;
+  status?: string;
+  detail?: string;
+  weight?: number;
+};
+
+type OwnershipHistoryCandidate = {
+  vessel_name?: string;
+  disponent?: string;
+  from_date?: string;
+  to_date?: string;
+  role?: string;
+  status?: string;
+  detail?: string;
+};
+
+type OwnershipRegistryCheck = {
+  name?: string;
+  purpose?: string;
+  query?: string;
+  status?: string;
+};
+
+type OwnershipIntel = {
+  tier?: string;
+  score?: number;
+  summary?: string;
+  beneficial_owner_status?: string;
+  previous_ownership_status?: string;
+  role_chain: OwnershipIntelEntry[];
+  evidence: OwnershipIntelEntry[];
+  history_candidates: OwnershipHistoryCandidate[];
+  registry_checks: OwnershipRegistryCheck[];
+  search_pivots: string[];
+  limitations: string[];
+};
+
+type CommercialContact = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  evidence?: string;
+  confidence_score?: number;
+  verification_status?: string;
+};
+
+type CommercialContactBundle = {
+  role?: string;
+  company_id?: string;
+  name?: string;
+  country_code?: string;
+  website?: string;
+  source_url?: string;
+  register_source_url?: string;
+  phone?: string;
+  email?: string;
+  parent_name?: string;
+  parent_company_id?: string;
+  shipvault_company_id?: string;
+  shipvault_country?: string;
+  shipvault_city?: string;
+  source?: string;
+  tier?: string;
+  contacts: CommercialContact[];
+};
+
+function recordArray(raw: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((e): e is Record<string, unknown> => e != null && typeof e === "object" && !Array.isArray(e));
+}
+
+function stringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((v) => (v == null ? "" : String(v).trim())).filter(Boolean);
+}
+
+function readOwnershipIntel(summary: Record<string, unknown>): OwnershipIntel | null {
+  const raw = summary.ownership_intel;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  return {
+    tier: strSpec(obj.tier),
+    score: numSpec(obj.score),
+    summary: strSpec(obj.summary),
+    beneficial_owner_status: strSpec(obj.beneficial_owner_status),
+    previous_ownership_status: strSpec(obj.previous_ownership_status),
+    role_chain: recordArray(obj.role_chain).map((e) => ({
+      role: strSpec(e.role),
+      label: strSpec(e.label),
+      status: strSpec(e.status),
+    })),
+    evidence: recordArray(obj.evidence).map((e) => ({
+      role: strSpec(e.key),
+      label: strSpec(e.label),
+      status: strSpec(e.status),
+      detail: strSpec(e.detail),
+      weight: numSpec(e.weight),
+    })),
+    history_candidates: recordArray(obj.history_candidates).map((e) => ({
+      vessel_name: strSpec(e.vessel_name),
+      disponent: strSpec(e.disponent),
+      from_date: strSpec(e.from_date),
+      to_date: strSpec(e.to_date),
+      role: strSpec(e.role),
+      status: strSpec(e.status),
+      detail: strSpec(e.detail),
+    })),
+    registry_checks: recordArray(obj.registry_checks).map((e) => ({
+      name: strSpec(e.name),
+      purpose: strSpec(e.purpose),
+      query: strSpec(e.query),
+      status: strSpec(e.status),
+    })),
+    search_pivots: stringArray(obj.search_pivots),
+    limitations: stringArray(obj.limitations),
+  };
+}
+
+function readCommercialContacts(summary: Record<string, unknown>): CommercialContactBundle[] {
+  return recordArray(summary.commercial_contacts).map((bundle) => ({
+    role: strSpec(bundle.role),
+    company_id: strSpec(bundle.company_id),
+    name: strSpec(bundle.name),
+    country_code: strSpec(bundle.country_code),
+    website: strSpec(bundle.website),
+    source_url: strSpec(bundle.source_url),
+    register_source_url: strSpec(bundle.register_source_url),
+    phone: strSpec(bundle.phone),
+    email: strSpec(bundle.email),
+    parent_name: strSpec(bundle.parent_name),
+    parent_company_id: strSpec(bundle.parent_company_id),
+    shipvault_company_id: strSpec(bundle.shipvault_company_id),
+    shipvault_country: strSpec(bundle.shipvault_country),
+    shipvault_city: strSpec(bundle.shipvault_city),
+    source: strSpec(bundle.source),
+    tier: strSpec(bundle.tier),
+    contacts: recordArray(bundle.contacts).map((contact) => ({
+      name: strSpec(contact.name),
+      email: strSpec(contact.email),
+      phone: strSpec(contact.phone),
+      role: strSpec(contact.role),
+      evidence: strSpec(contact.evidence),
+      confidence_score: numSpec(contact.confidence_score),
+      verification_status: strSpec(contact.verification_status),
+    })),
+  })).filter((bundle) => bundle.name || bundle.email || bundle.phone || bundle.website || bundle.source_url || bundle.parent_name || bundle.contacts.length);
+}
+
+function ownershipTierBadgeVariant(tier?: string): "verified" | "partial" | "destructive" | "muted" {
+  if (tier === "high") return "verified";
+  if (tier === "medium") return "partial";
+  if (tier === "low") return "destructive";
+  return "muted";
+}
+
 export type VesselSpecs = {
   build_year?: number;
   vessel_class?: string;
@@ -362,6 +520,153 @@ export function VesselSpecificationsSection({ dossier }: Props) {
   );
 }
 
+function OwnershipIntelPanel({ intel }: { intel: OwnershipIntel }) {
+  const evidence = intel.evidence.slice(0, 5);
+  const chain = intel.role_chain.filter((entry) => entry.label).slice(0, 5);
+  const historyCandidates = intel.history_candidates.slice(0, 4);
+  const registryChecks = intel.registry_checks.slice(0, 4);
+  const pivots = intel.search_pivots.slice(0, 4);
+  const limitation = intel.limitations[0];
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/20 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <strong className="text-xs">Owner-chain OSINT</strong>
+        <div className="flex items-center gap-2">
+          {intel.score != null && <span className="text-[11px] text-muted-foreground">{Math.round(intel.score)}/100</span>}
+          <Badge variant={ownershipTierBadgeVariant(intel.tier)}>{intel.tier ?? "unknown"}</Badge>
+        </div>
+      </div>
+      {intel.summary && <p className="mt-1.5 text-[11px] text-muted-foreground">{intel.summary}</p>}
+      {chain.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+          {chain.map((entry, i) => (
+            <span key={`${entry.role}-${entry.label}-${i}`} className="rounded border border-border px-1.5 py-0.5 text-muted-foreground">
+              <span className="text-foreground">{entry.label}</span>
+              {entry.status && <span> · {entry.status}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+      {evidence.length > 0 && (
+        <ul className="mt-2 list-disc pl-4 text-[11px] text-muted-foreground">
+          {evidence.map((entry, i) => (
+            <li key={`${entry.role}-${i}`} className="mb-1">
+              <span className="font-semibold text-foreground">{entry.label}</span>
+              {entry.detail && <span> · {entry.detail}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {historyCandidates.length > 0 && (
+        <div className="mt-2 border-t border-border pt-2">
+          <strong className="text-[11px]">Previous owner/operator clues</strong>
+          <ul className="mt-1.5 list-disc pl-4 text-[11px] text-muted-foreground">
+            {historyCandidates.map((entry, i) => (
+              <li key={`${entry.vessel_name}-${entry.disponent}-${i}`} className="mb-1">
+                <span className="font-semibold text-foreground">{entry.disponent}</span>
+                {entry.vessel_name && <span> · {entry.vessel_name}</span>}
+                {(entry.from_date || entry.to_date) && (
+                  <span> · {[entry.from_date, entry.to_date].filter(Boolean).join(" → ")}</span>
+                )}
+                {entry.status && <span> · {entry.status}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {registryChecks.length > 0 && (
+        <div className="mt-2 border-t border-border pt-2">
+          <strong className="text-[11px]">Registry checks</strong>
+          <ul className="mt-1.5 list-disc pl-4 text-[11px] text-muted-foreground">
+            {registryChecks.map((check, i) => (
+              <li key={`${check.name}-${i}`} className="mb-1">
+                <span className="font-semibold text-foreground">{check.name}</span>
+                {check.query && <span> · {check.query}</span>}
+                {check.purpose && <span> · {check.purpose}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {pivots.length > 0 && (
+        <div className="mt-2 border-t border-border pt-2">
+          <strong className="text-[11px]">Verification pivots</strong>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {pivots.map((pivot) => (
+              <span key={pivot} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {pivot}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {limitation && <p className="disclaimer mt-2 text-[11px]">{limitation}</p>}
+    </div>
+  );
+}
+
+function CommercialContactsPanel({ bundles }: { bundles: CommercialContactBundle[] }) {
+  if (!bundles.length) return null;
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/20 p-2">
+      <strong className="text-xs">Contacts & company chain</strong>
+      <div className="mt-2 space-y-2">
+        {bundles.map((bundle) => (
+          <div key={`${bundle.role}-${bundle.company_id ?? bundle.name}`} className="rounded border border-border px-2 py-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-foreground">{bundle.name ?? "Company"}</span>
+              <span className="text-[10px] text-muted-foreground">{(bundle.role ?? "company").replace(/_/g, " ")}</span>
+            </div>
+            {(bundle.parent_name || bundle.shipvault_company_id || bundle.shipvault_country || bundle.shipvault_city) && (
+              <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                {bundle.parent_name && <span>parent: {bundle.parent_name}</span>}
+                {bundle.shipvault_company_id && <span>ShipVault {bundle.shipvault_company_id}</span>}
+                {bundle.shipvault_city && <span>{bundle.shipvault_city}</span>}
+                {bundle.shipvault_country && <span>{bundle.shipvault_country}</span>}
+              </div>
+            )}
+            <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+              {bundle.country_code && <span>{bundle.country_code}</span>}
+              {bundle.website && (
+                <a href={bundle.website} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                  website
+                </a>
+              )}
+              {bundle.register_source_url && (
+                <a href={bundle.register_source_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                  register
+                </a>
+              )}
+              {!bundle.register_source_url && bundle.source_url && (
+                <a href={bundle.source_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
+                  source
+                </a>
+              )}
+              {bundle.email && <a href={`mailto:${bundle.email}`}>{bundle.email}</a>}
+              {bundle.phone && <a href={`tel:${bundle.phone}`}>{bundle.phone}</a>}
+            </div>
+            {bundle.contacts.length > 0 && (
+              <ul className="mt-1.5 list-disc pl-4 text-[11px] text-muted-foreground">
+                {bundle.contacts.slice(0, 4).map((contact, i) => (
+                  <li key={`${contact.email}-${contact.phone}-${i}`} className="mb-1">
+                    <span className="text-foreground">{contact.name || contact.role || "Contact"}</span>
+                    {contact.role && contact.name && <span> · {contact.role}</span>}
+                    {contact.email && <span> · {contact.email}</span>}
+                    {contact.phone && <span> · {contact.phone}</span>}
+                    {!contact.email && !contact.phone && contact.evidence && <span> · {contact.evidence}</span>}
+                    {contact.verification_status && <span> · {contact.verification_status}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function VesselOwnershipSection({ dossier }: Props) {
   if (dossier.entity_type !== "vessel") return null;
 
@@ -380,6 +685,8 @@ export function VesselOwnershipSection({ dossier }: Props) {
       : ownerProfile?.shipvault_company_id != null
         ? String(ownerProfile.shipvault_company_id)
         : undefined;
+  const ownershipIntel = readOwnershipIntel(summary);
+  const commercialContacts = readCommercialContacts(summary);
   const fleetSize =
     ownerProfile?.fleet_size != null && Number.isFinite(Number(ownerProfile.fleet_size))
       ? Number(ownerProfile.fleet_size)
@@ -393,7 +700,7 @@ export function VesselOwnershipSection({ dossier }: Props) {
   if (dwt != null && Number.isFinite(dwt)) rows.push({ label: "DWT", value: dwt.toLocaleString() });
   if (fleetSize != null) rows.push({ label: "owner fleet", value: fleetSize.toLocaleString() });
 
-  const hasContent = rows.length > 0 || nameHistory.length > 0;
+  const hasContent = rows.length > 0 || nameHistory.length > 0 || ownershipIntel != null || commercialContacts.length > 0;
 
   return (
     <Card size="sm" className="mb-3">
@@ -414,6 +721,8 @@ export function VesselOwnershipSection({ dossier }: Props) {
             </a>
           </p>
         )}
+        {ownershipIntel && <OwnershipIntelPanel intel={ownershipIntel} />}
+        <CommercialContactsPanel bundles={commercialContacts} />
         {nameHistory.length > 0 && (
           <div className="mt-2">
             <strong className="text-xs">Name history</strong>

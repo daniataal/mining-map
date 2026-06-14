@@ -304,6 +304,8 @@ const SUMMARY_ENRICHMENT_META_KEYS = new Set([
   "operator_name",
   "owner_profile",
   "name_history",
+  "ownership_intel",
+  "commercial_contacts",
   "registry_flag",
   "gross_tonnage",
   "vessel_class",

@@ -332,7 +332,15 @@ export default function TerminalShell() {
                     authed={!!me?.uid}
                   />
                 ) : panel === "opportunities" ? (
-                  <OpportunityOriginatorPanel />
+                  <OpportunityOriginatorPanel
+                    onChainFocus={(features, focus) => {
+                      setRelationshipLines(features);
+                      if (focus) setMapFocus(focus);
+                    }}
+                    onClearChainFocus={() => {
+                      setRelationshipLines({ type: "FeatureCollection", features: [] });
+                    }}
+                  />
                 ) : panel === "live" ? (
                   <LiveIntelPanel
                     onSelectLead={(feat) => {

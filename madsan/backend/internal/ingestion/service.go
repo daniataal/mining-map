@@ -90,6 +90,9 @@ func (s *Service) ProcessJob(ctx context.Context, jobID uuid.UUID, dryRun bool) 
 	if jobType == oilOpportunityCandidatesJobType {
 		return s.processOilOpportunityCandidates(ctx, jobID, payload)
 	}
+	if jobType == opportunityChainSegmentsJobType {
+		return s.processOpportunityChainSegments(ctx, jobID, payload)
+	}
 	if jobType == cargoEstimatesBackfillJobType {
 		return s.processCargoEstimatesBackfill(ctx, jobID, payload)
 	}
